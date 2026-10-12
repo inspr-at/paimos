@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -248,7 +249,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 	if governance && workstationStepUp(r) {
 		if len(r.URL.RequestURI()) > 2048 || len(r.URL.EscapedPath()) > 500 {
 			if err := m.auditWorkstation(r, p, false, "invalid_action"); err != nil {
-				writeInternal(w)
+				internalFailure(w, r, "serveWorkstation", err)
 				return
 			}
 			writeBadRequest(w, "action URI too long")
@@ -256,19 +257,16 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 		}
 		if _, err := url.ParseQuery(r.URL.RawQuery); err != nil {
 			if err := m.auditWorkstation(r, p, false, "invalid_action"); err != nil {
-				writeInternal(w)
+				internalFailure(w, r, "serveWorkstation", err)
 				return
 			}
 			writeBadRequest(w, "invalid action query")
 			return
 		}
-		controller := http.NewResponseController(w)
-		_ = controller.SetReadDeadline(time.Now().Add(15 * time.Second))
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, workstationBodyLimit))
-		_ = controller.SetReadDeadline(time.Time{})
+		body, err := httpapi.ReadRequestBody(w, r, workstationBodyLimit, 15*time.Second)
 		if err != nil {
 			if err := m.auditWorkstation(r, p, false, "invalid_body"); err != nil {
-				writeInternal(w)
+				internalFailure(w, r, "serveWorkstation", err)
 				return
 			}
 			writeJSON(w, http.StatusRequestEntityTooLarge, errorJSON{Error: "action body exceeds 2 MiB"})
@@ -278,7 +276,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 		digest, summary := workstationAction(p, r, body)
 		if len(summary) > 256 {
 			if err := m.auditWorkstation(r, p, false, "invalid_action"); err != nil {
-				writeInternal(w)
+				internalFailure(w, r, "serveWorkstation", err)
 				return
 			}
 			writeBadRequest(w, "action summary exceeds 256 bytes")
@@ -344,7 +342,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			r = r.WithContext(context.WithValue(r.Context(), workstationSignerKey{}, approvedSigner))
 		}
 		if auditErr := m.auditWorkstation(r, p, step, outcome); auditErr != nil {
-			writeInternal(w)
+			internalFailure(w, r, "audit_workstation", auditErr)
 			return
 		}
 		if errors.Is(err, authz.ErrForbidden) {
@@ -356,7 +354,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			return
 		}
 		if err != nil {
-			writeInternal(w)
+			internalFailure(w, r, "serveWorkstation", err)
 			return
 		}
 		if proof == "" {
@@ -365,7 +363,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 		}
 	} else if governance {
 		if err := m.auditWorkstation(r, p, false, "admitted"); err != nil {
-			writeInternal(w)
+			internalFailure(w, r, "serveWorkstation", err)
 			return
 		}
 	}
@@ -402,10 +400,10 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		writeBadRequest(w, "invalid id")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(15 * time.Second))
-	defer controller.SetReadDeadline(time.Time{})
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 4096, 15*time.Second); err != nil {
+		writeBadRequest(w, "invalid request")
+		return
+	}
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF {
@@ -484,7 +482,7 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 	case errors.Is(err, errKeyInactive), isUnique(err):
 		writeJSON(w, 409, errorJSON{Error: "key inactive or another marked key exists"})
 	case err != nil:
-		writeInternal(w)
+		internalFailure(w, r, "handleOwnerWorkstation", err)
 	default:
 		writeJSON(w, 200, keyJSON(out))
 	}
@@ -541,7 +539,7 @@ func (m *Module) handleWorkstationChallenge(w http.ResponseWriter, r *http.Reque
 	case errors.Is(err, pgx.ErrNoRows):
 		writeJSON(w, 404, errorJSON{Error: "challenge unavailable"})
 	case err != nil:
-		writeInternal(w)
+		internalFailure(w, r, "handleWorkstationChallenge", err)
 	default:
 		writeJSON(w, 200, out)
 	}

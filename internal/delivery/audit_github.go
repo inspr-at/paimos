@@ -26,6 +26,7 @@ type MergeFact struct {
 
 type auditPull struct {
 	Number   int64      `json:"number"`
+	State    string     `json:"state"`
 	Merged   bool       `json:"merged"`
 	MergeSHA string     `json:"merge_commit_sha"`
 	MergedAt *time.Time `json:"merged_at"`

@@ -37,18 +37,34 @@ func (m *Module) observationLock(ctx context.Context) (context.Context, func(), 
 	return db.WithConnection(ctx, m.pool, conn), func() { unlock(conn, key); release() }, nil
 }
 func (m *Module) Run(ctx context.Context) {
+	jobCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); m.runMetrics(jobCtx) }()
+	defer func() { cancel(); <-done }()
 	app := &crossreview.GitHubApp{Config: m.config}
 	if m.github == nil || !app.Configured(m.config.TenantID, m.config.Repository) {
+		<-ctx.Done()
 		return
 	}
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
+	retries := time.NewTicker(5 * time.Second)
+	defer retries.Stop()
+	retry := func() {
+		if err := m.retryWebhooks(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("delivery receipt retry incomplete", "error_class", webhookErrorClass(err))
+		}
+	}
+	retry()
+	m.sweep(ctx)
 	for {
-		m.sweep(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			m.sweep(ctx)
+		case <-retries.C:
+			retry()
 		}
 	}
 }
@@ -206,7 +222,9 @@ func (m *Module) Reconcile(ctx context.Context, tid string) error {
 		}
 		page := []entry{}
 		err = db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT sequence,delivery_id FROM delivery_github_events WHERE sequence>$1 AND NOT fanout_done ORDER BY sequence LIMIT 100`, seq)
+			rows, err := tx.Query(ctx, `SELECT sequence,delivery_id FROM delivery_github_events e WHERE sequence>$1 AND NOT fanout_done
+				AND NOT EXISTS(SELECT 1 FROM delivery_webhook_receipts r WHERE r.delivery_id=e.delivery_id)
+				ORDER BY sequence LIMIT 100`, seq)
 			if err != nil {
 				return err
 			}

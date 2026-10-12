@@ -53,7 +53,7 @@ func TestLocalSocketAuthAndBound(t *testing.T) {
 	client := &http.Client{Transport: transport}
 	defer transport.CloseIdleConnections()
 	// Every local ownership mutation shares the existing socket-token boundary.
-	for _, path := range []string{"/v1/ledger/import", "/v1/ledger/leave"} {
+	for _, path := range []string{"/v1/ledger/import", "/v1/ledger/leave", "/v1/setup", "/v1/account-link"} {
 		request, _ := http.NewRequest("POST", "http://agentd"+path, nil)
 		response, err := client.Do(request)
 		if err != nil {

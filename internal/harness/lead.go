@@ -24,19 +24,142 @@ import (
 // Lead is a redacted project projection. Generation changes only on an explicit
 // claim; revision changes on every intent/control write. Neither grants roles.
 type Lead struct {
-	ProjectID              string  `json:"project_id"`
-	SessionID              *string `json:"session_id"`
-	Generation             int64   `json:"generation"`
-	Revision               int64   `json:"revision"`
-	State                  string  `json:"state"`
-	Reason                 string  `json:"reason"`
-	ProcessActive          bool    `json:"process_active"`
-	AutomaticLaunchEnabled bool    `json:"automatic_launch_enabled"`
+	ProjectID              string       `json:"project_id"`
+	SessionID              *string      `json:"session_id"`
+	Generation             int64        `json:"generation"`
+	Revision               int64        `json:"revision"`
+	State                  string       `json:"state"`
+	Reason                 string       `json:"reason"`
+	ProcessActive          bool         `json:"process_active"`
+	AutomaticLaunchEnabled bool         `json:"automatic_launch_enabled"`
+	Actions                *LeadActions `json:"actions,omitempty"`
 	updatedAt              time.Time
 	owner                  string
 	// dispatchKey is the agent key row bound at claim or last proven pickup.
 	// Fair turns qualify exactly this credential; it is never projected.
 	dispatchKey string
+}
+
+// LeadActions is a read-only, caller-specific GET projection. It belongs to the
+// surrounding revision/generation/session snapshot, never to audit events or
+// worker lease authority. Every mutation retains its own fenced authorization.
+type LeadActions struct {
+	Start          LeadAction `json:"start"`
+	Resume         LeadAction `json:"resume"`
+	Pause          LeadAction `json:"pause"`
+	Adopt          LeadAction `json:"adopt"`
+	CancelAdoption LeadAction `json:"cancel_adoption"`
+	Remove         LeadAction `json:"remove"`
+}
+
+type LeadAction struct {
+	Available     bool   `json:"available"`
+	BlockedReason string `json:"blocked_reason"`
+}
+
+func leadAction(reason string) LeadAction {
+	return LeadAction{Available: reason == "", BlockedReason: reason}
+}
+
+func blockedLeadActions(reason string) LeadActions {
+	a := leadAction(reason)
+	return LeadActions{a, a, a, a, a, a}
+}
+
+func projectLeadActions(ctx context.Context, tx pgx.Tx, p tenant.Principal, stored, view Lead) (LeadActions, error) {
+	if p.Kind != tenant.Person {
+		return blockedLeadActions("person_required"), nil
+	}
+	scope := authz.Scope{ProjectID: stored.ProjectID}
+	if err := authz.RequireTx(ctx, tx, p, "harness.control", scope); errors.Is(err, authz.ErrForbidden) {
+		return blockedLeadActions("harness_control_required"), nil
+	} else if err != nil {
+		return LeadActions{}, err
+	}
+	var canonical string
+	err := tx.QueryRow(ctx, `SELECT c.id::text FROM principals p JOIN principals c ON c.tenant_id=p.tenant_id AND c.id=coalesce(p.linked_to,p.id) WHERE p.id=$1 AND p.kind='person' AND p.status='active' AND c.kind='person' AND c.status='active'`, p.ID).Scan(&canonical)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return blockedLeadActions("person_required"), nil
+	} else if err != nil {
+		return LeadActions{}, err
+	}
+	ownerReason := ""
+	if stored.Revision > 0 && canonical != stored.owner {
+		ownerReason = "lead_owner_required"
+	}
+	actions := blockedLeadActions(ownerReason)
+	// Removal deliberately follows its existing permission rule: a person with
+	// harness.control may remove a never-started intent, even another owner's.
+	actions.Remove = leadAction("lead_not_removable")
+	if stored.Revision > 0 && stored.Generation == 0 && stored.SessionID == nil {
+		var history bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_lead_generations WHERE project_id=$1)`, stored.ProjectID).Scan(&history); err != nil {
+			return actions, err
+		}
+		if !history {
+			actions.Remove = leadAction("")
+		}
+	}
+	if ownerReason != "" {
+		return actions, nil
+	}
+	switch {
+	case stored.Revision == 0:
+		actions.Pause = leadAction("lead_required")
+	case stored.Reason == adoptionPending:
+		actions.Pause = leadAction("adoption_pending")
+	case stored.State == "paused":
+		actions.Pause = leadAction("already_paused")
+	default:
+		actions.Pause = leadAction("")
+	}
+	// Pause and removal need no run.create grant; start and adoption do.
+	if err = authz.RequireTx(ctx, tx, p, "run.create", scope); errors.Is(err, authz.ErrForbidden) {
+		actions.Start, actions.Resume, actions.Adopt, actions.CancelAdoption = leadAction("run_create_required"), leadAction("run_create_required"), leadAction("run_create_required"), leadAction("run_create_required")
+		return actions, nil
+	} else if err != nil {
+		return actions, err
+	}
+	actions.CancelAdoption = leadAction("unclaimed_adoption_required")
+	if stored.Reason == adoptionPending && stored.Generation == 0 && stored.SessionID != nil {
+		actions.CancelAdoption = leadAction("")
+	}
+	lifecycle, err := leadProject(ctx, tx, stored.ProjectID)
+	if err != nil {
+		return actions, err
+	}
+	startReason := ""
+	switch {
+	case lifecycle != "":
+		startReason = lifecycle
+	case view.ProcessActive:
+		startReason = "process_exit_unconfirmed"
+	case !view.AutomaticLaunchEnabled:
+		startReason = "automatic_launch_disabled"
+	}
+	actions.Start = leadAction(startReason)
+	actions.Resume = actions.Start
+	if view.State != "paused" {
+		actions.Resume = leadAction("lead_not_paused")
+	}
+	switch {
+	case lifecycle != "":
+		actions.Adopt = leadAction(lifecycle)
+	case stored.SessionID != nil:
+		actions.Adopt = leadAction("ordinary_succession_required")
+	case stored.State == "paused":
+		actions.Adopt = leadAction("start_required")
+	default:
+		var eligible bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND owner_principal_id=$2 AND `+adoptEligibleSQL+`)`, stored.ProjectID, canonical).Scan(&eligible); err != nil {
+			return actions, err
+		}
+		actions.Adopt = leadAction("no_eligible_session")
+		if eligible {
+			actions.Adopt = leadAction("")
+		}
+	}
+	return actions, nil
 }
 
 // LeadGate is supplied by the existing admission owners, never by an API body.
@@ -143,12 +266,10 @@ func leadFence(ctx context.Context, tx pgx.Tx, projectID string) error {
 	}
 	return lockHierarchy(ctx, tx, projectID)
 }
-func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (bool, error) {
-	var state string
-	var deleted *time.Time
-	err := tx.QueryRow(ctx, `SELECT n.state,n.deleted_at FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='project'`, projectID).Scan(&state, &deleted)
-	return state != "archived" && deleted == nil, err
+func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (string, error) {
+	return authz.ProjectStartReasonTx(ctx, tx, projectID)
 }
+
 func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string) error {
 	var canonical string
 	err := tx.QueryRow(ctx, `SELECT c.id::text FROM principals p JOIN principals c ON c.tenant_id=p.tenant_id AND c.id=coalesce(p.linked_to,p.id) WHERE p.id=$1 AND p.kind='person' AND p.status='active' AND c.kind='person' AND c.status='active'`, owner).Scan(&canonical)
@@ -200,7 +321,7 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, rea
 		return l, err
 	}
 	l.AutomaticLaunchEnabled = policy.AutomaticLaunchEnabled
-	active, err := leadProject(ctx, tx, l.ProjectID)
+	lifecycle, err := leadProject(ctx, tx, l.ProjectID)
 	if err != nil {
 		return l, err
 	}
@@ -212,8 +333,8 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, rea
 	if l.State == "none" {
 		return l, nil
 	}
-	if !active {
-		l.State, l.Reason = "cannot_start", "project_archived"
+	if lifecycle != "" {
+		l.State, l.Reason = "cannot_start", lifecycle
 		return l, nil
 	}
 	if err = leadOwner(ctx, tx, p, l.ProjectID, l.owner); errors.Is(err, authz.ErrForbidden) {
@@ -260,7 +381,16 @@ func (m *Module) readLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return m.projectLead(r.Context(), tx, p, l)
+	view, err := m.projectLead(r.Context(), tx, p, l)
+	if err != nil {
+		return nil, err
+	}
+	actions, err := projectLeadActions(r.Context(), tx, p, l, view)
+	if err != nil {
+		return nil, err
+	}
+	view.Actions = &actions
+	return view, nil
 }
 func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -282,12 +412,12 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err := leadOwner(ctx, tx, p, id, p.ID); err != nil {
 		return nil, err
 	}
-	active, err := leadProject(ctx, tx, id)
+	lifecycle, err := leadProject(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !active {
-		return nil, workorders.Fail(409, "project archived")
+	if lifecycle != "" {
+		return nil, workorders.Fail(409, lifecycle)
 	}
 	l, err := loadLead(ctx, tx, id, true)
 	if err != nil {
@@ -374,6 +504,9 @@ func (m *Module) removeLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 }
 
 func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s Session) (string, error) {
+	if reason, err := authz.ProjectStartReasonTx(ctx, tx, s.ProjectID); err != nil || reason != "" {
+		return reason, err
+	}
 	if m.leadAdmission == nil {
 		return "admission_unavailable", nil
 	}
@@ -423,12 +556,12 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if l.Revision != in.Revision {
 		return nil, workorders.Fail(409, "lead revision conflict")
 	}
-	active, err := leadProject(ctx, tx, id)
+	lifecycle, err := leadProject(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !active {
-		return nil, workorders.Fail(409, "project archived")
+	if lifecycle != "" {
+		return nil, workorders.Fail(409, lifecycle)
 	}
 	if err = leadOwner(ctx, tx, p, id, l.owner); err != nil {
 		return nil, err
@@ -652,6 +785,9 @@ func RequireCurrentLeadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pr
 		return err
 	}
 	if l.State != "working" {
+		if l.Reason == "project_frozen" || l.Reason == "project_archived" {
+			return workorders.Fail(409, l.Reason)
+		}
 		return workorders.Fail(409, "lead generation unavailable")
 	}
 	var agent string

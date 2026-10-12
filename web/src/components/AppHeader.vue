@@ -20,7 +20,8 @@ import { fatal } from '../lib/fatal'
 import { usePoller } from '../lib/usePolledData'
 import { pollDoctrineInbox, resetDoctrineInbox } from '../lib/doctrineInbox'
 import { toast } from '../lib/toast'
-import { placeOf, releaseChordOpen, sequence, visiblePlaces, type PlaceId } from '../lib/places'
+import { placeOf, visiblePlaces, type PlaceId } from '../lib/places'
+import { cancelShortcutSequence, installShortcutDispatcher, onAction, shortcutCaps, shortcutHint, shortcutKeys } from '../lib/shortcuts'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
@@ -28,6 +29,8 @@ import BizIcon from './business/BizIcon.vue'
 import CommandPalette from './CommandPalette.vue'
 import AccountMenu from './header/AccountMenu.vue'
 import AppMenu from './header/AppMenu.vue'
+import DeskPreview from './header/DeskPreview.vue'
+import HeaderMenu from './header/HeaderMenu.vue'
 import HeaderDensitySwitch from './work/HeaderDensitySwitch.vue'
 import { projectSection } from './work/projectNavigation'
 import { headerShortcut } from '../lib/projectHeader'
@@ -74,9 +77,11 @@ const allTickets = computed(() => route.path === '/tickets')
 const ticketScope = computed(() => typeof route.query.project_id === 'string' ? projects.byId(route.query.project_id) : undefined)
 const allKnowledge = computed(() => route.path === '/knowledge')
 const pageTitle = computed(() => !activePlace.value && !route.path.startsWith('/settings') && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
-// The three places, in order of use; the active one is where this page lives.
+// The places, the Decision Desk last; the active one is where this page lives.
 // The breadcrumb continues from it: Projects / PHAROS Pharos / PHAROS-11.
 const places = computed(() => visiblePlaces({ signedIn: !!session.identity, business: business.placeOpen }))
+// AEON-1214: for people the Desk is a split place; its chevron previews the Desk.
+const deskPreview = computed(() => session.identity?.principal.kind === 'person')
 // The places and the trail appear together once it is known whether Business is one
 // of the places (read, or remembered from this browser's last visit), so the trail
 // never slides sideways when Business turns up a moment after the first paint.
@@ -96,71 +101,33 @@ const businessCrumbs = computed(() => {
 const profilesPage = computed(() => route.path.startsWith('/settings/business/profiles'))
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === (profilesPage.value ? 'business' : sectionOf(route.params.section))) ?? null : null)
 const placeLabel = (id: PlaceId) => id === 'desk' ? `Decision Desk, ${desk.count === null ? 'count unavailable' : `${desk.count} open`}` : undefined
+const deskTip = computed(() => `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)}${shortcutHint('places.desk') ? ` · ${shortcutHint('places.desk')}` : ''}`)
+const deskBadge = computed(() => desk.count === null ? '?' : desk.count > 99 ? '99+' : String(desk.count))
 
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
-function typing(target: EventTarget | null) {
-  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-}
+// The avatar sheet opens the preview while the chevron has stepped aside (AEON-1214).
+const deskMenu = ref<InstanceType<typeof HeaderMenu> | null>(null)
+const bindDeskMenu = (menu: unknown) => { deskMenu.value = menu as InstanceType<typeof HeaderMenu> | null }
+watch(command, value => { if (value?.command.name === 'desk-preview') { consume(); void deskMenu.value?.show() } })
 // Pages with their own list search keep '/'; everywhere else it opens the palette.
-// /agents (and a session open on it) searches its Sessions list with / (AEON-1209).
-const agentsPage = computed(() => /^\/agents(\/(?!usage$|register-agent$)[^/]+)?$/.test(route.path))
-const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || route.path === '/tickets' || agentsPage.value || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
-function shortcut(event: KeyboardEvent) {
-  if (!globalSearch.value) return
-  const isK = event.key.toLowerCase() === 'k' || event.code === 'KeyK'
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && isK) {
-    // Capture runs before the focused control. Ctrl+K in the open palette moves
-    // the highlight; Cmd+K still selects the query.
-    const paletteInput = document.querySelector('dialog.palette[open] input')
-    if (event.ctrlKey && !event.metaKey && paletteInput && event.target === paletteInput) return
-    event.preventDefault()
-    event.stopPropagation()
+const pageOwnsSlash = computed(() => route.path === '/' || route.matched.some(record => record.path === '/agents/:sessionId?') || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || route.path === '/tickets' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
+const shortcutDisposers = [
+  onAction('app.palette', event => {
+    // Ctrl+K in the open palette moves the highlight; Cmd+K selects the query.
+    const input = document.querySelector('dialog.palette[open] input')
+    if (event.ctrlKey && input && event.target === input) return false
     palette.value?.open()
-    return
-  }
-  if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || typing(event.target) || document.querySelector('dialog[open], .floating')) return
-  if (event.key === '/' && !pageOwnsSlash.value) { event.preventDefault(); palette.value?.open() }
-  else if (event.key === '?') { event.preventDefault(); run({ name: 'shortcuts' }) }
-}
-// g p · g a · g b: go to a place. Listened for first (capture), so the second key
-// never reaches the page (p is Priority on an open ticket, a approves on Agents).
-// g on an open ticket also opens the release menu; that one layer must not swallow
-// the place key that follows. Any other menu, dialog or focused field cancels the
-// arm, and an expired arm must not re-arm inside one.
-const nextKey = sequence()
-let armedAt: number | null = null
-function layerLabels(): string[] {
-  return [...document.querySelectorAll('dialog[open], .floating')].map(layer => layer.getAttribute('aria-label') ?? '')
-}
-function releaseFromChord(now = Date.now()): Element | null {
-  if (!releaseChordOpen(layerLabels(), armedAt, now)) return null
-  return document.querySelector('dialog[open], .floating')
-}
-function disarmChord(now = Date.now()) {
-  if (armedAt === null) return
-  nextKey('\0', now, places.value)
-  armedAt = null
-}
-function placeKeys(event: KeyboardEvent) {
-  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
-  const now = Date.now()
-  if (typing(event.target) || (document.querySelector('dialog[open], .floating') && !releaseFromChord(now))) {
-    disarmChord(now)
-    return
-  }
-  const hit = nextKey(event.key, now, places.value)
-  armedAt = hit === 'armed' ? now : null
-  if (!hit || hit === 'armed') return
-  event.preventDefault(); event.stopImmediatePropagation()
-  if (route.path !== hit.to) void router.push(hit.to)
-}
-function chordPointer(event: PointerEvent) {
-  if (armedAt === null) return
-  const layer = releaseFromChord()
-  if (layer && event.target instanceof Node && layer.contains(event.target)) return
-  disarmChord()
-}
-function chordFocus(event: FocusEvent) { if (typing(event.target)) disarmChord() }
+  }, { enabled: () => globalSearch.value }),
+  onAction('app.search', () => { palette.value?.open() }, { enabled: () => globalSearch.value && !pageOwnsSlash.value }),
+  onAction('app.shortcuts', () => run({ name: 'shortcuts' }), { enabled: () => globalSearch.value }),
+  ...(['projects', 'agents', 'business', 'desk'] as const).map(id => onAction(`places.${id}`, () => {
+    const place = places.value.find(place => place.id === id)
+    if (!place) return false
+    if (route.path !== place.to) void router.push(place.to)
+  }, { enabled: () => places.value.some(place => place.id === id) })),
+]
+let stopShortcuts: (() => void) | undefined
+watch(() => [session.identity?.tenant.id, session.identity?.principal.id], cancelShortcutSequence)
 // One canonical Decision Desk count, independent of live sessions.
 const needsPoll = usePoller(() => desk.refresh(), 30_000, { enabled: () => session.identity?.principal.kind === 'person', invalidate: desk.invalidate })
 // The doctrine inbox (AEON-444): people who can send a proposal to git see a dot
@@ -184,63 +151,133 @@ watch(() => session.identity?.principal.id, id => {
   void agents.loadNeeds(true)
   void business.loadPlugins(true)
 }, { immediate: true })
-// Phones: the moon steps aside only when the breadcrumb's page (a ticket key) would
-// otherwise clip, and comes back as soon as the free room holds it (AEON-312). The
-// decision is measured, never guessed from the number of places; its quick toggle
-// then leads the avatar sheet. Room within a tenth of a pixel counts as enough, so
-// subpixel noise never keeps it away; should its return clip the key anyway, it
-// stays away at that width until the width, the page or the fonts change.
+// Phones: when the breadcrumb's page (a ticket key) would otherwise clip, the
+// Desk preview's chevron steps aside first, then the moon (AEON-312, AEON-1214);
+// they come back, the moon first, as soon as the free room holds them. The
+// decision is measured, never guessed from the number of places: each step is
+// tried and measured before paint. The moon's quick toggle then leads the avatar
+// sheet; the Desk itself stays one tap away on its place. Half a pixel of
+// subpixel noise never sends either away, and neither returns into less room
+// than it needs, so the header never toggles at the same width.
 const header = ref<HTMLElement>()
-const moonAway = ref(false)
+const steps = computed(() => deskPreview.value ? ['desk', 'moon'] : ['moon'])
+const awaySteps = ref(0)
+const away = computed(() => steps.value.slice(0, awaySteps.value).join(' ') || undefined)
 const narrow = window.matchMedia('(max-width: 600px)')
-let returnedAt = -1
-let heldAt = -1
-function fitMoon() {
-  const el = header.value
-  if (!el || !narrow.matches) { moonAway.value = false; return }
+// How far the header's row runs past its end padding, or its page past the trail.
+function overflow(el: HTMLElement) {
   const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
   const trail = el.querySelector<HTMLElement>('.crumbs')
-  const overflow = Math.max(el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
-  const width = el.clientWidth
-  if (!moonAway.value) {
-    if (overflow > 0.5) { moonAway.value = true; if (returnedAt === width) heldAt = width }
-    return
+  const end = el.getBoundingClientRect().right - (parseFloat(getComputedStyle(el).paddingRight) || 0)
+  const reach = Math.max(0, ...[...el.children].map(child => child.getBoundingClientRect().right))
+  return Math.max(reach - end, el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
+}
+// Above phone width the trail drops whole segments, never a chip cut mid-way
+// (AEON-1214): a crumb leaves together with the separator that joins it, from the
+// start, so the page you are on goes last; with nothing whole left, the trail
+// steps aside. A project's name ends in an ellipsis first, and steps aside
+// rather than show a sliver. What steps aside leaves sight and the tab order, but
+// screen readers keep the whole trail. Each fit starts from the whole trail, so
+// one width always gives one trail.
+function cutTrail(trail: HTMLElement) {
+  const frame = trail.getBoundingClientRect(), range = document.createRange()
+  for (const part of trail.children) {
+    if (!(part instanceof HTMLElement)) continue
+    const box = part.getBoundingClientRect(), style = getComputedStyle(part)
+    if (box.width <= 1 || style.display === 'none') continue
+    const inset = (side: 'Left' | 'Right') => parseFloat(style[`padding${side}`]) || 0
+    // A crumb clips to its own box, the trail to its. What must show whole: the
+    // crumb's keys, icons and names, or its text; an ellipsis by design, its box.
+    const left = Math.max(frame.left, style.overflowX === 'hidden' ? box.left : -Infinity)
+    const right = Math.min(frame.right, style.overflowX === 'hidden' ? box.right : Infinity)
+    let atoms: { left: number; right: number }[]
+    if (style.textOverflow === 'ellipsis') atoms = [{ left: box.left + inset('Left'), right: box.right - inset('Right') }]
+    else if (part.children.length) atoms = [...part.children].map(child => child.getBoundingClientRect()).filter(rect => rect.width > 1 && rect.height > 1)
+    else { range.selectNodeContents(part); atoms = [range.getBoundingClientRect()] }
+    if (atoms.some(atom => atom.left < left - 0.5 || atom.right > right + 0.5)) return true
   }
-  if (heldAt === width) return
-  const spacer = el.querySelector<HTMLElement>('.spacer')
-  const gap = parseFloat(getComputedStyle(el).columnGap) || 0
-  if (spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow) >= 44 + gap - 0.1) { moonAway.value = false; returnedAt = width }
+  return false
+}
+function fitTrail(trail: HTMLElement | null, wide: boolean) {
+  if (!trail) return
+  delete trail.dataset.empty
+  for (const part of trail.querySelectorAll<HTMLElement>('[data-dropped]')) {
+    if (part.dataset.dropped === 'tab') part.removeAttribute('tabindex')
+    delete part.dataset.dropped
+  }
+  if (!wide) return
+  const drop = (part: HTMLElement) => {
+    if (part.dataset.dropped !== undefined) return
+    const tab = part.matches('a[href], button') && !part.hasAttribute('tabindex')
+    if (tab) part.tabIndex = -1
+    part.dataset.dropped = tab ? 'tab' : ''
+  }
+  const name = trail.querySelector<HTMLElement>('.crumb-name')
+  if (name && name.scrollWidth > name.clientWidth && name.clientWidth < 3 * (parseFloat(getComputedStyle(name).fontSize) || 13.5)) drop(name)
+  const parts = [...trail.children] as HTMLElement[]
+  const crumbs = parts.filter(part => part.classList.contains('crumb') && getComputedStyle(part).display !== 'none')
+  // A trail that continues from a place keeps the separator before its first crumb.
+  const joined = !trail.classList.contains('lead')
+  for (let gone = 1; gone <= crumbs.length && cutTrail(trail); gone++) {
+    const first = crumbs[gone]
+    const from = first ? parts.indexOf(first) - (joined && first.previousElementSibling?.classList.contains('sep') ? 1 : 0) : parts.length
+    parts.slice(0, from).forEach(drop)
+    if (!first) trail.dataset.empty = ''
+  }
+}
+function fitHeader() {
+  const el = header.value
+  if (!el) return
+  const order = steps.value
+  const show = (n: number) => { const value = order.slice(0, n).join(' '); if (value) el.dataset.away = value; else delete el.dataset.away }
+  const trail = el.querySelector<HTMLElement>('.crumbs')
+  if (!narrow.matches) { show(0); awaySteps.value = 0; fitTrail(trail, true); return }
+  // Phones keep only where you are; the steps below keep it whole.
+  fitTrail(trail, false)
+  const over = (n: number) => { show(n); return overflow(el) }
+  let n = Math.min(awaySteps.value, order.length)
+  if (over(n) > 0.5) { while (n < order.length && over(++n) > 0.5) { /* the next one steps aside too */ } }
+  else {
+    // Coming back needs the free room for its 44 px (the moon also its gap), within
+    // a tenth of a pixel: a crumb that would shrink by less never shows as overflow.
+    const spacer = el.querySelector<HTMLElement>('.spacer'), gap = parseFloat(getComputedStyle(el).columnGap) || 0
+    while (n > 0 && spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow(el)) >= 44 + (order[n - 1] === 'moon' ? gap : 0) - 0.1) {
+      if (over(n - 1) > 0.5) break
+      n--
+    }
+  }
+  show(n)
+  awaySteps.value = n
 }
 let fitFrame = 0
 function refit() {
   cancelAnimationFrame(fitFrame)
-  // Fit the updated navigation before paint. Deferring the first measurement
-  // lets a newly rendered ticket key clip while the moon still takes its room.
-  fitMoon()
-  fitFrame = requestAnimationFrame(fitMoon)
+  // Fit the updated navigation before paint, and once more after it: a newly
+  // rendered ticket key may only reach its width in the next frame.
+  fitHeader()
+  fitFrame = requestAnimationFrame(fitHeader)
 }
-function remeasure() { heldAt = -1; refit() }
 const resized = new ResizeObserver(refit)
 const crumbsChanged = new MutationObserver(refit)
 // A web font swapping in changes the room without resizing the header.
 const fonts = 'fonts' in document ? document.fonts : undefined
-watch([() => route.fullPath, () => places.value.length, navReady], () => { heldAt = -1; refit() }, { flush: 'post' })
+watch([() => route.fullPath, () => places.value.length, navReady, deskPreview], refit, { flush: 'post' })
 onMounted(() => {
   if (header.value) { resized.observe(header.value); crumbsChanged.observe(header.value, { childList: true, subtree: true, characterData: true }) }
-  narrow.addEventListener('change', remeasure)
-  fonts?.addEventListener('loadingdone', remeasure)
-  void fonts?.ready.then(remeasure)
+  narrow.addEventListener('change', refit)
+  fonts?.addEventListener('loadingdone', refit)
+  void fonts?.ready.then(refit)
   refit()
-  window.addEventListener('keydown', headerKeys, true); window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
-  window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
+  window.addEventListener('keydown', headerKeys, true)
+  stopShortcuts = installShortcutDispatcher()
   needsPoll.start()
   doctrinePoller.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', headerKeys, true); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', refit); fonts?.removeEventListener('loadingdone', refit); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', headerKeys, true); stopShortcuts?.(); shortcutDisposers.forEach(dispose => dispose()); needsPoll.stop(); doctrinePoller.stop() })
 </script>
 
 <template>
-  <header ref="header" class="app-header">
+  <header ref="header" class="app-header" :data-away="away">
     <RouterLink class="lockup" to="/" :aria-label="`${lockupName} home`" :class="{ compact: !!projectKey || !!pageTitle || !!settingsSection || businessCrumbs.length > 0, tenant: !!tenantMark, 'has-logo': !!tenantMark?.logo, squarish: !!tenantMark?.logo && tenantMark.logo.width <= tenantMark.logo.height * 1.5 }">
       <template v-if="tenantMark">
         <span v-if="tenantMark.logo" class="tenant-logo" :class="{ plate: tenantMark.plate }">
@@ -254,16 +291,33 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
       </template>
     </RouterLink>
     <nav v-if="places.length && !fatal && navReady" class="places" aria-label="Places">
-      <RouterLink
-        v-for="place in places" :key="place.id" :to="place.to" class="place" :class="{ active: activePlace === place.id }"
-        :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)" :data-place="place.id"
-        :data-tip="place.id === 'desk' ? `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)} · g then d` : `g then ${place.key}`"
-      >
-        <BizIcon v-if="place.id === 'business'" name="briefcase" :size="16" />
-        <AppIcon v-else :name="place.id === 'agents' ? 'agent' : place.id === 'desk' ? 'check' : 'folder'" :size="16" />
-        <span class="place-text">{{ place.label }}</span>
-        <span v-if="place.id === 'desk'" class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ desk.count === null ? '?' : desk.count > 99 ? '99+' : desk.count }}</span>
-      </RouterLink>
+      <template v-for="place in places" :key="place.id">
+        <!-- The Desk is a split place (AEON-1214): its name goes to the Desk, the chevron previews it. -->
+        <span v-if="place.id === 'desk' && deskPreview" class="place split" :class="{ active: activePlace === 'desk' }" data-place="desk" role="group" aria-label="Decision Desk">
+          <RouterLink :to="place.to" class="place-main" :aria-current="activePlace === 'desk' ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel('desk')" :data-tip="deskTip">
+            <AppIcon name="check" :size="16" />
+            <span class="place-text">{{ place.label }}</span>
+            <span class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ deskBadge }}</span>
+          </RouterLink>
+          <HeaderMenu
+            id="desk-preview" :ref="bindDeskMenu" class="desk-more" role="dialog" popup="dialog" align="start" trigger-class="place-more" panel-class="desk-panel"
+            label="Decision Desk preview" trigger-label="Preview the Decision Desk" tip="Preview"
+          >
+            <template #trigger><AppIcon name="chevron" :size="14" /></template>
+            <template #default="{ close, phone }"><DeskPreview :phone="phone" @navigate="close()" /></template>
+          </HeaderMenu>
+        </span>
+        <RouterLink
+          v-else :to="place.to" class="place" :class="{ active: activePlace === place.id }"
+          :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)" :data-place="place.id"
+          :data-tip="place.id === 'desk' ? deskTip : shortcutHint(`places.${place.id}`) || undefined"
+        >
+          <BizIcon v-if="place.id === 'business'" name="briefcase" :size="16" />
+          <AppIcon v-else :name="place.id === 'agents' ? 'agent' : place.id === 'desk' ? 'check' : 'folder'" :size="16" />
+          <span class="place-text">{{ place.label }}</span>
+          <span v-if="place.id === 'desk'" class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ deskBadge }}</span>
+        </RouterLink>
+      </template>
     </nav>
     <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge || allTickets)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
       <template v-if="projectKey">
@@ -324,10 +378,10 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
     <button v-if="globalSearch" class="search-pill" type="button" aria-label="Search everything" aria-keyshortcuts="Control+K Meta+K" @click="palette?.open()">
       <AppIcon name="search" :size="15" />
       <span class="pill-text">Search</span>
-      <span class="pill-keys"><KeyCap k="mod" /><KeyCap k="K" /></span>
+      <span class="pill-keys"><KeyCap v-for="key in shortcutCaps(shortcutKeys('app.palette')[0] ?? '').flat()" :key="key" :k="key" /></span>
     </button>
     <!-- Quick light or dark; the avatar menu has the full choice, System included. -->
-    <button class="icon-btn header-btn theme-btn" :class="{ away: moonAway }" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
+    <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
     <AppMenu />
@@ -362,12 +416,25 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap;
 }
 .place svg { color: var(--ink-3); }
-@media (hover: hover) { .place:hover { color: var(--teal-ink); background: var(--row-hover); } .place:hover svg { color: var(--teal-ink); } }
-.place:active { background: var(--row-selected); }
-.place:focus-visible { box-shadow: var(--focus-ring); }
+@media (hover: hover) {
+  .place:not(.split):hover, .place-main:hover, .places :deep(.place-more:hover) { color: var(--teal-ink); background: var(--row-hover); }
+  .place:not(.split):hover svg, .place-main:hover svg { color: var(--teal-ink); }
+}
+.place:not(.split):active, .place-main:active, .places :deep(.place-more:active) { background: var(--row-selected); }
+.place:focus-visible, .place-main:focus-visible, .places :deep(.place-more:focus-visible) { box-shadow: var(--focus-ring); }
 .place.active { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .place.active svg { color: var(--teal); }
 .place .needs-badge { margin: 0 -4px 0 1px; }
+/* The Desk is a split place (AEON-1214): the name goes to the Desk, the chevron
+   opens its preview. One segment, a hairline between the halves; the preview
+   overlays the page and moves nothing. */
+.place.split { gap: 0; padding: 0; }
+.place-main { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 100%; padding: 0 8px 0 10px; border-radius: 999px 0 0 999px; color: inherit; text-decoration: none; }
+.places :deep(.place-more) { position: relative; display: grid; place-items: center; width: 26px; height: 100%; padding: 0; border: 0; border-radius: 0 999px 999px 0; background: transparent; color: var(--ink-3); }
+.places :deep(.place-more)::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 1px; background: var(--line-2); }
+.places :deep(.place-more) svg { color: inherit; }
+.places .split :deep(.place-more[aria-expanded="true"]) { color: var(--teal-ink); background: var(--row-hover); box-shadow: none; }
+.desk-more { height: 100%; }
 /* The breadcrumb continues from the active place; pages outside a place start it. */
 .crumbs { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; height: 30px; font-size: 13.5px; }
 .crumbs.lead { padding-left: 14px; }
@@ -392,32 +459,50 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
-.search-pill, .header-btn { flex-shrink: 0; }
+.header-btn { flex-shrink: 0; }
 .needs-badge { display: inline-grid; place-items: center; min-width: 3ch; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
 .needs-badge.empty { visibility: hidden; }
 .search-pill {
-  display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
+  --pill-start: 12px; --pill-end: 6px;
+  display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 var(--pill-end) 0 var(--pill-start); border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;
 }
 .search-pill:hover { color: var(--ink-2); box-shadow: var(--field-inset), 0 0 0 1px var(--glass-rim); }
 .search-pill:active { background: var(--row-selected); }
 .search-pill:focus-visible { box-shadow: var(--focus-ring); }
-.pill-text { flex: 1; text-align: left; }
+.pill-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 .pill-keys { display: inline-flex; gap: 3px; }
+/* The pill holds its width while the breadcrumb clips. Only when the trail has
+   nothing left to give does it yield the rest, so the row never runs past the
+   window: on a project's tickets at tablet widths the Desk's split place and the
+   density switch leave it short (AEON-1214). Its keys drop out first, then its
+   label; the magnifier stays, centred. */
+.search-pill { flex-shrink: .001; min-width: 44px; overflow: hidden; container: search-pill / inline-size; }
+@container search-pill (max-width: 140px) { .pill-keys { display: none; } }
+@container search-pill (max-width: 74px) {
+  .pill-text { display: none; }
+  .search-pill > svg { margin-inline: auto; translate: calc((var(--pill-end) - var(--pill-start)) / 2) 0; }
+}
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
 @media (max-width: 1180px) { .lockup.compact .wordmark, .lockup.compact.has-logo .tenant-name { display: none; } }
 @media (max-width: 1180px) {
   .place { width: 36px; padding: 0; justify-content: center; }
   .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .place .needs-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
+  /* The split keeps its count inline: the chevron sits where a corner badge would. */
+  .place.split { width: auto; }
+  .place-main { padding: 0 6px 0 10px; }
+  .place.split .needs-badge { position: static; }
 }
 /* The search pill gives up width before a breadcrumb has to clip. */
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
-/* Just wider than the phone header, the fixed pill is a few pixels too wide for the row. */
+/* Just wider than the phone header, the fixed pill is a few pixels too wide for the
+   row and gives way with the trail; the row takes the phone header's gaps, so the
+   Desk's split place fits beside Business and a project's density switch (AEON-1214). */
 @media (max-width: 720px) {
-  .search-pill { flex-shrink: 1; min-width: 44px; overflow: hidden; }
-  .search-pill .pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .app-header { gap: 4px; }
+  .search-pill { flex-shrink: 1; }
 }
 @media (max-width: 600px) {
   .app-header { gap: 4px; padding: 0 10px; }
@@ -442,6 +527,15 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .place:not(.active) { border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
   .place.active { box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--chip-teal-line); }
   .place .needs-badge { top: 2px; right: 0; }
+  /* The Desk's two halves are full 44 px targets; the outline is drawn inside, so it takes no room. */
+  .place.split { width: auto; }
+  .place.split:not(.active) { border: 0; box-shadow: inset 0 0 0 1px var(--glass-edge), var(--shadow-btn); }
+  .place-main { width: 44px; padding: 0; justify-content: center; }
+  .place.split .needs-badge { position: absolute; }
+  .places :deep(.place-more) { width: 44px; }
+  .places :deep(.place-more)::before { top: 12px; bottom: 12px; }
+  .app-header[data-away~="desk"] .desk-more { display: none; }
+  .app-header[data-away~="desk"] .place-main { border-radius: 999px; }
   /* The breadcrumb keeps only where you are. */
   .crumbs { gap: 6px; }
   /* The fold button's full touch target and focus ring must clear its trail. */
@@ -454,7 +548,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .crumb-name { display: none; }
   .crumb-long { display: none; }
   .crumb-short { display: inline; }
-  .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .search-pill { width: 44px; height: 44px; --pill-start: 0px; --pill-end: 0px; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; }
 }
@@ -469,9 +563,14 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .app-header .crumbs > .phone-header-fold { min-inline-size: 44px; }
   .phone-header-fold .key-badge { display: none; }
 }
-@media (max-width: 600px) { .theme-btn.away { display: none; } }
+@media (max-width: 600px) { .app-header[data-away~="moon"] .theme-btn { display: none; } }
 /* A square workspace logo leads the places at a place's root; wide logos and inner pages leave the room to them. */
 @media (min-width: 380px) and (max-width: 600px) {
   .app-header:has(.places) .lockup.tenant.squarish:not(.compact) { display: inline-flex; min-width: 40px; }
+}
+/* What the measured fit drops (fitTrail, AEON-1214) takes no room and stays for
+   screen readers, like the folded Settings label. Last, so it wins. */
+.app-header .crumbs [data-dropped], .app-header .crumbs[data-empty] {
+  position: absolute; width: 1px; min-width: 0; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 </style>

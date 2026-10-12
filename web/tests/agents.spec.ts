@@ -4,6 +4,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { controlStability } from './control-stability'
 
 const world: AgentWorld = {
   me: me.id,
@@ -91,7 +92,7 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   await expect(page.locator('.sessions .grp').nth(1).locator('[role="row"]').first()).toHaveAttribute('data-row', `s:${camy}`)
   await expect(page.getByRole('button', { name: /^Ended\s*1/ })).toBeVisible()
   const lead = row(page, camy)
-  await expect(lead.getByRole('link', { name: /Claude camy, Working/ })).toBeVisible()
+  await expect(lead.getByRole('link', { name: /Claude Code camy, Working/ })).toBeVisible()
   await expect(lead).toContainText('camy')
   await expect(lead).toContainText('Lead')
   await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
@@ -391,6 +392,96 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await expect(page).toHaveURL(`/agents/${order[2]}`)
 })
 
+test('AEON-1219: registry navigation and hints respect menus, fields, IME and native keys', async ({ page }, testInfo) => {
+  const errors = watchErrors(page)
+  const { calls } = await setup(page)
+  await openAgents(page)
+  const search = page.getByRole('button', { name: 'Search everything', exact: true })
+  const more = page.getByRole('button', { name: 'More agent actions' })
+  const guard = await controlStability(page, { search, more })
+  await guard.check(async () => {
+    await more.click()
+    await page.keyboard.press('j')
+    await page.keyboard.press('p')
+    await expect(page.getByRole('dialog', { name: 'More agent actions' })).toBeVisible()
+    await expect(page).toHaveURL('/agents')
+    await page.keyboard.press('Escape')
+  })
+  guard.done()
+  // AEON-1210 groups the list by project; navigation follows the displayed lead and its workers.
+  const order = await page.locator('.sessions .grp', { has: row(page, camy) }).locator('[data-row^="s:"]').evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
+  expect(order[0]).toBe(camy)
+  expect(order.length).toBeGreaterThan(1)
+  const nextSession = order[1]!
+  await row(page, camy).focus()
+  for (const modifiers of ['Control', 'Meta']) for (const key of ['s', 'r', 'd', 'p', 'a']) {
+    await page.keyboard.press(`${modifiers}+${key}`)
+  }
+  await row(page, camy).dispatchEvent('keydown', { key: 'j', code: 'KeyJ', isComposing: true })
+  await expect(row(page, camy)).toBeFocused()
+  await page.keyboard.press('j')
+  await expect(row(page, nextSession)).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(`/agents/${nextSession}`)
+  await panel(page).focus()
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL('/agents')
+  await expect(row(page, nextSession)).toBeFocused()
+  // P1 owns this list's search: / focuses it while the global palette keeps Ctrl K.
+  await page.keyboard.press('/')
+  await expect(page.getByRole('dialog', { name: 'Search and commands' })).toHaveCount(0)
+  await expect(page.getByRole('searchbox', { name: 'Search sessions in this list' })).toBeFocused()
+  await page.keyboard.press('Control+k')
+  const palette = page.getByRole('dialog', { name: 'Search and commands' })
+  await expect(palette).toBeVisible()
+  const input = palette.getByRole('combobox')
+  await input.fill('jpr')
+  await input.press('j')
+  await expect(input).toHaveValue('jprj')
+  await page.keyboard.press('Escape')
+  await row(page, nextSession).focus()
+  await page.keyboard.press('?')
+  const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
+  await expect(sheet).toBeVisible()
+  const next = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Next \/ previous session$/ }) })
+  await expect(next).toContainText('J')
+  await expect(next).toContainText('Down arrow')
+  await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
+  // AEON-1196 P1 now registers this handler; AEON-1219's pre-P1 absence is stale.
+  const listSearch = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Search sessions \(this list\)$/ }) })
+  await expect(listSearch).toBeVisible()
+  await expect(listSearch).toContainText('F')
+  await expect(listSearch).toContainText('/')
+  await expect(sheet.locator('dd', { hasText: /^Jump the divider:/ })).toHaveCount(0)
+  const closeLabel = sheet.getByText('Close the details to List only', { exact: true })
+  await expect(closeLabel).toBeVisible()
+  await expect(closeLabel.locator('svg')).toHaveCount(1)
+  await expect(closeLabel).not.toContainText('→')
+  const close = sheet.getByRole('button', { name: 'Close shortcuts' })
+  const sheetGuard = await controlStability(page, { close })
+  await sheetGuard.check(async () => {
+    await page.keyboard.press('j')
+    await expect(close).toBeFocused()
+  })
+  sheetGuard.done()
+  await close.click()
+  expect(calls.some(call => call.method === 'POST' && /\/(pause|resume)$/.test(call.path))).toBe(false)
+  // Review evidence only: no screenshot equality or theme/width test matrix.
+  for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.locator('main').focus()
+    await page.screenshot({ path: testInfo.outputPath(`agents-${width}-${theme}.png`), fullPage: true })
+    await page.keyboard.press('?')
+    await expect(sheet).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`shortcuts-${width}-${theme}.png`), fullPage: true })
+    await close.click()
+  }
+  await page.keyboard.press('g'); await page.keyboard.press('d')
+  await expect(page).toHaveURL('/decision-desk')
+  expect(errors).toEqual([])
+})
+
 test('closing a session panel goes back instead of adding history, like the ticket panel', async ({ page }) => {
   await setup(page)
   await page.goto('/')
@@ -500,7 +591,7 @@ test('the ticket panel shows the bound agent’s attention state and links to it
   await page.goto('/p/PHAROS/PHAROS-11')
   const details = page.getByRole('complementary', { name: 'Ticket details' })
   // Its principal has an unbound approval; the ticket and Agents keep this session working.
-  const chip = details.getByRole('link', { name: 'Claude camy: Working. Open the session' })
+  const chip = details.getByRole('link', { name: 'Claude Code camy: Working. Open the session' })
   await expect(chip).toBeVisible()
   await chip.click()
   await expect(page).toHaveURL(`/agents/${camy}`)

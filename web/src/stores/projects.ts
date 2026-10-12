@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
-import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary } from '../lib/api'
+import { computed, ref, watch } from 'vue'
+import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary, type WorkNode } from '../lib/api'
 import { projectProgressPercent } from '../lib/projectColumns'
+import { compareRevision } from '../lib/liveUpdates'
+import { preferenceOwner } from '../lib/preferences'
 import { projectDescription, projectRouteKey } from '../lib/work'
 
 export interface Project extends ProjectSummary {
@@ -21,13 +23,19 @@ export interface Project extends ProjectSummary {
 // project nodes (for classic keys and descriptions), cached for the session and
 // refreshed in the background when a page asks again after a minute.
 export const useProjects = defineStore('projects', () => {
+  const owner = preferenceOwner
   const summaries = ref<ProjectSummary[]>([])
   const details = ref(new Map<string, { routeKey: string; description: string; updatedAt: string }>())
   const loaded = ref(false)
   const loading = ref(false)
   const error = ref('')
   let request: Promise<void> | undefined
-  let loadedAt = 0
+  let loadedAt = 0, generation = 0
+  watch(owner, () => {
+    generation++; summaries.value = []; details.value = new Map(); loaded.value = false
+    loading.value = false; error.value = ''; loadedAt = 0; request = undefined
+    if (owner.value) void load()
+  }, { flush: 'sync' })
 
   const projects = computed<Project[]>(() => summaries.value.map(summary => {
     const detail = details.value.get(summary.id)
@@ -47,6 +55,8 @@ export const useProjects = defineStore('projects', () => {
   }))
 
   function load(force = false): Promise<void> {
+    if (!owner.value) return Promise.resolve()
+    const started = generation
     if (request) return request
     if (loaded.value && !force && Date.now() - loadedAt < 60_000) return Promise.resolve()
     loading.value = true
@@ -54,18 +64,31 @@ export const useProjects = defineStore('projects', () => {
     request = (async () => {
       try {
         const [summary, nodes] = await Promise.all([getProjects(true), listNodes({ kind: ['project'], limit: 500 })])
+        if (started !== generation) return
         const map = new Map<string, { routeKey: string; description: string; updatedAt: string }>()
-        for (const node of nodes.items) map.set(node.id, { routeKey: projectRouteKey(node.key, node.fields), description: projectDescription(node.body, node.fields), updatedAt: node.updated_at })
-        summaries.value = summary.items
+        const current = new Map(summaries.value.map(item => [item.id, item]))
+        const names = new Map<string, { title: string; state: string }>()
+        for (const node of nodes.items) {
+          const cached = details.value.get(node.id), shown = current.get(node.id)
+          if (cached && shown && compareRevision(cached.updatedAt, node.updated_at) > 0) {
+            map.set(node.id, cached); names.set(node.id, shown)
+          } else {
+            map.set(node.id, { routeKey: projectRouteKey(node.key, node.fields), description: projectDescription(node.body, node.fields), updatedAt: node.updated_at })
+            names.set(node.id, node)
+          }
+        }
+        summaries.value = summary.items.map(item => {
+          const latest = names.get(item.id)
+          return latest ? { ...item, title: latest.title, state: latest.state } : item
+        })
         details.value = map
         loaded.value = true
         loadedAt = Date.now()
         error.value = ''
       } catch (e) {
-        error.value = e instanceof Error ? e.message : 'Projects could not be loaded'
+        if (started === generation) error.value = e instanceof Error ? e.message : 'Projects could not be loaded'
       } finally {
-        loading.value = false
-        request = undefined
+        if (started === generation) { loading.value = false; request = undefined }
       }
     })()
     return request
@@ -78,6 +101,16 @@ export const useProjects = defineStore('projects', () => {
   }
   function byId(id: string): Project | undefined {
     return projects.value.find(project => project.id === id)
+  }
+
+  // A current settings read or confirmed write supplies this node revision.
+  // A slower background read cannot put an earlier name or state back.
+  function applyNode(node: WorkNode): void {
+    if (compareRevision(node.updated_at, details.value.get(node.id)?.updatedAt) < 0) return
+    summaries.value = summaries.value.map(summary => summary.id === node.id ? { ...summary, title: node.title, state: node.state } : summary)
+    details.value = new Map(details.value).set(node.id, {
+      routeKey: projectRouteKey(node.key, node.fields), description: projectDescription(node.body, node.fields), updatedAt: node.updated_at,
+    })
   }
 
   // Archives or restores a project (its node state). The summary shows the new
@@ -98,5 +131,5 @@ export const useProjects = defineStore('projects', () => {
     }
   }
 
-  return { projects, loaded, loading, error, load, byRouteKey, byId, setState }
+  return { projects, loaded, loading, error, load, byRouteKey, byId, setState, applyNode }
 })

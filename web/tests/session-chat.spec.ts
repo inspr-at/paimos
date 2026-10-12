@@ -389,6 +389,8 @@ test('a tap at the bottom keeps following new posts', async ({ page }) => {
 
 test('an upward gesture on a thread that fits still follows the next post', async ({ page }) => {
   const { worker, data, messages } = await setup(page, { count: 2, storage: { 'aeon.session-tab': 'messages' } })
+  // This case needs a fitting thread; long-token wrapping is covered separately.
+  messages.forEach((message, index) => { message.body = `Short post ${index + 1}.` })
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/agents/${worker.id}`)
   const panel = panelOf(page)
@@ -909,6 +911,8 @@ test('AEON-976 Stop: Esc leaves the field then interrupts with captured process 
   await page.keyboard.press('Escape')
   await expect.poll(() => payloads.length).toBe(1)
   expect(payloads[0]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
+  // AEON-1219: chat capture owns Esc before the page's close-details action.
+  await expect(page).toHaveURL(`/agents/${worker.id}?tab=messages`)
   await expect(page.locator('.toast.error').filter({ hasText: 'ownership changed' })).toBeVisible()
   await expect(field).toHaveValue('Keep this draft')
   await expect(panel).toBeVisible()

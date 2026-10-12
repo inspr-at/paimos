@@ -13,7 +13,8 @@ const row = (page: Page, n: number) => page.locator(`[data-row="s:${id(n)}"]`)
 const familyFold = (page: Page, n: number) => row(page, n).locator('[data-fold="family"]')
 // AEON-1209: the folded dial is the light control in the capacity row; unfolded, its body is a card under it.
 const dial = (page: Page) => page.locator(':is(.cdial, .dial-card)')
-// AEON-1210: Sessions group by project, so the live total is the head's count, folded workers included.
+// AEON-1210: the card head counts live sessions across project groups, folded workers included.
+const liveCount = (page: Page) => page.locator('.sessions .sess-title .fs-count')
 const headCount = (page: Page, filter: string) => page.locator(`.agents-page .page-head .count[data-filter="${filter}"]`)
 const shots = process.env.AEON691_SHOTS
 
@@ -68,6 +69,7 @@ test('live families count all external workers, hide hundreds of ended siblings 
   await page.goto('/agents')
   // The head's counts replaced the live line (AEON-780): all four live sessions, each started outside PAIMOS.
   await expect(headCount(page, 'working')).toContainText('4')
+  await expect(liveCount(page)).toHaveText('4')
   await expect(page.locator('.sessions .row')).toHaveCount(4)
   await expect(row(page, 1).locator('.history-toggle')).toHaveText('696 stopped')
   await expect(row(page, 1).locator('.history-toggle')).toHaveAttribute('aria-expanded', 'false')

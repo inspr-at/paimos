@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
@@ -362,6 +363,11 @@ func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 				return dbErr("allocate node key", err)
 			}
 		}
+		if kind.Slug == "project" {
+			if err := requireUniqueProjectKey(ctx, tx, fields); err != nil {
+				return err
+			}
+		}
 		siblings, err := loadSiblings(ctx, tx, parentID)
 		if err != nil {
 			return err
@@ -671,6 +677,11 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 		}
 		if kind.Slug == "tag" {
 			return badRequest("delete tags through /api/tags/{tagId}")
+		}
+		if kind.Slug == "project" {
+			if err := authz.RequireProjectAdminTx(ctx, tx, p, id); err != nil {
+				return err
+			}
 		}
 		if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
 			return err
@@ -1064,4 +1075,48 @@ func requireCreateTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, kin
 		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
 	}
 	return nil
+}
+
+// The tree/tenant fence serializes project creates. This narrow constraint
+// lookup includes hidden and deleted projects to keep their keys reserved;
+// the holder's title is read only after restoring caller visibility.
+func requireUniqueProjectKey(ctx context.Context, tx pgx.Tx, fields []byte) error {
+	var values struct {
+		Key string `json:"project_key"`
+	}
+	if err := json.Unmarshal(fields, &values); err != nil {
+		return err
+	}
+	candidate := values.Key
+	if candidate == "" {
+		return nil
+	}
+	var visible string
+	if err := tx.QueryRow(ctx, `SELECT current_setting($1)`, db.VisibleProjectsSetting).Scan(&visible); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config($1,'*',true)`, db.VisibleProjectsSetting); err != nil {
+		return err
+	}
+	var holder string
+	err := tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+	 WHERE k.slug='project' AND (upper(n.fields->>'project_key')=upper($1) OR upper(n.fields->'classic'->>'key')=upper($1) OR upper(n.key)=upper($1) OR upper(split_part(n.key,'-',1))=upper($1)) ORDER BY n.id LIMIT 1`, candidate).Scan(&holder)
+	if _, restoreErr := tx.Exec(ctx, `SELECT set_config($1,$2,true)`, db.VisibleProjectsSetting, visible); restoreErr != nil {
+		return restoreErr
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var title string
+	err = tx.QueryRow(ctx, `SELECT title FROM nodes WHERE id=$1`, holder).Scan(&title)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &httpError{status: 409, msg: "project key is already reserved"}
+	}
+	if err != nil {
+		return err
+	}
+	return &httpError{status: 409, msg: fmt.Sprintf("project key %q is already held by project %q", candidate, title)}
 }

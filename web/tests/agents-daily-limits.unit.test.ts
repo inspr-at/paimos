@@ -10,11 +10,15 @@ import {
   type DailyAccount, type DailySettings, type DailyState,
 } from '../src/lib/dailyLimits'
 import { DEFAULT_DIAL, readDialPrefs, selectedHarness, withDialDefaults } from '../src/lib/dialPrefs'
+import { HARNESS_LABEL } from '../src/lib/agentState'
 const mocks = vi.hoisted(() => ({ api: vi.fn(), queue: vi.fn() }))
 vi.mock('../src/lib/api.ts', () => ({ api: mocks.api }))
 vi.mock('../src/lib/workQueue.ts', () => ({ queueRequest: mocks.queue }))
 vi.mock('../src/lib/usePolledData.ts', () => ({ usePoller: () => ({ start() {}, stop() {} }) }))
 import { useAgentPlan } from '../src/lib/useAgentPlan'
+
+// The harness's name (AEON-1175): "Claude" until AEON-1160 names it "Claude Code"; both pass.
+const CLAUDE = HARNESS_LABEL.claude!
 
 const account = (fields: Partial<DailyAccount> = {}): DailyAccount => ({ account_id: 'a1', label: 'markus.barta', order: 1, used_pct: 47, left_pct: 53, start_of_day_used_pct: 40, limit_used_pct: 50, floor_pct: 0, resets_at: '2026-10-14T17:00:00Z', freshness: 'fresh', resets: null, can_edit: true, details_redacted: false, ...fields })
 const state = (fields: Partial<DailyState> = {}, accounts: DailyAccount[] = [account()]): DailyState => ({ state: 'on_pace', limit_used_pct: 50, today_points_used: 7, today_points_allowed: 10, over_pace_points: 0, active_account_id: 'a1', next_on_ladder: null, accounts, ...fields })
@@ -32,12 +36,12 @@ describe('what the dial may say about a daily reading', () => {
   it('is over pace in gold with the points above today’s share, and at the limit in red', () => {
     const over = view(state({ state: 'over_pace', over_pace_points: 4, limit_used_pct: 60, today_points_used: 14, today_points_allowed: 20 }, [account({ used_pct: 54, limit_used_pct: 60 })]))
     expect(over.kind).toBe('over_pace'); expect(stateWords(over)).toBe('4 percentage points over pace'); expect(needsAttention(over)).toBe(true)
-    expect(chipTip(over, 'at most 2')).toBe('Claude · at most 2 · ≤ 60 % used today · 4 percentage points over pace')
+    expect(chipTip(over, 'at most 2')).toBe(`${CLAUDE} · at most 2 · ≤ 60 % used today · 4 percentage points over pace`)
     const limit = view(state({ state: 'at_limit', next_on_ladder: 'codex', today_points_used: 11 }, [account({ used_pct: 51 })]))
     expect(limit.kind).toBe('at_limit'); expect(needsAttention(limit)).toBe(true)
     expect(stateWords(limit, true)).toBe('At today’s limit · Codex next')
-    expect(stateWords(limit)).toBe('At today’s limit · Codex next on the model ladder')
-    expect(chipTip(limit, 'at most 2')).toBe('Claude · at most 2 · at today’s limit · Codex next')
+    expect(stateWords(limit)).toBe('At today’s limit · Codex next in the Models order')
+    expect(chipTip(limit, 'at most 2')).toBe(`${CLAUDE} · at most 2 · at today’s limit · Codex next`)
   })
   it('never reports the limit for a stale, missing or private reading, although the server also refuses starts then', () => {
     const stale = view(state({ state: 'at_limit' }, [account({ freshness: 'stale' })]))
@@ -52,7 +56,7 @@ describe('what the dial may say about a daily reading', () => {
     for (const freshness of ['stale', 'expired', 'unknown'] as const) {
       const old = view(state({ state: 'at_limit' }, [account({ used_pct: 51, limit_used_pct: 50, freshness })]))
       expect(old.kind, freshness).toBe('unknown'); expect(needsAttention(old), freshness).toBe(false); expect(stateWords(old), freshness).toBe('Usage not measured right now')
-      expect(chipTip(old, 'at most 2'), freshness).toBe('Claude · at most 2 · usage not measured right now')
+      expect(chipTip(old, 'at most 2'), freshness).toBe(`${CLAUDE} · at most 2 · usage not measured right now`)
     }
     // One fresh account at its limit does not make up for another account whose reading is old.
     expect(view(state({ state: 'at_limit' }, [account({ used_pct: 51 }), account({ account_id: 'a2', used_pct: 52, freshness: 'stale' })])).kind).toBe('unknown')
@@ -69,22 +73,24 @@ describe('what the dial may say about a daily reading', () => {
     const everything = { mode: 'everything', points_per_day: null } as const
     const boosted = view(state({ limit_used_pct: 60, today_points_used: 7, today_points_allowed: 20 }, [account({ limit_used_pct: 60 })]), settings({ pace: everything, boost_today: makeBoost(60, 'used', '2026-10-09T22:00:00Z') }))
     expect(boosted.limit).toBe(60); expect(boosted.kind).toBe('on_pace')
-    expect(usageLine(boosted)).toBe('≤ 60 % used today'); expect(detailHeadline(boosted)).toBe('Claude · daily limit: up to 60 % used')
-    expect(stateWords(boosted)).toBe('Within today’s limit'); expect(chipTip(boosted, 'at most 2')).toBe('Claude · at most 2 · ≤ 60 % used today · within today’s limit')
+    expect(usageLine(boosted)).toBe('≤ 60 % used today'); expect(detailHeadline(boosted)).toBe(`${CLAUDE} · daily limit: up to 60 % used`)
+    expect(stateWords(boosted)).toBe('Within today’s limit'); expect(chipTip(boosted, 'at most 2')).toBe(`${CLAUDE} · at most 2 · ≤ 60 % used today · within today’s limit`)
     expect(needsAttention(boosted)).toBe(false)
     // Reaching the Boost's ceiling is the limit, as for any other day.
     const reached = view(state({ state: 'at_limit', limit_used_pct: 60, today_points_used: 21, today_points_allowed: 20 }, [account({ used_pct: 61, limit_used_pct: 60 })]), settings({ pace: everything, boost_today: makeBoost(60, 'used', '2026-10-09T22:00:00Z') }))
     expect(reached.kind).toBe('at_limit')
     // Without a Boost nothing limits it, and without a daily limit the words say so.
     const free = view(state({ limit_used_pct: 100 }), settings({ pace: everything }))
-    expect(free.kind).toBe('everything'); expect(usageLine(free)).toBe('no daily limit'); expect(detailHeadline(free)).toBe('Claude · no daily limit')
+    expect(free.kind).toBe('everything'); expect(usageLine(free)).toBe('no daily limit'); expect(detailHeadline(free)).toBe(`${CLAUDE} · no daily limit`)
   })
-  it('words what happens at the limit without inventing a ladder', () => {
+  it('words what happens at the limit without inventing an order: Settings › Models decides', () => {
     const base = state({ state: 'at_limit' }, [account({ used_pct: 51 })])
-    expect(atLimitWords(view(base))).toBe('new work follows the model ladder')
-    expect(atLimitWords(view({ ...base, next_on_ladder: 'cursor' }))).toBe('Cursor next on the model ladder')
-    expect(atLimitWords(view(base, settings({ at_limit: 'wait' })))).toBe('new work waits until midnight')
-    expect(stateWords(view(base, settings({ at_limit: 'wait' })), true)).toBe('At today’s limit · new work waits')
+    expect(atLimitWords(view(base))).toBe('new work follows Settings › Models')
+    expect(stateWords(view(base), true)).toBe('At today’s limit · follows Models')
+    expect(atLimitWords(view({ ...base, next_on_ladder: 'cursor' }))).toBe('Cursor next in the Models order')
+    // AEON-1166: a per-harness Wait saved before the dial followed Models is ignored, never promised.
+    for (const short of [false, true]) expect(stateWords(view(base, settings({ at_limit: 'wait' })), short)).toBe(stateWords(view(base), short))
+    expect(chipTip(view(base, settings({ at_limit: 'wait' })), 'at most 2')).toBe(`${CLAUDE} · at most 2 · at today’s limit · follows Models`)
   })
   it('lets only an owner who may manage every account change today’s limit', () => {
     expect(view(state()).editable).toBe(true)

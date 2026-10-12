@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
 import { policyJSON } from './policyEditor'
-import type { OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, WriteResult } from './modelsSimple'
+import type { ChainEnd, OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, SituationKey, SituationOrder, TailBoard, TicketResolution, WriteResult } from './modelsSimple'
 
 async function request<T>(path: string, method = 'GET', body?: unknown, person?: string | null, signal?: AbortSignal): Promise<T> {
   const response = await api(path, { method, signal, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(person ? { 'If-Prefs-Person': person } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -23,9 +23,26 @@ export const getRegistry = async (signal?: AbortSignal) => {
   return profiles
 }
 export const getWorkspaceRules = (signal?: AbortSignal) => request<RulesDocument>('/model-rules', 'GET', undefined, undefined, signal)
-export const putOrder = (scope: Scope, column: string, body: OrderBody, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}`, 'PUT', { ...body, revision }, who(scope, person))
+export const putOrder = (scope: Scope, column: string, body: OrderBody & Pick<ChainBody, 'efforts' | 'end'>, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}`, 'PUT', { ...body, revision }, who(scope, person))
 export const resetOrder = (scope: Scope, column: string, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}&revision=${revision}`, 'DELETE', undefined, who(scope, person))
 export const putEffort = (scope: Scope, column: string, effort: string | null, revision: number, person: string | null) => request<WriteResult>(`${first(column, '/thinking')}?for=${scope}`, 'PUT', { effort, revision }, who(scope, person))
 export const putWorkspaceRules = (column: string, body: RulesBody, revision: number) => request<RulesDocument>(`/model-rules/workspace/${encodeURIComponent(column)}`, 'PUT', { ...body, revision })
 export const dismissLine = (scope: Scope, line: string, revision: number, person: string | null) => request<WriteResult>(`/model-preferences/tray/${encodeURIComponent(line)}/dismiss?for=${scope}`, 'POST', { revision }, who(scope, person))
 export const putDismissed = (scope: Scope, lines: string[], revision: number, person: string | null) => request<WriteResult>(`/model-preferences/profile?for=${scope}`, 'PUT', { dismissed_lines: lines, revision }, who(scope, person))
+// Situation orders are workspace orders (Expert, For everyone): DELETE means "same as the row", or automatic for review.
+const situationPath = (column: string, situation: SituationKey) => `/model-preferences/orders/${encodeURIComponent(column)}/${situation}`
+export const putSituationOrder = (column: string, situation: SituationKey, body: SituationOrder, revision: number) => request<WriteResult>(`${situationPath(column, situation)}?for=default`, 'PUT', { ...body, revision })
+export const resetSituationOrder = (column: string, situation: SituationKey, revision: number) => request<WriteResult>(`${situationPath(column, situation)}?for=default&revision=${revision}`, 'DELETE')
+/**
+ * A row's order (AEON-1161): rank is the pick and its fallback. Omitted efforts, end and not keep what is stored;
+ * a personal write on a workspace row creates the person's own order. An empty end stores none: the order then ends
+ * as its column does without one.
+ */
+export interface ChainBody { rank: string[]; efforts?: Record<string, string>; end?: ChainEnd | ''; not?: string[] }
+export const putChain = (scope: Scope, column: string, body: ChainBody, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}`, 'PUT', { ...body, revision }, who(scope, person))
+// Never rules are workspace rules: admins only, written against the rules revision.
+const never = (column: string, line: string) => first(column, `/never/${encodeURIComponent(line)}`)
+export const putNever = (column: string, line: string, why: string, revision: number) => request<RulesDocument>(never(column, line), 'PUT', { why, revision })
+export const deleteNever = (column: string, line: string, revision: number) => request<RulesDocument>(`${never(column, line)}?revision=${revision}`, 'DELETE')
+/** How one ticket resolves, for the "Why this model?" link on a ticket row. */
+export const getTicketResolution = (ticket: string, signal?: AbortSignal) => request<TicketResolution>(`/models/resolve?${new URLSearchParams({ ticket })}`, 'GET', undefined, undefined, signal)

@@ -55,10 +55,11 @@ func routingBounds(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-// Accepted daemon telemetry only persists demand. No worker requests an
-// approval, selects a reviewer, creates a retry or settles guessed usage.
+// Accepted daemon telemetry activates only its matching actor or persists
+// completion demand. No worker requests an approval, selects a reviewer,
+// creates a retry or settles guessed usage.
 func (e *Executor) recordCompletion(ctx context.Context, tx pgx.Tx, p tenant.Principal, v agentruns.Run, t agentruns.Telemetry, _ *[]events.Change) error {
-	if v.RoutineLaunchID == nil || t.Kind != "finished" {
+	if v.RoutineLaunchID == nil || t.Kind != "started" && t.Kind != "finished" {
 		return nil
 	}
 	// The telemetry endpoint already fenced the exact daemon, generation and
@@ -71,6 +72,30 @@ func (e *Executor) recordCompletion(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		}
 		if role != "build" && role != "review" && role != "fix" {
 			return nil
+		}
+		if t.Kind == "started" {
+			// The hook runs inside accepted telemetry's final transaction and
+			// before event append. Refused/stale reports never reach it. Match
+			// the committed launch and held root grant before enabling actions.
+			tag, err := tx.Exec(ctx, `UPDATE routine_attempts a SET state='running',updated_at=clock_timestamp()
+ FROM routine_launch_intents l JOIN routine_runs r ON r.id=l.routine_run_id
+ JOIN agent_runs ar ON ar.id=l.agent_run_id
+ WHERE a.agent_run_id=$1 AND a.run_id=r.id AND l.id=$2 AND a.principal_id=$3
+ AND a.assignment_digest=r.assignment_digest AND l.binding=ar.trace->'routine_launch'
+ AND l.state='claimed' AND l.exit_observed_at IS NULL AND l.claimed_at IS NOT NULL
+ AND ar.status='running' AND ar.daemon_id=l.binding->>'daemon_id' AND ar.daemon_generation=l.binding->>'daemon_generation'
+ AND ar.account_id::text=l.binding->>'account_id' AND l.worker_principal_id=a.principal_id
+ AND a.state IN ('pending','running') AND r.state IN ('dispatched','starting','running')
+ AND EXISTS(SELECT 1 FROM routine_budget_grants g WHERE g.attempt_id=a.id AND g.agent_run_id=ar.id AND g.run_id=r.id
+  AND g.id::text=l.binding->>'budget_grant_id' AND g.account_id=ar.account_id AND g.parent_id IS NULL AND g.state='held')`, v.ID, *v.RoutineLaunchID, p.ID)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return workorders.Fail(409, "routine_start_binding_changed")
+			}
+			_, err = tx.Exec(ctx, `UPDATE routine_runs SET state='running',updated_at=clock_timestamp() WHERE id=$1`, run)
+			return err
 		}
 		payload, _ := json.Marshal(completion{v.ID, t.ReviewRange})
 		if _, err := tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload) VALUES($1,$2,$3,'routine.continue',$4) ON CONFLICT(tenant_id,run_id,effect_key) DO NOTHING`, p.TenantID, run, "finish:"+v.ID, payload); err != nil {
@@ -200,6 +225,11 @@ func (e *Executor) ContinueTx(ctx context.Context, tx pgx.Tx, tid, id string) (b
 			switch {
 			case errors.As(err, &refusal) && refusal.Status == 409:
 				result = map[string]any{"wait_reason": refusal.Message}
+				if refusal.Message == "routine_review_proof_unavailable" || refusal.Message == "review_policy_changed" || refusal.Message == "review_head_changed" || refusal.Message == "fix_review_changed" {
+					// Re-evaluate the original evidence on the next pass. A stale
+					// gate never authorizes another actor or broader permissions.
+					result["reevaluation_required"] = true
+				}
 			case errors.As(err, &pairing) && (pairing.Status == 409 || pairing.Status == 410):
 				result = map[string]any{"wait_reason": pairing.Code}
 			case errors.As(err, &use) && use.Status == 409:
@@ -281,6 +311,9 @@ func (e *Executor) advance(ctx context.Context, tx pgx.Tx, tid string, r intent,
 	if !r.consent || r.consentRevision != r.revision || principal != r.principal {
 		return nil, workorders.Fail(409, "routine_execution_consent_required")
 	}
+	if err := routineRecoveryGuardTx(ctx, tx, r.id); err != nil {
+		return nil, err
+	}
 	owner := tenant.Principal{ID: r.owner, TenantID: tid, Kind: tenant.Person}
 	for _, perm := range []string{"nodes.write", "run.create", "work_orders.write"} {
 		if err := authz.RequireTx(ctx, tx, owner, perm, authz.Scope{ProjectID: r.project}); err != nil {
@@ -359,6 +392,24 @@ func (e *Executor) advance(ctx context.Context, tx pgx.Tx, tid string, r intent,
 			return e.park(ctx, tx, owner, r, "failed_fix_artifact_unverified")
 		} else {
 			if c.Range == nil {
+				if role == "build" {
+					ready, err := nonCodeLandingTx(ctx, tx, r.id)
+					if err != nil {
+						return nil, err
+					}
+					if ready {
+						if err := authorProof(ctx, tx, c.AgentRunID); err != nil {
+							return nil, err
+						}
+						if err := e.continuationFacts(ctx, tx, owner, r, c.AgentRunID); err != nil {
+							return nil, err
+						}
+						if _, err := tx.Exec(ctx, `UPDATE routine_runs SET state='awaiting_pipeline',updated_at=clock_timestamp() WHERE id=$1`, r.id); err != nil {
+							return nil, err
+						}
+						return map[string]any{"state": "awaiting_pipeline", "non_code": true}, nil
+					}
+				}
 				return nil, workorders.Fail(409, "completed_artifact_unavailable")
 			}
 			if err := authorProof(ctx, tx, c.AgentRunID); err != nil {

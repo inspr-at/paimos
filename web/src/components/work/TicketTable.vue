@@ -147,6 +147,8 @@ function planningDescribedBy(row: ListItem): string {
 const width = ref(1200)
 const phoneQuery = window.matchMedia('(max-width: 720px)')
 const phone = ref(phoneQuery.matches)
+const coarseQuery = window.matchMedia('(pointer: coarse)')
+const coarse = ref(coarseQuery.matches)
 // One live feed for the whole list (AEON-233). Workers are matched to loaded rows;
 // a ticket with a worker earns Assignee even when nobody is the stored owner.
 const live = useLiveAgents()
@@ -189,7 +191,13 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
-const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({ ...def, field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host' })))
+const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({
+  ...def,
+  // Keep the designed text room after reserving the extra arrow reach (26px)
+  // and action reach (40px). Saved tablet layouts can scroll inside the card.
+  min: def.min + (def.id === 'title' && coarse.value && !phone.value ? 66 : 0),
+  field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host',
+})))
 const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
 const hostIds = computed(() => new Set(columns.value.filter(column => !COLUMN_BY_ID.has(column.id as ColumnId)).map(column => column.id)))
 const customised = computed(() => layout.value.customised || !!hostIds.value.size)
@@ -201,32 +209,34 @@ const measuring = ref(false)
 const autoWidths = ref<Partial<Record<string, number>>>({})
 const foldSpace = ref(0)
 let fitGeneration = 0
-let fittedRows = new Set<string>()
 let fittedColumns = new Set<string>()
 async function fitLoaded() {
   const generation = ++fitGeneration
   if (props.loading || phone.value) { measuring.value = false; return }
+  // Fit each column when it first appears. Loading or expanding more rows must
+  // not move controls already on screen; explicit Fit still uses all loaded rows.
+  if (!ids.value.some(id => id !== 'title' && !Number.isFinite(props.prefs?.widths?.[id]) && dragWidths.value[id] === undefined && !fittedColumns.has(id))) {
+    measuring.value = false
+    return
+  }
   // Folded groups still contribute their loaded values. Briefly render their
   // rows out of flow for measurement, then remove them before the next paint.
   measuring.value = true
   await nextTick()
   if (generation !== fitGeneration) return
   if (props.loading || phone.value || !grid.value) { measuring.value = false; return }
-  const rows = new Set([...props.rowsById.keys(), ...(props.outline ?? []).flatMap(entry => entry.type === 'row' ? [entry.row.id] : [])])
-  const newRows = [...rows].some(id => !fittedRows.has(id))
   const next = { ...autoWidths.value }
   for (const id of ids.value) {
     if (id === 'title' || Number.isFinite(props.prefs?.widths?.[id]) || dragWidths.value[id] !== undefined) continue
-    if (!newRows && fittedColumns.has(id)) continue
+    if (fittedColumns.has(id)) continue
     next[id] = loadedFitWidth(definitions.value.get(id)!, Math.max(next[id] ?? 0, fittedWidth(id)))
     fittedColumns.add(id)
   }
-  fittedRows = rows
   autoWidths.value = next
   measuring.value = false
 }
 watch(() => props.loading, (loading, wasLoading) => {
-  if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedRows.clear(); fittedColumns.clear() }
+  if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedColumns.clear() }
 })
 watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
 const dragWidths = ref<Partial<Record<string, number>>>({})
@@ -257,8 +267,10 @@ const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] ==
 const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
 const phoneChange = () => { phone.value = phoneQuery.matches }
+const coarseChange = () => { coarse.value = coarseQuery.matches }
 onMounted(() => {
   phoneChange(); void fitLoaded(); phoneQuery.addEventListener('change', phoneChange)
+  coarseQuery.addEventListener('change', coarseChange)
   if (card.value) {
     // The first fit happens before paint, so the columns never jump into place.
     const box = getComputedStyle(card.value)
@@ -266,7 +278,7 @@ onMounted(() => {
     sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value)
   }
 })
-onBeforeUnmount(() => { fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
+onBeforeUnmount(() => { fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); coarseQuery.removeEventListener('change', coarseChange); sizer?.disconnect() })
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
 let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's
@@ -347,7 +359,7 @@ function autofit(id: string) {
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
 watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
-watch(() => props.projectId, () => { autoWidths.value = {}; dragWidths.value = {}; foldSpace.value = 0; fittedRows.clear(); fittedColumns.clear(); void fitLoaded() })
+watch(() => props.projectId, () => { autoWidths.value = {}; dragWidths.value = {}; foldSpace.value = 0; fittedColumns.clear(); void fitLoaded() })
 function estimate(row: ListItem) { return estimateDisplay(row).text }
 // An epic with open children and no hours still has coverage to explain.
 function emptyEstimateTip(row: ListItem) {
@@ -471,7 +483,11 @@ function statusClick(event: MouseEvent, row: ListItem) {
   emit('status', row, event.currentTarget as HTMLElement)
 }
 function rowClick(event: MouseEvent, row: ListItem) {
-  if (swallowClick) { swallowClick = false; return }
+  const held = swallowClick
+  swallowClick = null
+  // A native context menu can prevent the hold's compatibility click. Keep
+  // suppression on that row and pointer; the next gesture still acts normally.
+  if (held?.rowId === row.id && held.pointerId === (event as PointerEvent).pointerId) { event.preventDefault(); return }
   if (props.selectable && phone.value && selecting.value && !(event.target as HTMLElement).closest('.phone-check')) {
     emit('select', row, 'toggle')
     return
@@ -499,21 +515,22 @@ function checkClick(event: MouseEvent, row: ListItem) {
 // both fire for one press; the click that follows must not undo it.
 const HOLD_MS = 480
 let pressTimer = 0
-let pressOrigin: { x: number; y: number } | null = null
+let pressOrigin: { x: number; y: number; pointerId: number } | null = null
 let pointerDown = false
-let swallowClick = false
+let swallowClick: { rowId: string; pointerId: number } | null = null
+function clearHoldClick() { swallowClick = null }
 function pressBegin(event: PointerEvent, row: ListItem) {
   if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value || selecting.value || event.button !== 0) return
   if ((event.target as HTMLElement).closest('button, input')) return
   pointerDown = true
-  swallowClick = false
-  pressOrigin = { x: event.clientX, y: event.clientY }
+  swallowClick = null
+  pressOrigin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
   window.clearTimeout(pressTimer)
   pressTimer = window.setTimeout(() => {
     pressTimer = 0
     const current = props.rowsById.get(row.id)
     if (!current || current.updated_at !== row.updated_at || props.selectionDisabled || props.rowSelectable?.(current) === false) return
-    swallowClick = true
+    swallowClick = { rowId: row.id, pointerId: event.pointerId }
     emit('select', current, 'toggle')
   }, HOLD_MS)
 }
@@ -527,16 +544,16 @@ function pressFinish(fromPointerUp: boolean) {
   if (!pressTimer) return
   window.clearTimeout(pressTimer)
   pressTimer = 0
-  if (fromPointerUp) swallowClick = false
+  if (fromPointerUp) swallowClick = null
 }
 function longPress(event: Event, row: ListItem) {
   if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value) return
   event.preventDefault()
-  if (swallowClick) return
+  if (swallowClick?.rowId === row.id) return
   if (pressTimer) { window.clearTimeout(pressTimer); pressTimer = 0 }
   // A later click belongs to this press only while the finger is still down.
   // A dispatched context menu (no pointer) must leave the next tap alone.
-  swallowClick = pointerDown
+  swallowClick = pointerDown && pressOrigin ? { rowId: row.id, pointerId: pressOrigin.pointerId } : null
   emit('select', row, 'toggle')
 }
 function linkClick(event: MouseEvent) {
@@ -598,9 +615,14 @@ function observe() {
   observer.observe(sentinel.value)
 }
 let stopLive: (() => void) | undefined
-onMounted(() => { stopLive = live.watch(); observe() })
+onMounted(() => {
+  stopLive = live.watch(); observe()
+  // Disclosure may stop a clipped name's pointerdown before it reaches the
+  // row. Clear the previous gesture in document capture, even for that name.
+  document.addEventListener('pointerdown', clearHoldClick, true)
+})
 watch(() => [props.scrollRoot, props.hasMore, props.loadingMore, !!props.outline], observe)
-onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer) })
+onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer); document.removeEventListener('pointerdown', clearHoldClick, true) })
 defineExpose({
   focusGrid, scrollToRow, el: grid,
   focusCreate: () => (inlineQuick.value[0] ?? quick.value)?.focus(),
@@ -742,7 +764,7 @@ defineExpose({
           <!-- Unified Outline: a destination above growing rows. -->
           <template v-else-if="entry.type === 'root'">
             <tr
-              v-if="canDrag" class="outline-root-drop" aria-label="Project root drop destination" :class="{ 'drop-target': dropTarget === 'no-epic' }"
+              v-if="canDrag" class="outline-root-drop" aria-label="Project root drop destination" :class="{ 'drop-target': dropTarget === 'no-epic', 'drag-active': !!dragId }"
               @dragover="dragOver($event, null)" @dragleave="dragLeave($event, 'no-epic')" @drop="drop($event, null)"
             >
               <td :colspan="columns.length">
@@ -1113,7 +1135,10 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .ticket-row.drop-target td, .outline-group.drop-target th { background: var(--row-selected); }
 .ticket-row.drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
 .outline-group.drop-target th { box-shadow: inset 0 0 0 2px var(--teal); }
-.outline-root-drop td { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised-2); }
+.outline-root-drop td { padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised-2); }
+/* Keep the root destination in reach during a drag, without covering ordinary
+   row controls while browsing or when a pointer scrolls them into view. */
+.outline-root-drop.drag-active td { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; }
 .root-drop-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 36px; padding: 6px 0; font-size: 12px; color: var(--ink-3); }
 .root-drop-hint { margin-left: auto; }
 .outline-root-drop.drop-target td { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
@@ -1174,6 +1199,11 @@ td.c-title { position: relative; overflow: hidden; }
 .row-actions :deep(.icon-btn):hover { color: var(--teal-ink); }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
 @media (min-width: 721px) and (pointer: coarse) {
+  /* Reserve the arrow's full reach before the type marker. Its centre stays
+     within the row's content line, including the first row's top hairline. */
+  .tree { box-sizing: content-box; margin: 0; padding-inline: 13px; }
+  .twisty { left: calc(var(--twisty-left) + 13px); }
+  .guide { margin-left: 13px; }
   /* Keep the compact visuals, but reserve each full 44px reach plus the
      existing 2px separation before interaction, as on fine pointers above.
      Padding contains the outer edges as well. Touch can set :hover during
@@ -1183,6 +1213,11 @@ td.c-title { position: relative; overflow: hidden; }
   /* Reserve the touch action reach before hover/focus so the recurring
      marker never changes the title width when those actions appear. */
   .title-cell { padding-right: 98px; }
+  /* Parents have only Open. Reserving an absent Queue target would consume
+     their title after the full arrow reach and subtree progress are drawn. */
+  td.c-title:has(.row-actions > :only-child) .title-cell { padding-right: 52px; }
+  /* The count carries the same progress when the touch controls need room. */
+  .epic-progress .bar { display: none; }
 }
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
@@ -1395,10 +1430,12 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .tree-row .title-cell { position: relative; padding-left: 0; }
   /* Centre the shared hit area on the arrow; desktop indentation is already
      represented by the card's padding, so it must not offset the phone arrow. */
-  .twisty { position: relative; inset: auto; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
-  .twisty-spacer { display: block; flex-shrink: 0; width: 26px; }
+  .twisty { position: relative; inset: auto; flex: none; width: 36px; height: 36px; margin: 4px; }
+  .twisty-spacer { display: block; flex-shrink: 0; width: 44px; }
   .tree-row .tree { display: contents; }
-  .tree-row .title-link { flex-basis: calc(100% - 60px); }
+  /* The arrow slot (44), type marker (22) and two gaps (16) share one line.
+     Reserve all three so a long title cannot wrap under the arrow's reach. */
+  .tree-row .title-link { flex-basis: calc(100% - 82px); }
   .epic-progress { flex-basis: 100%; margin-left: 22px; padding-left: 0; }
   .epic-progress .bar { display: block; width: 96px; }
   .ticket-row.top td { border-top: 0; }

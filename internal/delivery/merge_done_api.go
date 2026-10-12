@@ -65,9 +65,10 @@ func (m *Module) mergeBackfill(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 	r = r.WithContext(ctx)
-	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
-	defer controller.SetReadDeadline(time.Time{})
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 16<<10, 5*time.Second); err != nil {
+		respondError(w, fail(http.StatusBadRequest, "invalid request body"))
+		return
+	}
 	var in mergeBackfillInput
 	if err := decode(w, r, &in); err != nil {
 		respondError(w, err)

@@ -25,12 +25,15 @@ type retireTable struct {
 
 var retireTables = []retireTable{
 	{"model_pref_orders", []string{"profile_id", "column_key", "situation"}, false},
+	{"model_pref_situation_orders", []string{"profile_id", "column_key", "situation"}, false},
 	{"model_pref_profiles", []string{"id"}, true},
 	{"model_rules", []string{"scope", "project_id", "column_key", "line"}, false},
 	{"model_rule_revisions", []string{"scope", "scope_key"}, true},
-	{"model_role_routes", []string{"role", "priority"}, false},
-	{"model_security_role_routes", []string{"role", "priority"}, false},
+	{"model_row_constraints", []string{"scope", "project_id", "column_key", "line"}, false},
+	{"model_pauses", []string{"harness", "model"}, false},
 	{"model_pref_cells", []string{"scope_id", "kind_id", "bucket"}, false},
+	{"model_role_routes", []string{"role", "profile_id"}, false},
+	{"model_security_role_routes", []string{"role", "profile_id"}, false},
 	{"model_pref_scopes", []string{"id"}, true},
 	{"model_profile_retirements", []string{"profile_id"}, false},
 }
@@ -166,12 +169,47 @@ func undoRetireSnapshots(ctx context.Context, tx pgx.Tx, before, after, current 
 }
 
 type retireUse struct {
-	Label    string  `json:"label"`
-	Who      string  `json:"who"`
-	From     string  `json:"from"`
-	To       *string `json:"to"`
-	project  string
-	personal string
+	Label string  `json:"label"`
+	Who   string  `json:"who"`
+	From  string  `json:"from"`
+	To    *string `json:"to"`
+	// The native level the use runs the old version at, and the successor level
+	// it moves to. Rules, locks and pauses carry no level.
+	FromEffort *string `json:"from_effort"`
+	ToEffort   *string `json:"to_effort"`
+	project    string
+	personal   string
+}
+
+// successorProfiles are the routes a use can move to: the enabled, active
+// profiles of the named successor, as the retirement transfer selects them.
+func successorProfiles(model lifecycleModel, all []lifecycleModel) []Profile {
+	out := []Profile{}
+	if model.Lifecycle.Successor == nil {
+		return out
+	}
+	for _, next := range all {
+		if next.Identity != *model.Lifecycle.Successor {
+			continue
+		}
+		for _, p := range next.Profiles {
+			if p.Enabled && !p.Retired {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// moveLevel is the successor level a use at effort lands on: nearestProfile,
+// ties going up, exactly as transferModelLineReferences and the pinned-cell
+// move write it. No effort or no successor route means no level to show.
+func moveLevel(effort string, level *int, candidates []Profile) *string {
+	if effort == "" || len(candidates) == 0 {
+		return nil
+	}
+	next := nearestProfile(candidates, effort, level).Effort
+	return &next
 }
 
 func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool {
@@ -181,6 +219,8 @@ func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool
 			continue
 		}
 		lines[boardLineID(p)] = true
+		line, _ := modelsLine(p)
+		lines[line] = true
 	}
 	// Stable line references already choose a newer active version automatically.
 	// They move only if the selected version is still the active line head.
@@ -189,8 +229,10 @@ func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool
 			continue
 		}
 		for _, p := range next.Profiles {
-			if !p.Retired && p.Enabled && lines[boardLineID(p)] && compareCatalogVersions(next.Version, model.Version) > 0 {
+			line, _ := modelsLine(p)
+			if !p.Retired && p.Enabled && (lines[boardLineID(p)] || lines[line]) && compareCatalogVersions(next.Version, model.Version) > 0 {
 				delete(lines, boardLineID(p))
+				delete(lines, line)
 			}
 		}
 	}
@@ -216,13 +258,23 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 		row := rowFields(raw)
 		scopes[rowString(row, "id")] = row
 	}
-	add := func(label, who, project, person string) {
+	after := successorProfiles(model, all)
+	// A level a chain step stores by name takes its shared scale from the old version's own profile.
+	levelOf := func(effort string) *int {
+		for _, p := range model.Profiles {
+			if !p.Retired && p.Effort == effort {
+				return p.EffortLevel
+			}
+		}
+		return nil
+	}
+	add := func(label, who, project, person string, from, to *string) {
 		if len(out) > 2048 {
 			return
 		}
-		out = append(out, retireUse{Label: label, Who: who, From: model.Identity, To: model.Lifecycle.Successor, project: project, personal: person})
+		out = append(out, retireUse{Label: label, Who: who, From: model.Identity, To: model.Lifecycle.Successor, FromEffort: from, ToEffort: to, project: project, personal: person})
 	}
-	for _, raw := range s["model_pref_orders"] {
+	for _, raw := range append(append([]json.RawMessage{}, s["model_pref_orders"]...), s["model_pref_situation_orders"]...) {
 		row := rowFields(raw)
 		pref := prefs[rowString(row, "profile_id")]
 		person := rowString(pref, "person_id")
@@ -231,37 +283,65 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 			who = person
 		}
 		var rank, not []string
+		var efforts map[string]string
+		var pickLevel *int
 		_ = json.Unmarshal(row["rank"], &rank)
 		_ = json.Unmarshal(row["not_allowed"], &not)
+		_ = json.Unmarshal(row["efforts"], &efforts)
+		_ = json.Unmarshal(row["effort_level"], &pickLevel)
 		for i, line := range rank {
 			if lines[line] {
 				label := "fallback"
+				// The pick's own level is the row's effort; a chain step's is its entry in efforts.
+				effort, level := efforts[line], levelOf(efforts[line])
 				if i == 0 {
 					label = "Default"
 					if rowString(row, "column_key") != "other" {
 						label = "Except for"
 					}
+					if pick := rowString(row, "effort"); pick != "" {
+						effort, level = pick, pickLevel
+					}
 				}
-				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, "", person)
+				var from *string
+				if effort != "" {
+					from = &effort
+				}
+				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, rowString(pref, "project_id"), person, from, moveLevel(effort, level, after))
 			}
 		}
 		for _, line := range not {
 			if lines[line] {
-				add("never · "+rowString(row, "column_key"), who, "", person)
+				add("never · "+rowString(row, "column_key"), who, rowString(pref, "project_id"), person, nil, nil)
 			}
 		}
 	}
 	for _, raw := range s["model_rules"] {
 		row := rowFields(raw)
+		if lines[rowString(row, "line")] && string(row["moved_to_models"]) != "true" {
+			add("lock · "+rowString(row, "lock")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "", nil, nil)
+		}
+	}
+	for _, raw := range s["model_row_constraints"] {
+		row := rowFields(raw)
 		if lines[rowString(row, "line")] {
-			add("lock · "+rowString(row, "lock")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "")
+			add("lock · "+rowString(row, "kind")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "", nil, nil)
+		}
+	}
+	for _, raw := range s["model_pauses"] {
+		row := rowFields(raw)
+		for _, profile := range model.Profiles {
+			if !profile.Retired && profile.Harness == rowString(row, "harness") && profile.Model == rowString(row, "model") {
+				add("pause · "+profile.Harness, rowString(row, "set_by"), "", "", nil, nil)
+				break
+			}
 		}
 	}
 	for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
 		for _, raw := range s[table] {
 			row := rowFields(raw)
 			if ids[rowString(row, "profile_id")] {
-				add("fallback · "+rowString(row, "role"), "Default", "", "")
+				add("fallback · "+rowString(row, "role"), "Default", "", "", nil, nil)
 			}
 		}
 	}
@@ -274,7 +354,16 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 			if person != "" {
 				who = person
 			}
-			add("pinned · "+rowString(row, "bucket"), who, project, person)
+			// A pinned cell keeps its harness: it moves to the nearest level of the successor's same route.
+			var from, to *string
+			for _, old := range model.Profiles {
+				if old.ID == rowString(row, "profile_id") {
+					effort := old.Effort
+					from, to = &effort, moveLevel(old.Effort, old.EffortLevel, sameRouteProfiles(after, old))
+					break
+				}
+			}
+			add("pinned · "+rowString(row, "bucket"), who, project, person, from, to)
 		}
 	}
 	return out
@@ -299,4 +388,33 @@ func visibleRetireUses(ctx context.Context, tx pgx.Tx, p tenant.Principal, uses 
 		out = append(out, use)
 	}
 	return out, incomplete, nil
+}
+
+// Retained ladders are historical retirement/Undo references, never dispatch authority.
+func transferRetiredLadderReferences(ctx context.Context, tx pgx.Tx, before, after []Profile) error {
+	for _, old := range before {
+		candidates := sameRouteProfiles(after, old)
+		if len(candidates) == 0 {
+			continue
+		}
+		replacement := nearestProfile(candidates, old.Effort, old.EffortLevel)
+		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
+			var incompatible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` a JOIN `+table+` b ON b.tenant_id=a.tenant_id AND b.role=a.role WHERE a.profile_id=$1 AND b.profile_id=$2 AND (a.state<>b.state OR a.reason<>b.reason OR a.valid_until IS DISTINCT FROM b.valid_until))`, old.ID, replacement.ID).Scan(&incompatible); err != nil {
+				return err
+			}
+			if incompatible {
+				return fail(409, "successor has a conflicting role hold")
+			}
+			// Equal policies collapse into their earliest priority. Differing
+			// pause/hold evidence rejects the transaction instead of dropping it.
+			if _, err := tx.Exec(ctx, `DELETE FROM `+table+` t USING `+table+` a,`+table+` b WHERE a.tenant_id=b.tenant_id AND a.role=b.role AND a.profile_id=$1 AND b.profile_id=$2 AND t.tenant_id=a.tenant_id AND t.role=a.role AND t.priority=greatest(a.priority,b.priority)`, old.ID, replacement.ID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET profile_id=$2 WHERE profile_id=$1 AND NOT EXISTS(SELECT 1 FROM `+table+` n WHERE n.tenant_id=`+table+`.tenant_id AND n.role=`+table+`.role AND n.profile_id=$2)`, old.ID, replacement.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

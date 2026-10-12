@@ -14,6 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Risk: the retired ladder writer still decodes a body or prepares the
+// catalog. An out-of-range priority it once refused with 400 is now answered
+// 410 unread, before any profile, route, seed event or counter changes.
 func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 	for _, additive := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cold", true: "additive"}[additive], func(t *testing.T) {
@@ -31,14 +34,8 @@ func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 			before := catalogSetupState(t, p)
 			body := fmt.Sprintf(`[{"role":"build","priority":2147483648,"profile_id":%q,"state":"available"}]`, id)
 			status, raw := call(t, &p, http.MethodPut, "/api/models/routes", body)
-			var refusal struct {
-				Error string `json:"error"`
-			}
-			if err := json.Unmarshal(raw, &refusal); err != nil {
-				t.Fatalf("decode refusal: %v: %s", err, raw)
-			}
-			if status != http.StatusBadRequest || refusal.Error != "priority exceeds storage range" {
-				t.Errorf("wrong range refusal: status=%d body=%s", status, raw)
+			if !retiredLadderRefusal(status, raw) {
+				t.Errorf("retired writer validated the priority instead of answering 410: status=%d body=%s", status, raw)
 			}
 			if after := catalogSetupState(t, p); after != before {
 				t.Error("priority overflow changed profiles, routes, seed events or event counter")
@@ -47,25 +44,79 @@ func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 	}
 }
 
+// Risk: a stored priority at the storage maximum survives the retirement of
+// the ladder writer. Models orders hold ranks, not priorities: the retired
+// writer answers 410 without storing the body, and the deprecated read derives
+// contiguous priorities from the saved Models order.
 func TestMaximumRoutePriorityCanBeStored(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "priority-maximum", "person", "Owner", []string{"admin"})
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	if len(profiles) == 0 {
+	luna, haiku := profileBySlug(profiles, "codex-luna-medium"), profileBySlug(profiles, "claude-haiku-medium")
+	if luna.ID == "" || haiku.ID == "" {
 		t.Fatal("missing catalog fixture")
 	}
-	body := fmt.Sprintf(`[{"role":"build","priority":%d,"profile_id":%q,"state":"available"}]`, math.MaxInt32, profiles[0].ID)
-	got := decode[[]Route](t, &p, http.MethodPut, "/api/models/routes", body, http.StatusOK)
-	if len(got) != 1 || got[0].Priority != math.MaxInt32 || got[0].ProfileID != profiles[0].ID {
-		t.Fatalf("maximum priority changed: %+v", got)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "first", "wait", luna.ID, haiku.ID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := catalogSetupState(t, p)
+	body := fmt.Sprintf(`[{"role":"build","priority":%d,"profile_id":%q,"state":"available"}]`, math.MaxInt32, haiku.ID)
+	if status, raw := call(t, &p, http.MethodPut, "/api/models/routes", body); !retiredLadderRefusal(status, raw) {
+		t.Fatalf("retired writer accepted the maximum priority: %d %s", status, raw)
+	}
+	if catalogSetupState(t, p) != before {
+		t.Fatal("retired writer stored the maximum priority")
+	}
+	got := decode[routesRead](t, &p, http.MethodGet, "/api/models/routes?role=build", "", http.StatusOK)
+	if got.CanEdit || got.EditToken != nil || len(got.Routes) != 2 || got.Routes[0].ProfileID != luna.ID || got.Routes[1].ProfileID != haiku.ID {
+		t.Fatalf("derived read is editable or does not follow the Models order: %+v", got)
+	}
+	for i, route := range got.Routes {
+		if route.Priority != i+1 {
+			t.Fatalf("derived priorities are not contiguous: %+v", got.Routes)
+		}
+	}
+}
+
+// Risk: a retained ladder row at the largest stored priority overflows or
+// loses its place when Models v2 migrates the ladder into the Default's order.
+func TestMaximumRoutePriorityMigratesToModelsOrder(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "priority-maximum", "person", "Owner", []string{"admin"})
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	last, first := profileBySlug(profiles, "claude-opus-xhigh"), profileBySlug(profiles, "codex-6-1-sol-high")
+	if last.ID == "" || first.ID == "" {
+		t.Fatal("missing catalog fixture")
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: math.MaxInt32, ProfileID: last.ID, State: "available"}); err != nil {
+			return err
+		}
+		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 1, ProfileID: first.ID, State: "available"}); err != nil {
+			return err
+		}
 		var priority int
-		if err := tx.QueryRow(t.Context(), `SELECT priority FROM model_role_routes WHERE role='build' AND profile_id=$1`, profiles[0].ID).Scan(&priority); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT priority FROM model_role_routes WHERE role='build' AND profile_id=$1`, last.ID).Scan(&priority); err != nil {
 			return err
 		}
 		if priority != math.MaxInt32 {
 			t.Fatalf("maximum priority not stored: %d", priority)
+		}
+		if _, err := tx.Exec(t.Context(), `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+			return err
+		}
+		var rank, want []string
+		if err := tx.QueryRow(t.Context(), `SELECT o.rank FROM model_pref_orders o JOIN model_pref_profiles w ON w.id=o.profile_id
+ WHERE w.scope='workspace' AND o.column_key='other' AND o.situation='first'`).Scan(&rank); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT array_agg(aeon_models_line(family,harness,model) ORDER BY id=$2::uuid) FROM model_profiles WHERE id IN ($1::uuid,$2::uuid)`, first.ID, last.ID).Scan(&want); err != nil {
+			return err
+		}
+		if !slices.Equal(rank, want) {
+			t.Fatalf("maximum priority lost its place: rank %v, want %v", rank, want)
 		}
 		return nil
 	}); err != nil {

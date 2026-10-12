@@ -471,7 +471,9 @@
     {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusOrdinaryUndoOrdersAcrossActivation","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusPatchAndBulkBoundary","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusReusesAutopilotActivity","tier":"GATED-FULL","active":true},
-    {"kind":"go","package":"internal/nodes","name":"TestWorkStatusEntryFencesTenantBeforeTree","tier":"GATED-FULL","active":true}
+    {"kind":"go","package":"internal/nodes","name":"TestWorkStatusEntryFencesTenantBeforeTree","tier":"GATED-FULL","active":true},
+    {"kind":"go","package":"internal/nodes","name":"TestNodeAuthorizationErrorsPreserveHTTPFailures","tier":"ESSENTIAL","active":true},
+    {"kind":"go","package":"internal/nodes","name":"TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin","tier":"ESSENTIAL","active":true}
   ],
   "browserPolicies": {
     "tests/no-shift.spec.ts": {

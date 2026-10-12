@@ -5,7 +5,7 @@
 // on the left, the selected harness's usage on the right, and one info area at the top that
 // "● 11 running (1 in line) ▾" opens. Low-priority facts live in hover and focus text;
 // only a state that needs attention (over pace, at today's limit) keeps a flag.
-import { computed, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import { accountRoomCopy, accountRoomWords, limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
 import { can } from '../../lib/authz'
 import { chipTip, dailyOf, dailyView, DEFAULT_DAILY_POINTS, needsAttention, stateWords, usageLine } from '../../lib/dailyLimits'
@@ -78,6 +78,12 @@ function toggleInfo() {
   if (folded.value) { dialPrefs.setInfo(true); sections.toggle('dial') } else dialPrefs.setInfo(!dialPrefs.prefs.info_open)
 }
 function pick(key: string) { dialPrefs.select(key) }
+function toggleDial() {
+  const key = folded.value ? selected.value : ''
+  if (key) pick(key)
+  sections.toggle('dial')
+  if (key) void nextTick(() => document.getElementById(bodyId)?.querySelector<HTMLElement>(`[data-sel="${key}"]`)?.focus({ preventScroll: true }))
+}
 // Touch: a tap on a unit's face opens it on its plate (a tight row); an outside tap or four
 // idle seconds close it, never while − or + is held.
 const openUnit = ref('')
@@ -154,7 +160,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
        no fill; its − and + keep their room and show on hover or focus. Unfolded, today's body
        opens as a card under the capacity row. -->
   <div class="working dial cdial" :class="{ open: !folded, loading: !(plan && snapshot) }" role="group" aria-label="Agents at once" @pointerdown="armUnitClose">
-    <button type="button" class="fs-tog cdf" :aria-expanded="!folded" :aria-controls="bodyId" :aria-label="folded ? 'Unfold the dial: each harness, its daily limit and usage' : 'Fold the dial'" :data-tip="folded ? 'Unfold: each harness, its daily limit and usage' : 'Fold the dial'" @click="sections.toggle('dial')"><AppIcon name="chevron-right" :size="13" /></button>
+    <button type="button" class="fs-tog cdf" :aria-expanded="!folded" :aria-controls="bodyId" :aria-label="folded ? 'Unfold the dial: each harness, its daily limit and usage' : 'Fold the dial'" :data-tip="folded ? 'Unfold: each harness, its daily limit and usage' : 'Fold the dial'" @click="toggleDial"><AppIcon name="chevron-right" :size="13" /></button>
     <template v-if="plan && snapshot">
       <WorkingStepper unit total class="f-total" :class="{ open: openUnit === 'total' }" data-unit="total" role="group" :aria-label="`Agents at once: ${total}`" :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" label="Agents at once" @step="changeTotal" @edit="editTotal" @hold="held" @face="tapUnit('total')">
         <template #mark><span class="du-face" :data-tip="`Run up to ${total} ${total === 1 ? 'agent' : 'agents'} at once`">
