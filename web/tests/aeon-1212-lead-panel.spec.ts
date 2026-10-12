@@ -281,6 +281,12 @@ async function checkPanel(page: Page, phone: boolean) {
       }
     }
     const text = (root as HTMLElement).innerText
+    const computer = root.querySelector('.host-fact')
+    if (touch && computer && visible(computer)) {
+      const name = computer.querySelector('.host-badge')?.getBoundingClientRect()
+      const rename = computer.querySelector('.host-pencil')?.getBoundingClientRect()
+      if (name && rename && name.right > rename.left + .5) bad.push('computer name and rename touch targets overlap')
+    }
     if (/\b(Agenten|Sitzung|Einstellungen|nicht|bitte)\b/.test(text)) bad.push('mixed language')
     if (/[✓✔✕✖×▾▸▲▼◂▶◀★☆●○⚠]/.test(text)) bad.push('text icon glyph')
     if (root.querySelectorAll('.pane-bar .agent-glyph .agent-state-mark').length !== 1) bad.push('avatar state badge')

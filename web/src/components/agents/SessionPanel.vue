@@ -603,4 +603,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .why { margin: 0 12px 6px; }
 }
 @media (pointer: coarse) { .act { min-width: 44px; min-height: 44px; } }
+@media (max-width: 720px), (pointer: coarse) {
+  .host-fact.editable { padding-right: 46px; }
+  .host-fact :deep(.host-badge), .host-fact :deep(.host-pencil) { min-width: 44px; height: 44px; }
+}
 </style>
