@@ -9,6 +9,17 @@ import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs
 import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern } from './core.mjs'
 import { browserImpact, nightlyBrowserMap } from './browser-impact.mjs'
 
+// Shared bounded diff reader for Actions event bases and offline merge bases.
+export function pathsBetween(base, { exec=command }={}) {
+  try {
+    if (!/^[a-f0-9]{40}$/.test(base??'')) return undefined
+    const output=exec('git',['diff','--name-only','-z','--no-renames',base,'HEAD'],{timeout:30_000})
+    if(Buffer.byteLength(output)>2*1024*1024||(output&&!output.endsWith('\0')))return undefined
+    const paths=output.split('\0').filter(Boolean)
+    return validImpactPaths(paths)?paths:undefined
+  } catch { return undefined }
+}
+
 export function changedPaths(event, env=process.env, { fetchBase=false, exec=command }={}) {
   if (!['pull_request','merge_group'].includes(event)) return undefined
   try {
@@ -19,10 +30,7 @@ export function changedPaths(event, env=process.env, { fetchBase=false, exec=com
     // The small planner checkout needs only HEAD and the exact event base, not
     // the complete repository history. Other jobs retain their own checkout.
     if (fetchBase) exec('git',['fetch','--no-tags','--depth=1','origin',base],{timeout:30_000})
-    const output=exec('git',['diff','--name-only','-z','--no-renames',base,'HEAD'],{timeout:30_000})
-    if(Buffer.byteLength(output)>2*1024*1024||(output&&!output.endsWith('\0')))return undefined
-    const paths=output.split('\0').filter(Boolean)
-    return validImpactPaths(paths)?paths:undefined
+    return pathsBetween(base,{exec})
   } catch { return undefined }
 }
 

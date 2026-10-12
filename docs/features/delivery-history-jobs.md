@@ -11,12 +11,14 @@ including after a first automatic read fails before committing a cursor. Once
 a cursor exists, selecting another window requires `restart`.
 
 The source exposes `last_read_error` (reason, missing permission when known, and
-check time), `retry_at`, and `last_event_at`. A GitHub 403 requesting `actions=read`
+check time), `retry_at`, and `last_event_at`. Any GitHub 403 from an Actions endpoint
 becomes `actions_read_missing`; a missing installation/repository becomes
 `not_installed`; other read failures become `github_unavailable`. Permission and
-installation failures retry after 30 minutes, other failed steps after five
-minutes. Deferred job reads keep their existing retry hour. The server honours
-these times. `POST /projects/{projectId}/delivery/metrics/check-again` bypasses the
+installation failures start at 30 minutes; other non-transient failures start at
+one minute. Repeated failures double the persisted delay, capped at one hour.
+Transient failures retry with jitter after 30–59 seconds. Partial job reads use
+the same policy, and failed runs become eligible at the source's stored deadline.
+The server honours these times. `POST /projects/{projectId}/delivery/metrics/check-again` bypasses the
 retry time immediately without discarding progress; it requires `delivery.manage`.
 A successful step clears its read error. Signed, installation-bound repository
 webhooks update the last event time; clients consider seven days without an event
