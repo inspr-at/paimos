@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -829,7 +830,7 @@ func ptrInt(n int) *int { return &n }
 // Risk: models.read discloses another account's wait cause or reset/schedule
 // through either resolver surface, including after usage sharing is revoked.
 func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
-	for _, cause := range []string{"allowance", "schedule"} {
+	for _, cause := range []string{"allowance", "schedule", "host"} {
 		t.Run(cause, func(t *testing.T) {
 			owner, member := boardFixture(t)
 			admin := addPrincipal(t, owner.TenantID, "person", "Nonowning admin", []string{"admin"})
@@ -855,6 +856,29 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 					_, err = tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used=allowance,ends_at=$2 WHERE account_id=$1`, account, until)
 					return err
 				}
+				if cause == "host" {
+					var runner, request, computer, key string
+					if err := tx.QueryRow(t.Context(), `SELECT registered_by_principal_id::text FROM agent_accounts WHERE id=$1`, account).Scan(&runner); err != nil {
+						return err
+					}
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,prefix,hash,scopes)
+ VALUES($1,$2,replace($2::text,'-',''),repeat('e',64),ARRAY['run.claim']) RETURNING id::text`, owner.TenantID, runner).Scan(&key); err != nil {
+						return err
+					}
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,'864864864',repeat('e',64),repeat('e',64),repeat('e',64),'{"platform":"darwin","arch":"arm64"}',repeat('e',64),'redeemed',$2) RETURNING id::text`, owner.TenantID, owner.ID).Scan(&request); err != nil {
+						return err
+					}
+					policy := hostcapacity.Default()
+					policy.Mode = "fixed"
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,state,capacity_policy)
+ VALUES($1,$2,$3,$4,'minimal',repeat('e',64),'connected',$5) RETURNING id::text`, owner.TenantID, request, runner, key, policy).Scan(&computer); err != nil {
+						return err
+					}
+					_, err = tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,state,ongoing_approved_at)
+ VALUES($1,$2,$3,$4,$5,'connected',now())`, owner.TenantID, account, computer, request, sol.ID)
+					return err
+				}
 				// Unknown quota with the next band two days away keeps this
 				// fixture outside working hours throughout all HTTP reads.
 				until = time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day()+2, 8, 0, 0, 0, time.UTC)
@@ -876,6 +900,8 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 			detail := "Codex account is at its allowance or floor until " + until.UTC().Format(time.RFC3339)
 			if cause == "schedule" {
 				detail = "Codex account is outside its scheduled hours until " + until.Format(time.RFC3339)
+			} else if cause == "host" {
+				detail = "Codex computer has no recent host capacity report"
 			}
 			for _, phase := range []struct {
 				name  string

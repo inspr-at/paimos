@@ -22,8 +22,11 @@ func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity
 	var now time.Time
 	// Legacy pairing records may omit platform; unknown evidence must remain
 	// advisory rather than failing capacity reads and lifecycle mutations.
+	// A principal can also have external worker assignments. Only an account
+	// reservation belongs to this daemon's managed launch path; lifecycle
+	// release markers alone cannot turn an external process into a managed slot.
 	err := tx.QueryRow(ctx, `SELECT capacity_policy,capacity_signals,capacity_reported_at,capacity_history,
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND (r.status IN ('starting','running','waiting')
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.account_id IS NOT NULL AND (r.status IN ('starting','running','waiting')
   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')),
  (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp(),coalesce(q.details->>'platform',''),c.state
  FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now, &platform, &state)
@@ -226,6 +229,26 @@ func HostCapacityForPrincipal(ctx context.Context, tx pgx.Tx, principal string) 
 	}
 	v, err := hostCapacity(ctx, tx, computer)
 	return &v, err
+}
+
+// HostCapacityForAccount projects the enrolled computer's start gate and owner.
+// The owner may see host diagnostics without acquiring another account's quota
+// details. Unpaired accounts retain their existing admission behavior.
+func HostCapacityForAccount(ctx context.Context, tx pgx.Tx, account string) (*hostcapacity.View, string, error) {
+	var computer, owner string
+	err := tx.QueryRow(ctx, `SELECT c.id::text,q.approved_by::text
+ FROM agent_pairing_enrollments e
+ JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+ JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ WHERE e.account_id=$1 AND c.state='connected'`, account).Scan(&computer, &owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	v, err := hostCapacity(ctx, tx, computer)
+	return &v, owner, err
 }
 
 func (m *Module) renameComputer(w http.ResponseWriter, r *http.Request, p tenant.Principal) {

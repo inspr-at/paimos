@@ -79,7 +79,8 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 			health.Dispatchable++
 		} else if route.Wait != nil {
 			wait := route.Wait
-			if !visible[account.ID] {
+			reader, _ := tenant.PrincipalFrom(ctx)
+			if !visible[account.ID] && !hostReasonVisible(reader, route) {
 				// Availability can be public without releasing the owner's
 				// quota, schedule, reserve or exact next attempt time.
 				wait = &CapacityWait{}
@@ -92,6 +93,10 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 		out[account.Harness] = health
 	}
 	return out, nil
+}
+
+func hostReasonVisible(reader tenant.Principal, route CapacityRouting) bool {
+	return route.Wait != nil && route.Wait.HostReason != "" && reader.Kind == tenant.Person && reader.ID == route.hostOwner
 }
 
 // ModelWaitReason describes the actual admission gate without account identity
@@ -119,6 +124,20 @@ func ModelWaitReason(harness string, wait *CapacityWait) string {
 	}[wait.Code]
 	if cause == "" {
 		cause = "account cannot take new work right now"
+	}
+	if wait.Code == "capacity" && wait.HostReason != "" {
+		cause = map[string]string{
+			"maximum_agents":           "computer has reached its managed agent limit",
+			"managed_exit_unconfirmed": "account is waiting for an unconfirmed managed process to exit",
+			"host_signals_stale":       "computer has no recent host capacity report",
+			"host_activity_unknown":    "computer's activity state is unknown",
+			"memory_pressure":          "computer is waiting for memory pressure to fall",
+			"host_load_unknown":        "computer's load is unknown",
+			"host_load":                "computer is above its host load limit",
+		}[wait.HostReason]
+		if cause == "" {
+			cause = "computer is waiting for host capacity"
+		}
 	}
 	until := ""
 	if wait.Until != nil {

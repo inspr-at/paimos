@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -17,6 +18,7 @@ import (
 
 // CapacityRouting is advice, never a reservation or authority to launch.
 type CapacityRouting struct {
+	hostOwner      string
 	Rank           int           `json:"rank"`
 	AvailableSlots int           `json:"available_slots"`
 	ResetsAt       *time.Time    `json:"resets_at,omitempty"`
@@ -244,8 +246,15 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 		if wait == nil {
 			wait = windowWait(windows, now)
 		}
+		host, owner, err := agentpairing.HostCapacityForAccount(ctx, tx, a.ID)
+		if err != nil {
+			return nil, err
+		}
+		if wait == nil && host != nil && host.Reason != "" {
+			wait = &CapacityWait{Code: "capacity", HostReason: host.Reason}
+		}
 		if wait != nil {
-			out[a.ID] = CapacityRouting{Wait: wait}
+			out[a.ID] = CapacityRouting{Wait: wait, hostOwner: owner}
 			continue
 		}
 		p := routeRank(a, windows, slots, estimates, now)
@@ -412,6 +421,25 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 		advice, err := routingAdvice(r.Context(), tx, accounts, profile, runRow{Purpose: "managed"}, now)
 		if err != nil {
 			return err
+		}
+		// An aggregate wait has no account_id for privateResponse to inspect.
+		// Filter host diagnostics before folding away the owning account.
+		ids := make([]string, len(accounts))
+		for i, a := range accounts {
+			ids[i] = a.ID
+		}
+		visible, err := accountprivacy.Load(r.Context(), tx, p, ids)
+		if err != nil {
+			return err
+		}
+		for _, a := range accounts {
+			route := advice[a.ID]
+			if route.Wait != nil && route.Wait.HostReason != "" && !visible[a.ID] && !hostReasonVisible(p, route) {
+				copy := *route.Wait
+				copy.HostReason = ""
+				route.Wait = &copy
+				advice[a.ID] = route
+			}
 		}
 		out = nextAdvice(harness, accounts, advice)
 		return nil

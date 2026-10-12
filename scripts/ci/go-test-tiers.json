@@ -2428,6 +2428,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityOwnerRevisionRuntimeAndClaimFence","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLaterConnectOnlyApprovalCancelsQueuedVerification","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryApprovalCrashBeforeEnrollment","tier":"ESSENTIAL"}
