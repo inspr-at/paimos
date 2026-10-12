@@ -330,11 +330,21 @@ test('Next up and Recent that can’t be read say what is missing and offer Try 
   // Try again on Next up: while the read is held, the button stays where it is, says the same and refuses a second press.
   queueDown = false
   const again = queueFail.getByRole('button', { name: 'Try again' })
-  const before = await again.boundingBox()
+  // The click may scroll a shorter P5 pane into view. Measure in scrolling
+  // content coordinates, keeping the exact position-and-size assertion.
+  await expect(again).toBeVisible()
+  const bounds = () => again.evaluate(element => {
+    const box = element.getBoundingClientRect()
+    let x = box.x + window.scrollX, y = box.y + window.scrollY
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) { x += parent.scrollLeft; y += parent.scrollTop }
+    return { x, y, width: box.width, height: box.height }
+  })
+  const before = await bounds()
+  expect(before.width).toBeGreaterThan(0); expect(before.height).toBeGreaterThan(0)
   await again.click()
   await expect(again).toHaveAttribute('aria-busy', 'true')
   await expect(again).toHaveText('Try again')
-  expect(await again.boundingBox()).toEqual(before)
+  expect(await bounds()).toEqual(before)
   await expect(historyFail.getByRole('button', { name: 'Try again' })).toHaveAttribute('aria-disabled', 'true')
   release()
   await expect(queueFail).toHaveCount(0)
