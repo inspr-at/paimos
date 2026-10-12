@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Coordinator: PLAYWRIGHT_PORT=5835 WT1_SCREENSHOT_DIR=<scratchpad> npm test -- agents-worker-tree.spec.ts agents-hierarchy.spec.ts
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import type { HarnessSession } from '../src/lib/agents'
@@ -72,7 +70,8 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
   // Equal start times: session ID decides, never the latest heartbeat (AEON-468).
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5)])
-  await expect(row(page, id(2)).getByRole('link', { name: 'Claude ss1-handoff-supersession, Working' })).toBeVisible()
+  // AEON-1160 (dbf44284b) names the harness Claude Code; labels still distinguish workers.
+  await expect(row(page, id(2)).getByRole('link', { name: 'Claude Code ss1-handoff-supersession, Working' })).toBeVisible()
   await expect(children(page)).not.toContainText(['aeon-coordinator'])
   await history(page).focus()
   await page.keyboard.press('Enter')
@@ -202,77 +201,27 @@ test('a deep problem marks every ancestor, folded parents name it, and arrow key
   await expect(row(page, id(2))).toHaveClass(/\bactive\b/)
 })
 
-// AEON-784 risk (fix round 2): folding Sessions strands the page's ways into it.
-// A live-line count and the menu's History open a folded section for this visit;
-// the stored fold stays as the person left it.
-test('a live-line count and the menu History open a folded Sessions section without a preference write', async ({ page }) => {
+// AEON-784 risk, after AEON-1209: the Sessions card no longer folds (its head carries the list's
+// tools). A fold stored before must not hide the list a count or History leads into, and the
+// page writes no fold preference on the way.
+test('a Sessions fold stored before shows the list; a count and History lead straight into it without a preference write', async ({ page }) => {
   const { work } = await setup(page)
   work.preferences['ui.agents.sections'] = { dial: true, accounts: false, sessions: false, queued: true }
   const puts: string[] = []
   page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/preferences/ui.agents.sections')) puts.push(request.url()) })
   await page.goto('/agents')
   const sessions = page.getByRole('region', { name: 'Sessions' })
-  const toggle = sessions.locator('.fs-head > .fs-tog')
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(sessions.locator('.fs-tog')).toHaveCount(0)
+  await expect(sessions.locator('.row[data-state="working"]').first()).toBeVisible()
   await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
-  // State counts now filter; the cursor selects the first match while focus
-  // stays on the control. ArrowUp reaches that row without another pointer.
+  // State counts filter; the cursor selects the first match while focus stays on the control.
+  // ArrowUp reaches that row without another pointer.
   await page.keyboard.press('ArrowUp')
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect(sessions.locator('.row[data-state="working"]').first()).toBeFocused()
   await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
-  await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-
-  // History moved into the Sessions head. Reveal the section for this visit
-  // through its state count, then enter History without a fold preference write.
-  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
   await sessions.getByRole('button', { name: 'Show history: every ended or removed session', exact: true }).click()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await expect(sessions.locator('#sessions-title')).toHaveText('History')
-  await expect(sessions.locator('.fs-body')).not.toHaveAttribute('inert', /.*/)
-  expect(puts).toEqual([])
-  expect(work.preferences['ui.agents.sections']).toMatchObject({ sessions: false })
-})
-
-// AEON-784 risk (fix round 3): a count jumps into Sessions while it still shows
-// open by default; the stored fold lands afterwards and hides the row it focused.
-test('a live-line count keeps Sessions open when the section preference lands after the jump', async ({ page }) => {
-  const { work } = await setup(page)
-  // The stored dial fold differs from the default, so the spec can see the late read land.
-  work.preferences['ui.agents.sections'] = { dial: false, accounts: false, sessions: false, queued: true }
-  // Barrier: the section read is answered only after the count has jumped.
-  let release!: () => void
-  const released = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/preferences/ui.agents.sections', async route => {
-    if (route.request().method() === 'GET') await released
-    return route.fallback()
-  })
-  const puts: string[] = []
-  page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/preferences/ui.agents.sections')) puts.push(request.url()) })
-  await page.goto('/agents')
-  const sessions = page.getByRole('region', { name: 'Sessions' })
-  const toggle = sessions.locator('.fs-head > .fs-tog')
-  const target = sessions.locator('.row[data-state="working"]').first()
-  // Before the read, Sessions shows open, so the jump needs no fold change to reach the row.
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
-  // State counts now filter; the cursor selects the first match while focus
-  // stays on the control. ArrowUp reaches that row without another pointer.
-  await page.keyboard.press('ArrowUp')
-  await expect(target).toBeFocused()
-  const read = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/preferences/ui.agents.sections')
-  release()
-  await read
-  // The late read did land: the dial follows the stored fold, Sessions keeps the jumped-to row shown.
-  await expect(page.getByRole('region', { name: 'Agents at once' }).locator('.fs-tog')).toHaveAttribute('aria-expanded', 'false')
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await expect(sessions.locator('.fs-body')).not.toHaveAttribute('inert', /.*/)
-  await expect(target).toBeVisible()
-  await expect(target).toBeFocused()
-  // Folding ends the visit's reveal and writes nothing: the preference already says folded.
-  await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  // The card is named by its title, so it is the History region now.
+  await expect(page.locator('.sessions #sessions-title')).toHaveText('History')
   expect(puts).toEqual([])
   expect(work.preferences['ui.agents.sections']).toMatchObject({ sessions: false })
 })
@@ -287,14 +236,13 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto('/agents')
       await expect(row(page, id(100))).toBeVisible()
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-      const dir = process.env.WT1_SCREENSHOT_DIR ?? testInfo.outputDir
       for (const state of ['live', 'history']) {
         if (state === 'history') await history(page).click()
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
         expect(await page.locator('.sessions .row').evaluateAll(rows => rows.filter(row => row.scrollWidth > row.clientWidth + 1).map(row => row.getAttribute('data-row')))).toEqual([])
         const axe = await new AxeBuilder({ page }).include('.sessions').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice']).analyze()
         expect(axe.violations).toEqual([])
-        await page.locator('.sessions').screenshot({ path: join(dir, `wt1-${width}-${theme}-${state}.png`), animations: 'disabled' })
+        await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`wt1-${width}-${theme}-${state}.png`), animations: 'disabled' })
       }
     })
   }

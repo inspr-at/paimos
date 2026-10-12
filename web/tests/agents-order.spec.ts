@@ -100,6 +100,9 @@ test('clicking Ticket orders rows by ticket, stays put on refresh, is remembered
   await page.reload()
   await expect.poll(() => rowOrder(page)).toEqual([...byTicket].reverse())
 
+  // Default order lives in Display, with the sort (AEON-1209); Display shows a chosen order in teal.
+  await expect(page.locator('.sessions .sort-tool')).toHaveClass(/\bon\b/)
+  await page.locator('.sessions .sort-tool').click()
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
   await expect(page.getByRole('columnheader', { name: 'State' })).toHaveAttribute('aria-sort', 'ascending')
@@ -141,9 +144,9 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
   const start = [sid(3), sid(1), sid(2), sid(4)]
   await expect.poll(() => rowOrder(page)).toEqual(start)
   await expect(page.locator('.thead')).toBeHidden()
-  // The Sessions head's sort tool opens the same select and direction (AEON-784).
+  // The Sessions head's Display opens the same select and direction (AEON-784, AEON-1209).
   const tool = page.locator('.sessions .sort-tool')
-  await expect(tool).toHaveAccessibleName(/^Sort sessions: State, ascending/)
+  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by State, ascending/)
   await tool.click()
   const bar = page.getByRole('group', { name: 'Sort sessions' })
   const pick = bar.getByRole('combobox', { name: 'Sort' })
@@ -168,9 +171,9 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
 
   await page.keyboard.press('Escape')
   await expect(bar).toHaveCount(0)
-  await expect(tool).toHaveAccessibleName(/^Sort sessions: Heartbeat, ascending/)
+  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by Heartbeat, ascending/)
+  await tool.click()
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual(start)
-  await tool.click()
   await expect(pick).toHaveValue('state')
 })

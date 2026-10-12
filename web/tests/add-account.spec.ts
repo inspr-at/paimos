@@ -259,11 +259,12 @@ test('the Agents page links to Settings; Add an account lives there and opens th
   const errors = watchErrors(page)
   await setup(page, { desk: true })
   await page.goto('/agents')
-  const cap = page.getByRole('region', { name: 'Accounts and computers' })
-  await expect(cap.getByRole('link', { name: /Manage/ })).toHaveAttribute('href', '/settings/accounts')
-  // AEON-782: the section is a status line; adding an account is a Settings action.
+  // AEON-1209: the accounts chip's popover leads into Settings; adding an account is a Settings action.
+  await page.locator('.cap-row .acc-chip').click()
+  const cap = page.getByRole('dialog', { name: 'Accounts and computers' })
+  await expect(cap.locator('.tile[data-part="accounts"]')).toHaveAttribute('href', '/settings/accounts')
   await expect(cap.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
-  await cap.getByRole('link', { name: /Manage/ }).click()
+  await cap.locator('.tile[data-part="accounts"]').click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
   await page.getByRole('button', { name: 'Add an account' }).click()
   await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
@@ -286,8 +287,10 @@ test('without account.manage the action is gone and the hint stays', async ({ pa
   await expect(page.getByText(CREDENTIAL)).toBeVisible()
   await expect(page.getByRole('link', { name: CONNECT })).toHaveCount(0)
   await page.goto('/agents')
-  await expect(page.getByRole('region', { name: 'Accounts and computers' }).getByRole('link', { name: 'Add an account' })).toHaveCount(0)
-  await expect(page.getByRole('link', { name: /Manage/ })).toBeVisible()
+  await page.locator('.cap-row .acc-chip').click()
+  const cap = page.getByRole('dialog', { name: 'Accounts and computers' })
+  await expect(cap.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
+  await expect(cap.locator('.tile[data-part="accounts"]')).toBeVisible()
 })
 
 test('no paired machine links to Connect your machine, including from the hash', async ({ page }) => {

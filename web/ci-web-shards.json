@@ -740,6 +740,8 @@
         ,
         {"file":"tests/aeon-1188-displayhome.spec.ts","listedTests":8,"weightSeconds":20,"weightSource":"local-single-worker-AEON-1188-15s-plus-margin"}
         ,
+        {"file":"tests/aeon-1209-agents-head.spec.ts","listedTests":19,"weightSeconds":75,"weightSource":"remote-one-worker-AEON-1209-60s-plus-margin"}
+        ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}

@@ -589,17 +589,16 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     expect(world.calls).toHaveLength(0)
     await page.screenshot({ path: join(dir, `session-tier-${width}-${theme}.png`) })
 
-    // The retired briefing link continues to the canonical Agents panel.
+    // The retired briefing link continues to Agents; the Desk is the header's place there (AEON-1209, AEON-1139).
     await page.goto('/briefing')
     await expect(page).toHaveURL('/agents')
-    const briefingDesk = page.getByRole('region', { name: 'Decision Desk', exact: true })
-    await expect(briefingDesk).toContainText(world.questions[0]!.input.question)
-    await expect(briefingDesk.getByLabel('Open decisions')).toHaveText('6')
+    const briefingDesk = page.locator('.places').getByRole('link', { name: 'Decision Desk, 6 open', exact: true })
+    await expect(briefingDesk).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Decision Desk', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
-    await expectStableControls({ controls: { review: page.getByTestId('agents-desk-review'), history: page.getByTestId('agents-desk-history'), header: page.locator('.places') }, interactions: [{ name: 'refresh canonical panel', run: async () => {
+    await expectStableControls({ controls: { desk: briefingDesk, header: page.locator('.places') }, interactions: [{ name: 'refresh the Desk count', run: async () => {
       await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-      await expect(briefingDesk).toContainText(world.questions[0]!.input.question)
-      await expect(briefingDesk.getByLabel('Open decisions')).toHaveText('6')
+      await expect(briefingDesk).toBeVisible()
     } }] })
     await page.screenshot({ path: join(dir, `briefing-${width}-${theme}.png`) })
 

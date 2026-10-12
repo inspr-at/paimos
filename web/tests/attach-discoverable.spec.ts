@@ -205,8 +205,8 @@ test('connections retain expiry ordering and stay separate from canonical permis
   await page.goto('/agents')
   const queue = strip(page)
   await expect(queue.getByLabel('Connections to review')).toHaveText('2')
-  await expect(page.getByRole('region', { name: 'Decision Desk', exact: true }).getByLabel('Open decisions')).toHaveText('1')
-  await expect(page.locator('.desk-panel .desk-item')).toHaveAttribute('href', '/decision-desk?item=a:permission')
+  // The permission is the Desk's (AEON-1209: the header's Decision Desk place counts it; the Agents page has no Desk panel).
+  await expect(page.getByRole('link', { name: 'Decision Desk, 1 open' })).toHaveAttribute('href', '/decision-desk')
   const rows = queue.locator('.connection-item')
   await expect(rows).toHaveCount(2)
   expect(await rows.evaluateAll(rows => rows.map(row => row.getAttribute('data-row')))).toEqual(['t:sooner', 't:later'])

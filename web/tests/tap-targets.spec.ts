@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport } from '../src/lib/serviceTier'
+
+test.use({ screenshot: 'only-on-failure' })
 
 const sessionId = '5e000000-0000-4000-8000-000000000001'
 const longName = 'Berechtigungsprüfung für die österreichische Unternehmensverwaltung und Wiederherstellungskoordination'
@@ -115,11 +116,9 @@ async function edgeClick(page: Page, control: Locator, expanded: boolean, phone:
   await page.mouse.click(x, y)
 }
 async function capture(page: Page, label: string) {
-  const directory = 'test-results/aeon-630-tap-targets'
-  await mkdir(directory, { recursive: true })
   // Capture the relevant list, including the control, rather than the page's
   // independently scrolling main area (a full-page shot can show its tail).
-  await page.locator(label.startsWith('tickets-') ? '.table-card' : '.sessions').screenshot({ path: `${directory}/${label}.png`, animations: 'disabled' })
+  await page.locator(label.startsWith('tickets-') ? '.table-card' : '.sessions').screenshot({ path: test.info().outputPath(`${label}.png`), animations: 'disabled' })
 }
 
 for (const { width, coarse } of [

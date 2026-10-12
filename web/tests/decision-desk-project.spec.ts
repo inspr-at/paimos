@@ -6,6 +6,8 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { expectStableControls } from './helpers/stable'
+// AEON-1209: the Agents page no longer carries the Desk panel; its harness keeps the panel covered until the header preview (AEON-1214).
+const DESK_PANEL = '/tests/desk-panel-harness.html'
 
 const AEON = { name: 'Paimos Aeon', href: '/p/PRJ-35' }, PHAROS = { name: 'Pharos', href: '/p/PRJ-17' }
 const notice = (now: string, before: string) => `Now in ${now}. The item before was in ${before}.`
@@ -99,7 +101,7 @@ test('the Agents desk panel names each item\'s project with a new-tab link', asy
   await page.setViewportSize({ width: 1440, height: 1000 })
   const world = await mockDecisionDesk(page)
   world.questions[1]!.project_id = 'p-pharos'
-  await page.goto('/agents')
+  await page.goto(DESK_PANEL)
   const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
   const row = panel.getByRole('listitem').filter({ hasText: 'Should the successor continue the review?' })
   const link = row.getByTestId('agents-desk-project')
@@ -132,7 +134,7 @@ test('the Agents doctrine row resolves its project through the authorized ticket
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page, { theme })
     world.rule.ticket = 'AEON-1'
-    await page.goto('/agents')
+    await page.goto(DESK_PANEL)
     const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
     const row = panel.getByRole('listitem').filter({ hasText: 'Doctrine change' })
     const link = row.getByTestId('agents-desk-project')
@@ -156,7 +158,7 @@ test('the Agents doctrine project link stays put through a second desk refresh w
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page, { theme })
-    await page.goto('/agents')
+    await page.goto(DESK_PANEL)
     const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
     const row = panel.getByRole('listitem').filter({ hasText: 'Doctrine change' })
     const link = row.getByTestId('agents-desk-project'), title = row.getByRole('link', { name: 'Doctrine change', exact: true })

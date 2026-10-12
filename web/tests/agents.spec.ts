@@ -414,10 +414,10 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL('/agents')
   await expect(row(page, nova)).toBeFocused()
-  // The page's search/layout packages attach later: bare / must not open the
-  // global palette on the Agents list, even before a search handler exists.
+  // P1 owns this list's search: / focuses it while the global palette keeps Ctrl K.
   await page.keyboard.press('/')
   await expect(page.getByRole('dialog', { name: 'Search and commands' })).toHaveCount(0)
+  await expect(page.getByRole('searchbox', { name: 'Search sessions in this list' })).toBeFocused()
   await page.keyboard.press('Control+k')
   const palette = page.getByRole('dialog', { name: 'Search and commands' })
   await expect(palette).toBeVisible()
@@ -434,7 +434,11 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await expect(next).toContainText('J')
   await expect(next).toContainText('Down arrow')
   await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
-  await expect(sheet.getByText('Search sessions (this list)', { exact: true })).toHaveCount(0)
+  // AEON-1196 P1 now registers this handler; AEON-1219's pre-P1 absence is stale.
+  const listSearch = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Search sessions \(this list\)$/ }) })
+  await expect(listSearch).toBeVisible()
+  await expect(listSearch).toContainText('F')
+  await expect(listSearch).toContainText('/')
   await expect(sheet.locator('dd', { hasText: /^Jump the divider:/ })).toHaveCount(0)
   const closeLabel = sheet.getByText('Close the details to List only', { exact: true })
   await expect(closeLabel).toBeVisible()

@@ -1,56 +1,56 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
 import type { PairingPermissions } from '../../lib/agentPairing'
 import { overviewAccounts, type SignInReference } from '../../lib/accountsOverview'
-import { computerCaptionParts, DEFAULT_QUOTA_THRESHOLDS, glanceItems, glanceSummary, isProblemSignin, onlineComputers, signinStatus, windowLabel, type GlanceItem } from '../../lib/accountsGlance'
+import { DEFAULT_QUOTA_THRESHOLDS, glanceAvailability, glanceChipText, glanceFlag, glanceItems, glanceSummary, glanceTiles, isProblemSignin, onlineComputers, type GlanceAvailability, type GlanceItem, type GlancePart } from '../../lib/accountsGlance'
 import { pacingSummary } from '../../lib/computerAccounts'
-import { HARNESS_NAME, when, whenFull } from '../../lib/capacity'
+import { when, whenFull } from '../../lib/capacity'
 import { validQuotaThresholds, type QuotaWarningSettings } from '../../lib/quotaWarnings'
 import { toast } from '../../lib/toast'
-import { usePoller } from '../../lib/usePolledData'
-import { vClipTip } from '../../directives/clipTip'
+import { initialRefreshStatus, usePoller } from '../../lib/usePolledData'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
-import { useSectionFold } from '../../stores/sectionPrefs'
 import { useSession } from '../../stores/session'
-import AppIcon from '../AppIcon.vue'
-import NeedsYouList, { type NeedsYouItem } from '../settings/NeedsYouList.vue'
-import FoldSection from './FoldSection.vue'
-import HarnessMark from './HarnessMark.vue'
+import AppIcon, { type IconName } from '../AppIcon.vue'
+import FloatingPanel from '../work/FloatingPanel.vue'
 import VerificationButton from './VerificationButton.vue'
 import { signinKey, useVerification } from '../../lib/useVerification'
 
-// Accounts and computers on the Agents page (AEON-782): its state in one status
-// line and what blocks agents in the body, as the approved design (AEON-721)
-// has it. The lists, panels, capacity, pacing and the account menu live in
-// Settings › Accounts and computers (AEON-686, AEON-786); every name and cell
-// here opens the right panel there.
-const route = useRoute(), router = useRouter()
+// Accounts and computers on the Agents page (AEON-782), now the accounts chip in the
+// capacity row (AEON-1209, design AEON-1196; the tiles are AEON-1176 P6). The chip names
+// what there is and flags what needs a person; its popover keeps the status line, Away
+// and Verify again, then three tiles that open Settings › Accounts, Computers and Capacity.
+const route = useRoute()
 const props = defineProps<{ permissions: PairingPermissions; showAccounts: boolean }>()
 const agents = useAgents(), capacity = useCapacity(), session = useSession()
-const { open, toggle, reveal } = useSectionFold('accounts')
 const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 const identityKey = computed(() => `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`)
 const now = computed(() => agents.now)
 
-// An approval link (?verify_account=…) shows the section once; an explicit fold wins afterwards.
-watch(() => route.query.verify_account, id => { if (id) reveal() }, { immediate: true })
-
 const busy = ref(false)
+const chip = ref<HTMLButtonElement>()
+const open = ref(false)
+function close(restore: boolean) {
+  open.value = false
+  if (restore) chip.value?.focus({ preventScroll: true })
+}
+watch(identityKey, () => { open.value = false; linked = '' })
 
 // ---------- What the page knows ----------
-const computers = computed(() => props.permissions.canListComputers ? capacity.computers.filter(c => c.computer_id && !c.archived_at) : [])
-const accounts = computed(() => props.showAccounts ? overviewAccounts(agents.accounts, capacity.rows, computers.value) : [])
+const computers = computed(() => props.permissions.canListComputers && capacity.computersState !== 'forbidden' ? capacity.computers.filter(c => c.computer_id && !c.archived_at) : [])
+const accounts = computed(() => props.showAccounts && agents.accountsState !== 'forbidden' ? overviewAccounts(agents.accounts, capacity.rows, computers.value) : [])
 const thresholds = ref<QuotaWarningSettings>({ ...DEFAULT_QUOTA_THRESHOLDS })
-const baseItems = computed(() => glanceItems(accounts.value, computers.value, thresholds.value, now.value, typeof route.query.verify_account === 'string' ? route.query.verify_account : ''))
+const requested = computed(() => typeof route.query.verify_account === 'string' ? route.query.verify_account : '')
+const baseItems = computed(() => glanceItems(accounts.value, computers.value, thresholds.value, now.value, requested.value))
 const allSignins = computed(() => accounts.value.flatMap(a => a.signins))
 const verification = useVerification(identityKey, allSignins, canVerify, () => capacity.refreshComputers())
 const attemptedItems = ref<{ item: GlanceItem; index: number }[]>([])
 watch(identityKey, () => { attemptedItems.value = [] })
+// A sign-in verified here keeps its row until the person leaves, so Verify again's answer stays where it was asked.
 const items = computed(() => {
   const retained = new Map(verification.retained.value.map(s => [signinKey(s), s]))
   const remembered = attemptedItems.value.filter(x => x.item.signin && retained.has(signinKey(x.item.signin)))
@@ -59,19 +59,70 @@ const items = computed(() => {
   for (const { item, index } of remembered) out.splice(Math.min(index, out.length), 0, { ...item, signin: retained.get(signinKey(item.signin!))! })
   return out
 })
+const openItems = computed(() => items.value.filter(i => !i.signin || isProblemSignin(i.signin) || i.signin.enrollment.account_id === requested.value))
 const summary = computed(() => glanceSummary(accounts.value, computers.value, baseItems.value, now.value))
-const pacingLine = computed(() => pacingSummary(capacity.schedule))
-const loaded = computed(() => capacity.loaded || !props.showAccounts)
-const failed = computed(() => !loaded.value && capacity.state === 'error')
-const empty = computed(() => loaded.value && !accounts.value.length && !computers.value.length)
-const stale = computed(() => capacity.stale || capacity.computersStale)
-const allReady = computed(() => accounts.value.every(a => a.signins.every(s => signinStatus(s.computer, s.enrollment.account_id) === 'Ready')))
+// Each value names the reads that support it. A successful capacity response cannot
+// stand in for a missing accounts/computers response, nor supply an unread schedule.
+const sources = computed(() => ({
+  accounts: props.showAccounts ? agents.accountsStatus : { ...initialRefreshStatus(), state: 'forbidden' as const, error: 'Owners and admins see accounts here.' },
+  capacity: capacity.capacityStatus,
+  computers: props.permissions.canListComputers ? capacity.computersStatus : { ...initialRefreshStatus(), state: 'forbidden' as const, error: 'Owners and admins see computers here.' },
+  schedules: capacity.schedulesStatus,
+}))
+const chipState = computed(() => glanceAvailability(Object.values(sources.value), !accounts.value.length && !computers.value.length, now.value))
+const tileStates = computed<Record<GlancePart, GlanceAvailability>>(() => ({
+  accounts: glanceAvailability(agents.accountsState === 'ready' && !accounts.value.length
+    ? [sources.value.accounts] : [sources.value.accounts, sources.value.capacity, sources.value.computers], !accounts.value.length, now.value),
+  // This tile claims connectivity; account readiness and verification have their own line below.
+  computers: glanceAvailability([sources.value.computers], !computers.value.length, now.value),
+  capacity: glanceAvailability([sources.value.schedules], false, now.value),
+}))
+const hasValues = (state: GlanceAvailability) => ['ready', 'empty', 'stale'].includes(state.state)
+const asOf = (state: GlanceAvailability) => state.updatedAt === null ? '' : `as of ${new Date(state.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
+const forbiddenWords = (part: GlancePart) => `Owners and admins see ${part} here`
 const online = computed(() => onlineComputers(computers.value))
-const statusText = computed(() => !props.showAccounts
-  ? `${online.value} of ${computers.value.length} ${computers.value.length === 1 ? 'computer' : 'computers'} online`
-  : accounts.value.length ? summary.value.text : `No accounts yet · ${computers.value.length} ${computers.value.length === 1 ? 'computer' : 'computers'} online`)
-const tone = computed(() => !props.showAccounts ? (online.value === computers.value.length ? 'ok' : 'warn') : accounts.value.length ? summary.value.tone : 'warn')
-async function retry() { await Promise.all([agents.refreshAccounts(), capacity.load()]) }
+const signins = computed(() => props.showAccounts ? capacity.signins.length : 0)
+const statusText = computed(() => accounts.value.length ? summary.value.text : `No accounts yet · ${online.value} ${online.value === 1 ? 'computer' : 'computers'} online`)
+const tone = computed(() => chipState.value.state === 'ready' && accounts.value.length ? summary.value.tone : 'warn')
+const chipText = computed(() => chipState.value.state === 'error' ? 'Accounts unreadable'
+  : chipState.value.state === 'forbidden' ? 'Accounts'
+  : accounts.value.length ? glanceChipText(accounts.value.length, computers.value.length, props.showAccounts) : `No accounts yet${computers.value.length ? ` · ${computers.value.length} computers` : ''}`)
+const flag = computed(() => hasValues(chipState.value) ? glanceFlag(signins.value, openItems.value) : '')
+const chipTip = computed(() => chipState.value.state === 'error' ? chipState.value.reason
+  : chipState.value.state === 'forbidden' ? `${forbiddenWords('accounts')}. ${chipState.value.reason}`
+  : chipState.value.state === 'stale' ? `${chipText.value}${flag.value ? ` · ${flag.value}` : ''} · ${asOf(chipState.value)}${chipState.value.reason ? ` · ${chipState.value.reason}` : ''}`
+  : 'Accounts, computers and capacity')
+const awayWords = computed(() => capacity.away ? `until ${when(capacity.away, now.value)}` : '')
+const shownAway = computed(() => hasValues(chipState.value) && capacity.away)
+const tiles = computed(() => glanceTiles({
+  accounts: accounts.value, computers: computers.value,
+  // Accounts keeps its quota warnings; connectivity uses computer-owned updates
+  // and cleanup. Joined verification claims appear below the tiles.
+  items: openItems.value, computerItems: glanceItems([], computers.value, thresholds.value, now.value), summary: summary.value, signins: signins.value,
+  pacing: capacity.schedulesLoaded ? pacingSummary(capacity.schedule) : '', away: awayWords.value, showAccounts: true,
+}).map(tile => {
+  const state = tileStates.value[tile.part]
+  return { ...tile, state,
+    line: state.state === 'error' ? `Couldn't read ${tile.part}` : state.state === 'forbidden' ? forbiddenWords(tile.part) : tile.line,
+    detail: state.state === 'stale' ? asOf(state) : ['error', 'forbidden', 'empty'].includes(state.state) ? '' : tile.detail,
+  }
+}))
+const ICON: Record<GlancePart, IconName> = { accounts: 'key', computers: 'monitor', capacity: 'gauge' }
+async function retry(part?: GlancePart) {
+  if (part === 'computers') await capacity.refreshComputers()
+  else if (part === 'capacity') await capacity.refreshSchedules()
+  else if (part === 'accounts') await Promise.all([agents.refreshAccounts(), capacity.refreshCapacity(), capacity.refreshComputers()])
+  else await Promise.all([agents.refreshAccounts(), capacity.load()])
+}
+
+// An approval link (?verify_account=…) opens the popover once, at the sign-in it names, as soon
+// as the chip is there (the first read may still be in flight); closing it is the person's choice.
+let linked = ''
+watch([requested, chip], ([id, button]) => {
+  if (!id || !button || linked === id) return
+  linked = id
+  open.value = true
+}, { immediate: true, flush: 'post' })
 
 // ---------- Low-quota thresholds: read once per person, again when the window returns ----------
 let generation = 0
@@ -92,7 +143,7 @@ onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener(
 
 // ---------- Verify again, bound to the sign-in on screen ----------
 function canVerify(s: SignInReference) {
-  return mayManage.value && s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && s.enrollment.can_verify === true
+  return chipState.value.state === 'ready' && mayManage.value && s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && s.enrollment.can_verify === true
     && s.computer.verification_capabilities?.[s.enrollment.harness]?.supported === true
 }
 const verifyBusy = (s: SignInReference) => verification.pending(s)
@@ -101,223 +152,155 @@ async function verifyAgain(item: GlanceItem) {
   if (!attemptedItems.value.some(x => x.item.id === item.id)) attemptedItems.value.push({ item, index: items.value.findIndex(i => i.id === item.id) })
   await verification.request(item.signin)
 }
-// The folded head's one-click fix: the first sign-in a person may verify right now.
+// The one-click fix: the first sign-in a person may verify right now.
 const firstFix = computed(() => items.value.find(i => i.kind === 'verify' && i.signin && canVerify(i.signin)))
+// What the popover leads with: that fix, else the first thing that blocks agents, with its one
+// fix command from the computer's own report (AEON-499; never a daemon-supplied command).
+const lead = computed(() => chipState.value.state === 'ready' ? firstFix.value ?? openItems.value[0] : undefined)
+const leadVerify = computed(() => !!lead.value?.signin && lead.value === firstFix.value)
+function detailOf(i: GlanceItem): string {
+  const readiness = (i.kind === 'attention' || i.kind === 'verify') && i.signinId ? capacity.accountLines.get(i.signinId)?.readiness : undefined
+  const words = readiness?.hint ? `${i.detail}. ${readiness.hint}` : i.detail
+  return readiness?.command ? `${words}${/[.!?]$/.test(words) ? '' : '.'} On ${i.signin?.computer.computer_name ?? 'its computer'}, run ${readiness.command}.` : words
+}
+const feedback = computed(() => lead.value?.signin ? verification.message(lead.value.signin) : '')
 
 // ---------- Away ----------
 async function endAway() {
-  if (busy.value || !mayManage.value) return
+  if (busy.value || !mayManage.value || tileStates.value.capacity.state !== 'ready') return
   const owner = identityKey.value
   busy.value = true
   try { await capacity.endAway(); if (owner === identityKey.value) toast('Welcome back. Agents follow your plan again.') }
   catch (e) { if (owner === identityKey.value) toast(e instanceof Error ? e.message : 'That did not save. Please try again.', { tone: 'error' }) }
   finally { if (owner === identityKey.value) busy.value = false }
 }
-
-// ---------- Links into Settings, each with the right panel open ----------
-const SETTINGS = '/settings/accounts'
-const linkComputer = (id: string | null | undefined, signin?: string) => `${SETTINGS}?${new URLSearchParams({ computer: id ?? '', ...(signin ? { signin } : {}) })}`
-const linkAccount = (id: string) => `${SETTINGS}?${new URLSearchParams({ account: id })}`
-const linkOf = (i: GlanceItem) => i.kind === 'quota' ? linkAccount(i.accountId!) : linkComputer(i.computerId, i.signinId)
-// The computer's own report says how to fix a blocked sign-in: its hint, and the one command to run there.
-function detailOf(i: GlanceItem): string {
-  const readiness = (i.kind === 'attention' || i.kind === 'verify') && i.signinId ? capacity.accountLines.get(i.signinId)?.readiness : undefined
-  const feedback = i.signin && verification.message(i.signin)
-  if (feedback) return feedback
-  const words = readiness?.hint ? `${i.detail}. ${readiness.hint}` : i.detail
-  return readiness?.command ? `${words}${/[.!?]$/.test(words) ? '' : '.'} On ${i.signin?.computer.computer_name ?? 'its computer'}, run ${readiness.command}.` : words
-}
-const needs = computed<NeedsYouItem[]>(() => items.value.map(i => {
-  const resolved = !!i.signin && !isProblemSignin(i.signin) && verification.retained.value.some(s => signinKey(s) === signinKey(i.signin!))
-  return {
-    id: i.id,
-    name: i.kind === 'verify' && i.signin ? `${HARNESS_NAME[i.signin.enrollment.harness] ?? 'Account'} verification on ${i.signin.computer.computer_name}` : i.name,
-    detail: detailOf(i), count: resolved ? 0 : 1,
-    icon: i.kind === 'quota' ? 'gauge' : i.kind === 'cleanup' ? 'shield' : 'alert', tone: i.kind === 'cleanup' ? 'waiting' : undefined,
-    href: linkOf(i),
-    action: i.kind === 'verify' && i.signin && canVerify(i.signin) ? { label: 'Verify again', fixesProblem: true, disabled: verifyBusy(i.signin), busy: verifyBusy(i.signin) } : { label: 'Details' },
-  }
-}))
-function act(id: string) {
-  const item = items.value.find(i => i.id === id)
-  if (!item) return
-  if (item.kind === 'verify' && item.signin && canVerify(item.signin)) void verifyAgain(item)
-  else void router.push(linkOf(item))
-}
-
-// ---------- The grid ----------
-type Cell = { signinId: string; text: string; tone: 'ok' | 'warn' | 'wait' }
-const problems = computed(() => new Set(items.value.filter(i => i.signin && isProblemSignin(i.signin)).map(i => `${i.computerId}/${i.signinId}`)))
-/** One row per account, one cell list per computer: an account signed in twice on a computer shows both. */
-const grid = computed(() => accounts.value.map(a => ({
-  account: a,
-  quota: a.windows[0] ? { percent: Math.max(0, Math.min(100, Math.round(a.windows[0].remaining_percent))), label: windowLabel(a.windows[0]).toLowerCase().replace(' window', '').replace(' allowance', '') } : null,
-  cells: computers.value.map(c => a.signins.filter(s => s.computer.computer_id === c.computer_id).map<Cell>(s => {
-    const text = signinStatus(c, s.enrollment.account_id, a.rows.find(row => row.id === s.enrollment.account_id), now.value)
-    return { signinId: s.enrollment.account_id, text, tone: text === 'Ready' ? 'ok' : problems.value.has(`${c.computer_id}/${s.enrollment.account_id}`) ? 'warn' : 'wait' }
-  })),
-})))
 </script>
 
 <template>
-  <FoldSection class="acc-section" label="Accounts and computers" :open="open" :tip="open ? 'Fold accounts and computers' : 'Unfold accounts and computers'" @toggle="toggle">
-    <template #title><span class="acc-ico" aria-hidden="true"><AppIcon name="monitor" :size="14" /></span>Accounts and computers</template>
-    <template #head>
-      <span class="fs-sum" role="status">
-        <span v-if="!loaded && !failed" class="stat-skel" aria-hidden="true"></span><span v-if="!loaded && !failed" class="sr-only">Reading accounts and computers…</span>
-        <span v-else-if="failed" class="st warn"><span class="dot warn" aria-hidden="true"></span><span class="t">Accounts could not be read · <button type="button" class="link-btn" @click="retry">Try again</button></span></span>
-        <span v-else-if="empty" class="st warn"><span class="dot wait" aria-hidden="true"></span><span class="t">No accounts yet · <RouterLink class="link-btn" to="/agents/register-agent">Connect a computer</RouterLink></span></span>
-        <span v-else class="st" :class="{ warn: tone === 'warn' }"><span class="dot" :class="tone" aria-hidden="true"></span><span class="t" v-clip-tip>{{ statusText }}</span></span>
-      </span>
-      <span v-if="capacity.away" class="away" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
-        <span>Away until {{ when(capacity.away, now) }}</span>
-        <button v-if="mayManage" type="button" class="link-btn" :disabled="busy" aria-label="Back now: end Away" @click="endAway">Back now</button>
-      </span>
-      <span v-if="!open && firstFix?.signin" class="fs-act"><VerificationButton class="sm" :busy="verifyBusy(firstFix.signin)" @click="verifyAgain(firstFix)" /></span>
-      <span class="fs-tools"><RouterLink class="btn sm ghost" :to="SETTINGS" aria-label="Manage accounts and computers" title="Accounts, computers, capacity and warnings in Settings"><AppIcon name="gear" :size="14" /><span class="tl">Manage</span></RouterLink></span>
-    </template>
-
-    <template #feedback><p v-if="!open && firstFix?.signin && verification.message(firstFix.signin)" class="verification-feedback" role="status">{{ verification.message(firstFix.signin) }}</p></template>
-    <div class="acc-pad acc">
-      <p v-if="failed" class="empty" role="alert">Accounts could not be read. <button type="button" class="btn sm" @click="retry">Try again</button></p>
-      <p v-else-if="empty" class="empty">No accounts or computers yet. <RouterLink to="/agents/register-agent">Connect a computer</RouterLink>, sign in to a harness there, and it appears here.</p>
-      <template v-else-if="loaded">
-        <NeedsYouList v-if="props.showAccounts" :items="needs" :show-calm="verification.retained.value.length > 0" :aside="!stale && allReady ? 'Everything else is working.' : 'Based on the last available reports.'" @action="act" />
-        <p v-if="stale" class="stale" role="status">Some readings may be out of date. <button type="button" class="btn sm" @click="retry">Refresh</button></p>
-        <section v-if="accounts.length && computers.length" class="grid-wrap" aria-labelledby="acc-grid-title">
-          <div class="zone-head"><h3 id="acc-grid-title" class="eyebrow">Sign-ins at a glance</h3><p>Each cell is one account on one computer</p></div>
-          <div class="matrix-scroll" tabindex="0" aria-label="Sign-ins table; scroll horizontally for more computers">
-            <table class="matrix">
-              <thead><tr>
-                <th scope="col" class="corner">Account · quota left</th>
-                <th v-for="c in computers" :key="c.computer_id!" scope="col">
-                  <RouterLink class="mx-head" :to="linkComputer(c.computer_id)" :data-tip="`Open ${c.computer_name} in Settings`">
-                    <span class="glyph sm" aria-hidden="true"><AppIcon name="monitor" :size="14" /></span>
-                    <b class="mx-name" v-clip-tip>{{ c.computer_name }}</b>
-                    <span class="mx-sub"><span class="dot" :class="computerCaptionParts(c).tone" aria-hidden="true"></span><span class="long">{{ computerCaptionParts(c).long }}</span><span class="short">{{ computerCaptionParts(c).short }}</span></span>
-                  </RouterLink>
-                </th>
-              </tr></thead>
-              <tbody>
-                <tr v-for="row in grid" :key="row.account.id">
-                  <th scope="row">
-                    <RouterLink class="mx-head" :to="linkAccount(row.account.records[0]?.id ?? row.account.id)" :data-tip="`Open ${row.account.vendor} in Settings`">
-                      <span class="vendor" aria-hidden="true"><HarnessMark :harness="row.account.harness" :size="15" /></span>
-                      <b class="mx-name">{{ row.account.vendor }}</b>
-                      <span class="mx-sub">
-                        <template v-if="row.quota"><span class="mini" aria-hidden="true"><i :style="{ width: `${row.quota.percent}%` }"></i></span>{{ row.quota.percent }}% · {{ row.quota.label }}</template>
-                        <template v-else>Quota not reported</template>
-                      </span>
-                    </RouterLink>
-                  </th>
-                  <td v-for="(cells, index) in row.cells" :key="computers[index].computer_id!">
-                    <RouterLink v-for="cell in cells" :key="cell.signinId" class="mx-cell" :to="linkComputer(computers[index].computer_id, cell.signinId)" :aria-label="`${row.account.vendor} on ${computers[index].computer_name}: ${cell.text}`">
-                      <span class="st" :class="{ warn: cell.tone === 'warn' }"><span class="dot" :class="cell.tone" aria-hidden="true"></span>{{ cell.text }}</span>
-                    </RouterLink>
-                    <span v-if="!cells.length" class="mx-none"><AppIcon name="minus" :size="16" /><span class="sr-only">{{ row.account.vendor }} is not signed in on {{ computers[index].computer_name }}</span></span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <p class="acc-foot">
-          <span v-if="props.showAccounts"><b>Pacing:</b> {{ pacingLine }} · <RouterLink :to="`${SETTINGS}#capacity-and-load`">Change in Settings</RouterLink></span>
-          <span>Lists, capacity and low-quota warnings live in <RouterLink :to="SETTINGS">Settings, under Accounts and computers</RouterLink>.</span>
-        </p>
-      </template>
+  <span class="acc-slot">
+    <span v-if="chipState.state === 'loading'" class="skeleton acc-sk" role="status" aria-label="Reading accounts and computers…" />
+    <button
+      v-else ref="chip" type="button" class="schip acc-chip" :class="{ warn: chipState.state === 'error', stale: chipState.state === 'stale' }" :data-state="chipState.state" aria-haspopup="dialog" :aria-expanded="open"
+      :aria-label="`Accounts and computers: ${chipText}${flag ? `, ${flag}` : ''}${shownAway ? `, away ${awayWords}` : ''}${chipState.state === 'stale' ? `, ${asOf(chipState)}` : ''}`"
+      :data-tip="open ? undefined : chipTip" @click="open = !open"
+    >
+      <AppIcon :name="chipState.state === 'error' ? 'alert' : chipState.state === 'forbidden' ? 'lock' : 'monitor'" :size="15" />
+      <span class="sc-t">{{ chipText }}</span>
+      <span v-if="chipState.state === 'stale'" class="chip-age"><AppIcon name="clock" :size="13" />{{ asOf(chipState) }}</span>
+      <span v-else-if="flag" class="flag">{{ flag }}</span>
+      <span v-else-if="shownAway" class="flag calm">Away</span>
+      <AppIcon name="chevron" :size="13" class="chev" />
+    </button>
+  </span>
+  <FloatingPanel v-if="open && chip" :anchor="chip" :width="440" label="Accounts and computers" cycle @close="close">
+    <div class="acc-pop">
+      <!-- The tiles come first and never move; what changes (Away, the first fix and its answer, the state line) grows below them (AEON-541). -->
+      <nav class="tiles" aria-label="Accounts, computers and capacity in Settings">
+        <div v-for="tile in tiles" :key="tile.part" class="tile-shell" :data-part="tile.part" :data-state="tile.state.state">
+          <RouterLink class="tile" :data-part="tile.part" :to="tile.to" :data-tip="tile.state.reason || `${tile.line}. ${tile.detail}`" @click="open = false">
+            <AppIcon :name="ICON[tile.part]" :size="16" class="ti" />
+            <span class="tt">
+              <b>{{ tile.title }}</b>
+              <span v-if="tile.state.state === 'loading'" class="tile-line"><span class="skeleton tile-sk" role="status" :aria-label="`Reading ${tile.part}…`" /></span>
+              <span v-else class="tile-line" :class="{ warn: tile.state.state === 'error' || tile.warn && tile.state.state === 'ready' }">
+                <AppIcon v-if="tile.state.state === 'error'" name="alert" :size="14" />
+                <AppIcon v-else-if="tile.state.state === 'forbidden'" name="lock" :size="14" />
+                <span>{{ tile.line }}</span>
+              </span>
+              <small class="tile-note"><AppIcon v-if="tile.state.state === 'stale'" name="clock" :size="12" />{{ tile.state.state === 'loading' ? '' : tile.detail }}</small>
+            </span>
+            <AppIcon name="chevron-right" :size="14" class="go" />
+          </RouterLink>
+          <button v-if="tile.state.state === 'error'" type="button" class="link-btn tile-retry" @click="retry(tile.part)">Try again</button>
+          <RouterLink v-else-if="tile.state.state === 'empty' && mayManage" class="link-btn tile-retry" to="/agents/register-agent" @click="open = false">Connect</RouterLink>
+        </div>
+      </nav>
+      <p v-if="shownAway" class="away" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
+        <span>Away {{ awayWords }}</span>
+        <button v-if="mayManage" type="button" class="link-btn" :disabled="busy || tileStates.capacity.state !== 'ready'" aria-label="Back now: end Away" @click="endAway">Back now</button>
+      </p>
+      <div v-if="lead" class="acc-fix" :data-need="lead.id">
+        <span class="fix-t"><b>{{ lead.name }}</b><small v-if="feedback" class="verification-feedback" role="status">{{ feedback }}</small><small v-else class="fix-d">{{ detailOf(lead) }}</small></span>
+        <VerificationButton v-if="leadVerify && lead.signin" class="sm" :busy="verifyBusy(lead.signin)" @click="verifyAgain(lead)" />
+      </div>
+      <p class="acc-state" role="status">
+        <template v-if="chipState.state === 'error'"><span class="st warn"><AppIcon name="alert" :size="14" /><span class="t">Accounts unreadable</span></span><button type="button" class="link-btn" @click="retry()">Try again</button></template>
+        <span v-else-if="chipState.state === 'forbidden'" class="st"><AppIcon name="lock" :size="14" /><span class="t">{{ forbiddenWords('accounts') }}</span></span>
+        <template v-else-if="chipState.state === 'stale'"><span class="st stale"><AppIcon name="clock" :size="14" /><span class="t">{{ statusText }} · {{ asOf(chipState) }}</span></span><button type="button" class="link-btn" @click="retry()">Refresh</button></template>
+        <template v-else-if="chipState.state === 'empty'"><span class="st"><AppIcon name="info" :size="14" /><span class="t">No accounts yet</span></span><RouterLink v-if="mayManage" class="link-btn" to="/agents/register-agent" @click="open = false">Connect</RouterLink></template>
+        <span v-else class="st" :class="{ warn: tone === 'warn' }"><span class="dot" :class="tone" aria-hidden="true" /><span class="t">{{ statusText }}</span></span>
+      </p>
     </div>
-  </FoldSection>
+  </FloatingPanel>
 </template>
 
 <style scoped>
-.acc-section { container: acc / inline-size; border-radius: 20px; min-width: 0; }
-.acc-ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-sunken); color: var(--ink-2); }
-/* The head: title, then the state; Verify again and Manage sit at the line end, so a part that appears moves nothing before it. Wide: one row, and the state shortens with an ellipsis instead of wrapping, so Verify again leaving never changes the head's height. Medium (below): two fixed rows, whatever is shown, so nothing jumps when Away or Verify again comes or goes. */
-.acc-section :deep(.fs-head) { flex-wrap: nowrap; gap: 6px 12px; }
-.fs-sum { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink-2); font-size: 13px; }
-.fs-sum .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The chip: one control at the shared height, its flag inside. */
+.acc-slot { display: grid; flex: none; inline-size: clamp(28ch, 26vw, 40ch); max-inline-size: 100%; }
+.schip { inline-size: 100%; display: inline-flex; align-items: center; flex: none; gap: 8px; min-width: 0; height: var(--ctl-h, 36px); padding: 0 10px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px; background: var(--btn-bg); color: var(--ink-2); box-shadow: var(--shadow-btn); font-size: 13px; white-space: nowrap; cursor: pointer; }
+@media (hover: hover) { .schip:hover { background: var(--btn-bg-hover, var(--btn-bg)); color: var(--ink); } }
+.schip[aria-expanded="true"] { background: var(--row-selected); color: var(--teal-ink); }
+.schip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.schip > svg { flex: none; }
+.sc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 550; text-align: left; }
+.schip.warn > svg:first-child { color: var(--warn-ink); }
+.schip.warn .sc-t { color: var(--warn-ink); }
+.schip.stale .flag { background: none; box-shadow: none; color: var(--ink-3); }
+.chip-age { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--ink-3); font-size: 11.5px; }
+.chev { color: var(--ink-3); }
+.flag { display: inline-flex; align-items: center; flex: none; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); font-size: 11.5px; font-weight: 650; white-space: nowrap; }
+/* The flag keeps the room of its usual words ("1 needs you", "2 sign-ins"), so a count that changes moves nothing. */
+.flag:not(.calm) { justify-content: center; min-inline-size: 12ch; }
+.flag.calm { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.acc-sk { display: inline-block; width: 100%; height: var(--ctl-h, 36px); border-radius: 999px; }
+/* A narrow row (phones): the chip takes the full width; its words shorten, the flag stays. */
+@container cap (max-width: 640px) {
+  .acc-slot { flex: 1 1 100%; inline-size: 100%; }
+  .sc-t { flex: 1; }
+}
+
+/* The popover: the status line, Away and Verify again, then the three tiles. */
+.acc-pop { display: grid; gap: 10px; padding: 4px; }
+.acc-state { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 0; padding: 2px 4px; }
 .st { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink-2); font-size: 13px; }
+.st .t { min-width: 0; overflow-wrap: anywhere; }
 .st.warn { color: var(--warn-ink); font-weight: 600; }
 .dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .dot.ok { background: var(--ok); }
 .dot.warn { background: var(--gold); }
 .dot.wait { box-shadow: inset 0 0 0 1.8px var(--gold); }
-.dot.blocked { box-shadow: inset 0 0 0 1.8px var(--ink-3); }
-.stat-skel { display: inline-block; width: 220px; max-width: 100%; height: 12px; border-radius: 6px; background: var(--skeleton); }
 .link-btn { padding: 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 12.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .link-btn:disabled { opacity: .55; cursor: default; }
 .link-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 4px; }
-.away { display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.away .link-btn { font-size: 12px; }
-.fs-act { display: flex; align-items: center; margin-left: auto; flex: none; }
-.fs-tools { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
-.fs-act + .fs-tools { margin-left: 0; }
-.fs-tools .btn.ghost { color: var(--ink-2); }
-.fs-tools .btn.ghost svg { color: var(--ink-3); }
-.fs-tools .btn.ghost:hover, .fs-tools .btn.ghost:hover svg { color: var(--teal-ink); }
-
-/* The body: Needs you, then the grid, then the pacing line. */
-.verification-feedback { margin: 0; padding: 0 20px 12px; color: var(--ink-2); font-size: 13px; }
-.acc-pad { display: grid; gap: 18px; padding: 4px 20px 16px; border-top: 1px solid var(--line); padding-top: 16px; }
-.acc :deep(.needs-head) { margin: 0 0 10px; }
-.acc :deep(.needs-head h2) { font: 650 13.5px/1.3 var(--font); letter-spacing: 0; }
-.acc :deep(.attention) { background: var(--surface-raised); }
-.empty, .stale { margin: 0; color: var(--ink-3); font-size: 13px; }
-.empty a, .acc-foot a { color: var(--teal-ink); }
-.zone-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 10px; }
-.zone-head p { margin: 0; font-size: 12px; color: var(--ink-3); }
-.eyebrow { margin: 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.matrix-scroll { max-width: 100%; overflow-x: auto; }
-.matrix-scroll:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-row); }
-.matrix { width: 100%; min-width: 320px; border-collapse: collapse; table-layout: fixed; }
-.matrix th, .matrix td { padding: 2px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; font-weight: inherit; }
-.matrix thead th { border-bottom-color: var(--line-2); vertical-align: bottom; }
-.matrix .corner { width: 38%; padding-bottom: 10px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
-.mx-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0 10px; width: 100%; min-height: 54px; padding: 6px 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: inherit; text-align: left; text-decoration: none; }
-.mx-head:hover, .mx-cell:hover { background: var(--row-hover); }
-.mx-head:focus-visible, .mx-cell:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.mx-head > .vendor, .mx-head > .glyph { grid-row: span 2; }
-.mx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 650; }
-.mx-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; grid-column: 2; min-width: 0; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
-.mx-sub .short { display: none; }
-.vendor { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
-.glyph { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-sunken); color: var(--ink-2); }
-.mini { display: inline-block; width: 40px; height: 4px; border-radius: 999px; background: var(--track); overflow: hidden; }
-.mini i { display: block; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--teal) 60%, transparent); }
-.mx-cell { display: flex; align-items: center; gap: 8px; width: 100%; height: 46px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: inherit; text-align: left; text-decoration: none; }
-.mx-none { display: flex; align-items: center; height: 46px; padding: 0 10px; color: var(--ink-3); }
-.acc-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 0; font-size: 12.5px; color: var(--ink-3); }
-.acc-foot b { color: var(--ink-2); font-weight: 600; }
-@media (pointer: coarse) { .mx-head, .mx-cell { min-height: 44px; } }
-
-/* Medium: Away and Verify again beside the status no longer fit one row with the title and Manage (about 780 px of controls in the widest case, Away plus Verify again, before the status gets any room). The head then always has two rows, chosen by the container's width alone and never by what is shown: row 1 chevron, title, Manage at the line end; row 2 the status with Away after it, and Verify again at the line end, as in the wide head, so neither moves the other. Away's margin box (26 + 1 + 5) is as tall as Verify again's (28 + 4), so a row they share keeps its height, and Away its place, when Verify again leaves. The state still shortens with an ellipsis, so no part ever leaves the card. */
-@container acc (640px < width <= 63.75rem) {
-  .acc-section :deep(.fs-head) { flex-wrap: wrap; row-gap: 0; }
-  .acc-section :deep(.fs-head)::after { content: ''; order: 2; flex: 0 0 100%; height: 0; }
-  .fs-tools, .fs-act + .fs-tools { order: 1; margin-left: auto; }
-  .fs-sum { order: 3; flex: 0 1 auto; min-height: 28px; margin: 0 0 4px; padding-left: 40px; }
-  .away { order: 4; margin: 1px 0 5px; }
-  .fs-act { order: 5; margin: 0 0 4px auto; }
-}
-
-/* Phone: summary keeps one line with a full-text clip tip, above the fix. */
-@container acc (width <= 640px) {
-  .acc-section :deep(.fs-head) { flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px 6px 4px; }
-  .fs-sum { order: 3; flex: 1 1 100%; padding-left: 40px; }
-  .fs-sum .st { min-height: 20px; }
-  .fs-tools, .fs-act + .fs-tools { margin-left: auto; }
-  .fs-tools .btn { min-height: 44px; width: 44px; padding: 0; }
-  .fs-tools .tl { display: none; }
-  .fs-act { order: 4; flex: 1 1 100%; margin: 4px 0 2px; padding-left: 40px; }
-  .fs-act .btn { min-height: 44px; }
-  .away { order: 4; height: 44px; }
-  .acc-pad { padding: 12px 12px 14px; }
-  .matrix .corner { width: 36%; }
-  .mx-head { grid-template-columns: minmax(0, 1fr); min-height: 52px; padding: 6px; }
-  .mx-head > .vendor, .mx-head > .glyph, .mx-sub .mini, .mx-sub .long { display: none; }
-  .mx-head > .mx-sub { grid-column: 1; }
-  .mx-sub .short { display: inline; }
-  .mx-cell, .mx-none { min-height: 52px; padding: 0 6px; }
+.away { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0 4px; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
+/* The words grow downward beside Verify again, which keeps its place at the top right. */
+.acc-fix { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px 12px; padding: 0 4px; }
+.fix-t { display: grid; gap: 2px; min-width: 0; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.fix-t b { font-weight: 600; }
+.fix-t small { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.st.stale, .schip.stale, .tile-note { color: var(--ink-3); }
+.tiles { display: grid; gap: 6px; }
+.tile-shell { position: relative; }
+.tile-retry { position: absolute; inset-inline-start: 42px; bottom: 8px; }
+.tile { display: grid; grid-template-columns: 22px minmax(0, 1fr) 16px; align-items: center; gap: 10px; min-height: 56px; padding: 8px 10px; border-radius: 12px; background: var(--surface-sunken); color: var(--ink); text-decoration: none; }
+@media (hover: hover) { .tile:hover { background: var(--row-hover); } }
+.tile:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.ti { justify-self: center; color: var(--ink-2); }
+.go { color: var(--ink-3); }
+.tt { display: grid; gap: 1px; min-width: 0; font-size: 13px; }
+.tt b { font-weight: 650; }
+.tt .tile-line { display: flex; align-items: flex-start; gap: 5px; min-height: 2.9em; }
+.tile-line > svg { flex: none; margin-top: 2px; }
+.tile-line > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.tile-sk { display: block; width: 80%; height: 1em; margin-top: 3px; }
+.tt span { color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }
+.tile-line.warn > span { color: inherit; }
+.tt span.warn { color: var(--warn-ink); font-weight: 600; }
+.tt small { display: flex; align-items: flex-start; gap: 4px; min-height: 2.9em; max-height: 2.9em; overflow: hidden; color: var(--ink-3); font-size: 11.5px; overflow-wrap: anywhere; }
+@media (pointer: coarse), (max-width: 720px) {
+  .link-btn { display: inline-flex; align-items: center; min-height: 44px; }
+  .acc-fix :deep(.btn) { min-height: 44px; }
+  .tile { min-height: 64px; }
+  .tt .tile-note { min-height: 44px; max-height: 44px; }
 }
 </style>

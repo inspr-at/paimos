@@ -45,7 +45,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountShipping(mux)
 	m.mountMetrics(mux)
 	m.mountFlow(mux)
-	// auditWebhook keeps the reviewed ingress and records merge-audit facts after it accepts the event.
+	// Every authenticated delivery is durable before projection/audit/flow work.
 	mux.HandleFunc("POST /api/github/webhook", m.mergeWebhook)
 	mux.HandleFunc("POST /api/projects/{projectId}/delivery/merge-backfill", m.mergeBackfill)
 	mux.HandleFunc("GET /api/delivery/audit", m.auditList)

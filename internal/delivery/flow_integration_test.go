@@ -1158,39 +1158,60 @@ func TestDeliveryFlowLateQueuedKeepsRunningStart(t *testing.T) {
 func TestDeliveryFlowCompletionKeepsFlake(t *testing.T) {
 	// Risk: a completion redelivery of an earlier failed attempt, after the
 	// suite classified that attempt as flaky, stores it as red.
-	f, g := newMetricsFixture(t)
-	p := f.pull()
-	f.gh.pulls[7] = p
-	opened := f.at.Add(-3 * time.Hour)
-	auditSend(t, f, "pull_request", "flow-flake-pr", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
-	head := p.Head
-	created := f.at.Add(-2 * time.Hour)
-	wall := 10 * time.Minute
-	latest := githubRunBody(501, 2, defaultCIWorkflow, "pull_request", p.Branch, head, created.Add(30*time.Minute), 12*time.Minute, "success", 900)
-	latest["pull_requests"] = []any{map[string]any{"number": 7}}
-	first := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", p.Branch, head, created, wall, "failure", 900)
-	first["pull_requests"] = []any{map[string]any{"number": 7}}
-	g.respond = func(path string) (any, error) {
-		switch path {
-		case "/actions/runs?check_suite_id=900&head_sha=" + head + "&per_page=2":
-			return map[string]any{"total_count": 1, "workflow_runs": []any{latest}}, nil
-		case "/actions/runs/501/attempts/1":
-			return first, nil
+	for _, configured := range []bool{true, false} {
+		name := "configured"
+		if !configured {
+			name = "unconfigured"
 		}
-		return nil, errRead
-	}
-	suite := map[string]any{"action": "completed", "check_suite": map[string]any{"id": 900, "head_sha": head, "head_branch": p.Branch, "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}}}
-	auditSend(t, f, "check_suite", "flow-flake-suite", suite, 204)
-	if step, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); step != "ci" || ended == nil || outcome == nil || *outcome != "flaky" {
-		t.Fatalf("suite: %s %v %v", step, ended, outcome)
-	}
-	events := flowEventCount(t, f)
-	started := created.Add(time.Minute)
-	body := workflowRunBody("completed", 501, 1, "pull_request", p.Branch, head, defaultCIWorkflow, created, &started, "failure", 7)
-	body["workflow_run"].(map[string]any)["updated_at"] = started.Add(wall)
-	auditSend(t, f, "workflow_run", "flow-flake-redelivery", body, 204)
-	if step, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); step != "ci" || ended == nil || outcome == nil || *outcome != "flaky" || flowEventCount(t, f) != events {
-		t.Fatalf("completion redelivery: %s %v %v, events %d → %d", step, ended, outcome, events, flowEventCount(t, f))
+		t.Run(name, func(t *testing.T) {
+			var f *fixture
+			var g *metricsFake
+			if configured {
+				f, g = newMetricsFixture(t)
+			} else {
+				f = newFixture(t)
+				g = &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+				f.m.github = g
+			}
+			p := f.pull()
+			f.gh.pulls[7] = p
+			opened := f.at.Add(-3 * time.Hour)
+			auditSend(t, f, "pull_request", "flow-flake-pr", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+			head := p.Head
+			created := f.at.Add(-2 * time.Hour)
+			wall := 10 * time.Minute
+			latest := githubRunBody(501, 2, defaultCIWorkflow, "pull_request", p.Branch, head, created.Add(30*time.Minute), 12*time.Minute, "success", 900)
+			latest["pull_requests"] = []any{map[string]any{"number": 7}}
+			first := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", p.Branch, head, created, wall, "failure", 900)
+			first["pull_requests"] = []any{map[string]any{"number": 7}}
+			g.respond = func(path string) (any, error) {
+				switch path {
+				case "/actions/runs?check_suite_id=900&head_sha=" + head + "&per_page=2":
+					return map[string]any{"total_count": 1, "workflow_runs": []any{latest}}, nil
+				case "/actions/runs/501/attempts/1":
+					return first, nil
+				}
+				return nil, errRead
+			}
+			suite := map[string]any{"action": "completed", "check_suite": map[string]any{"id": 900, "head_sha": head, "head_branch": p.Branch, "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}}}
+			auditSend(t, f, "check_suite", "flow-flake-suite", suite, 204)
+			if step, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); step != "ci" || ended == nil || outcome == nil || *outcome != "flaky" {
+				t.Fatalf("suite: %s %v %v", step, ended, outcome)
+			}
+			events := flowEventCount(t, f)
+			started := created.Add(time.Minute)
+			body := workflowRunBody("completed", 501, 1, "pull_request", p.Branch, head, defaultCIWorkflow, created, &started, "failure", 7)
+			body["workflow_run"].(map[string]any)["updated_at"] = started.Add(wall)
+			auditSend(t, f, "workflow_run", "flow-flake-redelivery", body, 204)
+			if step, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); step != "ci" || ended == nil || outcome == nil || *outcome != "flaky" || flowEventCount(t, f) != events {
+				t.Fatalf("completion redelivery: %s %v %v, events %d → %d", step, ended, outcome, events, flowEventCount(t, f))
+			}
+			if !configured {
+				if runs, pulls, marks := metricCounts(t, f); runs+pulls+marks != 0 {
+					t.Fatalf("unconfigured flake path wrote metrics: runs=%d pulls=%d marks=%d", runs, pulls, marks)
+				}
+			}
+		})
 	}
 }
 
