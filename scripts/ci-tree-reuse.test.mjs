@@ -10,6 +10,11 @@ import { decide, verifyRun, transport, main, requiredJobs, executionSteps, workf
 const repository = 'inspr-at/paimos';
 const sha = 'a'.repeat(40);
 const listPath = `actions/workflows/ci.yml/runs?event=merge_group&status=success&head_sha=${sha}&per_page=20`;
+function fakeClock() {
+  let elapsed = 0;
+  const waits = [];
+  return { waits, now: () => elapsed, advance: ms => { elapsed += ms; }, sleep: async ms => { waits.push(ms); elapsed += ms; } };
+}
 function fixture(attempt = 1) {
   const run = { id: 123, name: 'CI', repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: attempt, event: 'merge_group', head_sha: sha };
   const workflow = { id: 20, name: 'CI', path: workflowPath, decideMergeGroup, verifyPRFacts, verifyPRRun, prProofPrefix };
@@ -19,7 +24,7 @@ function fixture(attempt = 1) {
   }) };
   jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
   jobs.jobs.push({ name: 'tree-reuse', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
-  const listed = { total_count: 1, workflow_runs: [{ id: 123, head_sha: sha, event: 'merge_group' }] };
+  const listed = { total_count: 1, workflow_runs: [{ id: 123, head_sha: sha, event: 'merge_group', status: 'completed', conclusion: 'success' }] };
   const calls = [];
   const api = async path => {
     calls.push(path);
@@ -31,7 +36,7 @@ function fixture(attempt = 1) {
   };
   return { run, workflow, jobs, listed, calls, api };
 }
-const check = (f, options = {}) => decide({ event: 'push', ref: 'refs/heads/main', sha, repository, api: f.api, ...options });
+const check = (f, options = {}) => decide({ event: 'push', ref: 'refs/heads/main', sha, repository, api: f.api, clock: fakeClock(), ...options });
 const job = (f, name) => f.jobs.jobs.find(j => j.name === name);
 
 test('found: an exact-SHA successful merge-group full suite reuses with source note', async () => {
@@ -62,7 +67,78 @@ test('the full suite reuses without the retired comparison job and still require
 
 test('not found: a direct main push runs the full suite', async () => {
   const f = fixture(); f.listed.workflow_runs = []; f.listed.total_count = 0;
-  assert.equal((await check(f)).reuse, 'none');
+  const clock = fakeClock();
+  const result = await check(f, { clock });
+  assert.equal(result.reuse, 'none');
+  assert.equal(result.reason, 'no verified successful merge_group run for this SHA in the bounded candidate list; after 5 lookups over 150 s');
+  assert.deepEqual(f.calls, Array(5).fill(listPath));
+  assert.deepEqual(clock.waits, [15000, 30000, 45000, 60000]);
+});
+
+test('main push retries two empty listings and stops immediately on verified evidence', async () => {
+  const f = fixture(), clock = fakeClock();
+  let lookups = 0;
+  const api = async path => {
+    if (path === listPath && ++lookups <= 2) { f.calls.push(path); return { total_count: 0, workflow_runs: [] }; }
+    return f.api(path);
+  };
+  assert.deepEqual(await check(f, { api, clock }), { reuse: 'merge_group', run: 123, reason: 'reused merge_group run 123' });
+  assert.equal(lookups, 3);
+  assert.deepEqual(clock.waits, [15000, 30000]);
+  assert.deepEqual(f.calls, [listPath, listPath, listPath, 'actions/runs/123', 'actions/workflows/ci.yml', 'actions/runs/123/attempts/1/jobs?per_page=100']);
+});
+
+test('main push retries until the exact-SHA listing contains a completed successful run', async () => {
+  const f = fixture(), clock = fakeClock();
+  let lookups = 0;
+  const api = async path => {
+    if (path === listPath) {
+      lookups++;
+      f.run.status = lookups < 3 ? 'in_progress' : 'completed';
+      f.listed.workflow_runs[0].status = f.run.status;
+      f.listed.workflow_runs[0].conclusion = lookups < 3 ? null : 'success';
+    }
+    return f.api(path);
+  };
+  assert.equal((await check(f, { api, clock })).reuse, 'merge_group');
+  assert.equal(lookups, 3);
+  assert.deepEqual(clock.waits, [15000, 30000]);
+  assert.equal(f.calls.filter(path => path.includes('/jobs?')).length, 1);
+});
+
+test('a completed successful candidate rejected by an ensure does not retry', async () => {
+  const f = fixture(), clock = fakeClock();
+  job(f, 'go-test (1)').steps[0].conclusion = 'skipped';
+  await assert.rejects(verifyRun(repository, 123, f.api, sha), /missing full execution evidence/);
+  const result = await check(f, { clock });
+  assert.equal(result.reuse, 'none');
+  assert.match(result.reason, /after 1 lookups over 0 s$/);
+  assert.equal(f.calls.filter(path => path === listPath).length, 1);
+  assert.deepEqual(clock.waits, []);
+});
+
+test('API time counts toward the three-minute main-push budget', async () => {
+  const clock = fakeClock();
+  let lookups = 0;
+  const api = async path => {
+    assert.equal(path, listPath);
+    lookups++; clock.advance(10000);
+    return { total_count: 0, workflow_runs: [] };
+  };
+  const result = await check(fixture(), { api, clock });
+  assert.equal(result.reuse, 'none');
+  assert.match(result.reason, /after 4 lookups over 130 s$/);
+  assert.equal(lookups, 4);
+  assert.deepEqual(clock.waits, [15000, 30000, 45000]);
+});
+
+test('a delayed wake does not start a lookup outside the main-push budget', async () => {
+  const f = fixture(), clock = fakeClock();
+  f.listed.workflow_runs = []; f.listed.total_count = 0;
+  clock.sleep = async ms => { clock.waits.push(ms); clock.advance(180000); };
+  const result = await check(f, { clock });
+  assert.equal(result.reuse, 'none');
+  assert.match(result.reason, /after 1 lookups over 180 s$/);
   assert.deepEqual(f.calls, [listPath]);
 });
 
@@ -149,8 +225,11 @@ test('every heavy execution step must succeed, even with green job conclusions',
 
 test('kill switch, PR, queue, manual and non-main push do no API reads', async () => {
   for (const options of [{ killSwitch: 'off' }, { event: 'pull_request' }, { event: 'merge_group' }, { event: 'workflow_dispatch' }, { ref: 'refs/heads/other' }]) {
-    const f = fixture();
-    assert.equal((await check(f, { ...options, api: () => assert.fail('must not read') })).reuse, 'none');
+    const f = fixture(), clock = fakeClock();
+    let reads = 0;
+    assert.equal((await check(f, { ...options, clock, api: async () => { reads++; return f.listed; } })).reuse, 'none');
+    assert.equal(reads, 0);
+    assert.deepEqual(clock.waits, []);
     assert.deepEqual(f.calls, []);
   }
 });
@@ -185,21 +264,45 @@ test('verified main entry point emits reuse and source-run outputs plus success 
   assert.match(readFileSync(summary, 'utf8'), /reused merge_group run 123/);
 });
 
+test('main entry point retries discovery with a fresh bounded proof lookup', async () => {
+  const f = fixture(), clock = fakeClock(), signals = [];
+  let lookups = 0;
+  const result = await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha, GITHUB_REPOSITORY: repository, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture' }, async (url, options) => {
+    const path = url.slice(`https://api.github.com/repos/${repository}/`.length);
+    signals.push(options.signal);
+    if (path === listPath && ++lookups <= 2) return new Response(JSON.stringify({ total_count: 0, workflow_runs: [] }));
+    return new Response(JSON.stringify(await f.api(path)));
+  }, clock);
+  assert.equal(result.reuse, 'merge_group');
+  assert.equal(result.run, 123);
+  assert.equal(lookups, 3);
+  assert.deepEqual(clock.waits, [15000, 30000]);
+  assert.equal(new Set(signals.slice(0, 3)).size, 3);
+  assert(signals.slice(2).every(signal => signal === signals[2]), 'listing and its full verification share one bounded lookup');
+});
+
 test('direct main entry point cannot reuse absent merge-group evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'aeon-423-'));
-  const output = join(dir, 'output'); let calls = 0;
-  const result = await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha, GITHUB_REPOSITORY: repository, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture', GITHUB_OUTPUT: output }, async url => {
+  const output = join(dir, 'output'), clock = fakeClock(), signals = []; let calls = 0;
+  const result = await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha, GITHUB_REPOSITORY: repository, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture', GITHUB_OUTPUT: output }, async (url, options) => {
     calls++; assert.equal(url, `https://api.github.com/repos/${repository}/${listPath}`);
+    signals.push(options.signal);
     return new Response(JSON.stringify({ total_count: 0, workflow_runs: [] }));
-  });
-  assert.equal(calls, 1); assert.equal(result.reuse, 'none');
+  }, clock);
+  assert.equal(calls, 5); assert.equal(result.reuse, 'none');
+  assert.equal(new Set(signals).size, 5, 'every lookup gets a fresh timeout signal');
+  assert.match(result.reason, /after 5 lookups over 150 s$/);
+  assert.deepEqual(clock.waits, [15000, 30000, 45000, 60000]);
   assert.equal(readFileSync(output, 'utf8'), 'reuse=none\nrun=\n');
 });
 
 test('disabled main entry point writes fallback outputs and an honest summary', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'aeon-423-'));
   const output = join(dir, 'output'); const summary = join(dir, 'summary');
-  assert.equal((await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', CI_TREE_REUSE: 'off', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary })).reuse, 'none');
+  const clock = fakeClock(); let reads = 0;
+  assert.equal((await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', CI_TREE_REUSE: 'off', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary }, async () => { reads++; return new Response('{}'); }, clock)).reuse, 'none');
+  assert.equal(reads, 0);
+  assert.deepEqual(clock.waits, []);
   assert.equal(readFileSync(output, 'utf8'), 'reuse=none\nrun=\n');
   assert.match(readFileSync(summary, 'utf8'), /disabled/);
 });

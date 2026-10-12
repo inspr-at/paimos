@@ -2,12 +2,17 @@
 // AEON-423: reuse only an API-verified full merge-group suite at this exact SHA.
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 export const workflowPath = '.github/workflows/ci.yml';
 const oid = /^[a-f0-9]{40}$/;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const ensure = (value, message) => { if (!value) throw new Error(message); };
+const mainPushBackoff = [15000, 30000, 45000, 60000];
+const mainPushBudget = 180000;
+const lookupTimeout = 10000;
+const mainPushClock = { now: () => performance.now(), sleep };
 
 // A green aggregate is insufficient. These execution steps must have run.
 export const executionSteps = {
@@ -169,31 +174,48 @@ export async function decideMergeGroup({ event, killSwitch, sha, repository, api
   }
 }
 
-export async function decide({ event, ref, killSwitch, sha, repository, api }) {
+export async function decide({ event, ref, killSwitch, sha, repository, api, createLookupAPI = () => api, clock = mainPushClock }) {
   if (event !== 'push' || ref !== 'refs/heads/main' || killSwitch === 'off') return { reuse: 'none', reason: 'disabled or not a main push' };
+  const started = clock.now();
+  let lookups = 0;
+  let reason;
+  const fallback = () => ({ reuse: 'none', reason: `${reason}; after ${lookups} lookups over ${Math.floor((clock.now() - started) / 1000)} s` });
   try {
     ensure(oid.test(sha), 'invalid push SHA');
-    const found = await api(`actions/workflows/ci.yml/runs?event=merge_group&status=success&head_sha=${sha}&per_page=20`);
-    ensure(Number.isSafeInteger(found.total_count) && found.total_count >= 0 && Array.isArray(found.workflow_runs) && found.workflow_runs.length <= 20, 'invalid run list');
-    // Bounded discovery: absent/truncated older evidence simply runs full CI.
-    for (const candidate of found.workflow_runs) {
-      if (candidate.head_sha !== sha || candidate.event !== 'merge_group') continue;
-      try {
-        const verified = await verifyRun(repository, candidate.id, api, sha);
-        return { reuse: 'merge_group', run: verified.run, reason: `reused merge_group run ${verified.run}` };
-      } catch { /* Failed, cancelled, partial rerun or stale candidate: try next. */ }
+    for (let attempt = 0; ; attempt++) {
+      const lookupAPI = createLookupAPI();
+      lookups++;
+      const found = await lookupAPI(`actions/workflows/ci.yml/runs?event=merge_group&status=success&head_sha=${sha}&per_page=20`);
+      ensure(Number.isSafeInteger(found.total_count) && found.total_count >= 0 && Array.isArray(found.workflow_runs) && found.workflow_runs.length <= 20, 'invalid run list');
+      // Listing status controls retries only; verifyRun remains the sole proof.
+      const successfulCandidate = found.workflow_runs.some(candidate => candidate.head_sha === sha && candidate.event === 'merge_group' && candidate.status === 'completed' && candidate.conclusion === 'success');
+      for (const candidate of found.workflow_runs) {
+        if (candidate.head_sha !== sha || candidate.event !== 'merge_group') continue;
+        try {
+          const verified = await verifyRun(repository, candidate.id, lookupAPI, sha);
+          return { reuse: 'merge_group', run: verified.run, reason: `reused merge_group run ${verified.run}` };
+        } catch { /* Failed, cancelled, partial rerun or stale candidate: try next. */ }
+      }
+      reason = `no verified successful merge_group run for this SHA in the bounded candidate list${found.total_count > found.workflow_runs.length ? '; search truncated' : ''}`;
+      const delay = mainPushBackoff[attempt];
+      // Stop on rejected green evidence. Otherwise leave a full lookup timeout
+      // inside the wall-clock budget, including time already spent in the API.
+      if (successfulCandidate || delay === undefined || clock.now() - started + delay + lookupTimeout > mainPushBudget) return fallback();
+      await clock.sleep(delay);
+      if (clock.now() - started + lookupTimeout > mainPushBudget) return fallback();
     }
-    return { reuse: 'none', reason: `no verified successful merge_group run for this SHA in the bounded candidate list${found.total_count > found.workflow_runs.length ? '; search truncated' : ''}` };
   } catch {
     return { reuse: 'none', reason: 'merge_group lookup unavailable; full CI required' };
   }
 }
 
-export async function main(vars, fetcher = fetch) {
+export async function main(vars, fetcher = fetch, clock = mainPushClock) {
   let decision = { reuse: 'none', reason: 'disabled or not a main push' };
   if (vars.GITHUB_EVENT_NAME === 'push' && vars.GITHUB_REF === 'refs/heads/main' && vars.CI_TREE_REUSE !== 'off') {
-    const request = transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.timeout(10000), fetcher);
-    decision = await decide({ event: vars.GITHUB_EVENT_NAME, ref: vars.GITHUB_REF, killSwitch: vars.CI_TREE_REUSE, sha: vars.GITHUB_SHA, repository: vars.GITHUB_REPOSITORY, api: github(vars.GITHUB_REPOSITORY, request) });
+    const signal = AbortSignal.timeout(mainPushBudget);
+    // Each listing plus candidate verification keeps its original 10 s bound.
+    const createLookupAPI = () => github(vars.GITHUB_REPOSITORY, transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.any([signal, AbortSignal.timeout(lookupTimeout)]), fetcher));
+    decision = await decide({ event: vars.GITHUB_EVENT_NAME, ref: vars.GITHUB_REF, killSwitch: vars.CI_TREE_REUSE, sha: vars.GITHUB_SHA, repository: vars.GITHUB_REPOSITORY, createLookupAPI, clock });
   }
   if (vars.GITHUB_EVENT_NAME === 'merge_group' && vars.CI_MG_REUSE === 'on') {
     const request = transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.timeout(10000), fetcher);
