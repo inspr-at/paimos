@@ -124,9 +124,9 @@ No new secrets, permissions, tables or migrations are part of C0.
 
 R0 owns these same-PR metadata changes before merge:
 
-- Add `internal/nativecontract/**` and `internal/nativesessions/**` to the agent
-  runtime ownership slice, and `web/src/lib/nativeSessionContract.ts` to its
-  frontend ownership slice. Existing reporter/API/cmd ownership remains applicable.
+- Add `internal/nativecontract/**` and `internal/nativesessions/**` to S2
+  (`agent-runtime`). The TypeScript declaration is already covered by S9
+  (`web-core-tests`); existing reporter/API/cmd ownership remains applicable.
 - Register `internal/nativecontract:TestNativeContractRejectsUnsafeWire`,
   `internal/nativecontract:TestNativeContractAreaParity`, and
   `internal/nativesessions:TestDisabledNativeRoutesAuthenticateWithoutStarting`

@@ -4,10 +4,13 @@ package nativecontract_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,6 +22,19 @@ import (
 )
 
 const testID = "00000000-0000-4000-8000-000000000001"
+
+// api/openapi.yaml is ignored output, so the package must also work from a
+// fresh checkout. The shared generator publishes its cache atomically.
+func TestMain(m *testing.M) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput()
+	cancel()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "prepare native OpenAPI: %v\n%s", err, output)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 func binding() nativecontract.Binding {
 	return nativecontract.Binding{TenantID: testID, ProjectID: testID, OwnedSessionID: testID, HarnessSessionID: testID, RuntimeEpoch: testID, DaemonID: "test-daemon", DaemonGeneration: "test-epoch", BindingRevision: 1, RunID: nil}

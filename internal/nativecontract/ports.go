@@ -229,8 +229,8 @@ type WriterCoordinator interface {
 // Output is already filtered by provider-specific allowlists before FrameSource.
 // Both local and public transport independently enforce the same export rules.
 
-// localOnly is embedded in internal authority/process/profile types. They must
-// never become JSON projections, including when nested in another value.
+// localOnly supplies the refusal methods for internal authority/process/profile
+// types. They never become JSON projections, including when nested in a value.
 type localOnly struct{}
 
 func (localOnly) MarshalJSON() ([]byte, error) {
