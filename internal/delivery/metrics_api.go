@@ -482,10 +482,6 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 		return BackfillResult{}, fail(502, "GitHub could not be read; the backfill resumes from its last stored position")
 	}
 	var retryAt *time.Time
-	if next.ReadSource == historyChecks && next.Phase != "done" {
-		paced := now.Add(time.Minute)
-		retryAt = &paced
-	}
 	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
 			return err
@@ -504,6 +500,10 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
 		}
 		at := m.now()
+		if next.ReadSource == historyChecks && next.Phase != "done" {
+			paced := at.Add(time.Minute)
+			retryAt = &paced
+		}
 		if err = upsertRunsTx(ctx, tx, p.TenantID, source.Repository, "backfill", batch.Runs, at); err != nil {
 			return err
 		}
@@ -545,7 +545,7 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 		return BackfillResult{}, err
 	}
 	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated, RetryAt: retryAt}
-	if next.Phase == "runs" {
+	if next.Phase == "runs" && next.ReadSource != historyChecks {
 		day := next.Day
 		result.Day = &day
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +25,7 @@ func checksRun(r metricRun) bool { return r.ID < 0 }
 // workflow. This also makes permission changes idempotent without deleting facts.
 func preferredMetricRuns(runs []metricRun) []metricRun {
 	exact := map[string]bool{}
-	key := func(r metricRun) string { return r.Head + "/" + r.Workflow }
+	key := func(r metricRun) string { return r.Head + "/" + path.Base(r.Workflow) }
 	for _, r := range runs {
 		if !checksRun(r) {
 			exact[key(r)] = true
@@ -150,8 +151,17 @@ type metricCheckRun struct {
 }
 
 func validMetricSuite(s metricCheckSuite) bool {
+	if len(s.Pulls) > 100 {
+		return false
+	}
+	for _, p := range s.Pulls {
+		if p.Number <= 0 || p.Number > 2147483647 {
+			return false
+		}
+	}
 	return s.ID > 0 && reviewgate.ValidSHA(s.Head) && len(s.Branch) <= 255 &&
-		!s.Created.IsZero() && len(s.Pulls) <= 100
+		!s.Created.IsZero() && len(s.Status) <= 32 && len(s.App.Slug) <= 100 &&
+		(s.HeadCommit.Tree == "" || reviewgate.ValidSHA(s.HeadCommit.Tree))
 }
 
 // suiteCheckRuns uses the latest check verdicts in one suite. It can identify
@@ -216,12 +226,16 @@ func suiteCheckRuns(get func(string, any) error, suite metricCheckSuite, ci, nig
 		return nil, false, nil
 	}
 	var started, completed time.Time
-	conclusion := "success"
+	conclusion := ""
 	for _, check := range checks {
 		if check.Status != "completed" || check.Conclusion == nil || *check.Conclusion == "" || len(*check.Conclusion) > 32 {
 			return nil, false, nil
 		}
-		conclusion = worseConclusion(conclusion, *check.Conclusion)
+		if conclusion == "" {
+			conclusion = *check.Conclusion
+		} else {
+			conclusion = worseConclusion(conclusion, *check.Conclusion)
+		}
 		if check.Started == nil || check.Completed == nil || check.Started.IsZero() || check.Completed.Before(*check.Started) {
 			// Skipped checks have no elapsed execution time.
 			if *check.Conclusion == "skipped" || *check.Conclusion == "neutral" {

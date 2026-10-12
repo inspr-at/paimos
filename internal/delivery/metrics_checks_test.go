@@ -157,6 +157,7 @@ func TestDeliveryChecksHistoryResumesAndReportsHonestMetrics(t *testing.T) {
 	derived := runs[0]
 	exact := derived
 	exact.ID = 900
+	exact.Workflow = "ci.yml"
 	exact.Name = "CI"
 	exact.Started = exact.Started.Add(time.Minute)
 	preferred := preferredMetricRuns([]metricRun{derived, exact})
@@ -221,7 +222,7 @@ func TestDeliveryChecksHistoryPersistsPacingAndUsesActionsAfterGrant(t *testing.
 	g.respond = historyChecksFixture(t, f.m.config.Repository, f.at, 60)
 	var first BackfillResult
 	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{"restart": true, "days": 90}, 200, &first)
-	if first.State != "running" || first.RetryAt == nil || !first.RetryAt.Equal(f.at.Add(time.Minute)) || first.Calls > 40 {
+	if first.State != "running" || first.RetryAt == nil || !first.RetryAt.Equal(f.at.Add(time.Minute)) || first.Calls > 40 || first.Day != nil {
 		t.Fatalf("pacing: %+v", first)
 	}
 	before := len(g.calls)

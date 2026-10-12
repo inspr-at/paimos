@@ -78,7 +78,7 @@ func backfillPosition(source *metricSourceRow, now time.Time) BackfillResult {
 	out := BackfillResult{State: "running", Phase: "runs", Since: dayStart(now.AddDate(0, 0, -source.BackfillDays)), RetryAt: source.RetryAt}
 	if c := source.Cursor; c != nil {
 		out.Since, out.Phase, out.Truncated = c.Since, c.Phase, c.Truncated
-		if c.Phase == "runs" {
+		if c.Phase == "runs" && c.ReadSource != historyChecks {
 			day := c.Day
 			out.Day = &day
 		}

@@ -127,12 +127,12 @@ test('AEON-1253: repository shows the history source without moving its controls
     })
     await stable.check(async () => {
       world.source!.history_source = 'actions'
-      await page.clock.runFor(16_000)
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
       await expect(line).toHaveText('History source: GitHub Actions')
     })
     await stable.check(async () => {
       world.source!.history_source = 'checks'
-      await page.clock.runFor(16_000)
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
       await expect(line).toContainText('GitHub checks')
     })
     // Stress variable text at every evidence width without changing the UI copy.
