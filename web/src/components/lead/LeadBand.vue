@@ -229,7 +229,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
   .lead-acts .act-main { grid-area: acts; justify-self: end; min-height: 44px; }
   .lead-acts .fold-btn { width: 44px; height: 44px; }
   /* Phone: the name and state already sit on their own row below the controls; folded, they stay stacked. */
-  .lead.folded .lead-who { display: grid; }
+  .lead.folded .lead-who { display: grid; row-gap: 1px; }
   .lead.folded .lead-sep { display: none; }
   .lead-now, .empty-lead { margin-left: 0; }
   .asks, .lead-foot { margin-left: -14px; margin-right: -14px; }
