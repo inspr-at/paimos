@@ -80,7 +80,7 @@ test('members do not receive record recovery controls', async ({ page }) => {
 })
 
 for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
-  test(`recovery visual ${width} ${theme}`, async ({ page }) => {
+  test(`recovery visual ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await setup(page)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
@@ -89,10 +89,10 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     await expect(dialog(page).getByRole('button', { name: 'Archive session' })).toBeVisible()
     await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeFocused()
     expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    await page.screenshot({ path: `../.agent-artifacts/recovery-${width}-${theme}.png` })
+    await page.screenshot({ path: info.outputPath(`recovery-${width}-${theme}.png`) })
     await page.keyboard.press('Escape')
     await expect(dialog(page)).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Recover', exact: true })).toBeFocused()
+    await expect(page.getByRole('button', { name: 'More session actions', exact: true })).toBeFocused()
   })
 }
 
@@ -140,13 +140,13 @@ test('an accepted force stop reads the lists again before the daemon answers', a
 })
 
 for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
-  test(`force confirmation visual ${width} ${theme}`, async ({ page }) => {
+  test(`force confirmation visual ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await managed(page)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await expect(dialog(page)).toContainText('Root PID 1234')
     expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    await page.screenshot({ path: `../.agent-artifacts/force-${width}-${theme}.png` })
+    await page.screenshot({ path: info.outputPath(`force-${width}-${theme}.png`) })
   })
 }
 

@@ -67,9 +67,9 @@ async function refresh() {
   } catch (e) { if (turn === epoch) error.value = e instanceof Error ? e.message : 'Recovery details could not be loaded.' }
   finally { if (turn === epoch) loading.value = false }
 }
-async function open() {
+async function open(anchor?: HTMLElement) {
   if (!allowed.value) return
-  opener = document.activeElement as HTMLElement
+  opener = anchor ?? document.activeElement as HTMLElement
   done.value = false; reason.value = ''; visible.value = true; action.value = 'archive'; forceControl.value = null
   dialog.value?.showModal(); void refresh()
   await nextTick(); cancelButton.value?.focus()
@@ -137,7 +137,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <button v-if="allowed && !session.archived_at && !hideTrigger" type="button" class="btn sm ghost" @click="open"><AppIcon name="wrench" :size="14" />Recover</button>
+  <button v-if="allowed && !session.archived_at && !hideTrigger" type="button" class="btn sm ghost" @click="open()"><AppIcon name="wrench" :size="14" />Recover</button>
   <dialog ref="dialog" class="recovery-dialog" :aria-labelledby="`${uid}-title`" :aria-describedby="`${uid}-intro`" @cancel.prevent="close">
     <div class="recovery-card">
       <h2 :id="`${uid}-title`">{{ done ? 'Session archived' : forceControl ? 'Force stop requested' : 'Recover session' }}</h2>

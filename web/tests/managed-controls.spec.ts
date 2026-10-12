@@ -183,10 +183,12 @@ test('phone stop asks before sending, and More reaches Recover and Remove', asyn
   expect(requests).toHaveLength(0)
   await expect(page).toHaveURL(new RegExp(id))
 
+  await controls(page).getByRole('button', { name: 'More session controls', exact: true }).click()
+  await expect(page.getByText('Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await more.click()
   const menu = page.getByRole('menu', { name: 'More session actions' })
   await expect(menu.locator('p')).toHaveCount(0)
-  await expect(panelOf(page).getByText('Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.', { exact: true })).toBeVisible()
   const recoverItem = menu.getByRole('menuitem', { name: 'Recover', exact: true })
   const removeItem = menu.getByRole('menuitem', { name: 'Remove Focused session' })
   await touch(recoverItem)

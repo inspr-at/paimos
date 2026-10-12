@@ -95,7 +95,7 @@ watch([() => props.view?.session.host, () => auth.identity?.principal.id], async
 }, { immediate: true })
 const root = ref<HTMLElement>()
 const thread = ref<HTMLElement>()
-const recovery = ref<{ open: () => void }>()
+const recovery = ref<{ open: (anchor?: HTMLElement) => void }>()
 const removal = ref<{ remove: () => void }>()
 // Same breakpoint as the full-height sheet. Only a managed session with the
 // control capability collapses Recover, Remove and settings into one overflow.
@@ -311,7 +311,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
             <div class="panel-menu" role="menu">
               <button v-if="agentRecovery.action(view.session)" type="button" role="menuitem" class="btn ghost" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); actionsAnchor = null"><AppIcon name="refresh" :size="16" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
               <button v-if="!serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="btn ghost" @click="pickTier(actionsAnchor); actionsAnchor = null"><AppIcon name="gauge" :size="16" />Change tier…</button>
-              <button v-if="showRecover" type="button" role="menuitem" class="btn ghost" @click="recovery?.open(); actionsAnchor = null"><AppIcon name="wrench" :size="16" />Recover</button>
+              <button v-if="showRecover" type="button" role="menuitem" class="btn ghost" @click="recovery?.open(actionsAnchor ?? undefined); actionsAnchor = null"><AppIcon name="wrench" :size="16" />Recover</button>
               <button v-if="showRemove" type="button" role="menuitem" class="btn ghost" :aria-label="`Remove ${view.name}`" @click="removal?.remove(); actionsAnchor = null"><AppIcon name="trash" :size="16" />{{ quick ? 'Remove' : 'Remove…' }}</button>
             </div>
           </FloatingPanel>
