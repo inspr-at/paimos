@@ -105,11 +105,23 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		if err != nil {
 			return nil, err
 		}
-		if workqueue.State(t.State) == "blocked" || !readiness(t).Ready {
-			continue
-		}
 		if err = queuePermission(r.Context(), tx, p, t.ProjectID, true); err != nil {
 			return nil, err
+		}
+		if err = workqueue.RequireBuildAdmissionTx(r.Context(), tx, p, t.ID, "", nil); err != nil {
+			var conflict *workqueue.BuildConflict
+			if errors.As(err, &conflict) {
+				reason := "build_in_flight"
+				if conflict.Reason == "built_unmerged" {
+					reason = "already_built_ship_it"
+				}
+				rememberWait(reason)
+				continue
+			}
+			return nil, err
+		}
+		if workqueue.State(t.State) == "blocked" || !readiness(t).Ready {
+			continue
 		}
 		// A queue entry cannot mint a retry lineage or an unbounded cost hold.
 		// Re-check already routed entries too, before the idempotent pickup return.
@@ -304,6 +316,9 @@ func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
 	}
 	t, err := queueLoadTicket(ctx, tx, *v.QueueNodeID, true)
 	if err != nil {
+		return err
+	}
+	if err = workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, t.ID, "", nil); err != nil {
 		return err
 	}
 	if v.QueueTargetAgentID == nil && v.QueueRoutedAt == nil {

@@ -475,6 +475,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 				rejected = fail(400, "invalid_request", "activation contains no transcript")
 				return attachEnd(ctx, tx, &out, "detached")
 			}
+			// Owner consent permits observing this process, not a parallel build.
+			// The tenant/tree/pairing fences and current attachScope check above
+			// remain in force through admission, session creation and lease commit.
+			if err = workorders.RequireBuildAdmissionTx(ctx, tx, p, out.Snapshot.TicketID, "", nil); err != nil {
+				return err
+			}
 			secret, err := randomHex(32)
 			if err != nil {
 				return err

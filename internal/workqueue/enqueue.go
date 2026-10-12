@@ -18,6 +18,9 @@ import (
 // taken here. The same readiness, typed orders and rank helpers serve manual
 // queue entry; inert runs cannot be picked up before coordinator routing.
 func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string) ([]events.Change, error) {
+	if err := RequireBuildAdmissionTx(ctx, tx, p, nodeID, "", nil); err != nil {
+		return nil, err
+	}
 	var title, body, kind, state string
 	var fields, node json.RawMessage
 	err := tx.QueryRow(ctx, `SELECT n.title,n.body,k.slug,n.state,n.fields,to_jsonb(n)-'tenant_id' FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1`, nodeID).Scan(&title, &body, &kind, &state, &fields, &node)
