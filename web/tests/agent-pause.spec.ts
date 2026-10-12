@@ -143,7 +143,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await screenshot(page, `${width}-${theme}-pause`)
     await single.locator('[data-submit]').click(); await expect.poll(() => mock.calls.length).toBe(3)
     expect(mock.calls[2]?.body.level).toBe('pause')
-    await expect(page.locator('.agents-page .row').filter({ hasText: 'worker-1' }).locator('.ava')).toHaveAttribute('aria-label', /: Pausing$/)
+    await expect(page.locator(`[data-row="s:${mock.data.sessions[0]!.id}"] .ava`)).toHaveAttribute('aria-label', /: Pausing$/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true); expect(errors).toEqual([])
   })
 }
