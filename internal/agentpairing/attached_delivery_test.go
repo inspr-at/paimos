@@ -617,6 +617,7 @@ func TestAttachedDeliveryTwoSessionsOnePrincipal(t *testing.T) {
 	in.Sequence = 0
 	in.Snapshot.Process.PID++
 	in.Snapshot.Process.Started = "second-process"
+	in.Snapshot.TicketID = siblingWatchTicket(t, n.f, in.Snapshot.ProjectID)
 	in.MessageGeneration = ""
 	in.MessageConsentDigest = ""
 	activateWatch(t, n.f, n.key, &in)
