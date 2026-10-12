@@ -124,7 +124,10 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(mine.nth(0).locator('.delivery')).toHaveText('Read')
       await expect(mine.nth(0).locator('.delivery')).toHaveAttribute('data-tip', /^Read by the session · /)
       await expect(mine.nth(1).locator('.delivery')).toHaveText('Delivered')
-      await expect(mine.nth(2).locator('.undelivered > span')).toHaveText('Not delivered · the session ended')
+      // Main's compact receipt names the terminal state; its explanation and Retry stay explicit.
+      await expect(mine.nth(2).locator('.undelivered > span')).toHaveText('Not delivered')
+      await expect(mine.nth(2).locator('.undelivered')).toHaveAttribute('data-status', 'not_delivered')
+      await expect(mine.nth(2).locator('.undelivered')).toHaveAttribute('data-tip', 'It will not arrive later. Send it again once the session is listening.')
       await expect(mine.nth(2).getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
       await expect(mine.nth(2).locator('.delivery')).toHaveCount(0)
       await expect(queued).toHaveAttribute('data-status', 'sent')
