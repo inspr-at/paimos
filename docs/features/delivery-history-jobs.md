@@ -37,10 +37,12 @@ and the other heads' matching suites, P recent PRs, H their heads, Q live queue
 heads. Extra check pages add calls. At 50 commits/day, 50 recent PR heads/day,
 one suite/head and no live queue heads this is about 18,092 reads. Each step is
 limited to 40 repository reads, with one minute between unfinished steps, plus
-installation lookup, token creation and revocation. Thus one continuously active
-project uses at most about 2,580 calls/hour (roughly seven hours for that example),
+installation lookup, token creation and revocation. Thus automatic continuation
+for one continuously active project uses at most about 2,580 calls/hour (roughly
+seven hours for that example),
 below the [minimum installation budget of 5,000/hour](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
-Other projects and live reads share that budget; GitHub refusals retain the
+Other projects, live reads and explicit Check again retries share that budget;
+Check again deliberately bypasses the delay. GitHub refusals retain the
 existing error classification and persisted backoff. Lists have explicit bounds;
 a bound never turns missing history into success or zero.
 
