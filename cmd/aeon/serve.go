@@ -68,6 +68,7 @@ import (
 	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/modelprovider"
 	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
 	"github.com/inspr-at/paimos/internal/parentbenefits"
@@ -455,6 +456,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			inbox.New(pool, attachedMessages),
 			chat.New(pool, chat.Options{Enabled: cfg.ChatEnabled}),
 			harnessMod,
+			nativesessions.NewDisabled(),
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),
