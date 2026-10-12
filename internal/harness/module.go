@@ -1386,9 +1386,12 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	bindingError := s.inboxBindingCode
 	if in.InboxBindingError != nil {
-		if err := json.Unmarshal(in.InboxBindingError, &bindingError); err != nil || bindingError != nil && !hookbinding.Valid(*bindingError) {
+		// Preserve the stored value for change detection and the audit record.
+		var reportedError *string
+		if err := json.Unmarshal(in.InboxBindingError, &reportedError); err != nil || reportedError != nil && !hookbinding.Valid(*reportedError) {
 			return nil, workorders.Fail(400, "invalid inbox binding refusal code")
 		}
+		bindingError = reportedError
 		if bindingError == nil {
 			cleared := ""
 			bindingError = &cleared

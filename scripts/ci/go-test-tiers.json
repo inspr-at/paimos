@@ -6148,6 +6148,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestAEON1254BindingReportsPersistRefusalTransitions","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesRejectCredentialsAndRevalidateStoredText","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesValidationHistoryAndIsolation","tier":"GATED-FULL"}

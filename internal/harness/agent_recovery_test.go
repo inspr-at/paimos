@@ -601,6 +601,83 @@ func TestAgentRecoveryBudgetRejectionCommitsDecisionWithoutContinuation(t *testi
 	})
 }
 
+// Risk: a later binding report must replace a stored refusal or reported clear,
+// without renewing the heartbeat or losing the previous reason in the audit.
+func TestAEON1254BindingReportsPersistRefusalTransitions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		before any
+	}{
+		{"reason_changes", "hook_cli_mismatch"},
+		{"failure_after_clear", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := fixture(t)
+			lease := "fixture-binding-transition-lease-00000001"
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			w := f.call(f.agent, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "fixture-binding-transition-000001", "worker_lease": lease, "management_mode": "unmanaged", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+			expect(t, w, 201)
+			id := decode(t, w)["id"].(string)
+			path := base + "/" + id
+			beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_error": tc.before, "max_session_file_bytes": 512000, "rules_client_version": "261005070923.0.0"}
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, lease), 200)
+			w = f.call(f.person, "GET", path, nil, "")
+			expect(t, w, 200)
+			if got, exists := decode(t, w)["inbox_binding_error"]; !exists || got != tc.before {
+				t.Fatalf("initial refusal = %v (present %t), want %v", got, exists, tc.before)
+			}
+			var beforeEvidence []byte
+			var beforeEvents int
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(s)-'inbox_binding_error'-'row_version' FROM harness_sessions s WHERE id=$1`, id).Scan(&beforeEvidence); err != nil {
+					return err
+				}
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1`, id).Scan(&beforeEvents)
+			})
+			const next = "principal_mismatch"
+			report := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_report": true, "inbox_binding_error": next}
+			w = f.call(f.agent, "POST", path+"/heartbeat", report, lease)
+			expect(t, w, 200)
+			if got := decode(t, w)["inbox_binding_error"]; got != next {
+				t.Errorf("report refusal = %v, want %s", got, next)
+			}
+			// A separate read must observe the committed report, not a mutated
+			// in-memory session returned by the write request.
+			w = f.call(f.person, "GET", path, nil, "")
+			expect(t, w, 200)
+			if got := decode(t, w)["inbox_binding_error"]; got != next {
+				t.Errorf("persisted refusal = %v, want %s", got, next)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var afterEvidence []byte
+				if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(s)-'inbox_binding_error'-'row_version' FROM harness_sessions s WHERE id=$1`, id).Scan(&afterEvidence); err != nil {
+					return err
+				}
+				if !bytes.Equal(beforeEvidence, afterEvidence) {
+					t.Error("binding report changed session state beyond its diagnostic")
+				}
+				var afterEvents int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1`, id).Scan(&afterEvents); err != nil {
+					return err
+				}
+				if afterEvents != beforeEvents+1 {
+					t.Errorf("binding report added %d audit events, want 1", afterEvents-beforeEvents)
+				}
+				var before, after []byte
+				if err := tx.QueryRow(t.Context(), `SELECT before->'inbox_binding_error',after->'inbox_binding_error' FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&before, &after); err != nil {
+					return err
+				}
+				wantBefore, _ := json.Marshal(tc.before)
+				wantAfter, _ := json.Marshal(next)
+				if !bytes.Equal(before, wantBefore) || !bytes.Equal(after, wantAfter) {
+					t.Errorf("audit refusal %s -> %s, want %s -> %s", before, after, wantBefore, wantAfter)
+				}
+				return nil
+			})
+		})
+	}
+}
+
 func TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears(t *testing.T) {
 	f := fixture(t)
 	lease := "fixture-binding-worker-lease-000000000001"
