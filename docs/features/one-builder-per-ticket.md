@@ -11,8 +11,9 @@ who cannot see that session receives the refusal with its identifying metadata
 withheld; tenant isolation and caller visibility remain intact.
 Managed workers' ticket, work-order and run bindings resolve to the originating
 ticket for the admission lock, active-worker and delivery checks, and parallel
-audit. The session keeps its original binding fields. Conflicting bindings are
-refused. Work orders without an originating ticket retain their own build slot.
+audit. The session keeps its original binding fields. Conflicting originating
+ticket bindings are refused. A standalone order uses an explicit ticket when
+one is supplied, otherwise it retains its own build slot.
 Attach consent authorizes observation of the process; it does not authorize
 parallel work. A refused activation creates no session or lease and retains
 the approval for a retry while it is still valid.

@@ -78,16 +78,22 @@ func NormalizeParallelReason(reason *string) error {
 }
 
 const buildTicketIDSQL = `coalesce(b.queue_ticket,
- CASE WHEN nk.slug='work_order' AND pk.slug IN ('work','ticket','task') THEN n.parent_id END,n.id)`
+ CASE WHEN nk.slug='work_order' AND pk.slug IN ('work','ticket','task') THEN n.parent_id END,
+ CASE WHEN dk.slug='work_order' AND dpk.slug IN ('work','ticket','task') THEN direct.parent_id END,b.direct_ticket,n.id)`
 
 const buildTicketJoinsSQL = ` LEFT JOIN nodes n ON n.id=b.node_id
  LEFT JOIN node_kinds nk ON nk.tenant_id=n.tenant_id AND nk.id=n.kind_id
  LEFT JOIN nodes parent ON parent.tenant_id=n.tenant_id AND parent.id=n.parent_id
- LEFT JOIN node_kinds pk ON pk.tenant_id=parent.tenant_id AND pk.id=parent.kind_id `
+ LEFT JOIN node_kinds pk ON pk.tenant_id=parent.tenant_id AND pk.id=parent.kind_id
+ LEFT JOIN nodes direct ON direct.id=b.direct_ticket
+ LEFT JOIN node_kinds dk ON dk.tenant_id=direct.tenant_id AND dk.id=direct.kind_id
+ LEFT JOIN nodes direct_parent ON direct_parent.tenant_id=direct.tenant_id AND direct_parent.id=direct.parent_id
+ LEFT JOIN node_kinds dpk ON dpk.tenant_id=direct_parent.tenant_id AND dpk.id=direct_parent.kind_id `
 
 // BuildTicketTx resolves the at-most-three public bindings under caller RLS.
 // Work-order children and their runs occupy the originating ticket's slot;
-// standalone orders keep their own slot. Conflicting bindings fail closed.
+// standalone orders use an explicit ticket if supplied, otherwise their own
+// slot. Conflicting originating ticket bindings fail closed.
 // Callers hold the tenant/tree fences, so bindings cannot change before write.
 func BuildTicketTx(ctx context.Context, tx pgx.Tx, ticket, order, run *string) (*string, error) {
 	expected := 0
@@ -102,9 +108,9 @@ func BuildTicketTx(ctx context.Context, tx pgx.Tx, ticket, order, run *string) (
 	var target *string
 	var found, distinct int
 	err := tx.QueryRow(ctx, `WITH bindings AS (
-	 SELECT $1::uuid AS node_id,NULL::uuid AS queue_ticket WHERE $1::uuid IS NOT NULL
-	 UNION ALL SELECT node_id,NULL::uuid FROM work_orders WHERE node_id=$2
-	 UNION ALL SELECT work_order_id,queue_node_id FROM agent_runs WHERE id=$3
+	 SELECT $1::uuid AS node_id,NULL::uuid AS queue_ticket,$1::uuid AS direct_ticket WHERE $1::uuid IS NOT NULL
+	 UNION ALL SELECT node_id,NULL::uuid,$1::uuid FROM work_orders WHERE node_id=$2
+	 UNION ALL SELECT work_order_id,queue_node_id,$1::uuid FROM agent_runs WHERE id=$3
 	) SELECT min(`+buildTicketIDSQL+`::text),count(*),count(DISTINCT `+buildTicketIDSQL+`)
 	 FROM bindings b `+buildTicketJoinsSQL+` WHERE n.id IS NOT NULL AND n.deleted_at IS NULL`, ticket, order, run).Scan(&target, &found, &distinct)
 	if err != nil {
@@ -122,9 +128,9 @@ func BuildTicketTx(ctx context.Context, tx pgx.Tx, ticket, order, run *string) (
 // The same resolution serves the existence probe and public metadata query.
 // Also retain a legacy row's explicit ticket as a blocker if its bindings differ.
 const activeBuildersSQL = `WITH builders AS (
- SELECT s.*,` + buildTicketIDSQL + ` AS build_ticket FROM harness_sessions s
+ SELECT s.*,b.node_id AS binding_node,` + buildTicketIDSQL + ` AS build_ticket FROM harness_sessions s
  LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
- CROSS JOIN LATERAL (SELECT coalesce(r.work_order_id,s.work_order_id,s.ticket_node_id) AS node_id,r.queue_node_id AS queue_ticket) b
+ CROSS JOIN LATERAL (SELECT coalesce(r.work_order_id,s.work_order_id,s.ticket_node_id) AS node_id,r.queue_node_id AS queue_ticket,s.ticket_node_id AS direct_ticket) b
  ` + buildTicketJoinsSQL + `
  WHERE s.role='worker' AND s.stopped_at IS NULL AND s.id::text<>$2
 ) `
@@ -165,7 +171,7 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	var active bool
 	err = withBuildVisibilityTx(ctx, tx, func(step pgx.Tx) error {
 		return step.QueryRow(ctx, activeBuildersSQL+`SELECT EXISTS(SELECT 1 FROM builders
-		 WHERE ticket_node_id=$1 OR build_ticket=$1)`, ticket, except).Scan(&active)
+		 WHERE ticket_node_id=$1 OR build_ticket=$1 OR binding_node=$1)`, ticket, except).Scan(&active)
 	})
 	if err != nil {
 		return err
@@ -176,7 +182,7 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		var starterID, starterName, starterKind *string
 		err = tx.QueryRow(ctx, activeBuildersSQL+`SELECT s.id::text,coalesce(s.display_label,s.harness),p.id::text,p.name,p.kind,s.created_at
 		 FROM builders s LEFT JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=coalesce(s.started_by_principal_id,s.owner_principal_id,s.agent_principal_id)
-		 WHERE s.ticket_node_id=$1 OR s.build_ticket=$1
+		 WHERE s.ticket_node_id=$1 OR s.build_ticket=$1 OR s.binding_node=$1
 		 ORDER BY s.created_at,s.id LIMIT 1`, ticket, except).Scan(&conflict.SessionID, &conflict.Label, &starterID, &starterName, &starterKind, &conflict.Since)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err

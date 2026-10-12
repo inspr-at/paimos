@@ -164,8 +164,13 @@ func TestAttachActivationRefusesOccupiedTicket(t *testing.T) {
 	if state != "approved" || session != nil || active != 1 {
 		t.Fatalf("refused attach mutated approval or created a worker: state=%s session=%v active=%d", state, session, active)
 	}
-	f.call("POST", base+"/"+first["id"].(string)+"/stop", map[string]string{"reason": "process_exited"}, true, "", 200)
-	// Person stopping a process needs no worker bearer or lease proof.
+	stop := f.request("POST", base+"/"+first["id"].(string)+"/stop", map[string]string{"reason": "process_exited"}, false, key)
+	stop.Header.Set("X-Aeon-Worker-Lease", registration["worker_lease"].(string))
+	stopped := httptest.NewRecorder()
+	f.h.ServeHTTP(stopped, stop)
+	if stopped.Code != http.StatusOK {
+		t.Fatalf("lease-authorized stop: status=%d body=%s", stopped.Code, stopped.Body)
+	}
 	// Retry the still-valid approval only after the occupying generation ended.
 	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &v)
 	if v.State != "active" || v.SessionID == nil || *v.SessionID == first["id"] {
