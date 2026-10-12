@@ -6830,6 +6830,8 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHealthDatabase","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestLongMutationPreservesEventPositionAfterAuthentication","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadStatementTimeoutReturns503","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyGate","tier":"GATED-FULL"}

@@ -81,9 +81,10 @@ func separateHandlerBudget(pattern string) bool {
 	return false
 }
 
-// handlerBudgetMiddleware is inside all authentication/authorization middleware.
-// Restore the caller's lifetime while retaining the authenticated values and
-// transaction guards. Never admit a handler after the admission deadline.
+// handlerBudgetMiddleware runs after authentication/authorization, before
+// downstream middleware captures the request. Restore the caller's lifetime
+// while retaining authenticated values and transaction guards. Never admit a
+// handler after the admission deadline.
 func handlerBudgetMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if budget, ok := r.Context().Value(handlerBudgetKey{}).(handlerBudget); ok {
