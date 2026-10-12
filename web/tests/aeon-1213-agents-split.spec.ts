@@ -405,6 +405,92 @@ test('AEON-1213 regression: failed layout reads retain the local handle until re
   expect(writes()).toHaveLength(1)
 })
 
+// Folding after a failed GET must stay local until recovery supplies the shared
+// handle and previous folds. Changes during that recovery keep their latest intent.
+test('AEON-1213 regression: failed layout reads keep fold intents local until recovery preserves shared fields', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { data, work, calls } = await setup(page, 'light', 420)
+  const stored = { handle: 420, folded_projects: ['p-aeon'], extension: { keep: true } }
+  work.preferences['agents:layout'] = structuredClone(stored)
+  let recover = false, reads = 0, release!: () => void
+  const recovery = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/preferences/**', async route => {
+    if (decodeURIComponent(new URL(route.request().url()).pathname).endsWith('/agents:layout') && route.request().method() === 'GET') {
+      reads++
+      if (!recover) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+      await recovery
+    }
+    await route.fallback()
+  })
+  const failedRead = page.waitForResponse(response => decodeURIComponent(new URL(response.url()).pathname).endsWith('/agents:layout') && response.status() === 503)
+  await page.goto('/agents')
+  await (await failedRead).finished()
+  const lead = row(page, data.sessions[0]!.id), worker = row(page, data.sessions[9]!.id)
+  const fold = lead.locator('.tree-fold')
+  await expect(worker).toBeVisible()
+  const guard = await controlStability(page, { fold, lead })
+  await guard.check(async () => { await fold.click(); await expect(worker).toHaveCount(0) })
+  await page.clock.runFor(500)
+  const writes = () => calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/agents:layout')
+  expect(writes()).toEqual([])
+  expect(work.preferences['agents:layout']).toEqual(stored)
+  await expect.poll(() => reads).toBe(2)
+
+  recover = true
+  await guard.check(async () => { await fold.click(); await expect(worker).toBeVisible() })
+  await expect.poll(() => reads).toBe(3)
+  await guard.check(async () => { await fold.click(); await expect(worker).toHaveCount(0) })
+  await page.clock.runFor(500)
+  expect(writes()).toEqual([])
+  expect(work.preferences['agents:layout']).toEqual(stored)
+  expect(reads).toBe(3)
+  release()
+  await expect.poll(() => work.preferences['agents:layout']).toEqual({ ...stored, folded_projects: ['p-aeon', 'p-pharos'] })
+  expect(writes()).toHaveLength(1)
+  await expect(worker).toHaveCount(0)
+  guard.done()
+})
+
+test('AEON-1213 regression: delayed fold recovery cannot follow a person switch', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { data, work, calls } = await setup(page, 'light', 420)
+  let reads = 0, release!: () => void
+  const recovery = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/preferences/**', async route => {
+    if (decodeURIComponent(new URL(route.request().url()).pathname).endsWith('/agents:layout') && route.request().method() === 'GET') {
+      reads++
+      if (reads === 1) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+      if (reads === 2) await recovery
+    }
+    await route.fallback()
+  })
+  const failedRead = page.waitForResponse(response => decodeURIComponent(new URL(response.url()).pathname).endsWith('/agents:layout') && response.status() === 503)
+  await page.goto('/agents')
+  await (await failedRead).finished()
+  const lead = row(page, data.sessions[0]!.id), worker = row(page, data.sessions[9]!.id)
+  await expect(worker).toBeVisible()
+  await lead.locator('.tree-fold').click(); await expect(worker).toHaveCount(0)
+  await page.clock.runFor(500)
+  const writes = () => calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/agents:layout')
+  expect(writes()).toEqual([])
+  await expect.poll(() => reads).toBe(2)
+  const nextPerson = { handle: 660, folded_projects: ['p-aeon'] }
+  work.preferences['agents:layout'] = structuredClone(nextPerson)
+  await page.evaluate(async () => {
+    const sessionPath = '/src/stores/session.ts', prefPath = '/src/lib/preferences.ts'
+    const { useSession } = await import(sessionPath), { setPreferenceOwner } = await import(prefPath)
+    const session = useSession(), identity = { ...session.identity, principal: { ...session.identity.principal, id: '22222222-2222-4222-8222-222222222222' } }
+    setPreferenceOwner(identity); session.identity = identity
+  })
+  await expect.poll(() => reads).toBe(3)
+  await expect(worker).toBeVisible()
+  release()
+  await page.clock.runFor(500)
+  expect(writes()).toEqual([])
+  expect(work.preferences['agents:layout']).toEqual(nextPerson)
+  await expect(lead.locator('.tree-fold')).toHaveAttribute('aria-expanded', 'true')
+})
+
 // Approved table contract: fields and tracks must move together, so removing a
 // column cannot put model/computer/beat content under the wrong heading.
 test('AEON-1213 regression: the table uses the approved columns with the ticket in the session name', async ({ page }) => {
