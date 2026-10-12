@@ -424,7 +424,8 @@ const phoneFit = (page: Page) => page.locator('.app-header').evaluate(header => 
     }
   }
   const outside = controls.filter(el => { const r = el.getBoundingClientRect(); return r.left < start - 0.5 || r.right > end + 0.5 }).map(name)
-  const room = `header ${Math.round(own.width)} px, spacer ${header.querySelector('.spacer')?.getBoundingClientRect().width.toFixed(1)} px`
+  const parts = [...header.children].filter(child => child.getBoundingClientRect().width > 1).map(child => `${child.className.split(' ')[0]} ${Math.round(child.getBoundingClientRect().width)}`)
+  const room = `header ${Math.round(own.width)} px: ${parts.join(', ')}`
   return { keys: keys.map(key => key.textContent!.trim()), cut, outside, header: header.scrollWidth - header.clientWidth, page: document.documentElement.scrollWidth - innerWidth, away: header.dataset.away ?? '', room }
 })
 for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
