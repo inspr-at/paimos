@@ -337,14 +337,14 @@ watch(state, (next, prev) => {
 .dl-ctrls { display: flex; align-items: center; gap: 10px; }
 .slot-hidden { visibility: hidden; }
 .dl-updated { font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
-.dl-status { min-height: 40px; }
+.dl-status { min-height: 56px; }
 .dl-status.veiled { visibility: hidden; }
 /* The warning replaces the status row in place: same anchor, no extra flow, so tiles stay put. */
-.banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: calc(50% + 6px); left: 0; margin: 0; min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
+.banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: calc(50% + 6px); left: 0; margin: 0; min-height: 44px; padding-block: 0; flex-wrap: nowrap; }
 .banner.pref-warn .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The read alert owns the right half, the save alert the left half: always, so a retry never moves or resizes (AEON-541). */
 .dl-status .banner.half { margin-left: calc(50% + 6px); }
-.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; margin-top: 12px; }
+.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; margin-top: 12px; }
 .src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
 .src svg { flex: none; color: var(--teal-ink); }
 .src b { font-weight: 600; color: var(--ink); }
@@ -356,8 +356,8 @@ watch(state, (next, prev) => {
 .banner.err { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .banner.err svg { color: var(--danger); }
 .banner .btn { flex: none; gap: 6px; }
-/* While a read is in flight or has failed, the row keeps the height measured from the chips (AEON-541). */
-.dl-status .banner { min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
+/* The status row fits its actions in every state; a failed read keeps the measured chip height (AEON-541). */
+.dl-status .banner { min-height: 44px; padding-block: 0; flex-wrap: nowrap; }
 .dl-status .banner .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner.flow-pref-warn { margin: 0; min-height: 40px; padding-block: 0; flex-wrap: nowrap; }
 .banner.flow-pref-warn .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }

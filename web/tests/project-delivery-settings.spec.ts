@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Risks: moving repository controls, false successful writes, overwriting inherited
-// settings, and late responses modifying a different project/person.
+// settings, invented history progress, overflowing banners, duplicate repository
+// cards, and late responses modifying a different project/person.
 import { expect, test, type Page } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics } from './delivery-numbers-fixtures'
 import { checkProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
@@ -87,6 +89,20 @@ async function choose(page: Page, world: Awaited<ReturnType<typeof setup>>['worl
   await expect(page.locator('#checks')).toBeVisible()
   await expect(page.locator('#checks .frow').first()).toBeVisible()
   await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', state)
+  // P3/P4 can merge in either order; the legacy stub must never accompany the editor.
+  await expect(page.locator('.settings-body .m-card').filter({ has: page.getByRole('heading', { name: /^Repository(?: & delivery)?$/ }) })).toHaveCount(1)
+}
+
+async function bannerContainsAction(page: Page, name: string) {
+  const action = page.locator('.dl-status .banner .btn')
+  await expect(action).toBeVisible()
+  const bounds = await action.evaluate(element => {
+    const button = element.getBoundingClientRect(), banner = element.closest('.banner')!.getBoundingClientRect()
+    return { width: button.width, height: button.height, gaps: [button.left - banner.left, button.top - banner.top, banner.right - button.right, banner.bottom - button.bottom] }
+  })
+  expect(bounds.width).toBeGreaterThan(0); expect(bounds.height).toBeGreaterThan(0)
+  for (const gap of bounds.gaps) expect(gap, `${name}: action stays inside the banner`).toBeGreaterThanOrEqual(-.5)
+  return { passed: true, message: `${name}: banner contains its ${bounds.height}px action on all four sides` }
 }
 
 test('AEON-1226: repository states stay put and delivery edits preserve authority, inheritance and identity', async ({ page }) => {
@@ -105,6 +121,11 @@ test('AEON-1226: repository states stay put and delivery edits preserve authorit
         if (baseline) for (const i of [0, 1]) expect(Math.abs(bounds[i]! - baseline[i]!)).toBeLessThanOrEqual(.5)
         else baseline = bounds
         if (readOnly) await expect(page.locator('[data-act="change"], [data-act="check"], [data-act="link"], #add-check')).toHaveCount(0)
+        if (state === 'reading') {
+          // GET metrics has no phase or cursor; no progress may be inferred from it.
+          await expect(page.locator('.phases')).toHaveCount(0)
+          await expect(page.getByRole('progressbar', { name: 'History read' })).toHaveCount(0)
+        }
         if (state === 'loading') { world.pendingLoad = null; release(); await expect(page.locator('.repo-slot')).not.toHaveAttribute('data-state', 'loading') }
       }
     }
@@ -145,6 +166,10 @@ test('AEON-1226: repository states stay put and delivery edits preserve authorit
   expect(world.history).toEqual(historyBeforeCheck)
   expect(world.source!.retry_at).toBeNull(); expect(world.source!.last_read_error).toBeNull()
   expect(world.source!.backfill_since).toBe(linkedSince)
+  await expect(page.locator('.phases .now')).toHaveText('Pull requests')
+  await expect(page.getByRole('progressbar', { name: 'History read' })).toHaveAttribute('aria-valuenow', '48')
+  await expect(page.locator('.phases svg')).toHaveCount(3)
+  await expect(page.locator('.phases svg path')).toHaveCount(0)
   await page.locator('[data-act=repo-more]').click(); await page.getByRole('menuitem', { name: /Read history again/ }).click()
   await expect.poll(() => world.history.at(-1)).toEqual({ days: 60, restart: true })
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -194,6 +219,7 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
       let release!: () => void
       if (state === 'loading') world.pendingLoad = { entered: () => {}, until: new Promise<void>(resolve => { release = resolve }) }
       await choose(page, world, state, readOnly)
+      if (state === 'reading') await expect(page.locator('.phases')).toHaveCount(0)
       const name = `delivery-${state}${readOnly ? '-readonly' : ''}-${width}-${theme}`
       results.push(...await checkProjectSettings(page, name, width < 600))
       await page.locator('#repository').scrollIntoViewIfNeeded()
@@ -211,9 +237,39 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     results.push(...await checkProjectSettings(page, `how-actions-${width}-${theme}`, width < 600))
     await page.keyboard.press('Escape'); await expect(how).toBeFocused(); stable.done()
 
+    // A real backfill response may name the active phase; its other phases stay neutral.
+    world.actionsReadable = true
+    const progress = await controlStability(page, { change: page.locator('[data-act=change]'), more: page.locator('[data-act=repo-more]'), slot: page.locator('.repo-slot'), checks: page.locator('#checks') })
+    await progress.check(async () => { await page.locator('[data-act=check]').click(); await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'reading') })
+    progress.done()
+    await expect(page.locator('.phases .now')).toHaveText('Pull requests')
+    await expect(page.locator('.phases svg path')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath(`delivery-reading-progress-${width}-${theme}.png`), fullPage: true })
+    results.push(...await checkProjectSettings(page, `delivery-reading-progress-${width}-${theme}`, width < 600))
+
     world.state = 'none'; world.source = null
     await page.goto('/p/AEON/delivery'); await expect(page.getByRole('link', { name: 'Link repository', exact: true })).toBeVisible()
+    await expect(page.locator('.dl-status .banner')).toContainText('history is then read once from the GitHub API')
+    results.push(await bannerContainsAction(page, `delivery-banner-none-${width}-${theme}`))
+    const windows = page.locator('.dl-head').getByRole('radiogroup', { name: 'Chart window' }), action = page.getByRole('link', { name: 'Link repository', exact: true })
+    const banner = await controlStability(page, { action, windows, levels: page.locator('.dl-head').getByRole('radiogroup', { name: 'Level of detail' }), firstLearn: page.locator('.s-tile .learn').first() })
+    await banner.check(() => action.hover())
+    await banner.check(async () => { await windows.getByRole('radio', { name: '90 days' }).click(); await expect(action).toBeVisible() })
+    await banner.check(async () => { await windows.getByRole('radio', { name: '7 days' }).click(); await expect(action).toBeVisible() })
+    banner.done()
+    const refresh = await controlStability(page, { windows, status: page.locator('.dl-status'), firstLearn: page.locator('.s-tile .learn').first() })
+    await refresh.check(async () => { world.state = 'error'; await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await expect(page.getByTestId('delivery-load-error')).toBeVisible() })
+    await refresh.check(async () => { world.state = 'none'; await page.getByRole('button', { name: 'Retry', exact: true }).click(); await expect(action).toBeVisible() })
+    refresh.done()
     await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-${width}-${theme}.png`), fullPage: true })
+
+    const german = settingsData(); german.profile.locale = 'de-AT'
+    await mockSettings(page, german)
+    await page.goto('/p/AEON/delivery'); await expect(page.getByRole('link', { name: 'Repository verknüpfen', exact: true })).toBeVisible()
+    results.push(await bannerContainsAction(page, `delivery-banner-none-de-${width}-${theme}`))
+    await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-de-${width}-${theme}.png`), fullPage: true })
+    german.profile.locale = 'en-US'
+    await page.goto('/p/AEON/delivery'); await expect(action).toBeVisible()
     await page.getByRole('link', { name: 'Link repository', exact: true }).click(); await expect(page.locator('#link-form')).toBeVisible()
     world.state = 'appoff'; world.source = source('appoff'); world.metrics = deliveryMetrics().metrics
     await page.goto('/p/AEON/delivery'); await expect(page.locator('.go-src').first()).toBeVisible()
