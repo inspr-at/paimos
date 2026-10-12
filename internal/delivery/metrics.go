@@ -112,6 +112,7 @@ type metricIncident struct {
 // earliest time the bounded read still returns every fact; older facts were
 // cut by the read bound.
 type metricInput struct {
+	ChecksHistory   bool
 	Runs            []metricRun
 	Pulls           []metricPull
 	Marks           []metricMark

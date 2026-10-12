@@ -27,6 +27,7 @@ export interface Metric {
   windows: MetricWindow[]; daily: MetricPoint[]; series: MetricBucket[]; target: MetricTarget | null; releases?: MetricRelease[]
 }
 export interface MetricSource {
+  history_source?: 'actions' | 'checks' | null
   repository: string; ci_workflow: string; nightly_workflow: string; app_connected: boolean
   backfill: 'not_started' | 'running' | 'done'; backfill_since: string | null; backfill_done_at: string | null; covered_since: string | null
   last_read_error?: { reason: 'actions_read_missing' | 'not_installed' | 'github_unavailable'; permission: 'actions:read' | null; at: string } | null

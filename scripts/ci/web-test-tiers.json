@@ -11030,6 +11030,8 @@
     ,
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: repository states stay put and delivery edits preserve authority, inheritance and identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1253: repository shows the history source without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

@@ -21,19 +21,17 @@ import (
 // metricsReader runs bounded reads with the App's existing short-lived
 // installation token. tenantID is the authenticated tenant (or the App's
 // configured tenant for a webhook it already accepted). Reads of a private
-// repository's workflow runs need actions:read, which the shipping
-// installation token already requests. No new credential exists.
+// repository uses Actions when granted and checks otherwise. No new credential
+// exists and no caller receives the repository-scoped read-only token.
 type metricsReader interface {
-	MetricsRead(context.Context, string, func(get func(string, any) error) error) error
+	MetricsRead(context.Context, string, func(get func(string, any) error, source string) error) error
 }
 
-func (g AppReader) MetricsRead(ctx context.Context, tenantID string, read func(func(string, any) error) error) error {
+func (g AppReader) MetricsRead(ctx context.Context, tenantID string, read func(func(string, any) error, string) error) error {
 	if !g.App.Configured(tenantID, g.App.Config.Repository) {
 		return errRead
 	}
-	return g.App.ReadShippingInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
-		return read(get)
-	})
+	return g.App.ReadHistoryInstallation(ctx, read)
 }
 
 var metricWorkflow = regexp.MustCompile(`^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$`)
@@ -334,6 +332,7 @@ type githubPullFact struct {
 	Closed  *time.Time `json:"closed_at"`
 	Head    struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	Base struct {
 		Ref  string `json:"ref"`
@@ -364,11 +363,13 @@ func metricPullFrom(p githubPullFact, repository string) (metricPull, error) {
 // workflow and UTC day (GitHub caps one filtered listing at 1 000 results),
 // then pull requests by last update until one is older than Since.
 type backfillCursor struct {
-	Since    time.Time `json:"since"`
-	Phase    string    `json:"phase"`
-	Workflow int       `json:"workflow"`
-	Day      string    `json:"day"`
-	Page     int       `json:"page"`
+	ReadSource string        `json:"read_source,omitempty"`
+	Checks     *checksCursor `json:"checks,omitempty"`
+	Since      time.Time     `json:"since"`
+	Phase      string        `json:"phase"`
+	Workflow   int           `json:"workflow"`
+	Day        string        `json:"day"`
+	Page       int           `json:"page"`
 	// Truncated records a day with more runs than GitHub lists (1 000), or a
 	// pull-request listing that hit GitHub's last page while recent pulls remain.
 	Truncated bool `json:"truncated,omitempty"`

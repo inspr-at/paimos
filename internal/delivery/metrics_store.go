@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -191,7 +192,29 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 				return webhookNotConfigured, nil, nil
 			}
 		}
-		err = reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error) error {
+		err = reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error, source string) error {
+			if source == historyChecks {
+				var suite metricCheckSuite
+				if err := get(fmt.Sprintf("/check-suites/%d", e.Suite.ID), &suite); err != nil {
+					return err
+				}
+				if suite.ID != e.Suite.ID || suite.Head != e.Suite.Head {
+					return errRead
+				}
+				ci, nightly := defaultCIWorkflow, defaultNightlyWorkflow
+				if len(scope.workflows) > 0 {
+					ci = scope.workflows[0]
+				}
+				if len(scope.nightly) > 0 {
+					nightly = scope.nightly[0]
+				}
+				var err error
+				runs, _, err = suiteCheckRuns(get, suite, ci, nightly, e.Repository.Default, m.now())
+				return err
+			}
+			if source != historyActions {
+				return errRead
+			}
 			var err error
 			runs, err = suiteRuns(get, e.Suite.ID, e.Suite.Head)
 			if err != nil {
@@ -465,6 +488,10 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 	if s.Cursor != nil && s.Cursor.Truncated {
 		in.Truncated = true
 	}
+	if s.Cursor != nil && s.Cursor.ReadSource == historyChecks {
+		in.ChecksHistory, in.Truncated = true, true
+		in.Covered, in.PreflightCovered = nil, nil
+	}
 	return in, nil
 }
 
@@ -524,6 +551,7 @@ func loadProjectInputTx(ctx context.Context, tx pgx.Tx, project string, in *metr
 // of those projects.
 type jobScope struct {
 	workflows []string
+	nightly   []string
 	Required  []string
 }
 
@@ -540,19 +568,20 @@ func (m *Module) jobScope(ctx context.Context) (jobScope, error) {
 	var scope jobScope
 	service := db.AllProjects(ctx, "delivery metric webhook job scope")
 	err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT project_id::text,ci_workflow FROM delivery_metric_sources WHERE repository=$1 ORDER BY project_id`, m.config.Repository)
+		rows, err := tx.Query(ctx, `SELECT project_id::text,ci_workflow,nightly_workflow FROM delivery_metric_sources WHERE repository=$1 ORDER BY project_id`, m.config.Repository)
 		if err != nil {
 			return err
 		}
 		var projects []string
 		for rows.Next() {
-			var project, workflow string
-			if err = rows.Scan(&project, &workflow); err != nil {
+			var project, workflow, nightly string
+			if err = rows.Scan(&project, &workflow, &nightly); err != nil {
 				rows.Close()
 				return err
 			}
 			projects = append(projects, project)
 			scope.workflows = append(scope.workflows, workflow)
+			scope.nightly = append(scope.nightly, nightly)
 		}
 		rows.Close()
 		if err = rows.Err(); err != nil {
