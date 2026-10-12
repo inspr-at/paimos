@@ -113,11 +113,12 @@ func (s *Server) build() {
 	s.Mux.HandleFunc("/api/", handleNotFound)
 	s.Mux.HandleFunc("/api", handleNotFound)
 
-	var api http.Handler = s.Mux
+	var api http.Handler = handlerBudgetMiddleware(s.Mux)
 	for i := len(s.Middleware) - 1; i >= 0; i-- {
 		api = s.Middleware[i](api)
 	}
 	api = readStatementTimeoutMiddleware(api)
+	api = requestBudgetMiddleware(api)
 	api = routePatternMiddleware(s.Mux, api)
 	api = requestIDMiddlewareWithMetrics(recoverMiddleware(securityMiddleware(api)), &s.Metrics)
 

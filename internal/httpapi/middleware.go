@@ -33,6 +33,84 @@ func commonMiddleware(next http.Handler) http.Handler {
 	return requestIDMiddleware(recoverMiddleware(securityMiddleware(next)))
 }
 
+const (
+	ordinaryRequestBudget = time.Minute
+	authenticationBudget  = 5 * time.Second
+)
+
+type handlerBudgetKey struct{}
+type handlerBudget struct {
+	parent context.Context
+	stop   context.CancelFunc
+}
+
+// requestBudgetMiddleware runs before authentication, including pool admission
+// and authorization. Ordinary API requests have a one-minute total deadline.
+// Streams and routes with longer handler budgets get five seconds for admission;
+// their handlers retain their existing lifetime after authentication finishes.
+func requestBudgetMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		duration := ordinaryRequestBudget
+		separate := separateHandlerBudget(r.Pattern)
+		if separate {
+			duration = authenticationBudget
+		}
+		ctx, stop := context.WithTimeout(r.Context(), duration)
+		defer stop()
+		if separate {
+			ctx = context.WithValue(ctx, handlerBudgetKey{}, handlerBudget{r.Context(), stop})
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func separateHandlerBudget(pattern string) bool {
+	switch pattern {
+	case "GET /api/events/stream", "GET /api/events/subscribe",
+		"GET /api/inbox/stream", "GET /api/chat-threads/{id}/live",
+		"GET /api/quotes/{quoteId}/collaboration/stream",
+		"GET /api/projects/{projectId}/delivery/flow/stream",
+		"GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications",
+		"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch",
+		"GET /api/runs/queued/notifications",
+		"POST /api/projects/{projectId}/delivery/metrics/backfill",
+		"POST /api/projects/{projectId}/delivery/metrics/check-again",
+		"POST /api/projects/{projectId}/delivery/merge-backfill":
+		return true
+	}
+	return false
+}
+
+// handlerBudgetMiddleware is inside all authentication/authorization middleware.
+// Restore the caller's lifetime while retaining the authenticated values and
+// transaction guards. Never admit a handler after the admission deadline.
+func handlerBudgetMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if budget, ok := r.Context().Value(handlerBudgetKey{}).(handlerBudget); ok {
+			if err := r.Context().Err(); err != nil {
+				LogFailure(r, "authentication_budget", err)
+				WriteError(w, http.StatusServiceUnavailable, "service unavailable")
+				return
+			}
+			// WithoutCancel also masks the admission context's cancellation
+			// cause; its values alone must survive into the handler phase.
+			ctx := handlerLifetimeContext{context.WithoutCancel(r.Context()), budget.parent}
+			budget.stop()
+			r = r.WithContext(ctx)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type handlerLifetimeContext struct {
+	context.Context
+	parent context.Context
+}
+
+func (ctx handlerLifetimeContext) Deadline() (time.Time, bool) { return ctx.parent.Deadline() }
+func (ctx handlerLifetimeContext) Done() <-chan struct{}       { return ctx.parent.Done() }
+func (ctx handlerLifetimeContext) Err() error                  { return ctx.parent.Err() }
+
 // readStatementTimeoutMiddleware bounds list and search statements before the
 // module starts a tenant transaction. It buffers these small JSON responses so
 // a module's generic database error can be replaced by a clear 503 problem.
