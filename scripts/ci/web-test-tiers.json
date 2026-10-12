@@ -262,6 +262,12 @@
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:phone › dark 390: the lead line, the queue chip and every row target reach 44 px"
     ,
+    "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read"
+    ,
+    "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence"
+    ,
+    "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -5703,6 +5709,70 @@
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"the search finds a row by the model name it shows, and still by its raw ids","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"touch › 390: every target in the Sessions card is 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 approved check.mjs: the round-7 design passes and supplies the reference screenshots","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1000 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1000 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1024 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1024 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1440 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1440 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 390 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 390 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 400 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 400 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix3: 1000 dark G3 results and G6 admission evidence stay honest and the owned worker row stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix3: 1000 light G3 results and G6 admission evidence stay honest and the owned worker row stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix3: 1440 dark G3 results and G6 admission evidence stay honest and the owned worker row stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix3: 1440 light G3 results and G6 admission evidence stay honest and the owned worker row stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix3: 400 dark G3 results and G6 admission evidence stay honest and the owned worker row stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix3: 400 light G3 results and G6 admission evidence stay honest and the owned worker row stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix4: dark wide worker metadata stays in its row, full values are readable and every Beat label fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix4: light wide worker metadata stays in its row, full values are readable and every Beat label fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 dark long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 light long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1440 dark long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1440 light long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 390 dark long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 390 light long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: failed answer retries the same request, a plain message never decides, and a late result stays off another session","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: losing question-read access clears retained cards and discards the pending decision response","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: pinned and last-used tabs belong to the person; queue links force Lead at Next up and chat keys only type","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: server action omission and decision denial remain read-only, and more than four real options link to the Desk","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 1024: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -15008,6 +15078,12 @@
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1212: admission uses four real gates and a timestamp; no report, unreadable, stale and held states never claim current passes","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1212: an explicit link wins; a real ask, held start and worker problem win over the pinned default; otherwise default then last used","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1249: panel model names and effort match the session row for registered and unlisted models","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/lead.test.ts","name":"AEON-1038: unclaimed starts and launch-off policy never invent admission failures","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"AEON-791: the saved agent names reach every screen that reads LEAD_WORDS, and clearing restores Lead","tier":"ESSENTIAL"}
@@ -16075,6 +16151,12 @@
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"bindings > bind workers by their real parent, at any depth, and survive a cycle","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"bindings > map each named event to what it wakes; no event rereads everything","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > AEON-1212: a loaded Agents bundle does not prove that its session tree was read successfully","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > AEON-1212: failed or stale live reads cannot prove an empty worker inventory; truncated live reads are lower bounds","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > AEON-1212: overlapping opening refreshes await the same authoritative question read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a failed read is said: queue counts become unknown, questions keep what was shown as incomplete","tier":"ESSENTIAL"}
     ,

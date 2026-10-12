@@ -185,7 +185,7 @@ it('S8-013: a delayed session-ended send error for A cannot disable B', async ()
   const state = setup('components/agents/SessionChat.vue', props, {
     '../../lib/api': { APIError }, '../../lib/displayLanguage': { displayLanguage }, '../../lib/agents': {}, '../../lib/agentRows': { readSessionMarker: async () => null }, '../../lib/toast': { toast: () => {} },
     '../../stores/agents': { useAgents: () => ({ thread: () => [], threadState: () => 'idle', addressOf: () => 'agent', refreshThread: async () => {}, send: () => pending.promise, controls: {} }) },
-    '../../stores/session': { useSession: () => ({ identity: { principal: { id: 'viewer', kind: 'agent' } } }) },
+    '../../stores/session': { useSession: () => ({ identity: { tenant: { id: 'tenant' }, principal: { id: 'viewer', kind: 'agent' } } }) },
     '../../stores/profile': { useProfile: () => ({ profile: null }) },
     './sessionMessages': { collapseMessages: () => [] }, './sessionChat': helpers, './chatLive': await import('../src/components/agents/chatLive'),
   }).state

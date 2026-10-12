@@ -75,7 +75,8 @@ test('Restart requests the exact row and keeps destructive actions behind the se
 test('Reconnect waits for reporting confirmation and rejected recovery stays an error', async ({ page }) => {
   const fixture = await setup(page, 'reconnect')
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  await panel.getByRole('button', { name: 'Reconnect', exact: true }).click()
+  await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Reconnect', exact: true }).click()
   await expect(page.getByText(/Reconnect requested. Waiting for the daemon/)).toBeVisible()
   fixture.complete('rejected')
   await page.clock.runFor(1100)
@@ -98,12 +99,11 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     const fixture = await setup(page, 'restart', true, true)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    const close = panel.getByRole('button', { name: width < 1100 ? 'Back to the list' : 'Close session details', exact: true })
-    let restart = panel.getByRole('button', { name: 'Restart', exact: true })
-    if (width < 1100) {
-      const more = panel.getByRole('button', { name: 'More session controls', exact: true })
+    const close = panel.getByRole('button', { name: 'Close session details', exact: true })
+    {
+      const more = panel.getByRole('button', { name: 'More session actions', exact: true })
       await more.click()
-      restart = page.getByRole('menuitem', { name: 'Restart', exact: true })
+      const restart = page.getByRole('menuitem', { name: 'Restart', exact: true })
       await expect(restart).toBeVisible()
       // The pointer can move between menu entries without changing geometry.
       const guard = await controlStability(page, { restart, remove: page.getByRole('menuitem', { name: `Remove ${fixture.label}`, exact: true }) })
@@ -123,11 +123,6 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       fixture.complete('continuation_queued')
       await requestControls.check(async () => { await page.clock.runFor(1100); await expect(page.getByText(/Continuation queued for normal dispatch/)).toBeVisible() })
       requestControls.done()
-    } else {
-      const guard = await controlStability(page, { restart, frame: panel.getByRole('heading').first() })
-      await guard.check(() => restart.click()); guard.done()
-      await expect(page.getByText(/Restart requested. Waiting/)).toBeVisible()
-      expect(fixture.request()?.action).toBe('restart')
     }
     const controls = await controlStability(page, {
       close,

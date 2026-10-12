@@ -138,14 +138,14 @@ test('session setup and work context appear from the mocked harness API', async 
   const setupBlock = panel(page).locator('section[aria-labelledby="setup-title"]')
   const workBlock = panel(page).locator('section[aria-labelledby="work-title"]')
   await expect(setupBlock).toContainText('Codex')
-  await expect(setupBlock).toContainText('gpt-6-sol')
+  await expect(setupBlock).toContainText('GPT-6 Sol · xhigh')
   await expect(setupBlock).toContainText('xhigh')
   await expect(setupBlock).toContainText('Codex Pro')
   await expect(setupBlock).toContainText('1.2.3')
   await expect(workBlock).toContainText('AEON-213')
   await expect(workBlock).toContainText('/Code/aeon-worktrees/tm1-session-metadata')
   await expect(workBlock).toContainText('tm1.session-metadata')
-  await expect(panel(page).locator('.head-sub').getByRole('link', { name: /PHAROS-12/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-12')
+  await expect(setupBlock.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Ticket$/ }) }).getByRole('link', { name: /PHAROS-12/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-12')
   await expect(workBlock.locator('.commits li')).toHaveText(['abc1234Store session setup', 'def5678Show work context'])
   await row(page, session(3)).locator('.agent-link').click()
   await expect(panel(page).locator('section[aria-labelledby="work-title"]')).toHaveCount(0)
@@ -302,8 +302,9 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
   await expect(details).toContainText('lead session · owned by AEON')
-  await expect(details.locator('.head-sub .ticket-chip')).toHaveText('PHAROS-11')
-  await expect(details.getByRole('link', { name: /PHAROS-11 Connect/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  const ticketFact = details.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Ticket$/ }) })
+  await expect(ticketFact.locator('.key')).toHaveText('PHAROS-11')
+  await expect(ticketFact.getByRole('link', { name: /PHAROS-11 Connect/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
   await expect(details).toContainText('Claude Max')
   await expect(details.locator('.metric')).toHaveText([/Running/, /184k/, /22k/, /\$3\.84/])
   await expect(details.locator('.run-row .run-chip')).toHaveText(['Running', 'Completed', 'Failed'])
@@ -673,6 +674,31 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await panel(page).getByText(brief, { exact: true }).scrollIntoViewIfNeeded()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`agents-session-${width}-${colorScheme}.png`), fullPage: true })
+    const details = panel(page)
+    const ticketFact = details.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Ticket$/ }) })
+    const ticket = ticketFact.getByRole('link', { name: /^PHAROS-11 Connect/ })
+    await expect(ticketFact.locator('.key')).toHaveText('PHAROS-11')
+    await expect(ticketFact.locator('.faint')).toHaveText('· In progress')
+    await expect(ticket).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+    await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
+    if (width === 390) expect((await ticket.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    await expectStableControls({
+      controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Session actions' }), tabs: details.getByRole('tablist'), ticket },
+      scrollAreas: { details: details.locator('.scroll') },
+      interactions: [
+        { name: 'hover the ticket title', run: async () => {
+          await ticket.hover()
+          await expect(ticket.locator('.ticket-title')).toHaveCSS('text-decoration-line', 'underline')
+          await expect(ticket.locator('.key')).toHaveCSS('text-decoration-line', 'none')
+        } },
+        { name: 'focus the ticket link', run: async () => { await ticket.focus(); await expect(ticket).toBeFocused() } },
+      ],
+    })
+    await ticket.blur()
+    await details.locator('.pane-bar').hover()
+    await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
+    await expect(ticketFact.locator('.faint')).toBeInViewport({ ratio: 1 })
+    await page.screenshot({ path: testInfo.outputPath(`details-ticket-${width}-${colorScheme}.png`), fullPage: true })
   })
 }
 

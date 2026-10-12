@@ -24,6 +24,7 @@ const words = computed(() => chatWords[german.value ? 'de' : 'en'])
 const label = (status: MessageStatus) => ({ sent: words.value.sending, delivered: words.value.delivered, read: words.value.read, not_delivered: words.value.failed })[status.status]
 const me = computed(() => identity.identity?.principal.id ?? '')
 const items = computed(() => collapseMessages(props.messages))
+const startsTimeGroup = (index: number) => index > 0 && Date.parse(items.value[index]?.created_at ?? '') - Date.parse(items.value[index - 1]?.created_at ?? '') >= 5 * 60_000
 const latestOwn = computed(() => items.value.filter(message => message.sender_principal_id === me.value).at(-1)?.id)
 const agents = useAgents()
 const cap = computed(() => { const session = agents.sessions.find(session => session.id === props.sessionId); return session ? chatCapability(session) : 'between' })
@@ -46,7 +47,7 @@ const statusOf = (m: ProjectMessage): MessageStatus | undefined => {
     <ol v-if="items.length" class="thread" aria-label="Messages">
       <template v-for="(m, index) in items" :key="m.id">
         <li v-if="m.id === newFrom" class="new-divider" role="separator" :aria-label="`${newCount ?? 1} new`"><span>{{ words.newDivider }}</span></li>
-        <li class="msg" :class="{ mine: m.sender_principal_id === me }" :tabindex="m.sender_principal_id === me ? 0 : undefined" :data-event="m.optimistic ? undefined : m.last_event" :data-id="m.id">
+        <li class="msg" :class="{ mine: m.sender_principal_id === me, 'has-actions': m.sender_principal_id === principalId, 'time-group': startsTimeGroup(index) }" :tabindex="m.sender_principal_id === me ? 0 : undefined" :data-event="m.optimistic ? undefined : m.last_event" :data-id="m.id">
           <p class="msg-meta" :class="{ older: m.sender_principal_id === me && m.id !== latestOwn && statusOf(m)?.status !== 'sent' }">
             <Avatar v-if="m.sender_principal_id !== me && (items[index - 1]?.sender_principal_id !== m.sender_principal_id || items[index - 1]?.sender_label !== m.sender_label)" :name="historicalSender(m, me)" kind="agent" :size="18" />
             <span v-if="m.sender_principal_id !== me && (items[index - 1]?.sender_principal_id !== m.sender_principal_id || items[index - 1]?.sender_label !== m.sender_label)" class="msg-author" :title="historicalSender(m, me)">{{ historicalSender(m, me) }}</span>
@@ -81,8 +82,13 @@ const statusOf = (m: ProjectMessage): MessageStatus | undefined => {
 <style scoped>
 .session-messages { min-width: 0; }
 .empty-line { font-size: 13px; color: var(--ink-2); }
-.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; list-style: none; }
-.msg { min-width: 0; width: 100%; padding: 6px 0; }
+.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.msg { position: relative; min-width: 0; width: 100%; padding: 0; }
+.msg.time-group { margin-top: 8px; }
+/* Actions stay beside the message, including on touch screens. Their fixed
+   lane cannot cover text or reserve an empty row when hover hides them. */
+.msg.has-actions { min-height: 44px; padding-inline-end: 96px; }
+.msg :deep(.chat-markdown > :last-child) { margin-bottom: 0; }
 .msg.mine { justify-self: end; width: auto; max-width: min(92%, 640px); display: flex; flex-direction: column; padding: 0; }
 .mine .msg-body { padding: 10px 14px; border-radius: 16px 16px 5px 16px; background: var(--chip-teal-bg); }
 .mine .msg-meta { order: 1; justify-content: flex-end; margin: 3px 0 0; min-height: 18px; }
@@ -100,7 +106,7 @@ const statusOf = (m: ProjectMessage): MessageStatus | undefined => {
 .undelivered { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--danger); overflow-wrap: anywhere; }
 .undelivered svg { flex: none; }
 .insertion { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; margin-bottom: 3px; font-size: 11px; color: var(--ink-3); }
-.message-actions { display: flex; gap: 2px; margin-top: 4px; }
+.message-actions { position: absolute; top: 0; right: 0; display: flex; gap: 2px; }
 .message-actions .icon-btn { width: 44px; height: 44px; }
 @media (hover: hover) {
   .msg:not(:hover, :focus-within) .message-actions { opacity: 0; }

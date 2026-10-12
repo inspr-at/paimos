@@ -4,7 +4,6 @@ import { computed, ref, watch } from 'vue'
 import { displayLanguage } from '../../lib/displayLanguage'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
-import KeyCap from '../KeyCap.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import { elapsed, liveWords, type LiveTurn } from './chatLive'
 
@@ -50,7 +49,7 @@ const foldLabel = computed(() => `${words.value.tools(props.turn.tools.length)} 
     <p v-else-if="running" class="working">
       <AppIcon name="sparkle" :size="16" class="spark" />
       <span>{{ words.working }}</span><span class="num">{{ elapsed(now - turn.started) }}</span>
-      <span v-if="canStop" class="esc-hint"><span aria-hidden="true">·</span><KeyCap k="Esc" /><span>{{ words.escStop }}</span></span>
+      <span v-if="canStop" class="esc-hint"><span aria-hidden="true">·</span><span>Interrupt in the session header</span></span>
     </p>
     <p v-else-if="!running && turn.stop === 'applied'" class="live-note stopped" role="status">{{ words.stopped }}</p>
   </section>

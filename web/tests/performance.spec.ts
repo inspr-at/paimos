@@ -3,6 +3,14 @@ import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 
 async function throttle(page: Page) {
+  const panelModules: string[] = []
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname
+    // Cover both the dev source graph and the bundled performance build.
+    const source = /\/components\/(?:agents\/(?:SessionPanel|SessionChat|ChatLiveBlock)|lead\/(?:LeadPanel|LeadPauseSheet|StartLeadSheet))\.vue$/.test(path)
+    const bundle = /\/assets\/(?:SessionPanel|SessionChat|ChatLiveBlock|LeadPanel|LeadPauseSheet|StartLeadSheet)-[^/]+\.js$/.test(path)
+    if ((source || bundle) && panelModules.length < 12) panelModules.push(path)
+  })
   const cdp = await page.context().newCDPSession(page)
   await cdp.send('Network.emulateNetworkConditions', {
     offline: false, latency: 150, downloadThroughput: 200_000, uploadThroughput: 93_750,
@@ -15,6 +23,7 @@ async function throttle(page: Page) {
       for (const entry of list.getEntries()) lcp = entry.startTime
     }).observe({ type: 'largest-contentful-paint', buffered: true })
   })
+  return panelModules
 }
 
 async function paint(page: Page) {
@@ -27,9 +36,10 @@ async function paint(page: Page) {
 
 test('cold Projects home has bounded API requests', async ({ page }) => {
   test.setTimeout(60_000)
-  await throttle(page)
+  const panelModules = await throttle(page)
   const calls = await mockWork(page, fixtures({ bigProject: 200 }))
-  await page.goto('/')
+  // Rendered project data is the readiness barrier for these API bounds.
+  await page.goto('/', { waitUntil: 'commit' })
   await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link')).toHaveCount(3, { timeout: 30_000 })
   const timings = await paint(page)
   const paths = calls.map(call => call.path)
@@ -37,11 +47,12 @@ test('cold Projects home has bounded API requests', async ({ page }) => {
   expect(paths.filter(path => path === '/api/projects')).toHaveLength(1)
   expect(paths.filter(path => path === '/api/nodes')).toHaveLength(1)
   expect(paths.filter(path => /^\/api\/nodes\/[^/]+$/.test(path))).toHaveLength(0)
+  expect(panelModules).toEqual([])
 })
 
 test('cold ticket page has bounded API requests', async ({ page }) => {
   test.setTimeout(60_000)
-  await throttle(page)
+  const panelModules = await throttle(page)
   const data = fixtures({ bigProject: 200 })
   const offPagePerson = { id: '33333333-3333-4333-8333-333333333333', name: 'Off-page owner' }
   data.people.push(offPagePerson)
@@ -52,7 +63,7 @@ test('cold ticket page has bounded API requests', async ({ page }) => {
   const calls = await mockWork(page, data, {
     hold: request => request.path === '/api/nodes' && request.query.get('facets') === 'assignee' ? { until: peopleReady } : undefined,
   })
-  await page.goto('/p/PHAROS/PHAROS-11')
+  await page.goto('/p/PHAROS/PHAROS-11', { waitUntil: 'commit' })
   await expect(page.getByRole('heading', { name: /Hetzner Cloud for managed provisioning/ }).first()).toBeVisible({ timeout: 30_000 })
   const timings = await paint(page)
   const paths = calls.map(call => call.path)
@@ -60,6 +71,7 @@ test('cold ticket page has bounded API requests', async ({ page }) => {
   expect(paths.filter(path => path === '/api/nodes/lookup')).toHaveLength(1)
   expect(paths.filter(path => /^\/api\/nodes\/[^/]+$/.test(path) && path !== '/api/nodes/lookup')).toHaveLength(1)
   expect(paths.filter(path => path === '/api/nodes').length).toBeLessThanOrEqual(4)
+  expect(panelModules).toEqual([])
   const peopleReads = () => calls.filter(call => call.path === '/api/nodes' && call.query.get('facets') === 'assignee')
   expect(peopleReads()).toHaveLength(0)
 

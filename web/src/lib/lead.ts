@@ -10,6 +10,26 @@ export interface ProjectLead {
   project_id: string; revision: number; generation: number; session_id: string | null
   state: LeadState; reason: string; process_active: boolean
   automatic_launch_enabled?: boolean
+  /** Caller-specific GET projection (AEON-1220); omission is unavailable. */
+  actions?: Partial<Record<LeadPersonAction, { available: boolean; blocked_reason: string }>>
+}
+export type LeadPersonAction = 'start' | 'resume' | 'pause' | 'adopt' | 'cancel_adoption' | 'remove'
+export const leadActionAvailable = (lead: ProjectLead | null | undefined, action: LeadPersonAction) => lead?.actions?.[action]?.available === true
+export function leadActionReason(lead: ProjectLead | null | undefined, action: LeadPersonAction): string {
+  const projection = lead?.actions?.[action]
+  if (!projection) return 'Action availability could not be read. Refresh the lead.'
+  if (projection.available) return ''
+  const reasons: Record<string, string> = {
+    person_required: 'A person must make this choice.', harness_control_required: 'You need permission to control this lead.',
+    lead_owner_required: 'Only the person who owns this lead may do this.',
+    owner_required: 'Only the person who owns this lead may do this.', owner_mismatch: 'Only the person who owns this lead may do this.',
+    run_create_required: 'You need permission to start work.', automatic_launch_disabled: LEAD_LAUNCH_OFF,
+    lead_required: 'No lead has started.', already_paused: 'This lead is already paused.', adoption_pending: 'An adoption is pending.',
+    process_exit_unconfirmed: 'Wait until its session confirms it stopped.',
+    process_active: 'Wait until its session confirms it stopped.', project_archived: 'This project is archived.',
+    lead_not_paused: 'This lead is not paused.',
+  }
+  return reasons[projection.blocked_reason] ?? `Unavailable: ${projection.blocked_reason || 'the server did not supply a reason'}`
 }
 export type GateKind = 'dial' | 'harness' | 'account_room' | 'host_load'
 export type DecisionStage = 'queue' | 'admission' | 'review' | 'release_handoff'
