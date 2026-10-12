@@ -20,6 +20,10 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	HookOrigin            string                  `json:"hook_origin,omitempty"`
+	HookInstance          string                  `json:"hook_instance,omitempty"`
+	HookConfig            string                  `json:"hook_config,omitempty"`
+	HookPrincipal         string                  `json:"hook_principal,omitempty"`
 	ModelSent             bool                    `json:"model_sent,omitempty"`
 	SentModel             string                  `json:"sent_model,omitempty"`
 	SentEffort            string                  `json:"sent_effort,omitempty"`

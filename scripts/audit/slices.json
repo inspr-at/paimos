@@ -241,7 +241,10 @@
         "internal/cli/hook_subagent_unix.go",
         "internal/cli/hook_subagent_other.go",
         "internal/cli/hook_subagent_unix_test.go",
-        "internal/inbox/routine_notice.go"
+        "internal/inbox/routine_notice.go",
+        "internal/hookbinding/**",
+        "internal/cli/hook_binding.go",
+        "internal/cli/hook_binding_unix_test.go"
       ]
     },
     {

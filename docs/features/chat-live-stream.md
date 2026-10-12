@@ -168,3 +168,22 @@ require explicit resync without obsolete content.
 
 No migration is needed. The registration request accepts one more capability
 value, `chat`; pinned response schemas are unchanged.
+
+
+Unmanaged Claude sessions with a generic inbox hook use the live source-session
+index to select the heartbeat's instance, configuration and principal. A hook
+installed from an older CLI must be installed again using the heartbeat's CLI
+and `--instance`, for example `aeon --instance ppm hook install --harness claude
+--scope project`. `aeon doctor` checks that configuration without running hook
+commands. Restart only the heartbeat helper to record the account selector;
+the external Claude process and its ownership stay unchanged, including across
+`--succeeds` registrations.
+
+A paired daemon cannot borrow another agent principal's worker authority.
+Confirmed refusals remove its attempted hook binding; uncertain replies retain
+only a non-serviceable identity for safe retry. The generic inbox continues with
+the registration's own account, and confirms delivery after foreground stdout
+handoff. Chat shows a value-free connection reason and queued messages show why
+they cannot be delivered yet. Successful binding clears the stored reason.
+No transcript is imported by this repair; the session's attributed replies
+continue through the existing messaging commands.
