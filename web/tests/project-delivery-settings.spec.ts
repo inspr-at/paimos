@@ -110,11 +110,13 @@ test('AEON-1253: repository shows the history source without moving its controls
   test.setTimeout(120_000)
   const { world, errors } = await setup(page)
   world.state = 'done'
-  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 })
-    await page.addInitScript(theme => localStorage.setItem('aeon-theme', theme), theme)
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: { choice: theme } } }))
     world.source = { ...source('done')!, history_source: 'checks' }
     await page.goto('/p/AEON/settings/delivery')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
     const card = page.locator('#repository'), line = card.locator('[data-history-source]')
     await expect(line).toContainText('GitHub checks · partial history; attempt and runner wait metrics unavailable.')
     await expect(card.getByText('accept Actions: Read', { exact: false })).toHaveCount(0)
