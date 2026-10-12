@@ -24,7 +24,7 @@ import (
 // AEON-1103, or excluding it also frees a daemon-owned unconfirmed process.
 func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "one_per_harness")
 	v := f.redeem(p)
 	e := v.Enrollments[0]
@@ -42,9 +42,9 @@ func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
 	f.call("PUT", "/api/agent-pairing/computers/"+*v.ComputerID+"/capacity", map[string]any{"expected_revision": v.Revision, "policy": policy}, true, "", 200)
 	var external string
 	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,started_at,ended_at,trace)
- SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,'ownership_lost',created_at,clock_timestamp(),
+ SELECT tenant_id,work_order_id,agent_principal_id,$2::uuid,'ownership_lost',created_at,clock_timestamp(),
  '{"worker_assignment":{"state":"launched"},"work_lifecycle_release":{"exit_unconfirmed":true}}'
- FROM agent_runs WHERE id=$1 RETURNING id::text`, *e.VerificationRunID).Scan(&external); err != nil {
+ FROM agent_runs WHERE id=$1 RETURNING id::text`, *e.VerificationRunID, f.profiles["codex"]).Scan(&external); err != nil {
 		t.Fatal(err)
 	}
 	readHost := func(running int, reason string) {
@@ -71,15 +71,15 @@ func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
 	readHost(1, "maximum_agents")
 	// Computer ownership grants only the host cause, even before account linking.
 	var advice agentaccounts.CapacityNext
-	decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness=codex", nil, true, "", 200), &advice)
+	decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness=claude", nil, true, "", 200), &advice)
 	if advice.Wait == nil || advice.Wait.HostReason != "managed_exit_unconfirmed" || advice.ParallelRuns != 0 {
 		t.Fatalf("owner lost the retained managed-process cause: %+v", advice)
 	}
 	actor := tenant.Principal{ID: f.person, TenantID: f.tenantID, Kind: tenant.Person}
 	if err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
 		health, err := agentaccounts.HarnessHealthAt(tenant.WithPrincipal(t.Context(), actor), tx, time.Now())
-		if err == nil && (health["codex"].Dispatchable != 0 || len(health["codex"].Reasons) != 1 || health["codex"].Reasons[0] != "Codex account is waiting for an unconfirmed managed process to exit") {
-			t.Fatalf("model admission lost the owner cause: %+v", health["codex"])
+		if err == nil && (health["claude"].Dispatchable != 0 || len(health["claude"].Reasons) != 1 || health["claude"].Reasons[0] != "Claude account is waiting for an unconfirmed managed process to exit") {
+			t.Fatalf("model admission lost the owner cause: %+v", health["claude"])
 		}
 		return err
 	}); err != nil {
