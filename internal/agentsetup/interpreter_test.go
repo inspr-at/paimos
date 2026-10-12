@@ -263,7 +263,7 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				t.Fatal(err)
 			}
 			detail := api.progress.HarnessDetails["codex"]
-			if detail.ReasonDetail != ProbePinRenewed || len(detail.Attention) != 1 || detail.Attention[0].ReasonDetail != ProbePinRenewed {
+			if detail.Reason != PinRenewed || detail.ReasonDetail != ProbePinRenewed || len(detail.Attention) != 1 || detail.Attention[0].Reason != PinRenewed || detail.Attention[0].ReasonDetail != ProbePinRenewed || detail.Fix != (HarnessFix{}) {
 				t.Fatal("renewal absent from safe attention details")
 			}
 			public, _ := json.Marshal(detail)
@@ -272,6 +272,19 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 			}
 			if probes != 1 {
 				t.Fatal("a healthy pin was automatically replaced")
+			}
+			ready, _ := HarnessReport("codex", "ready", "")
+			local.states[""] = LocalStatus{Ready: true, DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "ready"}, HarnessDetails: map[string]HarnessDetail{"codex": ready}, AccountStatuses: map[string]HarnessDetail{testAccount: ready}}
+			if err := e.SyncFences(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if api.progress.HarnessDetails["codex"].ReasonDetail != "" {
+				t.Fatal("ready report retained recovery diagnostics")
+			}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "blocked"}, HarnessDetails: map[string]HarnessDetail{"codex": blocked}, AccountStatuses: map[string]HarnessDetail{testAccount: blocked}}
+			progress, err := e.Status(t.Context())
+			if err != nil || progress.HarnessDetails["codex"].Reason != PinInvalid || progress.HarnessDetails["codex"].ReasonDetail != "" {
+				t.Fatal("past renewal hid a later failure", err)
 			}
 		})
 	}

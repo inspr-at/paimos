@@ -167,6 +167,11 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 		if local, err := e.Local.Status(ctx, ""); err == nil && local.DaemonID == s.View.DaemonID {
 			local = pinRenewalDetails(s, local)
 			proof.Progress = observedProgress(s.View, local)
+			for _, enrolled := range s.View.Enrollments {
+				if local.AccountStatuses[enrolled.AccountID].State == "ready" {
+					delete(s.CodexPins.Renewals, enrolled.AccountKey)
+				}
+			}
 		}
 	}
 	proof.Progress = e.reportInstall(s.View, proof.Progress)
@@ -601,7 +606,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		for _, a := range s.View.Enrollments {
 			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
 				if len(candidates) == 1 && !s.Removed[a.AccountID] {
-					return e.renewPin(s, a, c)
+					return e.renewPin(ctx, s, a, c)
 				}
 				return e.progress(s), errors.New("this harness account is already connected; no new request was created")
 			}
@@ -693,7 +698,7 @@ func renewsExistingPin(s *snapshot, candidates []Candidate) bool {
 // discovered. No request, approval, credential, identity or launcher changes,
 // and a healthy pin is never replaced. The daemon lifts the block on its next
 // runtime check. Claude pins are shared and change only through repin.
-func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progress, error) {
+func (e *Engine) renewPin(ctx context.Context, s *snapshot, enrolled Enrollment, c Candidate) (Progress, error) {
 	exists := errors.New("this harness account is already connected; no new request was created")
 	if c.Harness == "claude" || c.Harness == "grok" {
 		return e.progress(s), exists
@@ -725,7 +730,7 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if hash := s.CodexPins.LauncherHashes[current.Key]; hash != "" && codexLauncherHash(c.Path, config.Workspace) != hash {
 		return e.progress(s), errors.New("the enrolled launcher content changed; use the existing person-approved enrollment flow")
 	}
-	if !pinBlocked(config, enrolled.AccountID) {
+	if nodePinReasonWithExecutor(ctx, current.Path, config.Workspace, currentInterpreter(current), OSExecutor{}) == "" {
 		identity := RecordAttachIdentity(c.Harness, c.Path, config.Workspace)
 		if identity == nil || config.AttachIdentities[c.Harness] == *identity {
 			return e.progress(s), exists
@@ -760,7 +765,7 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	}
 	current.Node, current.PiNode = c.Node, c.PiNode
 	config.Accounts[index] = current
-	if pinBlocked(config, enrolled.AccountID) {
+	if ctx.Err() != nil || nodePinReasonWithExecutor(ctx, current.Path, config.Workspace, currentInterpreter(current), OSExecutor{}) != "" {
 		return Progress{Stage: "blocked", Action: "the discovered interpreter is still unusable; pass --node-path to an installed Node executable outside the workspace"}, errors.New("interpreter pin still blocked")
 	}
 	id, err := uuid()
@@ -801,13 +806,11 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	return p, nil
 }
 
-func pinBlocked(c RuntimeConfig, accountID string) bool {
-	for _, block := range AccountPinBlocks(c) {
-		if block.AccountID == accountID {
-			return true
-		}
+func currentInterpreter(a RuntimeAccount) harnesslaunch.Node {
+	if a.Harness == "pi" {
+		return a.PiNode
 	}
-	return false
+	return a.Node
 }
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {

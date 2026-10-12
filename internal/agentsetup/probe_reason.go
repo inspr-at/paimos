@@ -26,7 +26,7 @@ const maxProbeDetail = 160
 func SafeProbeDetail(reason, detail string) string {
 	if detail == ProbePinRenewed {
 		switch reason {
-		case PinMissing, PinPartial, PinDrifted, PinInvalid, "probe_pending", "starting":
+		case PinRenewed, PinMissing, PinPartial, PinDrifted, PinInvalid, "probe_pending", "starting":
 			return detail
 		}
 	}

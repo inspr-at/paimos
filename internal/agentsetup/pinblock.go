@@ -224,6 +224,9 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 		return errors.New("automatic pin renewal runtime unavailable")
 	}
 	for _, enrolled := range s.View.Enrollments {
+		if ctx.Err() != nil {
+			return nil
+		}
 		if enrolled.State != "connected" || enrolled.Harness != "codex" || s.Removed[enrolled.AccountID] {
 			continue
 		}
@@ -257,6 +260,8 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 			if d.LookPath == nil && strings.Contains(oldClass, "/Cellar/") {
 				prefix, formula, _ := strings.Cut(oldClass, "/Cellar/")
 				retry.NodePath = filepath.Join(prefix, "opt", formula, "bin", "node")
+			} else if d.LookPath == nil && oldClass == "/nix/store/nodejs" {
+				retry.NodePath = filepath.Join(d.Home, ".nix-profile", "bin", "node")
 			}
 			if retry.NodePath == "" {
 				lookup := d.LookPath
@@ -284,7 +289,7 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 				continue
 			}
 			candidate.Key, candidate.Label = current.Key, enrolled.Label
-			if _, err := e.renewPin(s, enrolled, candidate); err != nil {
+			if _, err := e.renewPin(ctx, s, enrolled, candidate); err != nil {
 				return err
 			}
 		}
@@ -309,23 +314,31 @@ func pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
 		if !found || renewed.Path == "" {
 			continue
 		}
-		if detail, ok := local.AccountStatuses[enrolled.AccountID]; ok {
-			local.AccountStatuses[enrolled.AccountID] = detail.WithProbeDetail("codex", ProbePinRenewed)
+		account := local.AccountStatuses[enrolled.AccountID]
+		if renewedPinDetail(account) {
+			account.Reason = PinRenewed
+			local.AccountStatuses[enrolled.AccountID] = account.WithProbeDetail("codex", ProbePinRenewed)
 		}
 		if detail, ok := local.HarnessDetails["codex"]; ok {
-			if detail.State == "ready" || local.AccountStatuses[enrolled.AccountID].Reason == detail.Reason {
+			if renewedPinDetail(detail) && account.Reason == PinRenewed {
+				detail.Reason = PinRenewed
 				detail = detail.WithProbeDetail("codex", ProbePinRenewed)
 			}
 			detail.Attention = append([]AccountAttention(nil), detail.Attention...)
 			for i := range detail.Attention {
-				if detail.Attention[i].AccountID == enrolled.AccountID {
-					detail.Attention[i].ReasonDetail = SafeProbeDetail(detail.Attention[i].Reason, ProbePinRenewed)
+				if detail.Attention[i].AccountID == enrolled.AccountID && SafeProbeDetail(detail.Attention[i].Reason, ProbePinRenewed) != "" {
+					detail.Attention[i].Reason = PinRenewed
+					detail.Attention[i].ReasonDetail = ProbePinRenewed
 				}
 			}
 			local.HarnessDetails["codex"] = detail
 		}
 	}
 	return local
+}
+
+func renewedPinDetail(detail HarnessDetail) bool {
+	return detail.State == "blocked" && SafeProbeDetail(detail.Reason, ProbePinRenewed) != ""
 }
 
 func claudeSharedReason(c RuntimeConfig) string {
