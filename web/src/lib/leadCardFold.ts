@@ -66,3 +66,35 @@ export function useLeadCardFold(project: Ref<string>, viewer: Ref<string>, hasLe
   }, { flush: 'sync' })
   return { ready, collapsed, moving, toggle, settle }
 }
+
+export const LEAD_PANEL_KEY = 'ui.project.lead-panel'
+interface LeadPanelPrefs { collapsed?: boolean }
+
+/**
+ * AEON-1256: a running lead's card collapses to its header row. One choice per person, for every
+ * project; open by default. Like the fold above, `ready` waits for that person's read so the card
+ * opens in its final shape, and `moving` is true only while a person's own toggle animates.
+ */
+export function useLeadPanelCollapse(viewer: Ref<string>) {
+  const pref = usePreference<LeadPanelPrefs>(LEAD_PANEL_KEY)
+  const ready = ref(false), moving = ref(false)
+  let turn = 0
+  watch(viewer, () => {
+    const mine = ++turn
+    ready.value = false; moving.value = false
+    void pref.ready.then(() => { if (mine === turn) ready.value = true })
+  }, { immediate: true, flush: 'sync' })
+
+  const collapsed = computed(() => ready.value && pref.value.value?.collapsed === true)
+  function toggle() {
+    if (!ready.value) return
+    const fold = !collapsed.value
+    pref.save({ collapsed: fold }, 0)
+    // Without a signed-in owner nothing was saved and nothing moves.
+    moving.value = collapsed.value === fold && !reducedMotion()
+  }
+  function settle(event: TransitionEvent) {
+    if (event.target === event.currentTarget && event.propertyName === 'grid-template-rows') moving.value = false
+  }
+  return { ready, collapsed, moving, toggle, settle }
+}

@@ -96,7 +96,7 @@ func TestCatalogAndStrictCapacityScheduleRemainReadable(t *testing.T) {
 
 func TestFix2MixedShapesAndLegacyEnums(t *testing.T) {
 	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	raw := []byte(`{"groups":[{"id":"group","schedule":{"timezone":"Europe/Vienna","week":[]}}],"pins":[{"id":"pin","code":"schedule"}],"accounts":[{"account_id":"` + id + `","unavailable_reasons":["probe"],"code":"vendor","windows":[{"used":42}]}]}`)
+	raw := []byte(`{"groups":[{"id":"group","schedule":{"timezone":"Europe/Vienna","week":[]}}],"pins":[{"id":"pin","code":"schedule"}],"accounts":[{"account_id":"` + id + `","unavailable_reasons":["probe"],"code":"vendor","wait":{"code":"capacity","host_reason":"managed_exit_unconfirmed","run_now_allowed":false},"windows":[{"used":42}]}]}`)
 	body, err := Redact(raw, Policy{}, "", false)
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +113,21 @@ func TestFix2MixedShapesAndLegacyEnums(t *testing.T) {
 	}
 	if account["code"] != "state" || account["unavailable_reasons"].([]any)[0] != "state" || len(account["windows"].([]any)) != 0 {
 		t.Fatalf("legacy enum or quota boundary violated: %s", body)
+	}
+	if account["wait"].(map[string]any)["host_reason"] != nil {
+		t.Fatalf("private host cause escaped account redaction: %s", body)
+	}
+	visible, err := Redact(raw, Policy{id: true}, "", false)
+	if err != nil || strings.Contains(string(visible), `"host_reason"`) || !strings.Contains(string(visible), `"used":42`) {
+		t.Fatalf("usage sharing released host diagnostics or lost quota: %s %v", visible, err)
+	}
+	visible, err = RedactWithControls(raw, Policy{id: true}, Policy{id: true}, nil, "", false)
+	if err != nil || strings.Contains(string(visible), `"host_reason"`) {
+		t.Fatalf("registering account controls released host diagnostics: %s %v", visible, err)
+	}
+	visible, err = RedactWithControls(raw, Policy{id: true}, nil, Policy{id: true}, "", false)
+	if err != nil || !strings.Contains(string(visible), `"host_reason":"managed_exit_unconfirmed"`) {
+		t.Fatalf("owner lost host cause: %s %v", visible, err)
 	}
 }
 

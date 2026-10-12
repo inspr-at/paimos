@@ -25,6 +25,7 @@ const href = (routeKey: string, key: string) => `/p/${encodeURIComponent(routeKe
     <div v-for="s in stations" :key="s.id" class="station" :class="s.tone" :data-station="s.id">
       <span class="st-mark"><AppIcon :name="ICON[s.id]" :size="13" /></span>
       <button type="button" class="st-label" :data-tip="TIP[s.id]" :aria-label="`${s.count ?? 'Unknown'} ${s.label}. Open the ${LEAD_WORDS.l} panel`" @click="emit('open', $event.currentTarget as HTMLElement)"><b>{{ s.count ?? '—' }}</b>{{ s.label }}</button>
+      <!-- AEON-1256: the sub-label line keeps its height when empty, so the line never grows or shrinks. -->
       <span class="st-keys"><TicketPeekLink v-for="k in s.keys" :key="k" class="key" :ticket-key="k" :href="href(routeKey, k)" /><span v-if="s.more">+{{ s.more }}</span></span>
     </div>
   </div>
@@ -41,7 +42,7 @@ const href = (routeKey: string, key: string) => `/p/${encodeURIComponent(routeKe
 .station.hold .st-mark { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1.5px var(--queue-wait-line); color: var(--queue-wait-ink); }
 .st-label { display: flex; align-items: baseline; gap: 8px; padding: 0; border: 0; background: none; color: var(--ink-2); font-size: 12.5px; text-align: left; cursor: pointer; }
 .st-label b { color: var(--ink); font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.st-keys { display: flex; flex-wrap: wrap; gap: 0 8px; font: 500 11.5px/1.6 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.st-keys { display: flex; flex-wrap: wrap; gap: 0 8px; min-height: 1.6em; font: 500 11.5px/1.6 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .key { font-family: var(--mono); font-size: 11.5px; color: var(--teal-ink); text-decoration: none; }
 .key:hover { text-decoration: underline; text-underline-offset: 3px; }
 .line.empty .st-label b, .line.empty .st-keys { visibility: hidden; }

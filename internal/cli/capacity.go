@@ -77,7 +77,9 @@ func (rt *runtime) cmdCapacity() *Command {
 				reason := "no eligible account"
 				if advice.Wait != nil {
 					reason = advice.Wait.Code
-					if advice.Wait.Until != nil {
+					if advice.Wait.HostReason != "" {
+						reason = agentaccounts.ModelWaitReason(advice.Harness, advice.Wait)
+					} else if advice.Wait.Until != nil {
 						reason += " until " + advice.Wait.Until.Format(time.RFC3339)
 					}
 				}
