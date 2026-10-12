@@ -38,6 +38,10 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number;
   const capacity = capacityWorld()
   data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
   await mockAgents(page, data, { capacity })
+  await page.route('**/api/projects/*/harness-sessions/*/tier', route => route.fulfill({ json: {
+    session_id: new URL(route.request().url()).pathname.split('/')[5], revision: 0, active_tier: null, pending: null,
+    read_only: true, read_only_reason: 'This fixture session does not support confirmed tier changes.', reports: [], requests: [],
+  } }))
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions.push('run.create', 'account.read')
@@ -317,8 +321,10 @@ test('Next up and Recent that can’t be read say what is missing and offer Try 
   const queueFail = panel.locator('[data-read-fail="queue"]'), historyFail = panel.locator('[data-read-fail="history"]')
   await expect(queueFail.locator('p')).toHaveText('The queue can’t be read right now, so Next up is unknown.')
   await expect(historyFail.locator('p')).toHaveText('The lead’s history can’t be read right now, so Recent, Gate and Merged are unknown.')
-  await expect(panel.locator('.facts dd.sub').nth(1)).toHaveText('can’t be read')
-  await expect(panel.locator('.facts dd.sub').nth(2)).toHaveText('can’t be read')
+  const gateCount = panel.locator('.lead-content .facts > div').filter({ has: page.getByText('In the gate', { exact: true }) }).locator('dd')
+  const mergedCount = panel.locator('.lead-content .facts > div').filter({ has: page.getByText('Merged today', { exact: true }) }).locator('dd')
+  await expect(gateCount).toHaveText('—')
+  await expect(mergedCount).toHaveText('—')
   for (const raw of ['queue store unavailable', 'event log unavailable', 'Unmocked route']) await expect(panel).not.toContainText(raw)
   await page.screenshot({ path: info.outputPath('1440-light-read-failed.png') })
   // Try again on Next up: while the read is held, the button stays where it is, says the same and refuses a second press.
@@ -339,7 +345,8 @@ test('Next up and Recent that can’t be read say what is missing and offer Try 
   await historyFail.getByRole('button', { name: 'Try again' }).click()
   await expect(historyFail).toHaveCount(0)
   await expect(panel.locator('.log li')).toHaveCount(3)
-  await expect(panel.locator('.facts dd.sub').nth(2)).not.toHaveText('can’t be read')
+  await expect(gateCount).toHaveText('1')
+  await expect(mergedCount).toHaveText('0')
 })
 
 // The design's gate (AEON-1196 check.mjs) on the grouped list: no coloured edge accents, SVG icons

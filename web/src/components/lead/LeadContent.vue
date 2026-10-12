@@ -136,16 +136,18 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
         <div v-if="workerRows.length" class="worker-list" role="table" aria-label="Lead workers">
           <div class="worker-columns" role="row"><span role="columnheader">Session</span><span role="columnheader">Time</span><span role="columnheader">Execution</span><span role="columnheader">Computer</span><span role="columnheader">Beat</span></div>
           <div v-for="row in workerRows" :key="row.worker.session_id ?? `${row.worker.harness}:${row.worker.since}`" class="worker-row" role="row">
+            <div role="cell" aria-colspan="5">
             <button type="button" class="wk worker" :aria-label="`${row.name}: ${row.view?.status.label || row.worker.phase}`" :data-tip="[row.name, row.worker.current_activity?.text || row.worker.activity_note, row.model, row.account, row.view?.session.host].filter(Boolean).join(' · ')" @click="openWorker(row.worker.session_id)">
-              <span class="worker-session" role="cell">
+              <span class="worker-session">
                 <AgentGlyph v-if="row.view" :view="row.view" :size="26" /><span v-else class="vendor"><HarnessMark :harness="row.worker.harness" :size="15" /></span>
                 <span class="wk-t"><span v-clip-tip="row.name" class="worker-name">{{ row.name }}</span><small v-clip-tip>{{ row.worker.current_activity?.text || row.worker.activity_note }}</small></span>
               </span>
-              <span class="size worker-time" role="cell">{{ row.view ? elapsed(row.view.session, now) : `${minutes(row.worker.since)} min` }}</span>
-              <span class="worker-execution" role="cell"><span v-clip-tip>{{ row.model || 'Model not reported' }}</span><small v-clip-tip>{{ row.account }}</small></span>
-              <span v-clip-tip class="worker-computer" role="cell">{{ row.view?.session.host || 'Not reported' }}</span>
-              <span class="size worker-beat" role="cell">{{ row.worker.heartbeat_at ? relativeTime(row.worker.heartbeat_at, { now }) : 'Not reported' }}</span>
+              <span class="size worker-time">{{ row.view ? elapsed(row.view.session, now) : `${minutes(row.worker.since)} min` }}</span>
+              <span class="worker-execution"><span v-clip-tip>{{ row.model || 'Model not reported' }}</span><small v-clip-tip>{{ row.account }}</small></span>
+              <span v-clip-tip class="worker-computer">{{ row.view?.session.host || 'Not reported' }}</span>
+              <span class="size worker-beat">{{ row.worker.heartbeat_at ? relativeTime(row.worker.heartbeat_at, { now }) : 'Not reported' }}</span>
             </button>
+            </div>
           </div>
         </div>
       </section>

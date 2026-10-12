@@ -89,11 +89,13 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await page.goto('/p/PHAROS')
     await expect(start).toHaveAttribute('aria-disabled', 'true')
     await card.getByRole('button', { name: /PHAROS .*: open details/ }).click()
-    const panel = page.getByRole('complementary', { name: `PHAROS ${leadName.toLowerCase()}` }), resume = panel.locator('[data-act="resume"]'), close = panel.getByRole('button', { name: 'Close details' })
-    await expect(resume).toHaveAttribute('aria-disabled', 'true')
-    await expect(panel.locator('.pane-foot')).toContainText(OFF)
+    const panel = page.getByRole('complementary', { name: 'Session details' }), resume = panel.getByRole('button', { name: 'Resume', exact: true }), close = panel.getByRole('button', { name: 'Close session details' })
+    await expect(resume).toBeDisabled()
+    await expect(resume).toHaveAttribute('data-tip', OFF)
+    await resume.hover()
+    await expect(page.locator('.tooltip')).toHaveText(OFF)
     await expectStableControls({ controls: { resume, close }, scrollAreas: { body: panel.locator('.pane-body') }, interactions: [
-      { name: 'Resume cannot submit', run: async () => { await resume.dispatchEvent('click'); await expect(resume).toHaveAttribute('aria-disabled', 'true') } },
+      { name: 'Resume cannot submit', run: async () => { await resume.dispatchEvent('click'); await expect(resume).toBeDisabled() } },
     ] })
     await capture('lead-panel-off')
     expect(mocked.state.calls.filter(c => c.method === 'POST' || c.method === 'PUT')).toEqual([])
