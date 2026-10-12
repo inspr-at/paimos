@@ -680,7 +680,7 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await expect(ticketFact.locator('.key')).toHaveText('PHAROS-11')
     await expect(ticketFact.locator('.faint')).toHaveText('· In progress')
     await expect(ticket).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-    await ticketFact.scrollIntoViewIfNeeded()
+    await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
     if (width === 390) expect((await ticket.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     await expectStableControls({
       controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Session actions' }), tabs: details.getByRole('tablist'), ticket },
@@ -696,6 +696,8 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     })
     await ticket.blur()
     await details.locator('.pane-bar').hover()
+    await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
+    await expect(ticketFact.locator('.faint')).toBeInViewport({ ratio: 1 })
     await page.screenshot({ path: testInfo.outputPath(`details-ticket-${width}-${colorScheme}.png`), fullPage: true })
   })
 }
