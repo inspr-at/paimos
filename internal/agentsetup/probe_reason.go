@@ -26,7 +26,7 @@ const maxProbeDetail = 160
 func SafeProbeDetail(reason, detail string) string {
 	if detail == ProbePinRenewed {
 		switch reason {
-		case "", PinMissing, PinPartial, PinDrifted, PinInvalid, "probe_pending", "starting":
+		case PinMissing, PinPartial, PinDrifted, PinInvalid, "probe_pending", "starting":
 			return detail
 		}
 	}
@@ -72,10 +72,6 @@ func (d HarnessDetail) WithProbeDetail(harness, detail string) HarnessDetail {
 		return d
 	}
 	d.Fix = report.Fix
-	if d.State == "ready" && d.Reason == "" && detail == ProbePinRenewed {
-		d.ReasonDetail = ProbePinRenewed
-		return d
-	}
 	if d.State != "blocked" && d.State != "login_required" {
 		return d
 	}

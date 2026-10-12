@@ -722,7 +722,7 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if current.Path != c.Path || current.Home != c.Home || current.Identity != c.Identity {
 		return e.progress(s), errors.New("the signed-in account or executable differs from the enrolled one; remove this enrollment, then add the harness again")
 	}
-	if hash := s.CodexLauncherHashes[current.Key]; hash != "" && codexLauncherHash(c.Path, config.Workspace) != hash {
+	if hash := s.CodexPins.LauncherHashes[current.Key]; hash != "" && codexLauncherHash(c.Path, config.Workspace) != hash {
 		return e.progress(s), errors.New("the enrolled launcher content changed; use the existing person-approved enrollment flow")
 	}
 	if !pinBlocked(config, enrolled.AccountID) {
@@ -754,6 +754,10 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 		p.Action = "Local attach identity recorded; restart agentd to use it. No enrollment or interpreter pin changed."
 		return p, nil
 	}
+	old := current.Node
+	if current.Harness == "pi" {
+		old = current.PiNode
+	}
 	current.Node, current.PiNode = c.Node, c.PiNode
 	config.Accounts[index] = current
 	if pinBlocked(config, enrolled.AccountID) {
@@ -763,7 +767,6 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if err != nil {
 		return Progress{}, err
 	}
-	old := s.Candidates[candidate].Candidate.Interpreter()
 	event, _ := json.Marshal(struct {
 		Kind      string             `json:"kind"`
 		ID        string             `json:"id"`
@@ -780,10 +783,10 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	c.Key = enrolled.AccountKey
 	recordCodexLauncher(s, c)
 	if c.Harness == "codex" {
-		if s.PinRenewals == nil {
-			s.PinRenewals = map[string]harnesslaunch.Node{}
+		if s.CodexPins.Renewals == nil {
+			s.CodexPins.Renewals = map[string]harnesslaunch.Node{}
 		}
-		s.PinRenewals[c.Key] = c.Node
+		s.CodexPins.Renewals[c.Key] = c.Node
 	}
 	if err := e.save(s, false); err != nil {
 		return Progress{}, err

@@ -85,7 +85,23 @@ func codexUpgradeFixture(t *testing.T) (Discovery, string, harnesslaunch.Node, h
 }
 
 func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
-	for _, scenario := range []string{"automatic", "add harness", "healthy", "launcher content", "launcher path", "home", "identity", "location class", "unsafe candidate", "unsafe old pin", "missing launcher hash", "runtime owner", "revoked"} {
+	for _, pair := range []struct {
+		old, next string
+		same      bool
+	}{
+		{"/opt/homebrew/Cellar/node/26.10.0/bin/node", "/opt/homebrew/Cellar/node/26.11.1/bin/node", true},
+		{"/opt/homebrew/Cellar/node/26.10.0/bin/node", "/opt/homebrew/Cellar/node@24/24.1.0/bin/node", false},
+		{"/opt/homebrew/Cellar/node/26.10.0/bin/node", "/usr/local/Cellar/node/26.11.1/bin/node", false},
+		{"/opt/homebrew/Cellar/node/26.10.0/bin/node", "/nix/store/synthetic-nodejs-26.11.1/bin/node", false},
+		{"/nix/store/old-nodejs-26.10.0/bin/node", "/nix/store/new-nodejs-26.11.1/bin/node", true},
+		{"/unrecognized/bin/node", "/unrecognized/bin/node", false},
+	} {
+		oldClass, nextClass := nodeLocationClass(pair.old), nodeLocationClass(pair.next)
+		if (oldClass != "" && oldClass == nextClass) != pair.same {
+			t.Fatal("interpreter location class crossed its package or prefix fence")
+		}
+	}
+	for _, scenario := range []string{"automatic", "add harness", "healthy", "launcher content", "launcher during probe", "launcher path", "home", "symlink home", "identity", "location class", "unsafe candidate", "unsafe old pin", "missing launcher hash", "runtime owner", "revoked"} {
 		t.Run(scenario, func(t *testing.T) {
 			e, api, local, options, _ := engineFixture(t)
 			defer e.Store.Close()
@@ -116,6 +132,11 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				if scenario == "identity" {
 					return "other@example.test", nil
 				}
+				if scenario == "launcher during probe" {
+					if err := os.WriteFile(launcher, []byte("#!/bin/bash\n# changed during identity read\n"), 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
 				return c.Identity, nil
 			}
 			saved, err := e.load()
@@ -131,6 +152,13 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				before.Accounts[0].Path = next.Path
 			case "home":
 				before.Accounts[0].Home = physicalTemp(t)
+			case "symlink home":
+				if err := os.Remove(c.Home); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(physicalTemp(t), c.Home); err != nil {
+					t.Fatal(err)
+				}
 			case "location class":
 				class := d.nodeClass
 				d.nodeClass = func(path string) string {
@@ -148,7 +176,7 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "missing launcher hash":
-				saved.CodexLauncherHashes = nil
+				saved.CodexPins.LauncherHashes = nil
 			case "runtime owner":
 				before.PrincipalID = testComputer
 			case "revoked":
@@ -197,13 +225,28 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				if !bytes.Equal(raw, after) || journals != 0 {
 					t.Fatal("refused renewal changed the runtime or journal")
 				}
-				if scenario != "identity" && probes != 0 {
+				if scenario != "identity" && scenario != "launcher during probe" && probes != 0 {
 					t.Fatal("renewal probed before its safety fences")
 				}
 				return
 			}
 			if journals != 1 || probes != 1 || api.createCount != creates {
 				t.Fatal("renewal was not exactly one local, identity-checked event")
+			}
+			for _, entry := range entries {
+				if !strings.HasPrefix(entry.Name(), "pin-renewal-") {
+					continue
+				}
+				raw, err := e.Store.Read(entry.Name(), 4096)
+				var event struct {
+					Kind      string `json:"kind"`
+					AccountID string `json:"account_id"`
+					Harness   string `json:"harness"`
+					Old, New  harnesslaunch.Node
+				}
+				if err != nil || json.Unmarshal(raw, &event) != nil || event.Kind != "interpreter_pin_renewed" || event.Old != old || event.New != next || event.AccountID != testAccount || event.Harness != "codex" {
+					t.Fatal("renewal journal lost the approved account or interpreter history", err)
+				}
 			}
 			config, err := ReadRuntimeConfig(e.Store.Path())
 			if err != nil || config.Accounts[0].Node != next || len(AccountPinBlocks(config)) != 0 {

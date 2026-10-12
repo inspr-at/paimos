@@ -344,7 +344,7 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 			// A shell wrapper can answer version/login without starting its
 			// env-node account/read shim. The version-only fallback above then
 			// misses Node. Retry every check through the candidate interpreter.
-			if c.Node.Path == "" && d.NodePath == "" && ctx.Err() == nil {
+			if c.Node.Path == "" && d.NodePath == "" && ctx.Err() == nil && !errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
 				if node, lookupErr := d.LookPath("node"); lookupErr == nil {
 					d.NodePath = node
 					return d.Detect(ctx, harness, accountContext)

@@ -88,36 +88,39 @@ type RuntimeConfig struct {
 }
 
 type snapshot struct {
-	CodexLauncherHashes map[string]string             `json:"codex_launcher_hashes,omitempty"`
-	PinRenewals         map[string]harnesslaunch.Node `json:"pin_renewals,omitempty"`
-	HookHome            string                        `json:"hook_home,omitempty"`
-	HookCapabilities    []hookcap.Capability          `json:"hook_capabilities,omitempty"`
-	LocalAuthKeyID      string                        `json:"local_auth_key_id,omitempty"`
-	BoundComputer       string                        `json:"bound_computer_id,omitempty"`
-	BoundDaemon         string                        `json:"bound_daemon_id,omitempty"`
-	BoundPrincipal      string                        `json:"bound_principal_id,omitempty"`
-	Schema              string                        `json:"schema"`
-	Origin              string                        `json:"origin"`
-	Request             DeviceRequest                 `json:"request"`
-	Device              secret                        `json:"device_secret"`
-	Runtime             secret                        `json:"runtime_secret"`
-	Lifecycle           secret                        `json:"lifecycle_secret"`
-	LifecycleRequestID  string                        `json:"lifecycle_request_id"`
-	Response            DeviceResponse                `json:"response"`
-	View                View                          `json:"view"`
-	Candidates          []LocalCandidate              `json:"candidates"`
-	StartService        bool                          `json:"start_service"`
-	Service             *ServiceReceipt               `json:"service,omitempty"`
-	NodePath            string                        `json:"node_path,omitempty"`
-	ClaudeSDKPath       string                        `json:"claude_sdk_path,omitempty"`
-	ClaudeRepinID       string                        `json:"claude_repin_id,omitempty"`
-	ClaudePinInfo       *ClaudeDependencyInfo         `json:"claude_pin_info,omitempty"`
-	Phase               string                        `json:"phase"`
-	DisconnectAll       bool                          `json:"disconnect_all"`
-	Removed             map[string]bool               `json:"removed"`
-	Cleaned             []string                      `json:"cleaned"`
-	ComputerCleaned     bool                          `json:"computer_cleaned"`
-	NextPoll            time.Time                     `json:"next_poll"`
+	HookHome           string                `json:"hook_home,omitempty"`
+	HookCapabilities   []hookcap.Capability  `json:"hook_capabilities,omitempty"`
+	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
+	BoundComputer      string                `json:"bound_computer_id,omitempty"`
+	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
+	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
+	Schema             string                `json:"schema"`
+	Origin             string                `json:"origin"`
+	Request            DeviceRequest         `json:"request"`
+	Device             secret                `json:"device_secret"`
+	Runtime            secret                `json:"runtime_secret"`
+	Lifecycle          secret                `json:"lifecycle_secret"`
+	LifecycleRequestID string                `json:"lifecycle_request_id"`
+	Response           DeviceResponse        `json:"response"`
+	View               View                  `json:"view"`
+	Candidates         []LocalCandidate      `json:"candidates"`
+	StartService       bool                  `json:"start_service"`
+	Service            *ServiceReceipt       `json:"service,omitempty"`
+	NodePath           string                `json:"node_path,omitempty"`
+	ClaudeSDKPath      string                `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID      string                `json:"claude_repin_id,omitempty"`
+	ClaudePinInfo      *ClaudeDependencyInfo `json:"claude_pin_info,omitempty"`
+	Phase              string                `json:"phase"`
+	DisconnectAll      bool                  `json:"disconnect_all"`
+	Removed            map[string]bool       `json:"removed"`
+	Cleaned            []string              `json:"cleaned"`
+	ComputerCleaned    bool                  `json:"computer_cleaned"`
+	NextPoll           time.Time             `json:"next_poll"`
+	// Local approval and renewal metadata are never part of pairing telemetry.
+	CodexPins struct {
+		LauncherHashes map[string]string             `json:"launcher_hashes,omitempty"`
+		Renewals       map[string]harnesslaunch.Node `json:"renewals,omitempty"`
+	} `json:"codex_pins,omitzero"`
 }
 
 // Only Progress is printable. The snapshot and HTTP request bodies contain

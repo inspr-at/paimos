@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -168,22 +169,24 @@ func recordCodexLauncher(s *snapshot, c Candidate) {
 		return
 	}
 	if hash := codexLauncherHash(c.Path, s.Request.Workspace); hash != "" {
-		if s.CodexLauncherHashes == nil {
-			s.CodexLauncherHashes = map[string]string{}
+		if s.CodexPins.LauncherHashes == nil {
+			s.CodexPins.LauncherHashes = map[string]string{}
 		}
-		s.CodexLauncherHashes[c.Key] = hash
+		s.CodexPins.LauncherHashes[c.Key] = hash
 	}
 }
 
 // Unknown installations have no automatic upgrade authority. Homebrew keeps
 // its prefix and formula fence; Nix keeps its nodejs package class.
+var nodeFormula = regexp.MustCompile(`^node(?:@[0-9]+)?$`)
+
 func nodeLocationClass(path string) string {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return ""
 	}
 	for _, prefix := range []string{"/opt/homebrew", "/usr/local", "/usr/local/Homebrew", "/home/linuxbrew/.linuxbrew"} {
 		parts := strings.Split(strings.TrimPrefix(path, prefix+"/Cellar/"), "/")
-		if strings.HasPrefix(path, prefix+"/Cellar/") && len(parts) == 4 && parts[1] != "" && parts[2] == "bin" && parts[3] == "node" && (parts[0] == "node" || strings.HasPrefix(parts[0], "node@") && len(parts[0]) > 5) {
+		if strings.HasPrefix(path, prefix+"/Cellar/") && len(parts) == 4 && parts[1] != "" && parts[2] == "bin" && parts[3] == "node" && nodeFormula.MatchString(parts[0]) {
 			return prefix + "/Cellar/" + parts[0]
 		}
 	}
@@ -233,7 +236,7 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 				continue
 			}
 			oldClass := d.locationClass(current.Node.Path)
-			hash := s.CodexLauncherHashes[current.Key]
+			hash := s.CodexPins.LauncherHashes[current.Key]
 			if oldClass == "" || hash == "" || codexLauncherHash(current.Path, config.Workspace) != hash {
 				continue
 			}
@@ -244,6 +247,11 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 			if !approved || current.Home != filepath.Join(d.Home, ".codex") {
 				continue
 			}
+			profile, err := openDirectory(current.Home, false, true)
+			if err != nil {
+				continue
+			}
+			profile.Close()
 			retry := d
 			retry.NodePath = ""
 			if d.LookPath == nil && strings.Contains(oldClass, "/Cellar/") {
@@ -285,10 +293,10 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 }
 
 // The event is advisory and never changes readiness or a recovery command.
-// Ready reports use existing reason_detail; blocked siblings retain their
-// existing pin reason in attention_accounts until the daemon's fresh probe.
+// Blocked accounts retain their existing pin reason in attention_accounts
+// until the daemon's fresh probe. Ready reports continue to omit reason_detail.
 func pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
-	if len(s.PinRenewals) == 0 {
+	if len(s.CodexPins.Renewals) == 0 {
 		return local
 	}
 	local.AccountStatuses = maps.Clone(local.AccountStatuses)
@@ -297,7 +305,7 @@ func pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
 		if enrolled.Harness != "codex" || enrolled.State != "connected" || s.Removed[enrolled.AccountID] {
 			continue
 		}
-		renewed, found := s.PinRenewals[enrolled.AccountKey]
+		renewed, found := s.CodexPins.Renewals[enrolled.AccountKey]
 		if !found || renewed.Path == "" {
 			continue
 		}
