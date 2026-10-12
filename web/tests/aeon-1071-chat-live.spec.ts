@@ -405,7 +405,14 @@ test('AEON-1071 every visible chat-native post is recorded on its chat thread', 
   const panel = panelOf(page)
   // The three identical posts render as one row.
   await expect(panel.locator('.msg', { hasText: 'Same check passed.' }).locator('.duplicate')).toHaveText('×3')
-  for (const body of bodies.slice(0, 3)) await expect(panel.locator('.msg', { hasText: body })).toBeInViewport({ ratio: 1 })
+  // The approved split has a narrower detail pane. Each post must be fully
+  // visible when read, including when the thread needs scrolling to show it.
+  for (const body of bodies.slice(0, 3)) {
+    const row = panel.locator('.msg', { hasText: body })
+    await row.scrollIntoViewIfNeeded()
+    await expect(row).toBeInViewport({ ratio: 1 })
+    await page.clock.runFor(2_000)
+  }
   await page.clock.runFor(2_000)
   await expect.poll(() => [...seen].sort()).toEqual(ids)
 })
@@ -414,6 +421,9 @@ test('AEON-1071 every visible chat-native post is recorded on its chat thread', 
 // Send now, but the chat outbox is read only between turns, so the chosen
 // mode was silently dropped. The offered sends follow the next message's transport.
 for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only what its transport consumes ${width}`, async ({ page }, testInfo) => {
+  // FIX7: Ctrl keycaps are wider than Command icons. Exercise CI's keyboard
+  // geometry on every host; the 480 px split otherwise passed only on macOS.
+  await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64' }))
   const { worker, data, chat } = await setup(page, { session: { activity: 'busy' } })
   const final = '3e000000-0000-4000-8000-000000000900'
   chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.'))
@@ -429,6 +439,7 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
   await composer.blur()
   // Managed delivery steers natively.
   await expect(steer).toContainText('Send now')
+  await expect(steer.locator('.keycap').first()).toHaveText('Ctrl')
   await expect(steer).toBeEnabled()
   await expect(note).toHaveCount(0)
   const guard = await controlStability(page, { composer, send, stop })
@@ -442,10 +453,23 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     await expect(send).toContainText('After this turn')
     await expect(stop).toBeEnabled()
   })
+  await guard.check(async () => {
+    await panel.getByRole('button', { name: 'Cancel the reply', exact: true }).click()
+    await expect(panel.locator('.replying')).toHaveCount(0)
+    await expect(steer).toBeEnabled()
+    await expect(note).toHaveCount(0)
+    await expect(composer).toHaveValue('Ship it after the smoke test.')
+  })
+  await guard.check(async () => {
+    await row.hover()
+    await row.getByRole('button', { name: 'Reply', exact: true }).click()
+    await expect(steer).toHaveCount(0)
+    await expect(note).toHaveText('Chat replies arrive between turns')
+  })
   await page.screenshot({ path: testInfo.outputPath(`aeon-1071-chat-reply-${width}.png`) })
   await guard.check(async () => {
     // The steer shortcut sends after the turn, to the chat thread.
-    await composer.press('ControlOrMeta+Enter')
+    await composer.press('Control+Enter')
     await expect.poll(() => outbox.length).toBe(1)
     expect(outbox[0]).toMatchObject({ body: 'Ship it after the smoke test.', reply_to: final })
     // The reply is done: the next message is managed again and may steer.
@@ -453,5 +477,31 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     await expect(note).toHaveCount(0)
   })
   guard.done()
+  if (width === 1440) {
+    // The divider's minimum details width and wide focus preset must also
+    // keep the field and primary actions still when the transport changes.
+    const divider = page.getByRole('separator', { name: 'Resize the session list' })
+    for (const key of ['End', 'Home']) {
+      await divider.press(key)
+      if (key === 'End') await expect(panel).toHaveCSS('width', '380px')
+      else await expect(panel).toHaveCSS('width', /^(?:[7-9]\d{2}|\d{4})px$/)
+      await composer.fill('Keep this draft when cancelling a reply.')
+      await composer.blur()
+      const resized = await controlStability(page, { composer, send, stop })
+      await resized.check(async () => {
+        await row.hover()
+        await row.getByRole('button', { name: 'Reply', exact: true }).click()
+        await expect(steer).toHaveCount(0)
+        await expect(note).toHaveText('Chat replies arrive between turns')
+      })
+      await resized.check(async () => {
+        await panel.getByRole('button', { name: 'Cancel the reply', exact: true }).click()
+        await expect(steer).toBeEnabled()
+        await expect(note).toHaveCount(0)
+        await expect(composer).toHaveValue('Keep this draft when cancelling a reply.')
+      })
+      resized.done()
+    }
+  }
   expect(data.sent.some(message => message.body === 'Ship it after the smoke test.')).toBe(false)
 })

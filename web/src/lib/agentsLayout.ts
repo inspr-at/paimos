@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Agents page layout, per person and across devices (AEON-1210, design AEON-1196 §3.3).
 // The `agents:layout` preference holds the folded project groups (`folded_projects`); the
-// split handle joins it later (`handle`, package P5). A save sends the whole object it read,
-// so one part never drops the other.
-import { computed } from 'vue'
-import { usePreference } from './preferences'
+// split handle shares it (`handle`, package P5). Saves merge into a successfully read
+// object, so one part never drops the other, including after a failed read.
+import { computed, shallowRef, watch } from 'vue'
+import { preferenceOwner, usePreference } from './preferences'
 
 export const AGENTS_LAYOUT_KEY = 'agents:layout'
 export interface AgentsLayout { folded_projects?: string[]; [key: string]: unknown }
@@ -36,9 +36,27 @@ export function nextFolded(current: readonly string[], fold: Iterable<string>, u
 
 export function useAgentsLayout() {
   const pref = usePreference<AgentsLayout>(AGENTS_LAYOUT_KEY)
-  const folded = computed(() => new Set(foldedProjects(pref.value.value)))
+  const pending = shallowRef<{ fold: Set<string>; unfold: Set<string>; known?: ReadonlySet<string> } | null>(null)
+  const folded = computed(() => {
+    const current = foldedProjects(pref.value.value), intent = pending.value
+    return new Set(intent ? nextFolded(current, intent.fold, intent.unfold, intent.known) : current)
+  })
+  // A pending read or fold cannot outlive its person, even on A → B → A.
+  watch(preferenceOwner, () => { pending.value = null }, { flush: 'sync' })
+  async function savePending() {
+    const intent = pending.value
+    if (!intent || !await pref.ensureLoaded() || pending.value !== intent) return
+    pref.save({ ...(pref.value.value ?? {}), folded_projects: nextFolded(foldedProjects(pref.value.value), intent.fold, intent.unfold, intent.known) }, 0)
+    pending.value = null
+  }
+  // Another layout consumer may recover the shared read first.
+  watch(pref.value, () => { if (pending.value) void savePending() })
   function setFolded(fold: Iterable<string>, unfold: Iterable<string>, known?: ReadonlySet<string>) {
-    pref.save({ ...(pref.value.value ?? {}), folded_projects: nextFolded([...folded.value], fold, unfold, known) }, 0)
+    const folds = new Set(pending.value?.fold), unfolds = new Set(pending.value?.unfold)
+    for (const id of unfold) { folds.delete(id); unfolds.add(id) }
+    for (const id of fold) if (PROJECT_ID.test(id)) { unfolds.delete(id); folds.delete(id); folds.add(id) }
+    pending.value = { fold: folds, unfold: unfolds, known: known && new Set(known) }
+    void savePending()
   }
   return { folded, setFolded, get ready() { return pref.ready } }
 }

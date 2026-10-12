@@ -125,20 +125,29 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
       await expect(row.locator('.result')).toHaveText('Ship')
       await expect(menu).toBeVisible()
       if (width <= 390) {
-        // Compact rows (AEON-1211, design AEON-1196): the bin and the menu beside the two lines; the computer is
-        // named and renamed in the details. The opener mark names the command.
+        // Approved compact rows keep removal in Actions, leaving the name its
+        // room. The base capture still checks the former inline bin.
         await expect(host).toBeHidden()
         await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', 'Terminal · ffmpeg')
-        for (const action of [remove, menu]) {
+        if (before) await expect(remove).toBeVisible()
+        else await expect(remove).toBeHidden()
+        for (const action of before ? [remove, menu] : [menu]) {
           const actionBox = (await action.boundingBox())!
           expect(actionBox.width).toBeGreaterThanOrEqual(44)
           expect(actionBox.height).toBeGreaterThanOrEqual(44)
         }
-        await expectStableControls({ controls: { row, remove, menu }, scrollAreas: { row }, interactions: [
+        await expectStableControls({ controls: { row, menu, ...(before ? { remove } : {}) }, scrollAreas: { row }, interactions: [
           { name: 'open row Actions', run: async () => {
             await menu.click()
             await expect(menu).toHaveAttribute('aria-expanded', 'true')
             await expect(page.getByRole('menu', { name: `Actions for ${session.display_label}` })).toBeVisible()
+            if (!before) {
+              const removeItem = page.getByRole('menu', { name: `Actions for ${session.display_label}` }).getByRole('menuitem', { name: 'Remove stale session', exact: true })
+              await expect(removeItem).toBeVisible()
+              const box = (await removeItem.boundingBox())!
+              expect(box.width).toBeGreaterThanOrEqual(44)
+              expect(box.height).toBeGreaterThanOrEqual(44)
+            }
           } },
           { name: 'close row Actions', run: async () => {
             await page.keyboard.press('Escape')
@@ -146,7 +155,12 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
           } },
           { name: 'click Remove and report its failure', run: async () => {
             const count = removed.length
-            await remove.click()
+            if (before) await remove.click()
+            else {
+              await menu.click()
+              await page.getByRole('menu', { name: `Actions for ${session.display_label}` }).getByRole('menuitem', { name: 'Remove stale session', exact: true }).click()
+              await expect(menu).toHaveAttribute('aria-expanded', 'false')
+            }
             await expect.poll(() => removed.length).toBe(count + 1)
             expect(removed.at(-1)).toBe(session.id)
             await expect(page.getByText('Removal unavailable in layout fixture', { exact: true }).last()).toBeVisible()

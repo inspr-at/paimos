@@ -8,6 +8,7 @@ type Json = Record<string, unknown>
 type Owner = { tenant: { id: string }; principal: { id: string } } | null
 interface Preference {
   key: string; owner: string; epoch: number; value: Ref<Json | null>; ready: Promise<void>
+  loaded: boolean; reading?: Promise<boolean>
   timer?: ReturnType<typeof setTimeout>; channel?: MessageChannel; tail?: Promise<void>
 }
 const owner = shallowRef('')
@@ -45,17 +46,21 @@ function capture() {
   const person = owner.value, started = epoch
   return () => !!person && person === owner.value && started === epoch && authenticationCurrent()
 }
-export async function readPreference(key: string): Promise<Json | null> {
+async function readPreferenceResult(key: string): Promise<{ ok: boolean; value: Json | null }> {
   const current = capture(), controller = new AbortController()
-  if (!current()) return null
+  if (!current()) return { ok: false, value: null }
   flights.add(controller)
   try {
     const response = await api(`/preferences/${encodeURIComponent(key)}`, { signal: controller.signal })
-    if (!response.ok || !current()) return null
+    if (!response.ok || !current()) return { ok: false, value: null }
     const body = await response.json()
-    return current() && body?.value && typeof body.value === 'object' && !Array.isArray(body.value) ? body.value : null
-  } catch { return null }
+    if (!current()) return { ok: false, value: null }
+    return { ok: true, value: body?.value && typeof body.value === 'object' && !Array.isArray(body.value) ? body.value : null }
+  } catch { return { ok: false, value: null } }
   finally { flights.delete(controller) }
+}
+export async function readPreference(key: string): Promise<Json | null> {
+  return (await readPreferenceResult(key)).value
 }
 export async function writePreference(key: string, value: Json): Promise<boolean> {
   const current = capture(), controller = new AbortController()
@@ -78,14 +83,25 @@ export async function writePreference(key: string, value: Json): Promise<boolean
   }
 }
 const owned = (pref: Preference) => pref.owner === owner.value && pref.epoch === epoch && !!pref.owner && authenticationCurrent()
+function loadPreference(pref: Preference): Promise<boolean> {
+  if (pref.reading) return pref.reading
+  const read = readPreferenceResult(pref.key).then(result => {
+    if (!owned(pref) || !result.ok) return false
+    pref.loaded = true
+    if (pref.value.value === null) pref.value.value = result.value
+    return true
+  }).finally(() => { if (pref.reading === read) pref.reading = undefined })
+  pref.reading = read
+  return read
+}
 function preference(key: string): Preference | null {
   if (!owner.value) return null
   const scopedKey = `${owner.value}/${key}`
   const existing = cache.get(scopedKey)
   if (existing) return existing
-  const pref: Preference = { key, owner: owner.value, epoch, value: ref(null), ready: Promise.resolve() }
+  const pref: Preference = { key, owner: owner.value, epoch, value: ref(null), ready: Promise.resolve(), loaded: false }
   cache.set(scopedKey, pref)
-  pref.ready = readPreference(key).then(stored => { if (owned(pref) && stored && pref.value.value === null) pref.value.value = stored })
+  pref.ready = loadPreference(pref).then(() => undefined)
   return pref
 }
 // A slow move must finish before its Undo is sent. The tail checks ownership
@@ -115,6 +131,15 @@ export function usePreference<T extends object>(key: string) {
   // Existing consumers follow the new owner with an empty value and a new read;
   // every queued callback retains its original Preference object and epoch.
   const value = computed<T | null>(() => preference(key)?.value.value as T | null ?? null)
+  // Merging shared fields requires a successful read, including an empty value.
+  // A failed read can be retried; concurrent callers share the same owned flight.
+  async function ensureLoaded(): Promise<boolean> {
+    const pref = preference(key)
+    if (!pref) return false
+    await pref.ready
+    if (!owned(pref)) return false
+    return pref.loaded || loadPreference(pref)
+  }
   function save(next: T, delay = 400) {
     const pref = preference(key)
     if (!pref || !owned(pref)) return
@@ -124,7 +149,7 @@ export function usePreference<T extends object>(key: string) {
     if (delay <= 0) { writeSoon(pref); return }
     pref.timer = setTimeout(() => { pref.timer = undefined; if (owned(pref)) persist(pref) }, delay)
   }
-  return { value, get ready() { return preference(key)?.ready ?? Promise.resolve() }, save }
+  return { value, get ready() { return preference(key)?.ready ?? Promise.resolve() }, ensureLoaded, save }
 }
 // Saves again what a preference holds now, where its last write failed.
 export function retryFailedPreferences() {

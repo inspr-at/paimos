@@ -5,7 +5,7 @@ import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
 import { getNode } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Approval, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
@@ -59,7 +59,7 @@ function chatBlur(event: FocusEvent) {
   // compact frame until focus explicitly leaves this panel.
   if (event.relatedTarget instanceof Node && !root.value?.contains(event.relatedTarget)) composing.value = false
 }
-const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
+const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; docked?: boolean; sheet?: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
 const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
 watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
@@ -95,7 +95,7 @@ const managedControls = computed(() => {
   return !!session && session.management_mode === 'managed' && session.advertised_capabilities.includes('managed_control_v1')
 })
 // A watched session is read-only (AEON-258): no controls to collapse.
-const compactControls = computed(() => phone.value && managedControls.value && !reported.value?.watch)
+const compactControls = computed(() => (phone.value || props.sheet) && managedControls.value && !reported.value?.watch)
 const showRecover = computed(() => {
   const session = props.view?.session
   return !!session && !session.archived_at && (can('harness.recover', session.project_id) || can('harness.force_stop', session.project_id))
@@ -186,6 +186,14 @@ watch(() => s.value?.id, async id => {
   thread.value?.scrollTo({ top: 0 })
   await agents.refreshAgentRuns(s.value.agent_principal_id)
 }, { immediate: true })
+watch([() => s.value?.id, () => auth.identity?.tenant.id, () => auth.identity?.principal.id, () => props.sheet], async (_next, previous) => {
+  actionsAnchor.value = null; composing.value = false
+  if (previous?.length && (_next[1] !== previous[1] || _next[2] !== previous[2])) { tab.value = 'overview'; unread.value = 0 }
+  const id = s.value?.id, owner = `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`
+  await nextTick()
+  if (id !== s.value?.id || owner !== `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`) return
+  for (const body of root.value?.querySelectorAll<HTMLElement>('.scroll') ?? []) body.scrollTop = 0
+}, { flush: 'post', immediate: true })
 onMounted(() => { root.value?.focus({ preventScroll: true }); phoneMedia.addEventListener('change', syncPhone) })
 onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 
@@ -203,17 +211,18 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
 <template>
-  <aside ref="root" class="session-panel" :class="{ composing }" aria-label="Session details" tabindex="-1" @focusin="chatFocus" @focusout="chatBlur">
+  <aside ref="root" class="session-panel" :class="{ composing, docked, sheet }" aria-label="Session details" tabindex="-1" @focusin="chatFocus" @focusout="chatBlur">
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
       <div class="head-top">
+        <button v-if="sheet" type="button" class="icon-btn flat sheet-back" aria-label="Back to the list" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="arrow-left" :size="18" /></button>
         <template v-if="view && !loading">
           <AgentGlyph :view="view" :size="36" />
           <h2 class="name">{{ view.name }}</h2>
           <AgentStateLabel :state="view.status.state" :label="view.status.label" />
         </template>
         <span class="spacer" />
-        <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+        <button v-if="!sheet" type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
       </div>
       <div v-if="view && !loading" class="head-sub">
         <TicketPeekLink v-if="view.ticket" class="ticket-detail" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="head-ticket">{{ view.ticket.title }}</span></TicketPeekLink>
@@ -377,6 +386,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 }
 .session-panel:focus-visible { box-shadow: var(--shadow-pop), var(--focus-ring); }
 @media (min-width: 1100px) { .session-panel { width: var(--panel-w); } }
+.session-panel.docked { position: sticky; inset: auto; top: 0; flex: 1 1 0; min-width: 0; width: auto; height: var(--pane-h); overflow: hidden; animation: none; box-shadow: var(--shadow); }
+.session-panel.docked .head-top { padding-right: 48px; }
+.session-panel.sheet { z-index: 40; inset: calc(var(--header-h) + 8px) 16px calc(var(--footer-h) + 8px); width: auto; }
 @media (prefers-reduced-motion: no-preference) {
   .session-panel { animation: panel-in .22s cubic-bezier(.2, .7, .2, 1); }
   @keyframes panel-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
@@ -476,13 +488,15 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 @media (max-width: 720px) {
   /* The sheet follows the visual viewport, so the keyboard never covers the composer. */
   .session-panel { z-index: 40; inset: var(--vv-top, 0px) 0 auto 0; width: auto; height: var(--vv-h, 100dvh); border-radius: 0; border: 0; background: var(--canvas); }
+  .session-panel.sheet { inset: var(--vv-top, 0px) 0 auto 0; width: auto; height: var(--vv-h, 100dvh); padding-bottom: env(safe-area-inset-bottom); }
   .panel-head { padding: calc(6px + env(safe-area-inset-top)) 8px 10px 16px; }
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
-  /* Up to four quiet controls share one row on phones; none shrinks under its label, so one that
-     would wraps to the next row instead of spilling past the sheet's edge (AEON-1062). */
-  .head-actions .btn { flex: 1 1 0; min-width: max-content; min-height: 44px; padding-inline: 4px; }
-  .head-top .icon-btn { width: 40px; height: 40px; }
+  /* Nested action components keep their labels' room and wrap onto the next line.
+     Shrinking their roots hid Remove beyond the sheet's edge. */
+  .head-actions :deep(.btn) { flex: 0 0 auto; min-width: min-content; min-height: 44px; padding-inline: 8px; }
+  .head-actions :deep(.pause-controls) { flex-wrap: wrap; max-width: 100%; }
+  .head-top .icon-btn { width: 44px; height: 44px; }
   /* Compact only after entering the composer. Keep that frame while focus
      moves to thread actions, so focusing Retry/Copy cannot move the click. */
   .session-panel.composing .head-actions,

@@ -42,6 +42,8 @@ import { below, countedLive, shownBelow, treeRows, type TreeRow } from './sessio
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
 import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
+import KeyCap from '../KeyCap.vue'
+import { shortcutCaps, shortcutHint, shortcutKeys } from '../../lib/shortcuts'
 import { vClipTip } from '../../directives/clipTip'
 import { canLaunchLead, leadBand, leadLaunchReason, type ProjectLead } from '../../lib/lead'
 import { openLeadPanel, openStartLead } from '../../lib/leadOverlay'
@@ -66,6 +68,7 @@ const props = defineProps<{
   loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean; filter?: HeadFilter | null
   /** The card head's search (AEON-1209): it filters this list only. */
   query?: string
+  layoutDock?: boolean; pane?: boolean
   /** Each project's lead and queued work (AEON-1210): lead rows, the queue chip and the no-lead line. */
   projects?: AgentProjects | null
   /** Display › Group by and Filter › Project, Harness, Computer; the address carries both. */
@@ -475,7 +478,7 @@ const rollLabel = (row: Row) => row.under.problem ? `${row.under.problem} ${row.
 
 // Tree keys (AEON-784): on a row or its fold button, ← folds an open parent or
 // goes to the parent; → unfolds a folded parent or goes to its first child.
-// Other controls in the row (the tier cell) keep their own arrow keys.
+// Other controls in the row keep their own arrow keys.
 const table = ref<HTMLElement>()
 function focusSession(id: string) {
   void nextTick(() => {
@@ -595,17 +598,17 @@ watch([() => props.selected, () => props.history?.length, () => current.value.le
 }, { immediate: true })
 
 // A row offers only what works for its session (AEON-291). Ended and silent
-// sessions get a bin right in the row: one click, then an undo toast. The
-// overflow holds the rest; it is hidden when the bin already says it all.
+// sessions get a bin in table rows; compact rows keep removal in their one
+// reserved overflow slot, leaving names room.
 const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { grant: grant.value, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
 const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemoval(view)
-// A project's lead also offers its lead panel and Next up (AEON-1210; the design's LeadMenu on the row).
+// A project's lead also offers its lead panel and Next up (AEON-1210).
 const leadProject = (view: SessionView) => view.session.project_id && !view.session.stopped_at && (view.session.role === 'coordinator' || leadOf(view.session.project_id)?.session_id === view.session.id) ? view.session.project_id : null
-// Rows have no Tier cell; the tier lives in the details, and the menu's Change tier… reaches it from the row (AEON-1211).
+// Tier lives in the panel; the row menu also opens its picker.
 const hasMenu = (view: SessionView) => { const m = menuOf(view); return !!leadProject(view) || m.control.length > 0 || m.other.length > 0 || !!m.note || (m.remove && !bin(view)) || !serviceTiers.unavailable(view.session) || serviceTiers.canAsk(view.session) }
-const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
+const menu = ref<{ view: SessionView; anchor: HTMLElement; compact: boolean } | null>(null)
 const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
-function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
+function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement, compact: !!table.value && getComputedStyle(table.value).display === 'block' } }
 function pickTier() {
   const selected = menu.value
   if (!selected) return
@@ -743,6 +746,9 @@ function revealSession(id: string) {
 // It sticks inside the card under the app header; the pills and the column heads stick
 // with it. Sticking adds a hairline shadow only, so its box never changes.
 const search = ref<HTMLInputElement>()
+const searchKeys = computed(() => shortcutKeys('agents.search.focus'))
+const searchCaps = computed(() => searchKeys.value.slice(0, 1).flatMap(shortcutCaps).flat())
+const filterKeys = computed(() => shortcutKeys('agents.filter.add'))
 const draft = ref(props.query ?? '')
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(() => props.query, value => { if ((value ?? '') !== draft.value.trim()) draft.value = value ?? '' })
@@ -871,7 +877,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 </script>
 
 <template>
-  <section ref="root" class="sessions glass-card" aria-labelledby="sessions-title" @pointerenter="pointing = true" @pointerleave="pointing = false">
+  <section ref="root" class="sessions glass-card" :class="{ 'has-layout-dock': layoutDock, pane }" aria-labelledby="sessions-title" @pointerenter="pointing = true" @pointerleave="pointing = false">
     <!-- The card head (AEON-1209, design AEON-1196): the list's own tools. It sticks inside the card,
          at the card's width, under the app header; the pills and the column heads stick with it. -->
     <div ref="stick" class="th-stick" :class="{ stuck }" data-stick>
@@ -889,14 +895,14 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             <AppIcon name="search" :size="14" />
             <input
               id="sessions-q" ref="search" v-model="draft" class="field" type="search" placeholder="Search sessions" maxlength="200" autocomplete="off" spellcheck="false"
-              aria-label="Search sessions in this list" aria-keyshortcuts="F /" data-tip="Filters this list · F or /" @keydown="searchKey"
+              aria-label="Search sessions in this list" :aria-keyshortcuts="searchKeys.join(' ') || undefined" :data-tip="['Filters this list', shortcutHint('agents.search.focus')].filter(Boolean).join(' · ')" @keydown="searchKey"
             />
-            <kbd v-if="!draft" class="keycap sk-cap" aria-hidden="true">F</kbd>
+            <span v-if="!draft && searchCaps.length" class="sk-cap" aria-hidden="true"><KeyCap v-for="key in searchCaps" :key="key" :k="key" /></span>
             <button v-else type="button" class="clear-q" aria-label="Clear the search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
           </label>
           <button
             ref="filterButton" type="button" class="btn facet-btn tool-btn" :class="{ on: !!stateFilter || activeFacets.length > 0 }" aria-haspopup="menu" :aria-expanded="filterMenu?.anchor === filterButton"
-            aria-label="Filter" aria-keyshortcuts="Shift+F" :data-tip="filterMenu ? undefined : 'Add a filter · Shift F'" @click="openFilter"
+            aria-label="Filter" :aria-keyshortcuts="filterKeys.join(' ') || undefined" :data-tip="filterMenu ? undefined : ['Add a filter', shortcutHint('agents.filter.add')].filter(Boolean).join(' · ')" @click="openFilter"
           ><AppIcon name="filter" :size="13" /><span class="bl">Filter</span></button>
           <button
             type="button" class="btn facet-btn tool-btn sort-tool" :class="{ on: !!sort || !!displayWord }" aria-haspopup="dialog" :aria-expanded="!!sortMenu" :aria-disabled="!sortable || undefined"
@@ -1151,7 +1157,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <button v-if="pause.eligible(menu.view.session, 'stop')" type="button" role="menuitem" class="menu-item danger" @click="pause.open('stop', [menu.view.session], menu.anchor); menu = null"><AppIcon name="halt" /><span class="mi-text">Stop now…</span></button>
         <template v-if="menuItems.remove">
           <button type="button" role="menuitem" class="menu-item" @click="pickRemove">
-            <AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quickRemoval(menu.view) ? 'Remove' : 'Remove…' }}</span></span>
+            <AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quickRemoval(menu.view) ? (menu.compact ? 'Remove stale session' : 'Remove') : 'Remove…' }}</span></span>
           </button>
         </template>
         <p v-if="menu.view.session.agent_recovery" class="menu-note">{{ menu.view.session.agent_recovery.detail }}</p>
@@ -1227,6 +1233,14 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
 .lineage .history-toggle { flex-shrink: 0; }
 .sessions { overflow: clip; container: sessions / inline-size; padding: 0; }
+.sessions.has-layout-dock .tree-head { padding-right: 58px; }
+/* In a split the unbordered list pane is the query container: 560 means the handle's
+   560 px, without subtracting this card's two hairlines from the threshold. */
+.sessions.pane { container: none; display: flex; flex-direction: column; height: var(--pane-h); }
+.sessions.pane > * { flex-shrink: 0; }
+.sessions.pane > .table { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; align-content: start; }
+.sessions.pane .th-stick { position: static; }
+.sessions.pane .thead { top: 0; }
 /* The card head (AEON-1209, design AEON-1196): sticky inside the card, at the card's width, right
    under the app header. Sticking adds a hairline shadow only; its box and insides never change. */
 .th-stick { position: sticky; top: 0; z-index: 20; padding: 6px 8px 0; border-radius: var(--radius) var(--radius) 0 0; background: color-mix(in srgb, var(--surface-raised) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: box-shadow .15s ease; }
@@ -1490,13 +1504,19 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .table { grid-template-columns: minmax(108px, 1fr) 84px minmax(96px, 150px) 64px 108px; }
   .thead > .c-host, .execution-host > .c-host, .exec-account { display: none; }
 }
+/* The table already summarizes a lead's workers on line 2. Keep a separate
+   summary track only where it carries an action or a problem/ask below. */
+@container sessions (min-width: 560px) {
+  .kid-count { display: none; }
+  .worker-tools:not(:has(.worker-toggle, .roll)) { display: none; }
+}
 /* Compact rows (AEON-1211): a list under 560 px (the phone, and later the side list) shows each
    session in two lines. Line 1 opens with the 12 px harness mark, names the session and ends with
-   its time; line 2 says what it works on. Execution, Computer and Beat move to the details and the
-   row menu. 16 px per tree level (AEON-784). */
+   its time; line 2 says what it works on. Execution, Computer and Beat move to
+   the details and the row menu. 16 px per tree level (AEON-784). */
 @container sessions (max-width: 559px) {
   /* A 44 px fold column on touch and phones; 28 px beside a fine pointer. */
-  .table { --tree-step: 16px; --fold: 28px; display: block; }
+  .table { --tree-step: 16px; --fold: 28px; --row-action: 28px; display: block; }
   .grp { display: block; }
   .q-l1 { display: none; }
   .q-l2 { display: inline-flex; }
@@ -1508,7 +1528,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
   /* Two 20 + 18 px lines (gap 2) beside the 30 px avatar put its centre, the fold's and the tree's
      joint 29 px below the row's top. */
-  .row { --tree-joint: 29px; display: grid; grid-template-columns: var(--fold) 30px minmax(0, 1fr) auto; column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 29px; display: grid; grid-template-columns: var(--fold) 30px minmax(0, 1fr) var(--row-action); column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .row > .c-agent { grid-column: 1 / 4; display: grid; grid-template-columns: subgrid; align-items: start; row-gap: 0; padding-block: 0; }
   .row.worker .c-agent { padding-left: 0; }
@@ -1532,14 +1552,16 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .worker-tools { grid-column: 2 / -1; grid-row: 2; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; margin: 0 0 0 -4px; padding: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .c-agent > .q-l2 { grid-column: 3; grid-row: 2; justify-self: start; margin-top: 2px; }
-  /* Beside the two lines sit ⋯ and, on an ended or silent row, its one-tap bin (AEON-291), centred
-     on them. Pause, Resume and Change tier are in the menu. */
-  .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - 10px - 22px); padding: 0; }
-  .act, .c-actions > .pause-controls { display: none; }
-  .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
+  /* One slot stays reserved even while its menu trigger is hidden. Remove,
+     Pause, Resume and Change tier stay available in that menu. */
+  .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - 10px - var(--row-action) / 2); padding: 0; }
+  .act, .c-actions > .pause-controls, .c-actions > .bin { display: none; }
+  .row > .c-actions .more { width: var(--row-action); height: var(--row-action); opacity: 0; }
+  .row:is(:hover, :focus-within) > .c-actions .more, .row > .c-actions .more[aria-expanded="true"] { opacity: 1; }
 }
 @media (pointer: coarse), (max-width: 720px) {
-  .table { --fold: 44px; }
+  .table { --fold: 44px; --row-action: 44px; }
+  .row > .c-actions .more { opacity: 1; }
   /* The Ended toggle is a 44 px target on touch, in a header of its own height. */
   .group-row { height: 44px; margin-block: 4px 0; }
   .group-toggle { height: 44px; }
