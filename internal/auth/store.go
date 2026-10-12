@@ -349,6 +349,7 @@ func (m *Module) authenticateSession(ctx context.Context, raw []byte) (tenant.Pr
 		// activity timestamp is recent, and never revive an expired session.
 		// A concurrent renewal/authority write owns the row: skip it instead
 		// of queueing parallel requests, and retry on the next request.
+		// One statement timestamp keeps activity and expiry exactly 30 days apart.
 		_, err := tx.Exec(ctx, `UPDATE sessions
 			SET last_seen_at = statement_timestamp(), expires_at = statement_timestamp() + interval '30 days'
 			WHERE id IN (SELECT id FROM sessions
