@@ -24,7 +24,13 @@ test('native Go enumeration reports package failure output and retains a failing
   const cli=fileURLToPath(new URL('../../scripts/test-tiers/cli.mjs',import.meta.url))
   writeFileSync(resolve(directory,'go'),`#!${process.execPath}
 const fs=require('node:fs');
-if(process.argv.includes('run')) {
+// Cached discovery probes identity before it enumerates native tests. Keep
+// those reads successful so this fixture fails at enumeration, as asserted.
+if(process.argv.includes('version')) {
+  console.log('go version native-enumeration-fixture');
+} else if(process.argv.includes('env')) {
+  console.log(JSON.stringify({GOOS:'fixture',GOARCH:'fixture',GOFLAGS:'',CGO_ENABLED:'0',GOVERSION:'fixture',GOEXPERIMENT:'',GOWORK:'off'}));
+} else if(process.argv.includes('run')) {
   const tests=JSON.parse(fs.readFileSync(${JSON.stringify(manifest)},'utf8')).tests.map(row=>({...row,active:true}));
   console.log(JSON.stringify({tests,imports:{}}));
 } else {
