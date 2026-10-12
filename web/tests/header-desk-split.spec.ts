@@ -426,7 +426,8 @@ const phoneFit = (page: Page) => page.locator('.app-header').evaluate(header => 
   const outside = controls.filter(el => { const r = el.getBoundingClientRect(); return r.left < start - 0.5 || r.right > end + 0.5 }).map(name)
   const parts = [...header.children].filter(child => child.getBoundingClientRect().width > 1).map(child => `${child.className.split(' ')[0]} ${Math.round(child.getBoundingClientRect().width)}`)
   const room = `header ${Math.round(own.width)} px: ${parts.join(', ')}`
-  return { keys: keys.map(key => key.textContent!.trim()), cut, outside, header: header.scrollWidth - header.clientWidth, page: document.documentElement.scrollWidth - innerWidth, away: header.dataset.away ?? '', room }
+  const empty = header.querySelector<HTMLElement>('.crumbs')?.dataset.empty !== undefined
+  return { keys: keys.map(key => key.textContent!.trim()), cut, outside, header: header.scrollWidth - header.clientWidth, page: document.documentElement.scrollWidth - innerWidth, away: header.dataset.away ?? '', room, empty }
 })
 for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`at ${width} ${theme} the header shows a key whole or not at all and fits the window (AEON-1240)`, async ({ page }, testInfo) => {
@@ -448,8 +449,9 @@ for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of [
       expect(fit.page, `${where}: page scrolls sideways`).toBeLessThanOrEqual(0)
       // The key leaves only when it can't show whole: from 390 the project's chip fits once the Desk's chevron is aside.
       if (width >= 390 && (target.slug === 'settings' || target.slug === 'delivery')) expect(fit.keys, where).toContain('PHAROS')
-      // A key that left takes no room: what stepped aside for it (the moon) comes back.
-      if (!fit.keys.length && ['settings', 'delivery', 'ticket'].includes(target.slug)) expect(fit.away, where).not.toContain('moon')
+      // A key that left takes no room: with the trail empty, what stepped aside for it (the moon) comes back.
+      if (fit.empty) expect(fit.away, where).not.toContain('moon')
+      if (width === 320 && (target.slug === 'settings' || target.slug === 'ticket')) expect(fit.empty, `${where}: the key left`).toBe(true)
       const key = page.locator('.app-header .crumbs').locator('.key-badge, .mono-crumb').filter({ visible: true })
       const controls = { places: places(page), search: page.getByRole('button', { name: 'Search everything' }), account: page.locator('.app-header .account'), ...(fit.keys.length ? { key: key.first() } : {}) }
       await expectStableControls({ controls, interactions: [
