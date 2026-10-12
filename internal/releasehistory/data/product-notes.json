@@ -6577,6 +6577,39 @@
           "group": "fixes"
         }
       ]
+    },
+    "261012211543.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 131,
+      "snapshot_sha256": "efc37cfe0415c3527873d648368a3ab511a83a1ffa527c3054c4acc0a4ff0ab5",
+      "captured_at": "2026-10-12T21:16:39Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1251",
+          "pill_en": "Model starts unblocked",
+          "pill_de": "Modellstarts wieder frei",
+          "benefit_en": "Routines and starts from PAIMOS pick an available model again instead of waiting with no reason.",
+          "benefit_de": "Routinen und Starts aus PAIMOS wählen wieder ein verfügbares Modell, statt ohne Grund zu warten.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1252",
+          "pill_en": "Clear GitHub access errors",
+          "pill_de": "Klare GitHub-Zugriffsfehler",
+          "benefit_en": "When GitHub refuses access to Actions, the delivery history names the missing permission and stops retrying every few seconds.",
+          "benefit_de": "Verweigert GitHub den Zugriff auf Actions, nennt die Lieferhistorie die fehlende Berechtigung und versucht es nicht mehr alle paar Sekunden erneut.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1256",
+          "pill_en": "Collapsible lead panel",
+          "pill_de": "Einklappbares Lead-Panel",
+          "benefit_en": "The lead panel on a project page can be collapsed to one line, and its numbers no longer make the page jump.",
+          "benefit_de": "Das Lead-Panel auf einer Projektseite lässt sich auf eine Zeile einklappen, und seine Zahlen lassen die Seite nicht mehr springen.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
