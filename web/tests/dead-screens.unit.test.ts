@@ -103,7 +103,10 @@ it('Check computers opens the real Computers settings section without the retire
     'vue-router': { useRouter: () => ({ push }) },
     '../../lib/authz': { can: () => true },
     '../../lib/lead': { LEAD_WORDS: { l: 'lead' }, canLaunchLead: () => true },
-    '../../lib/leadCardFold': { useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false) }) },
+    '../../lib/leadCardFold': {
+      useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false) }),
+      useLeadPanelCollapse: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false), toggle() {}, settle() {} }),
+    },
     '../../lib/leadOverlay': {}, '../../lib/toast': {},
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
     '../../lib/useLeadSummary': { useLeadSummary: () => ({

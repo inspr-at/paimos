@@ -87,7 +87,10 @@ it('an unmanaged lead card offers cooperative pause and hides restart controls a
       '../../lib/projectSettings': projectSettings,
       '../../lib/authz': { can: () => true }, 'vue-router': { useRouter: () => ({}) },
       '../../lib/lead': { ...leadAPI, canPause: () => true, canResume: () => true, LEAD_WORDS: { l: 'lead' }, unmanagedLeadCopy: 'Unmanaged: steering limited to messages and pause' },
-      '../../lib/leadCardFold': { useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false) }) },
+      '../../lib/leadCardFold': {
+        useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false) }),
+        useLeadPanelCollapse: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false), toggle() {}, settle() {} }),
+      },
       '../../lib/leadOverlay': {}, '../../lib/toast': {}, '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
       '../../lib/useLeadSummary': { useLeadSummary: () => summary },
       '../../stores/projectLeads': { useProjectLeads: () => ({ views: { project: { principal: { session: 'running', management: 'unmanaged' } } }, busy: {}, load() {} }) },
