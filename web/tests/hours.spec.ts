@@ -231,7 +231,8 @@ test('a changed period refuses the approval and says so', async ({ page }) => {
 test('a running period can be reviewed from the week strip', async ({ page }) => {
   await setup(page)
   await openWeek(page)
-  await page.getByRole('button', { name: 'Review' }).click()
+  // AEON-1214's header preview has its own descriptive accessible name.
+  await page.getByRole('button', { name: 'Review', exact: true }).click()
   const panel = page.getByRole('complementary', { name: 'Period review' })
   await expect(panel.getByText('Running', { exact: true })).toBeVisible()
   await expect(panel.getByText('Still running: approving closes it now.')).toBeVisible()

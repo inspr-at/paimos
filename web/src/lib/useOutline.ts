@@ -380,7 +380,14 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   async function readLive(query: ListQuery, purpose: LiveReadPurpose) {
     const run = generation, sent = rowStore.mark()
     const page = await (options.fetchList ?? listNodes)(query)
-    if (!matchMode.value || run !== generation || purpose === 'presence') return page
+    if (run !== generation || purpose === 'presence') return page
+    if (!matchMode.value) {
+      // Aggregate hints can also name descendants held by another view. A
+      // lazy tree offers additions only in levels it has loaded; opening an
+      // untouched branch will read its children then. Keep known rows so a
+      // move can still be classified against their previous placement.
+      return { ...page, items: page.items.filter(row => lazyNodes.has(row.id) || row.parent_id === projectId.value || !!row.parent_id && blocks.has(row.parent_id)) }
+    }
     // Ancestors place filtered matches even when they do not match themselves.
     // Read them afresh on relevant events; no project-lifetime cache of values.
     const ids = query.ids ?? []
