@@ -130,6 +130,13 @@ func TestRoutineClaimReplayRetainsBindingAndLiveGuards(t *testing.T) {
 	s25Request(t, d, d.agentRun, "claim", body, g, g.DaemonGeneration, 200, "")
 	var sibling string
 	must(t, d.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,'running' FROM agent_runs WHERE id=$1 RETURNING id::text`, d.agentRun).Scan(&sibling))
+	// An external assignment has no managed account binding and consumes no
+	// host slot. Binding it to the account must restore the live host refusal.
+	s25Request(t, d, d.agentRun, "claim", body, g, g.DaemonGeneration, 200, "")
+	// Keep the account ceiling open so only the one-agent host ceiling can
+	// produce the expected refusal, rather than account-level parallelism.
+	d.exec(`UPDATE agent_accounts SET max_parallel_runs=2 WHERE id=$1`, g.AccountID)
+	d.exec(`UPDATE agent_runs SET account_id=$2 WHERE id=$1`, sibling, g.AccountID)
 	s25Request(t, d, d.agentRun, "claim", body, g, g.DaemonGeneration, 409, "host_maximum_agents")
 	d.exec(`UPDATE agent_runs SET status='cancelled' WHERE id=$1`, sibling)
 	d.exec(`UPDATE routine_launch_intents SET binding=jsonb_set(binding,'{account_id}',to_jsonb($2::text)) WHERE id=$1`, g.LaunchID, d.project)
