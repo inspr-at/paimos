@@ -6076,16 +6076,16 @@
     "261012145858.0.0": {
       "release_channel": "stable",
       "release_sequence": 130,
-      "snapshot_sha256": "1f7d1e489402a2ff78a237ba5a1aa25398a0ac1994baacf8dc7f1d32b280c9ed",
-      "captured_at": "2026-10-12T15:01:18Z",
+      "snapshot_sha256": "37811b62bbd6477933585e81f78275e7a2d31714f0a284bda57f3d8dee9bff10",
+      "captured_at": "2026-10-12T15:21:46Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-1091",
           "pill_en": "Content needs no release",
           "pill_de": "Inhalte ohne Release",
-          "benefit_en": "Content you create with the tool counts as finished the day after it is done, without a software release.",
-          "benefit_de": "Inhalte, die mit dem Werkzeug entstehen, gelten am Tag nach Fertigstellung als abgenommen, ohne Software-Release.",
+          "benefit_en": "Tickets marked “No release needed” can be accepted without a software release after the configured waiting time (30 days by default), unless an objection or a human check stops it.",
+          "benefit_de": "Als „Kein Release nötig“ markierte Tickets können nach der eingestellten Wartezeit (standardmäßig 30 Tage) ohne Software-Release abgenommen werden, sofern kein Einwand und keine menschliche Prüfung entgegensteht.",
           "group": "features"
         },
         {
@@ -6114,18 +6114,18 @@
         },
         {
           "key": "AEON-1140",
-          "pill_en": "One-step lead adoption",
-          "pill_de": "Lead-Übernahme in einem Schritt",
-          "benefit_en": "Adopting a running session as project lead works with the session's own files, and an empty list explains what is missing.",
-          "benefit_de": "Eine laufende Sitzung lässt sich mit ihren eigenen Dateien als Projektleitung übernehmen, und eine leere Liste erklärt, was fehlt.",
+          "pill_en": "Simpler lead adoption",
+          "pill_de": "Einfachere Lead-Übernahme",
+          "benefit_en": "After you confirm the adoption, the running session completes its lead claim on its own; an empty candidate list explains what is missing.",
+          "benefit_de": "Nach deiner Bestätigung schließt die laufende Sitzung ihren Lead-Anspruch selbst ab; eine leere Kandidatenliste erklärt, was fehlt.",
           "group": "fixes"
         },
         {
           "key": "AEON-1141",
-          "pill_en": "Every subagent visible",
-          "pill_de": "Jeder Subagent sichtbar",
-          "benefit_en": "Every subagent an agent starts shows up on Agents under its parent, without anyone registering it by hand.",
-          "benefit_de": "Jeder Subagent, den ein Agent startet, erscheint unter Agents bei seinem Elternagenten, ohne dass ihn jemand von Hand anmeldet.",
+          "pill_en": "Claude subagents visible",
+          "pill_de": "Claude-Subagenten sichtbar",
+          "benefit_en": "With the PAIMOS hooks installed, registered Claude Code sessions report their subagents automatically under their parent on Agents.",
+          "benefit_de": "Mit den PAIMOS-Hooks melden registrierte Claude-Code-Sitzungen ihre Subagenten automatisch unter ihrer Elternsitzung in Agents.",
           "group": "features"
         },
         {
@@ -6148,24 +6148,24 @@
           "key": "AEON-1144",
           "pill_en": "Models that scale",
           "pill_de": "Modelle mit Überblick",
-          "benefit_en": "Models stays calm with dozens of models: grouped by provider, with visible fallbacks and a one-click cleanup of outdated versions.",
-          "benefit_de": "Die Modellseite bleibt auch mit vielen Modellen übersichtlich: nach Anbieter gruppiert, mit sichtbaren Ausweichmodellen und einfachem Aufräumen veralteter Versionen.",
+          "benefit_en": "Models stays calm with dozens of models: grouped by provider, with visible fallbacks and a reviewed cleanup of outdated versions.",
+          "benefit_de": "Die Modellseite bleibt auch mit vielen Modellen übersichtlich: nach Anbieter gruppiert, mit sichtbaren Ausweichmodellen und einem geprüften Aufräumen veralteter Versionen.",
           "group": "features"
         },
         {
           "key": "AEON-1146",
-          "pill_en": "Models actually run",
-          "pill_de": "Modelle laufen wieder",
-          "benefit_en": "PAIMOS only holds a model back when its account is really at its limit, and says why in plain words.",
-          "benefit_de": "PAIMOS hält ein Modell nur zurück, wenn sein Konto wirklich am Limit ist, und sagt verständlich warum.",
+          "pill_en": "Clearer model waits",
+          "pill_de": "Klarere Modell-Wartegründe",
+          "benefit_en": "Missing quota readings no longer count as proof that an account is used up, and PAIMOS explains the other reasons a model has to wait.",
+          "benefit_de": "Fehlende Kontingentdaten gelten nicht mehr als Nachweis, dass ein Konto erschöpft ist, und PAIMOS erklärt die anderen Gründe, warum ein Modell warten muss.",
           "group": "fixes"
         },
         {
           "key": "AEON-1147",
           "pill_en": "Honest release reminders",
           "pill_de": "Ehrliche Release-Hinweise",
-          "benefit_en": "Needs attention only lists tickets that were really merged but never released, explained in plain words.",
-          "benefit_de": "„Braucht Aufmerksamkeit“ zeigt nur Tickets, die wirklich gemergt, aber nie released wurden, in klaren Worten.",
+          "benefit_en": "New release reminders in Needs attention appear only with recorded merge evidence and in projects that use releases.",
+          "benefit_de": "Neue Release-Hinweise in „Braucht Aufmerksamkeit“ erscheinen nur mit nachgewiesenem Merge und in Projekten, die Releases verwenden.",
           "group": "fixes"
         },
         {
@@ -6188,16 +6188,16 @@
           "key": "AEON-1151",
           "pill_en": "Models from the source",
           "pill_de": "Modelle aus der Quelle",
-          "benefit_en": "Models and their thinking levels come straight from the providers, with the source shown, so nothing is hand-typed or missing.",
-          "benefit_de": "Modelle und ihre Denkstufen kommen direkt von den Anbietern, mit sichtbarer Quelle, damit nichts von Hand eingetragen wird oder fehlt.",
+          "benefit_en": "Provider and harness catalogs supply model facts together with their source; values nobody reports stay marked unknown, and you can still add entries by hand.",
+          "benefit_de": "Anbieter- und Harness-Kataloge liefern Modelldaten samt Quelle; Werte, die niemand meldet, bleiben als unbekannt markiert, und Einträge von Hand bleiben möglich.",
           "group": "features"
         },
         {
           "key": "AEON-1152",
           "pill_en": "Harnesses report models",
           "pill_de": "Harnesse melden Modelle",
-          "benefit_en": "Each coding tool reports which models and levels it can really run, so PAIMOS never offers one it can't start.",
-          "benefit_de": "Jedes Coding-Tool meldet, welche Modelle und Stufen es wirklich ausführen kann, damit PAIMOS nie etwas anbietet, das nicht startet.",
+          "benefit_en": "Codex, Claude Code, Cursor, OpenCode and pi can report their model catalogs, including native thinking levels where the tool exposes them.",
+          "benefit_de": "Codex, Claude Code, Cursor, OpenCode und pi können ihre Modellkataloge melden, samt nativer Denkstufen, wo das Werkzeug sie bereitstellt.",
           "group": "features"
         },
         {
@@ -6212,16 +6212,16 @@
           "key": "AEON-1157",
           "pill_en": "One model choice everywhere",
           "pill_de": "Eine Modellwahl überall",
-          "benefit_en": "Every agent start, review and CLI call picks its model the way the Models page shows it, and an unknown quota never blocks work.",
-          "benefit_de": "Jeder Agentenstart, jedes Review und jeder CLI-Aufruf wählt das Modell so, wie es die Modellseite zeigt, und ein unbekanntes Kontingent blockiert nie.",
+          "benefit_en": "Automatic model choices for starts, reviews and CLI roles follow the orders on Models; accounts with a saved quota floor can still wait for a reading.",
+          "benefit_de": "Automatische Modellentscheidungen für Starts, Reviews und CLI-Rollen folgen den Reihenfolgen der Modellseite; Konten mit gespeicherter Kontingent-Untergrenze können weiterhin auf einen Messwert warten.",
           "group": "features"
         },
         {
           "key": "AEON-1158",
           "pill_en": "Old model rules migrated",
           "pill_de": "Alte Modellregeln übernommen",
-          "benefit_en": "Saved model orders, holds and rules carry over unchanged to the new Models page, with a record of everything that moved.",
-          "benefit_de": "Gespeicherte Modell-Reihenfolgen, Sperren und Regeln gehen unverändert auf die neue Modellseite über, mit Nachweis über alles Verschobene.",
+          "benefit_en": "Saved model orders, holds and rules move into the new Models settings, with an audit record of the conversion; role-specific holds become pauses.",
+          "benefit_de": "Gespeicherte Modell-Reihenfolgen, Sperren und Regeln wandern in die neuen Einstellungen der Modellseite, mit einem Nachweis der Umwandlung; rollenbezogene Sperren werden zu Pausen.",
           "group": "features"
         },
         {
@@ -6380,8 +6380,8 @@
           "key": "AEON-1191",
           "pill_en": "Routine status shown",
           "pill_de": "Routinestatus auf einen Blick",
-          "benefit_en": "Routines show their last run, their rules before the first save, and ask for consent on the Decision Desk.",
-          "benefit_de": "Routinen zeigen ihren letzten Lauf, ihre Regeln schon vor dem ersten Speichern und fragen auf dem Entscheidungs-Desk nach Zustimmung.",
+          "benefit_en": "Routines show their last run and, once saved, the rules that apply to them; consent requests appear on the Decision Desk.",
+          "benefit_de": "Routinen zeigen ihren letzten Lauf und nach dem Speichern die für sie geltenden Regeln; Zustimmungsanfragen erscheinen auf dem Entscheidungs-Desk.",
           "group": "features"
         },
         {
@@ -6436,8 +6436,8 @@
           "key": "AEON-1209",
           "pill_en": "Calm Agents header",
           "pill_de": "Ruhiger Agenten-Kopf",
-          "benefit_en": "The Agents page starts with one tidy row of actions and capacity, and the session list keeps its search and filters in view.",
-          "benefit_de": "Die Agentenseite beginnt mit einer aufgeräumten Zeile für Aktionen und Kapazität, und die Sitzungsliste behält Suche und Filter im Blick.",
+          "benefit_en": "The Agents page starts with a tidy action header and its own capacity row, while session search and filters stay in view.",
+          "benefit_de": "Die Agentenseite beginnt mit einer aufgeräumten Kopfzeile für Aktionen und einer eigenen Kapazitätszeile; Suche und Filter der Sitzungsliste bleiben im Blick.",
           "group": "features"
         },
         {
@@ -6498,10 +6498,10 @@
         },
         {
           "key": "AEON-1219",
-          "pill_en": "Keys work everywhere",
-          "pill_de": "Tasten überall gleich",
-          "benefit_en": "Keyboard shortcuts come from one place, so the same key does the same thing on every page and works on German and English keyboards.",
-          "benefit_de": "Tastenkürzel kommen aus einer Stelle: dieselbe Taste macht überall dasselbe und funktioniert auf deutscher und englischer Tastatur.",
+          "pill_en": "Shared navigation keys",
+          "pill_de": "Gemeinsame Navigationstasten",
+          "benefit_en": "Global navigation and Agents shortcuts come from one shared list and work on German and English keyboards; page-specific keys keep their own actions.",
+          "benefit_de": "Globale Navigation und Agents-Tastenkürzel stammen aus einer gemeinsamen Liste und funktionieren mit deutscher und englischer Tastatur; seitenspezifische Tasten behalten ihre eigenen Aktionen.",
           "group": "features"
         },
         {
@@ -6532,16 +6532,16 @@
           "key": "AEON-1234",
           "pill_en": "History fills itself",
           "pill_de": "Historie füllt sich selbst",
-          "benefit_en": "After you link a repository, its delivery history fills in by itself, and if GitHub permissions are missing you are told exactly what is missing.",
-          "benefit_de": "Nach dem Verknüpfen eines Repositorys füllt sich die Lieferhistorie von selbst, und fehlen GitHub-Berechtigungen, siehst du genau welche.",
+          "benefit_en": "After you link a repository, its delivery history fills automatically, and missing GitHub Actions read access is named explicitly.",
+          "benefit_de": "Nach dem Verknüpfen eines Repositorys füllt sich die Lieferhistorie automatisch; fehlender Lesezugriff auf GitHub Actions wird ausdrücklich benannt.",
           "group": "features"
         },
         {
           "key": "AEON-1235",
           "pill_en": "New projects, guided",
           "pill_de": "Neue Projekte, geführt",
-          "benefit_en": "Creating a project suggests a free key, checks it right away and leads you straight to linking its repository.",
-          "benefit_de": "Beim Anlegen eines Projekts wird ein freier Schlüssel vorgeschlagen, sofort geprüft, und du kommst direkt zum Verknüpfen des Repositorys.",
+          "benefit_en": "Creating a project suggests a key from its name, checks its format right away and then opens Settings with linking a repository as the next step.",
+          "benefit_de": "Beim Anlegen eines Projekts wird aus dem Namen ein Schlüssel vorgeschlagen und sofort auf das Format geprüft; danach öffnen sich die Einstellungen mit dem Verknüpfen eines Repositorys als nächstem Schritt.",
           "group": "features"
         },
         {
