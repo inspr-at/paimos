@@ -135,7 +135,6 @@
 /* An older version is shown for what it is: its line always runs the newest version, so it is never picked. */
 .mdl-pop .opt.is-old { cursor: default; }
 .mdl-pop .opt.is-old .t { color: var(--ink-2); }
-.mdl-pop .opt.is-old .lvc, .mdl-pop .opt.is-old .lvc:hover { cursor: default; color: var(--ink-3); background: transparent; }
 .mdl-pop .opt.more { grid-template-columns: 22px minmax(0, 1fr) 16px; min-height: 36px; color: var(--ink-2); }
 .mdl-pop .opt.more .t { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
 .mdl-pop .opt.more svg { color: var(--ink-3); }

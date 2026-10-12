@@ -115,3 +115,7 @@ const second = (entry: ModelEntry) => entry.replacedBy
   <p class="sr-only" aria-live="polite">{{ live }}</p>
   <div v-if="lock" class="pm-lock"><span>Members can’t change this</span><label class="switch"><input type="checkbox" role="switch" :checked="locked" @change="emit('lock', ($event.target as HTMLInputElement).checked)" /><span class="sr-only">Lock for everyone</span></label></div>
 </template>
+<style scoped>
+/* An older version's levels are only read (AEON-1240): no pointer, no hover fill. */
+.opt.is-old .lvc, .opt.is-old .lvc:hover { cursor: default; color: var(--ink-3); background: transparent; }
+</style>

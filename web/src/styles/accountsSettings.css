@@ -72,9 +72,6 @@
 .lim-sec .use[aria-checked="true"] .thumb { transform: translateX(14px); }
 .lim-sec .use:disabled .track, .lim-sec .use[aria-disabled="true"] .track { opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .lim-sec .track, .lim-sec .thumb { transition: none; } }
-/* An older rule or a hold keeps the docked panel's full width for its words, so "Set by you · at most 20 % a day"
-   reads on one line, and its Remove or End now sits under them (AEON-1240); each still reserves its tallest state. */
-@container lim (max-width: 600px) { .lim-sec .lim.legacy { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim.legacy > .act { justify-self: start; justify-items: start; } }
 /* The docked panel keeps controls on the right; a phone sheet or a very narrow panel stacks them (design §phone). */
 @container lim (max-width: 320px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn, .lim-sec .lim > .act { justify-self: start; } .lim-sec .act { justify-items: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
 @media (max-width: 600px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn, .lim-sec .lim > .act { justify-self: start; } .lim-sec .act { justify-items: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
