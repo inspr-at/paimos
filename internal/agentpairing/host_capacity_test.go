@@ -9,13 +9,110 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// Risk: a stale external assignment consumes a managed host slot forever after
+// AEON-1103, or excluding it also frees a daemon-owned unconfirmed process.
+func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
+	schedule := capacity.DefaultSchedule("UTC")
+	schedule.Reserve = capacity.ReserveOff
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": e.AccountID, "schedule": schedule}, true, "", 204)
+	policy := hostcapacity.Default()
+	policy.MaximumAgents = 1
+	f.call("PUT", "/api/agent-pairing/computers/"+*v.ComputerID+"/capacity", map[string]any{"expected_revision": v.Revision, "policy": policy}, true, "", 200)
+	seed := func(fn func(pgx.Tx) error) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, fn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var external string
+	seed(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,started_at,ended_at,trace)
+ SELECT tenant_id,work_order_id,agent_principal_id,$2::uuid,'ownership_lost',created_at,clock_timestamp(),
+ '{"worker_assignment":{"state":"launched"},"work_lifecycle_release":{"exit_unconfirmed":true}}'
+ FROM agent_runs WHERE id=$1 RETURNING id::text`, *e.VerificationRunID, f.profiles["codex"]).Scan(&external)
+	})
+	readHost := func(running int, reason string) {
+		t.Helper()
+		var got agentpairing.View
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &got)
+		if got.HostCapacity.Running != running || got.HostCapacity.Reason != reason {
+			t.Fatalf("host running=%d reason=%q, want %d/%q", got.HostCapacity.Running, got.HostCapacity.Reason, running, reason)
+		}
+	}
+	// 129 did not count this terminal assignment; 130's retained marker did.
+	readHost(0, "")
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running',ended_at=NULL WHERE id=$1`, external)
+		return err
+	})
+	readHost(0, "")
+	// The actual reservation and claim must still succeed beside that process.
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	readHost(1, "maximum_agents")
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',ended_at=clock_timestamp(),
+ trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, *e.VerificationRunID)
+		return err
+	})
+	readHost(1, "maximum_agents")
+	// Computer ownership grants only the host cause, even before account linking.
+	var advice agentaccounts.CapacityNext
+	decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness=claude", nil, true, "", 200), &advice)
+	if advice.Wait == nil || advice.Wait.HostReason != "managed_exit_unconfirmed" || advice.ParallelRuns != 0 {
+		t.Fatalf("owner lost the retained managed-process cause: %+v", advice)
+	}
+	actor := tenant.Principal{ID: f.person, TenantID: f.tenantID, Kind: tenant.Person}
+	readModelReason := func(want string) {
+		t.Helper()
+		if err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+			health, err := agentaccounts.HarnessHealthAt(tenant.WithPrincipal(t.Context(), actor), tx, time.Now())
+			if err == nil && (health["claude"].Dispatchable != 0 || len(health["claude"].Reasons) != 1 || health["claude"].Reasons[0] != want) {
+				t.Fatalf("model admission lost the owner cause: %+v, want %q", health["claude"], want)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readModelReason("Claude account is waiting for an unconfirmed managed process to exit")
+	// Authenticated exit releases only the managed slot; the external row stays.
+	r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "completed", "process_state": "exited", "turn_count_delta": 1}, false, key)
+	r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+	r.Header.Set(agentruns.GenerationHeader, "test-generation")
+	w := httptest.NewRecorder()
+	f.h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("owned exit reconciliation: %d %s", w.Code, w.Body.String())
+	}
+	readHost(0, "")
+	// A fresh authentication failure is also explained to the computer owner;
+	// private quota remains private before this account is linked to a person.
+	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/probe", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "available": false, "failure": "auth_failed"}, false, key, 200)
+	readModelReason("Claude account needs signing in")
+}
 
 func TestHostCapacityOwnerRevisionRuntimeAndClaimFence(t *testing.T) {
 	f := newFixture(t)

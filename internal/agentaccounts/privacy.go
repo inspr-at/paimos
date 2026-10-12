@@ -54,7 +54,11 @@ func (m *Module) privateResponse(next http.HandlerFunc) http.HandlerFunc {
 					if err != nil {
 						return err
 					}
-					body, err = accountprivacy.RedactWithControls(body, policy, controls, fallback, strings.HasSuffix(r.URL.Path, "/readings"))
+					hostDiagnostics, err := accountprivacy.LoadHostDiagnostics(r.Context(), tx, p, ids)
+					if err != nil {
+						return err
+					}
+					body, err = accountprivacy.RedactWithControls(body, policy, controls, hostDiagnostics, fallback, strings.HasSuffix(r.URL.Path, "/readings"))
 					return err
 				})
 				if err != nil {

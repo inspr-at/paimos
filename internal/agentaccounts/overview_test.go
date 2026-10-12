@@ -15,9 +15,136 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk (AEON-1251): sharing usage or registering an account releases the
+// computer owner's host diagnostics through either capacity projection.
+func TestCapacityHostDiagnosticsRequireComputerPersonOwner(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	f := limitWorldAt(t, "capacity-host-privacy", 1, now)
+	other := addPrincipal(t, f.admin.TenantID, "person", "Shared nonowner", []string{"admin"})
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 25, ResetsAt: now.Add(24 * time.Hour), ReadAt: now, Source: "harness"}}}), 204, nil)
+	var role string
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'host_projection_reader','Host projection reader') RETURNING id::text`, f.admin.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'account.read'),($1,$2,'account.overview.read')`, f.admin.TenantID, role); err != nil {
+			return err
+		}
+		var request, computer, key string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM agent_keys WHERE principal_id=$1 ORDER BY id LIMIT 1`, f.runner.ID).Scan(&key); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),'975975975',repeat('e',64),repeat('e',64),repeat('e',64),'{"platform":"darwin","arch":"arm64"}',repeat('e',64),'redeemed',$2) RETURNING id::text`, f.admin.TenantID, f.admin.ID).Scan(&request); err != nil {
+			return err
+		}
+		policy := hostcapacity.Default()
+		policy.Mode = "fixed"
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,state,capacity_policy)
+ VALUES($1,gen_random_uuid(),$2,$3,$4,'daemon-a',repeat('e',64),'connected',$5) RETURNING id::text`, f.admin.TenantID, request, f.runner.ID, key, policy).Scan(&computer); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_requests SET computer_id=$2 WHERE id=$1`, request, computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,state,verification_expires_at,ongoing_approved_at)
+ VALUES($1,$2,$3,$4,$5,'connected',$6,$7)`, f.admin.TenantID, f.account.ID, computer, request, f.profile, now.Add(time.Hour), now)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, testDB, f.admin.TenantID, f.runner.ID, "host_projection_reader")
+	readerKey := issueKey(t, f.runner, []string{"account.read", "account.overview.read"})
+	for _, phase := range []struct {
+		name, accountOwner string
+		shared             bool
+	}{{"shared", f.admin.ID, true}, {"private", f.admin.ID, false}, {"different-account-owner", other.ID, true}} {
+		err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			// Owner changes revoke sharing; opt in again only after that reset.
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, f.account.ID, phase.accountOwner); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=$2 WHERE id=$1`, f.account.ID, phase.shared)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, reader := range []tenant.Principal{f.admin, other, f.runner} {
+			for _, path := range []string{"/api/agent-accounts/overview", "/api/agent-accounts/capacity"} {
+				t.Run(phase.name+"/"+reader.Name+path, func(t *testing.T) {
+					token := ""
+					if reader.Kind == tenant.Agent {
+						token = readerKey
+					}
+					status, body := call(t, f.mod, &reader, token, "GET", path, "")
+					if reader.Kind == tenant.Agent && strings.HasSuffix(path, "/capacity") {
+						// The capacity list is person-only; explicit overview scope
+						// must not widen that gate or disclose diagnostics in errors.
+						if status != http.StatusForbidden || strings.Contains(string(body), `"host_reason"`) {
+							t.Fatalf("agent capacity gate changed: %d %s", status, body)
+						}
+						return
+					}
+					if status != http.StatusOK {
+						t.Fatalf("projection status %d: %s", status, body)
+					}
+					type row struct {
+						AccountID string            `json:"account_id"`
+						Wait      *CapacityWait     `json:"wait"`
+						Routing   *CapacityRouting  `json:"routing"`
+						Windows   []json.RawMessage `json:"windows"`
+					}
+					var rows []row
+					if strings.HasSuffix(path, "/overview") {
+						var page struct {
+							Accounts []row `json:"accounts"`
+						}
+						if err := json.Unmarshal(body, &page); err != nil {
+							t.Fatal(err)
+						}
+						rows = page.Accounts
+					} else if err := json.Unmarshal(body, &rows); err != nil {
+						t.Fatal(err)
+					}
+					if len(rows) != 1 || rows[0].AccountID != f.account.ID {
+						t.Fatalf("projection lost the account: %s", body)
+					}
+					item := rows[0]
+					usageVisible := phase.shared || reader.ID == phase.accountOwner || reader.ID == f.runner.ID
+					wantWindows := 0
+					if usageVisible {
+						wantWindows = 1
+					}
+					if len(item.Windows) != wantWindows {
+						t.Fatalf("host privacy changed usage sharing: %s", body)
+					}
+					if reader.ID != f.admin.ID {
+						if strings.Contains(string(body), `"host_reason"`) {
+							t.Errorf("nonowner or registering agent received host diagnostics for account %s", item.AccountID)
+						}
+					} else {
+						if item.Routing == nil || item.Routing.Wait == nil || item.Routing.Wait.Code != "capacity" || item.Routing.Wait.HostReason != "host_signals_stale" {
+							t.Errorf("computer owner lost routing cause: %s", body)
+						}
+						if strings.HasSuffix(path, "/overview") && (item.Wait == nil || item.Wait.Code != "capacity" || item.Wait.HostReason != "host_signals_stale") {
+							t.Errorf("computer owner lost overview cause: %s", body)
+						}
+					}
+					if usageVisible && (item.Routing == nil || item.Routing.Wait == nil || item.Routing.Wait.Code != "capacity") {
+						t.Errorf("host privacy changed the routing decision: %s", body)
+					}
+				})
+			}
+		}
+	}
+}
 
 // Risk: an all-account read leaks private quota/calendar data, drops independent
 // windows, grants agents a new default authority, or crosses tenant boundaries.

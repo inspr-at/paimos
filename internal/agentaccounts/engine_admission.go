@@ -232,7 +232,7 @@ func engineHost(ctx context.Context, tx pgx.Tx, account, owner string, now time.
 	var at *time.Time
 	var running int
 	err := tx.QueryRow(ctx, `SELECT c.capacity_signals,c.capacity_policy,c.capacity_reported_at,
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND ($3::text='' OR r.id::text<>$3) AND (r.status IN ('starting','running','waiting')
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.account_id IS NOT NULL AND ($3::text='' OR r.id::text<>$3) AND (r.status IN ('starting','running','waiting')
   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
  FROM agent_pairing_enrollments e
  JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
