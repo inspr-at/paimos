@@ -535,23 +535,27 @@ function changed(event?: string, identity?: AgentEventIdentity) {
 }
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
+  const main = work.value?.closest('main')
   const measureWidth = () => { workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0) }
-  measureWidth()
-  layoutResize = new ResizeObserver(() => {
+  const measureHeight = () => { paneHeight.value = Math.max(0, (main?.clientHeight ?? 0) - 8) }
+  measureWidth(); measureHeight()
+  layoutResize = new ResizeObserver(entries => {
     // Width only depends on the surrounding page. Apply its breakpoint before
     // paint; deferring it lets the old split move controls during interaction.
     measureWidth()
+    // The main viewport's height is independent of the split. Its resize can
+    // settle immediately too, without briefly opening a zero-height pane.
+    if (entries.some(entry => entry.target === main)) measureHeight()
     // Applying a breakpoint changes the work area's height. Defer that read
     // so the height write cannot feed the same observer delivery.
     if (layoutFrame !== undefined) return
     layoutFrame = requestAnimationFrame(() => {
       layoutFrame = undefined
-      paneHeight.value = Math.max(0, (work.value?.closest('main')?.clientHeight ?? 0) - 8)
+      measureHeight()
       if (!canSplit.value) { drag = null; dragWidth.value = null }
     })
   })
   if (work.value) layoutResize.observe(work.value)
-  const main = work.value?.closest('main')
   if (main) layoutResize.observe(main)
   stopTierWatch = serviceTiers.watchPage()
   document.addEventListener('visibilitychange', evidenceVisible)
