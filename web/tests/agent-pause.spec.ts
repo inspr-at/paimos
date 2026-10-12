@@ -491,7 +491,9 @@ for (const theme of ['light', 'dark'] as const) {
     })
     const session = mock.data.sessions[0]!
     await page.goto(`/agents/${session.id}`)
-    await page.addStyleTag({ content: '.agents-page .page-head { letter-spacing: .06em }' })
+    // P5 keeps the page head full width above the split. Retain this narrow
+    // typography risk explicitly, including the original compact-label check.
+    await page.addStyleTag({ content: '.agents-page .page-head { width: 820px; max-width: 100%; letter-spacing: .06em }' })
     const row = page.locator(`[data-row="s:${session.id}"]`)
     await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const open = windButton(page)
