@@ -101,7 +101,7 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 			t.Fatal("interpreter location class crossed its package or prefix fence")
 		}
 	}
-	for _, scenario := range []string{"automatic", "add harness", "healthy", "launcher content", "launcher during probe", "launcher path", "home", "symlink home", "identity", "location class", "unsafe candidate", "unsafe old pin", "missing launcher hash", "runtime owner", "revoked"} {
+	for _, scenario := range []string{"automatic", "add harness", "healthy", "launcher content", "launcher during probe", "launcher during version read", "launcher path", "home", "symlink home", "home during probe", "identity", "location class", "unsafe candidate", "unsafe old pin", "missing launcher hash", "runtime owner", "revoked"} {
 		t.Run(scenario, func(t *testing.T) {
 			e, api, local, options, _ := engineFixture(t)
 			defer e.Store.Close()
@@ -137,6 +137,14 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				if scenario == "home during probe" {
+					if err := os.Remove(c.Home); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(physicalTemp(t), c.Home); err != nil {
+						t.Fatal(err)
+					}
+				}
 				return c.Identity, nil
 			}
 			saved, err := e.load()
@@ -150,6 +158,14 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				}
 			case "launcher path":
 				before.Accounts[0].Path = next.Path
+			case "launcher during version read":
+				// The fake discovery executor does not execute this script; the
+				// final OS version read does, establishing the exact interleaving.
+				quoted := "'" + strings.ReplaceAll(launcher, "'", "'\\''") + "'"
+				script := "#!/bin/sh\nprintf '%s\\n' '#!/bin/bash' '# changed during version read' > " + quoted + "\nprintf '%s\\n' v26.11.1\n"
+				if err := os.WriteFile(next.Path, []byte(script), 0700); err != nil {
+					t.Fatal(err)
+				}
 			case "home":
 				before.Accounts[0].Home = physicalTemp(t)
 			case "symlink home":
@@ -200,9 +216,9 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 			} else {
 				err = e.SyncFences(t.Context())
 			}
-			if scenario == "runtime owner" {
+			if scenario == "runtime owner" || scenario == "launcher during version read" {
 				if err == nil {
-					t.Fatal("wrong runtime owner accepted")
+					t.Fatal("changed binding accepted")
 				}
 			} else if err != nil {
 				t.Fatal(err)
@@ -225,7 +241,7 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				if !bytes.Equal(raw, after) || journals != 0 {
 					t.Fatal("refused renewal changed the runtime or journal")
 				}
-				if scenario != "identity" && scenario != "launcher during probe" && probes != 0 {
+				if scenario != "identity" && scenario != "launcher during probe" && scenario != "home during probe" && scenario != "launcher during version read" && probes != 0 {
 					t.Fatal("renewal probed before its safety fences")
 				}
 				return
