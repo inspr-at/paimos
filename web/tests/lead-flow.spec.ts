@@ -2,7 +2,7 @@
 // AEON-741: the approved lead flow. Lead band in every state, the line and the
 // docked lead panel, Start lead and Pause, Queue on the ticket with its progress
 // line, the Agents page leads list and the expert-only manual start.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
 import { HOST_A, mockLeadFlow } from './lead-flow-fixtures'
@@ -13,6 +13,14 @@ const panel = (page: Page) => page.getByRole('complementary', { name: 'Session d
 const mac = process.platform === 'darwin'
 const submit = mac ? 'Meta+Enter' : 'Control+Enter'
 async function theme(page: Page, value: 'light' | 'dark') { await page.evaluate(choice => { document.documentElement.dataset.theme = choice }, value) }
+// mockLeadFlow installs the clock, including animation frames. Native layout
+// observation is the barrier for responsive geometry, independent of that clock.
+async function settleLayout(target: Locator) {
+  await target.evaluate(element => new Promise<void>(resolve => {
+    const observer = new ResizeObserver(() => { observer.disconnect(); resolve() })
+    observer.observe(element)
+  }))
+}
 
 test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh', async ({ page }, info) => {
   const { data } = await mockLeadFlow(page, { lead: 'paused', aeon: 'paused', queue: [] })
@@ -35,7 +43,7 @@ test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls 
     await page.setViewportSize({ width, height: 1100 })
     // The focus refresh starts after the nested responsive containers paint;
     // a viewport transition is a separate interaction from the held reread.
-    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+    await settleLayout(page.locator('.sessions .table'))
     const guard = await controlStability(page, { aeon: rows.nth(0), pharos: rows.nth(1) })
     for (const look of ['light', 'dark'] as const) {
       await theme(page, look)
@@ -283,9 +291,8 @@ test('ticket header steps down at every dock width so Close stays inside with a 
     await expect(drawer.getByRole('button', { name: 'Open as full page', exact: true })).toBeVisible()
     for (const width of [1920, 1600, 1440, 1366, 1280, 1180, 1024, 900, 800, 721]) {
       await page.setViewportSize({ width, height: 1000 })
-      // The fold runs in a ResizeObserver callback before paint: measure after
-      // the next frame has rendered, as a person would see it.
-      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+      // Measure after the real layout observers, not the fixture's fake frames.
+      await settleLayout(bar)
       const geometry = await bar.evaluate(el => {
         const frame = el.getBoundingClientRect()
         const buttons = [...el.querySelectorAll('button')].map(button => {
@@ -306,12 +313,12 @@ test('ticket header steps down at every dock width so Close stays inside with a 
     // font metric change must still fold its labels; observing only the bar's
     // width cannot see this growth.
     await page.setViewportSize({ width: 1440, height: 1000 })
-    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+    await settleLayout(bar)
     const before = (await bar.boundingBox())!
     const fonts = await page.addStyleTag({ content: '.project-page.ticket-dock { --panel-user-w: 560px; } .panel-bar .q-word { font-size: 40px !important; }' })
     try {
       await page.setViewportSize({ width: 1441, height: 1000 })
-      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+      await settleLayout(bar)
       const after = (await bar.boundingBox())!
       expect(Math.abs(after.width - before.width), 'the dock width stayed fixed').toBeLessThanOrEqual(0.5)
       expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth), `${key}: late font metrics stay inside the fixed dock`).toBeLessThanOrEqual(0)
