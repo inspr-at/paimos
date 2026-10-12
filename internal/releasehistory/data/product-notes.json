@@ -6076,8 +6076,8 @@
     "261012145858.0.0": {
       "release_channel": "stable",
       "release_sequence": 130,
-      "snapshot_sha256": "735833c20545db3700cea847e0ca0683cfb35f2e6e33c70225a93e14924c092a",
-      "captured_at": "2026-10-12T15:38:55Z",
+      "snapshot_sha256": "8046f0375bdd280f91d4dda69e78c1d0e01eb29f5a23a9778a083f24b84ba196",
+      "captured_at": "2026-10-12T15:40:57Z",
       "release_revision": 1,
       "items": [
         {
@@ -6245,7 +6245,7 @@
           "pill_en": "Simple fallback order",
           "pill_de": "Einfache Ausweich-Reihenfolge",
           "benefit_en": "You see and change what happens when a model can't run, right under each row, with undo.",
-          "benefit_de": "Du siehst und änderst direkt unter jeder Zeile, was passiert, wenn ein Modell nicht laufen kann, mit Rückgängig.",
+          "benefit_de": "Direkt unter jeder Zeile ist sichtbar und änderbar, was passiert, wenn ein Modell nicht laufen kann, mit Rückgängig.",
           "group": "features"
         },
         {
@@ -6277,7 +6277,7 @@
           "pill_en": "Policies as plain rules",
           "pill_de": "Regeln ohne Ballast",
           "benefit_en": "Policies shows only the rules: cross-family review, what agents must ask you for, and where other rules live.",
-          "benefit_de": "Die Regelseite zeigt nur Regeln: Review durch eine andere Modellfamilie, wofür Agenten dich fragen müssen, und wo andere Regeln liegen.",
+          "benefit_de": "Die Regelseite zeigt nur Regeln: Review durch eine andere Modellfamilie, wofür Agenten nachfragen müssen, und wo andere Regeln liegen.",
           "group": "features"
         },
         {
@@ -6285,7 +6285,7 @@
           "pill_en": "Dial follows Models",
           "pill_de": "Regler folgt Modellen",
           "benefit_en": "When a harness hits its limit, work simply continues with the next model in your order instead of a separate switch.",
-          "benefit_de": "Erreicht ein Harness sein Limit, geht die Arbeit einfach mit dem nächsten Modell deiner Reihenfolge weiter statt über einen eigenen Schalter.",
+          "benefit_de": "Erreicht ein Harness sein Limit, geht die Arbeit einfach mit dem nächsten Modell der Reihenfolge weiter statt über einen eigenen Schalter.",
           "group": "features"
         },
         {
@@ -6349,7 +6349,7 @@
           "pill_en": "Who runs a routine",
           "pill_de": "Wer eine Routine ausführt",
           "benefit_en": "When you set up a routine, you can only pick people or agents that are really allowed to run it.",
-          "benefit_de": "Beim Einrichten einer Routine kannst du nur Personen oder Agenten wählen, die sie wirklich ausführen dürfen.",
+          "benefit_de": "Beim Einrichten einer Routine stehen nur Personen oder Agenten zur Wahl, die sie wirklich ausführen dürfen.",
           "group": "features"
         },
         {
@@ -6397,7 +6397,7 @@
           "pill_en": "No flicker on focus",
           "pill_de": "Kein Flackern beim Fokus",
           "benefit_en": "Switching back to PAIMOS no longer makes lists blink or reorder; what you see stays put while it refreshes.",
-          "benefit_de": "Beim Zurückwechseln zu PAIMOS blinken oder springen Listen nicht mehr; was du siehst, bleibt stehen, während es aktualisiert wird.",
+          "benefit_de": "Beim Zurückwechseln zu PAIMOS blinken oder springen Listen nicht mehr; der sichtbare Inhalt bleibt stehen, während er aktualisiert wird.",
           "group": "fixes"
         },
         {
@@ -6445,7 +6445,7 @@
           "pill_en": "Sessions by project",
           "pill_de": "Sitzungen nach Projekt",
           "benefit_en": "Sessions are grouped by project with the lead on top and its workers below, so you see who works on what at a glance.",
-          "benefit_de": "Sitzungen sind nach Projekt gruppiert, mit dem Lead oben und seinen Workern darunter, damit du auf einen Blick siehst, wer woran arbeitet.",
+          "benefit_de": "Sitzungen sind nach Projekt gruppiert, mit dem Lead oben und seinen Workern darunter, sodass auf einen Blick erkennbar ist, wer woran arbeitet.",
           "group": "features"
         },
         {
@@ -6461,7 +6461,7 @@
           "pill_en": "One panel per lead",
           "pill_de": "Ein Panel pro Lead",
           "benefit_en": "One panel per lead with Lead, Session and Chat, opening on whatever needs you first.",
-          "benefit_de": "Ein Panel pro Lead mit Lead, Sitzung und Chat, das dort öffnet, wo du zuerst gebraucht wirst.",
+          "benefit_de": "Ein Panel pro Lead mit Lead, Sitzung und Chat, das dort öffnet, wo zuerst Handlungsbedarf besteht.",
           "group": "features"
         },
         {
@@ -6509,7 +6509,7 @@
           "pill_en": "Honest lead buttons",
           "pill_de": "Ehrliche Lead-Knöpfe",
           "benefit_en": "The lead panel only offers start, pause and hand-over when you can really do them, and otherwise says why.",
-          "benefit_de": "Das Lead-Panel bietet Start, Pause und Übergabe nur an, wenn du sie wirklich ausführen kannst, und sagt sonst, warum.",
+          "benefit_de": "Das Lead-Panel bietet Start, Pause und Übergabe nur an, wenn sie wirklich ausführbar sind, und nennt sonst den Grund.",
           "group": "features"
         },
         {
