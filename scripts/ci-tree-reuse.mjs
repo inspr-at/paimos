@@ -179,7 +179,8 @@ export async function decide({ event, ref, killSwitch, sha, repository, api, cre
   const started = clock.now();
   let lookups = 0;
   let reason;
-  const fallback = () => ({ reuse: 'none', reason: `${reason}; after ${lookups} lookups over ${Math.floor((clock.now() - started) / 1000)} s` });
+  let truncated = false;
+  const fallback = () => ({ reuse: 'none', reason: `${reason} after ${lookups} lookups over ${Math.floor((clock.now() - started) / 1000)} s${truncated ? '; search truncated' : ''}` });
   try {
     ensure(oid.test(sha), 'invalid push SHA');
     for (let attempt = 0; ; attempt++) {
@@ -188,19 +189,23 @@ export async function decide({ event, ref, killSwitch, sha, repository, api, cre
       const found = await lookupAPI(`actions/workflows/ci.yml/runs?event=merge_group&status=success&head_sha=${sha}&per_page=20`);
       ensure(Number.isSafeInteger(found.total_count) && found.total_count >= 0 && Array.isArray(found.workflow_runs) && found.workflow_runs.length <= 20, 'invalid run list');
       // Listing status controls retries only; verifyRun remains the sole proof.
-      const successfulCandidate = found.workflow_runs.some(candidate => candidate.head_sha === sha && candidate.event === 'merge_group' && candidate.status === 'completed' && candidate.conclusion === 'success');
-      for (const candidate of found.workflow_runs) {
-        if (candidate.head_sha !== sha || candidate.event !== 'merge_group') continue;
+      const candidates = found.workflow_runs.filter(candidate => candidate.head_sha === sha && candidate.event === 'merge_group');
+      const retry = found.workflow_runs.length === 0 || (candidates.length > 0 && candidates.every(candidate => candidate.status !== 'completed'));
+      let proofFailure;
+      for (const candidate of candidates) {
         try {
           const verified = await verifyRun(repository, candidate.id, lookupAPI, sha);
           return { reuse: 'merge_group', run: verified.run, reason: `reused merge_group run ${verified.run}` };
-        } catch { /* Failed, cancelled, partial rerun or stale candidate: try next. */ }
+        } catch (error) {
+          if (candidate.status === 'completed') proofFailure = error instanceof Error ? error.message : 'verification unavailable';
+        }
       }
-      reason = `no verified successful merge_group run for this SHA in the bounded candidate list${found.total_count > found.workflow_runs.length ? '; search truncated' : ''}`;
+      reason = retry ? 'merge_group run absent' : `merge_group run rejected (${proofFailure ? `proof failed: ${proofFailure}` : 'no exact-SHA merge_group candidate'})`;
+      truncated = found.total_count > found.workflow_runs.length;
       const delay = mainPushBackoff[attempt];
-      // Stop on rejected green evidence. Otherwise leave a full lookup timeout
+      // Stop on rejected completed evidence or unrelated candidates. Leave a full lookup timeout
       // inside the wall-clock budget, including time already spent in the API.
-      if (successfulCandidate || delay === undefined || clock.now() - started + delay + lookupTimeout > mainPushBudget) return fallback();
+      if (!retry || delay === undefined || clock.now() - started + delay + lookupTimeout > mainPushBudget) return fallback();
       await clock.sleep(delay);
       if (clock.now() - started + lookupTimeout > mainPushBudget) return fallback();
     }
@@ -212,6 +217,7 @@ export async function decide({ event, ref, killSwitch, sha, repository, api, cre
 export async function main(vars, fetcher = fetch, clock = mainPushClock) {
   let decision = { reuse: 'none', reason: 'disabled or not a main push' };
   if (vars.GITHUB_EVENT_NAME === 'push' && vars.GITHUB_REF === 'refs/heads/main' && vars.CI_TREE_REUSE !== 'off') {
+    ensure(repositoryPattern.test(vars.GITHUB_REPOSITORY), 'invalid repository');
     const signal = AbortSignal.timeout(mainPushBudget);
     // Each listing plus candidate verification keeps its original 10 s bound.
     const createLookupAPI = () => github(vars.GITHUB_REPOSITORY, transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.any([signal, AbortSignal.timeout(lookupTimeout)]), fetcher));

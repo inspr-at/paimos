@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { decide, verifyRun, transport, main, requiredJobs, executionSteps, workflowPath, decideMergeGroup, verifyPRFacts, verifyPRRun, prProofPrefix } from './ci-tree-reuse.mjs';
 
@@ -70,7 +71,7 @@ test('not found: a direct main push runs the full suite', async () => {
   const clock = fakeClock();
   const result = await check(f, { clock });
   assert.equal(result.reuse, 'none');
-  assert.equal(result.reason, 'no verified successful merge_group run for this SHA in the bounded candidate list; after 5 lookups over 150 s');
+  assert.equal(result.reason, 'merge_group run absent after 5 lookups over 150 s');
   assert.deepEqual(f.calls, Array(5).fill(listPath));
   assert.deepEqual(clock.waits, [15000, 30000, 45000, 60000]);
 });
@@ -112,7 +113,34 @@ test('a completed successful candidate rejected by an ensure does not retry', as
   await assert.rejects(verifyRun(repository, 123, f.api, sha), /missing full execution evidence/);
   const result = await check(f, { clock });
   assert.equal(result.reuse, 'none');
-  assert.match(result.reason, /after 1 lookups over 0 s$/);
+  assert.equal(result.reason, 'merge_group run rejected (proof failed: missing full execution evidence) after 1 lookups over 0 s');
+  assert.equal(f.calls.filter(path => path === listPath).length, 1);
+  assert.deepEqual(clock.waits, []);
+});
+
+test('failed or unrelated listings fall back without retrying discovery', async () => {
+  for (const change of [
+    { conclusion: 'failure' }, { conclusion: 'cancelled' }, { conclusion: 'timed_out' },
+    { head_sha: 'b'.repeat(40) }, { head_sha: 'b'.repeat(40), status: 'in_progress' },
+    { event: 'pull_request' },
+  ]) {
+    const f = fixture(), clock = fakeClock();
+    Object.assign(f.listed.workflow_runs[0], change);
+    Object.assign(f.run, change);
+    const result = await check(f, { clock });
+    assert.equal(result.reuse, 'none');
+    assert.match(result.reason, /rejected .*after 1 lookups over 0 s$/);
+    if (change.conclusion) assert.match(result.reason, /proof failed: run not successful/);
+    else assert.deepEqual(f.calls, [listPath]);
+    assert.equal(f.calls.filter(path => path === listPath).length, 1);
+    assert.deepEqual(clock.waits, []);
+  }
+  // An incomplete candidate cannot make a rejected completed proof retryable.
+  const f = fixture(), clock = fakeClock();
+  f.listed.workflow_runs.push({ id: 999, head_sha: sha, event: 'merge_group', status: 'in_progress' });
+  f.listed.total_count++;
+  f.run.conclusion = 'failure';
+  assert.equal((await check(f, { clock })).reuse, 'none');
   assert.equal(f.calls.filter(path => path === listPath).length, 1);
   assert.deepEqual(clock.waits, []);
 });
@@ -235,7 +263,18 @@ test('kill switch, PR, queue, manual and non-main push do no API reads', async (
 });
 
 test('network failure and invalid SHA fail closed', async () => {
-  assert.equal((await check(fixture(), { api: async () => { throw new Error('offline'); } })).reuse, 'none');
+  for (const emptyLookups of [0, 1]) {
+    const clock = fakeClock();
+    const calls = [];
+    const api = async path => {
+      calls.push(path);
+      if (calls.length <= emptyLookups) return { total_count: 0, workflow_runs: [] };
+      throw new Error('offline');
+    };
+    assert.deepEqual(await check(fixture(), { api, clock }), { reuse: 'none', reason: 'merge_group lookup unavailable; full CI required' });
+    assert.deepEqual(calls, Array(emptyLookups + 1).fill(listPath));
+    assert.deepEqual(clock.waits, emptyLookups ? [15000] : []);
+  }
   const f = fixture(); assert.equal((await check(f, { sha: 'invalid' })).reuse, 'none'); assert.deepEqual(f.calls, []);
 });
 
@@ -281,6 +320,56 @@ test('main entry point retries discovery with a fresh bounded proof lookup', asy
   assert(signals.slice(2).every(signal => signal === signals[2]), 'listing and its full verification share one bounded lookup');
 });
 
+test('per-lookup deadlines abort verification and count toward the main-push budget', async t => {
+  let deadlines;
+  t.mock.method(AbortSignal, 'timeout', ms => {
+    const controller = new AbortController();
+    deadlines.push({ ms, controller });
+    return controller.signal;
+  });
+  for (const scenario of ['completed', 'pending then success', 'pending until budget']) {
+    deadlines = [];
+    const f = fixture(), clock = fakeClock(), signals = [];
+    let lookups = 0, aborted = 0;
+    if (scenario !== 'completed') f.listed.workflow_runs[0].status = 'in_progress';
+    const result = await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha, GITHUB_REPOSITORY: repository, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture' }, async (url, options) => {
+      const path = url.slice(`https://api.github.com/repos/${repository}/`.length);
+      if (path === listPath) {
+        lookups++;
+        signals.push(options.signal);
+      }
+      assert.equal(options.signal, signals.at(-1), 'verification shares the listing deadline');
+      if (path.includes('/jobs?') && (scenario !== 'pending then success' || lookups === 1)) {
+        f.calls.push(path);
+        // The listing and run/workflow reads have completed. Expire this
+        // lookup while its job proof is outstanding, with no real timer.
+        assert.equal(deadlines.at(-1).ms, 10000);
+        assert.equal(deadlines[0].ms, 180000);
+        clock.advance(10000);
+        deadlines.at(-1).controller.abort(new DOMException('lookup deadline exceeded', 'TimeoutError'));
+        assert(options.signal.aborted);
+        assert(!deadlines[0].controller.signal.aborted, 'only the per-lookup deadline expired');
+        aborted++;
+        options.signal.throwIfAborted();
+      }
+      return new Response(JSON.stringify(await f.api(path)));
+    }, clock);
+    const continued = scenario === 'pending then success';
+    const exhausted = scenario === 'pending until budget';
+    assert.equal(result.reuse, continued ? 'merge_group' : 'none');
+    assert.equal(lookups, exhausted ? 4 : continued ? 2 : 1);
+    assert.equal(aborted, exhausted ? 4 : 1);
+    assert.equal(f.calls.filter(path => path.includes('/jobs?')).length, lookups);
+    assert.equal(clock.now(), exhausted ? 130000 : continued ? 25000 : 10000);
+    assert.deepEqual(clock.waits, exhausted ? [15000, 30000, 45000] : continued ? [15000] : []);
+    assert.equal(new Set(signals).size, lookups, 'continuing discovery gets a fresh lookup deadline');
+    assert.equal(deadlines.length, lookups + 1);
+    if (continued) assert(!signals.at(-1).aborted);
+    else if (exhausted) assert.equal(result.reason, 'merge_group run absent after 4 lookups over 130 s');
+    else assert.equal(result.reason, 'merge_group run rejected (proof failed: lookup deadline exceeded) after 1 lookups over 10 s');
+  }
+});
+
 test('direct main entry point cannot reuse absent merge-group evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'aeon-423-'));
   const output = join(dir, 'output'), clock = fakeClock(), signals = []; let calls = 0;
@@ -305,6 +394,24 @@ test('disabled main entry point writes fallback outputs and an honest summary', 
   assert.deepEqual(clock.waits, []);
   assert.equal(readFileSync(output, 'utf8'), 'reuse=none\nrun=\n');
   assert.match(readFileSync(summary, 'utf8'), /disabled/);
+});
+
+test('invalid main-push repository fails loudly with outputs unset', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aeon-1245-'));
+  const output = join(dir, 'output'), summary = join(dir, 'summary'), clock = fakeClock();
+  const vars = { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha, GITHUB_REPOSITORY: 'invalid', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary };
+  for (const invalid of ['invalid', 'owner/repo/extra', '', undefined]) {
+    await assert.rejects(main({ ...vars, GITHUB_REPOSITORY: invalid }, async () => assert.fail('invalid repository cannot do API work'), clock), /invalid repository/);
+    assert(!existsSync(output));
+    assert(!existsSync(summary));
+    assert.deepEqual(clock.waits, []);
+  }
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('./ci-tree-reuse.mjs', import.meta.url))], { cwd: dir, env: vars, encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /Reuse proof unavailable; outputs unset, full CI required/);
+  assert.equal(result.stdout, '');
+  assert(!existsSync(output));
+  assert(!existsSync(summary));
 });
 
 test('output write failure is not reported as success', async () => {
