@@ -27,6 +27,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
@@ -424,6 +425,25 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	// finishes cleanly through the loop.
 	if !dep.alive(o.OwnerPID) {
 		return rt.rejectDeadOwner(o, &session)
+	}
+	if validUUID(o.SourceSession) {
+		inst, err := rt.resolve()
+		if err != nil {
+			return err
+		}
+		me, err := rt.caller()
+		if err != nil {
+			return err
+		}
+		config, err := rt.configFile()
+		if err != nil {
+			return err
+		}
+		session.disk.HookOrigin = strings.TrimRight(inst.URL, "/")
+		session.disk.HookInstance, session.disk.HookConfig, session.disk.HookPrincipal = inst.Name, config, me.Principal.ID
+		if err := saveHeartbeatSession(&session); err != nil {
+			return err
+		}
 	}
 	if err := recordSessionIndex(rt, o, &session); err != nil {
 		return err
@@ -926,7 +946,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if o.OwnedStop {
 		body["advertised_capabilities"] = []string{"status", "owned_stop_v1"}
 	}
-	if o.ReconnectSocket != "" {
+	if o.ReconnectSocket != "" || o.Management == "unmanaged" && o.Harness == "claude" && validUUID(o.SourceSession) {
 		body["advertised_capabilities"] = append(body["advertised_capabilities"].([]string), "inbox")
 	}
 	putText(body, "generator", o.Generator, true)
@@ -1378,21 +1398,53 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		return errHeartbeatStopRequested
 	}
 
-	if o.ReconnectSocket != "" {
+	// The heartbeat's own key remains the only authority for this generation.
+	// A different paired principal cannot consume it; generic hooks use the
+	// indexed CLI account instead. Report binding failure without skipping usage.
+	bindingCode := ""
+	if o.Management == "unmanaged" && o.Harness == "claude" && validUUID(o.SourceSession) {
+		if o.Worktree != "" {
+			home, _ := os.UserHomeDir()
+			executable, _ := os.Executable()
+			bindingCode = inboxHookCheck(o.Worktree, home, executable, session.disk.HookInstance)
+		}
 		indexed, _, result := lookupSessionIndex(strings.ToLower(o.SourceSession))
 		if result != sessionIndexBound || indexed != session.id {
-			return errors.New("heartbeat reported, but the live inbox hook binding is unavailable")
+			bindingCode = "hook_index_mismatch"
 		}
-		active, apiErr := rt.api()
-		if apiErr != nil {
-			return apiErr
+		if bindingCode == "" && o.ReconnectSocket != "" {
+			// Explicit sockets remain subject to the daemon's own verification.
+			// Auto-discovered runtime metadata permits an early, value-free diagnosis.
+			preflight := pairedBindingCheck(session.disk.HookOrigin, session.disk.HookPrincipal)
+			if preflight == "instance_mismatch" || preflight == "principal_mismatch" {
+				bindingCode = preflight
+			} else {
+				active, apiErr := rt.api()
+				if apiErr != nil {
+					return apiErr
+				}
+				local := agentdwire.Client{Socket: o.ReconnectSocket, TokenFile: o.ReconnectSocket + ".token"}
+				hookCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				hookErr := local.BindAttachedHook(hookCtx, agentd.AttachedHookRequest{PrincipalID: session.disk.HookPrincipal, Origin: strings.TrimRight(active.BaseURL, "/"), ProjectID: projectID, SessionID: session.id, Harness: o.Harness, Lease: session.lease, OwnerPID: o.OwnerPID, Sequence: session.disk.Sequence, Activity: o.Activity})
+				cancel()
+				if hookErr != nil {
+					bindingCode = "daemon_unavailable"
+					var refusal *hookbinding.Refusal
+					if errors.As(hookErr, &refusal) {
+						bindingCode = refusal.Code
+					}
+				}
+			}
 		}
-		local := agentdwire.Client{Socket: o.ReconnectSocket, TokenFile: o.ReconnectSocket + ".token"}
-		hookCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		hookErr := local.BindAttachedHook(hookCtx, agentd.AttachedHookRequest{Origin: strings.TrimRight(active.BaseURL, "/"), ProjectID: projectID, SessionID: session.id, Harness: o.Harness, Lease: session.lease, OwnerPID: o.OwnerPID, Sequence: session.disk.Sequence, Activity: o.Activity})
-		cancel()
-		if hookErr != nil {
-			return errors.New("heartbeat reported, but paired reconnect binding was refused")
+		// Same-sequence metadata update is replayable and uses the worker's
+		// original lease. It adds no process/watch/control authority.
+		var code *string
+		if bindingCode != "" {
+			code = &bindingCode
+		}
+		diagnostic := map[string]any{"phase": o.Phase, "activity": o.Activity, "activity_sequence": session.disk.Sequence, "inbox_binding_error": code}
+		if err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, diagnostic, new(map[string]any)); err != nil {
+			return errors.New("heartbeat reported, but inbox binding diagnostic could not be saved")
 		}
 	}
 	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
@@ -1444,6 +1496,9 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	rt.printHeartbeatPause(session.id, response.Pause, o.PrintControls)
 	if o.PrintControls {
 		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)
+	}
+	if bindingCode != "" {
+		return fmt.Errorf("heartbeat reported, but paired reconnect binding was refused: %s", hookbinding.Reason(bindingCode))
 	}
 	return nil
 }

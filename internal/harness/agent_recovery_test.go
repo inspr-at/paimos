@@ -600,3 +600,43 @@ func TestAgentRecoveryBudgetRejectionCommitsDecisionWithoutContinuation(t *testi
 		return nil
 	})
 }
+
+func TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears(t *testing.T) {
+	f := fixture(t)
+	lease := "fixture-binding-worker-lease-000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.agent, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "fixture-binding-source-000001", "worker_lease": lease, "management_mode": "unmanaged", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+	expect(t, w, 201)
+	path := base + "/" + decode(t, w)["id"].(string) + "/heartbeat"
+	beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_error": "hook_cli_mismatch"}
+	expect(t, f.call(f.agent, "POST", path, beat, "wrong-lease"), 403)
+	w = f.call(f.agent, "POST", path, beat, lease)
+	expect(t, w, 200)
+	if decode(t, w)["inbox_binding_error"] != "hook_cli_mismatch" {
+		t.Fatal("worker refusal was not projected")
+	}
+	beat["inbox_binding_error"] = "private-canary-error-body"
+	expect(t, f.call(f.agent, "POST", path, beat, lease), 400)
+	delete(beat, "inbox_binding_error")
+	w = f.call(f.agent, "POST", path, beat, lease)
+	expect(t, w, 200)
+	if decode(t, w)["inbox_binding_error"] != "hook_cli_mismatch" {
+		t.Fatal("older writer cleared the refusal")
+	}
+	beat["inbox_binding_error"] = nil
+	w = f.call(f.agent, "POST", path, beat, lease)
+	expect(t, w, 200)
+	if decode(t, w)["inbox_binding_error"] != nil {
+		t.Fatal("successful binding did not clear the refusal")
+	}
+	// The daemon's foreign principal cannot gain worker authority from a lease.
+	other := uid()
+	f.addAgent(t, other, "Paired daemon fixture")
+	foreignSession := f.registerSession(t, other, "worker", "", "foreign-worker-ref-00000001", lease)
+	foreignPath := base + "/" + foreignSession + "/heartbeat"
+	w = f.call(f.agent, "POST", foreignPath, beat, lease)
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "harness worker proof rejected") {
+		t.Fatal("test failed for a different refusal reason")
+	}
+}

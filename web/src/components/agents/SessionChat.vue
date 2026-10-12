@@ -17,7 +17,7 @@ import type { Question } from '../../lib/decisionDeskApi'
 import ChatLiveBlock from './ChatLiveBlock.vue'
 import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, offeredSteer, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn, type SendTransport } from './chatLive'
 import { collapseMessages } from './sessionMessages'
-import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
+import { inboxBindingReason, advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -29,6 +29,7 @@ const words = computed(() => chatWords[displayLanguage()])
 const me = computed(() => identity.identity?.principal.id ?? '')
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
+const bindingReason = computed(() => ended.value ? '' : inboxBindingReason(s.value.inbox_binding_error, displayLanguage()))
 // Retain answered cards for this visit. The shared projection alone supplies
 // open questions; a card rereads its own record when it leaves that projection.
 const seenQuestions = ref<Question[]>([])
@@ -866,6 +867,7 @@ function retry(message: ProjectMessage) {
 function queueWhen(message: ProjectMessage) {
   if (uncertain.value.has(message.id)) return words.value.unclear
   if (message.send_failed || statuses.value[message.id]?.status === 'not_delivered') return words.value.failed
+  if (bindingReason.value) return `${words.value.deliveryBlocked}: ${bindingReason.value}`
   if (capability.value === 'between') return words.value.queueBetween
   return message.delivery_level === 'steer' ? capability.value === 'next' ? words.value.queueNext : words.value.queueNow : words.value.after
 }
@@ -952,9 +954,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
         @keydown.capture="onScrollKey">
         <div class="history-head">
           <button v-if="agents.threadMore[s.id]" type="button" class="earlier" :disabled="historyLoading" @click="earlier">{{ words.older }}</button>
-          <span v-else-if="agents.threadState(s) === 'ready' && messages.length">{{ words.start }}</span>
+          <span v-else-if="agents.threadState(s) === 'ready' && messages.length && !bindingReason">{{ words.start }}</span>
           <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
         </div>
+        <p v-if="bindingReason && !noPermission" class="binding-error" role="status">{{ words.liveDisconnected }}: {{ bindingReason }}</p>
         <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
         <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn && !seenQuestions.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
         <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now"
@@ -982,7 +985,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
       <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
         <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id" :data-status="message.send_failed ? 'not_delivered' : statuses[message.id]?.status ?? 'sent'">
           <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="14" />
-          <span class="queue-text" tabindex="0" :data-tip="message.body" :title="message.body">{{ message.body }}</span><span class="queue-when">{{ queueWhen(message) }}</span>
+          <div class="queue-copy"><span class="queue-text" tabindex="0" :data-tip="message.body" :title="message.body">{{ message.body }}</span><span class="queue-when" tabindex="0">{{ queueWhen(message) }}</span></div>
           <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn flat" :aria-label="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
           <button type="button" class="icon-btn flat" :aria-label="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
           <button type="button" class="icon-btn flat" :aria-label="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>
@@ -1020,8 +1023,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .queue-item { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 2px 3px 2px 10px; border-radius: 12px; background: var(--code-bg); box-shadow: inset 0 0 0 1px var(--line); }
 .queue-item > svg { flex: none; color: var(--ink-3); }
 .queue-item.editing { background: var(--chip-teal-bg); }
-.queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.queue-when { flex: 0 1 auto; font-size: 11.5px; color: var(--ink-3); }
+.queue-copy { flex: 1; min-width: 0; }
+.queue-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.queue-when { display: block; height: 2.8em; overflow-y: auto; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.4; color: var(--ink-3); }
+.binding-error { color: var(--ink-2); font-size: 13.5px; overflow-wrap: anywhere; margin: 12px 0; }
 .queue-item .icon-btn { flex: none; width: 44px; height: 44px; }
 .send-label { display: grid; }
 .send-label > span { grid-area: 1 / 1; }

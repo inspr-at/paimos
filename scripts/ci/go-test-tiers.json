@@ -1070,6 +1070,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVersionOnlyProbeNeverEstablishesReadiness","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestAEON1254RefusedBindingDoesNotInterceptGenericInbox","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestAccountEnvironmentRequiresLocalEnrollment","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAccountLinkPromptAndTerminalInjection","tier":"GATED-FULL"}
@@ -2181,6 +2183,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentUnknownForkNeverRetries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentWorktreeIdentityIgnoresDaemon","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestAEON1254AttachedHookRefusalsAreValueFree","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachConflictDiagnosticIsSurfacedAndBounded","tier":"GATED-FULL"}
     ,
@@ -4376,6 +4380,10 @@
     ,
     {"kind":"go","package":"internal/ciproof","name":"TestWebhookAuthentication","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAEON1254GenericHookUsesIndexedAccountAcrossSuccessor","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestAEON1254HookDoctorClassifiesCLIAndInstance","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAccountLinkLaunchUsesPrivateLoginAndPrintsOneLine","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAccountLinkWatchReportsOnlyFirstLinkedResultAndStops","tier":"GATED-FULL"}
@@ -6137,6 +6145,8 @@
     {"kind":"go","package":"internal/grokprobe","name":"TestNonDarwinGrokIsUnsupported","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/grokprobe","name":"TestTrustedProbeDerivesOnlyVerifiedIdentity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesRejectCredentialsAndRevalidateStoredText","tier":"GATED-FULL"}
     ,
