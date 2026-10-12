@@ -285,9 +285,12 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     await page.screenshot({ path: testInfo.outputPath(`projects-row-menu-${width}-${theme}.png`), fullPage: true })
     await page.getByRole('menuitem', { name: 'Project settings', exact: true }).click(); await expect(page).toHaveURL('/p/AEON/settings')
     world.leadReason = true
-    await page.goto('/p/AEON/tickets'); await expect(page.locator('[data-launch-reason] .settings-link')).toBeVisible()
+    await page.goto('/p/AEON/tickets'); await expect(page.locator('#lead-launch-reason-band .settings-link')).toBeVisible()
+    await expect(page.locator('#lead-launch-reason-band [data-launch-reason]')).toHaveText('Automatic launch is not enabled for this workspace yet.')
+    await expect(page.locator('#lead-launch-reason-band .settings-link')).toHaveText('Settings Agents')
+    await expect(page.locator('#lead-launch-reason-band .settings-link svg')).toHaveCount(2)
     await page.screenshot({ path: testInfo.outputPath(`lead-launch-reason-${width}-${theme}.png`), fullPage: true })
-    await page.locator('[data-launch-reason] .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/agents#lead')
+    await page.locator('#lead-launch-reason-band .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/agents#lead')
     failures.push(...errors); await context.close()
   }
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()

@@ -4,6 +4,7 @@ import { reactive, ref } from 'vue'
 import { flatten, mountView, settle, textOf, type RenderNode } from './webcore-view-harness'
 import { leadBand, type LeadCandidates, type ProjectLead } from '../src/lib/lead'
 import * as leadAPI from '../src/lib/lead'
+import * as projectSettings from '../src/lib/projectSettings'
 
 const candidate = { id: 'running', display_label: 'AEON-LEAD', harness: 'codex', host: 'build-7', management_mode: 'unmanaged', reported_at: '2026-10-09T11:50:00Z' }
 const deferred = <T>() => { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
@@ -83,6 +84,7 @@ it('an unmanaged lead card offers cooperative pause and hides restart controls a
     const lead: ProjectLead = { project_id: 'project', revision: 4, generation: 1, session_id: 'running', state, reason: '', process_active: state !== 'paused' }
     const summary = { lead: ref(lead), band: ref(leadBand(lead, 'AEON', 1)), leadSession: ref(state === 'paused' ? null : { management_mode: 'unmanaged' }), workers: ref([]), stations: ref([]), questions: ref([]), questionsPartial: ref(false) }
     const view = mountView('../src/components/lead/LeadBand.vue', {
+      '../../lib/projectSettings': projectSettings,
       '../../lib/authz': { can: () => true }, 'vue-router': { useRouter: () => ({}) },
       '../../lib/lead': { ...leadAPI, canPause: () => true, canResume: () => true, LEAD_WORDS: { l: 'lead' }, unmanagedLeadCopy: 'Unmanaged: steering limited to messages and pause' },
       '../../lib/leadCardFold': { useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false) }) },

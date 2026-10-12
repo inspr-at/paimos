@@ -4,6 +4,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { computed, reactive, ref } from 'vue'
 import * as leadAPI from '../src/lib/lead'
+import * as projectSettings from '../src/lib/projectSettings'
 import { flush, setupSource } from './record-source'
 
 const scopes: { stop(): void }[] = []
@@ -21,6 +22,7 @@ function environment(initial = fresh()) {
     '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {}, snapshots: {} }) },
     '../../lib/authz': { can: () => true },
     '../../lib/lead': leadAPI,
+    '../../lib/projectSettings': projectSettings,
     '../../lib/leadOverlay': { openStartLead: open, openLeadPause: vi.fn(), openLeadPanel: vi.fn(), closeLeadSheet: vi.fn(), leadOverlay: reactive({ start: {} }) },
     '../../lib/toast': { toast: vi.fn() },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },

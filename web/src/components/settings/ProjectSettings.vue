@@ -101,7 +101,7 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
         <ProjectWorkContextCard v-if="contextAllowed" :key="`${owner}/${project.id}`" :project="project" />
         <SettingsCard v-else title="Work context" icon="shield" anchor="project-work-context" variant="project"><p class="owner-line">Owners and admins choose where accounts may work in Settings › Accounts.</p><RouterLink class="link-btn quiet" to="/settings/accounts">Settings › Accounts <AppIcon name="chevron-right" :size="12" /></RouterLink></SettingsCard>
         <div class="owner-links">
-          <p id="lead">Lead policy and limits: <RouterLink to="/settings/agents">Settings › Agents <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
+          <p id="lead">Lead policy and limits: <RouterLink to="/settings/agents">Settings <AppIcon name="chevron-right" :size="12" /> Agents <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
           <p>Model choice: <RouterLink to="/settings/models">Settings › Models <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
           <p>Project rules: <RouterLink to="/settings/agent-rules">Settings › Agent rules <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
           <p>Accounts and contexts: <RouterLink to="/settings/accounts">Settings › Accounts <AppIcon name="chevron-right" :size="12" /></RouterLink></p>

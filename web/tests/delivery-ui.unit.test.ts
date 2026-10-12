@@ -9,6 +9,8 @@ import ts from 'typescript'
 const http = vi.hoisted(() => ({ handle: async (_path: string, _init?: RequestInit) => new Response('{}') }))
 vi.mock('../src/lib/api.ts', () => ({ api:(path:string, init?:RequestInit) => http.handle(path,init), APIError:class extends Error { constructor(readonly status:number,message:string) { super(message) } }, getProjects:async () => ({ items:[] }) }))
 import * as delivery from '../src/lib/delivery'
+import * as deliveryNumbers from '../src/lib/deliveryNumbers'
+import * as projectSettings from '../src/lib/projectSettings'
 import * as policy from '../src/lib/reviewPolicy'
 import * as identity from '../src/lib/identityScope'
 import * as reviews from '../src/lib/reviews'
@@ -24,7 +26,7 @@ const json = (body:unknown, status=200) => new Response(JSON.stringify(body), { 
 const deferred = () => { let release!:(value:Response) => void; const promise = new Promise<Response>(resolve => { release=resolve }); return {promise,release} }
 async function settle() { for(let i=0;i<15;i++) await Promise.resolve(); await Vue.nextTick() }
 function setup<T>(file:string,props:object):T {
- const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessRevalidate:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/policies':policies,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './DeliveryQueue.vue':{}, './SettingsCard.vue':{} }
+ const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessRevalidate:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/policies':policies,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../../stores/projects':{useProjects:() => ({projects:[{id:'project',routeKey:'AEON'}]})}, '../../lib/deliveryNumbers':deliveryNumbers, '../../lib/projectSettings':projectSettings, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './DeliveryQueue.vue':{}, './SettingsCard.vue':{} }
  const {descriptor}=parse(readFileSync(new URL(`../src/components/${file}`,import.meta.url),'utf8'))
  const {content}=compileScript(descriptor,{id:file})
  const exports:{default?:{setup:(props:object,context:object) => T}}={}

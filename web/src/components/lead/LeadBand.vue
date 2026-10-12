@@ -134,7 +134,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
       </div>
     </div>
 
-    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now" data-launch-reason>{{ leadLaunchReason(lead) }} <RouterLink :to="`${projectSettingsPath(routeKey, 'agents')}#lead`" class="settings-link">Settings › Agents<AppIcon name="chevron-right" :size="12" /></RouterLink></p>
+    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now"><span data-launch-reason>{{ leadLaunchReason(lead) }}</span> <RouterLink :to="`${projectSettingsPath(routeKey, 'agents')}#lead`" class="settings-link">Settings <AppIcon name="chevron-right" :size="12" /> Agents<AppIcon name="chevron-right" :size="12" /></RouterLink></p>
 
     <LeadAdoption v-if="band.state !== 'none' && mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
     <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>

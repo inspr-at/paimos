@@ -23,7 +23,12 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     const card = page.locator('section.lead'), start = card.locator('[data-act="main"]'), fold = card.locator('[data-act="fold"]')
     await expect(start).toHaveAttribute('aria-disabled', 'true')
     await expect(card.locator('[data-launch-reason]')).toHaveText(OFF)
-    await expectStableControls({ controls: { start, fold }, scrollAreas: { page: page.locator('html') }, interactions: [
+    const settings = card.locator('#lead-launch-reason-band .settings-link')
+    await expect(settings).toHaveText('Settings Agents')
+    await expect(settings).toHaveAttribute('href', '/p/PHAROS/settings/agents#lead')
+    await expect(settings.locator('svg')).toHaveCount(2)
+    await expectStableControls({ controls: { start, fold, settings }, scrollAreas: { page: page.locator('html') }, interactions: [
+      { name: 'settings link hover keeps the controls still', run: async () => { await settings.hover(); await expect(settings).toHaveAttribute('href', '/p/PHAROS/settings/agents#lead') } },
       { name: 'unavailable Start ignores a pointer event', run: async () => { await start.dispatchEvent('click'); await expect(page.locator('dialog.lead-sheet')).toHaveCount(0) } },
       { name: 'fold the unavailable card', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
       { name: 'unfold the unavailable card', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true') } },
