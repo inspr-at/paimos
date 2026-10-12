@@ -1446,9 +1446,9 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		if bindingCode != "" {
 			code = &bindingCode
 		}
-		diagnostic := map[string]any{"phase": o.Phase, "activity": o.Activity, "activity_sequence": session.disk.Sequence, "inbox_binding_error": code}
+		diagnostic := map[string]any{"phase": o.Phase, "activity": o.Activity, "activity_sequence": session.disk.Sequence, "inbox_binding_error": code, "inbox_binding_report": true}
 		if err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, diagnostic, new(map[string]any)); err != nil {
-			return errors.New("heartbeat reported, but inbox binding diagnostic could not be saved")
+			return errors.New("heartbeat reported, but inbox binding diagnostic could not be saved; the server must support harness-session/3.1")
 		}
 	}
 	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {

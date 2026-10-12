@@ -608,7 +608,7 @@ func TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears(t *testing.T) {
 	w := f.call(f.agent, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "fixture-binding-source-000001", "worker_lease": lease, "management_mode": "unmanaged", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
 	expect(t, w, 201)
 	path := base + "/" + decode(t, w)["id"].(string) + "/heartbeat"
-	beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_error": "hook_cli_mismatch"}
+	beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_error": "hook_cli_mismatch", "max_session_file_bytes": 512000, "rules_client_version": "261005070923.0.0"}
 	expect(t, f.call(f.agent, "POST", path, beat, "wrong-lease"), 403)
 	w = f.call(f.agent, "POST", path, beat, lease)
 	expect(t, w, 200)
@@ -623,6 +623,26 @@ func TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears(t *testing.T) {
 	if decode(t, w)["inbox_binding_error"] != "hook_cli_mismatch" {
 		t.Fatal("older writer cleared the refusal")
 	}
+	var beforeAt, beforeVersion string
+	var beforeGrace, beforeMaximum int
+	readEvidence := func() (string, string, int, int) {
+		var at, version string
+		var grace, maximum int
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT heartbeat_at::text,coalesce(rules_client_version,''),missing_progress_beats,coalesce(max_session_file_bytes,0) FROM harness_sessions WHERE id=$1`, strings.TrimSuffix(strings.TrimPrefix(path, base+"/"), "/heartbeat")).Scan(&at, &version, &grace, &maximum)
+		})
+		return at, version, grace, maximum
+	}
+	beforeAt, beforeVersion, beforeGrace, beforeMaximum = readEvidence()
+	report := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_report": true, "inbox_binding_error": nil}
+	w = f.call(f.agent, "POST", path, report, lease)
+	expect(t, w, 200)
+	afterAt, afterVersion, afterGrace, afterMaximum := readEvidence()
+	if beforeMaximum != 512000 || beforeVersion != "261005070923.0.0" || beforeAt != afterAt || beforeVersion != afterVersion || beforeGrace != afterGrace || beforeMaximum != afterMaximum {
+		t.Fatal("binding metadata changed liveness, grace period or client capability")
+	}
+	report["activity_sequence"] = 2
+	expect(t, f.call(f.agent, "POST", path, report, lease), 409)
 	beat["inbox_binding_error"] = nil
 	w = f.call(f.agent, "POST", path, beat, lease)
 	expect(t, w, 200)

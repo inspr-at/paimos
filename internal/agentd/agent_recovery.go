@@ -318,7 +318,7 @@ func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservatio
 	}
 	image, err := m.validateHarnessImage(ctx, process, in.Harness)
 	if err != nil {
-		return &hookbinding.Refusal{Code: "harness_identity_mismatch"}
+		return &hookbinding.Refusal{Code: "harness_identity_mismatch", Cause: ErrNotOwned}
 	}
 	if s.attachedHooks == nil {
 		s.attachedHooks = make(map[string]*attachedHookBinding)

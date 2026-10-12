@@ -5,10 +5,12 @@
 package hookbinding
 
 type Refusal struct {
-	Code string `json:"code"`
+	Code  string `json:"code"`
+	Cause error  `json:"-"`
 }
 
 func (e *Refusal) Error() string { return Reason(e.Code) }
+func (e *Refusal) Unwrap() error { return e.Cause }
 
 func Reason(code string) string {
 	switch code {

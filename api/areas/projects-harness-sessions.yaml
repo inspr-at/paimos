@@ -233,6 +233,7 @@ paths:
                 rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
                 attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
+                inbox_binding_report: {type: boolean, default: false, description: "Update only the refusal after an accepted heartbeat. Requires the same phase, activity and sequence; never renews liveness or changes progress, rules capabilities or process authority."}
                 inbox_binding_error: {$ref: '#/components/schemas/InboxBindingError'}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}

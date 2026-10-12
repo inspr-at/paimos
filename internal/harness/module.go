@@ -1336,20 +1336,21 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		ModelReports []modelregistry.Observation `json:"model_reports"`
 		pauseProgressReport
 		rules.ClientReport
-		AttachedHook      bool                    `json:"attached_hook"`
-		InboxBindingError json.RawMessage         `json:"inbox_binding_error"`
-		ProcessOwnership  *ownedprocess.Identity  `json:"process_ownership"`
-		Phase             string                  `json:"phase"`
-		Activity          string                  `json:"activity"`
-		ActivitySequence  int64                   `json:"activity_sequence"`
-		ActivityNote      *string                 `json:"activity_note"`
-		Doing             *string                 `json:"doing"`
-		DoingAt           *time.Time              `json:"doing_at"`
-		ToolActivity      *agentactivity.Activity `json:"tool_activity"`
-		DisplayLabel      json.RawMessage         `json:"display_label"`
-		EtaReadyAt        json.RawMessage         `json:"eta_ready_at"`
-		EtaLiveAt         json.RawMessage         `json:"eta_live_at"`
-		ProgressPct       json.RawMessage         `json:"progress_pct"`
+		AttachedHook       bool                    `json:"attached_hook"`
+		InboxBindingError  json.RawMessage         `json:"inbox_binding_error"`
+		InboxBindingReport bool                    `json:"inbox_binding_report"`
+		ProcessOwnership   *ownedprocess.Identity  `json:"process_ownership"`
+		Phase              string                  `json:"phase"`
+		Activity           string                  `json:"activity"`
+		ActivitySequence   int64                   `json:"activity_sequence"`
+		ActivityNote       *string                 `json:"activity_note"`
+		Doing              *string                 `json:"doing"`
+		DoingAt            *time.Time              `json:"doing_at"`
+		ToolActivity       *agentactivity.Activity `json:"tool_activity"`
+		DisplayLabel       json.RawMessage         `json:"display_label"`
+		EtaReadyAt         json.RawMessage         `json:"eta_ready_at"`
+		EtaLiveAt          json.RawMessage         `json:"eta_live_at"`
+		ProgressPct        json.RawMessage         `json:"progress_pct"`
 		sessionText
 		Commits []Commit `json:"commits"`
 	}
@@ -1376,7 +1377,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		}
 	}
 	s, err := worker(ctx, tx, r, p)
-	if err != nil && lostContact(s) && leaseProof(s, r, p) {
+	if err != nil && !in.InboxBindingReport && lostContact(s) && leaseProof(s, r, p) {
 		// AEON-291: the sweeper closed a silent generation; its own worker is back.
 		s, err = revive(ctx, tx, p, s, in.Phase)
 	}
@@ -1402,6 +1403,28 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		if err != nil {
 			return nil, err
 		}
+	}
+	// Binding diagnostics follow the accepted beat, but are not another
+	// liveness/progress/rules report. Never revive a generation or reset its
+	// client capability, warning grace period or scheduled controls here.
+	if in.InboxBindingReport {
+		if in.InboxBindingError == nil || in.AttachedHook || in.ProcessOwnership != nil || in.ActivitySequence != s.ActivitySequence || in.Phase != s.Phase || in.Activity != s.Activity {
+			return nil, workorders.Fail(409, "binding report requires the current heartbeat identity")
+		}
+		if !same(s.inboxBindingCode, bindingError) {
+			before := s
+			s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET inbox_binding_error=$2 WHERE id=$1 RETURNING `+sessionColumns, s.ID, bindingError))
+			if err != nil {
+				return nil, err
+			}
+			if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
+				return nil, err
+			}
+		}
+		if isolated {
+			return heartbeatReceipt(s), nil
+		}
+		return s, nil
 	}
 	if in.AttachedHook && in.ProcessOwnership == nil {
 		return nil, workorders.Fail(400, "exact attached hook identity required")
