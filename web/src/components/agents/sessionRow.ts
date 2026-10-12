@@ -39,6 +39,17 @@ export function intendedResult(view: SessionView) {
   return view.name
 }
 
+// The execution-column CI captures the base SessionList with this branch's helpers.
+// Keep its context read compatible; the approved rows use their activity line instead.
+export function sessionContext(view: SessionView, primary: string) {
+  const name = view.name.trim()
+  if (primary !== name) return name
+  const host = view.session.host?.trim()
+  if (host && host !== name) return host
+  const project = view.projectTitle?.trim() || view.projectKey?.trim()
+  return project && project !== name ? project : name
+}
+
 // Known public model-name prefixes only. Harness identity never implies a provider.
 export function modelProvider(model: string): ModelProvider {
   const value = model.trim().toLowerCase()

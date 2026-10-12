@@ -163,6 +163,11 @@ const structure: Structure<SessionView> = {
 const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (pointing.value || keyFocus.value || menuOpen.value), undefined, {
   read: projectLayout,
   headings: layout => layout.headings,
+  follow: (held, current, ids) => ({
+    ...held,
+    placements: new Map([...held.placements].map(([id, placement]) => [id, ids.has(`p:${id}`) ? current.placements.get(id) ?? placement : placement])),
+    headings: held.headings.flatMap(heading => ids.has(heading.id) ? current.headings.filter(next => next.id === heading.id) : [heading]),
+  }),
 })
 // Whether a row matches is part of its place: a row the hold keeps keeps the match it froze with,
 // so a refresh that changes it, a new copy or a renamed model alike, waits like any other move.
@@ -904,7 +909,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <SessionsHeld v-if="loaded && state === 'ready'" :pending="hold.pending.value" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" />
         <span v-if="loaded && state === 'ready'" class="head-tools">
           <button
-            v-if="!showRemoved && stale.length" type="button" class="btn sm ghost quiet-btn" :disabled="removal.busy.value"
+            v-if="stale.length" type="button" class="btn sm ghost quiet-btn" :class="{ 'clear-stale-off': showRemoved }" :disabled="showRemoved || removal.busy.value" :aria-hidden="showRemoved || undefined"
             :aria-label="`Clear stale: ${stale.length} without a heartbeat for 15 minutes`"
             :data-tip="`${stale.length} without a heartbeat for 15 minutes`" @click="hold.follow(stale.map(s => s.id)); removal.clearStale(stale)"
           ><AppIcon name="trash" :size="13" /><span class="tool-label">Clear stale</span></button>
@@ -1012,7 +1017,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           <span role="gridcell" class="c-time" />
           <span class="execution-host" role="presentation"><span role="gridcell" class="c-exec" /><span role="gridcell" class="c-host" /></span>
           <span role="gridcell" class="right c-beat" />
-          <span role="gridcell" class="c-actions" @click.stop><LeadMenu :project-id="section.project.id" :project-key="section.project.key" :lead="section.line.lead" /></span>
+          <span role="gridcell" class="c-actions" @click.stop><LeadMenu :project-id="section.project.id" :project-key="section.project.key" :lead="section.line.lead" @removed="hold.followHeadings([`p:${$event}`])" /></span>
         </div>
         <div
           v-for="row in sectionRows.get(section.id)" :key="row.view.session.id" class="row agent-state-surface" :data-state="row.view.status.state" role="row"
@@ -1259,6 +1264,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .head-tools { display: inline-flex; align-items: center; gap: 2px; margin-right: -4px; }
 /* One control height across the head (AEON-1209). */
 .head-tools .btn { height: var(--ctl-h, 36px); padding: 0 12px; font-size: 13px; }
+/* History keeps the stale action's slot, including when the tools wrap onto another line. */
+.head-tools .clear-stale-off { visibility: hidden; pointer-events: none; }
 .tool-label { white-space: nowrap; }
 /* Applied filters, under the head: the state filter is the head count's (AEON-780); × or Esc clears it. */
 .pills-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 10px 8px; }

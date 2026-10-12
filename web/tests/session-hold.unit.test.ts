@@ -213,6 +213,7 @@ describe('project headings share the held session structure', () => {
         lines: true,
       }).groups,
       headings: (groups: ReturnType<typeof projectGroups>['groups']) => groups.map(g => ({ id: g.project.id, key: g.line?.kind ?? 'session' })),
+      follow: (held: ReturnType<typeof projectGroups>['groups'], current: ReturnType<typeof projectGroups>['groups'], ids: ReadonlySet<string>) => held.flatMap(group => ids.has(group.project.id) ? current.filter(next => next.project.id === group.project.id) : [group]),
     }
     const hold = scope.run(() => useSessionHold(() => live.value, structure, () => pointing.value, timers, layout))!
     return { live, pointing, timers, scope, lead, queued, hold }
@@ -259,6 +260,30 @@ describe('project headings share the held session structure', () => {
       pointing.value = false; await nextTick()
       timers.advance(RELEASE_MS)
       expect(hold.layout.value![0]!.line?.kind).toBe('pending')
+      expect(hold.pending.value).toBe(0)
+    } finally { scope.stop() }
+  })
+
+  it('applies an own lead removal while unrelated headings wait, and holds later changes to that lead', async () => {
+    const { pointing, scope, lead, queued, hold } = setup()
+    try {
+      lead.value = { ...lead.value, state: 'paused', session_id: null, generation: 0, process_active: false }
+      pointing.value = true; await nextTick()
+      expect(hold.layout.value![0]!.line?.kind).toBe('pending')
+      queued.value = 1
+      lead.value = { ...lead.value, state: 'none', revision: 0 }
+      expect(hold.pending.value).toBe(2)
+      hold.followHeadings(['p-pharos'])
+      expect(hold.layout.value!.map(group => group.project.id)).toEqual(['p-pharos'])
+      expect(hold.layout.value![0]!.line?.kind).toBe('none')
+      expect(hold.pending.value, 'the unrelated queued heading still waits').toBe(1)
+      expect(ids(hold.views.value)).toEqual(['a'])
+      lead.value = { ...lead.value, state: 'starting', revision: 1 }
+      expect(hold.layout.value![0]!.line?.kind, 'rebasing an own deletion does not follow later refreshes').toBe('none')
+      expect(hold.pending.value).toBe(2)
+      hold.showNow()
+      expect(hold.layout.value!.map(group => group.project.id)).toEqual(['p-aeon', 'p-pharos'])
+      expect(hold.layout.value![1]!.line?.kind).toBe('pending')
       expect(hold.pending.value).toBe(0)
     } finally { scope.stop() }
   })

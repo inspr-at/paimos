@@ -40,6 +40,8 @@ export interface Heading { id: string; key: string }
 export interface HoldLayout<T, L> {
   read: (views: readonly T[], match: (view: T) => boolean) => L
   headings: (layout: L) => readonly Heading[]
+  /** Rebase only the headings changed by the person's own successful action. */
+  follow?: (held: L, current: L, ids: ReadonlySet<string>) => L
 }
 const headingStructure: Structure<Heading> = { id: heading => heading.id, key: heading => heading.key, order: headings => headings.map(heading => heading.id) }
 
@@ -122,6 +124,7 @@ export interface SessionHold<T, L = never> {
   showNow: () => void
   /** The person's own changes (a removal, a move) apply at once. */
   follow: (ids: Iterable<string>) => void
+  followHeadings: (ids: Iterable<string>) => void
   reset: () => void
 }
 
@@ -170,6 +173,13 @@ export function useSessionHold<T, L = never>(live: () => readonly T[], structure
     layout: computed(() => heldLayout.value?.value ?? layout?.read(live(), liveMatch)),
     showNow,
     follow(ids) { if (frame.value) follows.value = new Set([...follows.value, ...ids]) },
+    followHeadings(ids) {
+      if (!frame.value || !heldLayout.value || !layout?.follow) return
+      const placed = settle(frame.value, live(), structure, follows.value)
+      const match = (view: T) => follows.value.has(structure.id(view)) ? liveMatch(view) : frame.value!.matches.get(structure.id(view)) ?? liveMatch(view)
+      const value = layout.follow(heldLayout.value.value, layout.read(placed, match), new Set(ids))
+      heldLayout.value = { value, headings: frameOf(layout.headings(value), headingStructure) }
+    },
     reset,
   }
 }
