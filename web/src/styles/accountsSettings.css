@@ -28,10 +28,6 @@
   .ar-q .cap { white-space: normal; overflow: visible; }
 }
 .q-legend { margin-top: 12px; }
-/* Limits keep their content geometry through Remove and End now. Native scroll
-   anchoring can still follow replaced text/action descendants and move the
-   account's controls on screen, so this pane keeps the person's scroll offset. */
-.accounts-computers :deep(.pane-body:has([data-limits])) { overflow-anchor: none; }
 .p-say-slot { display: grid; margin-top: 12px; }
 .p-say-slot > .p-say { grid-area: 1/1; margin: 0; }
 .p-say.sizer { visibility: hidden; }
