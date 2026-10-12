@@ -98,7 +98,7 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   await expect(page.getByRole('button', { name: /^Ended\s*1/ })).toBeVisible()
   const lead = row(page, camy)
   await expect(lead.getByRole('link', { name: /Claude Code camy, Working/ })).toBeVisible()
-  await expect(lead).toContainText('camy')
+  await expect(lead.locator('.result')).toHaveAttribute('title', /camy$/)
   await expect(lead).toContainText('Lead')
   await expect(lead.locator('.key-inline')).toHaveText('PHAROS-11 ·')
   // AEON-1211: the state lives in the avatar (its badge, name and tooltip); a precise word opens line 2.
