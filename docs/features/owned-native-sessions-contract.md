@@ -146,3 +146,26 @@ R0 is coordinator-owned and deliberately excluded from the builder write set.
 It must complete in this PR, before authoritative CI/merge. C0's browser check
 is not applicable. Guarded Go/static results and affected selection are reported
 in the worker handoff; an incomplete/refused check is never reported green.
+
+Worker validation handoff (2026-10-13): declaration generation/check, OpenAPI
+generation/check, schema reference/required-field validation, additive retention
+of all original 45 schemas / 20 routes, TypeScript syntax and exclusive-write-set
+checks pass. The affected planner reports `FULL: R2 full: OpenAPI lint package
+changed with the contract`; full CI belongs to the coordinator/PR lane.
+
+The guarded remote Go run at `b78b77c54` passed `internal/nativesessions` and
+`internal/reportercontract`, including the disabled-route zero-start fixture.
+The native unsafe-wire behavior fixture passed; area parity failed because the
+fresh checkout lacked ignored `api/openapi.yaml`. Package setup now generates
+that bundle before native tests. This fix and the private-producer/viewer fixture
+were committed, but repeated final-HEAD remote retries returned exit 3 at the
+global 2/2 capacity limit. Final-HEAD Go validation remains incomplete.
+Guarded static attempts also returned exit 3 (capacity, then the held/non-GREEN
+host guard); no static pass is claimed. There was no local Go/browser/static
+fallback, origin push, deployment, review gate or model CLI invocation.
+
+After applying the R0 rows above, the coordinator must run
+`remote-test.sh <worktree> ./internal/nativecontract/... ./internal/nativesessions/... ./internal/reportercontract/`
+and guarded `ci-static-locked.sh` / authoritative PR CI before merge. Browser
+validation is not applicable to C0. The worker exits with these checks explicit,
+without changing any coordinator-owned metadata or ticket state.
