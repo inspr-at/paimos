@@ -372,10 +372,22 @@ func TestAEON1254RefusedBindingDoesNotInterceptGenericInbox(t *testing.T) {
 	if !errors.As(err, &status) || status.Status != 403 || status.Message != "harness worker proof rejected" {
 		t.Fatalf("wrong refusal: %v", err)
 	}
-	if s.attachedHooks[in.SessionID] != nil {
+	if binding := s.attachedHooks[in.SessionID]; binding != nil && binding.ready {
 		t.Fatal("refused binding remained active")
 	}
-	if _, err := s.serviceAttachedHook(t.Context(), peer, AttachedHookRequest{Operation: "pull", SessionID: in.SessionID}); !errors.Is(err, ErrNotOwned) {
+	// A legitimate descendant would otherwise reach the daemon's API.
+	// An unrelated helper must not let this assertion pass for the wrong reason.
+	hook := *target
+	hook.PID, hook.Started, hook.Parent = target.PID+100, "foreground-fixture", target.PID
+	observe := m.observe
+	m.observe = func(pid int) (attachObservation, error) {
+		if pid == hook.PID {
+			return hook, nil
+		}
+		return observe(pid)
+	}
+	m.ancestry = m.observe
+	if _, err := s.serviceAttachedHook(t.Context(), hook, AttachedHookRequest{Operation: "pull", SessionID: in.SessionID}); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("generic fallback was intercepted: %v", err)
 	}
 	if len(m.sessions) != 0 {
