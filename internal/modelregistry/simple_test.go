@@ -862,8 +862,8 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 					if err := tx.QueryRow(t.Context(), `SELECT registered_by_principal_id::text FROM agent_accounts WHERE id=$1`, account).Scan(&runner); err != nil {
 						return err
 					}
-					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,prefix,hash,scopes)
- VALUES($1,$2::uuid,replace($2::uuid::text,'-',''),repeat('e',64),ARRAY['run.claim']) RETURNING id::text`, owner.TenantID, runner).Scan(&key); err != nil {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes)
+ VALUES($1,$2::uuid,'Host regression',replace($2::uuid::text,'-',''),repeat('e',64),ARRAY['run.claim']) RETURNING id::text`, owner.TenantID, runner).Scan(&key); err != nil {
 						return err
 					}
 					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)

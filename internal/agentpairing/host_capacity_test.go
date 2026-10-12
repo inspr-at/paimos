@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -40,13 +41,19 @@ func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
 	policy := hostcapacity.Default()
 	policy.MaximumAgents = 1
 	f.call("PUT", "/api/agent-pairing/computers/"+*v.ComputerID+"/capacity", map[string]any{"expected_revision": v.Revision, "policy": policy}, true, "", 200)
+	seed := func(fn func(pgx.Tx) error) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, fn); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var external string
-	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,started_at,ended_at,trace)
+	seed(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,started_at,ended_at,trace)
  SELECT tenant_id,work_order_id,agent_principal_id,$2::uuid,'ownership_lost',created_at,clock_timestamp(),
  '{"worker_assignment":{"state":"launched"},"work_lifecycle_release":{"exit_unconfirmed":true}}'
- FROM agent_runs WHERE id=$1 RETURNING id::text`, *e.VerificationRunID, f.profiles["codex"]).Scan(&external); err != nil {
-		t.Fatal(err)
-	}
+ FROM agent_runs WHERE id=$1 RETURNING id::text`, *e.VerificationRunID, f.profiles["codex"]).Scan(&external)
+	})
 	readHost := func(running int, reason string) {
 		t.Helper()
 		var got agentpairing.View
@@ -57,17 +64,19 @@ func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
 	}
 	// 129 did not count this terminal assignment; 130's retained marker did.
 	readHost(0, "")
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_runs SET status='running',ended_at=NULL WHERE id=$1`, external); err != nil {
-		t.Fatal(err)
-	}
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running',ended_at=NULL WHERE id=$1`, external)
+		return err
+	})
 	readHost(0, "")
 	// The actual reservation and claim must still succeed beside that process.
 	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
 	readHost(1, "maximum_agents")
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',ended_at=clock_timestamp(),
- trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, *e.VerificationRunID); err != nil {
-		t.Fatal(err)
-	}
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',ended_at=clock_timestamp(),
+ trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, *e.VerificationRunID)
+		return err
+	})
 	readHost(1, "maximum_agents")
 	// Computer ownership grants only the host cause, even before account linking.
 	var advice agentaccounts.CapacityNext
