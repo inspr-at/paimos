@@ -424,7 +424,8 @@ const phoneFit = (page: Page) => page.locator('.app-header').evaluate(header => 
     }
   }
   const outside = controls.filter(el => { const r = el.getBoundingClientRect(); return r.left < start - 0.5 || r.right > end + 0.5 }).map(name)
-  return { keys: keys.map(key => key.textContent!.trim()), cut, outside, header: header.scrollWidth - header.clientWidth, page: document.documentElement.scrollWidth - innerWidth, away: header.dataset.away ?? '' }
+  const room = `header ${Math.round(own.width)} px, spacer ${header.querySelector('.spacer')?.getBoundingClientRect().width.toFixed(1)} px`
+  return { keys: keys.map(key => key.textContent!.trim()), cut, outside, header: header.scrollWidth - header.clientWidth, page: document.documentElement.scrollWidth - innerWidth, away: header.dataset.away ?? '', room }
 })
 for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`at ${width} ${theme} the header shows a key whole or not at all and fits the window (AEON-1240)`, async ({ page }, testInfo) => {
@@ -439,7 +440,7 @@ for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of [
       await page.evaluate(() => document.fonts.ready.then(() => undefined))
       await settle(page)
       const fit = await phoneFit(page)
-      const where = `${target.path} at ${width} (keys ${fit.keys.join(', ') || 'none'}; aside ${fit.away || 'nothing'})`
+      const where = `${target.path} at ${width} (keys ${fit.keys.join(', ') || 'none'}; aside ${fit.away || 'nothing'}; ${fit.room})`
       expect(fit.cut, where).toEqual([])
       expect(fit.outside, `${where}: controls past the header`).toEqual([])
       expect(fit.header, `${where}: header scrolls sideways`).toBeLessThanOrEqual(0)
