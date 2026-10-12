@@ -289,7 +289,7 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   await expect(done.locator('.l2t')).toContainText(/moves to Ended at \d{1,2}:07/)
   await expect(done.locator('.c-time')).toHaveText('3 min ago')
   // It sits among the live rows, not in the folded Ended group.
-  await expect(page.locator('.sessions .group-row.stopped .group-toggle')).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('.sessions .ended-head .group-toggle')).toHaveAttribute('aria-expanded', 'false')
   await page.mouse.move(700, 8)
   await page.clock.runFor(6 * 60_000)
   await expect(done).toBeVisible()

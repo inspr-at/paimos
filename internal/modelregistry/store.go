@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/modelactivation"
@@ -35,11 +34,12 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 
 // Profile is one immutable model pin.
 type Profile struct {
-	Source   string     `json:"source"`
-	Origin   string     `json:"origin"`
-	Note     string     `json:"note"`
-	RetireAt *time.Time `json:"retire_at"`
-	Retired  bool       `json:"retired"`
+	Source   string      `json:"source"`
+	Origin   string      `json:"origin"`
+	Note     string      `json:"note"`
+	RetireAt *time.Time  `json:"retire_at"`
+	Retired  bool        `json:"retired"`
+	Pause    *modelPause `json:"pause,omitempty"`
 	Display
 	EffortLevel *int      `json:"effort_level"`
 	Provider    string    `json:"provider"`
@@ -173,33 +173,21 @@ func profileSource(source string) string {
 	return "auto"
 }
 
-// Only these constant identifiers enter SQL; the caller's role is never SQL.
-func roleRoutesTable(role string) string {
-	if role == "review-gate-security" {
-		return "model_security_role_routes"
-	}
-	return "model_role_routes"
-}
-
-func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO `+roleRoutesTable(route.Role)+` (tenant_id, role, priority, profile_id, state, reason, valid_until)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7)`,
-		tenantID, route.Role, route.Priority, route.ProfileID, route.State, route.Reason, route.ValidUntil)
-	return err
-}
-
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return listProfilesLimit(ctx, tx, 0)
 }
 
-func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
+func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int, enabledOnly ...bool) ([]Profile, error) {
 	query := `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
- EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now())),
+ (SELECT jsonb_build_object('until',x.until_at,'reason',x.reason,'by',x.set_by,'at',x.set_at) FROM model_pauses x WHERE x.harness=p.harness AND x.model=p.model AND (x.until_at IS NULL OR x.until_at>now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		ORDER BY p.slug, p.version, p.id`
+	if len(enabledOnly) > 0 && enabledOnly[0] {
+		query = strings.Replace(query, "ORDER BY p.slug", "WHERE p.enabled ORDER BY p.slug", 1)
+	}
 	if limit > 0 {
 		return readProfiles(ctx, tx, query+` LIMIT $1`, limit)
 	}
@@ -211,7 +199,8 @@ func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return readProfiles(ctx, tx, `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
- EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now())),
+ (SELECT jsonb_build_object('until',x.until_at,'reason',x.reason,'by',x.set_by,'at',x.set_at) FROM model_pauses x WHERE x.harness=p.harness AND x.model=p.model AND (x.until_at IS NULL OR x.until_at>now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		WHERE NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		ORDER BY p.slug, p.version, p.id LIMIT 257`)
@@ -226,7 +215,7 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired, &profile.Pause); err != nil {
 			return nil, err
 		}
 		profile.Source = profileSource(profile.Source)
@@ -237,23 +226,20 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 }
 
 func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT role, priority, profile_id::text, state, reason, valid_until
-		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) routes
-		ORDER BY role, priority, profile_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []Route{}
-	for rows.Next() {
-		var route Route
-		if err := rows.Scan(&route.Role, &route.Priority, &route.ProfileID, &route.State, &route.Reason, &route.ValidUntil); err != nil {
+	for _, role := range roleLadder {
+		steps, _, err := derivedRoleSteps(ctx, tx, nil, role.name, routesTotalLimit+1)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, route)
+		for _, step := range steps {
+			out = append(out, step.Route)
+		}
+		if len(out) > routesTotalLimit {
+			return nil, prefFail(413, "audit_snapshot_too_large")
+		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func validateProfile(in profileWrite) error {
@@ -331,53 +317,6 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 		return Profile{}, err
 	}
 	return out, nil
-}
-
-// replaceRoutes is the transaction-injected legacy fixture helper. Production
-// writes enter through Module.replace with final authority and shared fences.
-func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming []Route, now time.Time) ([]Route, error) {
-	if err := routeBounds(incoming); err != nil {
-		return nil, err
-	}
-	if err := requireCatalog(ctx, tx); err != nil {
-		return nil, err
-	}
-	before, err := boundedStoredRoutes(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	normalized, err := normalizeStoredRoutes(incoming, before, now, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := profilesExist(ctx, tx, normalized); err != nil {
-		return nil, err
-	}
-	if routesEqual(before, normalized) {
-		return before, nil
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
-		return nil, err
-	}
-	for _, route := range normalized {
-		if err := insertRoute(ctx, tx, p.TenantID, route); err != nil {
-			return nil, err
-		}
-	}
-	after, err := boundedStoredRoutes(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if err := writeEvent(ctx, tx, p, evRoutes, before, after); err != nil {
-		return nil, err
-	}
-	return after, nil
 }
 
 func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {

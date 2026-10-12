@@ -67,6 +67,32 @@ logs or credentials.
   workflow run is not written into the metric tables. Only the project's CI
   workflow counts.
 
+  Verified GitHub deliveries are saved before any downstream read or write
+  (AEON-1241). Separate checkpoints cover projection, review fan-out, check
+  audit, merge audit, metrics, Flow and merge completion. The delivery worker
+  resumes unfinished receipts after restart. Retries become eligible after
+  five seconds and back off to five minutes; reconciliation can delay a pass.
+  Failed processing still
+  returns 502; recovery also runs internally without a GitHub redelivery.
+  Repeated attempts use the existing idempotent fact and event identities.
+  A delivery ID reused with different authenticated content returns 409.
+  Closed unmerged PRs, merges into another branch and empty direct-push
+  completion results finish as `nothing_to_record`. Missing canonical merge
+  proof and refused ticket transitions stay pending within a budget of twelve
+  processing attempts. Internal recovery rechecks the existing ownership and
+  human gates. Unresolved or failed work then finishes with `gave_up` and a
+  content-free warning; it stops automatic reads without completing the ticket.
+
+  The tenant-isolated receipt retains the verified payload, its digest and
+  installation binding, never authentication headers or signatures. The DSAR
+  inventory classifies the payload for review, the external installation ID as
+  personal data and processing state as metadata, with a tenant locator like
+  the other delivery tables. Exhausted receipts retain their payload and earlier
+  checkpoints; retry exhaustion deletes no facts or Needs You refusals.
+  Historical suite heads include reconciliation observations; an overflow
+  fallback still requires a currently ticket-linked consumer. Unconfigured
+  metrics with no consumer require no Actions read.
+
 ## Reading
 
 `GET /api/projects/{projectId}/delivery/flow?at=&from=&to=` returns the runs

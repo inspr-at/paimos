@@ -176,6 +176,7 @@ export const useAgents = defineStore('agents', () => {
   const accounts = accountsRead.data
   const accountsState = computed(() => accountsRead.status.value.state)
   const accountsUpdatedAt = computed(() => accountsRead.status.value.updatedAt)
+  const accountsStatus = accountsRead.status
   const messagingState = ref<Availability>('idle')
   const pendingHeld = ref<Record<string, ProjectMessage[]>>({})
   const threads = ref<Record<string, ProjectMessage[]>>({})
@@ -628,7 +629,7 @@ export const useAgents = defineStore('agents', () => {
   function threadChanged() { threadPulse.value++ }
 
   return {
-    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
+    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, accountsStatus, messagingState, runs, nodes, controls, models, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, earlierThread, threadMore, refreshAgentRuns, tick, deliveryPulse, deliveryChanged, threadPulse, threadChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, threadState, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,

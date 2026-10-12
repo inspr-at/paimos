@@ -37,14 +37,18 @@ for (const theme of ['light', 'dark'] as const) {
 
 test('events glint once, restart on new evidence, and never replay on mount or state changes', async ({ page }) => {
   await gallery(page)
+  // Hold the event animation while checking its colour and restart.
+  const freeze = await page.addStyleTag({ content: '.glint { animation-play-state: paused !important; }' })
   const working = page.locator('[data-variant="3"][data-state="working"] [data-size="26"] > svg')
   await expect(working.locator('.glint')).toHaveCount(0)
   await page.getByRole('button', { name: 'Send event', exact: true }).click()
-  await expect(working.locator('.glint')).toHaveCSS('fill', 'rgb(201, 162, 74)')
+  const ink = await working.evaluate(el => { const probe = document.createElement('span'); probe.style.color = 'var(--secondary-line)'; el.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color })
+  await expect(working.locator('.glint')).toHaveCSS('fill', ink)
   const first = await working.locator('.glint').elementHandle()
   await page.getByRole('button', { name: 'Send event', exact: true }).click()
   expect(await first!.evaluate(node => node.isConnected)).toBe(false)
   await expect(page.locator('.stale .glint')).toHaveCount(0)
+  await freeze.evaluate(el => el.remove())
   await expect(working.locator('.glint')).toHaveCount(0, { timeout: 1500 })
   await page.getByRole('button', { name: 'Reset counter', exact: true }).click()
   await expect(working.locator('.glint')).toHaveCount(0)

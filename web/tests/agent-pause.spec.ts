@@ -193,7 +193,9 @@ test('wind-down previews only owned work and a reloaded all-computer report leav
   const barrier = new Promise<void>(resolve => { release = resolve }), requested = new Promise<void>(resolve => { observed = resolve })
   await page.route('**/api/me/leaving-at', async route => {
     if (waiting && route.request().method() === 'GET') {
-      waiting = false; observed(); await barrier
+      // The healthy stream can request another ownership read. Hold every
+      // concurrent answer, so none can open the gate before this barrier.
+      observed(); await barrier
       return route.fulfill({ json: { owner_principal_id: me.id, deadline_at: null, request_id: null, hosts: 'all', agents: [], stop_in_flight: false, items: [] } })
     }
     return route.fallback()
@@ -202,7 +204,7 @@ test('wind-down previews only owned work and a reloaded all-computer report leav
   const pop = formPopover(page), submit = pop.locator('button[type=submit]')
   await requested
   await expect(submit).toBeDisabled(); await expect(pop.locator('#wd-hint')).toHaveText('Reading owned sessions…')
-  release()
+  waiting = false; release()
   await expect(submit).toBeEnabled()
   await expect(pop.getByLabel('Where').locator('option')).toHaveText(['All computers · 1 agent', 'Chosen agents…'])
   await expect(pop.locator('.wdf-prev')).toContainText('1 agent on all computers'); await expect(pop.locator('.wdf-prev')).toContainText('0 hand over · 1 finish · 0 stop, no handover')

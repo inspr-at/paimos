@@ -445,6 +445,12 @@ func applyFlowStepTx(ctx context.Context, tx pgx.Tx, tid string, item flowItemRo
 			after.Outcome = before.Outcome
 		}
 	}
+	// The suite established that this exact GitHub run attempt failed and a
+	// later attempt passed. A lone failed-attempt redelivery has less evidence
+	// and must not erase that classification, even without metric storage.
+	if exists && in.Source == "github_app" && before.Outcome != nil && *before.Outcome == "flaky" && after.Outcome != nil && *after.Outcome == "red" {
+		after.Outcome = before.Outcome
+	}
 	// Reports may arrive out of order; an end never precedes its start.
 	if after.EndedAt != nil && after.EndedAt.Before(after.StartedAt) {
 		v := after.StartedAt

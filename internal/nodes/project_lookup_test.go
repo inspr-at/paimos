@@ -71,7 +71,10 @@ func TestProjectLookupAliasesVisibilityAndZeroAggregates(t *testing.T) {
 	}
 	// Matches on different alias forms are still ambiguous; an exact key does
 	// not take precedence. A project matching several forms counts only once.
-	third := makeProject("THIRD-1", first.Key, "EXACT")
+	third := makeProject("THIRD-1", "THIRD", "OLD-THIRD")
+	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('project_key',$2::text,'classic',jsonb_build_object('key','EXACT')) WHERE id=$1`, third.ID, first.Key); err != nil {
+		t.Fatal(err)
+	}
 	lookup(p, first.Key, http.StatusConflict)
 	lookup(p, "EXACT", http.StatusConflict)
 	guest := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Person, Name: "Guest"}

@@ -23,25 +23,25 @@ type boardCatalog struct {
 	lines      []modelprefs.BoardLine
 }
 
-func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+func loadBoardCatalog(ctx context.Context, tx pgx.Tx, routing ...bool) (boardCatalog, error) {
+	enabledOnly := len(routing) > 0 && routing[0]
+	filter := ""
+	if enabledOnly {
+		filter = " WHERE enabled"
+	}
 	out := boardCatalog{profiles: map[string][]Profile{}, introduced: map[string]time.Time{}, lines: []modelprefs.BoardLine{}}
 	var large bool
-	if err := tx.QueryRow(ctx, `SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles LIMIT 513) p`).Scan(&large); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles`+filter+` LIMIT 513) p`).Scan(&large); err != nil {
 		return out, err
 	}
 	if large {
 		return out, modelprefs.ErrBoardBounds
 	}
-	profiles, err := listProfiles(ctx, tx)
+	profiles, err := listProfilesLimit(ctx, tx, 513, enabledOnly)
 	if err != nil {
 		return out, err
 	}
-	for _, p := range profiles {
-		family, line, _ := ProfileLine(p)
-		id := family + ":" + line
-		out.profiles[id] = append(out.profiles[id], p)
-	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(d.introduced_at,p.created_at) FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id LIMIT 513`)
+	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(d.introduced_at,p.created_at) FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id`+strings.Replace(filter, "enabled", "p.enabled", 1)+` LIMIT 513`)
 	if err != nil {
 		return out, err
 	}
@@ -60,6 +60,19 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 	if err != nil {
 		return out, err
 	}
+	return boardCatalogFrom(profiles, stamp), nil
+}
+
+// boardCatalogFrom groups profiles into lines. A nil stamp map (a preview's
+// shared, bounded catalog) leaves introduction dates unknown; routing never
+// reads them, only the board's cards do.
+func boardCatalogFrom(profiles []Profile, stamp map[string]time.Time) boardCatalog {
+	out := boardCatalog{profiles: map[string][]Profile{}, introduced: map[string]time.Time{}, lines: []modelprefs.BoardLine{}}
+	for _, p := range profiles {
+		family, line, _ := ProfileLine(p)
+		id := family + ":" + line
+		out.profiles[id] = append(out.profiles[id], p)
+	}
 	keys := []string{}
 	for id := range out.profiles {
 		keys = append(keys, id)
@@ -72,9 +85,11 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 			l.Tools = false
 		}
 		for _, p := range ps {
-			at := stamp[p.ID]
-			if out.introduced[id].IsZero() || at.Before(out.introduced[id]) {
-				out.introduced[id] = at
+			if stamp != nil {
+				at := stamp[p.ID]
+				if out.introduced[id].IsZero() || at.Before(out.introduced[id]) {
+					out.introduced[id] = at
+				}
 			}
 			if p.Effort == "xhigh" && (p.Tier == "strong" || p.Tier == "frontier") {
 				l.Review = true
@@ -82,7 +97,7 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 		}
 		out.lines = append(out.lines, l)
 	}
-	return out, nil
+	return out
 }
 func (c boardCatalog) candidates(id string, level int, review bool) []Profile {
 	return c.effortCandidates(id, "", level, review)
@@ -183,6 +198,10 @@ type boardColumn struct {
 type boardStoredOrder struct {
 	Rank []string `json:"rank"`
 	Not  []string `json:"not"`
+	// End and Efforts belong to this column's own order only, so an Undo can
+	// write back the whole order a reset deleted (AEON-1161).
+	End     string            `json:"end,omitempty"`
+	Efforts map[string]string `json:"efforts,omitempty"`
 }
 type boardDocument struct {
 	PersonID  *string                 `json:"person_id"`
@@ -325,6 +344,7 @@ func boardDocumentFor(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState, c
 				col.Thinking.Own = order.Thinking
 				if order.Rank != nil {
 					col.StoredEffort = order.Effort
+					col.Stored.End, col.Stored.Efforts = order.End, order.Efforts
 				}
 				break
 			}

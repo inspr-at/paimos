@@ -221,6 +221,11 @@ test('fold memory survives reload; mode and step keys preserve browser shortcuts
   await expect(fold).toHaveAttribute('aria-expanded', 'false')
   await more.focus(); await more.press('ArrowUp')
   await expect(card.locator('.f-num')).toHaveText('6')
+  // AEON-1219: the page registry must leave a consumed arrow with its stepper.
+  await expect(more).toBeFocused()
+  await more.press('ArrowDown'); await expect(card.locator('.f-num')).toHaveText('5')
+  await expect(more).toBeFocused()
+  await more.press('ArrowUp'); await expect(card.locator('.f-num')).toHaveText('6')
   await more.press('Control+ArrowUp'); await expect(card.locator('.f-num')).toHaveText('6')
   await more.press('Meta+ArrowUp'); await expect(card.locator('.f-num')).toHaveText('6')
   await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 6 })

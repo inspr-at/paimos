@@ -201,7 +201,7 @@ for (const width of [1440, 1024, 390]) {
       controls: { fold, more: lead.getByRole('button', { name: /^Actions for / }), glyph: lead.locator('.ava'), history, search },
       interactions: [
         { name: 'hover fold', run: () => fold.hover() },
-        { name: 'fold the lead', run: async () => { await fold.click(); await expect(worker).toHaveCount(0); await expect(lead.locator('.kid-count')).toHaveText('1 sub-agent') } },
+        { name: 'fold the lead', run: async () => { await fold.click(); await expect(worker).toHaveCount(0); await expect(lead.locator('.current-activity')).toContainText('1 worker') } },
         { name: 'unfold the lead', run: async () => { await fold.click(); await expect(worker).toBeVisible() } },
         { name: '← folds', run: async () => { await lead.focus(); await page.keyboard.press('ArrowLeft'); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
         { name: '→ unfolds', run: async () => { await page.keyboard.press('ArrowRight'); await expect(worker).toBeVisible() } },

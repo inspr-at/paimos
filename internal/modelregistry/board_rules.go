@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
@@ -206,9 +207,33 @@ func (m *Module) writeModelRules(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope=$1 AND project_id IS NOT DISTINCT FROM $2::uuid AND column_key=$3`, scope, optionalUUID(project), column); err != nil {
 			return err
 		}
+		// The compatibility editor replaces the same row's migrated constraints
+		// under its existing final write authority and tenant/preference fences.
+		if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope=$1 AND project_id IS NOT DISTINCT FROM $2::uuid AND column_key=$3`, scope, optionalUUID(project), column); err != nil {
+			return err
+		}
+		// A rule this write leaves as it was keeps who set it and when: the row
+		// names them. Only new or changed rules carry this write's author.
+		stamps := map[[3]string]modelprefs.Rule{}
+		for _, rule := range before {
+			stamps[[3]string{rule.Line, rule.Lock, strings.TrimSpace(rule.Why)}] = rule
+		}
 		for _, rule := range desired {
-			if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,project_id,column_key,line,lock,position,why,set_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, p.TenantID, scope, optionalUUID(project), column, rule.Line, rule.Lock, rule.Position, rule.Why, p.ID); err != nil {
+			by, at := &p.ID, (*time.Time)(nil)
+			if prior, ok := stamps[[3]string{rule.Line, rule.Lock, rule.Why}]; ok {
+				by, at = prior.SetBy, &prior.SetAt
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,project_id,column_key,line,lock,position,why,set_by,moved_to_models,set_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$6<>'top',coalesce($10::timestamptz,now()))`, p.TenantID, scope, optionalUUID(project), column, rule.Line, rule.Lock, rule.Position, rule.Why, by, at); err != nil {
 				return err
+			}
+			if rule.Lock != "top" {
+				kind := "chain"
+				if rule.Lock == "not" {
+					kind = "never"
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,project_id,column_key,line,kind,position,why,set_by,set_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,coalesce($10::timestamptz,now()))`, p.TenantID, scope, optionalUUID(project), column, rule.Line, kind, rule.Position, rule.Why, by, at); err != nil {
+					return err
+				}
 			}
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO model_rule_revisions(tenant_id,scope,scope_key,revision) VALUES($1,$2,$3,1) ON CONFLICT(tenant_id,scope,scope_key) DO UPDATE SET revision=model_rule_revisions.revision+1 RETURNING revision`, p.TenantID, scope, project).Scan(&out.Revision); err != nil {

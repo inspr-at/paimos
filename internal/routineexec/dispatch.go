@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/recurrences"
+	"github.com/inspr-at/paimos/internal/routineactions"
 	"github.com/inspr-at/paimos/internal/routinebudget"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -41,6 +42,7 @@ const recoveryInterval = 30 * time.Second
 // runtime, qualified gate ages or CI readings means WAIT. No HTTP setting can
 // replace a collaborator or turn an advisory verdict into authority.
 type Options struct {
+	Actions       *routineactions.Broker
 	Reviews       *crossreview.Module
 	LeadRuntime   harness.LeadRuntimeChecks
 	Runtime       modelregistry.ExecutionRuntimeReader
@@ -51,6 +53,7 @@ type Options struct {
 type Executor struct {
 	pool    *pgxpool.Pool
 	options Options
+	cursors recoveryCursors
 }
 
 func New(pool *pgxpool.Pool, options Options) *Executor {
@@ -86,10 +89,12 @@ func (e *Executor) BindHarness(module *harness.Module) {
 
 // Pass reports partial work explicitly; a capped pass is never a complete scan.
 type Pass struct {
-	Scanned    int
-	Dispatched int
-	Waiting    int
-	Partial    bool
+	Scanned         int
+	Dispatched      int
+	Waiting         int
+	Partial         bool
+	RecoveryScanned int
+	RecoveryWaiting int
 }
 
 // Run combines transactional S05 notifications with bounded polling recovery.
@@ -206,6 +211,8 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 	out := Pass{}
 	ctx, cancel := context.WithTimeout(db.AllProjects(ctx, "routine intent recovery"), 25*time.Second)
 	defer cancel()
+	recovered, recoveryErr := e.recoverTenant(ctx, tenantID)
+	out.RecoveryScanned, out.RecoveryWaiting, out.Partial = recovered.Scanned, recovered.Waiting, recovered.Partial
 	ids := []string{}
 	err := db.InTenant(ctx, e.pool, tenantID, func(tx pgx.Tx) error {
 		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
@@ -231,13 +238,16 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 		return rows.Err()
 	})
 	if err != nil {
-		return out, err
+		return out, errors.Join(err, recoveryErr)
 	}
 	if len(ids) > batchSize {
 		out.Partial = true
 		ids = ids[:batchSize]
 	}
 	var failures []error
+	if recoveryErr != nil {
+		failures = append(failures, recoveryErr)
+	}
 	for _, id := range ids {
 		out.Scanned++
 		var result agentruns.RoutineQueueResult
@@ -262,6 +272,14 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 	out.Dispatched += continued.Dispatched
 	out.Waiting += continued.Waiting
 	out.Partial = out.Partial || continued.Partial
+	if err != nil {
+		failures = append(failures, err)
+	}
+	landed, err := e.landTenant(ctx, tenantID)
+	out.Scanned += landed.Scanned
+	out.Dispatched += landed.Dispatched
+	out.Waiting += landed.Waiting
+	out.Partial = out.Partial || landed.Partial
 	if err != nil {
 		failures = append(failures, err)
 	}
@@ -392,6 +410,9 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	}
 	if !r.consent || r.consentRevision != r.revision || principal != r.principal || r.assignment == nil {
 		return out, workorders.Fail(409, "routine_execution_consent_required")
+	}
+	if err := routineRecoveryGuardTx(ctx, tx, r.id); err != nil {
+		return out, err
 	}
 	owner := tenant.Principal{ID: r.owner, TenantID: tenantID, Kind: tenant.Person}
 	for _, permission := range []string{"nodes.read", "nodes.write", "run.create", "work_orders.write"} {

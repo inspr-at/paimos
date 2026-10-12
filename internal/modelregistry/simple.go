@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -27,7 +28,8 @@ func pickProfile(p *Profile) simplePick {
 	if p == nil {
 		return simplePick{}
 	}
-	line, effort := boardLineID(*p), p.Effort
+	line, _ := modelsLine(*p)
+	effort := p.Effort
 	return simplePick{Line: &line, Effort: &effort, Harness: p.Harness, Model: p.Model}
 }
 
@@ -38,9 +40,35 @@ type simpleLock struct {
 }
 type simpleRow struct {
 	simplePick
-	Column string      `json:"column"`
-	Mine   bool        `json:"mine"`
-	Lock   *simpleLock `json:"lock"`
+	Column string        `json:"column"`
+	Mine   bool          `json:"mine"`
+	Lock   *simpleLock   `json:"lock"`
+	Chain  []simpleStep  `json:"chain"`
+	End    string        `json:"end"`
+	Never  []simpleNever `json:"never"`
+}
+type simpleStep struct {
+	Line   string  `json:"line"`
+	Effort *string `json:"effort"`
+}
+type simpleNever struct {
+	Line string     `json:"line"`
+	By   *string    `json:"by"`
+	At   *time.Time `json:"at"`
+	Why  string     `json:"why"`
+}
+type simpleSituation struct {
+	simplePick
+	Chain []simpleStep `json:"chain"`
+	End   string       `json:"end"`
+	// Not is the order's saved exclusions, so the page can write the whole
+	// stored order back (Undo of "Same as the row").
+	Not []string `json:"not"`
+}
+type simpleQuick struct {
+	simplePick
+	Harness *string       `json:"harness"`
+	Trace   []simpleTrace `json:"trace"`
 }
 type simpleTrace struct {
 	Role     string `json:"role,omitempty"`
@@ -57,12 +85,17 @@ type simpleNext struct {
 	Trace    []simpleTrace `json:"trace"`
 }
 type simpleUnavailable struct {
-	Column      string  `json:"column"`
-	Line        string  `json:"line"`
-	RunsInstead *string `json:"runs_instead"`
-	Effort      *string `json:"effort"`
-	Reason      string  `json:"reason"`
-	Ticket      *string `json:"ticket"`
+	Column      string     `json:"column"`
+	Line        string     `json:"line"`
+	RunsInstead *string    `json:"runs_instead"`
+	Effort      *string    `json:"effort"`
+	Reason      string     `json:"reason"`
+	Ticket      *string    `json:"ticket"`
+	Cause       string     `json:"cause"`
+	Until       *time.Time `json:"until"`
+	Route       *string    `json:"route"`
+	RunsVia     *string    `json:"runs_via"`
+	Waits       bool       `json:"waits"`
 }
 type simpleNew struct {
 	Line  string   `json:"line"`
@@ -74,20 +107,36 @@ type simpleDocument struct {
 	Reviews    struct {
 		Mode string `json:"mode"`
 	} `json:"reviews"`
-	Next          *simpleNext         `json:"next"`
-	Unavailable   []simpleUnavailable `json:"unavailable"`
-	NewLines      []simpleNew         `json:"new_lines"`
-	Revision      int64               `json:"revision"`
-	RulesRevision int64               `json:"rules_revision"`
-	PersonID      *string             `json:"person_id"`
+	Next          *simpleNext                            `json:"next"`
+	Unavailable   []simpleUnavailable                    `json:"unavailable"`
+	NewLines      []simpleNew                            `json:"new_lines"`
+	Revision      int64                                  `json:"revision"`
+	RulesRevision int64                                  `json:"rules_revision"`
+	PersonID      *string                                `json:"person_id"`
+	Situations    *map[string]map[string]simpleSituation `json:"situations,omitempty"`
+	Quick         simpleQuick                            `json:"quick"`
+	Outdated      simpleOutdated                         `json:"outdated"`
 }
 
 func simpleRowFor(s modelprefs.BoardState, c boardCatalog, column string) simpleRow {
+	for _, rule := range s.Rules {
+		if rule.Scope == "workspace" && rule.Column == column && rule.Lock == "top" {
+			s.Person = nil // The lock owns the whole order, including native levels.
+			break
+		}
+	}
 	d := rawBoardDecision(s, column, "first")
-	row := simpleRow{Column: column}
+	row := simpleRow{Column: column, Chain: []simpleStep{}, Never: []simpleNever{}, End: "wait"}
+	if column != "other" {
+		row.End = "default"
+	}
+	order := simpleEffectiveOrder(s, d, column)
+	if order.End != "" {
+		row.End = order.End
+	}
 	if s.Person != nil {
 		for _, o := range s.Orders {
-			if o.ProfileID == s.Person.ID && o.Column == column && o.Situation == "first" {
+			if o.ProfileID == s.Person.ID && o.Column == column && o.Situation == "first" && o.Rank != nil {
 				row.Mine = true
 			}
 		}
@@ -95,7 +144,7 @@ func simpleRowFor(s modelprefs.BoardState, c boardCatalog, column string) simple
 	if len(d.Rank) > 0 {
 		id := d.Rank[0]
 		row.Line = &id
-		ps := c.effortCandidates(id, d.Effort, d.EffortLevel, false)
+		ps := modelsRouteCandidates(c.profiles[id], simpleStepEffort(order, id, d.Effort), d.EffortLevel, false)
 		if len(ps) > 0 {
 			row.simplePick = pickProfile(&ps[0])
 		}
@@ -103,7 +152,55 @@ func simpleRowFor(s modelprefs.BoardState, c boardCatalog, column string) simple
 			row.Lock = &simpleLock{By: lock.Who, At: lock.At, Reason: lock.Why}
 		}
 	}
+	for _, id := range d.Rank[min(1, len(d.Rank)):] {
+		pick := simpleLinePick(c, id, simpleStepEffort(order, id, d.Effort), d.EffortLevel, false)
+		row.Chain = append(row.Chain, simpleStep{Line: id, Effort: pick.Effort})
+	}
+	for _, rule := range s.Rules {
+		if rule.Scope == "workspace" && rule.Column == column && rule.Lock == "not" {
+			row.Never = append(row.Never, simpleNever{rule.Line, rule.SetBy, &rule.SetAt, rule.Why})
+		}
+	}
+	for _, id := range order.Not {
+		if !slices.ContainsFunc(row.Never, func(n simpleNever) bool { return n.Line == id }) {
+			row.Never = append(row.Never, simpleNever{Line: id, Why: "Saved exclusion"})
+		}
+	}
 	return row
+}
+
+func simpleEffectiveOrder(s modelprefs.BoardState, d modelprefs.BoardDecision, column string) modelprefs.BoardOrder {
+	profile := s.Workspace
+	if s.Person != nil && d.PreferenceOf.Source == "person" {
+		profile = *s.Person
+	}
+	for _, key := range []string{column, "other"} {
+		for _, order := range s.Orders {
+			if order.ProfileID == profile.ID && order.Column == key && order.Situation == "first" && order.Rank != nil {
+				return order
+			}
+		}
+	}
+	return modelprefs.BoardOrder{}
+}
+
+func simpleStepEffort(order modelprefs.BoardOrder, line, fallback string) string {
+	if effort, ok := order.Efforts[line]; ok {
+		return effort
+	}
+	return fallback
+}
+
+func simpleLinePick(c boardCatalog, line, effort string, level int, review bool) simplePick {
+	ps := modelsRouteCandidates(c.profiles[line], effort, level, review)
+	if len(ps) > 0 {
+		return pickProfile(&ps[0])
+	}
+	var native *string
+	if effort != "" {
+		native = &effort
+	}
+	return simplePick{Line: &line, Effort: native}
 }
 
 func simpleTraceFor(out *WorkResolution, c boardCatalog) []simpleTrace {
@@ -129,7 +226,7 @@ func simpleTraceFor(out *WorkResolution, c boardCatalog) []simpleTrace {
 				if p.ID != step.ProfileID {
 					continue
 				}
-				line := boardLineID(p)
+				line, _ := modelsLine(p)
 				if !step.Selected && seen[line] {
 					continue
 				}
@@ -175,9 +272,52 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		s = modelsBoardIdentities(s, c)
+		c = modelsCatalog(c)
 		s.Lines = c.lines
+		for _, order := range s.Orders {
+			for _, line := range order.Rank {
+				if !slices.ContainsFunc(s.Lines, func(l modelprefs.BoardLine) bool { return l.ID == line }) {
+					s.Lines = append(s.Lines, modelprefs.BoardLine{ID: line})
+				}
+			}
+		}
+		out.Outdated, err = simpleOutdatedFor(ctx, tx, person, c)
+		if err != nil {
+			return err
+		}
 		if level == "default" {
 			s.Person = nil
+			cells := map[string]map[string]simpleSituation{}
+			out.Situations = &cells
+			for _, order := range s.Orders {
+				if order.ProfileID != s.Workspace.ID || order.Situation == "first" || order.Rank == nil || strings.HasPrefix(order.Column, "review:") || !validBoardColumn(s, order.Column) {
+					continue
+				}
+				cell := simpleSituation{Chain: []simpleStep{}, End: order.End, Not: []string{}}
+				if order.Not != nil {
+					cell.Not = order.Not
+				}
+				if cell.End == "" {
+					cell.End = "row"
+					if order.Situation == "review" {
+						cell.End = "auto"
+					}
+				}
+				d := rawBoardDecision(s, order.Column, order.Situation)
+				for i, line := range order.Rank {
+					pick := simpleLinePick(c, line, simpleStepEffort(order, line, d.Effort), d.EffortLevel, order.Situation == "review")
+					if i == 0 {
+						cell.simplePick = pick
+					} else {
+						cell.Chain = append(cell.Chain, simpleStep{line, pick.Effort})
+					}
+				}
+				if cells[order.Column] == nil {
+					cells[order.Column] = map[string]simpleSituation{}
+				}
+				cells[order.Column][order.Situation] = cell
+			}
 		}
 		out.Revision = targetBoardProfile(s, level).Revision
 		out.RulesRevision, err = ruleRevision(ctx, tx, "workspace", "")
@@ -194,7 +334,7 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 			row := simpleRowFor(s, c, k.Slug)
 			// An omitted kind follows Default. Show a row when this scope owns it, it is locked, or the pick
 			// actually differs from that default — never because a column template disagrees with itself.
-			if row.Lock != nil || row.Mine || !sameSimplePick(row.simplePick, out.All.simplePick) {
+			if row.Lock != nil || row.Mine || !sameSimplePick(row.simplePick, out.All.simplePick) || !reflect.DeepEqual(row.Chain, out.All.Chain) || !reflect.DeepEqual(row.Never, out.All.Never) || simpleOwnRow(s, k.Slug) {
 				out.Exceptions = append(out.Exceptions, row)
 				columns = append(columns, k.Slug)
 			}
@@ -217,19 +357,18 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 			if resolved != nil {
 				chosen = pickProfile(resolved.Profile)
 			}
-			if chosen.Line == nil || *chosen.Line != *row.Line {
-				reasons := []string{}
-				for _, step := range simpleTraceFor(resolved, c) {
-					if step.Line == *row.Line && step.Reason != "" {
-						reasons = append(reasons, step.Reason)
-					}
-				}
-				reason := joinReasons(reasons)
-				if reason == "" {
-					reason = "no qualified account with available capacity"
-				}
-				out.Unavailable = append(out.Unavailable, simpleUnavailable{Column: column, Line: *row.Line, RunsInstead: chosen.Line, Effort: chosen.Effort, Reason: reason})
+			if !sameSimplePick(chosen, row.simplePick) || chosen.Harness != row.Harness || chosen.Model != row.Model {
+				out.Unavailable = append(out.Unavailable, simpleCausesFor(column, *row.Line, chosen, resolved, c)...)
 			}
+		}
+		quick, err := ResolveWork(ctx, tx, current, WorkQuery{Role: "scout", Area: "other", Column: "other", Situation: "first", PersonID: person, WorkspaceOnly: level == "default", ExplicitBoard: true}, now)
+		if err != nil {
+			return err
+		}
+		out.Quick = simpleQuick{simplePick: pickProfile(quick.Profile), Trace: simpleTraceFor(&quick, c)}
+		if quick.Profile != nil {
+			harness := quick.Profile.Harness
+			out.Quick.Harness = &harness
 		}
 		placed := map[string]bool{}
 		for _, o := range s.Orders {

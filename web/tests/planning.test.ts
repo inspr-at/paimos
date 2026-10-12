@@ -54,15 +54,21 @@ test('frozen default estimates have one uncalibrated basis line', () => {
   }
 })
 
-test('real capped planner list response keeps legacy figures and explicit history text', () => {
-  // Exact API bytes emitted by TestPlanningTruncatedHistoryListFixture.
+test('real capped registry list response keeps independent estimates and names the registry gap', () => {
+  // Exact API bytes emitted by TestPlanningTruncatedHistoryListFixture: a
+  // registry beyond Models' bounds resolves no route, so learning reads nothing.
   const page = JSON.parse(readFileSync(new URL('./fixtures/planning-truncated-list.json', import.meta.url), 'utf8')) as { items: ListItem[] }
   assert.equal(page.items.length, 1)
   const r = page.items[0]!
-  assert.equal(r.planning!.model_estimate!.state, 'uncalibrated')
+  assert.equal(r.planning!.route, null)
+  assert.equal(r.planning!.route_gap, 'registry')
+  assert.equal(r.planning!.route_truncated, true)
+  assert.equal(r.planning!.model_estimate, undefined)
   assert.equal(r.planning!.tokens.calibration!.basis, 'median')
   assert.equal(r.planning!.tokens.calibration!.level, 'route')
-  const basis = 'median of finished tickets on route codex gpt-6-astra xhigh (n=5); history truncated'
+  assert.equal(r.planning!.tokens.calibration!.any_route, true)
+  const basis = 'median of finished tickets on any route (n=5)'
+  assert.equal(modelCell(r).tip, 'No agent session yet\nBuild hard · backend\nThe model registry has no available route for this role')
   assert.equal(tokensCell(r).estimated, '8M')
   assert.equal(tokensCell(r).tip, `Estimated ~8M tokens · no agent session yet\n${basis}`)
   assert.equal(listCostCell(r).estimated, '$80')

@@ -3,18 +3,21 @@
 import { computed } from 'vue'
 import AppIcon from '../../AppIcon.vue'
 import HarnessMark from '../../agents/HarnessMark.vue'
-import { lineFallback, lineFamily, pickText, showsEffort, type RowView } from '../../../lib/modelsSimple'
+import { lineFallback, lineFamily, pickText, showsEffort, type CantSentence, type RowView } from '../../../lib/modelsSimple'
 
-// One row: label | picker | lock | remove, then a "can't run" line under it when the pick cannot run right now.
-const props = defineProps<{ row: RowView; harness?: string; expanded: boolean; lockTip: string; instead: string; reason: string }>()
+// One row: label | picker | lock | remove, then one "can't run" sentence under it, from one cause, when the pick
+// cannot run right now (approved Models v2, AEON-1144): what stops it, then what happens instead; last the row's
+// fallback (the default slot, AEON-1161).
+const props = defineProps<{ row: RowView; harness?: string; expanded: boolean; lockTip: string; cant: CantSentence | null }>()
 const emit = defineEmits<{ open: [button: HTMLElement]; reset: []; remove: [] }>()
 const name = computed(() => props.row.isDefault ? 'Default for all work' : props.row.label)
 const model = computed(() => props.row.entry?.name ?? (lineFallback(props.row.line) || 'Not set'))
 const effort = computed(() => showsEffort(props.row.entry) ? props.row.effort : null)
 // A pick whose profile left the registry keeps a readable name and its family's mark, and says why it has no details.
 const summary = computed(() => props.row.entry || !props.row.line ? pickText(props.row.entry, props.row.effort, 'Not set') : `${lineFallback(props.row.line)} (not in the model registry)`)
+// The model's maker marks the pick; a model runs through several harnesses.
 const mark = computed(() => props.row.entry?.harness ?? props.harness ?? '')
-const family = computed(() => props.row.entry ? '' : lineFamily(props.row.line))
+const family = computed(() => props.row.entry?.provider ?? lineFamily(props.row.line))
 </script>
 <template>
   <div class="row" :class="{ def: row.isDefault }" :data-row="row.key" :data-column="row.column">
@@ -36,6 +39,7 @@ const family = computed(() => props.row.entry ? '' : lineFamily(props.row.line))
     </span>
     <div class="c3"><span v-if="row.lock" class="lock" data-lock tabindex="0" role="img" :data-tip="lockTip" :aria-label="`Locked for everyone. ${lockTip}`"><AppIcon name="lock" :size="15" /></span></div>
     <div class="c4"><button v-if="row.remove" type="button" class="icon-btn flat x" data-remove :aria-label="`Remove ${row.label}; it uses the default again`" data-tip="Use the default again" @click="emit('remove')"><AppIcon name="close" :size="14" /></button></div>
-    <p v-if="row.unavailable" class="na" data-unavailable><AppIcon name="alert" :size="14" /><span><b>Can’t run right now</b> · {{ instead ? `${instead} runs instead` : 'work waits' }} · {{ reason }}</span></p>
+    <p v-if="cant" class="na" data-unavailable><AppIcon name="alert" :size="14" /><span>{{ cant.cause }}<span class="sr-only">, so </span><AppIcon class="ar" name="arrow" :size="12" />{{ cant.then }}.</span></p>
+    <slot />
   </div>
 </template>

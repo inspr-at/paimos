@@ -18,7 +18,10 @@ import (
 type WorkQuery struct {
 	// routineEval applies the mandatory family floor to board routing
 	// only for the internal routine resolver; ordinary routes retain their API.
-	routineEval      bool
+	routineEval bool
+	// preview shares an editor preview's bounded catalog with every Models
+	// walk of that preview; nil reads the live catalog for each walk.
+	preview          *preferencePreviewCatalog
 	Escalation       bool
 	ReviewPolicies   []reviewgate.FamilyPolicy
 	TicketID         string
@@ -159,13 +162,16 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 
 func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
 	if catalog != nil {
-		// Editor previews retain their smaller, honest truncation boundary.
+		// Editor previews retain their smaller, honest truncation boundary,
+		// and every cell's Models walk reuses that one bounded read.
 		if _, err := catalog.profiles(ctx, tx); err != nil {
 			return WorkResolution{}, err
 		}
+		ctx = context.WithValue(ctx, previewBoardKey{}, catalog)
 		if q.PersonID == nil {
 			q.WorkspaceOnly = true
 		}
+		q.preview = catalog
 	}
 	if q.TicketID != "" {
 		var fields []byte
@@ -362,9 +368,9 @@ func preferenceStep(ctx context.Context, tx pgx.Tx, profile Profile, role string
   EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id AND x.retire_at IS NULL),
  (SELECT x.retire_at FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id),
   o.suppressed_until
-  FROM model_profiles p LEFT JOIN (`+agentaccounts.ModelRoleRoutesSQL+`) r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$2
+  FROM model_profiles p LEFT JOIN (`+agentaccounts.ModelPausesSQL+`) r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id
   LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
-  WHERE p.id=$1::uuid`, profile.ID, role).Scan(&step.State, &step.Reason, &step.ValidUntil, &step.Retired, &step.RetireAt, &step.SuppressedUntil)
+  WHERE p.id=$1::uuid`, profile.ID).Scan(&step.State, &step.Reason, &step.ValidUntil, &step.Retired, &step.RetireAt, &step.SuppressedUntil)
 	if err != nil {
 		return step, fmt.Errorf("preference policy: %w", err)
 	}

@@ -113,7 +113,7 @@ test('hover and focus show who works on what; an agent opens its session', async
   await expect(camy).toHaveAttribute('href', '/agents/s-camy')
   await expect(pop.getByRole('link', { name: /AEON-184/ })).toHaveAttribute('href', '/p/AEON/AEON-184')
   await expect(pop.getByRole('link', { name: /AEON-184/ })).toContainText('Live agents on project cards and rows')
-  await expect(pop.getByRole('link', { name: /^aeon-coordinator, Claude, working for 2h 20m/ })).toBeVisible()
+  await expect(pop.getByRole('link', { name: /^aeon-coordinator, Claude Code, working for 2h 20m/ })).toBeVisible()
   // An agent without a ticket has no ticket line (no filler).
   await expect(pop.locator('.pop-agent', { hasText: 'aeon-coordinator' }).locator('.ticket-line')).toHaveCount(0)
   // Leaving closes it; the keyboard opens it on focus and walks into it with Enter.
@@ -154,8 +154,8 @@ test('without permission to know the agent the chip still says an agent works', 
   const data = world('none')
   data.live.push(liveAgent({ project_id: 'p-hausv', harness: 'claude', ticket: { id: 'n-h1', key: 'HAUSV-887', title: 'Yearly statement preview', project_id: 'p-hausv' } }, 3))
   await cards(page, data)
-  const chip = card(page, 'p-hausv').getByRole('button', { name: '1 agent working: Claude agent on HAUSV-887. Who works on what' })
-  await expect(chip).toContainText('Claude agent')
+  const chip = card(page, 'p-hausv').getByRole('button', { name: '1 agent working: Claude Code agent on HAUSV-887. Who works on what' })
+  await expect(chip).toContainText('Claude Code agent')
   await chip.click()
   const pop = page.getByRole('dialog', { name: 'Active agents on Hausverwaltung' })
   // No session to open: the agent is a line, not a link. History stays a plain /agents link.
@@ -186,14 +186,16 @@ test('working and lost-heartbeat agents: polls every 20 seconds and says what ch
   const data = world('none')
   const calls = await cards(page, data)
   const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
-  await expect.poll(reads).toBe(1)
+  // The healthy handshake triggers one catch-up read after the initial load.
+  await page.clock.runFor(1)
+  await expect.poll(reads).toBe(2)
   await expect(page.locator('.live')).toHaveCount(0)
   const news = page.getByRole('region', { name: 'Projects', exact: true }).locator('[aria-live="polite"].sr-only')
   const camy = liveAgent({ project_id: 'p-janus', session_id: 's-j', principal_id: CAMY, name: 'camy', ticket: { id: 'n-j', key: 'JANUS-9', title: 'Sessions', project_id: 'p-janus' } }, 1)
   const nova = liveAgent({ project_id: 'p-janus', session_id: 's-n', principal_id: OPS, name: 'nova', ticket: null }, 0.2)
   data.live.push(camy)
   await page.clock.runFor(20_500)
-  await expect.poll(reads).toBe(2)
+  await expect.poll(reads).toBe(3)
   await expect(card(page, 'p-janus').locator('.live-chip')).toBeVisible()
   // News settles for a moment before it is said.
   await expect(news).toHaveText('')
@@ -216,15 +218,15 @@ test('working and lost-heartbeat agents: polls every 20 seconds and says what ch
   // A working session past the red threshold stays visible with an honest heartbeat warning.
   data.live.push(liveAgent({ project_id: 'p-site', name: 'late', heartbeat_at: new Date(Date.parse('2026-09-23T12:00:00Z') - 660_000).toISOString() }))
   await page.clock.runFor(20_500)
-  await expect.poll(reads).toBe(6)
+  await expect.poll(reads).toBe(7)
   await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'unresponsive')
   await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/no heartbeat/)
   // A hidden tab asks nothing and catches up when shown again.
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await page.clock.runFor(65_000)
-  expect(reads()).toBe(6)
+  expect(reads()).toBe(7)
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
-  await expect.poll(reads).toBe(7)
+  await expect.poll(reads).toBe(8)
 })
 
 test('the UI audit lets a chip share its own link only in its slot', async ({ page }) => {
@@ -344,7 +346,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await chip.click()
       const popup = page.getByRole('dialog', { name: 'Active agents on Aeon' })
       await expect(popup).toBeVisible()
-      const preferences = popup.getByRole('button', { name: 'Model preferences for Aeon' })
+      const preferences = popup.getByRole('button', { name: 'Model preferences', exact: true })
       const guard = await controlStability(page, { chip, preferences })
       await guard.check(() => preferences.hover())
       guard.done()
@@ -401,13 +403,15 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
       const calls = await cards(page, data)
       const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
       const bot = card(page, 'p-hausv').locator('.live-bot')
+      await page.clock.runFor(1)
+      await expect.poll(reads).toBe(2)
       await expect(bot.locator('.glint')).toHaveCount(0)
       await page.clock.runFor(20_000)
-      await expect.poll(reads).toBe(2)
+      await expect.poll(reads).toBe(3)
       await expect(bot.locator('.glint')).toHaveCount(0)
       data.live[0]!.heartbeat_at = '2026-09-23T12:00:10Z'
       await page.clock.runFor(20_000)
-      await expect.poll(reads).toBe(3)
+      await expect.poll(reads).toBe(4)
       await expect(bot.locator('.glint')).toHaveCount(0)
       Object.assign(data.live[0]!, { activity_note: 'Running tests', activity_note_id: 10, activity_sequence: 7 })
       await page.clock.runFor(20_000)

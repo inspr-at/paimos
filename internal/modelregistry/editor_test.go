@@ -174,6 +174,17 @@ func editorError(t *testing.T, w *httptest.ResponseRecorder, status int, code st
 }
 func editorJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
+// retiredLadderRefusal reports the retired writer's 410 by its decoded
+// message: the JSON encoder escapes ">" as >, so the raw body never
+// contains "Settings > Models".
+func retiredLadderRefusal(status int, body []byte) bool {
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	return status == http.StatusGone && json.Unmarshal(body, &refusal) == nil &&
+		refusal.Error == "Role ladders moved to Settings > Models; use model preference orders and model pauses."
+}
+
 func editorFixture(t *testing.T) (tenant.Principal, *editorHTTP) {
 	t.Helper()
 	var p tenant.Principal
@@ -207,105 +218,74 @@ func editorKind(t *testing.T, doc preferenceDocument, slug string) string {
 	return ""
 }
 
+// Risk: an equal, changed, whole-tenant or clearing write through the retired
+// ladder writer changes a role, issues an edit token or writes an audit event.
 func TestEditorRoleCASLegacyNoopAndAudit(t *testing.T) {
 	p, h := editorFixture(t)
 	build, other := h.ladder(t, p, "build"), h.ladder(t, p, "scout")
-	if build.EditToken == nil || !build.CanEdit || routeEditToken("build", build.Routes) != *build.EditToken {
-		t.Fatal("missing complete editable content")
+	if build.EditToken != nil || build.CanEdit || other.EditToken != nil || other.CanEdit {
+		t.Fatal("compatibility read still grants editing")
 	}
 	path := "/api/models/routes?role=build"
-	before := eventCount(t, p, evRoutes)
-	noop := h.call(t, p, "PUT", path, editorJSON(build.Routes), map[string]string{"If-Match": *build.EditToken})
-	editorDecode[[]Route](t, noop)
-	if noop.Header().Get("ETag") != *build.EditToken || eventCount(t, p, evRoutes) != before {
-		t.Fatal("equal save mutated token/event")
-	}
+	token := map[string]string{"If-Match": `"` + strings.Repeat("f", 64) + `"`}
 	want := append([]Route{}, build.Routes...)
-	want[0].Priority = 100
-	saved := h.call(t, p, "PUT", path, editorJSON(want), map[string]string{"If-Match": *build.EditToken})
-	rows := editorDecode[[]Route](t, saved)
-	if saved.Header().Get("ETag") == *build.EditToken || !reflect.DeepEqual(rows, canonicalRoutes(want)) || eventCount(t, p, evRoutes) != before+1 {
-		t.Fatal("save/token/event wrong")
+	for i := range want {
+		want[i].Priority += 100
 	}
-	editorError(t, h.call(t, p, "PUT", path, editorJSON(build.Routes), map[string]string{"If-Match": *build.EditToken}), 409, "stale_revision")
-	if !reflect.DeepEqual(h.ladder(t, p, "scout").Routes, other.Routes) {
-		t.Fatal("other role changed")
-	}
-	var all []Route
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error { var err error; all, err = listRoutes(t.Context(), tx); return err }); err != nil {
-		t.Fatal(err)
-	}
-	for i := range all {
-		if all[i].Role == "build" {
-			all[i].Priority += 100
+	before, events := catalogSetupState(t, p), eventCount(t, p, evRoutes)
+	for _, tc := range []struct {
+		path, body string
+		headers    map[string]string
+	}{{path, editorJSON(build.Routes), token}, {path, editorJSON(want), token}, {"/api/models/routes", editorJSON(want), nil}, {path, "[]", token}} {
+		w := h.call(t, p, "PUT", tc.path, tc.body, tc.headers)
+		editorRetired(t, w)
+		if w.Header().Get("ETag") != "" {
+			t.Fatal("retired writer issued an edit token")
 		}
 	}
-	editorDecode[[]Route](t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(all), nil))
-	editorError(t, h.call(t, p, "PUT", path, editorJSON(build.Routes), map[string]string{"If-Match": saved.Header().Get("ETag")}), 409, "stale_revision")
-	current := h.ladder(t, p, "build")
-	empty := h.call(t, p, "PUT", path, "[]", map[string]string{"If-Match": *current.EditToken})
-	if len(editorDecode[[]Route](t, empty)) != 0 {
-		t.Fatal("role was not cleared")
-	}
-	var actor string
-	var auditBefore, auditAfter []Route
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT actor_principal_id::text,before,after FROM events WHERE type=$1 ORDER BY id DESC LIMIT 1`, evRoutes).Scan(&actor, &auditBefore, &auditAfter)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if actor != p.ID || len(roleRoutes("build", auditBefore)) == 0 || len(roleRoutes("build", auditAfter)) != 0 || len(roleRoutes("scout", auditAfter)) != len(other.Routes) {
-		t.Fatal("audit did not capture complete before/after tenant content")
+	if catalogSetupState(t, p) != before || eventCount(t, p, evRoutes) != events || !reflect.DeepEqual(h.ladder(t, p, "build").Routes, build.Routes) || !reflect.DeepEqual(h.ladder(t, p, "scout").Routes, other.Routes) {
+		t.Fatal("retired writer changed a role or wrote an audit event")
 	}
 }
 
+// Risk: an expiring hold or an expiry-policy compensation sent to the retired
+// ladder writer still reaches its clock or storage. Holds are Models pauses
+// now; retained content tokens still bind full-precision expiry and reason.
 func TestEditorExpiryTokensAndCompensation(t *testing.T) {
-	p, h := editorFixture(t)
+	p, _ := editorFixture(t)
 	clock := time.Date(2030, 1, 1, 0, 0, 0, 123456000, time.UTC)
-	m := &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { return clock, nil }}
-	h = newEditorHTTP(t, m)
+	sampled := false
+	h := newEditorHTTP(t, &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { sampled = true; return clock, nil }})
 	initial := h.ladder(t, p, "build")
-	held := append([]Route{}, initial.Routes...)
+	if initial.EditToken != nil || initial.CanEdit || len(initial.Routes) == 0 {
+		t.Fatal("compatibility read still grants editing")
+	}
 	expiry := clock.Add(time.Second)
-	held[0].State, held[0].Reason, held[0].ValidUntil = "conserved", "quota", &expiry
-	w := h.call(t, p, "PUT", "/api/models/routes?role=build", editorJSON(held), map[string]string{"If-Match": *initial.EditToken})
-	stored := editorDecode[[]Route](t, w)
-	token := w.Header().Get("ETag")
-	clock = expiry
-	before := eventCount(t, p, evRoutes)
-	now := h.ladder(t, p, "build")
-	if *now.EditToken != token || eventCount(t, p, evRoutes) != before {
-		t.Fatal("expiry changed stored token/event")
+	held := []Route{{Role: "build", Priority: 1, ProfileID: "00000000-0000-0000-0000-000000000001", State: "conserved", Reason: "quota", ValidUntil: &expiry}}
+	before, events := catalogSetupState(t, p), eventCount(t, p, evRoutes)
+	token := map[string]string{"If-Match": `"` + strings.Repeat("1", 64) + `"`}
+	for _, path := range []string{"/api/models/routes?role=build", "/api/models/routes?role=build&expiry_policy=clear", "/api/models/routes?role=build&expiry_policy=preserve"} {
+		editorRetired(t, h.call(t, p, "PUT", path, editorJSON(held), token))
 	}
-	stored[0].Priority = 100
-	w = h.call(t, p, "PUT", "/api/models/routes?role=build", editorJSON(stored), map[string]string{"If-Match": token})
-	stored = editorDecode[[]Route](t, w)
-	token = w.Header().Get("ETag")
-	for _, mutate := range []func(*Route){func(r *Route) { r.Reason = "changed" }, func(r *Route) { r.State = "unavailable" }, func(r *Route) { e := expiry.Add(-time.Microsecond); r.ValidUntil = &e }} {
-		changed := append([]Route{}, stored...)
-		for i := range changed {
-			if changed[i].State != "available" {
-				mutate(&changed[i])
-			}
-		}
-		editorError(t, h.call(t, p, "PUT", "/api/models/routes?role=build", editorJSON(changed), map[string]string{"If-Match": token}), 422, "suppression_expired")
+	if sampled || catalogSetupState(t, p) != before || eventCount(t, p, evRoutes) != events {
+		t.Fatal("retired writer sampled its clock or changed stored holds")
 	}
-	var all []Route
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error { var err error; all, err = listRoutes(t.Context(), tx); return err }); err != nil {
+	// The Models successor preserves the exact reason and native expiry.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) SELECT tenant_id,harness,model,$2,'quota',$3 FROM model_profiles WHERE id=$1`, initial.Routes[0].ProfileID, expiry, p.ID)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	editorDecode[[]Route](t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(all), nil))
-	cleared := h.call(t, p, "PUT", "/api/models/routes?role=build&expiry_policy=clear", editorJSON(held), map[string]string{"If-Match": token})
-	actual := editorDecode[[]Route](t, cleared)
-	for _, row := range actual {
-		if row.State != "available" || row.Reason != "" || row.ValidUntil != nil {
-			t.Fatal("compensation revived expired hold")
+	found := false
+	for _, row := range h.ladder(t, p, "build").Routes {
+		if row.ProfileID == initial.Routes[0].ProfileID {
+			found = row.State == "unavailable" && row.Reason == "quota" && row.ValidUntil != nil && row.ValidUntil.Equal(expiry)
 		}
 	}
-	if cleared.Header().Get("ETag") != routeEditToken("build", actual) {
-		t.Fatal("confirmation token differs from actual rows")
+	if !found {
+		t.Fatal("deprecated read lost the Models pause")
 	}
-	editorError(t, h.call(t, p, "PUT", "/api/models/routes?role=build&expiry_policy=clear", editorJSON(held), map[string]string{"If-Match": token}), 409, "stale_revision")
 	// Full-precision and reason-only changes must bind different content.
 	a := held
 	b := append([]Route{}, held...)
@@ -321,39 +301,37 @@ func TestEditorExpiryTokensAndCompensation(t *testing.T) {
 	}
 }
 
+// Risk: a cold compatibility read seeds the catalog or hands out an edit
+// token, or a malformed, unconditional or over-bound write to the retired
+// ladder writer prepares the catalog instead of answering 410.
 func TestEditorBoundsPreconditionsAndReadOnlyCold(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "editor-cold", "person", "Owner", []string{"admin"})
 	h := newEditorHTTP(t, &Module{pool: appPool})
 	before := catalogSetupState(t, p)
 	cold := h.ladder(t, p, "build")
-	if cold.Setup || cold.CanEdit || cold.EditToken == nil || catalogSetupState(t, p) != before {
+	if cold.Setup || cold.CanEdit || cold.EditToken != nil || catalogSetupState(t, p) != before {
 		t.Fatal("cold read side effects")
 	}
-	for _, header := range []string{"", "*", "W/" + *cold.EditToken, *cold.EditToken + ", " + *cold.EditToken} {
-		status, code := 400, "invalid_revision"
+	for _, header := range []string{"", "*", "W/\"x\"", `"` + strings.Repeat("0", 64) + `", "` + strings.Repeat("0", 64) + `"`} {
 		headers := map[string]string{"If-Match": header}
 		if header == "" {
-			status, code = 428, "revision_required"
 			headers = nil
 		}
-		editorError(t, h.call(t, p, "PUT", "/api/models/routes?role=build", "[]", headers), status, code)
+		editorRetired(t, h.call(t, p, "PUT", "/api/models/routes?role=build", "[]", headers))
 	}
 	for _, q := range []string{"?role=build&expiry_policy=invalid", "?expiry_policy=clear", "?role=build&role=scout", "?role=unknown"} {
-		w := h.call(t, p, "PUT", "/api/models/routes"+q, "[]", nil)
-		if w.Code != 400 {
-			t.Fatal("query accepted", q, w.Code)
-		}
+		editorRetired(t, h.call(t, p, "PUT", "/api/models/routes"+q, "[]", nil))
 	}
 	rows := make([]Route, 251)
-	editorError(t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(rows), nil), 413, "too_many_routes")
+	editorRetired(t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(rows), nil))
 	rows = rows[:51]
 	for i := range rows {
 		rows[i].Role = "build"
 	}
-	editorError(t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(rows), nil), 413, "too_many_routes")
+	editorRetired(t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(rows), nil))
 	if catalogSetupState(t, p) != before {
-		t.Fatal("bounded refusals seeded catalog")
+		t.Fatal("retired writer seeded catalog")
 	}
 	displayRoutesFixture(t, p, 51)
 	large := h.ladder(t, p, "review-gate")
@@ -523,4 +501,42 @@ type legacyPreferenceTestModule struct{ *Module }
 
 func (m legacyPreferenceTestModule) Mount(mux *http.ServeMux) {
 	m.Module.mount(mux, m.Module.writePreferences)
+}
+
+func errorText(raw []byte) string {
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Error == "" {
+		return string(raw)
+	}
+	return out.Error
+}
+
+func modelsState(t *testing.T, p tenant.Principal) string {
+	t.Helper()
+	var state string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_profiles p),
+ 'prefs',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_pref_profiles p),
+ 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_orders o),
+ 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_situation_orders o),
+ 'pauses',(SELECT jsonb_agg(to_jsonb(o) ORDER BY harness,model) FROM model_pauses o),
+ 'constraints',(SELECT jsonb_agg(to_jsonb(o) ORDER BY scope,column_key,line) FROM model_row_constraints o),
+ 'ladders',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r),
+ 'events',(SELECT count(*) FROM events WHERE type=$1),
+ 'counter',(SELECT to_jsonb(c) FROM event_counters c))::text`, evRoutes).Scan(&state)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func retiredLadderWrite(t *testing.T, h *editorHTTP, p tenant.Principal, path, body string, headers map[string]string) {
+	t.Helper()
+	w := h.call(t, p, "PUT", path, body, headers)
+	if !retiredLadderRefusal(w.Code, w.Body.Bytes()) || w.Header().Get("Deprecation") != "true" || w.Header().Get("Link") != `</api/model-preferences/orders>; rel="successor-version"` {
+		t.Fatalf("retired ladder writer answered %d: %s", w.Code, w.Body.String())
+	}
 }

@@ -449,7 +449,8 @@ test('project settings choose the context; an unmapped project says no account w
   const errors = watchErrors(page)
   const w = await setup(page)
   await page.route('**/api/recurrences**', route => route.fulfill({ json: { items: [], next_cursor: null } }))
-  await page.goto('/p/PRJ-17/settings')
+  await page.goto('/p/PRJ-17/settings/agents')
+  await expect(page).toHaveURL('/p/PRJ-17/settings/agents')
   const card = page.locator('#project-work-context')
   await expect(card.getByText('This project has no context yet, so no account may work on it. Choose one.')).toBeVisible()
   const select = card.getByLabel('Context')
@@ -480,7 +481,8 @@ test('project settings find a context past the first page and count its accounts
     cells: new Set([...base.cells, key(ACCOUNTS.main, late), key(many[225]!.id, late)]), project: { context_id: late },
   })
   await page.route('**/api/recurrences**', route => route.fulfill({ json: { items: [], next_cursor: null } }))
-  await page.goto('/p/PRJ-17/settings')
+  await page.goto('/p/PRJ-17/settings/agents')
+  await expect(page).toHaveURL('/p/PRJ-17/settings/agents')
   const card = page.locator('#project-work-context'), select = card.getByLabel('Context')
   // Context 245 of 250 sits on the second page; Extra 225 on the second account page.
   await expect(card.getByText('2 accounts may work here: Main, Extra 225.')).toBeVisible()

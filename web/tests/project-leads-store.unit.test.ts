@@ -25,6 +25,18 @@ vi.mock('../src/stores/agents', () => ({ useAgents: () => ({ admitSessions: (row
 vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {}, can: () => true }))
 vi.mock('../src/stores/liveAgents', () => ({ useLiveAgents: () => ({ items: [], watch: () => () => {} }) }))
 vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => ({ snapshots: {} }) }))
+// The shared Agents projection (AEON-1210) binds questions by the exact asking session; its own reads are tested in agent-projection.unit.test.ts.
+type Fake = { asks: Map<string, { id: string; project_id: string }[]>; state: string; partial: boolean }
+const holder = vi.hoisted(() => ({ live: null as unknown as Fake }))
+vi.mock('../src/stores/agentProjection', async () => {
+  const { reactive } = await import('vue')
+  holder.live = reactive({ asks: new Map(), state: 'ready', partial: false }) as Fake
+  return { useAgentProjection: () => ({
+    watchProjects: () => () => {}, workersOf: () => new Set(), queuedOf: () => null,
+    asksOf: (id?: string | null) => id ? holder.live.asks.get(id) ?? [] : [],
+    get questions() { return { state: holder.live.state, partial: holder.live.partial } },
+  }) }
+})
 import { useProjectLeads } from '../src/stores/projectLeads'
 import { useLeadSummary } from '../src/lib/useLeadSummary'
 import { resetPositions } from '../src/lib/position'
@@ -36,7 +48,6 @@ const decision = (id: number, stage: LeadDecision['request']['stage'], outcome: 
   event_id: id, project_id: P, session_id: session, recorded_at: at, outcome, reason_codes: [], gate_freshness: [], results: [],
   request: { stage, outcome, reason_codes: ['gates_ready'], attempt: 1, ticket_node_id: ticket },
 })
-const question = (id: string, asker = AGENT) => ({ id, project_id: P, state: 'open', input: { question: id, options: [] }, askers: [{ principal_id: asker }] })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 function routes(over: Partial<Record<'lead' | 'pause' | 'decisions' | 'questions' | 'session', Handler>> = {}): Handler {
@@ -157,28 +168,26 @@ it('gate and merged totals cover every generation and survive trimming the retai
   lines.stop()
 })
 
-it('an unanswered question stays with the lead after its session stopped', async () => {
+it('questions bind to the lead’s exact session, also after it stopped; another generation’s stay on the Desk', async () => {
   const leads = useProjectLeads()
-  http.handler = routes({ lead: () => lead({ state: 'paused', process_active: false, revision: 6 }), questions: () => ({ items: [question('q-lead'), question('q-other', 'someone')], has_more: false }) })
+  const projection = holder.live
+  projection.asks = new Map([[S1, [{ id: 'q-lead', project_id: P }, { id: 'q-elsewhere', project_id: 'p2' }]], [S2, [{ id: 'q-next-generation', project_id: P }]]])
+  http.handler = routes({ lead: () => lead({ state: 'paused', process_active: false, revision: 6 }) })
   const lines = summary()
   await leads.load(P)
   expect(lines.leadSession.value).toBeNull()
   expect(lines.questions.value.map(q => q.id)).toEqual(['q-lead'])
-  lines.stop()
-})
-
-it('open questions are paged within a bound and a remainder is reported, never hidden', async () => {
-  const leads = useProjectLeads()
-  const offsets: number[] = []
-  http.handler = routes({ questions: path => {
-    const offset = Number(new URL(path, 'http://x').searchParams.get('offset')); offsets.push(offset)
-    return { items: Array.from({ length: 100 }, (_, i) => question(`q-${offset + i}`, offset === 300 && i === 7 ? AGENT : 'someone')), has_more: true }
-  } })
-  const lines = summary()
+  expect(lines.questionsPartial.value).toBe(false)
+  // The lead restarts as a new session: only that session's asks follow it.
+  http.handler = routes({ lead: () => lead({ session_id: S2, generation: 3, revision: 8 }) })
   await leads.load(P)
-  expect(offsets).toEqual([0, 100, 200, 300, 400])
-  expect(lines.questions.value.map(q => q.id)).toEqual(['q-307'])
+  expect(lines.questions.value.map(q => q.id)).toEqual(['q-next-generation'])
+  // An incomplete or failed read is said, never hidden.
+  projection.partial = true
   expect(lines.questionsPartial.value).toBe(true)
+  projection.partial = false; projection.state = 'error'
+  expect(lines.questionsPartial.value).toBe(true)
+  projection.state = 'ready'
   lines.stop()
 })
 
@@ -193,31 +202,4 @@ it('a session read answered after a reset is not admitted for the next person', 
   await loading; await settle()
   expect(http.admitted).toEqual([])
   expect(leads.view(P).principal).toBeNull()
-})
-
-it('a failed later question page keeps the questions read and says the rest are unread', async () => {
-  const leads = useProjectLeads()
-  http.handler = routes({ questions: path => {
-    const offset = Number(new URL(path, 'http://x').searchParams.get('offset'))
-    if (offset > 0) throw new Error('page failed')
-    return { items: [question('q-lead'), ...Array.from({ length: 99 }, (_, i) => question(`q-${i}`, 'someone'))], has_more: true }
-  } })
-  const lines = summary()
-  await leads.load(P)
-  expect(lines.questions.value.map(q => q.id)).toEqual(['q-lead'])
-  expect(lines.questionsPartial.value).toBe(true)
-  lines.stop()
-})
-
-it('a failed question read keeps the last questions shown and reports them incomplete', async () => {
-  const leads = useProjectLeads()
-  http.handler = routes({ questions: () => ({ items: [question('q-lead')], has_more: false }) })
-  const lines = summary()
-  await leads.load(P)
-  expect(lines.questionsPartial.value).toBe(false)
-  http.handler = routes({ questions: () => { throw new Error('read failed') } })
-  await leads.load(P)
-  expect(lines.questions.value.map(q => q.id)).toEqual(['q-lead'])
-  expect(lines.questionsPartial.value).toBe(true)
-  lines.stop()
 })

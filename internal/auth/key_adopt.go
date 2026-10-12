@@ -41,7 +41,7 @@ func (m *Module) handleAdoptAgentKey(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errKeyOwned), errors.Is(err, errKeyInactive):
 		writeJSON(w, http.StatusConflict, errorJSON{Error: err.Error()})
 	case err != nil:
-		writeInternal(w)
+		internalFailure(w, r, "handleAdoptAgentKey", err)
 	default:
 		writeJSON(w, http.StatusOK, keyJSON(key))
 	}

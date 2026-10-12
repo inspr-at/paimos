@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
 import { isTextClipped, vClipTip, type ClipTipValue } from '../src/lib/clipTip'
+import { reactive } from 'vue'
+import { setupSource } from './record-source'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 it('detects horizontal ellipsis and vertical clamps, excluding hidden and fitting text', () => {
   const box = { clientWidth: 100, clientHeight: 40, scrollWidth: 100, scrollHeight: 40 }
@@ -69,4 +71,49 @@ it('remeasures after fonts load and disconnects without reacting to late work af
   f.unmount(); f.resize()
   expect(f.disconnect).toHaveBeenCalledOnce()
   expect(onClip).toHaveBeenCalledTimes(calls)
+})
+
+// Risk: Chromium can omit a hold's compatibility click after contextmenu.
+// Its pending suppression must not consume the next tap on this or another row.
+it('a phone selection hold suppresses only its own row and pointer click', () => {
+  vi.useFakeTimers()
+  vi.stubGlobal('window', { matchMedia: () => ({ matches: true, removeEventListener() {} }), setTimeout, clearTimeout })
+  vi.stubGlobal('document', { removeEventListener() {} })
+  const a = { id: 'a', kind_slug: 'work', fields: {}, updated_at: '2026-10-12T00:00:00Z' }
+  const b = { ...a, id: 'b' }
+  for (const next of [a, b]) {
+    const props = reactive({ selectable: true, rowsById: new Map([[a.id, a], [b.id, b]]), selected: new Set<string>(), groups: [], sort: [], collapsed: new Set(), now: 0 })
+    const view = setupSource('components/work/TicketTable.vue', props, {
+      '../../lib/displayLanguage': {}, '../../directives/clipTip': {}, '../../lib/estimates': {},
+      '../../lib/columns': { COLUMN_BY_ID: new Map(), visibleColumns: () => ({ columns: [], customised: false }), withHostColumns: () => [], releaseLabel: () => '', tagList: () => [] },
+      '../../lib/releaseMembership': {}, '../../lib/liveAgents': { ticketWorkers: () => new Map() },
+      '../../stores/liveAgents': { useLiveAgents: () => ({ forProject: () => [] }) },
+      '../../lib/ticketList': {}, '../../lib/workVocabulary': {}, '../../lib/work': {},
+      '../../stores/workQueue': { useWorkQueue: () => ({ snapshots: {} }) },
+      '../../lib/authz': {}, '../../lib/workQueue': { queueable: () => false },
+      '../../lib/planning': { planningPresent: () => ({}) }, '../../lib/eta': { etaFromTicket: () => null },
+    })
+    const state = view.state as { pressBegin: (event: unknown, row: unknown) => void; pressFinish: (up: boolean) => void; rowClick: (event: unknown, row: unknown) => void }
+    const target = { closest: () => null }, preventDefault = vi.fn()
+    const selections = () => view.emitted.filter(event => event[0] === 'select')
+    try {
+      state.pressBegin({ button: 0, pointerId: 2, clientX: 0, clientY: 0, target }, a)
+      vi.advanceTimersByTime(479); expect(selections()).toEqual([])
+      vi.advanceTimersByTime(1); expect(selections()).toEqual([['select', props.rowsById.get(a.id), 'toggle']])
+      props.selected.add(a.id); state.pressFinish(true)
+      // No compatibility click arrives. A different gesture acts normally,
+      // including when it is on the same selected row.
+      state.rowClick({ pointerId: 3, target, preventDefault }, next)
+      expect(selections()).toEqual([['select', props.rowsById.get(a.id), 'toggle'], ['select', next, 'toggle']])
+      expect(preventDefault).not.toHaveBeenCalled()
+      // The original hold's actual compatibility click is still consumed.
+      props.selected.clear()
+      state.pressBegin({ button: 0, pointerId: 4, clientX: 0, clientY: 0, target }, a)
+      vi.advanceTimersByTime(480); props.selected.add(a.id); state.pressFinish(true)
+      const heldSelections = selections()
+      state.rowClick({ pointerId: 4, target, preventDefault }, a)
+      expect(selections()).toEqual(heldSelections)
+      expect(preventDefault).toHaveBeenCalledOnce()
+    } finally { view.stop() }
+  }
 })

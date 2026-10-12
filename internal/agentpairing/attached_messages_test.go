@@ -13,7 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"sync"
@@ -189,9 +189,13 @@ func TestAttachedNoteCanariesAndIdempotency(t *testing.T) {
 // Actual handler output, first response and idempotent replay, must satisfy the
 // published send and receipt schemas in both attached modes.
 func TestAttachedSendResponsesMatchContract(t *testing.T) {
-	raw, e := os.ReadFile("../../api/openapi.yaml")
+	// Read the canonical bundle from authored areas even in a fresh checkout,
+	// where api/openapi.yaml is ignored build output. Bound generator work.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	raw, e := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--stdout").Output()
 	if e != nil {
-		t.Fatal(e)
+		t.Fatalf("bundle authored OpenAPI: %v", e)
 	}
 	var doc struct {
 		Paths      map[string]map[string]any `yaml:"paths"`

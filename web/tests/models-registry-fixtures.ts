@@ -4,12 +4,28 @@
 // preview and retire/restore. Every write is recorded so a test can assert the
 // exact calls, and a test can make any one of them fail.
 import { expect, type Page } from '@playwright/test'
+import { LEVEL, manyRoutes } from './fixtures/registry-many'
 
 export interface MockProfile {
   id: string; slug: string; version: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; created_at: string
   display_name?: string; short_name?: string; model_version?: string; note?: string; source: 'auto' | 'manual'; retire_at: string | null; retired: boolean; effort_level: number | null; provider?: string
+  identity?: string
+  /** AEON-1163: where it came from, its lifecycle evidence and its active pause. */
+  origin?: 'shipped' | 'provider' | 'harness' | 'manual'
+  lifecycle?: { state: string | null; date: string | null; successor: string | null; reason: string; source: string } | null
+  pause?: { until: string | null; reason: string; by: string | null; at: string } | null
 }
 export interface Write { method: string; path: string; body: unknown }
+export interface MockOutdatedUse { label: string; who: string; from: string; to: string | null; from_effort?: string | null; to_effort?: string | null }
+export interface MockOutdatedVersion { version: string; line: string; state: string | null; date: string | null; successor: string | null; reason: string; source: string; uses: MockOutdatedUse[]; incomplete: boolean }
+/** AEON-1164: the outdated list and its one-step retire with Undo. Retiring marks the version's profiles retired; Undo brings them and their uses back. */
+export interface OutdatedWorld {
+  /** Sorted by identity; GET pages them as the server does, by limit and cursor. */
+  versions: MockOutdatedVersion[]; revision: string; incomplete: boolean
+  /** The next retire answers with this status and error instead (once). */
+  failRetire: { status: number; error: string } | null
+  undo: { token: string; versions: MockOutdatedVersion[] } | null
+}
 export interface RegistryWorld {
   profiles: MockProfile[]; permissions: string[]
   /** AEON-1054: Auto-update is the account matrix's New model versions rule and sends this revision. */
@@ -25,7 +41,20 @@ export interface RegistryWorld {
   gateUsage: Promise<void> | null
   /** Registry revision returned with the usage snapshot. */
   usageRevision: string
-  usage: { used_by: { column: string; layer: string; person?: string; replacement: { line: string | null; effort: string | null; harness?: string; model?: string } }[]; incomplete: boolean }
+  /**
+   * Uses the usage read answers. route (AEON-1163): the one route, "harness:model", whose own id a stored reference names (a
+   * board id from before Models); like the server, the mock names that use only when the read asks about the route, through
+   * its path or a profile parameter of one of its levels.
+   */
+  usage: { used_by: { column: string; layer: string; person?: string; route?: string; replacement: { line: string | null; effort: string | null; harness?: string; model?: string } }[]; incomplete: boolean }
+  /** AEON-1163: every usage read, its path and the profile parameters it asked about. */
+  usageAsks: { path: string; profiles: string[] }[]
+  /** Null answers GET /models/outdated with 404, as servers before AEON-1145 C do. */
+  outdated: OutdatedWorld | null
+  /** AEON-1163: pause writes refused for this model id (413), and accounts, saved keys and waiting models for How new models are found. */
+  failPause: string | null
+  accounts: { id: string; label: string; harness: string }[]; keys: { account_id: string; vendor: string }[]
+  observations: { harness: string; model: string; effort: string; pending: boolean; failures: number; suppressed_until: string | null; last_working_at: string | null }[]
 }
 const LEVELS: Record<string, number | null> = { off: 0, low: 1, medium: 2, high: 3, xhigh: 4, max: 5, default: null }
 let counter = 0
@@ -40,24 +69,33 @@ const levels = (base: Omit<Parameters<typeof mockProfile>[0], 'effort'>, efforts
 
 export function registryProfiles(): MockProfile[] {
   return [
-    ...levels({ harness: 'codex', model: 'gpt-6.1-sol', version: '2026-10-03-accepted', created_at: '2026-10-03T12:00:00Z', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6.1', note: 'strongest for building' }, ['low', 'medium', 'high', 'xhigh']),
-    ...levels({ harness: 'codex', model: 'gpt-6-sol', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6', retired: true }, ['high']),
-    ...levels({ harness: 'codex', model: 'gpt-6-astra', display_name: 'GPT Astra', short_name: 'Astra', model_version: '6', note: 'deepest reasoning, slower' }, ['low', 'medium', 'high', 'xhigh']),
-    ...levels({ harness: 'codex', model: 'gpt-6-luna', display_name: 'GPT Luna', short_name: 'Luna', model_version: '6', note: 'fast and light', retire_at: '2026-10-31T12:00:00Z' }, ['low', 'medium', 'high', 'xhigh']),
-    ...levels({ harness: 'claude', model: 'claude-opus-5-5', family: 'anthropic', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', note: 'best for design and concepts' }, ['high', 'xhigh', 'max']),
-    ...levels({ harness: 'claude', model: 'claude-sonnet-5-5', family: 'anthropic', display_name: 'Claude Sonnet', short_name: 'Sonnet', model_version: '5.5', note: 'fast everyday work' }, ['high', 'xhigh', 'max']),
-    ...levels({ harness: 'grok', model: 'grok-4.7', family: 'xai', display_name: 'Grok', short_name: 'Grok', model_version: '4.7', note: 'reviews and concepts' }, ['medium', 'high', 'xhigh']),
-    ...levels({ harness: 'grok', model: 'grok-4.8-preview', family: 'xai', display_name: 'Grok', short_name: 'Grok', model_version: '4.8 preview', enabled: false }, ['high']),
-    ...levels({ harness: 'cursor', model: 'composer-2.5', family: 'cursor', display_name: 'Composer', short_name: 'Composer', model_version: '2.5', note: 'quick edits in the editor' }, ['default']),
-    ...levels({ harness: 'pi', model: 'openrouter/qwen/qwen3-coder', family: 'unknown', display_name: 'Qwen3 Coder', short_name: 'Qwen3 Coder', note: 'trial for small scripts (AEON-1003)', source: 'manual', tier: 'standard' }, ['off']),
+    ...levels({ harness: 'codex', model: 'gpt-6.1-sol', version: '2026-10-03-accepted', created_at: '2026-10-03T12:00:00Z', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6.1', note: 'strongest for building', origin: 'harness' }, ['low', 'medium', 'high', 'xhigh']),
+    ...levels({ harness: 'codex', model: 'gpt-6-sol', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6', retired: true, origin: 'shipped' }, ['high']),
+    ...levels({ harness: 'codex', model: 'gpt-6-astra', display_name: 'GPT Astra', short_name: 'Astra', model_version: '6', note: 'deepest reasoning, slower', origin: 'harness' }, ['low', 'medium', 'high', 'xhigh']),
+    ...levels({ harness: 'codex', model: 'gpt-6-luna', display_name: 'GPT Luna', short_name: 'Luna', model_version: '6', note: 'fast and light', retire_at: '2026-10-31T12:00:00Z', origin: 'harness' }, ['low', 'medium', 'high', 'xhigh']),
+    ...levels({ harness: 'claude', model: 'claude-opus-5-5', family: 'anthropic', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', note: 'best for design and concepts', origin: 'provider',
+      lifecycle: { state: 'active', date: null, successor: null, reason: '', source: 'https://api.anthropic.com/v1/models' } }, ['high', 'xhigh', 'max']),
+    ...levels({ harness: 'pi', model: 'anthropic/claude-opus-5-5', family: 'anthropic', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', origin: 'harness' }, ['high', 'xhigh']),
+    ...levels({ harness: 'claude', model: 'claude-sonnet-5-5', family: 'anthropic', display_name: 'Claude Sonnet', short_name: 'Sonnet', model_version: '5.5', note: 'fast everyday work', origin: 'provider' }, ['high', 'xhigh', 'max']),
+    ...levels({ harness: 'grok', model: 'grok-4.7', family: 'xai', display_name: 'Grok', short_name: 'Grok', model_version: '4.7', note: 'reviews and concepts', origin: 'provider' }, ['medium', 'high', 'xhigh']),
+    ...levels({ harness: 'grok', model: 'grok-4.8-preview', family: 'xai', display_name: 'Grok', short_name: 'Grok', model_version: '4.8 preview', enabled: false, origin: 'provider' }, ['high']),
+    ...levels({ harness: 'cursor', model: 'composer-2.5', family: 'cursor', display_name: 'Composer', short_name: 'Composer', model_version: '2.5', note: 'quick edits in the editor', origin: 'harness' }, ['default']),
+    ...levels({ harness: 'pi', model: 'openrouter/qwen/qwen3-coder', family: 'unknown', display_name: 'Qwen3 Coder', short_name: 'Qwen3 Coder', note: 'trial for small scripts (AEON-1003)', source: 'manual', origin: 'manual', tier: 'standard' }, ['off']),
   ]
+}
+/** AEON-1163: the live registry's spread, 36 harness/model ids (tests/fixtures/registry-many.ts). */
+export function manyProfiles(): MockProfile[] {
+  return manyRoutes().flatMap(route => route.efforts.map(effort => mockProfile({
+    harness: route.harness, model: route.model, family: route.family, provider: route.family, effort, effort_level: LEVEL[effort] ?? null, display_name: route.display_name, short_name: route.short_name,
+    model_version: route.model_version, origin: route.origin, source: route.source ?? 'auto', enabled: route.enabled ?? true, note: route.note, identity: route.identity, lifecycle: route.lifecycle ?? null, pause: route.pause ?? null,
+  })))
 }
 export function registryWorld(over: Partial<RegistryWorld> = {}): RegistryWorld {
   return {
     profiles: registryProfiles(), permissions: ['models.read', 'models.manage', 'models.refresh', 'account.use.manage'], accountUseRevision: 7,
     settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: true, interval_minutes: 360 }, lastRun: '2026-10-09T04:12:00Z', writes: [], reads: [],
     check: { status: 200 }, failPut: false, conflictPut: false, failSettings: false, failUsage: false, failRetireAfter: null, failList: false, gateRetire: null, gateUsage: null, usageRevision: 'r1',
-    usage: { used_by: [], incomplete: false }, ...over,
+    usage: { used_by: [], incomplete: false }, usageAsks: [], outdated: null, failPause: null, accounts: [], keys: [], observations: [], ...over,
   }
 }
 
@@ -69,6 +107,7 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
   if (options.permissions !== false) await page.route('**/api/me/permissions*', route => route.fulfill({ json: { workspace: { id: 'registry-tenant', role: 'admin', permissions: world.permissions }, project: null } }))
   await page.route('**/api/account-use?*', route => route.fulfill({ json: { rules: { new_accounts: 'ask', new_contexts: 'ask', new_projects: 'default', new_models: world.settings.auto_add_profiles ? 'allow' : 'shipped_only', revision: world.accountUseRevision, enforced_at: null, confirmation_required: false, confirmed_at: null }, accounts: [], contexts: [], cells: [], next_account: null, next_context: null, running_outside: [], running_outside_truncated: false } }))
   await page.route('**/api/work-kinds*', route => route.fulfill({ json: { items: [{ id: 'k1', slug: 'backend', label: 'Backend build', hint: '', position: 1, examples: [], labels: [], ticket_count: 0 }], next_cursor: null } }))
+  await page.route('**/api/agent-accounts', route => route.fulfill({ json: world.accounts }))
   await page.route(/\/api\/models(\/.*)?(\?.*)?$/, async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, ''), method = request.method()
     const body = request.postData() ? request.postDataJSON() : undefined
@@ -76,11 +115,25 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
     else world.reads.push(decode(path))
     if (path === '/models' && method === 'GET') return world.failList ? route.fulfill({ status: 500, json: { error: 'boom' } }) : route.fulfill({ json: world.profiles })
     if (path === '/models' && method === 'POST') {
-      const created = mockProfile({ ...(body as object), source: 'manual', model: body.model, harness: body.harness, effort: body.effort, created_at: new Date().toISOString() })
+      const created = mockProfile({ ...(body as object), source: 'manual', origin: 'manual', model: body.model, harness: body.harness, effort: body.effort, created_at: new Date().toISOString() })
       world.profiles.push(created)
       return route.fulfill({ status: 201, json: created })
     }
-    if (path === '/models/refresh' && method === 'GET') return route.fulfill({ json: { settings: world.settings, last_run_at: world.lastRun, last_result: {}, sources: [], observations: [] } })
+    if (path === '/models/refresh' && method === 'GET') return route.fulfill({ json: { settings: world.settings, last_run_at: world.lastRun, last_result: {}, sources: world.keys, observations: world.observations } })
+    const key = /^\/models\/refresh\/credentials\/([^/]+)$/.exec(path)
+    if (key && method === 'PUT') {
+      world.keys = world.keys.filter(item => item.account_id !== key[1])
+      if (body.api_key) world.keys.push({ account_id: key[1]!, vendor: body.vendor })
+      return route.fulfill({ json: { account_id: key[1], vendor: body.vendor, configured: !!body.api_key } })
+    }
+    if (path === '/models/proposals/accept' && method === 'POST') {
+      const found = world.observations.find(item => item.harness === body.harness && item.model === body.model && item.effort === body.effort)
+      if (!found) return route.fulfill({ status: 404, json: { error: 'not found' } })
+      found.pending = false
+      const made = mockProfile({ harness: body.harness, model: body.model, effort: body.effort, origin: 'harness', display_name: body.model })
+      world.profiles.push(made)
+      return route.fulfill({ json: made })
+    }
     if (path === '/models/refresh' && method === 'POST') {
       if (world.check.status === 429) return route.fulfill({ status: 429, headers: { 'Retry-After': String(world.check.retryAfter ?? 300) }, json: { error: 'model refresh cooldown', retry_after: world.check.retryAfter ?? 300 } })
       if (world.check.status === 500) return route.fulfill({ status: 500, json: { error: 'refresh failed' } })
@@ -95,14 +148,51 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
       world.settings = stored
       return route.fulfill({ json: world.settings })
     }
+    const old = world.outdated
+    if (path.startsWith('/models/outdated') && !old) return route.fulfill({ status: 404, json: { error: 'not found' } })
+    if (path === '/models/outdated' && method === 'GET') {
+      const after = url.searchParams.get('cursor') ?? '', limit = Number(url.searchParams.get('limit') ?? 20)
+      const rest = old!.versions.filter(version => version.version > after), versions = rest.slice(0, limit)
+      return route.fulfill({ json: { versions, revision: old!.revision, next_cursor: rest.length > limit ? versions.at(-1)!.version : '', incomplete: old!.incomplete } })
+    }
+    if (path === '/models/outdated/retire' && method === 'POST') {
+      if (old!.failRetire) { const fail = old!.failRetire; old!.failRetire = null; return route.fulfill({ status: fail.status, json: { error: fail.error } }) }
+      if (body.revision !== old!.revision) return route.fulfill({ status: 409, json: { error: 'stale outdated preview' } })
+      const chosen = old!.versions.filter(version => (body.versions as string[]).includes(version.version))
+      for (const version of chosen) for (const profile of world.profiles) if (profile.identity === version.version) profile.retired = true
+      old!.versions = old!.versions.filter(version => !chosen.includes(version))
+      old!.revision = old!.revision.replace(/^./, c => c === 'a' ? 'b' : 'a')
+      old!.undo = { token: `41.${'c'.repeat(64)}`, versions: chosen }
+      return route.fulfill({ json: { moved: chosen.flatMap(version => version.uses), removed: chosen.map(version => version.version), undo_token: old!.undo.token } })
+    }
+    if (path === '/models/outdated/undo' && method === 'POST') {
+      if (!old!.undo || body.undo_token !== old!.undo.token) return route.fulfill({ status: 409, json: { error: 'invalid retirement undo' } })
+      const back = old!.undo.versions
+      for (const version of back) for (const profile of world.profiles) if (profile.identity === version.version) profile.retired = false
+      old!.versions = [...back, ...old!.versions].sort((a, b) => a.version < b.version ? -1 : 1)
+      old!.undo = null
+      return route.fulfill({ json: { event_id: 42, restored: true } })
+    }
+    const pause = /^\/models\/lines\/([^/]+)\/([^/]+)\/pause$/.exec(path)
+    if (pause) {
+      const harness = decode(pause[1]!), model = decode(pause[2]!)
+      if (world.failPause === model) return route.fulfill({ status: 413, json: { error: 'model_pause_limit' } })
+      const value = method === 'DELETE' ? null : { until: body.until, reason: body.reason, by: '11111111-1111-4111-8111-111111111111', at: new Date().toISOString() }
+      for (const profile of world.profiles) if (profile.harness === harness && profile.model === model) profile.pause = value
+      return route.fulfill({ json: { harness, model, pause: value } })
+    }
     const line = /^\/models\/lines\/([^/]+)\/([^/]+)(\/usage)?$/.exec(path)
     if (line) {
       const harness = decode(line[1]!), model = decode(line[2]!)
       if (line[3]) {
+        const profiles = url.searchParams.getAll('profile')
+        world.usageAsks.push({ path: decode(path), profiles })
         if (world.gateUsage) await world.gateUsage
         if (world.failUsage) return route.fulfill({ status: 500, json: { error: 'usage failed' } })
         const lineProfiles = world.profiles.filter(profile => sameLine(profile, harness, model))
-        return route.fulfill({ json: { ...world.usage, replacement: world.usage.used_by[0]?.replacement ?? { line: null, effort: null }, revision: world.usageRevision, line_profiles: lineProfiles } })
+        const asked = new Set([...lineProfiles, ...world.profiles.filter(profile => profiles.includes(profile.id))].map(profile => `${profile.harness}:${profile.model}`))
+        const used = world.usage.used_by.filter(use => !use.route || asked.has(use.route)).map(use => { const answer = { ...use }; delete answer.route; return answer })
+        return route.fulfill({ json: { ...world.usage, used_by: used, replacement: used[0]?.replacement ?? { line: null, effort: null }, revision: world.usageRevision, line_profiles: lineProfiles } })
       }
       if (world.failPut) return route.fulfill({ status: 422, json: { error: 'provider route does not match model namespace' } })
       if (world.conflictPut) return route.fulfill({ status: 409, json: { error: 'stale registry revision' } })
@@ -110,7 +200,7 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
       if (!before.length) return route.fulfill({ status: 404, json: { error: 'model line not found' } })
       before.forEach(profile => { profile.retired = true })
       const next = body.model ?? model, made = (body.efforts as string[]).map((effort, index) => mockProfile({
-        harness, model: next, effort, family: before[0]!.family, display_name: body.display_name, short_name: body.display_name, note: body.note, source: before[0]!.source, tier: before[0]!.tier, effort_level: LEVELS[effort] ?? Math.min(index, 5),
+        harness, model: next, effort, family: before[0]!.family, display_name: body.display_name, short_name: body.display_name, note: body.note, source: before[0]!.source, origin: before[0]!.origin, tier: before[0]!.tier, effort_level: LEVELS[effort] ?? Math.min(index, 5),
         model_version: before[0]!.model_version, version: `edit-${world.writes.length}`, created_at: new Date().toISOString(),
       }))
       world.profiles.push(...made)

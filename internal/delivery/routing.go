@@ -61,10 +61,13 @@ func boundedRouting(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		deadline, _ := ctx.Deadline()
-		controller := http.NewResponseController(w)
-		_ = controller.SetReadDeadline(deadline)
-		defer controller.SetReadDeadline(time.Time{})
+		r = r.WithContext(ctx)
+		if r.Method != http.MethodGet {
+			if err := httpapi.BufferRequestBodyTimeout(w, r, 16<<10, 15*time.Second); err != nil {
+				respondError(w, fail(http.StatusBadRequest, "invalid request body"))
+				return
+			}
+		}
 		handler(w, r.WithContext(ctx))
 	}
 }

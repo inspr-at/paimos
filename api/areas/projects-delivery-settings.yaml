@@ -36,11 +36,25 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: backfillProjectDeliveryMetrics
-      description: 'Requires delivery.manage. Runs one bounded backfill step (at most about 40 GitHub reads with the App installation token) from the stored cursor and stores workflow runs and pull requests idempotently. A fresh backfill also lists ci-preflight.yml. Once the runs and pulls are in, further steps are the jobs pass: each reads every job conclusion of first attempts that still lack a complete job map (the required checks of every project sharing the repository, and the worst runner wait). A run whose jobs GitHub could not return stays unfinished, the cursor stays in phase jobs, and retry_at names when to call again. A caller stops only when state is done. Nothing readable at all returns 502. restart begins a new backfill over days (1 to 90, default 30). A failed GitHub read writes nothing and returns 502; a concurrent step or source change returns 409.'
+      description: 'Requires delivery.manage. Runs one bounded history step and schedules server continuation, including after leaving the page or a server restart. Steps store facts idempotently and read at most about 40 GitHub pages. retry_at defers unfinished reads; GitHub failures persist last_read_error and retry automatically (missing permissions every 30 minutes). restart begins a new history window of 1 to 90 days, default 30. A concurrent step or source change returns 409; an unreadable GitHub step returns 502.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfillInput'}}}}
       responses:
         '200': {description: 'Backfill position after this step', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfill'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics/check-again:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: checkProjectDeliveryMetricSource
+      description: 'Requires delivery.manage. Retries the current history step immediately, bypassing its retry time without discarding progress. The server continues the remaining steps. A GitHub failure persists last_read_error and returns 502.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Current history position', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfill'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -65,7 +79,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     put:
       operationId: putProjectDeliveryMetricSource
-      description: 'Requires delivery.manage. Links the project to the GitHub repository whose delivery it measures, with the CI and nightly workflow files. Changing any of them starts the backfill over. Does not change GitHub.'
+      description: 'Requires delivery.manage. Links the project to the GitHub repository whose delivery it measures, with the CI and nightly workflow files. Linking or changing any of them schedules a server backfill over the requested history window. Does not change GitHub.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricSourceInput'}}}}
       responses:

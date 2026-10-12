@@ -10,7 +10,7 @@ for (const theme of ['light', 'dark'] as const) {
   test(`${theme}: every state agrees across /agents, detail, cards and list rows`, async ({ page }) => {
     const { agents } = await mockStateColours(page, theme)
     await page.goto('/agents')
-    await page.getByRole('button', { name: /^Ended/ }).click()
+    // The ended sessions stopped just now: they keep their places for 10 minutes (AEON-1210, design §3.2).
     for (const [index, state] of states.entries()) {
       const row = page.locator(`[data-row="s:${agents.sessions[index]!.id}"]`)
       await expect(row).toHaveAttribute('data-state', state)
@@ -105,7 +105,11 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   await expect(page.locator('[data-project-id="p-sc1-unresponsive"] .live-bot')).toHaveAttribute('data-state', 'awaiting')
   for (const view of ['Cards', 'List']) {
     await page.getByRole('radio', { name: `${view} view`, exact: true }).click()
-    await expect(page.locator('[data-project-id="p-sc1-working"] .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
+    // The live chip marks its state twice (AEON-750): on the robot and beside the state word; both take the saved palette.
+    const project = page.locator('[data-project-id="p-sc1-working"]')
+    await expect(project.locator('.agent-state-mark')).toHaveCount(2)
+    await expect(project.locator('.live-bot .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
+    await expect(project.locator('.chip-state .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
   }
   await page.goto('/settings/theme#agents')
   await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
@@ -115,7 +119,6 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   await saveAgentTheme(page)
   expect(appearance.saved.values.agents).toMatchObject({ palette: 'monochrome', dim_inactive: false })
   await page.goto('/agents')
-  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(page.locator('.row[data-state="stopped"]')).toHaveCSS('opacity', '1')
   await expect(page.locator('.row[data-state="working"] .ava .live-bot')).toHaveCSS('--agent-state-color', /.+/)
 })
@@ -173,7 +176,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.setViewportSize({ width, height: width === 1600 ? 1000 : 844 })
     await page.goto('/agents')
     await expect(page.locator('.row[data-state="awaiting"] .ava')).toHaveAttribute('aria-label', /: Awaiting heartbeat$/)
-    await expect(page.locator('.group-row').filter({ hasText: 'Needs attention' })).toBeVisible()
+    // AEON-1210: what needs a look stays in its project's group, never folded away with Ended.
+    await expect(page.locator('.sessions .grp:not(.ended) .row[data-state="awaiting"]').first()).toBeVisible()
     await expect(page.getByRole('group', { name: 'Show sessions by state' })).toContainText('working')
     // Closing a session retains the page keyboard cursor and returns to the list.
     await page.locator('[data-state="working"] .agent-link').click()

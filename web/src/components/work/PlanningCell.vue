@@ -19,11 +19,12 @@ const props = defineProps<{ column: PlanningColumn; row: PlanningRow; rowId?: st
 const descriptionId = computed(() => props.rowId ? `plan-${props.rowId}-${props.column}` : autoId)
 const model = computed(() => props.column === 'model' ? modelCell(props.row, modelDisplay.value) : null)
 const figure = computed(() => props.column === 'tokens' ? tokensCell(props.row) : listCostCell(props.row))
+// "Why this model?" explains this ticket on Settings › Models, by its visible key (Tick, AEON-1138), never the next queued one.
 function why() {
   const key = String(route.params.projectKey ?? route.params.key ?? '')
-  const rowProject = (props.row as PlanningRow & { project?: { id: string; title: string } | null }).project
-  const project = rowProject ?? projects.byRouteKey(key)
-  openModelPrefs({ project: project ? { id: project.id, title: project.title } : undefined, kind: typeof props.row.fields.area === 'string' ? props.row.fields.area : 'other', why: true, ticket: props.rowId, preview: model.value?.label })
+  const row = props.row as PlanningRow & { project?: { id: string; title: string } | null; key?: string }
+  const project = row.project ?? projects.byRouteKey(key)
+  openModelPrefs({ project: project ? { id: project.id, title: project.title } : undefined, kind: typeof props.row.fields.area === 'string' ? props.row.fields.area : 'other', why: true, ticket: row.key || props.rowId, preview: model.value?.label })
 }
 const EMPTY_LABEL = { model: 'No model', tokens: 'No tokens', list_cost: 'No cost', paid: 'No cost' }
 </script>
