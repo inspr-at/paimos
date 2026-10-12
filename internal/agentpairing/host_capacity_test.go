@@ -85,15 +85,19 @@ func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
 		t.Fatalf("owner lost the retained managed-process cause: %+v", advice)
 	}
 	actor := tenant.Principal{ID: f.person, TenantID: f.tenantID, Kind: tenant.Person}
-	if err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
-		health, err := agentaccounts.HarnessHealthAt(tenant.WithPrincipal(t.Context(), actor), tx, time.Now())
-		if err == nil && (health["claude"].Dispatchable != 0 || len(health["claude"].Reasons) != 1 || health["claude"].Reasons[0] != "Claude account is waiting for an unconfirmed managed process to exit") {
-			t.Fatalf("model admission lost the owner cause: %+v", health["claude"])
+	readModelReason := func(want string) {
+		t.Helper()
+		if err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+			health, err := agentaccounts.HarnessHealthAt(tenant.WithPrincipal(t.Context(), actor), tx, time.Now())
+			if err == nil && (health["claude"].Dispatchable != 0 || len(health["claude"].Reasons) != 1 || health["claude"].Reasons[0] != want) {
+				t.Fatalf("model admission lost the owner cause: %+v, want %q", health["claude"], want)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
 		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
 	}
+	readModelReason("Claude account is waiting for an unconfirmed managed process to exit")
 	// Authenticated exit releases only the managed slot; the external row stays.
 	r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "completed", "process_state": "exited", "turn_count_delta": 1}, false, key)
 	r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
@@ -104,6 +108,10 @@ func TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns(t *testing.T) {
 		t.Fatalf("owned exit reconciliation: %d %s", w.Code, w.Body.String())
 	}
 	readHost(0, "")
+	// A fresh authentication failure is also explained to the computer owner;
+	// private quota remains private before this account is linked to a person.
+	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/probe", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "available": false, "failure": "auth_failed"}, false, key, 200)
+	readModelReason("Claude account needs signing in")
 }
 
 func TestHostCapacityOwnerRevisionRuntimeAndClaimFence(t *testing.T) {

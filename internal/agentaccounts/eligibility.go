@@ -80,11 +80,11 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 		} else if route.Wait != nil {
 			wait := route.Wait
 			reader, _ := tenant.PrincipalFrom(ctx)
-			private := !visible[account.ID]
+			private := !visible[account.ID] && !localWaitVisible(reader, route)
 			if wait.HostReason != "" {
 				// Sharing usage is not permission to disclose host/process
 				// diagnostics. These explanations belong to the person owner.
-				private = !hostReasonVisible(reader, route)
+				private = !localWaitVisible(reader, route)
 			}
 			if private {
 				// Availability can be public without releasing the owner's
@@ -101,8 +101,14 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 	return out, nil
 }
 
-func hostReasonVisible(reader tenant.Principal, route CapacityRouting) bool {
-	return route.Wait != nil && route.Wait.HostReason != "" && reader.Kind == tenant.Person && reader.ID != "" && reader.ID == route.hostOwner
+func localWaitVisible(reader tenant.Principal, route CapacityRouting) bool {
+	if route.Wait == nil || reader.Kind != tenant.Person || reader.ID == "" || reader.ID != route.hostOwner {
+		return false
+	}
+	// The approving person owns the computer even before account linking.
+	// Local readiness is safe to explain; quota, schedules and times retain
+	// the account-sharing boundary above.
+	return route.Wait.HostReason != "" || slices.Contains([]string{"offline", "sign_in", "state", "capacity", "approval", "models"}, route.Wait.Code)
 }
 
 // ModelWaitReason describes the actual admission gate without account identity

@@ -428,7 +428,7 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 		// Filter host diagnostics before folding away the owning account.
 		for _, a := range accounts {
 			route := advice[a.ID]
-			if route.Wait != nil && route.Wait.HostReason != "" && !hostReasonVisible(p, route) {
+			if route.Wait != nil && route.Wait.HostReason != "" && !localWaitVisible(p, route) {
 				copy := *route.Wait
 				copy.HostReason = ""
 				route.Wait = &copy
