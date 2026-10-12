@@ -14,9 +14,10 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
       state.leads['p-pharos'] = { ...unstarted }
       await page.goto(view === 'card' ? '/p/PHAROS' : '/agents')
       await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, look)
-      const frame = view === 'card' ? page.locator('section.lead') : page.locator('.lead-list-item').filter({ has: page.locator('[data-project="PHAROS"]') })
+      // AEON-1210: on Agents, a lead without a session heads its project's group in Sessions, its ⋯ on the row.
+      const frame = view === 'card' ? page.locator('section.lead') : page.locator('.sessions .row.lead-row[data-project="PHAROS"]')
       const trigger = frame.locator('[data-act="lead-menu"]')
-      const row = view === 'card' ? frame.locator('[data-act="main"]') : frame.locator('.lead-row')
+      const row = view === 'card' ? frame.locator('[data-act="main"]') : frame
       await expectStableControls({ controls: { trigger, row }, scrollAreas: { page: page.locator('html') }, interactions: [
         { name: 'open removal menu', run: async () => { await trigger.click(); await expect(page.getByRole('dialog', { name: /More PHAROS .* actions/ })).toBeVisible() } },
       ] })

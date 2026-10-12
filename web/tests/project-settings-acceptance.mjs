@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // P1 adapter for AEON-1227 approved check.mjs: the original audit is retained
 // with its scope narrowed to the built P1 surface, rather than the mock shell.
+// P3 repository callers also use this unchanged audit.
 // P4 also reuses this approved audit for Advanced and the shared project sheet.
 export const approvedCheckSHA = '5f3e1a708081b52a1915d691ce80f300fa67338e4fc9172d02d2dc9392f35429'
 export async function checkProjectSettings(page, name, touch) {

@@ -403,6 +403,8 @@
         "web/src/components/settings/ProjectAdvancedSettings.vue",
         "web/src/components/settings/ProjectSettingsSheet.vue",
         "web/src/components/projects/NewProjectSheet.vue",
+        "web/src/components/settings/ProjectRepositorySettings.vue",
+        "web/src/components/settings/ProjectDeliveryChecks.vue",
         "web/src/components/settings/models/ModelLineRow.vue",
         "web/src/components/settings/models/ModelDiscovery.vue"
       ]
@@ -430,7 +432,10 @@
         "web/src/lib/projectSettingsExplainers.ts",
         "web/tests/project-settings.spec.ts",
         "web/tests/project-settings-acceptance.mjs",
-        "web/src/lib/projectAdvanced.ts"
+        "web/src/lib/projectAdvanced.ts",
+        "web/src/lib/projectDeliverySettings.ts",
+        "web/tests/project-delivery-settings.spec.ts",
+        "web/tests/project-delivery-settings.unit.test.ts"
       ],
       "exclude": [
         "web/src/views/**",

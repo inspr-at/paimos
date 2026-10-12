@@ -344,6 +344,7 @@ const rowActions = computed<RowAction[]>(() => {
   ] : []
   return [
     { id: 'open', label: 'Open', icon: 'arrow', group: 1, keys: 'Enter' },
+    { id: 'settings', label: 'Project settings', icon: 'gear', group: 1 },
     { id: 'move', label: 'Move to group…', icon: 'folder', group: 2, keys: 'm' },
     { id: 'select', label: picked ? 'Deselect' : 'Select', icon: 'check', group: 2, keys: 'x' },
     ...arranging,
@@ -360,6 +361,7 @@ async function rowAction(action: string) {
   rowMenu.value = null
   switch (action) {
     case 'open': void router.push(to(project)); break
+    case 'settings': void router.push(`/p/${encodeURIComponent(project.routeKey)}/settings`); break
     case 'move': openMove(selected.value.has(project.id) ? [...selected.value] : [project.id], menu.anchor instanceof HTMLElement ? menu.anchor : null); break
     case 'select': toggleSelect(project.id); focusItem(project.id); break
     case 'earlier': case 'later': arrange(project.id, action === 'earlier' ? -1 : 1); break

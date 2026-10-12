@@ -432,6 +432,56 @@ func TestDeliverySettingsAndIngressBinding(t *testing.T) {
 	})
 }
 
+func TestDeliverySettingsOverridesRevisionFence(t *testing.T) {
+	// Risk: editing one effective value pins workspace defaults, or a stale
+	// replacement silently overwrites another person's project settings.
+	f := newFixture(t)
+	url := "/api/projects/" + f.project + "/delivery-settings"
+	call := func(p tenant.Principal, method, query, body, etag string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, url+query, strings.NewReader(body))
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+		if etag != "" {
+			r.Header.Set("If-Match", etag)
+		}
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: got %d, want %d: %s", method, query, w.Code, want, w.Body.String())
+		}
+		return w
+	}
+	initial := call(f.person, "GET", "?view=overrides", "", "", 200)
+	if initial.Body.String() != "{}\n" || initial.Header().Get("ETag") == "" {
+		t.Fatalf("unsaved overrides: %s", initial.Body.String())
+	}
+	first := call(f.person, "PUT", "", `{"deadlines":{"ci_green":45}}`, initial.Header().Get("ETag"), 200)
+	var saved Settings
+	raw := call(f.person, "GET", "?view=overrides", "", "", 200)
+	if err := json.Unmarshal(raw.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.RequiredChecks != nil || saved.RequiredWorkflow != nil || len(saved.Deadlines) != 1 || saved.Deadlines[CIGreen] != 45 {
+		t.Fatalf("defaults pinned: %+v", saved)
+	}
+	call(f.person, "PUT", "", `{"required_workflow":"Stale"}`, initial.Header().Get("ETag"), 412)
+	call(f.foreign, "PUT", "", `{}`, first.Header().Get("ETag"), 404)
+	raw = call(f.person, "GET", "?view=overrides", "", "", 200)
+	if raw.Header().Get("ETag") != first.Header().Get("ETag") {
+		t.Fatal("rejected write changed revision")
+	}
+	call(f.person, "PUT", "", `{}`, first.Header().Get("ETag"), 200)
+	// Reset follows a future workspace value rather than copying today's default.
+	f.call(t, f.person, "PUT", "/api/settings/delivery", map[string]any{"deadlines": map[string]int{"ci_green": 17}}, 200, nil)
+	effective := call(f.person, "GET", "", "", "", 200)
+	if err := json.Unmarshal(effective.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Deadlines[CIGreen] != 17 {
+		t.Fatal("Reset did not restore inheritance")
+	}
+}
+
 func requiredChecksStored(i Item) bool {
 	got := map[string]Check{}
 	for _, c := range i.Observation.Checks {

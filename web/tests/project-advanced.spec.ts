@@ -155,6 +155,10 @@ test('AEON-1235: New project retains key conflicts and reports partial group ass
 test('AEON-1235: Advanced writes preserve revisions, bounds and honest repair refusals', async ({ page }) => {
   const world = await setup(page)
   await page.goto('/p/PHAROS/settings/delivery#advanced')
+  // Risk: merging P3 and P4 leaves the temporary repository stub beside P3’s editor.
+  const repositoryCards = page.locator('.settings-body .m-card').filter({ has: page.getByRole('heading', { name: /^Repository(?: & delivery)?$/ }) })
+  await expect(repositoryCards.locator('.repo-slot')).toBeVisible()
+  await expect(repositoryCards).toHaveCount(1)
   const review = modeButton(page, 'reviews', 'shadow')
   await expect(review).toBeEnabled()
   const stable = await controlStability(page, { queueOff: modeButton(page, 'queue', 'off'), queueShadow: modeButton(page, 'queue', 'shadow'), review, shipping: modeButton(page, 'shipping', 'off'), routing: modeButton(page, 'routing', 'off'), admission: page.getByRole('switch', { name: 'Record shadow admission' }) })

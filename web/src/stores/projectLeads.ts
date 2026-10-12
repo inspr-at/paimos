@@ -5,8 +5,7 @@ import { onReset } from '../lib/position'
 import { onAccessRevalidate } from '../lib/authz'
 import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
-import type { Question } from '../lib/decisionDeskApi'
-import { adoptLead, cancelLeadAdoption, canLaunchLead, canRemoveLead, emptyFold, foldDecisions, leadLaunchReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, removeLead, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
+import { adoptLead, cancelLeadAdoption, canLaunchLead, canRemoveLead, emptyFold, foldDecisions, leadLaunchReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, removeLead, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
 import { useAgents } from './agents'
 
 // AEON-741: read projections of each project's lead. The server decides state;
@@ -18,13 +17,13 @@ export interface LeadView {
   // The project's history across generations; totals live in the fold, so
   // trimming the retained decisions never changes them.
   decisions: LeadDecision[]; fold: DecisionFold; after: number; caughtUp: boolean; decisionsError: string
-  // The lead's agent, kept after its session stops so its questions stay visible.
+  // The lead's agent, kept after its session stops. Its open questions bind by exact session in the
+  // shared Agents projection (stores/agentProjection.ts, AEON-1210), never by this principal.
   principal: { session: string; id: string; management?: string } | null
-  questions: Question[] | null; questionsMore: boolean
 }
 const RETAIN = 2000
 const PROJECT_CAP = 50
-const blank = (): LeadView => ({ lead: null, error: '', forbidden: false, loadedAt: null, settings: null, decisions: [], fold: emptyFold(), after: 0, caughtUp: false, decisionsError: '', principal: null, questions: null, questionsMore: false })
+const blank = (): LeadView => ({ lead: null, error: '', forbidden: false, loadedAt: null, settings: null, decisions: [], fold: emptyFold(), after: 0, caughtUp: false, decisionsError: '', principal: null })
 const message = (e: unknown, fallback: string) => e instanceof Error && e.message ? e.message : fallback
 
 export const useProjectLeads = defineStore('projectLeads', () => {
@@ -92,8 +91,7 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       if (lead && lead.state !== 'none') {
         tasks.push(loadDecisions(id, started))
         if (lead.session_id && current.principal?.session !== lead.session_id) tasks.push(loadPrincipal(id, lead.session_id, started))
-        tasks.push(loadQuestions(id, started))
-      } else Object.assign(current, { decisions: [], fold: emptyFold(), after: 0, caughtUp: true, questions: [], questionsMore: false })
+      } else Object.assign(current, { decisions: [], fold: emptyFold(), after: 0, caughtUp: true })
       await Promise.all(tasks)
     })().finally(() => { if (pending.get(id) === request) pending.delete(id) })
     pending.set(id, request)
@@ -122,16 +120,6 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       const [row] = useAgents().admitSessions([read])
       if (row) view(id).principal = { session, id: row.agent_principal_id, management: row.management_mode }
     } catch { /* read again with the next load; the previous lead's asker stays */ }
-  }
-  async function loadQuestions(id: string, started: number) {
-    try {
-      const page = await readOpenQuestions(id)
-      if (started !== epoch) return
-      Object.assign(view(id), { questions: page.items.filter(q => q.project_id === id), questionsMore: page.more })
-    } catch {
-      // Unread questions are reported, never hidden: the previous read stays, marked incomplete.
-      if (started === epoch) view(id).questionsMore = true
-    }
   }
   /** Ticket keys for ids the lead reported; at most 12 reads per call, each once. */
   async function resolveKeys(ids: string[], started = epoch) {

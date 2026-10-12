@@ -742,6 +742,8 @@
         ,
         {"file":"tests/aeon-1209-agents-head.spec.ts","listedTests":19,"weightSeconds":75,"weightSource":"remote-one-worker-AEON-1209-60s-plus-margin"}
         ,
+        {"file":"tests/aeon-1210-agents-tree.spec.ts","listedTests":19,"weightSeconds":54,"weightSource":"remote-one-worker-AEON-1210-24s-plus-margin"}
+        ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
@@ -965,6 +967,8 @@
         {"file":"tests/profile.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/project-advanced.spec.ts","listedTests":4,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
+        ,
+        {"file":"tests/project-delivery-settings.spec.ts","listedTests":2,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
         ,
         {"file":"tests/project-groups.spec.ts","listedTests":18,"weightSeconds":39.95122,"weightSource":"unmeasured-test-rate"}
         ,

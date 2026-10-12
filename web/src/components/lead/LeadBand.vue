@@ -12,6 +12,7 @@ import { useLeadSummary } from '../../lib/useLeadSummary'
 import { useProjectLeads } from '../../stores/projectLeads'
 import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
+import { projectSettingsPath } from '../../lib/projectSettings'
 import AppIcon from '../AppIcon.vue'
 import LeadBot from './LeadBot.vue'
 import LeadAdoption from './LeadAdoption.vue'
@@ -24,7 +25,7 @@ const props = defineProps<{ projectId: string; projectKey: string; routeKey: str
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
 const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectKey'))
-const { lead, band, leadSession, workers, stations, questions, questionsPartial } = summary
+const { lead, band, leadSession, workers, workersKnown, workersPartial, stations, questions, questionsPartial } = summary
 const person = computed(() => session.identity?.principal.kind === 'person')
 const mayControl = computed(() => person.value && can('harness.control', props.projectId))
 const mayStart = computed(() => mayControl.value && can('run.create', props.projectId))
@@ -45,13 +46,15 @@ onMounted(() => poller.start())
 onBeforeUnmount(() => poller.stop())
 
 const time = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
+// Workers by their real parent (AEON-1210 G2): no count while that tree can't be read, “3+” while only part of it was.
+const workerWord = computed(() => !workersKnown.value ? '' : `${workers.value.length}${workersPartial.value ? '+' : ''} ${workers.value.length === 1 && !workersPartial.value ? 'worker' : 'workers'}`)
 const stateDetail = computed(() => {
   const s = leadSession.value
   if (!s || !lead.value) return ''
   const parts: string[] = []
-  if (lead.value.state === 'working') parts.push(`since ${time(s.since)}`, `${workers.value.length} ${workers.value.length === 1 ? 'worker' : 'workers'}`)
+  if (lead.value.state === 'working') parts.push(`since ${time(s.since)}`, workerWord.value)
   if (s.model) parts.push([s.model, s.reasoning_effort].filter(Boolean).join(', '))
-  return parts.join(' · ')
+  return parts.filter(Boolean).join(' · ')
 })
 const nowLine = computed(() => {
   if (unmanaged.value && lead.value?.state === 'paused') return 'Continue from the session itself; PAIMOS cannot restart an unmanaged process.'
@@ -133,7 +136,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
       </div>
     </div>
 
-    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now" data-launch-reason>{{ leadLaunchReason(lead) }}</p>
+    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now"><span data-launch-reason>{{ leadLaunchReason(lead) }}</span> <RouterLink :to="`${projectSettingsPath(routeKey, 'agents')}#lead`" class="settings-link">Settings <AppIcon name="chevron-right" :size="12" /> Agents<AppIcon name="chevron-right" :size="12" /></RouterLink></p>
 
     <LeadAdoption v-if="band.state !== 'none' && mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
     <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
@@ -228,7 +231,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
   .lead-acts .act-main { grid-area: acts; justify-self: end; min-height: 44px; }
   .lead-acts .fold-btn { width: 44px; height: 44px; }
   /* Phone: the name and state already sit on their own row below the controls; folded, they stay stacked. */
-  .lead.folded .lead-who { display: grid; }
+  .lead.folded .lead-who { display: grid; row-gap: 1px; }
   .lead.folded .lead-sep { display: none; }
   .lead-now, .empty-lead { margin-left: 0; }
   .asks, .lead-foot { margin-left: -14px; margin-right: -14px; }
@@ -239,4 +242,5 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 }
 @media (pointer: coarse) { .fold-btn { width: 44px; height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .lead.moving .lead-fold, .fold-btn :deep(svg) { transition: none; } }
+.settings-link { display:inline-flex; align-items:center; gap:3px; min-height:30px; color:var(--ink-2); } @media(pointer:coarse) { .settings-link { min-height:44px; } }
 </style>

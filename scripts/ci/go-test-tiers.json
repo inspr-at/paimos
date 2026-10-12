@@ -5852,6 +5852,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsAndIngressBinding","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsOverridesRevisionFence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingAppReaderScopesBindingsAndPartialReads","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingConcurrentClaimantsOwnOneAction","tier":"ESSENTIAL"}

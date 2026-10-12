@@ -81,8 +81,8 @@ test('Lost contact is an ended row with a bin; one click removes, Undo brings it
   const errors = watchErrors(page)
   const { lost, undone } = await setup(page)
   await page.goto('/agents')
-  // Not a Problem under Needs attention: it sits with the ended sessions.
-  await expect(page.locator('.group-row.attention')).not.toContainText('cursor-275')
+  // Not a Problem in its project's group (AEON-1210): it sits with the ended sessions.
+  await expect(page.locator('.sessions .grp:not(.ended)').filter({ hasText: 'cursor-275' })).toHaveCount(0)
   await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, lost.id)).toContainText('Lost contact')
   const bin = row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' })
@@ -144,7 +144,8 @@ test('a managed session menu offers Interrupt, Stop, settings and Remove', async
   await row(page, lead.id).hover()
   await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
   const menu = page.getByRole('menu', { name: 'Actions for claude-lead' })
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pause…', /^Interrupt this step/, 'Name, model, effort', /^Open PHAROS-11/, 'Copy session id', 'Stop now…', 'Remove…'])
+  // A project's lead also offers its lead panel first (AEON-1210).
+  await expect(menu.getByRole('menuitem')).toHaveText([/^Open the lead panel/, 'Pause…', /^Interrupt this step/, 'Name, model, effort', /^Open PHAROS-11/, 'Copy session id', 'Stop now…', 'Remove…'])
   await expect(menu).not.toContainText('Runs outside')
   // managed_control_v1: Interrupt goes through the ownership-aware route, bound to the process generation.
   await menu.getByRole('menuitem', { name: /^Interrupt/ }).click()
