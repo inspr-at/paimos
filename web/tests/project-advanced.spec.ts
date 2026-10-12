@@ -12,6 +12,7 @@ import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
 import { checkProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
 import { MACHINE_PATHS } from '../src/lib/projectAdvanced'
+import { fillProjectSettingsExplainer, PROJECT_SETTINGS_EXPLAINERS } from '../src/lib/projectSettingsExplainers'
 
 const release = '10000000-0000-4000-8000-000000000001'
 async function setup(page: Page, options: { admin?: boolean; principalKind?: 'person' | 'agent' } = {}) {
@@ -237,6 +238,15 @@ test('AEON-1235: stale project responses and missing authority cannot enable adm
 test('AEON-1235: approved P4 reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
   test.setTimeout(240_000)
   const lines = [`AEON-1235 P4 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit is adapted to the real P4 build and existing application shell. Full P2/P3 repository states are integration dependencies.', 'Design/API difference: Delivered needs release_id and frozen published membership, so maintenance includes a published-release selector. Actions precede growing preview/refusal content to preserve the control-stability rule.', 'Chat-v1 is a deployment opt-in with no readable workspace feature flag. The row describes its real dependency without asserting an invented enabled/disabled value.', 'The mock’s sample PR placeholder is omitted. All rendered records in these screenshots are test fixtures only.']
+  expect(Object.keys(PROJECT_SETTINGS_EXPLAINERS)).toHaveLength(21)
+  for (const [id, explanation] of Object.entries(PROJECT_SETTINGS_EXPLAINERS)) {
+    const parts = [explanation.what, explanation.effect, explanation.who, 'where' in explanation && explanation.where ? explanation.where.label : '']
+    for (const projectKey of ['PHAROS', 'AEON', 'PRJ-26']) {
+      const rendered = parts.map(value => fillProjectSettingsExplainer(value, { projectKey })).join(' ')
+      expect(rendered, `${id}/${projectKey}`).not.toMatch(/<[^>]*number>|\{(?:K|N2?|R|O|C)\}/)
+    }
+    lines.push(`how-${id}: no unresolved placeholders for PHAROS, AEON or PRJ-26 PASS`)
+  }
   for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {
@@ -259,6 +269,9 @@ test('AEON-1235: approved P4 reference states and check.mjs audit against the bu
         await stable.check(() => trigger.click())
         const explanation = page.locator('.explainer')
         await expect(explanation.locator('h3')).toBeFocused()
+        await expect(explanation).not.toContainText(/<[^>]*number>|\{(?:K|N2?|R|O|C)\}/)
+        if (['shadow', 'queue', 'reviews', 'shipping', 'routing', 'admission', 'mbf'].includes(id)) await expect(explanation).toContainText('a PHAROS ticket')
+        if (id === 'queue') await expect(explanation).toContainText('another PHAROS ticket')
         expect((await explanation.innerText()).split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word)).length).toBeLessThanOrEqual(120)
         expect(await explanation.evaluate(el => el.classList.contains('as-sheet'))).toBe(width < 600)
         await capture(`how-${id}`, false)
