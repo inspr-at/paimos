@@ -48,4 +48,4 @@ through `workqueue.RequireBuildAdmissionTx`; its advisory lock is keyed
 by the transaction's RLS tenant and ticket. Migration 1343 adds nullable
 reason/initiator columns and an index for active ticket workers, preserving
 older writers and historical parallel generations. The harness response
-contract is `harness-session/3.1`.
+contract is `harness-session/3.2`.
