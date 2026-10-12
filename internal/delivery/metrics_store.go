@@ -32,6 +32,10 @@ func upsertRunsTx(ctx context.Context, tx pgx.Tx, tid, repository, source string
 		if r.HeadTree != "" {
 			tree = &r.HeadTree
 		}
+		var suite *int64
+		if r.Suite > 0 {
+			suite = &r.Suite
+		}
 		// Job facts are stored with the run that read them; a later upsert of
 		// the same attempt without them keeps what is there.
 		var jobsAt *time.Time
@@ -47,15 +51,16 @@ func upsertRunsTx(ctx context.Context, tx pgx.Tx, tid, repository, source string
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_runs(tenant_id,repository,run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source,recorded_at,head_tree,jobs_read_at,worst_job_wait_ms,required_jobs)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_runs(tenant_id,repository,run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source,recorded_at,head_tree,jobs_read_at,worst_job_wait_ms,required_jobs,check_suite_id)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 			ON CONFLICT(tenant_id,repository,run_id,attempt) DO UPDATE SET workflow_path=EXCLUDED.workflow_path,workflow_name=EXCLUDED.workflow_name,event=EXCLUDED.event,head_branch=EXCLUDED.head_branch,head_sha=EXCLUDED.head_sha,
 			pull_request=coalesce(EXCLUDED.pull_request,delivery_metric_runs.pull_request),created_at=EXCLUDED.created_at,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,conclusion=EXCLUDED.conclusion,
 			head_tree=coalesce(EXCLUDED.head_tree,delivery_metric_runs.head_tree),
+			check_suite_id=coalesce(EXCLUDED.check_suite_id,delivery_metric_runs.check_suite_id),
 			jobs_read_at=coalesce(EXCLUDED.jobs_read_at,delivery_metric_runs.jobs_read_at),
 			worst_job_wait_ms=CASE WHEN EXCLUDED.jobs_read_at IS NOT NULL THEN EXCLUDED.worst_job_wait_ms ELSE delivery_metric_runs.worst_job_wait_ms END,
 			required_jobs=CASE WHEN EXCLUDED.jobs_read_at IS NOT NULL THEN EXCLUDED.required_jobs ELSE delivery_metric_runs.required_jobs END`,
-			tid, repository, r.ID, r.Attempt, r.Workflow, r.Name, r.Event, r.Branch, r.Head, r.PR, r.Created, r.Started, r.Completed, r.Conclusion, source, at, tree, jobsAt, r.WorstWaitMS, required); err != nil {
+			tid, repository, r.ID, r.Attempt, r.Workflow, r.Name, r.Event, r.Branch, r.Head, r.PR, r.Created, r.Started, r.Completed, r.Conclusion, source, at, tree, jobsAt, r.WorstWaitMS, required, suite); err != nil {
 			return err
 		}
 	}
@@ -201,15 +206,11 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 				if suite.ID != e.Suite.ID || suite.Head != e.Suite.Head {
 					return errRead
 				}
-				ci, nightly := defaultCIWorkflow, defaultNightlyWorkflow
-				if len(scope.workflows) > 0 {
-					ci = scope.workflows[0]
+				workflows, _, err := checksWorkflows(get, suite.Head, nil, checksWorkflowLimit+1)
+				if err != nil {
+					return err
 				}
-				if len(scope.nightly) > 0 {
-					nightly = scope.nightly[0]
-				}
-				var err error
-				runs, _, err = suiteCheckRuns(get, suite, ci, nightly, e.Repository.Default, m.now())
+				runs, _, err = suiteCheckRuns(get, suite, workflows.CI, workflows.Nightly, e.Repository.Default, m.now())
 				return err
 			}
 			if source != historyActions {
@@ -359,7 +360,7 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 		in.ReadFrom = later(in.ReadFrom, oldest.UTC().Add(metricSlack))
 	}
 	rows, err := tx.Query(ctx, `SELECT run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source,
-		coalesce(head_tree,''),jobs_read_at IS NOT NULL,worst_job_wait_ms,required_jobs
+		coalesce(head_tree,''),jobs_read_at IS NOT NULL,worst_job_wait_ms,required_jobs,coalesce(check_suite_id,0)
 		FROM delivery_metric_runs WHERE repository=$1 AND completed_at>=$2 ORDER BY completed_at DESC LIMIT $3`, s.Repository, from, metricRunLimit+1)
 	if err != nil {
 		return in, err
@@ -368,7 +369,7 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 		var r metricRun
 		var required []byte
 		if err = rows.Scan(&r.ID, &r.Attempt, &r.Workflow, &r.Name, &r.Event, &r.Branch, &r.Head, &r.PR, &r.Created, &r.Started, &r.Completed, &r.Conclusion, &r.Source,
-			&r.HeadTree, &r.JobsRead, &r.WorstWaitMS, &required); err != nil {
+			&r.HeadTree, &r.JobsRead, &r.WorstWaitMS, &required, &r.Suite); err != nil {
 			rows.Close()
 			return in, err
 		}
@@ -551,7 +552,6 @@ func loadProjectInputTx(ctx context.Context, tx pgx.Tx, project string, in *metr
 // of those projects.
 type jobScope struct {
 	workflows []string
-	nightly   []string
 	Required  []string
 }
 
@@ -568,20 +568,19 @@ func (m *Module) jobScope(ctx context.Context) (jobScope, error) {
 	var scope jobScope
 	service := db.AllProjects(ctx, "delivery metric webhook job scope")
 	err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT project_id::text,ci_workflow,nightly_workflow FROM delivery_metric_sources WHERE repository=$1 ORDER BY project_id`, m.config.Repository)
+		rows, err := tx.Query(ctx, `SELECT project_id::text,ci_workflow FROM delivery_metric_sources WHERE repository=$1 ORDER BY project_id`, m.config.Repository)
 		if err != nil {
 			return err
 		}
 		var projects []string
 		for rows.Next() {
-			var project, workflow, nightly string
-			if err = rows.Scan(&project, &workflow, &nightly); err != nil {
+			var project, workflow string
+			if err = rows.Scan(&project, &workflow); err != nil {
 				rows.Close()
 				return err
 			}
 			projects = append(projects, project)
 			scope.workflows = append(scope.workflows, workflow)
-			scope.nightly = append(scope.nightly, nightly)
 		}
 		rows.Close()
 		if err = rows.Err(); err != nil {

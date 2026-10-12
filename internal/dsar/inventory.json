@@ -486,6 +486,7 @@
       "classification": "metadata",
       "columns": {
         "attempt": "metadata",
+        "check_suite_id": "metadata",
         "completed_at": "metadata",
         "conclusion": "metadata",
         "created_at": "metadata",

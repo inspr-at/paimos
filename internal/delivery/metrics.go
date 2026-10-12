@@ -31,7 +31,10 @@ var metricWindowDays = []int{metricShortDays, metricDays, 90, 180, metricLongDay
 var metricSeriesDays = []int{90, 180, metricLongDays}
 
 type metricRun struct {
-	ID         int64
+	ID int64
+	// Suite is GitHub's verified check_suite_id for an Actions run. Zero
+	// means unknown; a checks observation's suite is also its negative ID.
+	Suite      int64
 	Attempt    int
 	Workflow   string
 	Name       string

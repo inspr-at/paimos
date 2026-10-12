@@ -2,16 +2,20 @@
 package delivery
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"gopkg.in/yaml.v3"
 )
 
 const historyActions = "actions"
@@ -21,13 +25,23 @@ const historyChecks = "checks"
 // are observations, never an assertion about an Actions run's first attempt.
 func checksRun(r metricRun) bool { return r.ID < 0 }
 
-// Exact Actions facts win over a suite-derived sample for the same head and
-// workflow. This also makes permission changes idempotent without deleting facts.
+// Exact Actions facts replace only their verified corresponding suite. A
+// workflow may run on one SHA on many different nights; those stay distinct.
 func preferredMetricRuns(runs []metricRun) []metricRun {
-	exact := map[string]bool{}
-	key := func(r metricRun) string { return r.Head + "/" + path.Base(r.Workflow) }
+	type identity struct {
+		suite          int64
+		head, workflow string
+	}
+	exact := map[identity]bool{}
+	key := func(r metricRun) identity {
+		suite := r.Suite
+		if checksRun(r) {
+			suite = -r.ID
+		}
+		return identity{suite, r.Head, path.Base(r.Workflow)}
+	}
 	for _, r := range runs {
-		if !checksRun(r) {
+		if !checksRun(r) && r.Suite > 0 {
 			exact[key(r)] = true
 		}
 	}
@@ -126,12 +140,163 @@ type metricCheckSuite struct {
 }
 
 type checksCursor struct {
-	Stage   string             `json:"stage"`
-	Page    int                `json:"page"`
-	Anchor  string             `json:"anchor,omitempty"`
-	Until   time.Time          `json:"until"`
-	Targets []checksTarget     `json:"targets,omitempty"`
-	Suites  []metricCheckSuite `json:"suites,omitempty"`
+	Stage     string               `json:"stage"`
+	Page      int                  `json:"page"`
+	Anchor    string               `json:"anchor,omitempty"`
+	Until     time.Time            `json:"until"`
+	Targets   []checksTarget       `json:"targets,omitempty"`
+	Suites    []metricCheckSuite   `json:"suites,omitempty"`
+	Workflows *checksWorkflowPaths `json:"workflows,omitempty"`
+}
+
+type checksWorkflowPaths struct {
+	Head        string `json:"head"`
+	Tree        string `json:"tree,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	CI          string `json:"ci,omitempty"`
+	Nightly     string `json:"nightly,omitempty"`
+}
+
+func (w checksWorkflowPaths) matches(s metricCheckSuite) bool {
+	return w.Head == s.Head || reviewgate.ValidSHA(w.Tree) && w.Tree == s.HeadCommit.Tree
+}
+
+const (
+	checksWorkflowLimit     = 20
+	checksWorkflowByteLimit = 128 * 1024
+)
+
+// checksWorkflows resolves shared repository identities at a pinned commit,
+// independently of any project's display/filter settings. Known aggregate job
+// names are still an inference; multiple matching files withhold that mapping.
+// Oversized/unsupported snapshots withhold both paths rather than guessing.
+func checksWorkflows(get func(string, any) error, head string, previous *checksWorkflowPaths, readBudget int) (checksWorkflowPaths, bool, error) {
+	out := checksWorkflowPaths{Head: head}
+	if !reviewgate.ValidSHA(head) {
+		return out, false, errRead
+	}
+	if readBudget < 1 {
+		return out, true, nil
+	}
+	var files []struct {
+		Path string `json:"path"`
+		Type string `json:"type"`
+		SHA  string `json:"sha"`
+	}
+	if err := get("/contents/.github/workflows?ref="+head, &files); err != nil {
+		if errors.Is(err, crossreview.ErrNotFound) {
+			return out, false, nil
+		}
+		return out, false, err
+	}
+	if len(files) > checksWorkflowLimit {
+		return out, false, nil
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	seen := map[string]bool{}
+	snapshot := sha256.New()
+	var workflows []string
+	for _, file := range files {
+		if !strings.HasSuffix(file.Path, ".yml") && !strings.HasSuffix(file.Path, ".yaml") {
+			continue
+		}
+		if file.Type != "file" || !metricWorkflow.MatchString(file.Path) || !reviewgate.ValidSHA(file.SHA) || seen[file.Path] {
+			return out, false, nil
+		}
+		seen[file.Path] = true
+		fmt.Fprintf(snapshot, "%s\x00%s\n", file.Path, file.SHA)
+		workflows = append(workflows, file.Path)
+	}
+	fingerprint := fmt.Sprintf("%x", snapshot.Sum(nil))
+	if previous != nil && previous.Fingerprint == fingerprint {
+		out.Fingerprint, out.CI, out.Nightly = fingerprint, previous.CI, previous.Nightly
+		return out, false, nil
+	}
+	// When the definitions changed, resume before reading any file unless
+	// every bounded file fits. Unchanged blobs only cost the directory read.
+	if len(workflows) > readBudget-1 {
+		return out, true, nil
+	}
+	ci, nightly := []string{}, []string{}
+	for _, workflow := range workflows {
+		var body struct {
+			Path     string `json:"path"`
+			Type     string `json:"type"`
+			Encoding string `json:"encoding"`
+			Size     int    `json:"size"`
+			Content  string `json:"content"`
+		}
+		if err := get("/contents/"+workflow+"?ref="+head, &body); err != nil {
+			return out, false, err
+		}
+		if body.Path != workflow || body.Type != "file" || body.Size < 0 {
+			return out, false, errRead
+		}
+		if body.Size > checksWorkflowByteLimit || len(body.Content) > 2*checksWorkflowByteLimit || body.Encoding != "base64" {
+			return out, false, nil
+		}
+		raw, err := base64.StdEncoding.DecodeString(body.Content)
+		if err != nil || len(raw) != body.Size || len(raw) > checksWorkflowByteLimit {
+			return out, false, errRead
+		}
+		// Inspect nodes without decoding aliases into expanded Go structures.
+		var document yaml.Node
+		if err := yaml.Unmarshal(raw, &document); err != nil {
+			return out, false, errRead
+		}
+		if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+			return out, false, nil
+		}
+		field := func(node *yaml.Node, name string) *yaml.Node {
+			for i := 0; i+1 < len(node.Content); i += 2 {
+				if node.Content[i].Kind == yaml.ScalarNode && node.Content[i].Value == name {
+					return node.Content[i+1]
+				}
+			}
+			return nil
+		}
+		jobs := field(document.Content[0], "jobs")
+		if jobs == nil || jobs.Kind != yaml.MappingNode || len(jobs.Content) > 1000 {
+			return out, false, nil
+		}
+		names := map[string]bool{}
+		for i := 0; i+1 < len(jobs.Content); i += 2 {
+			id, job := jobs.Content[i], jobs.Content[i+1]
+			if id.Kind != yaml.ScalarNode || job.Kind != yaml.MappingNode {
+				return out, false, nil
+			}
+			name := id.Value
+			if explicit := field(job, "name"); explicit != nil {
+				if explicit.Kind != yaml.ScalarNode {
+					return out, false, nil
+				}
+				name = explicit.Value
+			}
+			names[name] = true
+		}
+		known := func(prefix string) bool {
+			for _, name := range defaultRequiredChecks {
+				if !names[prefix+name] {
+					return false
+				}
+			}
+			return true
+		}
+		if known("") {
+			ci = append(ci, workflow)
+		}
+		if known("nightly-") {
+			nightly = append(nightly, workflow)
+		}
+	}
+	if len(ci) == 1 && !(len(nightly) == 1 && ci[0] == nightly[0]) {
+		out.CI = ci[0]
+	}
+	if len(nightly) == 1 && !(len(ci) == 1 && ci[0] == nightly[0]) {
+		out.Nightly = nightly[0]
+	}
+	out.Fingerprint = fingerprint
+	return out, false, nil
 }
 
 type metricCheckRun struct {
@@ -225,6 +390,10 @@ func suiteCheckRuns(get func(string, any) error, suite metricCheckSuite, ci, nig
 		// Unknown or ambiguous job names cannot identify a workflow.
 		return nil, false, nil
 	}
+	if !metricWorkflow.MatchString(workflow) {
+		// Repository definitions did not identify one unambiguous workflow.
+		return nil, false, nil
+	}
 	var started, completed time.Time
 	conclusion := ""
 	for _, check := range checks {
@@ -271,14 +440,14 @@ func suiteCheckRuns(get func(string, any) error, suite metricCheckSuite, ci, nig
 		}
 		event, pr = "pull_request", &suite.Pulls[0].Number
 	}
-	return []metricRun{{ID: -suite.ID, Attempt: 1, Workflow: workflow, Name: name, Event: event, Branch: branch, Head: suite.Head, HeadTree: suite.HeadCommit.Tree,
+	return []metricRun{{ID: -suite.ID, Suite: suite.ID, Attempt: 1, Workflow: workflow, Name: name, Event: event, Branch: branch, Head: suite.Head, HeadTree: suite.HeadCommit.Tree,
 		PR: pr, Created: started, Started: started, Completed: completed, Conclusion: conclusion}}, false, nil
 }
 
 // checksBackfillStep retains the same durable cursor and 40-read limit as the
 // Actions reader. Pending heads/suites are bounded pages, committed with their
 // facts. The default branch is pinned by SHA so new pushes cannot shift pages.
-func checksBackfillStep(get func(string, any) error, repository, ci, nightly string, cursor backfillCursor, now time.Time) (backfillCursor, backfillBatch, error) {
+func checksBackfillStep(get func(string, any) error, repository, _, _ string, cursor backfillCursor, now time.Time) (backfillCursor, backfillBatch, error) {
 	batch := backfillBatch{}
 	if cursor.Checks == nil {
 		cursor.Checks = &checksCursor{Stage: "main", Page: 1, Until: now.UTC()}
@@ -309,6 +478,27 @@ func checksBackfillStep(get func(string, any) error, repository, ci, nightly str
 		}
 		cursor.DefaultBranch = repo.Default
 	}
+	if c.Stage == "main" && c.Anchor == "" {
+		var commit struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Tree struct {
+					SHA string `json:"sha"`
+				} `json:"tree"`
+			} `json:"commit"`
+		}
+		// Scheduled workflows run on the default head even when that commit
+		// predates the history window. Suite timestamps, not commit dates,
+		// decide whether those observations belong in the window.
+		if err := counted("/commits/"+url.PathEscape(cursor.DefaultBranch), &commit); err != nil {
+			return cursor, batch, err
+		}
+		if !reviewgate.ValidSHA(commit.SHA) || !reviewgate.ValidSHA(commit.Commit.Tree.SHA) {
+			return cursor, batch, errRead
+		}
+		c.Anchor = commit.SHA
+		c.Targets = append(c.Targets, checksTarget{Head: commit.SHA, Tree: commit.Commit.Tree.SHA})
+	}
 	for batch.Calls < backfillCallBudget {
 		if len(c.Suites) > 0 {
 			// A suite may use five pages; never exceed the step budget.
@@ -316,6 +506,26 @@ func checksBackfillStep(get func(string, any) error, repository, ci, nightly str
 				return cursor, batch, nil
 			}
 			suite := c.Suites[0]
+			if suite.Status == "completed" && (c.Workflows == nil || !c.Workflows.matches(suite)) {
+				// Reserve the directory and check pages first. A changed file
+				// snapshot resumes if all its files cannot fit in this step.
+				if batch.Calls > backfillCallBudget-1-jobPageLimit {
+					return cursor, batch, nil
+				}
+				workflows, pending, err := checksWorkflows(counted, suite.Head, c.Workflows, backfillCallBudget-batch.Calls-jobPageLimit)
+				if err != nil {
+					return cursor, batch, err
+				}
+				if pending {
+					return cursor, batch, nil
+				}
+				workflows.Tree = suite.HeadCommit.Tree
+				c.Workflows = &workflows
+			}
+			ci, nightly := "", ""
+			if c.Workflows != nil && c.Workflows.matches(suite) {
+				ci, nightly = c.Workflows.CI, c.Workflows.Nightly
+			}
 			runs, _, err := suiteCheckRuns(counted, suite, ci, nightly, cursor.DefaultBranch, now)
 			if err != nil {
 				return cursor, batch, err
@@ -385,10 +595,10 @@ func checksBackfillStep(get func(string, any) error, repository, ci, nightly str
 				if !reviewgate.ValidSHA(commit.SHA) || !reviewgate.ValidSHA(commit.Commit.Tree.SHA) {
 					return cursor, batch, errRead
 				}
+				if commit.SHA == c.Anchor {
+					continue
+				}
 				c.Targets = append(c.Targets, checksTarget{Head: commit.SHA, Tree: commit.Commit.Tree.SHA})
-			}
-			if c.Anchor == "" && len(commits) > 0 {
-				c.Anchor = commits[0].SHA
 			}
 			if len(commits) < 100 || c.Page == backfillPullPageCap {
 				c.Stage, c.Page = "queues", 1
