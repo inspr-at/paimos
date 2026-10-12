@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/hooknote"
 	"github.com/inspr-at/paimos/internal/inbox"
 )
@@ -106,7 +107,12 @@ func (rt *runtime) cmdHook() *Command {
 			select {
 			case err := <-done:
 				if err != nil {
-					fmt.Fprintln(rt.stderr, "aeon hook: inbox handoff incomplete; continuing")
+					var refusal *hookbinding.Refusal
+					if errors.As(err, &refusal) {
+						fmt.Fprintln(rt.stderr, "aeon hook: "+refusal.Error()+"; continuing")
+					} else {
+						fmt.Fprintln(rt.stderr, "aeon hook: inbox handoff incomplete; continuing")
+					}
 				}
 			case <-ctx.Done():
 				fmt.Fprintln(rt.stderr, "aeon hook: time budget exhausted; continuing")
@@ -142,6 +148,10 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	if session == "" {
 		return nil
 	}
+	pairedAllowed, err := rt.selectIndexedHook(ctx, input.Session, session)
+	if err != nil {
+		return err
+	}
 	if event == "PostToolUse" {
 		writeHookActivity(input.Session, session, agentactivity.FromInput(input.ToolName, input.ToolInput))
 	}
@@ -151,6 +161,7 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	var frame strings.Builder
 	var delivered []inbox.Message
 	local, localAvailable := pairedHookClient()
+	localAvailable = localAvailable && pairedAllowed
 	var attachedDeliveries []agentd.HarnessDelivery
 	if localAvailable {
 		attachedDeliveries, err = local.PullAttachedHook(ctx, session)

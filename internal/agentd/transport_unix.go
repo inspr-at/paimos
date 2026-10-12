@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/hooknote"
 )
 
@@ -237,8 +239,29 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 				_ = json.NewEncoder(w).Encode(out)
 				return
 			}
-			if s.bindAttachedHook(ctx, peer, in) != nil {
-				http.Error(w, "attached hook binding refused", 409)
+			if err := s.bindAttachedHook(ctx, peer, in); err != nil {
+				code := "daemon_refused"
+				var refusal *hookbinding.Refusal
+				var status *client.StatusError
+				switch {
+				case errors.As(err, &refusal):
+					code = refusal.Code
+				case errors.Is(err, ErrNotOwned):
+					code = "process_unverified"
+				case errors.Is(err, ErrGeneration):
+					code = "generation_mismatch"
+				case errors.As(err, &status):
+					if status.Status == 403 && status.Message == "harness worker proof rejected" {
+						code = "worker_proof_rejected"
+					}
+					if status.Status == 403 && status.Message == "active paired hook daemon required" {
+						code = "pairing_unavailable"
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(hookbinding.Refusal{Code: code})
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

@@ -877,6 +877,7 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        inbox_binding_error: {$ref: '#/components/schemas/InboxBindingError'}
         desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
         service_tier: {$ref: '#/components/schemas/ServiceTier'}
         service_tier_revision: {type: integer, minimum: 0}

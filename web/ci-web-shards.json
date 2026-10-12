@@ -1064,7 +1064,7 @@
         ,
         {"file":"tests/session-chat-cli.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/session-chat.spec.ts","listedTests":43,"tierTiming":{"caseSeconds":{"max":4.661,"median":2.728,"min":1.828},"seconds":109.865,"selectedTests":38},"weightSeconds":95.439023,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/session-chat.spec.ts","listedTests":55,"tierTiming":{"caseSeconds":{"max":4.661,"median":2.728,"min":1.828},"seconds":109.865,"selectedTests":38},"weightSeconds":95.439023,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/session-ended.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
