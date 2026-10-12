@@ -831,17 +831,17 @@ components:
         error: {type: string, description: 'Build in flight, or already built — ship it, with the blocking session or delivery identified.'}
         code: {type: string, const: build_in_flight}
         reason: {type: string, enum: [active_builder, built_unmerged]}
-        session_id: {type: [string, 'null'], format: uuid, description: 'The other active worker generation; null for delivery evidence without an active worker.'}
-        label: {type: [string, 'null'], description: 'Public session label or harness name; null for delivery evidence.'}
+        session_id: {type: [string, 'null'], format: uuid, description: 'The other active worker generation; null for delivery evidence or a blocker outside visible projects.'}
+        label: {type: [string, 'null'], description: 'Public session label or harness name; null for delivery evidence or an invisible blocker.'}
         started_by:
           type: [object, 'null']
-          description: 'The initiating principal; legacy sessions fall back to their owner or agent. Null for delivery evidence.'
+          description: 'The initiating principal; legacy sessions fall back to their owner or agent. Null for delivery evidence or an unavailable/invisible initiator.'
           required: [id, name, kind]
           properties:
             id: {type: string, format: uuid}
             name: {type: string}
             kind: {type: string, enum: [person, agent]}
-        since: {type: string, format: date-time}
+        since: {type: [string, 'null'], format: date-time, description: 'Start of the visible session or delivery episode; null for an invisible blocker.'}
         delivery:
           type: object
           required: [repository, pull_request, branch]

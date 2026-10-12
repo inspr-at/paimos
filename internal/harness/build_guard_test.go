@@ -2,6 +2,7 @@
 package harness_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -10,8 +11,11 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -120,11 +124,49 @@ func TestTicketBuilderAdmissionRaceBindingRevivalAndQueue(t *testing.T) {
 	replacementID := decode(t, replacement)["id"].(string)
 	buildRefusal(t, f.call(f.agent, "POST", base+"/"+id+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, firstBody["worker_lease"].(string)), "active_builder")
 	expect(t, f.call(f.agent, "POST", base+"/"+replacementID+"/stop", map[string]any{"reason": "process_exited"}, secondBody["worker_lease"].(string)), 200)
-	expect(t, f.call(f.agent, "POST", base, buildRegistration(f, "after stop"), ""), 201)
+	afterStop := f.call(f.agent, "POST", base, buildRegistration(f, "after stop"), "")
+	expect(t, afterStop, 201)
 	foreign := f.call(f.foreign, "POST", base, buildRegistration(f, "foreign"), "")
 	expect(t, foreign, 404)
 	if strings.Contains(foreign.Body.String(), id) || strings.Contains(foreign.Body.String(), "first builder") {
 		t.Fatal("another tenant learned the blocking session")
+	}
+	// An unavailable legacy initiator must never make its session disappear.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET started_by_principal_id=$2 WHERE id=$1`, decode(t, afterStop)["id"], uid())
+		return err
+	})
+	missingActor := buildRefusal(t, f.call(f.agent, "POST", base, buildRegistration(f, "missing actor"), ""), "active_builder")
+	if missingActor["started_by"] != nil || missingActor["session_id"] != decode(t, afterStop)["id"] {
+		t.Fatal("missing actor metadata bypassed exclusion or invented an initiator")
+	}
+	// Project-only RLS cannot hide a blocker after the ticket changes projects.
+	destination := uid()
+	f.addNode(t, destination, "GUARD-3", "project", "", "Destination project")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, destination)
+		return err
+	})
+	limited := db.OnlyProjects(tenant.WithPrincipal(t.Context(), f.person), destination)
+	if err := db.InTenant(limited, f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+		err := workqueue.RequireBuildAdmissionTx(limited, tx, f.person, f.ticket, "", nil)
+		var conflict *workqueue.BuildConflict
+		if !errors.As(err, &conflict) || conflict.Reason != "active_builder" {
+			t.Fatalf("hidden old-project builder did not block admission: %v", err)
+		}
+		if conflict.SessionID != nil || conflict.Label != nil || conflict.StartedBy != nil || conflict.Since != nil {
+			t.Fatal("hidden blocker metadata escaped internal existence probe")
+		}
+		var visible int
+		if err := tx.QueryRow(limited, `SELECT count(*) FROM harness_sessions WHERE project_id=$1`, f.project).Scan(&visible); err != nil {
+			return err
+		}
+		if visible != 0 {
+			t.Fatal("internal probe left caller project visibility widened")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -137,6 +179,7 @@ func TestTicketParallelBuildRequiresCurrentAuthorityAndAudit(t *testing.T) {
 	parallel := buildRegistration(f, "independent researcher")
 	parallel["parallel_reason"] = "  Independent research for comparison  "
 	parallel["work_shape"] = "scout"
+	parallel["advertised_capabilities"] = []string{"pause"}
 	expect(t, f.call(f.agent, "POST", base, parallel, ""), 403)
 	coordinator := buildRegistration(f, "declared coordinator")
 	coordinator["role"] = "coordinator"
@@ -191,6 +234,19 @@ func TestTicketParallelBuildRequiresCurrentAuthorityAndAudit(t *testing.T) {
 		}
 		return err
 	})
+	// Resuming deliberately parallel work retains the recorded reason and
+	// repeats current authority. The other workers remain active throughout.
+	path := base + "/" + personSession["id"].(string)
+	paused := f.call(f.person, "POST", path+"/pause", map[string]any{}, "")
+	expect(t, paused, 200)
+	finishPaused(t, f, path, parallel["worker_lease"].(string), decode(t, paused)["pause"].(map[string]any)["control_id"].(string))
+	proof := map[string]any{"harness_session_ref": "parallel-resume-ref-" + uid(), "worker_lease": "parallel-resume-lease-" + uid()}
+	resumed := f.call(f.person, "POST", path+"/resume", map[string]any{"registration": proof}, "")
+	expect(t, resumed, 200)
+	successor := decode(t, resumed)["successor"].(map[string]any)
+	if successor["parallel_reason"] != personSession["parallel_reason"] || successor["id"] == personSession["id"] {
+		t.Fatal("parallel continuation lost its audited reason or reused the stopped generation")
+	}
 }
 
 // Risks: rebuilding already-built work, mismatching 2 with 20, cross-repository

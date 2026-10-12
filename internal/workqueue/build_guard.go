@@ -23,7 +23,7 @@ type BuildConflict struct {
 	SessionID *string        `json:"session_id"`
 	Label     *string        `json:"label"`
 	StartedBy *BuildStarter  `json:"started_by"`
-	Since     time.Time      `json:"since"`
+	Since     *time.Time     `json:"since"`
 	Delivery  *BuildDelivery `json:"delivery,omitempty"`
 }
 
@@ -43,7 +43,14 @@ func (e *BuildConflict) Error() string {
 	if e.Delivery != nil {
 		return "already built — ship it: unmerged delivery in " + e.Delivery.Repository
 	}
-	return fmt.Sprintf("build in flight: %s, started by %s since %s (session %s)", *e.Label, e.StartedBy.Name, e.Since.UTC().Format(time.RFC3339), *e.SessionID)
+	if e.SessionID == nil {
+		return "build in flight: another builder is active outside the visible project"
+	}
+	starter := "an unavailable principal"
+	if e.StartedBy != nil {
+		starter = e.StartedBy.Name
+	}
+	return fmt.Sprintf("build in flight: %s, started by %s since %s (session %s)", *e.Label, starter, e.Since.UTC().Format(time.RFC3339), *e.SessionID)
 }
 func (e *BuildConflict) HTTPStatus() int   { return 409 }
 func (e *BuildConflict) ErrorCode() string { return "build_in_flight" }
@@ -96,18 +103,32 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		}
 		return authz.RequireQueueCoordinatorTx(ctx, tx, p, projectID)
 	}
-	var conflict BuildConflict
-	var starter BuildStarter
-	err := tx.QueryRow(ctx, `SELECT s.id::text,coalesce(s.display_label,s.harness),p.id::text,p.name,p.kind,s.created_at
-	 FROM harness_sessions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=coalesce(s.started_by_principal_id,s.owner_principal_id,s.agent_principal_id)
-	 WHERE s.ticket_node_id=$1 AND s.role='worker' AND s.stopped_at IS NULL AND s.id::text<>$2
-	 ORDER BY s.created_at,s.id LIMIT 1`, ticket, except).Scan(&conflict.SessionID, &conflict.Label, &starter.ID, &starter.Name, &starter.Kind, &conflict.Since)
-	if err == nil {
-		conflict.Reason, conflict.StartedBy = "active_builder", &starter
-		return &conflict
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	// A moved ticket can retain a session in its old, now invisible project.
+	// Probe existence with the established bounded internal visibility helper;
+	// tenant RLS remains enforced and no hidden identity or time escapes.
+	var active bool
+	err := withFullOrder(ctx, tx, func(step pgx.Tx) error {
+		return step.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions
+		 WHERE ticket_node_id=$1 AND role='worker' AND stopped_at IS NULL AND id::text<>$2)`, ticket, except).Scan(&active)
+	})
+	if err != nil {
 		return err
+	}
+	var conflict BuildConflict
+	if active {
+		conflict.Reason = "active_builder"
+		var starterID, starterName, starterKind *string
+		err = tx.QueryRow(ctx, `SELECT s.id::text,coalesce(s.display_label,s.harness),p.id::text,p.name,p.kind,s.created_at
+		 FROM harness_sessions s LEFT JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=coalesce(s.started_by_principal_id,s.owner_principal_id,s.agent_principal_id)
+		 WHERE s.ticket_node_id=$1 AND s.role='worker' AND s.stopped_at IS NULL AND s.id::text<>$2
+		 ORDER BY s.created_at,s.id LIMIT 1`, ticket, except).Scan(&conflict.SessionID, &conflict.Label, &starterID, &starterName, &starterKind, &conflict.Since)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if starterID != nil {
+			conflict.StartedBy = &BuildStarter{ID: *starterID, Name: *starterName, Kind: *starterKind}
+		}
+		return &conflict
 	}
 	// Only the project's linked repository participates. The delivery projection
 	// links PRs by ticket; repository PR facts can precede that projection and

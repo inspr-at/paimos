@@ -474,6 +474,9 @@ func resumeRecipe(s Session) resumeResult {
 	if s.Command != nil {
 		out.Registration["command"] = *s.Command
 	}
+	if s.ParallelReason != nil {
+		out.Registration["parallel_reason"] = *s.ParallelReason
+	}
 	return out
 }
 
@@ -803,6 +806,7 @@ func inheritPauseRegistration(ctx context.Context, tx pgx.Tx, projectID string, 
 		{&in.Model, old.Model}, {&in.ReasoningEffort, old.ReasoningEffort}, {&in.Worktree, old.Worktree}, {&in.Branch, old.Branch},
 		{&in.AccountLabel, old.AccountLabel}, {&in.DisplayLabel, old.DisplayLabel}, {&in.HarnessVersion, old.HarnessVersion},
 		{&in.ParentID, old.ParentID}, {&in.TicketNodeID, old.TicketNodeID},
+		{&in.ParallelReason, old.ParallelReason},
 	} {
 		if *pair.dst == nil {
 			*pair.dst = pair.src

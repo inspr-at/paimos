@@ -6,6 +6,9 @@ transactional store guard as queue creation and pickup. Exact registration
 replay remains idempotent. A second worker receives HTTP 409 with
 `code: build_in_flight`, the blocking session ID and public label, who started
 it, and when. Coordinator generations do not occupy a worker slot.
+An earlier builder remains a blocker after its ticket moves projects. A caller
+who cannot see that session receives the refusal with its identifying metadata
+withheld; tenant isolation and caller visibility remain intact.
 
 When the project has a repository linked through Delivery settings, an open
 linked pull request or a projected `work/<slug>` branch with unmerged commits
@@ -23,6 +26,9 @@ insufficient. The reason is stored with the generation and recorded both as
 a ticket audit event and a visible ticket comment. Replaying registration
 does not duplicate either event. A changed ticket binding needs its own
 authorization and reason; a previous ticket's reason is not carried over.
+Paused parallel workers retain their same-ticket reason in the continuation
+recipe. Starting the successor repeats current person or coordinator authority
+and records the new generation on the ticket.
 
 The CLI accepts `--parallel-reason` on `harness register`, `run-heartbeat`
 and `run`. The server validates current authority using the initiating key
