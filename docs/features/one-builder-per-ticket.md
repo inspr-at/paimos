@@ -2,13 +2,20 @@
 
 A worker generation bound to a ticket occupies its build slot until it is
 stopped. Registration, ticket rebinding and lost-contact revival use the same
-transactional store guard as queue creation and pickup. Exact registration
-replay remains idempotent. A second worker receives HTTP 409 with
+transactional store guard as queue creation, pickup and attach/watch activation.
+Exact registration replay remains idempotent. A second worker receives HTTP 409 with
 `code: build_in_flight`, the blocking session ID and public label, who started
 it, and when. Coordinator generations do not occupy a worker slot.
 An earlier builder remains a blocker after its ticket moves projects. A caller
 who cannot see that session receives the refusal with its identifying metadata
 withheld; tenant isolation and caller visibility remain intact.
+Managed workers' ticket, work-order and run bindings resolve to the originating
+ticket for the admission lock, active-worker and delivery checks, and parallel
+audit. The session keeps its original binding fields. Conflicting bindings are
+refused. Work orders without an originating ticket retain their own build slot.
+Attach consent authorizes observation of the process; it does not authorize
+parallel work. A refused activation creates no session or lease and retains
+the approval for a retry while it is still valid.
 
 When the project has a repository linked through Delivery settings, an open
 linked pull request or a projected `work/<slug>` branch with unmerged commits

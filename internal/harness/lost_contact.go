@@ -107,9 +107,15 @@ func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase
 	if taken {
 		return s, workorders.Fail(403, "harness worker proof rejected")
 	}
-	if s.Role == "worker" && s.TicketNodeID != nil {
-		if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, *s.TicketNodeID, s.ID, nil); err != nil {
+	if s.Role == "worker" {
+		buildTicket, err := workqueue.BuildTicketTx(ctx, tx, s.TicketNodeID, s.WorkOrderID, s.RunID)
+		if err != nil {
 			return s, err
+		}
+		if buildTicket != nil {
+			if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, *buildTicket, s.ID, nil); err != nil {
+				return s, err
+			}
 		}
 	}
 	before := s

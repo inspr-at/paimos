@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -474,6 +475,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			if in.Text != "" {
 				rejected = fail(400, "invalid_request", "activation contains no transcript")
 				return attachEnd(ctx, tx, &out, "detached")
+			}
+			// Owner consent permits observing this process, not a parallel build.
+			// The tenant/tree/pairing fences and current attachScope check above
+			// remain in force through admission, session creation and lease commit.
+			if err = workqueue.RequireBuildAdmissionTx(ctx, tx, p, out.Snapshot.TicketID, "", nil); err != nil {
+				return err
 			}
 			secret, err := randomHex(32)
 			if err != nil {

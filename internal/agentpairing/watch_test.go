@@ -95,6 +95,19 @@ func watchFixtureFromFixture(t *testing.T, f *fixture, publicKey, harness string
 	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{MessageProtocol: attachedmsg.Protocol, AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
 	return f, key, in
 }
+
+func siblingWatchTicket(t *testing.T, f *fixture, project string) string {
+	t.Helper()
+	id := uuid(t, f.db)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id)
+		 SELECT $1,$2,id,aeon_next_node_key($1,short_prefix),'Independent watch ticket',$3 FROM node_kinds WHERE slug='work'`, f.tenantID, id, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
 func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceRequest) attachwatch.View {
 	t.Helper()
 	var v attachwatch.View
@@ -119,6 +132,51 @@ func activateWatch(t *testing.T, f *fixture, key string, in *attachwatch.DeviceR
 		t.Fatal("watch failed to activate")
 	}
 	return v
+}
+
+// Risk: person-approved attach activation creates a second worker outside the
+// shared store admission policy. Approval alone must not authorize parallelism.
+func TestAttachActivationRefusesOccupiedTicket(t *testing.T) {
+	f, key, in := watchFixture(t)
+	v := requestWatch(t, f, key, in)
+	in.ConsentDigest = v.ConsentDigest
+	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+	var agent string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT principal_id::text FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/projects/" + in.Snapshot.ProjectID + "/harness-sessions"
+	registration := map[string]any{"agent_principal_id": agent, "harness": "codex", "host": "Test workstation", "management_mode": "unmanaged", "role": "worker", "ticket_node_id": in.Snapshot.TicketID, "work_shape": "ship", "display_label": "direct builder", "harness_session_ref": nonce(), "worker_lease": nonce()}
+	var first map[string]any
+	decodeResult(t, f.call("POST", base, registration, true, "", 201), &first)
+	in.Operation, in.Sequence = "poll", 1
+	var refusal map[string]any
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), &refusal)
+	if refusal["code"] != "build_in_flight" || refusal["reason"] != "active_builder" || refusal["session_id"] != first["id"] || refusal["label"] != "direct builder" || refusal["since"] == nil {
+		t.Fatalf("attach lost the shared builder refusal: %+v", refusal)
+	}
+	var state string
+	var session *string
+	var active int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state,session_id::text,(SELECT count(*) FROM harness_sessions WHERE ticket_node_id=$2 AND stopped_at IS NULL AND role='worker') FROM harness_attach_requests WHERE id=$1`, in.RequestID, in.Snapshot.TicketID).Scan(&state, &session, &active); err != nil {
+		t.Fatal(err)
+	}
+	if state != "approved" || session != nil || active != 1 {
+		t.Fatalf("refused attach mutated approval or created a worker: state=%s session=%v active=%d", state, session, active)
+	}
+	f.call("POST", base+"/"+first["id"].(string)+"/stop", map[string]string{"reason": "process_exited"}, true, "", 200)
+	// Person stopping a process needs no worker bearer or lease proof.
+	// Retry the still-valid approval only after the occupying generation ended.
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &v)
+	if v.State != "active" || v.SessionID == nil || *v.SessionID == first["id"] {
+		t.Fatal("freed ticket did not admit the approved attach")
+	}
+	var directRefusal map[string]any
+	registration["harness_session_ref"], registration["worker_lease"] = nonce(), nonce()
+	decodeResult(t, f.call("POST", base, registration, true, "", 409), &directRefusal)
+	if directRefusal["code"] != "build_in_flight" || directRefusal["session_id"] != *v.SessionID {
+		t.Fatal("attached worker did not occupy the shared admission slot")
+	}
 }
 func TestAttachApprovalIdentityAndLease(t *testing.T) {
 	f, key, in := watchFixture(t)
@@ -224,6 +282,8 @@ func TestAttachLiveStreamRevokesAndNeverStoresText(t *testing.T) {
 	second.ConsentDigest = ""
 	second.RequestID = uuid(t, f.db)
 	second.Snapshot.Process.PID++
+	// The privacy claim is two sessions on one principal, each on its own ticket.
+	second.Snapshot.TicketID = siblingWatchTicket(t, f, in.Snapshot.ProjectID)
 	secondView := activateWatch(t, f, key, &second)
 	if *secondView.SessionID == *v.SessionID {
 		t.Fatal("two sessions on a principal collided")

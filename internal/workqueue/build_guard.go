@@ -78,6 +78,58 @@ func NormalizeParallelReason(reason *string) error {
 	return nil
 }
 
+const buildTicketIDSQL = `coalesce(b.queue_ticket,
+ CASE WHEN nk.slug='work_order' AND pk.slug IN ('work','ticket','task') THEN n.parent_id END,n.id)`
+
+const buildTicketJoinsSQL = ` JOIN nodes n ON n.id=b.node_id AND n.deleted_at IS NULL
+ JOIN node_kinds nk ON nk.tenant_id=n.tenant_id AND nk.id=n.kind_id
+ LEFT JOIN nodes parent ON parent.tenant_id=n.tenant_id AND parent.id=n.parent_id
+ LEFT JOIN node_kinds pk ON pk.tenant_id=parent.tenant_id AND pk.id=parent.kind_id `
+
+// BuildTicketTx resolves the at-most-three public bindings under caller RLS.
+// Work-order children and their runs occupy the originating ticket's slot;
+// standalone orders keep their own slot. Conflicting bindings fail closed.
+// Callers hold the tenant/tree fences, so bindings cannot change before write.
+func BuildTicketTx(ctx context.Context, tx pgx.Tx, ticket, order, run *string) (*string, error) {
+	expected := 0
+	for _, id := range []*string{ticket, order, run} {
+		if id != nil {
+			expected++
+		}
+	}
+	if expected == 0 {
+		return nil, nil
+	}
+	var target *string
+	var found, distinct int
+	err := tx.QueryRow(ctx, `WITH bindings AS (
+	 SELECT $1::uuid AS node_id,NULL::uuid AS queue_ticket WHERE $1::uuid IS NOT NULL
+	 UNION ALL SELECT node_id,NULL::uuid FROM work_orders WHERE node_id=$2
+	 UNION ALL SELECT work_order_id,queue_node_id FROM agent_runs WHERE id=$3
+	) SELECT min(`+buildTicketIDSQL+`::text),count(*),count(DISTINCT `+buildTicketIDSQL+`)
+	 FROM bindings b `+buildTicketJoinsSQL, ticket, order, run).Scan(&target, &found, &distinct)
+	if err != nil {
+		return nil, err
+	}
+	if found != expected {
+		return nil, pgx.ErrNoRows
+	}
+	if distinct != 1 {
+		return nil, workorders.Fail(409, "ticket, work order and run binding conflict")
+	}
+	return target, nil
+}
+
+// The same resolution serves the existence probe and public metadata query.
+// Also retain a legacy row's explicit ticket as a blocker if its bindings differ.
+const activeBuildersSQL = `WITH builders AS (
+ SELECT s.*,` + buildTicketIDSQL + ` AS build_ticket FROM harness_sessions s
+ LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
+ CROSS JOIN LATERAL (SELECT coalesce(r.work_order_id,s.work_order_id,s.ticket_node_id) AS node_id,r.queue_node_id AS queue_ticket) b
+ ` + buildTicketJoinsSQL + `
+ WHERE s.role='worker' AND s.stopped_at IS NULL AND s.id::text<>$2
+) `
+
 // RequireBuildAdmissionTx is the single builder/queue admission predicate.
 // Callers hold tenant -> tree fences, authorize the current target inside the
 // final mutation transaction, and append events last. The ticket advisory lock
@@ -90,6 +142,11 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	if err := NormalizeParallelReason(parallelReason); err != nil {
 		return err
 	}
+	target, err := BuildTicketTx(ctx, tx, &ticket, nil, nil)
+	if err != nil {
+		return err
+	}
+	ticket = *target
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-builder:'||current_setting('aeon.tenant_id')||':'||$1::uuid::text,0))`, ticket); err != nil {
 		return err
 	}
@@ -107,9 +164,9 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	// Probe existence with the established bounded internal visibility helper;
 	// tenant RLS remains enforced and no hidden identity or time escapes.
 	var active bool
-	err := withFullOrder(ctx, tx, func(step pgx.Tx) error {
-		return step.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions
-		 WHERE ticket_node_id=$1 AND role='worker' AND stopped_at IS NULL AND id::text<>$2)`, ticket, except).Scan(&active)
+	err = withFullOrder(ctx, tx, func(step pgx.Tx) error {
+		return step.QueryRow(ctx, activeBuildersSQL+`SELECT EXISTS(SELECT 1 FROM builders
+		 WHERE ticket_node_id=$1 OR build_ticket=$1)`, ticket, except).Scan(&active)
 	})
 	if err != nil {
 		return err
@@ -118,9 +175,9 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	if active {
 		conflict.Reason = "active_builder"
 		var starterID, starterName, starterKind *string
-		err = tx.QueryRow(ctx, `SELECT s.id::text,coalesce(s.display_label,s.harness),p.id::text,p.name,p.kind,s.created_at
-		 FROM harness_sessions s LEFT JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=coalesce(s.started_by_principal_id,s.owner_principal_id,s.agent_principal_id)
-		 WHERE s.ticket_node_id=$1 AND s.role='worker' AND s.stopped_at IS NULL AND s.id::text<>$2
+		err = tx.QueryRow(ctx, activeBuildersSQL+`SELECT s.id::text,coalesce(s.display_label,s.harness),p.id::text,p.name,p.kind,s.created_at
+		 FROM builders s LEFT JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=coalesce(s.started_by_principal_id,s.owner_principal_id,s.agent_principal_id)
+		 WHERE s.ticket_node_id=$1 OR s.build_ticket=$1
 		 ORDER BY s.created_at,s.id LIMIT 1`, ticket, except).Scan(&conflict.SessionID, &conflict.Label, &starterID, &starterName, &starterKind, &conflict.Since)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err

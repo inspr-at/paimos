@@ -46,6 +46,143 @@ func buildRefusal(t *testing.T, w *httptest.ResponseRecorder, reason string) map
 	return body
 }
 
+func managedBuildRegistration(t *testing.T, f *harnessFixture) map[string]any {
+	t.Helper()
+	order, run := uid(), uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id)
+		 SELECT $1,$2,id,'HTS-3','Managed build',$3 FROM node_kinds WHERE slug='work_order'`, f.person.TenantID, order, f.ticket); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'ready')`, f.person.TenantID, order, f.person.ID); err != nil {
+			return err
+		}
+		// A settled run retains its real dispatch binding without making the
+		// queue busy independently of the worker being tested.
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,status,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required) VALUES($1,$2,$3,$4,'completed',$5,$6,clock_timestamp(),false)`, f.person.TenantID, run, order, f.agent.ID, f.ticket, f.person.ID)
+		return err
+	})
+	body := buildRegistration(f, "managed builder")
+	body["management_mode"], body["ticket_node_id"] = "managed", order
+	body["work_order_id"], body["run_id"] = order, run
+	return body
+}
+
+// Risk: the daemon binds to a work order while direct clients and queueing
+// bind to its originating ticket. All supported bindings must share admission.
+func TestManagedTicketBuilderAdmissionSharesBindingsAndQueue(t *testing.T) {
+	for _, binding := range []string{"managed-first", "direct-first", "order-only", "run-only", "race"} {
+		t.Run(binding, func(t *testing.T) {
+			f := fixture(t)
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			queueableBuildTicket(t, f)
+			managed, direct := managedBuildRegistration(t, f), buildRegistration(f, "direct builder")
+			var first *httptest.ResponseRecorder
+			switch binding {
+			case "direct-first":
+				first = f.call(f.person, "POST", base, direct, "")
+				expect(t, first, 201)
+				buildRefusal(t, f.call(f.agent, "POST", base, managed, ""), "active_builder")
+			case "race":
+				pool, barrier, ctx := dbtest.BarrierPool(t, f.db.App, func(sql string) bool { return strings.Contains(sql, "aeon-builder:") })
+				f.mux = http.NewServeMux()
+				harness.New(pool).Mount(f.mux)
+				agentruns.New(f.db.App).Mount(f.mux)
+				firstDone, secondDone := make(chan *httptest.ResponseRecorder, 1), make(chan *httptest.ResponseRecorder, 1)
+				go func() { firstDone <- f.call(f.agent, "POST", base, managed, "") }()
+				holder := barrier.Wait(t, ctx)
+				finished := make(chan struct{})
+				go func() {
+					secondDone <- f.call(f.person, "POST", base, direct, "")
+					close(finished)
+				}()
+				if dbtest.BlockedOrDone(t, ctx, f.db.Admin, holder, finished) == "" {
+					t.Error("direct registration escaped the managed admission transaction")
+				}
+				barrier.Release()
+				first = dbtest.Await(t, ctx, firstDone)
+				expect(t, first, 201)
+				buildRefusal(t, dbtest.Await(t, ctx, secondDone), "active_builder")
+			default:
+				if binding != "managed-first" {
+					delete(managed, "ticket_node_id")
+					delete(managed, "work_shape")
+					if binding == "order-only" {
+						delete(managed, "run_id")
+					}
+				}
+				first = f.call(f.agent, "POST", base, managed, "")
+				expect(t, first, 201)
+				if binding == "run-only" {
+					// Legacy rows may retain only the run reference.
+					f.tx(t, f.person, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET work_order_id=NULL WHERE id=$1`, decode(t, first)["id"])
+						return err
+					})
+				}
+				buildRefusal(t, f.call(f.person, "POST", base, direct, ""), "active_builder")
+			}
+			refusal := buildRefusal(t, f.call(f.person, "POST", "/api/queue", map[string]any{"node_id": f.ticket}, ""), "active_builder")
+			if refusal["session_id"] != decode(t, first)["id"] {
+				t.Fatal("queue did not identify the actual blocking generation")
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var active, runs int
+				err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM harness_sessions WHERE role='worker' AND stopped_at IS NULL), (SELECT count(*) FROM agent_runs)`).Scan(&active, &runs)
+				if err == nil && (active != 1 || runs != 1) {
+					t.Errorf("refused admission wrote extra work: active=%d runs=%d", active, runs)
+				}
+				return err
+			})
+		})
+	}
+}
+
+// Risks: managed workers miss delivery facts and audit their exception on the
+// order instead of the originating ticket seen by people and queue clients.
+func TestManagedBuilderDeliveryAndParallelAuditUseOriginTicket(t *testing.T) {
+	for _, scenario := range []string{"delivery", "parallel-audit"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := fixture(t)
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			managed := managedBuildRegistration(t, f)
+			if scenario == "delivery" {
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/managed','CI','Nightly',clock_timestamp())`, f.person.TenantID, f.project); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,'owner/managed',72,'work/hts-2-built',clock_timestamp(),'webhook',clock_timestamp())`, f.person.TenantID)
+					return err
+				})
+				buildRefusal(t, f.call(f.agent, "POST", base, managed, ""), "built_unmerged")
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_pulls SET closed_at=clock_timestamp(),merged_at=clock_timestamp() WHERE repository='owner/managed' AND pull_request=72`)
+					return err
+				})
+				expect(t, f.call(f.agent, "POST", base, managed, ""), 201)
+				return
+			}
+			expect(t, f.call(f.agent, "POST", base, buildRegistration(f, "direct builder"), ""), 201)
+			managed["parallel_reason"] = "Independent managed comparison"
+			expect(t, f.call(f.agent, "POST", base, managed, ""), 403)
+			accepted := f.call(f.person, "POST", base, managed, "")
+			expect(t, accepted, 201)
+			expect(t, f.call(f.person, "POST", base, managed, ""), 201)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var audits, comments, wrongTarget int
+				err := tx.QueryRow(t.Context(), `SELECT
+				 (SELECT count(*) FROM events WHERE node_id=$1 AND type='harness.parallel_build_started' AND actor_principal_id=$2 AND after->>'session_id'=$3 AND after->>'parallel_reason'='Independent managed comparison'),
+				 (SELECT count(*) FROM events WHERE node_id=$1 AND type='comment.created' AND after->>'body_markdown' LIKE 'Parallel work authorized for session %'),
+				 (SELECT count(*) FROM events WHERE node_id=$4 AND type IN ('harness.parallel_build_started','comment.created'))`, f.ticket, f.person.ID, decode(t, accepted)["id"], managed["work_order_id"]).Scan(&audits, &comments, &wrongTarget)
+				if err == nil && (audits != 1 || comments != 1 || wrongTarget != 0) {
+					t.Errorf("managed parallel audit target/replay: audits=%d comments=%d order_events=%d", audits, comments, wrongTarget)
+				}
+				return err
+			})
+		})
+	}
+}
+
 // Risks: duplicate builds under RLS and an alternate binding/revival entry
 // bypassing exclusion. A PostgreSQL barrier establishes overlapping requests;
 // the observed lock wait, rather than scheduler timing, proves the race.

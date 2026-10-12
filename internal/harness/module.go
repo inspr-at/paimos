@@ -1008,16 +1008,22 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
-	if in.Role == "worker" && in.TicketNodeID != nil {
-		admitter := p
-		if in.ParallelReason != nil {
-			admitter, err = workorders.CurrentKeyPrincipal(r, tx, p, "harness.write")
-			if err != nil {
+	if in.Role == "worker" {
+		buildTicket, e := workqueue.BuildTicketTx(ctx, tx, in.TicketNodeID, in.WorkOrderID, in.RunID)
+		if e != nil {
+			return nil, e
+		}
+		if buildTicket != nil {
+			admitter := p
+			if in.ParallelReason != nil {
+				admitter, err = workorders.CurrentKeyPrincipal(r, tx, p, "harness.write")
+				if err != nil {
+					return nil, err
+				}
+			}
+			if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *buildTicket, "", in.ParallelReason); err != nil {
 				return nil, err
 			}
-		}
-		if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *in.TicketNodeID, "", in.ParallelReason); err != nil {
-			return nil, err
 		}
 	}
 	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,owner_principal_id,work_placement,parallel_reason,started_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, owner, placement, in.ParallelReason, p.ID))
@@ -1331,16 +1337,22 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	before := s
 	var placement json.RawMessage
 	if !same(s.TicketNodeID, in.TicketNodeID) {
-		if s.Role == "worker" && in.TicketNodeID != nil {
-			admitter := p
-			if in.ParallelReason != nil {
-				admitter, err = workorders.CurrentKeyPrincipal(r, tx, p, "harness.write")
-				if err != nil {
+		if s.Role == "worker" {
+			buildTicket, e := workqueue.BuildTicketTx(ctx, tx, in.TicketNodeID, s.WorkOrderID, s.RunID)
+			if e != nil {
+				return nil, e
+			}
+			if buildTicket != nil {
+				admitter := p
+				if in.ParallelReason != nil {
+					admitter, err = workorders.CurrentKeyPrincipal(r, tx, p, "harness.write")
+					if err != nil {
+						return nil, err
+					}
+				}
+				if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *buildTicket, s.ID, in.ParallelReason); err != nil {
 					return nil, err
 				}
-			}
-			if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *in.TicketNodeID, s.ID, in.ParallelReason); err != nil {
-				return nil, err
 			}
 		}
 		starter := tenant.Principal{}
