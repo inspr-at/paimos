@@ -168,8 +168,18 @@ func TestAttachActivationRefusesOccupiedTicket(t *testing.T) {
 	stop.Header.Set("X-Aeon-Worker-Lease", registration["worker_lease"].(string))
 	stopped := httptest.NewRecorder()
 	f.h.ServeHTTP(stopped, stop)
-	if stopped.Code != http.StatusOK {
-		t.Fatalf("lease-authorized stop: status=%d body=%s", stopped.Code, stopped.Body)
+	var denied map[string]any
+	decodeResult(t, stopped, &denied)
+	if stopped.Code != http.StatusForbidden || denied["code"] != "forbidden" || denied["error"] != "outside this computer's runtime authority" {
+		t.Fatalf("paired bearer gained control of a direct registration: status=%d body=%s", stopped.Code, stopped.Body)
+	}
+	// Establish the direct process's confirmed exit in the fixture without
+	// expanding the paired runtime's authority to control another registration.
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='process_exited' WHERE id=$1`, first["id"])
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 	// Retry the still-valid approval only after the occupying generation ended.
 	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &v)
