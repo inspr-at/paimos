@@ -350,7 +350,7 @@ func (m *Module) authenticateSession(ctx context.Context, raw []byte) (tenant.Pr
 		// A concurrent renewal/authority write owns the row: skip it instead
 		// of queueing parallel requests, and retry on the next request.
 		_, err := tx.Exec(ctx, `UPDATE sessions
-			SET last_seen_at = clock_timestamp(), expires_at = clock_timestamp() + interval '30 days'
+			SET last_seen_at = statement_timestamp(), expires_at = statement_timestamp() + interval '30 days'
 			WHERE id IN (SELECT id FROM sessions
 				WHERE id = $1 AND expires_at > clock_timestamp()
 				AND (last_seen_at <= clock_timestamp() - interval '1 minute'
