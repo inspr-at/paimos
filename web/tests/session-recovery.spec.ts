@@ -31,7 +31,8 @@ test('archive requires exact confirmation and keeps unknown process status hones
     data.sessions.splice(data.sessions.indexOf(selected), 1)
     await route.fulfill({ json: selected })
   })
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await page.getByRole('button', { name: 'More session actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Recover', exact: true }).click()
   await expect(dialog(page)).toContainText('workstation-offline')
   await expect(dialog(page)).toContainText('No force stop')
   await expect(dialog(page).getByRole('button', { name: 'Archive session' })).toBeDisabled()
@@ -56,7 +57,8 @@ test('stale observation clears confirmation and refreshes; uncertain retry keeps
     const status = bodies.length === 1 ? 409 : 503
     await route.fulfill({ status, json: { error: status === 409 ? 'session changed' : 'Host connection unavailable; result unknown' } })
   })
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await page.getByRole('button', { name: 'More session actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Recover', exact: true }).click()
   await dialog(page).getByLabel('Reason for recovery').fill('Stale registration')
   await dialog(page).getByLabel('Type the exact confirmation').fill(preview.confirmation)
   await dialog(page).getByRole('button', { name: 'Archive session' }).click()
@@ -82,7 +84,8 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await setup(page)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
-    await page.getByRole('button', { name: 'Recover', exact: true }).click()
+    await page.getByRole('button', { name: 'More session actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Recover', exact: true }).click()
     await expect(dialog(page).getByRole('button', { name: 'Archive session' })).toBeVisible()
     await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeFocused()
     expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
@@ -96,7 +99,8 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
 async function managed(page: Page) {
   const { selected, preview, calls } = await setup(page)
   Object.assign(preview, { force_stop_available: true, force_confirmation: `force stop ${selected.id} on ${selected.host} group 1234`, process_ownership: { daemon_id: 'workstation-agentd', generation: '1'.repeat(32), process_id: '2'.repeat(32), root_pid: 1234, group_id: 1234, started_at: '2026-09-27T10:00:00Z' } })
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await page.getByRole('button', { name: 'More session actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Recover', exact: true }).click()
   await dialog(page).getByRole('radio', { name: 'Force stop process' }).click()
   return { selected, calls, preview: preview as typeof preview & { force_confirmation: string } }
 }

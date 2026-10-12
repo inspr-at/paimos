@@ -9,7 +9,7 @@ import { HOST_A, mockLeadFlow } from './lead-flow-fixtures'
 import { controlStability } from './control-stability'
 
 const band = (page: Page) => page.locator('section.lead')
-const panel = (page: Page) => page.getByRole('complementary', { name: 'PHAROS lead' })
+const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const mac = process.platform === 'darwin'
 const submit = mac ? 'Meta+Enter' : 'Control+Enter'
 async function theme(page: Page, value: 'light' | 'dark') { await page.evaluate(choice => { document.documentElement.dataset.theme = choice }, value) }
@@ -151,13 +151,15 @@ test('working lead: the line opens the docked panel, questions go to the Decisio
     { name: 'close it with Esc', run: async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) } },
   ] })
   await name.click()
+  await panel(page).getByRole('tab', { name: 'Lead', exact: true }).click()
   await expect(panel(page).getByRole('heading', { name: 'Right now' })).toBeVisible()
   for (const section of ['Workers', 'Next up', 'Before every start', 'Recent']) await expect(panel(page).getByRole('heading', { name: section })).toBeVisible()
-  await expect(panel(page).locator('[data-check="dial"]')).toContainText('3 of 5 running')
+  await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start')
+  await expect(panel(page).locator('[data-check]')).toHaveText(['Dial', 'Harness limits', 'Account room', 'Host load'])
   await expect(panel(page).locator('.log')).toContainText('Merged PHAROS-15 and handed it to release')
   await page.screenshot({ path: info.outputPath('panel-working-1440.png') })
-  expect((await new AxeBuilder({ page }).include('aside.lead-panel').analyze()).violations).toEqual([])
-  await panel(page).locator('[data-act="pause"]').click()
+  expect((await new AxeBuilder({ page }).include('aside.session-panel').analyze()).violations).toEqual([])
+  await panel(page).getByRole('button', { name: 'Pause…', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Pause the PHAROS lead' })
   await expect(sheet.getByRole('button', { name: /^Pause/ })).toBeFocused()
   await page.keyboard.press(submit)
@@ -366,10 +368,11 @@ for (const look of ['light', 'dark'] as const) test(`phone: band, full-height pa
   await band(page).getByRole('button', { name: /PHAROS lead: open details/ }).click()
   const box = await panel(page).boundingBox()
   expect(box?.width).toBe(390); expect(box?.y).toBe(0)
-  const foot = await panel(page).locator('[data-act="pause"]').boundingBox()
-  expect(foot!.y + foot!.height).toBeGreaterThan(844 - 80)
+  const head = await panel(page).getByRole('button', { name: 'Pause…', exact: true }).boundingBox()
+  expect(head!.y).toBeLessThan(80)
+  expect(head!.height).toBeGreaterThanOrEqual(44)
   await page.screenshot({ path: info.outputPath(`phone-panel-${look}.png`) })
-  await panel(page).locator('[data-act="pause"]').click()
+  await panel(page).getByRole('button', { name: 'Pause…', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Pause the PHAROS lead' })
   const action = await sheet.locator('[data-act="pause"]').boundingBox()
   expect(action!.y + action!.height).toBeGreaterThan(844 - 80)

@@ -46,13 +46,13 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     await expect(card.getByRole('button', { name: 'Pause…', exact: true })).toHaveCount(0)
     await expect(card.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0)
     await card.getByRole('button', { name: 'PHAROS lead: open details' }).click()
-    const pendingPanel = page.locator('.lead-panel')
+    const pendingPanel = page.getByRole('complementary', { name: 'Session details' })
     await expect(pendingPanel.locator('[data-act="pause"]')).toHaveCount(0)
     await expect(pendingPanel.locator('[data-act="resume"]')).toHaveCount(0)
     const cancelAdoption = pendingPanel.locator('[data-act="cancel-adoption"]')
     await expect(cancelAdoption).toBeVisible()
     await page.screenshot({ path: info.outputPath(`pending-panel-${width}-${theme}.png`) })
-    const closePending = pendingPanel.getByRole('button', { name: 'Close details' })
+    const closePending = pendingPanel.getByRole('button', { name: 'Close session details' })
     await expectStableControls({ controls: { close: closePending, cancel: cancelAdoption }, scrollAreas: { body: pendingPanel.locator('.pane-body') }, interactions: [
       { name: 'read the pending adoption without moving Cancel', run: async () => { await pendingPanel.locator('.pane-body').evaluate(el => { el.scrollTop = el.scrollHeight }) } },
     ] })
@@ -70,9 +70,9 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     await expect(card).toContainText('at the gate'); await expect(card).toContainText('merged today')
     await page.screenshot({ path: info.outputPath(`unmanaged-${width}-${theme}.png`) })
     await card.getByRole('button', { name: 'PHAROS lead: open details' }).click()
-    const panel = page.locator('.lead-panel')
+    const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel).toContainText('Unmanaged: steering limited to messages and pause')
-    const close = panel.getByRole('button', { name: 'Close details' }), pause = panel.locator('[data-act="pause"]')
+    const close = panel.getByRole('button', { name: 'Close session details' }), pause = panel.getByRole('button', { name: 'Pause…', exact: true })
     await expectStableControls({ controls: { close, pause }, scrollAreas: { body: panel.locator('.pane-body') }, interactions: [
       { name: 'read longer history without moving the footer', run: async () => { await panel.locator('.pane-body').evaluate(el => { el.scrollTop = el.scrollHeight }) } },
     ] })

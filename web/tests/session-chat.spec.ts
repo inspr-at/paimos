@@ -80,6 +80,7 @@ const longId = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c
 async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string }; failReadMarks?: number; pendingForbidden?: boolean } = {}) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: options.theme ?? 'light' }
+  if (options.storage?.['aeon.session-tab']) work.preferences['agents:session-panel'] = { last: options.storage['aeon.session-tab'] === 'messages' ? 'chat' : 'overview' }
   await mockWork(page, work, { admin: options.admin ?? true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
   const worker = data.sessions[0]!
@@ -832,7 +833,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect.poll(() => pre.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(2)
     expect(await pre.evaluate(el => getComputedStyle(el).maskImage)).toContain('rgba(0, 0, 0, 0)')
     await thread.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, bubbles: true })) })
-    const fold = code.locator('.code-fold'), copy = code.locator('.code-copy'), stop = panel.getByRole('button', { name: 'Stop', exact: true })
+    const fold = code.locator('.code-fold'), copy = code.locator('.code-copy'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
     await expect(fold).toHaveText('Show all 40 lines')
     const guard = await controlStability(page, { copy, fold, composer: panel.locator('textarea'), stop, frame: panel })
     await guard.check(async () => { await fold.click(); await expect(code).not.toHaveClass(/folded/) })
@@ -903,15 +904,15 @@ test('AEON-976 Stop: Esc leaves the field then interrupts with captured process 
     return route.fulfill({ status: 409, json: { error: 'ownership changed' } })
   })
   await page.goto(`/agents/${worker.id}?tab=messages`)
-  const panel = panelOf(page), field = panel.locator('textarea'), stop = panel.getByRole('button', { name: 'Stop', exact: true })
+  const panel = panelOf(page), field = panel.locator('textarea'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
   await field.fill('Keep this draft')
   await field.press('Escape')
   await expect(field).not.toBeFocused()
   expect(payloads).toHaveLength(0)
-  await page.keyboard.press('Escape')
+  await stop.click()
   await expect.poll(() => payloads.length).toBe(1)
   expect(payloads[0]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
-  // AEON-1219: chat capture owns Esc before the page's close-details action.
+  // AEON-1212: Interrupt keeps the panel and its private draft open.
   await expect(page).toHaveURL(`/agents/${worker.id}?tab=messages`)
   await expect(page.locator('.toast.error').filter({ hasText: 'ownership changed' })).toBeVisible()
   await expect(field).toHaveValue('Keep this draft')

@@ -939,7 +939,7 @@ function reply(message: ProjectMessage) {
   replyTo.value = message
   void nextTick(() => textarea.value?.focus())
 }
-defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted })
+defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, working })
 </script>
 
 <template>

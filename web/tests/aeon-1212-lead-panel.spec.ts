@@ -32,7 +32,7 @@ const makeQuestion = (): Question => ({
 })
 async function setup(page: Page, options: { denied?: boolean; question?: boolean; german?: boolean; pinned?: string; last?: string; actions?: boolean; workerMetadata?: { model: string; account: string; computer: string } } = {}) {
   await page.clock.setSystemTime(NOW)
-  const world = await mockLeadFlow(page, { lead: 'working', longText: options.german, accountLabels: { claude: 'Claude Max', codex: options.workerMetadata?.account ?? 'ChatGPT Pro' }, hostLabel: options.workerMetadata?.computer })
+  const world = await mockLeadFlow(page, { lead: 'working', personActions: false, longText: options.german, accountLabels: { claude: 'Claude Max', codex: options.workerMetadata?.account ?? 'ChatGPT Pro' }, hostLabel: options.workerMetadata?.computer })
   const lead = world.state.leads['p-pharos']!
   lead.actions = Object.fromEntries(['start', 'resume', 'pause', 'adopt', 'cancel_adoption', 'remove'].map(action => [action, { available: action === 'pause', blocked_reason: action === 'pause' ? '' : 'ordinary_succession_required' }]))
   if (options.actions === false) delete lead.actions

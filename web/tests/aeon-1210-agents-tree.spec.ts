@@ -12,6 +12,7 @@ import { mockEffectivePermissions } from './authz-fixtures'
 import { mockDailyPlan } from './agents-daily-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { LeadDecision, ProjectLead } from '../src/lib/lead'
+import { mockLeadActions } from './lead-flow-fixtures'
 
 const sid = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const LEAD = sid(1)
@@ -47,7 +48,7 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number;
   const leads: Record<string, ProjectLead> = { 'p-pharos': lead('p-pharos', 'working', LEAD), 'p-aeon': lead('p-aeon', 'waiting_for_room'), 'p-frozen': lead('p-frozen', 'none'), 'p-web': lead('p-web', 'none') }
   await page.route(/\/api\/projects\/[^/]+\/lead$/, route => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]!)
-    return leads[id] ? route.fulfill({ json: leads[id] }) : route.fulfill({ status: 404, json: { error: 'not found' } })
+    return leads[id] ? route.fulfill({ json: { ...leads[id], actions: mockLeadActions(leads[id]!) } }) : route.fulfill({ status: 404, json: { error: 'not found' } })
   })
   const queued: [project: string, key: string, title: string][] = [
     ['p-pharos', 'PHAROS-21', 'Disk graph for every host'], ['p-pharos', 'PHAROS-22', 'Swap alert for the build hosts'], ['p-pharos', 'PHAROS-23', 'Restore drill report'], ['p-pharos', 'PHAROS-24', 'Fleet list export'],
@@ -129,7 +130,7 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} 1440: projects in
   await expect(leadRow(page).locator('.qchip.q-l2')).toBeHidden()
   await page.screenshot({ path: info.outputPath(`1440-${theme}-groups.png`) })
   await chip.click()
-  const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+  const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel).toBeVisible()
   await expect(panel.locator('#next-up')).toBeFocused()
   // Every read the panel makes is answered: its workers, Next up in queue order and the lead's history.
@@ -312,7 +313,7 @@ test('Next up and Recent that can’t be read say what is missing and offer Try 
   await page.route(/\/api\/projects\/p-pharos\/lead-decisions\?/, route => historyDown ? route.fulfill({ status: 500, json: { error: 'event log unavailable' } }) : route.fallback())
   await page.goto('/agents')
   await leadRow(page).locator('.qchip.q-l1').click()
-  const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+  const panel = page.getByRole('complementary', { name: 'Session details' })
   const queueFail = panel.locator('[data-read-fail="queue"]'), historyFail = panel.locator('[data-read-fail="history"]')
   await expect(queueFail.locator('p')).toHaveText('The queue can’t be read right now, so Next up is unknown.')
   await expect(historyFail.locator('p')).toHaveText('The lead’s history can’t be read right now, so Recent, Gate and Merged are unknown.')
@@ -454,7 +455,7 @@ test.describe('phone', () => {
     await page.screenshot({ path: info.outputPath(`390-${theme}-groups.png`), fullPage: true })
     // The chip on the state line opens Next up on a phone too.
     await leadRow(page).locator('.qchip.q-l2').tap()
-    const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+    const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('#next-up')).toBeFocused()
     await expect(panel.locator('#next-up .wk')).toHaveCount(3)
     await page.screenshot({ path: info.outputPath(`390-${theme}-next-up.png`) })

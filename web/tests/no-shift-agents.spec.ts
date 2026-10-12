@@ -41,26 +41,23 @@ for (const width of [1440, 1024, 390]) {
     })
     await page.route('**/api/projects/*/harness-sessions/*/controls/*', route => route.fulfill({ json: { id: request.request_id, session_id: session(1), kind: request.kind, state: 'completed', outcome: 'applied', reason: 'native_interrupt_acknowledged' } }))
     await page.goto(`/agents/${session(1)}`)
-    const controls = page.getByRole('region', { name: 'Session controls' })
-    const more = controls.getByRole('button', { name: 'More session controls', exact: true })
-    const interrupt = page.getByRole('menuitem', { name: /^Interrupt this step/ })
-    // The panel has a Stop now button; the session list has a menuitem.
-    const stop = page.getByRole('button', { name: 'Stop now…', exact: true })
-    const dialog = page.getByRole('dialog', { name: /^Stop now / })
-    await more.click()
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    const interrupt = panel.getByRole('button', { name: 'Interrupt', exact: true })
+    const more = panel.getByRole('button', { name: 'More session actions', exact: true })
+    const stop = panel.getByRole('button', { name: 'Stop…', exact: true })
+    const dialog = page.getByRole('dialog', { name: /^Stop .+\?$/ })
     await expectStableControls({
-      controls: { interrupt, more, stop },
+      controls: { interrupt, more, stop, tabs: panel.getByRole('tablist') },
       interactions: [
-        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(controls.getByRole('status')).toContainText('Interrupt applied'); await more.click() } },
-        { name: 'open and cancel Stop now', run: async () => { await more.click(); await stop.click(); await dialog.getByRole('button', { name: /^Stop now/ }).hover(); await dialog.getByRole('button', { name: /^Cancel/ }).click(); await more.click() } },
+        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(panel.locator('.session-feedback')).toContainText('Interrupt applied') } },
+        { name: 'open and cancel Stop', run: async () => { await stop.click(); await dialog.getByRole('button', { name: 'Stop session', exact: true }).hover(); await dialog.getByRole('button', { name: 'Cancel', exact: true }).click() } },
       ],
     })
-    await more.click()
     await stop.click()
     await expectStableControls({
-      controls: { ...(width === 390 ? { sheet: dialog } : {}), close: dialog.getByRole('button', { name: 'Close pause dialog' }), confirm: dialog.getByRole('button', { name: /^Stop now/ }), cancel: dialog.getByRole('button', { name: /^Cancel/ }), footer: dialog.locator('.pause-actions') },
-      scrollAreas: { body: dialog.locator('.pause-body') },
-      interactions: [{ name: 'hover confirmation', run: () => dialog.getByRole('button', { name: /^Stop now/ }).hover() }],
+      controls: { cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }), confirm: dialog.getByRole('button', { name: 'Stop session', exact: true }), actions: dialog.locator('.actions') },
+      scrollAreas: { body: dialog.locator('#confirm-body') },
+      interactions: [{ name: 'hover confirmation', run: () => dialog.getByRole('button', { name: 'Stop session', exact: true }).hover() }],
     })
   })
 

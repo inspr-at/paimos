@@ -36,6 +36,8 @@ import SessionStateEvidence from './SessionStateEvidence.vue'
 import ListeningLabel from './ListeningLabel.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import { useAgentRecovery } from '../../lib/agentRecovery'
+import { capabilityWords, chatCapability } from './sessionChat'
+import { displayLanguage } from '../../lib/displayLanguage'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
 import PauseEvidence from './PauseEvidence.vue'
@@ -73,6 +75,8 @@ const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
 watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
 const s = computed(() => props.view?.session)
+const capability = computed(() => s.value ? chatCapability(s.value) : 'between')
+const capText = computed(() => capabilityWords[displayLanguage()][capability.value])
 const agents = useAgents()
 const auth = useSession()
 // The person's own name for this computer (AEON-1211): compact rows have no Host cell, so the
@@ -249,7 +253,9 @@ const interruptReason = computed(() => {
   if (!row || !props.view) return 'No session is selected.'
   if (pausingSession(row)) return 'This session is handing over.'
   if (managedControls.value) return managedControlAllowed(row, 'interrupt', managedAccess()) ? '' : 'This session cannot be interrupted now.'
-  return props.controlBlock(props.view, 'interrupt')
+  const reason = props.controlBlock(props.view, 'interrupt')
+  if (reason) return reason
+  return tab.value === 'chat' && !chat.value?.working ? 'This session has no active turn to interrupt.' : ''
 })
 const pauseReason = computed(() => {
   if (isLead.value) return leadActionReason(lead.value, resumeOffered.value ? 'resume' : 'pause')
@@ -300,13 +306,13 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
             <button type="button" class="btn sm act ghost" :aria-label="resumeOffered ? 'Resume' : isLead ? 'Pause…' : 'Pause'" :data-tip="pauseReason || (resumeOffered ? 'Resume through the start checks' : isLead ? 'Pause: workers finish their step' : 'Pause: finishes its step, then holds')" :disabled="!!pauseReason || !!(s && leads.busy[s.project_id])" @click="pauseOrResume($event.currentTarget as HTMLElement)"><AppIcon :name="resumeOffered ? 'play' : 'pause'" :size="13" /><span class="act-l">{{ resumeOffered ? 'Resume' : isLead ? 'Pause…' : 'Pause' }}</span></button>
             <button type="button" class="btn sm act ghost danger-ghost" aria-label="Stop…" :disabled="!!stopReason" :data-tip="stopReason || 'Stop: opens the confirmation'" @click="stopSession($event.currentTarget as HTMLElement)"><AppIcon name="stop" :size="13" /><span class="act-l">Stop…</span></button>
           </span>
-          <button type="button" class="icon-btn sm flat pane-more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" :size="16" /></button>
-          <FloatingPanel v-if="actionsAnchor" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null">
+          <button v-if="!reported?.watch" type="button" class="icon-btn sm flat pane-more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" :size="16" /></button>
+          <FloatingPanel v-if="actionsAnchor && !reported?.watch" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null">
             <div class="panel-menu" role="menu">
               <button v-if="agentRecovery.action(view.session)" type="button" role="menuitem" class="btn ghost" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); actionsAnchor = null"><AppIcon name="refresh" :size="16" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
               <button v-if="!serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="btn ghost" @click="pickTier(actionsAnchor); actionsAnchor = null"><AppIcon name="gauge" :size="16" />Change tier…</button>
               <button v-if="showRecover" type="button" role="menuitem" class="btn ghost" @click="recovery?.open(); actionsAnchor = null"><AppIcon name="wrench" :size="16" />Recover</button>
-              <button v-if="showRemove" type="button" role="menuitem" class="btn ghost" @click="removal?.remove(); actionsAnchor = null"><AppIcon name="trash" :size="16" />{{ quick ? 'Remove' : 'Remove…' }}</button>
+              <button v-if="showRemove" type="button" role="menuitem" class="btn ghost" :aria-label="`Remove ${view.name}`" @click="removal?.remove(); actionsAnchor = null"><AppIcon name="trash" :size="16" />{{ quick ? 'Remove' : 'Remove…' }}</button>
             </div>
           </FloatingPanel>
           <SessionRecovery ref="recovery" hide-trigger :session="view.session" />
@@ -315,8 +321,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <button type="button" class="btn sm ghost pane-close" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><KeyCap class="close-key" k="Esc" /><AppIcon class="desktop-close" name="close" :size="14" /><AppIcon class="sheet-back" name="arrow-left" :size="18" /></button>
       </div>
       <p v-if="isLead && why" class="why"><AppIcon name="sparkle" :size="12" /><span>Opened on <b>{{ TAB_LABEL[openedTab] }}</b>: {{ why }}</span></p>
-      <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
       <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :lead="isLead" :pinned="pinned" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)" @select="selectTab" @pin="pinTab" />
+      <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -375,6 +381,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <ManagedSessionControls v-if="!reported?.watch" ref="managed" :session="reported || view.session" :now="now" :run-status="view.run?.status" />
       <ServiceTierBlock :key="view.session.id" :session="view.session" :name="view.name" />
+      <section v-if="!reported?.watch" class="recovery-evidence" aria-label="Session control evidence">
+        <p class="now-meta" :title="capText[1]">{{ capText[0] }}</p>
+        <p v-if="view.session.agent_recovery" class="outside-note">{{ view.session.agent_recovery.detail }}</p>
+      </section>
 
       <section class="block first" aria-labelledby="setup-title">
         <h3 id="setup-title" class="eyebrow">Details</h3>
