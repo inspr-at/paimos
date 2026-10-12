@@ -1039,6 +1039,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
    transport must never remove a row and move the field above it. */
 @container (max-width: 640px) {
   .compose-row.steering .compose-hint { display: none; }
+  .compose-row.steering .compose-hint + * { margin-left: auto; }
   @media (min-width: 721px) {
     .compose-row.steering { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
     .compose-row .steer-send, .compose-row .steer-note { grid-column: 1 / -1; }
