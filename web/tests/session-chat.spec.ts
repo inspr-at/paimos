@@ -4,7 +4,7 @@
 // delivery ticks, and no horizontal scroll with long unbroken tokens.
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Locator } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
@@ -80,9 +80,11 @@ const longId = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c
 async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string }; failReadMarks?: number; pendingForbidden?: boolean } = {}) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: options.theme ?? 'light' }
+  if (options.storage?.['aeon.session-tab']) work.preferences['agents:session-panel'] = { last: options.storage['aeon.session-tab'] === 'messages' ? 'chat' : 'overview' }
   await mockWork(page, work, { admin: options.admin ?? true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
   const worker = data.sessions[0]!
+  const managedRun = data.runs[0]!
   Object.assign(worker, { display_label: 'release-lead', run_id: null, activity: 'idle' })
   data.sessions.splice(1); data.runs.splice(0); data.approvals.splice(0)
   const template = data.messages[1]!
@@ -129,7 +131,7 @@ async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | '
     })
     return route.fulfill({ json: { items } })
   })
-  return { data, worker, calls, messages, receipts }
+  return { data, worker, calls, messages, receipts, managedRun }
 }
 // The viewer has read up to the post with this sent_event_id (200 + index).
 const readUpTo = (sessionId: string, event: number) => ({ 'aeon.session-read.v1': JSON.stringify({ [`${me.id}:${sessionId}`]: { event, id: 'seen', at: 1 } }) })
@@ -141,6 +143,18 @@ const localEvent = (page: Page, sessionId: string) => page.evaluate(key => {
 }, `${me.id}:${sessionId}`)
 const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const messagesTab = (page: Page) => panelOf(page).getByRole('tab', { name: /Chat/ })
+async function noUnreadBadge(badge: Locator) {
+  // The approved tabs reserve its width; zero unread is hidden from both the
+  // screen and accessibility tree, rather than moving the neighbouring tab.
+  await expect(badge).toHaveAttribute('aria-hidden', 'true')
+  await expect(badge).toBeHidden()
+}
+async function rememberTab(page: Page, name: 'Chat' | 'Overview') {
+  const saved = page.waitForResponse(response => response.request().method() === 'PUT' && decodeURIComponent(new URL(response.url()).pathname).endsWith('/preferences/agents:session-panel'))
+  await panelOf(page).getByRole('tab', { name: new RegExp(`^${name}`) }).click()
+  await saved
+}
+
 const scroller = (page: Page) => panelOf(page).locator('.thread-scroll')
 const noHorizontalScroll = (page: Page) => page.evaluate(() => {
   const doc = document.scrollingElement!
@@ -187,7 +201,7 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await expect(panel.getByRole('separator', { name: '2 new' })).toBeVisible()
   await expect(panel.locator('.msg').nth(2)).toHaveClass(/mine/) // Own post after the watermark, above the divider.
   await expect(panel.locator('.msg').nth(2)).toContainText('Good. Keep the fix small and ship it behind the release gate.')
-  await expect(messagesTab(page).locator('.count')).toHaveCount(0)
+  await noUnreadBadge(messagesTab(page).locator('.count'))
   // Everything is in view, so the watermark reaches the newest post.
   await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem('aeon.session-read.v1') ?? '{}')[key]?.event, `${me.id}:${worker.id}`)).toBe(204)
   await shot(page, 'messages-unread-1600')
@@ -195,10 +209,10 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await page.reload()
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
   await expect(panel.getByRole('separator')).toHaveCount(0)
-  await panel.getByRole('tab', { name: 'Overview' }).click()
+  await rememberTab(page, 'Overview')
   await page.reload()
   await expect(panel.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
-  await expect(messagesTab(page).locator('.count')).toHaveCount(0)
+  await noUnreadBadge(messagesTab(page).locator('.count'))
 })
 
 for (const width of [1600, 390]) {
@@ -229,14 +243,12 @@ for (const width of [1600, 390]) {
     await expect.poll(() => localEvent(page, worker.id)).toBe(204)
     await page.clock.fastForward(1_600)
     await expect.poll(() => markerPuts(calls).at(-1)?.body).toMatchObject({ last_read_event_id: 204 })
-    await page.evaluate(() => {
-      localStorage.removeItem('aeon.session-read.v1')
-      localStorage.setItem('aeon.session-tab', 'overview')
-    })
+    await rememberTab(page, 'Overview')
+    await page.evaluate(() => localStorage.removeItem('aeon.session-read.v1'))
     await page.reload()
     await expect(overview).toHaveAttribute('aria-selected', 'true')
     await expect(panel.locator('.msg')).toHaveCount(5)
-    await expect(badge).toHaveCount(0)
+    await noUnreadBadge(badge)
     await shot(page, `server-read-${width}`)
   })
 }
@@ -522,7 +534,7 @@ test('focusing the window picks up a read from another device', async ({ page })
   await expect(badge).toHaveText('2')
   event = 204
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(badge).toHaveCount(0)
+  await noUnreadBadge(badge)
 })
 
 test('a failed read marker is sent again on the next flush, without an error', async ({ page }) => {
@@ -567,7 +579,7 @@ test('?tab=messages deep-links to the thread; an ended session starts read on a 
   await page.goto(`/agents/${worker.id}?tab=messages`)
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
   await expect(panelOf(page).locator('.msg').first()).toBeVisible()
-  await expect(messagesTab(page).locator('.count')).toHaveCount(0)
+  await noUnreadBadge(messagesTab(page).locator('.count'))
   await expect(panelOf(page).getByText('This session has ended.', { exact: true })).toBeVisible()
 })
 
@@ -584,7 +596,7 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await expect(panel.getByRole('button', { name: /new messages, go to the latest/ })).toHaveCount(0)
   // Reading to the bottom clears the badge.
   await thread.evaluate(el => el.scrollTo({ top: el.scrollHeight }))
-  await expect(messagesTab(page).locator('.count')).toHaveCount(0)
+  await noUnreadBadge(messagesTab(page).locator('.count'))
   const atBottom = () => thread.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight <= 32)
   expect(await atBottom()).toBe(true)
   await expect(panel.getByRole('button', { name: /latest message/ })).toHaveCount(0)
@@ -608,13 +620,13 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await expect(jump).toHaveText('1 new')
   expect(await jump.evaluate(el => { const pill = el.getBoundingClientRect(), frame = el.parentElement!.getBoundingClientRect(); return Math.abs(pill.left + pill.width / 2 - frame.left - frame.width / 2) })).toBeLessThanOrEqual(.5)
   // The open tab carries no badge; the count sits on the jump button.
-  await expect(messagesTab(page).locator('.count')).toHaveCount(0)
+  await noUnreadBadge(messagesTab(page).locator('.count'))
   await shot(page, 'scrolled-up-390')
   await jump.click()
   await expect.poll(atBottom).toBe(true)
   await expect(jump).toHaveCount(0)
   await panel.getByRole('tab', { name: 'Overview' }).click()
-  await expect(messagesTab(page).locator('.count')).toHaveCount(0)
+  await noUnreadBadge(messagesTab(page).locator('.count'))
   await messagesTab(page).click()
 
   // Focusing the composer goes to the bottom.
@@ -656,21 +668,21 @@ test.describe('phone screenshots', () => {
   // A touch phone: no hover, so Reply stays visible as on an iPhone.
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
   for (const theme of ['light', 'dark'] as const) {
-    test(`${theme} 390: screenshots of both tabs`, async ({ page }) => {
-      test.skip(!process.env.SESSION_CHAT_SHOTS, 'screenshots only')
+    test(`${theme} 390: screenshots of both tabs`, async ({ page }, info) => {
+      const capture = (name: string) => page.screenshot({ path: info.outputPath(`session-chat/${name}.png`) })
       const { worker } = await setup(page, { theme, count: 7, storage: readUpTo(worker0, 203) })
       await page.goto(`/agents/${worker.id}`)
       await expect(messagesTab(page)).toBeVisible()
-      await shot(page, `overview-${theme}-390`)
+      await capture(`overview-${theme}-390`)
       await messagesTab(page).click()
       await expect(panelOf(page).getByRole('separator', { name: /new/ })).toBeVisible()
-      await shot(page, `messages-unread-${theme}-390`)
+      await capture(`messages-unread-${theme}-390`)
       await scroller(page).evaluate(el => el.scrollTo({ top: 0 }))
       await expect(panelOf(page).getByRole('button', { name: /latest message/ })).toBeVisible()
-      await shot(page, `scrolled-up-${theme}-390`)
+      await capture(`scrolled-up-${theme}-390`)
       await panelOf(page).getByRole('textbox').focus()
       await expect(panelOf(page).getByRole('button', { name: /latest message/ })).toHaveCount(0)
-      await shot(page, `focused-${theme}-390`)
+      await capture(`focused-${theme}-390`)
     })
   }
 })
@@ -819,10 +831,19 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     Object.assign(worker, { management_mode: 'managed', advertised_capabilities: ['interrupt', 'stop', 'steer'], activity: 'busy' })
     messages[0]!.body = shellBody(40)
     await page.route('**/api/me/profile', route => route.fulfill({ json: { principal_id: me.id, locale: 'de', avatar_hashes: {}, initials: 'MB', first_name: 'Markus', last_name: 'Barta', preferred_name: 'Markus', short_name: 'markus', timezone: 'Europe/Vienna', greeting_enabled: false, avatar_color: '#888888', week_start: 1, revision: 1 } }))
+    // AEON-1212 fix9: chat mounts behind Overview while the opening reads
+    // settle. Hold that read so the zero-size mount is deterministic.
+    let reveal!: () => void
+    const opening = new Promise<void>(resolve => { reveal = resolve })
+    await page.route('**/api/projects/p-pharos/lead', async route => { await opening; await route.fallback() })
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.setViewportSize({ width, height: 900 })
     await page.goto(`/agents/${worker.id}?tab=messages`)
     const panel = panelOf(page), thread = scroller(page), code = panel.locator('.chat-code'), pre = code.locator('pre')
+    try {
+      await expect(code).toBeAttached()
+      await expect(code).toBeHidden()
+    } finally { reveal() }
     await expect(code).toBeVisible()
     await expect(panel.getByRole('heading', { name: 'Prüfung abgeschlossen' })).toBeAttached()
     await expect(panel.locator('table th')).toHaveText(['Prüfung', 'Ergebnis'])
@@ -832,7 +853,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect.poll(() => pre.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(2)
     expect(await pre.evaluate(el => getComputedStyle(el).maskImage)).toContain('rgba(0, 0, 0, 0)')
     await thread.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, bubbles: true })) })
-    const fold = code.locator('.code-fold'), copy = code.locator('.code-copy'), stop = panel.getByRole('button', { name: 'Stop', exact: true })
+    const fold = code.locator('.code-fold'), copy = code.locator('.code-copy'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
     await expect(fold).toHaveText('Show all 40 lines')
     const guard = await controlStability(page, { copy, fold, composer: panel.locator('textarea'), stop, frame: panel })
     await guard.check(async () => { await fold.click(); await expect(code).not.toHaveClass(/folded/) })
@@ -891,29 +912,41 @@ test('AEON-976 shell updates: follow newest output until the reader scrolls up i
   await signal976(page)
   await expect(pre).toContainText('Prüfschritt 050')
   await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
+  // Hiding the tab must retain the reader's position and upward intent.
+  await panelOf(page).getByRole('tab', { name: /^Overview/ }).click()
+  await expect(pre).toBeHidden()
+  await messagesTab(page).click()
+  await expect(pre).toBeVisible()
+  await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
+  messages[0]!.body = shellBody(55)
+  await signal976(page)
+  await expect(pre).toContainText('Prüfschritt 055')
+  await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
 })
 
 test('AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership', async ({ page }) => {
-  const { worker } = await setup(page, { count: 1 })
+  const { data, worker, managedRun } = await setup(page, { count: 1 })
+  // Managed interruption requires a running run bound to this exact session.
+  data.runs.push(managedRun)
   const ownership = { daemon_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', generation: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', process_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', root_pid: 420, group_id: 420, started_at: new Date(now).toISOString() }
-  Object.assign(worker, { management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'interrupt', 'stop', 'steer'], process_ownership: ownership, activity: 'busy' })
+  Object.assign(worker, { run_id: managedRun.id, management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'interrupt', 'stop', 'steer'], process_ownership: ownership, process_observed_at: new Date(now).toISOString(), activity: 'busy' })
   const payloads: Record<string, unknown>[] = []
   await page.route('**/managed-controls', async route => {
     payloads.push(route.request().postDataJSON())
     return route.fulfill({ status: 409, json: { error: 'ownership changed' } })
   })
   await page.goto(`/agents/${worker.id}?tab=messages`)
-  const panel = panelOf(page), field = panel.locator('textarea'), stop = panel.getByRole('button', { name: 'Stop', exact: true })
+  const panel = panelOf(page), field = panel.locator('textarea'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
   await field.fill('Keep this draft')
   await field.press('Escape')
   await expect(field).not.toBeFocused()
   expect(payloads).toHaveLength(0)
-  await page.keyboard.press('Escape')
+  await stop.click()
   await expect.poll(() => payloads.length).toBe(1)
   expect(payloads[0]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
-  // AEON-1219: chat capture owns Esc before the page's close-details action.
+  // AEON-1212: Interrupt keeps the panel and its private draft open.
   await expect(page).toHaveURL(`/agents/${worker.id}?tab=messages`)
-  await expect(page.locator('.toast.error').filter({ hasText: 'ownership changed' })).toBeVisible()
+  await expect(panel.locator('.session-feedback[role="alert"]')).toHaveText('ownership changed')
   await expect(field).toHaveValue('Keep this draft')
   await expect(panel).toBeVisible()
   const guard = await controlStability(page, { field, stop, send: panel.locator('.send'), frame: panel })
@@ -952,7 +985,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await field.focus()
     await expect(panel.locator('.queue-item')).toHaveCount(1)
     await expect(panel.locator(`.msg[data-id="${original.id}"]`)).toHaveCount(0)
-    const guard = await controlStability(page, { field, primary: panel.locator('.send'), alternative: panel.locator('.steer-send'), stop: panel.locator('.chat-stop'), tab: messagesTab(page), capability: panel.locator('.capability'), frame: panel })
+    const guard = await controlStability(page, { field, primary: panel.locator('.send'), alternative: panel.locator('.steer-send'), stop: panel.getByRole('button', { name: 'Interrupt', exact: true }), tab: messagesTab(page), capability: panel.getByRole('group', { name: 'Session actions' }), frame: panel })
     const queueRow = panel.locator('.queue-item')
     const editGuard = await controlStability(page, { row: queueRow, edit: queueRow.getByRole('button', { name: 'Edit', exact: true }), cancel: queueRow.getByRole('button', { name: 'Cancel', exact: true }) })
     const editedText = 'Die überarbeitete Nachricht bleibt erhalten, wenn der Agent die ursprüngliche Nachricht schon übernommen hat.'
@@ -990,7 +1023,7 @@ test('AEON-977 Gemini holds normal input and interrupts only via Stop and send',
   Object.assign(worker, { harness: 'gemini', management_mode: 'managed', activity: 'busy', advertised_capabilities: ['inbox', 'steer', 'interrupt'] })
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = panelOf(page), field = panel.getByRole('textbox', { name: 'Message to release-lead' })
-  await expect(panel.getByRole('button', { name: 'A new message stops its turn' })).toBeVisible()
+  await expect(panel.locator('.gemini-note')).toHaveText('Gemini stops its current turn when it gets a new message. After this turn lets it finish.')
   await expect(panel.getByRole('button', { name: 'Send now', exact: true })).toHaveCount(0)
   await field.fill('Let the current turn finish'); await field.press('Enter')
   await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages')).length).toBe(1)

@@ -84,7 +84,7 @@ test('switching the visible session discards a late recovery result', async () =
   expect(recovery.busy[session.id]).toBeUndefined()
 })
 
-// Render the real header template for both control arrangements. Browser
+// Render the real header and Session evidence for both ownership modes. Browser
 // geometry coverage lives in agent-recovery.spec.ts; this gate can also run
 // while another worker owns the browser lane.
 test('changing diagnosis remains below every session control and tab', async () => {
@@ -96,28 +96,32 @@ test('changing diagnosis remains below every session control and tab', async () 
   const { descriptor } = parse(readFileSync(new URL('../src/components/agents/SessionPanel.vue', import.meta.url), 'utf8'))
   const template = descriptor.template!.content
   const header = template.slice(template.indexOf('<header'), template.indexOf('</header>') + '</header>'.length)
+  const evidence = template.slice(template.indexOf('<ManagedSessionControls'), template.indexOf('<section class="block first"'))
   const ts = await import('typescript')
-  const code = ts.transpileModule(compile(header, { mode: 'function', prefixIdentifiers: true, expressionPlugins: ['typescript'] }).code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const code = ts.transpileModule(compile(header + evidence, { mode: 'function', prefixIdentifiers: true, expressionPlugins: ['typescript'] }).code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const render = new Function('Vue', code)(Vue)
-  for (const compactControls of [false, true]) for (const detail of ['Reporting is current.', 'The paired computer still reports, but this exact session heartbeat and inbox binding remain overdue. '.repeat(5)]) {
+  for (const management_mode of ['managed', 'unmanaged']) for (const detail of ['Reporting is current.', 'The paired computer still reports, but this exact session heartbeat and inbox binding remain overdue. '.repeat(5)]) {
     const app = Vue.createSSRApp({ render, setup: () => ({
-      view: { name: 'Worker', harness: 'Claude', status: { state: 'working', label: 'Working' }, session: { ...session, advertised_capabilities: ['managed_control_v1'], agent_recovery: { ...session.agent_recovery, detail } } },
-      loading: false, compactControls, reported: undefined, outside: true, brand: { short_name: 'Aeon' },
+      view: { name: 'Worker', harness: 'Claude', status: { state: 'working', label: 'Working' }, session: { ...session, management_mode, advertised_capabilities: ['managed_control_v1'], agent_recovery: { ...session.agent_recovery, detail } } },
+      loading: false, reported: undefined, brand: { short_name: 'Aeon' },
       agentRecovery: { action: () => 'restart', busy: {} }, pausingSession: () => false, works: () => false,
       actionsAnchor: null, showRecover: false, showRemove: false, quick: true, tab: 'overview', unread: 0, now: 0,
       ticketState: '', selectTab: () => {}, serviceTiers: { unavailable: () => true },
       capability: 'native', capText: capabilityWords.en.native,
+      isLead: false, pinned: null, hasQuestion: false, managed: null, s: session,
+      interruptReason: '', pauseReason: '', stopReason: '', resumeOffered: false,
+      modelLine: '', leads: { busy: {} }, interrupt: () => {}, pauseOrResume: () => {}, stopSession: () => {}, pinTab: () => {}, closeActions: () => {},
     }) })
-    for (const name of ['SessionPauseActions', 'ManagedSessionControls', 'SessionTabs']) app.component(name, { render: () => Vue.h('button', { 'data-control': name }, name) })
-    for (const name of ['AgentGlyph', 'AgentStateLabel', 'AppIcon', 'TicketPeekLink', 'SessionRecovery', 'RemoveSessionDialog', 'FloatingPanel']) app.component(name, { render: () => Vue.h('span') })
+    for (const name of ['ManagedSessionControls', 'SessionTabs']) app.component(name, { render: () => Vue.h('button', { 'data-control': name }, name) })
+    for (const name of ['AgentGlyph', 'AgentStateLabel', 'AppIcon', 'KeyCap', 'ServiceTierBlock', 'SessionRecovery', 'RemoveSessionDialog', 'FloatingPanel']) app.component(name, { render: () => Vue.h('span') })
     const html = await renderToString(app)
     const feedback = html.indexOf(detail)
     const chip = html.indexOf(capabilityWords.en.native[0])
     expect(feedback).toBeGreaterThan(0)
     expect(chip).toBeGreaterThan(0)
     expect(chip).toBeLessThan(feedback)
-    for (const name of ['SessionPauseActions', 'ManagedSessionControls', 'SessionTabs']) {
-      const control = html.indexOf(`data-control="${name}"`)
+    for (const selector of ['aria-label="Interrupt"', 'aria-label="Pause"', 'aria-label="Stop…"', 'aria-label="More session actions"', 'data-control="ManagedSessionControls"', 'data-control="SessionTabs"']) {
+      const control = html.indexOf(selector)
       expect(control).toBeGreaterThan(0)
       expect(control).toBeLessThan(feedback)
     }

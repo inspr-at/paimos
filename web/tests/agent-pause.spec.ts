@@ -453,7 +453,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const guard = await controlStability(page, { row, menu: row.locator('.more') })
     await guard.check(async () => {
-      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
+      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop…', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: /^Stop now / })
       await dialog.locator('[data-submit]').click()
       await expect(dialog).not.toBeVisible()
@@ -491,7 +491,9 @@ for (const theme of ['light', 'dark'] as const) {
     })
     const session = mock.data.sessions[0]!
     await page.goto(`/agents/${session.id}`)
-    await page.addStyleTag({ content: '.agents-page .page-head { letter-spacing: .06em }' })
+    // P5 keeps the page head full width above the split. Retain this narrow
+    // typography risk explicitly, including the original compact-label check.
+    await page.addStyleTag({ content: '.agents-page .page-head { width: 820px; max-width: 100%; letter-spacing: .06em }' })
     const row = page.locator(`[data-row="s:${session.id}"]`)
     await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const open = windButton(page)
@@ -504,7 +506,7 @@ for (const theme of ['light', 'dark'] as const) {
     const before = await lines()
     const guard = await controlStability(page, { row, open })
     await guard.check(async () => {
-      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
+      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop…', exact: true }).click()
       await page.getByRole('dialog', { name: /^Stop now / }).locator('[data-submit]').click()
       await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stop requested( · |$)/)
     })

@@ -2,17 +2,25 @@
 // AEON-741: the approved lead flow. Lead band in every state, the line and the
 // docked lead panel, Start lead and Pause, Queue on the ticket with its progress
 // line, the Agents page leads list and the expert-only manual start.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
 import { HOST_A, mockLeadFlow } from './lead-flow-fixtures'
 import { controlStability } from './control-stability'
 
 const band = (page: Page) => page.locator('section.lead')
-const panel = (page: Page) => page.getByRole('complementary', { name: 'PHAROS lead' })
+const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const mac = process.platform === 'darwin'
 const submit = mac ? 'Meta+Enter' : 'Control+Enter'
 async function theme(page: Page, value: 'light' | 'dark') { await page.evaluate(choice => { document.documentElement.dataset.theme = choice }, value) }
+// mockLeadFlow installs the clock, including animation frames. Native layout
+// observation is the barrier for responsive geometry, independent of that clock.
+async function settleLayout(target: Locator) {
+  await target.evaluate(element => new Promise<void>(resolve => {
+    const observer = new ResizeObserver(() => { observer.disconnect(); resolve() })
+    observer.observe(element)
+  }))
+}
 
 test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh', async ({ page }, info) => {
   const { data } = await mockLeadFlow(page, { lead: 'paused', aeon: 'paused', queue: [] })
@@ -33,6 +41,9 @@ test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls 
   })
   for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1100 })
+    // The focus refresh starts after the nested responsive containers paint;
+    // a viewport transition is a separate interaction from the held reread.
+    await settleLayout(page.locator('.sessions .table'))
     const guard = await controlStability(page, { aeon: rows.nth(0), pharos: rows.nth(1) })
     for (const look of ['light', 'dark'] as const) {
       await theme(page, look)
@@ -151,13 +162,15 @@ test('working lead: the line opens the docked panel, questions go to the Decisio
     { name: 'close it with Esc', run: async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) } },
   ] })
   await name.click()
+  await panel(page).getByRole('tab', { name: 'Lead', exact: true }).click()
   await expect(panel(page).getByRole('heading', { name: 'Right now' })).toBeVisible()
   for (const section of ['Workers', 'Next up', 'Before every start', 'Recent']) await expect(panel(page).getByRole('heading', { name: section })).toBeVisible()
-  await expect(panel(page).locator('[data-check="dial"]')).toContainText('3 of 5 running')
+  await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start')
+  await expect(panel(page).locator('[data-check]')).toHaveText(['Dial', 'Harness limits', 'Account room', 'Host load'])
   await expect(panel(page).locator('.log')).toContainText('Merged PHAROS-15 and handed it to release')
   await page.screenshot({ path: info.outputPath('panel-working-1440.png') })
-  expect((await new AxeBuilder({ page }).include('aside.lead-panel').analyze()).violations).toEqual([])
-  await panel(page).locator('[data-act="pause"]').click()
+  expect((await new AxeBuilder({ page }).include('aside.session-panel').analyze()).violations).toEqual([])
+  await panel(page).getByRole('button', { name: 'Pause…', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Pause the PHAROS lead' })
   await expect(sheet.getByRole('button', { name: /^Pause/ })).toBeFocused()
   await page.keyboard.press(submit)
@@ -278,18 +291,17 @@ test('ticket header steps down at every dock width so Close stays inside with a 
     await expect(drawer.getByRole('button', { name: 'Open as full page', exact: true })).toBeVisible()
     for (const width of [1920, 1600, 1440, 1366, 1280, 1180, 1024, 900, 800, 721]) {
       await page.setViewportSize({ width, height: 1000 })
-      // The fold runs in a ResizeObserver callback before paint: measure after
-      // the next frame has rendered, as a person would see it.
-      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+      // Measure after the real layout observers, not the fixture's fake frames.
+      await settleLayout(bar)
       const geometry = await bar.evaluate(el => {
         const frame = el.getBoundingClientRect()
         const buttons = [...el.querySelectorAll('button')].map(button => {
           const rect = button.getBoundingClientRect()
           return { name: button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '', left: rect.left, right: rect.right, width: rect.width }
         }).filter(button => button.width > 0)
-        return { left: frame.left, right: frame.right, overflow: el.scrollWidth - el.clientWidth, buttons }
+        return { left: frame.left, right: frame.right, fold: el.parentElement?.dataset.fold, overflow: el.scrollWidth - el.clientWidth, buttons }
       })
-      expect(geometry.overflow, `${key} at ${width}: the header does not overflow`).toBeLessThanOrEqual(0)
+      expect(geometry.overflow, `${key} at ${width}: the header does not overflow (fold ${geometry.fold}, width ${geometry.right - geometry.left})`).toBeLessThanOrEqual(0)
       for (const name of ['Close ticket details', 'More actions', 'Edit']) expect(geometry.buttons.map(b => b.name), `${key} at ${width}: ${name} is shown`).toContain(name)
       for (const button of geometry.buttons) {
         expect(button.left, `${key} at ${width}: ${button.name} starts inside the header`).toBeGreaterThanOrEqual(geometry.left - 0.5)
@@ -297,6 +309,21 @@ test('ticket header steps down at every dock width so Close stays inside with a 
       }
       await expect(drawer.getByRole('button', { name: 'Close ticket details' })).toBeInViewport({ ratio: 1 })
     }
+    // A person-sized dock keeps its width during a viewport resize. A later
+    // font metric change must still fold its labels; observing only the bar's
+    // width cannot see this growth.
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await settleLayout(bar)
+    const before = (await bar.boundingBox())!
+    const fonts = await page.addStyleTag({ content: '.project-page.ticket-dock { --panel-user-w: 560px; } .panel-bar .q-word { font-size: 40px !important; }' })
+    try {
+      await page.setViewportSize({ width: 1441, height: 1000 })
+      await settleLayout(bar)
+      const after = (await bar.boundingBox())!
+      expect(Math.abs(after.width - before.width), 'the dock width stayed fixed').toBeLessThanOrEqual(0.5)
+      expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth), `${key}: late font metrics stay inside the fixed dock`).toBeLessThanOrEqual(0)
+      await expect(drawer.getByRole('button', { name: 'Close ticket details' })).toBeInViewport({ ratio: 1 })
+    } finally { await fonts.evaluate(el => el.remove()) }
   }
 })
 
@@ -366,10 +393,11 @@ for (const look of ['light', 'dark'] as const) test(`phone: band, full-height pa
   await band(page).getByRole('button', { name: /PHAROS lead: open details/ }).click()
   const box = await panel(page).boundingBox()
   expect(box?.width).toBe(390); expect(box?.y).toBe(0)
-  const foot = await panel(page).locator('[data-act="pause"]').boundingBox()
-  expect(foot!.y + foot!.height).toBeGreaterThan(844 - 80)
+  const head = await panel(page).getByRole('button', { name: 'Pause…', exact: true }).boundingBox()
+  expect(head!.y).toBeLessThan(80)
+  expect(head!.height).toBeGreaterThanOrEqual(44)
   await page.screenshot({ path: info.outputPath(`phone-panel-${look}.png`) })
-  await panel(page).locator('[data-act="pause"]').click()
+  await panel(page).getByRole('button', { name: 'Pause…', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Pause the PHAROS lead' })
   const action = await sheet.locator('[data-act="pause"]').boundingBox()
   expect(action!.y + action!.height).toBeGreaterThan(844 - 80)

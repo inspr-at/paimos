@@ -92,8 +92,9 @@ watch(sheetOpen, async open => {
     dialog.querySelector<HTMLElement>('textarea, input, select')?.focus()
   } else if (!open && dialog.open) dialog.close()
 })
+defineExpose({ interrupt: () => submit('interrupt'), stop: () => submit('stop'), feedback, error, waiting })
 function reset() { epoch++; editing.value = null; settingValue.value = ''; models.value = []; loadingSettings.value = false; clearTimeout(timer); draft.value = ''; result.value = null; request = null; error.value = ''; busy.value = false; uncertain.value = false; composing.value = false; moreAnchor.value = null }
-watch(() => `${props.session.project_id}/${props.session.id}`, reset)
+watch(() => `${auth.identity?.tenant.id}/${auth.identity?.principal.id}/${props.session.project_id}/${props.session.id}`, reset, { flush: 'sync' })
 onBeforeUnmount(() => { epoch++; clearTimeout(timer); request = null; phoneMedia.removeEventListener('change', syncPhone) })
 async function check(turn = epoch) {
   const id = result.value?.id || request?.request_id

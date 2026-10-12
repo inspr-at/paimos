@@ -12,6 +12,7 @@ import { mockEffectivePermissions } from './authz-fixtures'
 import { mockDailyPlan } from './agents-daily-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { LeadDecision, ProjectLead } from '../src/lib/lead'
+import { mockLeadActions } from './lead-flow-fixtures'
 
 const sid = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const LEAD = sid(1)
@@ -37,6 +38,10 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number;
   const capacity = capacityWorld()
   data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
   await mockAgents(page, data, { capacity })
+  await page.route('**/api/projects/*/harness-sessions/*/tier', route => route.fulfill({ json: {
+    session_id: new URL(route.request().url()).pathname.split('/')[5], revision: 0, active_tier: null, pending: null,
+    read_only: true, read_only_reason: 'This fixture session does not support confirmed tier changes.', reports: [], requests: [],
+  } }))
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions.push('run.create', 'account.read')
@@ -47,7 +52,7 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number;
   const leads: Record<string, ProjectLead> = { 'p-pharos': lead('p-pharos', 'working', LEAD), 'p-aeon': lead('p-aeon', 'waiting_for_room'), 'p-frozen': lead('p-frozen', 'none'), 'p-web': lead('p-web', 'none') }
   await page.route(/\/api\/projects\/[^/]+\/lead$/, route => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]!)
-    return leads[id] ? route.fulfill({ json: leads[id] }) : route.fulfill({ status: 404, json: { error: 'not found' } })
+    return leads[id] ? route.fulfill({ json: { ...leads[id], actions: mockLeadActions(leads[id]!) } }) : route.fulfill({ status: 404, json: { error: 'not found' } })
   })
   const queued: [project: string, key: string, title: string][] = [
     ['p-pharos', 'PHAROS-21', 'Disk graph for every host'], ['p-pharos', 'PHAROS-22', 'Swap alert for the build hosts'], ['p-pharos', 'PHAROS-23', 'Restore drill report'], ['p-pharos', 'PHAROS-24', 'Fleet list export'],
@@ -129,7 +134,7 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} 1440: projects in
   await expect(leadRow(page).locator('.qchip.q-l2')).toBeHidden()
   await page.screenshot({ path: info.outputPath(`1440-${theme}-groups.png`) })
   await chip.click()
-  const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+  const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel).toBeVisible()
   await expect(panel.locator('#next-up')).toBeFocused()
   // Every read the panel makes is answered: its workers, Next up in queue order and the lead's history.
@@ -312,22 +317,34 @@ test('Next up and Recent that can’t be read say what is missing and offer Try 
   await page.route(/\/api\/projects\/p-pharos\/lead-decisions\?/, route => historyDown ? route.fulfill({ status: 500, json: { error: 'event log unavailable' } }) : route.fallback())
   await page.goto('/agents')
   await leadRow(page).locator('.qchip.q-l1').click()
-  const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+  const panel = page.getByRole('complementary', { name: 'Session details' })
   const queueFail = panel.locator('[data-read-fail="queue"]'), historyFail = panel.locator('[data-read-fail="history"]')
   await expect(queueFail.locator('p')).toHaveText('The queue can’t be read right now, so Next up is unknown.')
   await expect(historyFail.locator('p')).toHaveText('The lead’s history can’t be read right now, so Recent, Gate and Merged are unknown.')
-  await expect(panel.locator('.facts dd.sub').nth(1)).toHaveText('can’t be read')
-  await expect(panel.locator('.facts dd.sub').nth(2)).toHaveText('can’t be read')
+  const gateCount = panel.locator('.lead-content .facts > div').filter({ has: page.getByText('In the gate', { exact: true }) }).locator('dd')
+  const mergedCount = panel.locator('.lead-content .facts > div').filter({ has: page.getByText('Merged today', { exact: true }) }).locator('dd')
+  await expect(gateCount).toHaveText('—')
+  await expect(mergedCount).toHaveText('—')
   for (const raw of ['queue store unavailable', 'event log unavailable', 'Unmocked route']) await expect(panel).not.toContainText(raw)
   await page.screenshot({ path: info.outputPath('1440-light-read-failed.png') })
   // Try again on Next up: while the read is held, the button stays where it is, says the same and refuses a second press.
   queueDown = false
   const again = queueFail.getByRole('button', { name: 'Try again' })
-  const before = await again.boundingBox()
+  // The click may scroll a shorter P5 pane into view. Measure in scrolling
+  // content coordinates, keeping the exact position-and-size assertion.
+  await expect(again).toBeVisible()
+  const bounds = () => again.evaluate(element => {
+    const box = element.getBoundingClientRect()
+    let x = box.x + window.scrollX, y = box.y + window.scrollY
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) { x += parent.scrollLeft; y += parent.scrollTop }
+    return { x, y, width: box.width, height: box.height }
+  })
+  const before = await bounds()
+  expect(before.width).toBeGreaterThan(0); expect(before.height).toBeGreaterThan(0)
   await again.click()
   await expect(again).toHaveAttribute('aria-busy', 'true')
   await expect(again).toHaveText('Try again')
-  expect(await again.boundingBox()).toEqual(before)
+  expect(await bounds()).toEqual(before)
   await expect(historyFail.getByRole('button', { name: 'Try again' })).toHaveAttribute('aria-disabled', 'true')
   release()
   await expect(queueFail).toHaveCount(0)
@@ -338,7 +355,8 @@ test('Next up and Recent that can’t be read say what is missing and offer Try 
   await historyFail.getByRole('button', { name: 'Try again' }).click()
   await expect(historyFail).toHaveCount(0)
   await expect(panel.locator('.log li')).toHaveCount(3)
-  await expect(panel.locator('.facts dd.sub').nth(2)).not.toHaveText('can’t be read')
+  await expect(gateCount).toHaveText('1')
+  await expect(mergedCount).toHaveText('0')
 })
 
 // The design's gate (AEON-1196 check.mjs) on the grouped list: no coloured edge accents, SVG icons
@@ -454,7 +472,7 @@ test.describe('phone', () => {
     await page.screenshot({ path: info.outputPath(`390-${theme}-groups.png`), fullPage: true })
     // The chip on the state line opens Next up on a phone too.
     await leadRow(page).locator('.qchip.q-l2').tap()
-    const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+    const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('#next-up')).toBeFocused()
     await expect(panel.locator('#next-up .wk')).toHaveCount(3)
     await page.screenshot({ path: info.outputPath(`390-${theme}-next-up.png`) })

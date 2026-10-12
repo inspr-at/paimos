@@ -228,15 +228,15 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(pane(page)).toHaveClass(/sheet/)
       await expect(dock(page)).toBeHidden()
       await expect(page.locator('.agents-divider')).not.toHaveAttribute('role', 'separator')
-      await expect(page.getByRole('button', { name: 'Back to the list', exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Close session details', exact: true })).toBeVisible()
       const body = pane(page).locator('.scroll:visible')
       await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0)
-      const guard = await controlStability(page, { back: page.getByRole('button', { name: 'Back to the list', exact: true }), frame: pane(page) })
+      const guard = await controlStability(page, { back: page.getByRole('button', { name: 'Close session details', exact: true }), frame: pane(page) })
       await guard.check(async () => { await body.evaluate(el => { el.scrollTop = 200 }); await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0) })
       await guard.check(async () => { await body.evaluate(el => { el.scrollTop = 0 }); await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0) })
       guard.done()
       const box = (await pane(page).boundingBox())!
-      if (width === 390) { expect(box.y).toBe(0); expect(box.height).toBe(900); expect((await page.getByRole('button', { name: 'Back to the list', exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44) }
+      if (width === 390) { expect(box.y).toBe(0); expect(box.height).toBe(900); expect((await page.getByRole('button', { name: 'Close session details', exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44) }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
       await page.screenshot({ path: info.outputPath(`sheet-${width}-${theme}.png`) })
       console.log(`check.mjs (P5 routed adapter): PASS ${width} ${theme} sheet · opens at top · pinned Back control`)
@@ -353,7 +353,7 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
       return { gap: frame.bottom - footer.bottom, inset: parseFloat(getComputedStyle(el).borderBottomWidth) + parseFloat(getComputedStyle(el).paddingBottom) }
     })
     expect(Math.abs(geometry.gap - geometry.inset), `${width}: composer pinned to pane bottom`).toBeLessThanOrEqual(.5)
-    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).locator('.chat-stop') })
+    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).getByRole('button', { name: 'Interrupt', exact: true }) })
     for (const draft of ['Die vollständigen Berechtigungseinstellungen für sämtliche angeschlossenen Arbeitsbereiche zuverlässig prüfen.', '']) {
       await guard.check(async () => {
         await composer.fill(draft); await composer.blur()
@@ -564,7 +564,7 @@ test.describe('touch', () => {
     await page.setViewportSize({ width: 390, height: 900 })
     await expect(pane(page)).toHaveClass(/sheet/)
     await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBe(0)
-    const back = (await page.getByRole('button', { name: 'Back to the list', exact: true }).boundingBox())!
+    const back = (await page.getByRole('button', { name: 'Close session details', exact: true }).boundingBox())!
     expect(back.width).toBeGreaterThanOrEqual(44); expect(back.height).toBeGreaterThanOrEqual(44)
     expect(await pane(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
     await page.screenshot({ path: info.outputPath('390-dark-touch-sheet.png') })

@@ -18,13 +18,15 @@ const showAll = computed(() => expanded.value ? (german.value ? 'Weniger zeigen'
 function remember() {
   if (!pre.value) return
   props.state.expanded = expanded.value
+  props.state.follow = follow.value
+  // A hidden tab has no scroll geometry; it cannot replace the reader's place.
+  if (!pre.value.clientHeight) return
   props.state.top = pre.value.scrollTop
   props.state.left = pre.value.scrollLeft
-  props.state.follow = follow.value
 }
 function scroll() {
   const el = pre.value
-  if (!el) return
+  if (!el?.clientHeight) return
   follow.value = el.scrollHeight - el.clientHeight - el.scrollTop <= 2
   remember()
 }
@@ -33,25 +35,35 @@ function readerKey(event: KeyboardEvent) { if (['ArrowUp', 'PageUp', 'Home'].inc
 async function toggle() {
   expanded.value = !expanded.value
   await nextTick()
-  if (tail.value && follow.value && pre.value) pre.value.scrollTop = pre.value.scrollHeight
+  if (tail.value && follow.value && pre.value?.clientHeight) pre.value.scrollTop = pre.value.scrollHeight
   remember()
 }
 async function copy() {
   try { await navigator.clipboard.writeText(props.code); copied.value = true }
   catch { toast(german.value ? 'Code konnte nicht kopiert werden.' : 'Could not copy code.', { tone: 'error' }) }
 }
-onMounted(() => {
+function restoreScroll() {
   const el = pre.value
-  if (!el) return
+  if (!el?.clientHeight) return
   el.scrollTop = tail.value && follow.value ? el.scrollHeight : props.state.top
   el.scrollLeft = props.state.left
+}
+let resize: ResizeObserver | undefined
+onMounted(() => {
+  restoreScroll()
+  // Chat can mount behind Overview while the panel's opening reads settle.
+  // Restore once it has real geometry, also after a tab or viewport resize.
+  if (typeof ResizeObserver !== 'undefined' && pre.value) {
+    resize = new ResizeObserver(restoreScroll)
+    resize.observe(pre.value)
+  }
 })
 watch(() => props.code, async () => {
   copied.value = false
   await nextTick()
-  if (tail.value && follow.value && pre.value) pre.value.scrollTop = pre.value.scrollHeight
+  if (tail.value && follow.value && pre.value?.clientHeight) pre.value.scrollTop = pre.value.scrollHeight
 })
-onBeforeUnmount(remember)
+onBeforeUnmount(() => { resize?.disconnect(); remember() })
 </script>
 
 <template>

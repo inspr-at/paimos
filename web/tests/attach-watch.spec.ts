@@ -140,7 +140,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await frame(page, 'text', 'Checking the migration fixture.\nThe project binding is unchanged.\nNext: run the targeted tests.\n')
     await expect(page.getByLabel('Agent-written live text')).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`watch-${theme}-${width}.png`) })
-    await page.getByRole('button', { name: width === 390 ? 'Back to the list' : 'Close session details', exact: true }).click()
+    await page.getByRole('button', { name: 'Close session details', exact: true }).click()
     await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
     const snapshot = { platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Markus’s MacBook', harness: 'codex', transcript: '/Users/markus/.codex/sessions/2026/09/29/session.jsonl', file_id: '1:234567', process: { pid: 4812, uid: 501, started: '2026-09-29T00:12:30Z', executable: '/opt/homebrew/bin/codex', cwd: '/Users/markus/Code/pharos' } }
     const review = { consent_mode, consent_digest: 'b'.repeat(64), request_id: 'attach-fixture', request_digest: 'a'.repeat(64), state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(), snapshot }
@@ -239,7 +239,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(page.getByRole('heading', { name: 'Attached session' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
     expect(await page.evaluate(() => (window as unknown as { attachChannels: { url: string }[] }).attachChannels.filter(c => c.url.endsWith('/watch')).length)).toBe(0)
-    await page.getByRole('button', { name: width === 390 ? 'Back to the list' : 'Close session details', exact: true }).click()
+    await page.getByRole('button', { name: 'Close session details', exact: true }).click()
     await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
     const review = {
       request_id: 'lease-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode, state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),

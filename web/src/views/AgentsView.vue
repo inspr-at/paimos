@@ -304,6 +304,7 @@ function reviewAttach(request: AttachReview) { attachDialog.value?.show(request,
 // Per session, like the server: harness.control in that session's project.
 const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, controlPermitted(view.session, { person: session.identity?.principal.kind === 'person', can }), agents.controls[view.session.id])
 async function control(view: SessionView, kind: SessionControl['kind']) {
+  const who = `${session.identity?.tenant.id}:${session.identity?.principal.id}`, id = view.session.id
   if (kind === 'stop') {
     const ok = await confirmAction({
       title: `Stop ${view.name}?`, danger: true, confirmLabel: 'Stop session',
@@ -311,8 +312,10 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
     })
     if (!ok) return
   }
+  const current = agents.views.find(row => row.session.id === id)
+  if (who !== `${session.identity?.tenant.id}:${session.identity?.principal.id}` || !current || controlBlock(current, kind)) return
   try {
-    await agents.control(view, kind)
+    await agents.control(current, kind)
     toast(kind === 'stop' ? `Stop sent to ${view.name}.` : `Interrupt sent to ${view.name}.`)
   } catch (e) { toast(message(e), { tone: 'error' }) }
 }

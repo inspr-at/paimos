@@ -5,7 +5,7 @@ import { onReset } from '../lib/position'
 import { onAccessRevalidate } from '../lib/authz'
 import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
-import { adoptLead, cancelLeadAdoption, canLaunchLead, canRemoveLead, emptyFold, foldDecisions, leadLaunchReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, removeLead, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
+import { adoptLead, cancelLeadAdoption, canLaunchLead, canRemoveLead, emptyFold, foldDecisions, leadLaunchReason, leadActionAvailable, leadActionReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, removeLead, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
 import { useAgents } from './agents'
 
 // AEON-741: read projections of each project's lead. The server decides state;
@@ -149,7 +149,13 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       if (started === epoch) { busy[id] = false; invalidate(); void load(id) }
     }
   }
-  const start = (id: string) => write(id, lead => {
+  type Snapshot = Pick<ProjectLead, 'revision' | 'generation' | 'session_id'>
+  function checkSnapshot(lead: ProjectLead, expected?: Snapshot) {
+    if (expected && (lead.revision !== expected.revision || lead.generation !== expected.generation || lead.session_id !== expected.session_id)) throw new Error('The lead changed. Check its state, then try again.')
+  }
+  const start = (id: string, expected?: Snapshot, action: 'start' | 'resume' = 'start') => write(id, lead => {
+    checkSnapshot(lead, expected)
+    if (expected && !leadActionAvailable(lead, action)) throw new Error(leadActionReason(lead, action))
     if (!canLaunchLead(lead)) throw new Error(leadLaunchReason(lead))
     return startLead(id, lead.revision)
   })
@@ -157,7 +163,11 @@ export const useProjectLeads = defineStore('projectLeads', () => {
     if (lead.revision !== revision) throw new Error('The lead changed. Reopen adoption and confirm again.')
     return adoptLead(id, revision, sessionId)
   })
-  const pause = (id: string) => write(id, lead => pauseLead(id, lead.revision, lead.generation))
+  const pause = (id: string, expected?: Snapshot) => write(id, lead => {
+    checkSnapshot(lead, expected)
+    if (expected && !leadActionAvailable(lead, 'pause')) throw new Error(leadActionReason(lead, 'pause'))
+    return pauseLead(id, lead.revision, lead.generation)
+  })
   const remove = (id: string, revision: number) => write(id, lead => {
     if (lead.revision !== revision || !canRemoveLead(lead)) throw new Error('The lead changed. Open its menu again.')
     return removeLead(id, revision)

@@ -15,9 +15,9 @@ const mocks = vi.hoisted(() => ({
   queue: (() => ({ items: [] })) as Handler, questions: (() => ({ items: [], has_more: false })) as Handler, sessions: (() => ({ items: [], next_cursor: null })) as Handler,
   calls: [] as string[], wake: null as null | ((event?: string, node?: string | null) => void),
   leads: { views: {} as Record<string, { caughtUp: boolean; decisions: unknown[] }>, loadMany: vi.fn(async () => {}), loadLead: vi.fn(async () => {}), load: vi.fn(async () => {}) },
-  agents: { loaded: false, views: [] as unknown[], admitSessions: (rows: unknown[]) => rows, loadAll: vi.fn(async () => {}) },
+  agents: { loaded: false, views: [] as unknown[], sessionsState: 'ready', sessionsError: '', sessionsStale: false, sessionsUpdatedAt: 1, admitSessions: (rows: unknown[]) => rows, loadAll: vi.fn(async () => {}) },
   work: { snapshots: {} as Record<string, unknown>, load: vi.fn(async (_project: string, _force?: boolean) => {}) },
-  live: [] as unknown[],
+  liveStatus: null as unknown as { state: string; dataStale: boolean; truncated: boolean; items: unknown[] },
   identity: null as unknown as { identity: { tenant: { id: string }; principal: { id: string } } | null },
   projects: null as unknown as { projects: { id: string; archived: boolean }[] },
 }))
@@ -31,7 +31,11 @@ vi.mock('../src/lib/agentRows', () => ({ listAllSessions: async (params: { proje
 vi.mock('../src/lib/agents', () => ({ onProjectionWake: (listener: (event?: string, node?: string | null) => void) => { mocks.wake = listener; return () => { mocks.wake = null } } }))
 vi.mock('../src/lib/usePolledData', () => ({ usePoller: () => ({ start() {}, stop() {} }) }))
 vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {}, can: () => true }))
-vi.mock('../src/stores/liveAgents', () => ({ useLiveAgents: () => ({ watch: () => () => {}, get items() { return mocks.live } }) }))
+vi.mock('../src/stores/liveAgents', async () => {
+  const { reactive } = await import('vue')
+  mocks.liveStatus = reactive({ state: 'ready', dataStale: false, truncated: false, items: [] as unknown[] })
+  return { useLiveAgents: () => ({ watch: () => () => {}, get items() { return mocks.liveStatus.items }, get state() { return mocks.liveStatus.state }, get dataStale() { return mocks.liveStatus.dataStale }, get truncated() { return mocks.liveStatus.truncated } }) }
+})
 vi.mock('../src/stores/projectLeads', () => ({ useProjectLeads: () => mocks.leads }))
 vi.mock('../src/stores/agents', () => ({ useAgents: () => mocks.agents }))
 vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => mocks.work }))
@@ -90,7 +94,9 @@ describe('the store', () => {
     mocks.questions = () => ({ items: [q('q1', { session: S1 })], has_more: false })
     mocks.sessions = () => ({ items: [], next_cursor: null })
     mocks.leads.views = {}; mocks.leads.loadMany.mockClear(); mocks.leads.loadLead.mockClear(); mocks.leads.load.mockClear()
-    mocks.agents.loaded = false; mocks.agents.loadAll.mockClear(); mocks.work.load.mockReset(); mocks.work.snapshots = {}; mocks.live = []
+    Object.assign(mocks.agents, { loaded: false, views: [], sessionsState: 'ready', sessionsError: '', sessionsStale: false, sessionsUpdatedAt: 1 })
+    Object.assign(mocks.liveStatus, { state: 'ready', dataStale: false, truncated: false })
+    mocks.agents.loadAll.mockClear(); mocks.work.load.mockReset(); mocks.work.snapshots = {}; mocks.liveStatus.items = []
     mocks.identity.identity = { tenant: { id: 't' }, principal: { id: 'markus' } }
     mocks.projects.projects = [{ id: 'p1', archived: false }, { id: 'p2', archived: false }, { id: 'old', archived: true }]
   })
@@ -157,6 +163,91 @@ describe('the store', () => {
     await flush()
     expect(projection.queuedOf('p1')).toBeNull()
     expect(projection.asksOf(S1)).toEqual([])
+  })
+
+  it('AEON-1212: overlapping opening refreshes await the same authoritative question read', async () => {
+    const openingAnswer = deferred<unknown>(), laterAnswer = deferred<unknown>()
+    let reads = 0
+    mocks.questions = () => ++reads <= 2 ? openingAnswer.promise : laterAnswer.promise
+    const projection = useAgentProjection()
+    const stop = projection.watchProjects({ all: true })
+    const opening = projection.refresh(), overlapping = projection.refresh()
+    try {
+      // An automatic read, the panel opening and a later poll overlap before
+      // any answer lands. The opening cannot finish on a discarded result.
+      openingAnswer.resolve({ items: [q('urgent', { session: S1 })], has_more: false })
+      await opening
+      expect(projection.asksOf(S1).map(item => item.id)).toEqual(['urgent'])
+      expect(reads).toBe(1)
+      // A named event during the shared read needs a fresh answer. All
+      // opening waiters remain attached through that catch-up, too.
+      vi.useFakeTimers()
+      const beforeWake = deferred<unknown>(), afterWake = deferred<unknown>(), catchUpStarted = deferred<void>()
+      let wakeReads = 0, settled = false
+      mocks.questions = () => {
+        if (++wakeReads === 1) return beforeWake.promise
+        catchUpStarted.resolve(); return afterWake.promise
+      }
+      const catchingUp = projection.refresh().then(() => { settled = true })
+      mocks.wake!('question.asked', 'new-question')
+      await vi.advanceTimersByTimeAsync(WAKE_BATCH_MS)
+      beforeWake.resolve({ items: [], has_more: false })
+      await catchUpStarted.promise
+      expect(settled).toBe(false)
+      afterWake.resolve({ items: [q('new-urgent', { session: S1 })], has_more: false })
+      await catchingUp
+      expect(projection.asksOf(S1).map(item => item.id)).toEqual(['new-urgent'])
+      expect(wakeReads).toBe(2)
+    } finally {
+      laterAnswer.resolve({ items: [q('urgent', { session: S1 })], has_more: false })
+      await overlapping
+      stop()
+    }
+  })
+
+  it('AEON-1212: failed or stale live reads cannot prove an empty worker inventory; truncated live reads are lower bounds', async () => {
+    mocks.leads.views = { p1: { lead: { session_id: S1, state: 'working' }, caughtUp: false, decisions: [] } } as never
+    mocks.sessions = () => ({ items: [{ id: W1, parent_harness_session_id: S1 }], next_cursor: null })
+    mocks.liveStatus.items = [{ session_id: W1, project_id: 'p1', stopped_at: null, role: 'worker' }]
+    const scope = effectScope()
+    const summary = scope.run(() => useLeadSummary(ref('p1'), ref('P1')))!
+    try {
+      await useAgentProjection().refresh()
+      expect(summary.workers.value.map(worker => worker.session_id)).toEqual([W1])
+      expect([summary.workersKnown.value, summary.workersPartial.value]).toEqual([true, false])
+      for (const state of ['idle', 'unavailable']) {
+        mocks.liveStatus.items = []; mocks.liveStatus.state = state
+        expect(summary.workersKnown.value).toBe(false)
+        expect(summary.workers.value).toEqual([])
+      }
+      mocks.liveStatus.state = 'ready'; mocks.liveStatus.dataStale = true
+      expect(summary.workersKnown.value).toBe(false)
+      mocks.liveStatus.items = [{ session_id: W1, project_id: 'p1', stopped_at: null, role: 'worker' }]
+      expect(summary.workers.value).toEqual([])
+      mocks.liveStatus.dataStale = false; mocks.liveStatus.truncated = true
+      expect(summary.workers.value.map(worker => worker.session_id)).toEqual([W1])
+      expect([summary.workersKnown.value, summary.workersPartial.value]).toEqual([true, true])
+      mocks.liveStatus.items = []
+      expect([summary.workersKnown.value, summary.workersPartial.value]).toEqual([true, true])
+    } finally { scope.stop() }
+  })
+
+  it('AEON-1212: a loaded Agents bundle does not prove that its session tree was read successfully', () => {
+    const projection = useAgentProjection()
+    mocks.agents.loaded = true
+    Object.assign(mocks.agents, { sessionsState: 'error', sessionsError: 'sessions down', sessionsUpdatedAt: null })
+    expect(projection.treeSource('p1')).toMatchObject({ state: 'error', error: 'sessions down' })
+    expect(projection.workersOf('p1', S1)).toBeNull()
+    Object.assign(mocks.agents, { sessionsState: 'ready', sessionsError: '', sessionsUpdatedAt: 1 })
+    mocks.agents.views = [{ session: { id: W1, project_id: 'p1', parent_harness_session_id: S1 } }]
+    expect([...projection.workersOf('p1', S1)!]).toEqual([W1])
+    // The polling state retains ready after one failed refresh. Its error and
+    // stale evidence still prevent a current, complete inventory claim.
+    Object.assign(mocks.agents, { sessionsError: 'refresh failed', sessionsStale: true })
+    expect(projection.treeSource('p1')).toMatchObject({ state: 'error', error: 'refresh failed' })
+    expect(projection.workersOf('p1', S1)).toBeNull()
+    Object.assign(mocks.agents, { sessionsError: '', sessionsStale: true })
+    expect(projection.workersOf('p1', S1)).toBeNull()
   })
 
   it('batches named events into one reread of what they changed; a reconnect rereads everything', async () => {
@@ -232,7 +323,7 @@ describe('the store', () => {
 
   it('a lead’s workers from a session read cut short are a lower bound; a cut-short queue count never stands in for the project’s own', async () => {
     mocks.leads.views = { p1: { lead: { project_id: 'p1', state: 'working', session_id: S1, reason: '', revision: 1, generation: 1, process_active: true }, caughtUp: false, decisions: [] } } as never
-    mocks.live = [{ session_id: W1, project_id: 'p1', stopped_at: null, role: 'worker' }]
+    mocks.liveStatus.items = [{ session_id: W1, project_id: 'p1', stopped_at: null, role: 'worker' }]
     mocks.sessions = () => ({ items: [{ id: S1, parent_harness_session_id: null }, { id: W1, parent_harness_session_id: S1 }], next_cursor: 'more' })
     mocks.queue = () => ({ items: Array.from({ length: QUEUE_ITEM_LIMIT + 1 }, () => ({ project_id: 'p1' })) })
     mocks.work.snapshots = { p1: { items: [{ key: 'P1-1' }, { key: 'P1-2' }, { key: 'P1-3' }] } }

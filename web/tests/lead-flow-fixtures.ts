@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test'
 import { fixtures, me, mockWork, type LiveAgentMock } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { pairedComputer } from './agent-pairing-fixtures'
-import type { LeadDecision, LeadState, ProjectLead } from '../src/lib/lead'
+import type { LeadDecision, LeadPersonAction, LeadState, ProjectLead } from '../src/lib/lead'
 import type { QueueWireEntry } from '../src/lib/workQueue'
 
 export const NOW = '2026-10-06T10:00:00Z'
@@ -24,6 +24,25 @@ export interface LeadFlowOptions {
    * Production availability tests explicitly pass false; servers still ship false. */
   launchEnabled?: boolean
   leadName?: string
+  /** Explicit test account display metadata; never credential identities. */
+  accountLabels?: Record<string, string>
+  hostLabel?: string
+  /** Omit the caller projection to exercise older/unreadable server responses. */
+  personActions?: boolean
+}
+
+// Server response fixture only. Production controls consume these fields and
+// must never reconstruct availability from the person's grants.
+export function mockLeadActions(lead: ProjectLead): NonNullable<ProjectLead['actions']> {
+  const blocked: Record<LeadPersonAction, string> = {
+    start: lead.automatic_launch_enabled !== true ? 'automatic_launch_disabled' : lead.state === 'none' || lead.reason === 'selection_cleared' ? '' : 'ordinary_succession_required',
+    resume: lead.automatic_launch_enabled !== true ? 'automatic_launch_disabled' : lead.process_active ? 'process_exit_unconfirmed' : lead.state === 'paused' ? '' : 'lead_not_paused',
+    pause: lead.reason === 'adoption_pending' ? 'adoption_pending' : lead.state === 'none' ? 'lead_required' : lead.state === 'paused' ? 'already_paused' : '',
+    adopt: lead.state === 'none' ? '' : 'ordinary_succession_required',
+    cancel_adoption: lead.reason === 'adoption_pending' ? '' : 'adoption_required',
+    remove: lead.revision > 0 && lead.generation === 0 && !lead.session_id ? '' : 'ordinary_succession_required',
+  }
+  return Object.fromEntries(Object.entries(blocked).map(([action, reason]) => [action, { available: !reason, blocked_reason: reason }]))
 }
 export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
   const data = fixtures()
@@ -77,7 +96,8 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
   const sessionRow = (a: LiveAgentMock) => ({
     id: a.session_id, project_id: a.project_id, agent_principal_id: a.principal_id, parent_harness_session_id: a.role === 'worker' ? LEAD_SESSION : null,
     work_order_id: null, run_id: null, ticket_node_id: a.ticket?.id ?? null, ticket: a.ticket ? { id: a.ticket.id, key: a.ticket.key, title: a.ticket.title } : null,
-    project: { id: a.project_id, key: 'PHAROS', title: 'Pharos' }, harness: a.harness, host: 'imac0', management_mode: a.management_mode, role: a.role,
+    project: { id: a.project_id, key: 'PHAROS', title: 'Pharos' }, harness: a.harness, host: options.hostLabel ?? 'imac0', management_mode: a.management_mode, role: a.role,
+    model: a.model ?? null, reasoning_effort: a.reasoning_effort ?? null, account_label: options.accountLabels?.[a.harness] ?? null,
     advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1, work_shape: 'ship', phase: a.phase, activity: a.activity,
     heartbeat_at: a.heartbeat_at, created_at: a.since, stopped_at: a.phase === 'stopped' ? '2026-10-06T09:31:00Z' : null, stop_reason: null, finished: false, display_label: a.name,
   })
@@ -105,7 +125,7 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
       state.calls.push({ method, path, body })
       const current = state.leads[lead[1]!]
       if (!current) return json({ error: 'project not found' }, 404)
-      if (method === 'GET') return json(current)
+      if (method === 'GET') return json({ ...current, ...(options.personActions === false ? {} : { actions: mockLeadActions(current) }) })
       if (method === 'DELETE') {
         if (body?.expected_revision !== current.revision) return json({ error: 'lead revision conflict' }, 409)
         if (current.revision === 0 || current.generation !== 0 || current.session_id !== null) return json({ error: 'only a never-started lead can be removed' }, 409)

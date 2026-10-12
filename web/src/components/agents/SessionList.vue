@@ -45,9 +45,10 @@ import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
 import KeyCap from '../KeyCap.vue'
 import { shortcutCaps, shortcutHint, shortcutKeys } from '../../lib/shortcuts'
 import { vClipTip } from '../../directives/clipTip'
-import { canLaunchLead, leadBand, leadLaunchReason, type ProjectLead } from '../../lib/lead'
+import { leadActionAvailable, leadActionReason, leadBand, type ProjectLead } from '../../lib/lead'
 import { openLeadPanel, openStartLead } from '../../lib/leadOverlay'
 import { useAgentsLayout } from '../../lib/agentsLayout'
+import { useRoute, useRouter } from 'vue-router'
 import { usePreference } from '../../lib/preferences'
 import { useProjects } from '../../stores/projects'
 import type { AgentState } from '../../lib/agentSignals'
@@ -59,6 +60,7 @@ import {
   DEFAULT_GROUP, emptyFacets, FACET_KEYS, FACET_TITLE, facetChoices, facetsActive, foldSummary, GROUP_BY, groupWord, isLeadRoot, keyedGroups, matchesFacets,
   NO_PROJECT, orderProjects, projectGroups, queueHeads, queuedWord, queueNote, type FacetKey, type Facets, type GroupBy, type LeadLine, type ProjectRef,
 } from './sessionGroups'
+const route = useRoute(), router = useRouter()
 const serviceTiers = useServiceTiers()
 
 // Session families stay together across status groups. Each lead's history is
@@ -366,10 +368,15 @@ function openPending(event: MouseEvent, project: ProjectRef) {
   if ((event.target as HTMLElement).closest('.c-actions, .qchip')) return
   openLeadPanel(project.id, event.currentTarget as HTMLElement)
 }
+function openProjectLead(projectId: string, anchor: HTMLElement, section: 'next-up' | null = null) {
+  const session = props.projects?.lead(projectId)?.session_id
+  if (session) { void router.push({ path: `/agents/${encodeURIComponent(session)}`, query: { ...route.query, tab: 'lead' }, hash: section ? '#next-up' : '' }); return }
+  openLeadPanel(projectId, anchor, section)
+}
 // The queue chip opens the project's lead at Next up (the Lead tab arrives with package P4).
 function openQueue(projectId: string | null | undefined, event: MouseEvent) {
   event.stopPropagation()
-  if (projectId) openLeadPanel(projectId, event.currentTarget as HTMLElement, 'next-up')
+  if (projectId) openProjectLead(projectId, event.currentTarget as HTMLElement, 'next-up')
 }
 // Keyed groups fold for this visit; the Ended fold opens on its own toggle, a filter or a link.
 const groupOpen = ref<Record<string, boolean>>({})
@@ -686,7 +693,7 @@ function pick(kind: SessionControl['kind']) {
 function pickLead(section: 'next-up' | null) {
   const selected = menu.value, project = selected ? leadProject(selected.view) : null
   menu.value = null
-  if (selected && project) openLeadPanel(project, selected.anchor, section)
+  if (selected && project) openProjectLead(project, selected.anchor, section)
 }
 function pickRecovery() {
   const view = menu.value?.view
@@ -998,8 +1005,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <div v-if="section.line?.kind === 'none' && section.project" class="row nolead" role="row" :data-project="section.project.key">
           <span role="gridcell" class="nl-in">
             <span class="nl-ic" aria-hidden="true"><AppIcon name="folder" :size="15" /></span><b class="mono nl-key">{{ section.project.key }}</b><span class="nl-t">{{ section.line.queued ? `${qWord(section.line.queued)} queued · ` : '' }}no {{ LEAD_WORDS.l }}</span>
-            <button v-if="projects?.mayStart && canLaunchLead(section.line.lead)" type="button" class="btn sm nl-btn" :aria-label="`Start a ${LEAD_WORDS.l} for ${section.project.key}`" @click="openStartLead([section.project.id], $event.currentTarget as HTMLElement, true)"><AppIcon name="play" :size="13" />Start a {{ LEAD_WORDS.l }}</button>
-            <span v-else class="nl-note">{{ !canLaunchLead(section.line.lead) ? leadLaunchReason(section.line.lead) : `A project admin starts its ${LEAD_WORDS.l}` }}</span>
+            <button v-if="leadActionAvailable(section.line.lead, 'start')" type="button" class="btn sm nl-btn" :aria-label="`Start a ${LEAD_WORDS.l} for ${section.project.key}`" @click="openStartLead([section.project.id], $event.currentTarget as HTMLElement, true)"><AppIcon name="play" :size="13" />Start a {{ LEAD_WORDS.l }}</button>
+            <span v-else class="nl-note">{{ leadActionReason(section.line.lead, 'start') }}</span>
           </span>
         </div>
         <!-- A lead without a running session on this list (starting, waiting for room, paused, can't start) still heads its group. -->

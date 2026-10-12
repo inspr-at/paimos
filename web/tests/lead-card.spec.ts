@@ -89,6 +89,7 @@ test('the fold is remembered for this person and project, and a lead clears it',
   await start(page).click()
   const sheet = page.getByRole('dialog', { name: 'Start lead for PHAROS' })
   await expect(sheet).toBeVisible()
+  await expect(sheet.locator('[data-act="start"]')).toHaveAttribute('aria-disabled', 'false')
   await page.keyboard.press(submit)
   await expect(sheet).toHaveCount(0)
   expect(state.calls.find(c => c.method === 'POST' && c.path === '/api/projects/p-pharos/lead')?.body).toEqual({ expected_revision: 0 })
