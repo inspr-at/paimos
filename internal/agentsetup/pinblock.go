@@ -206,6 +206,8 @@ func (d Discovery) locationClass(path string) string {
 
 // autoRenewCodexPins runs after current lifecycle fences, under setup.lock.
 // A failed check leaves the original block and its existing repair intact.
+// Legacy pairings without a recorded launcher hash remain manual: a successful
+// explicit add-harness repair establishes the baseline for later upgrades.
 func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 	if len(s.CodexPins.LauncherHashes) == 0 || s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState != "connected" || s.Phase != "connected" && s.Phase != "verification_pending" {
 		return nil
