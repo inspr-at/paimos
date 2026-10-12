@@ -203,6 +203,7 @@ test('phone stop asks before sending, and More reaches Recover and Remove', asyn
   await expect(recover).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(recover).toBeHidden()
+  await expect(more).toBeFocused()
 
   await more.click()
   await menu.getByRole('menuitem', { name: 'Remove Focused session' }).click()
