@@ -1376,6 +1376,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 @media (pointer: coarse), (max-width: 720px) { .nl-btn { min-height: 44px; } }
 .truncated { margin: 0; padding: 0 18px 12px; font-size: 12px; color: var(--ink-3); }
 .truncated a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+@media (pointer: coarse), (max-width: 720px) { .truncated a { display: inline-flex; align-items: center; min-height: 44px; } }
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--secondary-tint-3); color: var(--secondary-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 /* Marks differ in width (Claude narrow, xAI wide): a fixed slot keeps every row's text on one left edge. */
