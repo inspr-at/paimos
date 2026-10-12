@@ -506,6 +506,113 @@ class ProbeTest(unittest.TestCase):
         self.assertTrue(any('DELETE FROM account_use_cells' in c.args[0] for c in boundary.sql.call_args_list))
         self.assertEqual(sum(path.startswith('/api/runs/') for path, _ in self.posts), 2)
 
+    # Risk: identity-only bootstrap has no Codex route, and Models v2 deliberately
+    # refuses an empty pool instead of returning the older catalog preview.
+    # Exercise the real HTTP probe from pinned-contract selection through both
+    # pools. Only the disposable SQL boundary is mocked; an early resolve gets
+    # the same HTTP 400 as the published binary in CI.
+    def test_models_release_seeds_a_route_and_proves_both_pool_refusals(self):
+        boundary, ids, state = self.capable_fixture()
+        state['project'] = 'project'
+        self.responses['/api/nodes?parent_id=project&limit=100'] = {'items': [{'id': state['ticket']}]}
+        self.responses['/api/nodes/' + state['ticket']] = {'id': state['ticket']}
+        self.responses['/api/models'] = (200, 'application/json', b'[]')
+        matrix = {'rules': {'revision': 1, 'enforced_at': None},
+                  'accounts': [], 'contexts': [], 'cells': []}
+        self.responses['/api/account-use?limit=1'] = matrix
+        resolve = '/api/models/resolve?role=build&harness=codex'
+        seeded, populated = False, False
+        selections = []
+
+        def resolution():
+            if not seeded:
+                return (400, 'application/json', b'{"error":"role and harness combination is unsupported"}')
+            selections.append((populated, matrix['rules']['enforced_at'] is not None))
+            reason = ("no account allowed for this project's context" if populated
+                      else 'no qualified account with available capacity')
+            return {'profile': None, 'preview': False, 'owner_required': True,
+                    'ladder': [{'profile_id': 'fixture-pin', 'skip_reasons': [reason]}]}
+
+        self.responses[resolve] = resolution
+        fixture_sql = boundary.sql.side_effect
+
+        def sql(statement):
+            nonlocal seeded, populated
+            if 'INSERT INTO model_profiles' in statement:
+                self.assertIn('/api/models', self.requests)
+                self.assertIsNone(matrix['rules']['enforced_at'])
+                self.assertIn("'codex','openai','gpt-6.1-sol','high','strong',true,4", statement)
+                seeded = True
+            if statement.startswith('UPDATE account_use_rules'):
+                matrix['rules']['enforced_at'] = '2026-10-12T00:00:00Z'
+            if 'INSERT INTO agent_accounts' in statement:
+                populated = True
+            return fixture_sql(statement)
+
+        boundary.sql.side_effect = sql
+
+        def pinned_migration(args, **kwargs):
+            self.assertEqual(args[:5], ['git', 'ls-tree', '--name-only', 'models-release', '--'])
+            self.assertEqual(kwargs['timeout'], 15)
+            return Mock(returncode=0, stdout=args[-1] + '\n')
+
+        # account_use probes issue one additional unique missing-route request.
+        ids = [uuid.UUID(int=11)] + ids + [uuid.UUID(int=12)]
+        with patch.object(module.subprocess, 'run', side_effect=pinned_migration) as pinned, \
+             patch.object(module.uuid, 'uuid4', side_effect=ids), \
+             patch.object(module.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            boundary.check(state, '260930115354.0.0', release_tag='models-release')
+        self.assertEqual([call.args[0][-1] for call in pinned.call_args_list], [
+            'internal/db/migrations/1310_account_use_entry_guard.sql',
+            'internal/db/migrations/1333_models_v2_migration.sql'])
+        self.assertEqual(selections, [(False, False), (False, True), (True, True), (True, True)])
+        self.assertEqual(sum('INSERT INTO model_profiles' in call.args[0]
+                             for call in boundary.sql.call_args_list), 1)
+        self.assertEqual(sum('jsonb_build_object' in call.args[0]
+                             for call in boundary.sql.call_args_list), 4)
+        self.assertEqual(sum(path.startswith('/api/runs/') for path, _ in self.posts), 2)
+        self.assertIn('/api/nodes/' + state['ticket'], self.requests)
+
+    def test_models_empty_pool_requires_exact_non_executable_refusal(self):
+        resolve = '/api/models/resolve?role=build&harness=codex'
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
+            'accounts': [], 'parallel_runs': 0, 'wait': {'code': 'offline'}}
+        self.responses['/api/agent-accounts/use?harness=codex&account_id=account'] = (
+            404, 'application/json', b'{"error":"account not found"}')
+        refused = {'profile': None, 'preview': False, 'owner_required': True,
+                   'ladder': [{'profile_id': 'fixture-pin', 'skip_reasons': [
+                       'no qualified account with available capacity']}]}
+        self.responses[resolve] = refused
+        with contextlib.redirect_stdout(io.StringIO()):
+            boundary.selection(False, 'account', models_v2=True)
+            for field, value in (('profile', {'id': 'runnable'}), ('preview', True),
+                                 ('owner_required', False), ('ladder', []),
+                                 ('ladder', [{'skip_reasons': ['offline']}])):
+                self.responses[resolve] = {**refused, field: value}
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(
+                        AssertionError, 'empty Models pool lacks its account refusal'):
+                    boundary.selection(False, 'account', models_v2=True)
+            self.responses[resolve] = {**refused, 'command_template': 'unsafe launch'}
+            with self.assertRaisesRegex(AssertionError, 'activated pool supplied executable material'):
+                boundary.selection(False, 'account', models_v2=True)
+            self.responses[resolve] = (500, 'application/json', b'{"error":"resolve failed"}')
+            with self.assertRaisesRegex(AssertionError, 'models/resolve.*HTTP 500'):
+                boundary.selection(False, 'account', models_v2=True)
+
+    def test_models_contract_lookup_failure_stops_before_fixture_writes(self):
+        boundary, _ids, state = self.capable_fixture()
+        self.responses['/api/account-use?limit=1'] = {
+            'rules': {'revision': 1, 'enforced_at': None},
+            'accounts': [], 'contexts': [], 'cells': []}
+        with patch.object(module.subprocess, 'run', side_effect=[
+                Mock(returncode=0, stdout='internal/db/migrations/1310_account_use_entry_guard.sql\n'),
+                Mock(returncode=128, stdout='')]), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, r'cannot determine the pinned release contract: 1333_models_v2_migration\.sql'):
+                boundary.check(state, '260930115354.0.0', release_tag='missing-models-source')
+        boundary.sql.assert_not_called()
+        self.assertNotIn('/api/models/resolve?role=build&harness=codex', self.requests)
+
     def test_supported_previous_release_rejects_executable_preview(self):
         boundary, ids, state = self.capable_fixture()
         self.responses['/api/models/resolve?role=build&harness=codex'] = {
