@@ -39,7 +39,7 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
+                anyOf:
                   - {$ref: '#/components/schemas/BuildInFlightError'}
                   - {$ref: '#/components/schemas/Error'}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}

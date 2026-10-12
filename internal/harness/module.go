@@ -1303,6 +1303,9 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	if in.ParallelReason != nil && (s.Role != "worker" || in.TicketNodeID == nil) {
 		return nil, workorders.Fail(400, "parallel_reason requires a worker bound to a ticket")
 	}
+	if same(s.TicketNodeID, in.TicketNodeID) && in.ParallelReason != nil && !same(s.ParallelReason, in.ParallelReason) {
+		return nil, workorders.Fail(409, "parallel reason is immutable for this ticket binding")
+	}
 	if in.TicketNodeID == nil {
 		if in.WorkShape != "unknown" {
 			return nil, workorders.Fail(400, "detached ticket needs unknown shape")

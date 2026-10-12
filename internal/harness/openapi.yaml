@@ -140,7 +140,7 @@ paths:
             schema: {$ref: '#/components/schemas/HarnessRegistration'}
       responses:
         '201': {description: Registered or exact active replay}
-        '409': {description: 'Conflicting registration or hierarchy, or build_in_flight for an active builder or unmerged delivery evidence; private values are never returned', content: {application/json: {schema: {oneOf: [{$ref: '../../api/openapi.yaml#/components/schemas/BuildInFlightError'}, {$ref: '../../api/openapi.yaml#/components/schemas/Error'}]}}}}
+        '409': {description: 'Conflicting registration or hierarchy, or build_in_flight for an active builder or unmerged delivery evidence; private values are never returned', content: {application/json: {schema: {anyOf: [{$ref: '../../api/openapi.yaml#/components/schemas/BuildInFlightError'}, {$ref: '../../api/openapi.yaml#/components/schemas/Error'}]}}}}
   /api/projects/{projectId}/harness-sessions/orchestrator:
     get:
       operationId: resolveHarnessOrchestrator

@@ -61,7 +61,7 @@ func NormalizeParallelReason(reason *string) error {
 	if reason == nil {
 		return nil
 	}
-	if !utf8.ValidString(*reason) || utf8.RuneCountInString(*reason) > 500 || strings.ContainsFunc(*reason, unicode.IsControl) {
+	if len(*reason) > 2000 || !utf8.ValidString(*reason) || utf8.RuneCountInString(*reason) > 500 || strings.ContainsFunc(*reason, unicode.IsControl) || strings.ContainsAny(*reason, "\u2028\u2029") {
 		return workorders.Fail(400, "parallel_reason must be 1–500 characters without control characters")
 	}
 	*reason = strings.TrimSpace(*reason)

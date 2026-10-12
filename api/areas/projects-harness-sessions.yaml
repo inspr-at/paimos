@@ -30,7 +30,7 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
+                anyOf:
                   - {$ref: '#/components/schemas/BuildInFlightError'}
                   - {$ref: '#/components/schemas/Error'}
   /projects/{projectId}/harness-sessions/pause:
@@ -97,7 +97,7 @@ paths:
       responses:
         '200': {description: 'Updated public generation', content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '403': {$ref: '#/components/responses/Error'}
-        '409': {description: 'Revision, hierarchy or builder admission conflict', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/BuildInFlightError'}, {$ref: '#/components/schemas/Error'}]}}}}
+        '409': {description: 'Revision, hierarchy or builder admission conflict', content: {application/json: {schema: {anyOf: [{$ref: '#/components/schemas/BuildInFlightError'}, {$ref: '#/components/schemas/Error'}]}}}}
   /projects/{projectId}/harness-sessions/{sessionId}/archive:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

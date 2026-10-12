@@ -318,6 +318,9 @@ func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
 	if err != nil {
 		return err
 	}
+	if err = workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, t.ID, "", nil); err != nil {
+		return err
+	}
 	if v.QueueTargetAgentID == nil && v.QueueRoutedAt == nil {
 		return workorders.Fail(409, "coordinator routing required")
 	}

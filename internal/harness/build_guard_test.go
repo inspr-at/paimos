@@ -146,7 +146,7 @@ func TestTicketParallelBuildRequiresCurrentAuthorityAndAudit(t *testing.T) {
 	expect(t, parent, 201)
 	parallel["parent_harness_session_id"] = decode(t, parent)["id"]
 	expect(t, f.call(f.agent, "POST", base, parallel, ""), 403)
-	for _, reason := range []string{"   ", "line\nbreak", strings.Repeat("x", 501)} {
+	for _, reason := range []string{"   ", "line\nbreak", "line\u2028break", strings.Repeat("x", 501)} {
 		bad := buildRegistration(f, "invalid reason")
 		bad["parallel_reason"] = reason
 		expect(t, f.call(f.person, "POST", base, bad, ""), 400)

@@ -487,7 +487,10 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 		if err = workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil); err != nil {
 			var conflict *workqueue.BuildConflict
 			if errors.As(err, &conflict) {
-				item.Outcome, item.Reason = "active", conflict.Error()
+				item.Outcome, item.Reason = "active", "build in flight"
+				if conflict.Reason == "built_unmerged" {
+					item.Reason = "already built — ship it"
+				}
 				s.Partial = true
 				continue
 			}
