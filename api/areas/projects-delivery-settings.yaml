@@ -7,18 +7,23 @@ paths:
     get:
       operationId: getProjectDeliverySettings
       description: 'Reads effective settings with project overrides over tenant defaults. Requires delivery.read.'
+      parameters:
+        - {name: view, in: query, schema: {type: string, enum: [overrides]}, description: 'With overrides, returns only saved project values; absent values inherit. The default response remains the effective settings.'}
       security: [{session: []}, {agentKey: []}]
       responses:
-        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '200': {description: 'Settings', headers: {ETag: {description: 'Revision of the saved project values for If-Match.', schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
         '403': {$ref: '#/components/responses/Error'}
     put:
       operationId: putProjectDeliverySettings
       description: 'Sets required checks and deadline durations in minutes. Requires delivery.manage; empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
+      parameters:
+        - {name: If-Match, in: header, schema: {type: string, maxLength: 128}, description: 'Optional saved-values ETag; a stale value rejects the write with 412.'}
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
       responses:
-        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '200': {description: 'Effective settings', headers: {ETag: {description: 'Revision of the saved project values for If-Match.', schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '412': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/delivery/metrics:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

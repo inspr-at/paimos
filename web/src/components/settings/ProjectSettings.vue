@@ -16,6 +16,8 @@ import ProjectGeneralSettings from './ProjectGeneralSettings.vue'
 
 const RecurringWorkCard = defineAsyncComponent(() => import('../recurrences/RecurringWorkCard.vue'))
 const ProjectWorkContextCard = defineAsyncComponent(() => import('./ProjectWorkContextCard.vue'))
+const ProjectRepositorySettings = defineAsyncComponent(() => import('./ProjectRepositorySettings.vue'))
+const ProjectDeliveryChecks = defineAsyncComponent(() => import('./ProjectDeliveryChecks.vue'))
 const props = defineProps<{ project: Project }>()
 const route = useRoute(), router = useRouter(), session = useSession()
 const root = ref<HTMLElement>(), navColumn = ref<HTMLElement>(), picker = ref<HTMLButtonElement>()
@@ -45,7 +47,7 @@ function ownsKey(event: KeyboardEvent): boolean {
   const element = overlay.value?.element()
   if (element) return element.contains(event.target as Node)
   // Routines and unrelated menus retain their existing keyboard owner.
-  return (section.value === 'general' || pickerOpen.value) && !!root.value?.contains(event.target as Node)
+  return (section.value === 'general' || section.value === 'delivery' || pickerOpen.value) && !!root.value?.contains(event.target as Node)
     && !document.querySelector('dialog[open], .floating, [role="menu"]')
 }
 const disposeKeys = [
@@ -99,7 +101,7 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
         <ProjectWorkContextCard v-if="contextAllowed" :key="`${owner}/${project.id}`" :project="project" />
         <SettingsCard v-else title="Work context" icon="shield" anchor="project-work-context" variant="project"><p class="owner-line">Owners and admins choose where accounts may work in Settings › Accounts.</p><RouterLink class="link-btn quiet" to="/settings/accounts">Settings › Accounts <AppIcon name="chevron-right" :size="12" /></RouterLink></SettingsCard>
         <div class="owner-links">
-          <p>Lead policy and limits: <RouterLink to="/settings/agents">Settings › Agents <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
+          <p id="lead">Lead policy and limits: <RouterLink to="/settings/agents">Settings <AppIcon name="chevron-right" :size="12" /> Agents <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
           <p>Model choice: <RouterLink to="/settings/models">Settings › Models <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
           <p>Project rules: <RouterLink to="/settings/agent-rules">Settings › Agent rules <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
           <p>Accounts and contexts: <RouterLink to="/settings/accounts">Settings › Accounts <AppIcon name="chevron-right" :size="12" /></RouterLink></p>
@@ -114,9 +116,13 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
         <RouterLink class="link-btn quiet" :to="`/settings/access/projects/${encodeURIComponent(project.id)}`">Settings › Access › Projects <AppIcon name="chevron-right" :size="12" /></RouterLink>
       </SettingsCard>
       <RecurringWorkCard v-else-if="section === 'routines'" :key="`${owner}/${project.id}`" :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" :consent="route.query.consent === '1'" />
-      <!-- P3 mounts the repository and delivery editors in this section. -->
       <slot v-else name="delivery" :project="project">
-        <SettingsCard title="Repository & delivery" icon="link" anchor="repository" variant="project"><template #lead>Pull requests, CI runs and merges for this project.</template><RouterLink class="link-btn quiet" :to="`/p/${encodeURIComponent(project.routeKey)}/delivery`">Open Delivery <AppIcon name="chevron-right" :size="12" /></RouterLink></SettingsCard>
+        <template v-if="can('delivery.read', project.id)">
+          <ProjectRepositorySettings :key="`repository/${owner}/${project.id}`" :project="project" />
+          <ProjectDeliveryChecks :key="`checks/${owner}/${project.id}`" :project="project" />
+          <p class="owner-line">The GitHub App belongs to this workspace’s setup; this page shows only whether it can read the repository.</p>
+        </template>
+        <SettingsCard v-else title="Repository & delivery" icon="link" anchor="repository" variant="project"><p class="owner-line">People with Read delivery permission can see this project’s repository, checks and deadlines.</p></SettingsCard>
       </slot>
     </div>
   </div>

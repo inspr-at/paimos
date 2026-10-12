@@ -29,6 +29,9 @@ export interface Metric {
 export interface MetricSource {
   repository: string; ci_workflow: string; nightly_workflow: string; app_connected: boolean
   backfill: 'not_started' | 'running' | 'done'; backfill_since: string | null; backfill_done_at: string | null; covered_since: string | null
+  last_read_error?: { reason: 'actions_read_missing' | 'not_installed' | 'github_unavailable'; permission: 'actions:read' | null; at: string } | null
+  last_event_at?: string | null
+  retry_at?: string | null
 }
 export interface DeliveryMetrics { project_id: string; generated_at: string; source: MetricSource | null; metrics: Metric[] }
 
