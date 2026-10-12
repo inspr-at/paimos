@@ -2,7 +2,18 @@
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 
+const pendingRequests = new WeakMap<Page, Set<string>>()
+test.afterEach(({ page }, info) => {
+  if (info.status !== info.expectedStatus) console.log(`PERF pending ${JSON.stringify([...(pendingRequests.get(page) ?? [])].slice(0, 40))}`)
+})
+
 async function throttle(page: Page) {
+  const pending = new Set<string>()
+  pendingRequests.set(page, pending)
+  page.on('request', request => pending.add(new URL(request.url()).pathname))
+  page.on('requestfinished', request => pending.delete(new URL(request.url()).pathname))
+  page.on('requestfailed', request => pending.delete(new URL(request.url()).pathname))
+  page.on('pageerror', error => console.log(`PERF page error: ${error.message}`))
   const cdp = await page.context().newCDPSession(page)
   await cdp.send('Network.emulateNetworkConditions', {
     offline: false, latency: 150, downloadThroughput: 200_000, uploadThroughput: 93_750,
