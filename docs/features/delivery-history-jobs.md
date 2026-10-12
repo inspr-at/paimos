@@ -37,6 +37,10 @@ The nullable `delivery_metric_runs.check_suite_id` column (migration 1345) keeps
 that identity through webhook/backfill upserts and reads; it is metadata in the
 DSAR inventory.
 
+Projects apply their workflow filters when metrics are read. Changing a filter
+changes that project's visible samples while existing repository facts keep
+their original workflow identity.
+
 [Installation metadata](https://docs.github.com/en/rest/apps/apps#get-an-installation-for-the-authenticated-app)
 reports the granted permissions. A repository-scoped token requests only
 checks/contents/pull_requests/metadata read, adding Actions read only when already
