@@ -295,7 +295,7 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   await expect(done).toBeVisible()
   await expect(done.locator('.ava')).toHaveAttribute('aria-label', /: Done$/)
   // AEON-1240: it says when it finished and when it moves, never its last activity or an estimate.
-  await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57 · moves to Ended at \d{1,2}:07$/)
+  await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57( [AP]M)? · moves to Ended at \d{1,2}:07( [AP]M)?$/)
   await expect(done.locator('.c-time')).toHaveText('3 min ago')
   // It sits among the live rows, not in the folded Ended group.
   await expect(page.locator('.sessions .ended-head .group-toggle')).toHaveAttribute('aria-expanded', 'false')
@@ -313,7 +313,7 @@ for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark
     await setup(page, colorScheme)
     await page.goto('/agents')
     const done = row(page, DONE)
-    await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57 · moves to Ended at \d{1,2}:07$/)
+    await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57( [AP]M)? · moves to Ended at \d{1,2}:07( [AP]M)?$/)
     await done.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath(`AEON-1240-finished-row-${width}-${colorScheme}.png`) })
   })

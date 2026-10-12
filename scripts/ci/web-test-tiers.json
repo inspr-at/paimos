@@ -1854,6 +1854,10 @@
     ,
     "vitest:tests/live-ticket.unit.test.ts:parent detail aggregate freshness > refetches an open parent after node.updated on an unseen descendant"
     ,
+    "vitest:tests/models-simple.unit.test.ts:one name per model > keeps a name the registry was given, and a line added by hand keeps its own"
+    ,
+    "vitest:tests/models-simple.unit.test.ts:one name per model > names every route of a version alike, whichever name its route, its provider or its raw id carries"
+    ,
     "vitest:tests/recurrence-marker.unit.test.ts:recurring marker copy > covers daily, quarterly, negative monthly days, events and incomplete legacy triggers honestly"
     ,
     "vitest:tests/recurrence-marker.unit.test.ts:recurring marker copy > describes the actual schedule and receipt number in the app language for English and German profiles"
@@ -18017,6 +18021,10 @@
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"Why? for the ticket a person clicked > explains that ticket’s own walk: what it skipped, and where it runs","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"Why? for the ticket a person clicked > says the ticket waits when nothing runs it, and cuts a long walk honestly","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"one name per model > keeps a name the registry was given, and a line added by hand keeps its own","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"one name per model > names every route of a version alike, whichever name its route, its provider or its raw id carries","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"orders and locks > keeps a locked line and a fallback the resolved list omitted","tier":"ESSENTIAL"}
     ,

@@ -95,21 +95,22 @@ const LINE_WORD = /^[a-z]+$/, NAMED_VERSION = /^[0-9]+(?:\.[0-9]{1,2})?$/
 /**
  * The one name of a model (AEON-1240): "GPT-6.1 Sol", "Opus 5.5", "Grok 4.7", never a harness or a profile revision.
  * The picker, the registry rows, the outdated tray and sheet, Routines and the Agents rows all say it this way, so
- * every new view names models through it. Codex's GPT models and Anthropic's models are named from their id, so a
- * route's raw id, a provider's own name ("Claude Opus 5.5") or an alias never changes it; other models by the
- * registry's short name and version, the version said once. A model added by hand keeps the name it was given.
+ * every new view names models through it. The registry's short name and version, the version said once; Codex's GPT
+ * models are named from their id, and so is an Anthropic model the registry gave no name of its own (none, its raw id
+ * or the provider's "Claude Opus 5.5"), so every route of one version reads alike. A name it was given stays.
  */
 export function fullName(profile: RegistryProfile): string {
+  const given = (profile.short_name || profile.display_name || '').trim(), version = profile.model_version?.trim() ?? ''
   if (profile.source !== 'manual') {
     const gpt = profile.harness === 'codex' ? /^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$/.exec(profile.model) : null
     if (gpt) return `GPT-${gpt[1]} ${titled(gpt[2]!)}`
-    if (profile.family === 'anthropic') {
-      const { line, version } = modelLine(profile), word = line.slice(line.indexOf(':') + 1)
-      if (LINE_WORD.test(word) && version === 'alias') return titled(word)
-      if (LINE_WORD.test(word) && NAMED_VERSION.test(version)) return `${titled(word)} ${version}`
+    if (profile.family === 'anthropic' && (!given || given === profile.model || /^claude\b/i.test(given))) {
+      const line = modelLine(profile), word = line.line.slice(line.line.indexOf(':') + 1)
+      if (LINE_WORD.test(word) && line.version === 'alias') return titled(word)
+      if (LINE_WORD.test(word) && NAMED_VERSION.test(line.version)) return `${titled(word)} ${line.version}`
     }
   }
-  const name = (profile.short_name || profile.display_name || profile.model).trim(), version = profile.model_version?.trim() ?? ''
+  const name = given || profile.model
   return version && name !== version && !name.endsWith(` ${version}`) ? `${name} ${version}` : name
 }
 

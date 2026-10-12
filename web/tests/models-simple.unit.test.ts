@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { APIError, api } from '../src/lib/api'
 import {
-  buildEntries, buildRows, cantSentence, groupByProvider, movePin, nearestEffort, nextView, orderWithFirst, pinFirst, reasonText, rulesBody, ticketWhy, unpin, untilText,
+  buildEntries, buildRows, cantSentence, fullName, groupByProvider, movePin, nearestEffort, nextView, orderWithFirst, pinFirst, reasonText, rulesBody, ticketWhy, unpin, untilText,
   type RegistryProfile, type SimpleDocument, type SimpleUnavailable, type TailBoard,
 } from '../src/lib/modelsSimple'
 import { getMembers } from '../src/lib/access'
@@ -188,6 +188,30 @@ describe('the picker: provider → line, newest first, older versions folded', (
     const groups = groupByProvider(many, entry => entry.name.includes('Opus'))
     expect(groups.map(group => [group.label, group.entries.map(entry => entry.name), group.older.map(entry => entry.name)])).toEqual([['Anthropic', ['Opus 5.5'], ['Opus 4.8']]])
     expect(groupByProvider(many, entry => entry.name === 'Grok 4.5').map(group => [group.entries.length, group.older.map(entry => entry.name)])).toEqual([[0, ['Grok 4.5']]])
+  })
+})
+
+// AEON-1240. Risk: one model reads under two names ("Opus 5.5" in the picker, "Claude Opus 5.5" in the registry, the
+// tray or an Agents row) because a route, the provider's catalog or a raw id named it; or a name an admin gave is lost.
+describe('one name per model', () => {
+  const opus = (over: Partial<RegistryProfile>): RegistryProfile => ({ id: 'p', harness: 'claude', family: 'anthropic', model: 'claude-opus-5-5', effort: 'high', tier: 'strong', enabled: true, ...over })
+  it('names every route of a version alike, whichever name its route, its provider or its raw id carries', () => {
+    expect([
+      opus({ display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' }),
+      opus({ display_name: 'Claude Opus 5.5', short_name: 'Claude Opus 5.5' }),
+      opus({ display_name: 'claude-opus-5-5', short_name: 'claude-opus-5-5' }),
+      opus({ display_name: 'Claude Opus', model_version: '5.5' }),
+      opus({ harness: 'pi', model: 'anthropic/claude-opus-5-5' }),
+      opus({ harness: 'cursor', model: 'claude-opus-5.5', display_name: 'Cursor claude-opus-5.5', short_name: 'claude-opus-5.5' }),
+    ].map(fullName)).toEqual(Array(6).fill('Opus 5.5'))
+    expect(fullName(opus({ model: 'opus', display_name: 'Claude Opus', short_name: 'Opus' }))).toBe('Opus')
+    expect(fullName({ ...opus({}), harness: 'codex', family: 'openai', model: 'gpt-6.1-sol', display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1' })).toBe('GPT-6.1 Sol')
+    // The version is said once, also when the registry's name already carries it.
+    expect(fullName({ ...opus({}), harness: 'grok', family: 'xai', model: 'grok-4.7', display_name: 'Grok 4.7', short_name: 'Grok 4.7', model_version: '4.7' })).toBe('Grok 4.7')
+  })
+  it('keeps a name the registry was given, and a line added by hand keeps its own', () => {
+    expect(fullName(opus({ display_name: 'Zephyr', short_name: 'Zephyr', model_version: '5.5' }))).toBe('Zephyr 5.5')
+    expect(fullName(opus({ source: 'manual', display_name: 'Claude Opus via proxy', short_name: 'Claude Opus via proxy' }))).toBe('Claude Opus via proxy')
   })
 })
 
