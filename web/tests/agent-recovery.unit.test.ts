@@ -110,7 +110,7 @@ test('changing diagnosis remains below every session control and tab', async () 
       capability: 'native', capText: capabilityWords.en.native,
       isLead: false, pinned: null, hasQuestion: false, managed: null, s: session,
       interruptReason: '', pauseReason: '', stopReason: '', resumeOffered: false,
-      modelLine: '', leads: { busy: {} }, interrupt: () => {}, pauseOrResume: () => {}, stopSession: () => {}, pinTab: () => {},
+      modelLine: '', leads: { busy: {} }, interrupt: () => {}, pauseOrResume: () => {}, stopSession: () => {}, pinTab: () => {}, closeActions: () => {},
     }) })
     for (const name of ['ManagedSessionControls', 'SessionTabs']) app.component(name, { render: () => Vue.h('button', { 'data-control': name }, name) })
     for (const name of ['AgentGlyph', 'AgentStateLabel', 'AppIcon', 'KeyCap', 'ServiceTierBlock', 'SessionRecovery', 'RemoveSessionDialog', 'FloatingPanel']) app.component(name, { render: () => Vue.h('span') })

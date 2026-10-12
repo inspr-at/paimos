@@ -138,6 +138,11 @@ function selectTab(next: PanelTab) {
   if (route.query.tab !== undefined || route.hash === '#next-up') { const query = { ...route.query }; delete query.tab; void router.replace({ query, hash: '' }) }
 }
 function pinTab() { if (isLead.value) leadPreference.save({ ...leadPreference.value.value, pinned: pinned.value === tab.value ? null : tab.value }, 0) }
+function closeActions(restore: boolean) {
+  const anchor = actionsAnchor.value
+  actionsAnchor.value = null
+  if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
+}
 function showQuestion(id: string) { selectTab('chat'); questionFocus.value = ''; void nextTick(() => { questionFocus.value = id }) }
 watch(() => [s.value?.id, owner.value], async () => {
   const mine = ++opening, selected = s.value, who = owner.value
@@ -307,8 +312,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
             <button type="button" class="btn sm act ghost danger-ghost" aria-label="Stop…" :disabled="!!stopReason" :data-tip="stopReason || 'Stop: opens the confirmation'" @click="stopSession($event.currentTarget as HTMLElement)"><AppIcon name="stop" :size="13" /><span class="act-l">Stop…</span></button>
           </span>
           <button v-if="!reported?.watch" type="button" class="icon-btn sm flat pane-more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" :size="16" /></button>
-          <FloatingPanel v-if="actionsAnchor && !reported?.watch" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null">
-            <div class="panel-menu" role="menu">
+          <FloatingPanel v-if="actionsAnchor && !reported?.watch" :anchor="actionsAnchor" align="end" label="More session actions" @close="closeActions">
+            <div class="panel-menu" role="menu" aria-label="More session actions">
               <button v-if="agentRecovery.action(view.session)" type="button" role="menuitem" class="btn ghost" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); actionsAnchor = null"><AppIcon name="refresh" :size="16" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
               <button v-if="!serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="btn ghost" @click="pickTier(actionsAnchor); actionsAnchor = null"><AppIcon name="gauge" :size="16" />Change tier…</button>
               <button v-if="showRecover" type="button" role="menuitem" class="btn ghost" @click="recovery?.open(actionsAnchor ?? undefined); actionsAnchor = null"><AppIcon name="wrench" :size="16" />Recover</button>
