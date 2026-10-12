@@ -35,6 +35,7 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(pool.Close)
 	checkSettings := func(q interface {
 		QueryRow(context.Context, string, ...any) pgx.Row
 	}, wantStatement, wantLock, wantIdle string) {
@@ -131,8 +132,9 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 			}
 			return nil
 		})
-		if err != nil && !errors.Is(err, sentinel) {
-			t.Fatal(err)
+		if rollback && !errors.Is(err, sentinel) || !rollback && err != nil {
+			conn.Release()
+			t.Fatalf("local budget transaction (rollback=%v): %v", rollback, err)
 		}
 		checkSettings(conn, "1s", "100ms", "1s")
 		conn.Release()
