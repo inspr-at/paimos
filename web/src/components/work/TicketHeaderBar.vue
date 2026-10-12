@@ -75,12 +75,20 @@ onMounted(() => {
   if (!main.value || typeof ResizeObserver === 'undefined') return
   sizing = new ResizeObserver(fit)
   sizing.observe(main.value)
+  // A dragged dock may keep the same width while viewport styles or font
+  // metrics change its controls. Its width observer cannot see that growth.
+  window.addEventListener('resize', fit)
+  document.fonts?.addEventListener('loadingdone', fit)
   // Slot content (Queue's count, Follow) and edit mode change the needed width.
   changes = new MutationObserver(fit)
   changes.observe(main.value, { subtree: true, childList: true, characterData: true })
   fit()
 })
-onBeforeUnmount(() => { sizing?.disconnect(); changes?.disconnect() })
+onBeforeUnmount(() => {
+  sizing?.disconnect(); changes?.disconnect()
+  window.removeEventListener('resize', fit)
+  document.fonts?.removeEventListener('loadingdone', fit)
+})
 const displayIcon = computed<IconName>(() => WORK_ICONS.includes(props.levelIcon as typeof WORK_ICONS[number]) ? props.levelIcon as IconName : props.kind === 'epic' ? 'epic' : props.kind === 'task' ? 'task' : 'ticket')
 const canConvert = computed(() => props.kind !== 'work' && props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
 function focusMore() { moreButton.value?.focus() }
