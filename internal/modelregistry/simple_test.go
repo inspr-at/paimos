@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/linkvault"
@@ -862,7 +863,7 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 						return err
 					}
 					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,prefix,hash,scopes)
- VALUES($1,$2,replace($2::text,'-',''),repeat('e',64),ARRAY['run.claim']) RETURNING id::text`, owner.TenantID, runner).Scan(&key); err != nil {
+ VALUES($1,$2::uuid,replace($2::uuid::text,'-',''),repeat('e',64),ARRAY['run.claim']) RETURNING id::text`, owner.TenantID, runner).Scan(&key); err != nil {
 						return err
 					}
 					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
@@ -932,6 +933,32 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 						}
 						if !found {
 							t.Fatal("resolver omitted the blocked model")
+						}
+						if cause == "host" && reader.ID != member.ID {
+							request := httptest.NewRequest("GET", "/api/agent-accounts/capacity/next?harness=codex", nil)
+							request = request.WithContext(tenant.WithPrincipal(request.Context(), reader))
+							if reader.Kind == tenant.Agent {
+								inRegistry(t, owner, func(tx pgx.Tx) error {
+									_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['models.read','account.read'] WHERE principal_id=$1`, reader.ID)
+									return err
+								})
+								request.Header.Set("Authorization", "Bearer aeon_"+strings.ReplaceAll(reader.ID, "-", "")+"_model-read-fixture")
+							}
+							mux := http.NewServeMux()
+							agentaccounts.New(appPool).Mount(mux)
+							response := httptest.NewRecorder()
+							mux.ServeHTTP(response, request)
+							var advice agentaccounts.CapacityNext
+							if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &advice) != nil || advice.Wait == nil || advice.Wait.Code != "capacity" {
+								t.Fatalf("capacity host wait: %d %s", response.Code, response.Body.String())
+							}
+							wantHost := ""
+							if reader.ID == owner.ID || phase.share {
+								wantHost = "host_signals_stale"
+							}
+							if advice.Wait.HostReason != wantHost {
+								t.Fatalf("aggregate host cause=%q, want %q", advice.Wait.HostReason, wantHost)
+							}
 						}
 						simple := decode[simpleDocument](t, &reader, "GET", "/api/model-preferences/simple?for=default", "", 200)
 						found = false
