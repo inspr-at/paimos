@@ -280,6 +280,7 @@
         "internal/quotepdf/**",
         "internal/deliveryvote/**",
         "internal/workorders/**",
+        "internal/workorders/build_guard.go",
         "internal/nodes/project_lookup.go",
         "internal/nodes/project_lookup_test.go"
       ]

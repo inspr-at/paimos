@@ -42,7 +42,8 @@ and `run`. The server validates current authority using the initiating key
 and live grants inside the fenced write. Existing ownership, lease, exit
 confirmation and queue readiness controls continue to apply.
 
-The guard is `workqueue.RequireBuildAdmissionTx`; its advisory lock is keyed
+The guard is `workorders.RequireBuildAdmissionTx`, also exposed to queue callers
+through `workqueue.RequireBuildAdmissionTx`; its advisory lock is keyed
 by the transaction's RLS tenant and ticket. Migration 1343 adds nullable
 reason/initiator columns and an index for active ticket workers, preserving
 older writers and historical parallel generations. The harness response

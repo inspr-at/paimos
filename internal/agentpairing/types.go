@@ -31,7 +31,6 @@ import (
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/workorders"
-	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -196,7 +195,7 @@ type Error struct {
 func (e *Error) Error() string                    { return e.Message }
 func fail(status int, code, message string) error { return &Error{status, code, message} }
 func WriteError(w http.ResponseWriter, err error) {
-	var conflict *workqueue.BuildConflict
+	var conflict *workorders.BuildConflict
 	if errors.As(err, &conflict) {
 		w.Header().Set("Cache-Control", "no-store")
 		workorders.WriteError(w, conflict)
