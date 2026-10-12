@@ -16,18 +16,22 @@ import uuid
 MISSING_ROUTE = object()
 
 
-def previous_account_use_capable(tag):
-    """The pinned release's embedded entry migration identifies its floor.
-
-    A supported release must pass policy checks; an HTTP error never chooses
-    the legacy branch or turns a broken supported release into a passing gate.
-    """
+def previous_embeds_migration(tag, migration):
+    """Select a released contract from its pinned source, never an HTTP error."""
     result = subprocess.run(['git', 'ls-tree', '--name-only', tag, '--',
-        'internal/db/migrations/1310_account_use_entry_guard.sql'],
+        'internal/db/migrations/' + migration],
         capture_output=True, text=True, timeout=15, check=False)
     if result.returncode:
-        raise AssertionError('cannot determine the pinned release account-use floor')
+        raise AssertionError('cannot determine the pinned release contract: ' + migration)
     return bool(result.stdout.strip())
+
+
+def previous_account_use_capable(tag):
+    """The pinned release's embedded entry migration identifies its floor."""
+    try:
+        return previous_embeds_migration(tag, '1310_account_use_entry_guard.sql')
+    except AssertionError:
+        raise AssertionError('cannot determine the pinned release account-use floor') from None
 
 
 def release_ready(payload):
@@ -174,6 +178,7 @@ CAPABILITY_ERROR = 'account-use capability required: this binary is below the ro
 # Released agentaccounts.ContextSkipReason: the ladder names the whole refusal,
 # never a bare category, so membership must match this exact text.
 CONTEXT_SKIP_REASON = "no account allowed for this project's context"
+NO_ACCOUNT_REASON = 'no qualified account with available capacity'
 
 
 class AccountUseBoundary:
@@ -236,7 +241,8 @@ class AccountUseBoundary:
             if require_refusal:
                 raise AssertionError('legacy refusal boundary unexpectedly supports account_use_v1')
             if release_tag is not None:
-                self.check_policy(state, capable=True)
+                models_v2 = previous_embeds_migration(release_tag, '1333_models_v2_migration.sql')
+                self.check_policy(state, capable=True, models_v2=models_v2)
             self.sql("ALTER SYSTEM SET log_error_verbosity='verbose'; SELECT pg_reload_conf();")
             self.sql(f"UPDATE account_use_rules SET enforced_at=coalesce(enforced_at,clock_timestamp()) WHERE tenant_id='{tenant}';")
             # A capable binary must keep serving the strict seeded reads and
@@ -250,14 +256,19 @@ class AccountUseBoundary:
             return
         self.check_policy(state)
 
-    def selection(self, populated, account):
+    def selection(self, populated, account, *, models_v2=False):
         """Supported releases enforce policy without rejecting every read."""
         path = '/api/models/resolve?role=build&harness=codex'
         resolved = self.probe.call(path)
         if resolved.get('command_template'):
             raise AssertionError(f'{path}: activated pool supplied executable material')
         if not populated:
-            if resolved.get('preview') is not True or not isinstance(resolved.get('profile'), dict):
+            if models_v2:
+                if (resolved.get('profile') is not None or resolved.get('preview', False)
+                    or resolved.get('owner_required') is not True
+                    or not any(NO_ACCOUNT_REASON in item.get('skip_reasons', []) for item in resolved.get('ladder', []))):
+                    raise AssertionError(f'{path}: empty Models pool lacks its account refusal')
+            elif resolved.get('preview') is not True or not isinstance(resolved.get('profile'), dict):
                 raise AssertionError(f'{path}: empty pool is not a catalog-only preview')
         elif (resolved.get('profile') is not None or resolved.get('preview', False)
               or not any(CONTEXT_SKIP_REASON in item.get('skip_reasons', []) for item in resolved.get('ladder', []))):
@@ -272,13 +283,23 @@ class AccountUseBoundary:
             status=409 if populated else 404,
             message='account_not_allowed_for_context' if populated else 'account not found')
 
-    def check_policy(self, state, *, capable=False):
+    def check_policy(self, state, *, capable=False, models_v2=False):
         """Exercise both activated pools before the strict supported reads."""
         self.probe.login()
         me = self.probe.call('/api/me')['principal']
         tenant, owner = str(uuid.UUID(me['tenant_id'])), str(uuid.UUID(me['id']))
         ticket = str(uuid.UUID(state['ticket']))
-        # Prepare an enabled catalog before activation, with no daily settings.
+        # New releases bootstrap identities only. Arrange one explicit pin in
+        # this disposable DB before activation; no account or daily grant is
+        # created. Production discovery must never invent dispatch authority.
+        if models_v2:
+            self.probe.call('/api/models')
+            self.sql(f"""BEGIN;
+                SELECT set_config('aeon.tenant_id','{tenant}',true),set_config('aeon.account_use_capable','on',true);
+                INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level)
+                    VALUES('{tenant}','aeon-compat-codex-build','1','codex','openai','gpt-6.1-sol','high','strong',true,4);
+                COMMIT;""")
+        # Prepare and verify the catalog before activation, with no daily settings.
         self.probe.call('/api/models/resolve?role=build&harness=codex')
         self.sql("ALTER SYSTEM SET log_error_verbosity='verbose'; SELECT pg_reload_conf();")
         agent, account, run, order, request = (str(uuid.uuid4()) for _ in range(5))
@@ -328,7 +349,7 @@ class AccountUseBoundary:
                 (f'/api/agent-pairing/requests/{request}/approve', {'request_digest':'0'*64,'verification':'connect_only','selected_account_keys':['compat']})]
             claim = (f'/api/runs/{run}/claim', {'daemon_id':'compat-daemon','daemon_generation':'compat-generation','reservation_ids':[str(uuid.uuid4())]})
             if capable:
-                self.selection(populated, account)
+                self.selection(populated, account, models_v2=models_v2)
                 self.probe.refused(*writes[0], status=403, message='agent key required')
                 self.probe.refused(*writes[1], status=404, message='pairing not found')
                 runtime.refused(*claim, status=409, message='account daemon generation changed'
