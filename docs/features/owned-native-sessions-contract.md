@@ -149,8 +149,9 @@ The granted R0 rows are applied in this branch:
   auth/cmd, reporter/API ownership and S9 TypeScript ownership cover the rest.
 - The Go tier manifest registers the two native contract tests, the disabled
   route test and `internal/auth:TestNativeRoutesThroughProductionAuthentication`
-  as ESSENTIAL. Both Go shard tables add unmeasured whole-package entries for
-  `nativecontract` and `nativesessions` to shard 2. Auth's existing whole-package
+  as ESSENTIAL. The seven-shard table assigns unmeasured `nativecontract` to
+  shard 2 and `nativesessions` to shard 4; the four-shard table assigns both to
+  shard 2, following the existing LPT balancing rule. Auth's existing whole-package
   entries automatically include its new test.
 - `reportercontract.Current` includes the `native-session` pin derived by
   `NativeSessionPin`; the established pin tool regenerates `pins.json`.

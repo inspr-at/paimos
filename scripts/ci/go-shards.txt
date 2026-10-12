@@ -130,7 +130,6 @@
 2 0 github.com/inspr-at/paimos/internal/inbox TestWebhookPolicy
 2 16 github.com/inspr-at/paimos/internal/localjournal
 2 0 github.com/inspr-at/paimos/internal/nativecontract
-2 0 github.com/inspr-at/paimos/internal/nativesessions
 2 0 github.com/inspr-at/paimos/internal/nodes TestCanonicalRouteFields
 2 230 github.com/inspr-at/paimos/internal/nodes TestConvertWritesOneEventAndUndo
 2 0 github.com/inspr-at/paimos/internal/nodes TestLeadMinutesFollowTheWebRules
@@ -279,6 +278,7 @@
 4 97514 github.com/inspr-at/paimos/internal/journey
 4 6749 github.com/inspr-at/paimos/internal/modelregistry
 4 0 github.com/inspr-at/paimos/internal/modelreport
+4 0 github.com/inspr-at/paimos/internal/nativesessions
 4 212 github.com/inspr-at/paimos/internal/nodes TestConvertDropsFieldsOutsideAClosedSchema
 4 1819 github.com/inspr-at/paimos/internal/nodes TestConvertIssueKindMatrix
 4 265 github.com/inspr-at/paimos/internal/nodes TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants
