@@ -12434,29 +12434,29 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"?tab=messages deep-links to the thread; an ended session starts read on a new browser","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de dark 1024: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile dark 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de dark 1440: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile dark 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de dark 390: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile dark 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de light 1024: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile light 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de light 1440: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile light 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de light 390: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile light 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en dark 1024: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile dark 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en dark 1440: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile dark 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en dark 390: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile dark 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en light 1024: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile light 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en light 1440: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile light 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en light 390: empty chat and queued delivery stay honest and stable","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile light 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

@@ -1199,7 +1199,7 @@ test('AEON-977 empty, offline and no-permission states preserve drafts and contr
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const language of ['en', 'de'] as const) {
- test(`AEON-1254 binding refusal ${language} ${theme} ${width}: empty chat and queued delivery stay honest and stable`, async ({ page }, testInfo) => {
+ test(`AEON-1254 binding refusal ${language} profile ${theme} ${width}: empty chat and queued delivery stay honest and stable`, async ({ page }, testInfo) => {
   const { worker, messages } = await setup(page, { theme, count: 3 })
   await hintStream(page)
   Object.assign(worker, { management_mode: 'unmanaged', activity: 'idle', has_vendor_session_ref: false, inbox_seen_via: null, inbox_binding_error: 'hook_cli_mismatch', advertised_capabilities: ['inbox'] })
@@ -1210,13 +1210,14 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
   if (language === 'de') await page.route('**/api/me/profile', route => route.fulfill({ json: { principal_id: me.id, locale: 'de', avatar_hashes: {}, initials: 'MB', first_name: 'Markus', last_name: 'Barta', preferred_name: 'Markus', short_name: 'markus', timezone: 'Europe/Vienna', greeting_enabled: false, avatar_color: '#888888', week_start: 1, revision: 1 } }))
   await page.setViewportSize({ width, height: 900 })
   await page.goto(`/agents/${worker.id}?tab=messages`)
+  // App controls remain English for a German profile (AEON-998).
   const panel = panelOf(page)
   const live = panel.locator('.binding-error')
-  await expect(live).toContainText(language === 'en' ? 'Live chat isn’t connected' : 'Live-Chat ist nicht verbunden')
-  await expect(live).toContainText(language === 'en' ? 'older or different CLI' : 'ältere oder andere CLI')
+  await expect(live).toContainText('Live chat isn’t connected')
+  await expect(live).toContainText('older or different CLI')
   const row = panel.locator('.queue-item')
   await expect(row).toHaveCount(1)
-  await expect(row.locator('.queue-when')).toContainText(language === 'en' ? 'Can’t be delivered yet' : 'Kann noch nicht zugestellt werden')
+  await expect(row.locator('.queue-when')).toContainText('Can’t be delivered yet')
   const field = panel.locator('.compose textarea')
   await field.fill('Status der Freigabeprüfung')
   const guard = await controlStability(page, { field, send: panel.locator('.send'), edit: row.locator('button').nth(0), cancel: row.locator('button').nth(1), tab: messagesTab(page), frame: panel })
@@ -1224,7 +1225,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
    worker.inbox_binding_error = 'principal_mismatch'
    await signal976(page)
    await page.clock.runFor(21_000)
-   await expect(live).toContainText(language === 'en' ? 'different agent identity' : 'andere Agentenidentität')
+   await expect(live).toContainText('different agent identity')
   })
   await page.screenshot({ path: testInfo.outputPath(`AEON-1254/refused-${language}-${theme}-${width}.png`) })
   await guard.check(async () => {
@@ -1232,10 +1233,10 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
    await signal976(page)
    await page.clock.runFor(21_000)
    await expect(live).toHaveCount(0)
-   await expect(row.locator('.queue-when')).toHaveText(language === 'en' ? 'At its next step' : 'Bei seinem nächsten Schritt')
+   await expect(row.locator('.queue-when')).toHaveText('At its next step')
   })
   guard.done()
-  await expect(panel.getByText(language === 'en' ? 'Start of the conversation' : 'Anfang des Gesprächs', { exact: true })).toHaveCount(0)
+  await expect(panel.getByText('Start of the conversation', { exact: true })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
  })
 }

@@ -306,6 +306,7 @@ paths:
               required: [phase, activity_sequence]
               properties:
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+                inbox_binding_error: {$ref: '../../api/openapi.yaml#/components/schemas/InboxBindingError'}
                 attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
                 phase: {type: string}
                 activity_sequence: {type: integer, minimum: 0}

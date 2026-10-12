@@ -44,6 +44,7 @@ func TestAEON1254GenericHookUsesIndexedAccountAcrossSuccessor(t *testing.T) {
 	// names the successor, not the predecessor, and stdout precedes ack.
 	isolate(t)
 	useIndexHome(t)
+	t.Setenv("HOME", canonicalPrivatePath(os.Getenv("HOME")))
 	var output bytes.Buffer
 	acked, reads := false, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

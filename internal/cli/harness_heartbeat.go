@@ -439,6 +439,10 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 		if err != nil {
 			return err
 		}
+		config, err = filepath.Abs(config)
+		if err != nil {
+			return err
+		}
 		session.disk.HookOrigin = strings.TrimRight(inst.URL, "/")
 		session.disk.HookInstance, session.disk.HookConfig, session.disk.HookPrincipal = inst.Name, config, me.Principal.ID
 		if err := saveHeartbeatSession(&session); err != nil {

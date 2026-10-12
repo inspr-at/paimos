@@ -626,7 +626,7 @@ func TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears(t *testing.T) {
 	beat["inbox_binding_error"] = nil
 	w = f.call(f.agent, "POST", path, beat, lease)
 	expect(t, w, 200)
-	if decode(t, w)["inbox_binding_error"] != nil {
+	if value, exists := decode(t, w)["inbox_binding_error"]; !exists || value != nil {
 		t.Fatal("successful binding did not clear the refusal")
 	}
 	// The daemon's foreign principal cannot gain worker authority from a lease.

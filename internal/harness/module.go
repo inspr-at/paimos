@@ -250,7 +250,7 @@ type Session struct {
 	AdoptedFromID           *string                `json:"adopted_from_id,omitempty"`
 	Controls                []Control              `json:"controls,omitempty"`
 	Watch                   *AttachStatus          `json:"watch,omitempty"`
-	InboxBindingError       *string                `json:"inbox_binding_error,omitempty"`
+	InboxBindingError       *string                `json:"inbox_binding_error"`
 	ProcessOwnership        *ownedprocess.Identity `json:"process_ownership,omitempty"`
 	ProcessObservedAt       *time.Time             `json:"process_observed_at,omitempty"`
 	ArchivedAt              *time.Time             `json:"archived_at"`

@@ -954,7 +954,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
         @keydown.capture="onScrollKey">
         <div class="history-head">
           <button v-if="agents.threadMore[s.id]" type="button" class="earlier" :disabled="historyLoading" @click="earlier">{{ words.older }}</button>
-          <span v-else-if="agents.threadState(s) === 'ready' && messages.length && !bindingReason">{{ words.start }}</span>
+          <span v-else-if="agents.threadState(s) === 'ready' && threadMessages.length && !bindingReason">{{ words.start }}</span>
           <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
         </div>
         <p v-if="bindingReason && !noPermission" class="binding-error" role="status">{{ words.liveDisconnected }}: {{ bindingReason }}</p>
