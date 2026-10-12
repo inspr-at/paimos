@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -114,8 +115,13 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, rollback := range []bool{false, true} {
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		retained := db.WithConnection(dbtest.Seed(ctx), pool, conn)
 		sentinel := errors.New("rollback long SQL budget")
-		err := db.InTenant(dbtest.Seed(ctx), pool, p.TenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(retained, pool, p.TenantID, func(tx pgx.Tx) error {
 			if err := db.SetLocalStatementTimeout(ctx, tx, 2*time.Minute); err != nil {
 				return err
 			}
@@ -128,7 +134,8 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 		if err != nil && !errors.Is(err, sentinel) {
 			t.Fatal(err)
 		}
-		checkSettings(pool, "1s", "100ms", "1s")
+		checkSettings(conn, "1s", "100ms", "1s")
+		conn.Release()
 	}
 
 	// Exercise the actual HTTP stream, whose dedicated LISTEN copies this
@@ -190,7 +197,7 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 	}}
 	deliveryMux := http.NewServeMux()
 	delivery.New(pool, crossreview.AppConfig{ID: "123", InstallationID: "456", TenantID: p.TenantID,
-		Repository: "example/backstops", KeyFile: "unused-fixture.pem"}, nil, reader, nil).Mount(deliveryMux)
+		Repository: "example/backstops", KeyFile: filepath.Join(t.TempDir(), "unused-fixture.pem")}, nil, reader, nil).Mount(deliveryMux)
 	call := func(path, body string, out any) {
 		t.Helper()
 		r := httptest.NewRequest("POST", path, strings.NewReader(body))
@@ -209,6 +216,9 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 	base := "/api/projects/" + project + "/delivery/metrics"
 	var source delivery.MetricSource
 	call(base+"/source", `{"repository":"example/backstops","days":1}`, &source)
+	if !source.AppConnected {
+		t.Fatal("fixture does not configure the fake GitHub reader")
+	}
 	var step delivery.BackfillResult
 	call(base+"/backfill", `{}`, &step)
 	if step.State != "done" || step.Phase != "done" || step.Calls == 0 || step.Truncated {

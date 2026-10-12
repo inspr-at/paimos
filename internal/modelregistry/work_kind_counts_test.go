@@ -31,10 +31,10 @@ func TestWorkKindGroupedCountsPreserveVisibilityAndPagination(t *testing.T) {
 	foreign := makePrincipal(t, "foreign-counts", "person", "Other", []string{"admin"})
 	projects := []string{editorProject(t, p, "COUNT-1"), editorProject(t, p, "COUNT-2")}
 	member := addPrincipal(t, p.TenantID, "person", "Project reader", nil)
-	bindEditorRole(t, p, member, "count-reader", projects[0], []string{"models.read", "projects.read", "nodes.read"})
+	bindEditorRole(t, p, member, "count_reader", projects[0], []string{"models.read", "projects.read", "nodes.read"})
 	// Models.read at workspace permits the list, while project visibility stays
 	// bound to the project's grant above.
-	bindEditorRole(t, p, member, "count-list", "", []string{"models.read"})
+	bindEditorRole(t, p, member, "count_list", "", []string{"models.read"})
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label,project_id)
 			VALUES($1,'local-count','Local one',$2),($1,'local-count','Local two',$3)`, p.TenantID, projects[0], projects[1]); err != nil {
@@ -178,17 +178,19 @@ func explainKindCounts(ctx context.Context, tx pgx.Tx, query string) (countPlan,
 		return countPlan{}, fmt.Errorf("expected one plan, got %d", len(plans))
 	}
 	out := countPlan{Execution: plans[0].Execution, Hits: plans[0].Plan.Hits}
-	var visit func(planNode)
-	visit = func(node planNode) {
+	var visit func(planNode) bool
+	visit = func(node planNode) bool {
+		hasNodes := node.Relation == "nodes"
 		if node.Relation == "nodes" {
 			out.NodeLoops += node.Loops
 		}
-		if node.Type == "Aggregate" {
+		for _, child := range node.Plans {
+			hasNodes = visit(child) || hasNodes
+		}
+		if node.Type == "Aggregate" && hasNodes {
 			out.Aggregates++
 		}
-		for _, child := range node.Plans {
-			visit(child)
-		}
+		return hasNodes
 	}
 	visit(plans[0].Plan)
 	return out, nil
