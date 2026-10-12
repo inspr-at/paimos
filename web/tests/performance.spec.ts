@@ -9,8 +9,13 @@ test.afterEach(({ page }, info) => {
 
 async function throttle(page: Page) {
   const pending = new Set<string>()
+  const panelModules: string[] = []
   pendingRequests.set(page, pending)
-  page.on('request', request => pending.add(new URL(request.url()).pathname))
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname
+    pending.add(path)
+    if (/\/components\/agents\/(?:SessionPanel|SessionChat|ChatLiveBlock)\.vue$/.test(path)) panelModules.push(path)
+  })
   page.on('requestfinished', request => pending.delete(new URL(request.url()).pathname))
   page.on('requestfailed', request => pending.delete(new URL(request.url()).pathname))
   page.on('pageerror', error => console.log(`PERF page error: ${error.message}`))
@@ -26,6 +31,7 @@ async function throttle(page: Page) {
       for (const entry of list.getEntries()) lcp = entry.startTime
     }).observe({ type: 'largest-contentful-paint', buffered: true })
   })
+  return panelModules
 }
 
 async function paint(page: Page) {
@@ -38,7 +44,7 @@ async function paint(page: Page) {
 
 test('cold Projects home has bounded API requests', async ({ page }) => {
   test.setTimeout(60_000)
-  await throttle(page)
+  const panelModules = await throttle(page)
   const calls = await mockWork(page, fixtures({ bigProject: 200 }))
   // The rendered data below is the readiness barrier. Development resources
   // unrelated to these API bounds must not hold navigation open.
@@ -50,11 +56,12 @@ test('cold Projects home has bounded API requests', async ({ page }) => {
   expect(paths.filter(path => path === '/api/projects')).toHaveLength(1)
   expect(paths.filter(path => path === '/api/nodes')).toHaveLength(1)
   expect(paths.filter(path => /^\/api\/nodes\/[^/]+$/.test(path))).toHaveLength(0)
+  expect(panelModules).toEqual([])
 })
 
 test('cold ticket page has bounded API requests', async ({ page }) => {
   test.setTimeout(60_000)
-  await throttle(page)
+  const panelModules = await throttle(page)
   const data = fixtures({ bigProject: 200 })
   const offPagePerson = { id: '33333333-3333-4333-8333-333333333333', name: 'Off-page owner' }
   data.people.push(offPagePerson)
@@ -73,6 +80,7 @@ test('cold ticket page has bounded API requests', async ({ page }) => {
   expect(paths.filter(path => path === '/api/nodes/lookup')).toHaveLength(1)
   expect(paths.filter(path => /^\/api\/nodes\/[^/]+$/.test(path) && path !== '/api/nodes/lookup')).toHaveLength(1)
   expect(paths.filter(path => path === '/api/nodes').length).toBeLessThanOrEqual(4)
+  expect(panelModules).toEqual([])
   const peopleReads = () => calls.filter(call => call.path === '/api/nodes' && call.query.get('facets') === 'assignee')
   expect(peopleReads()).toHaveLength(0)
 

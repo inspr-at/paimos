@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { leadOverlay, resetLeadOverlays } from '../../lib/leadOverlay'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
-import LeadPanel from './LeadPanel.vue'
 import LeadPauseSheet from './LeadPauseSheet.vue'
 import StartLeadSheet from './StartLeadSheet.vue'
+// Session and Chat belong to the opened panel, not every cold app page.
+const LeadPanel = defineAsyncComponent(() => import('./LeadPanel.vue'))
 
 // The app shell's one host for the docked lead panel and the lead sheets, so a
 // ticket preview over any page can open them. Leaving the view that opened an
