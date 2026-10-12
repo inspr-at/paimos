@@ -289,9 +289,9 @@ test('ticket header steps down at every dock width so Close stays inside with a 
           const rect = button.getBoundingClientRect()
           return { name: button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '', left: rect.left, right: rect.right, width: rect.width }
         }).filter(button => button.width > 0)
-        return { left: frame.left, right: frame.right, overflow: el.scrollWidth - el.clientWidth, buttons }
+        return { left: frame.left, right: frame.right, fold: el.parentElement?.dataset.fold, overflow: el.scrollWidth - el.clientWidth, buttons }
       })
-      expect(geometry.overflow, `${key} at ${width}: the header does not overflow`).toBeLessThanOrEqual(0)
+      expect(geometry.overflow, `${key} at ${width}: the header does not overflow (fold ${geometry.fold}, width ${geometry.right - geometry.left})`).toBeLessThanOrEqual(0)
       for (const name of ['Close ticket details', 'More actions', 'Edit']) expect(geometry.buttons.map(b => b.name), `${key} at ${width}: ${name} is shown`).toContain(name)
       for (const button of geometry.buttons) {
         expect(button.left, `${key} at ${width}: ${button.name} starts inside the header`).toBeGreaterThanOrEqual(geometry.left - 0.5)

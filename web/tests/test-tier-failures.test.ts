@@ -32,7 +32,8 @@ if(process.argv.includes('version')) {
   console.log(JSON.stringify({GOOS:'fixture',GOARCH:'fixture',GOFLAGS:'',CGO_ENABLED:'0',GOVERSION:'fixture',GOEXPERIMENT:'',GOWORK:'off'}));
 } else if(process.argv.includes('run')) {
   const tests=JSON.parse(fs.readFileSync(${JSON.stringify(manifest)},'utf8')).tests.map(row=>({...row,active:true}));
-  console.log(JSON.stringify({tests,imports:{}}));
+  const imports=Object.fromEntries([...new Set(tests.map(row=>row.package))].map(owner=>[owner,[]]));
+  console.log(JSON.stringify({tests,imports}));
 } else {
   console.log(JSON.stringify({Action:'build-output',ImportPath:'github.com/inspr-at/paimos/internal/proof',Output:'enumeration fixture failure\\n'}));
   console.log(JSON.stringify({Action:'build-fail',ImportPath:'github.com/inspr-at/paimos/internal/proof'}));
