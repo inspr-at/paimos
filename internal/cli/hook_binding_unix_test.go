@@ -80,6 +80,10 @@ func TestAEON1254GenericHookUsesIndexedAccountAcrossSuccessor(t *testing.T) {
 	if err := writeKey(keyPath(config, "other"), testKey); err != nil {
 		t.Fatal(err)
 	}
+	predecessor := t.TempDir()
+	writeIndexState(t, predecessor, indexOtherID, "Predecessor", "")
+	publishIndex(t, indexSourceID, predecessor)
+	writeIndexState(t, predecessor, indexOtherID, "Predecessor", `"closed":true`)
 	dir := t.TempDir()
 	metadata, _ := json.Marshal(map[string]string{"hook_origin": srv.URL, "hook_instance": "ppm", "hook_config": config, "hook_principal": indexAeonAlt})
 	writeIndexState(t, dir, indexAeonID, "Successor", strings.TrimSuffix(strings.TrimPrefix(string(metadata), "{"), "}"))
