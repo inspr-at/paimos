@@ -4,19 +4,39 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { admissionHistory, openingTab, panelModelLine, panelQueryTab } from '../src/lib/leadPanel.ts'
 import type { LeadDecision } from '../src/lib/lead.ts'
+import { modelNames, sessionExecution } from '../src/components/agents/sessionRow.ts'
+import type { SessionView } from '../src/stores/agents.ts'
 const NOW = Date.parse('2026-10-11T12:00:00Z')
 const input = { lead: true, asksYou: false, held: false, ended: false, workerProblem: false, workerLost: false, pinned: 'session' as const, last: 'lead' as const }
 const report = (patch: Partial<LeadDecision> = {}): LeadDecision => ({ event_id: 1, project_id: 'project', session_id: 'lead', recorded_at: '2026-10-11T10:42:00Z', outcome: 'selected', reason_codes: [], results: [], gate_freshness: ['dial','harness','account_room','host_load'].map(kind => ({ kind: kind as 'dial', freshness: 'fresh' })), request: { stage: 'admission', outcome: 'selected', reason_codes: [], attempt: 1 }, ...patch })
 const read = { complete: true, error: '', sessionStarted: '2026-10-11T09:00:00Z', now: NOW }
 
-test('AEON-1212 fix3: panel model names come from the matching harness registry and never expose an unrecognised identity', () => {
+test('AEON-1249: panel model names and effort match the session row for registered and unlisted models', () => {
   const profiles = [{ id: 'sol', slug: 'sol-medium', harness: 'codex', family: 'openai', model: 'gpt-6-sol', effort: 'medium', tier: 'standard', enabled: true, display_name: 'Sol', model_version: '6' }]
   const session = { harness: 'codex', model: 'gpt-6-sol', reasoning_effort: 'medium' }
-  assert.equal(panelModelLine(session, profiles), 'Sol 6 · medium')
-  assert.equal(panelModelLine({ ...session, model: null }, profiles, 'sol-medium'), 'Sol 6 · medium')
-  assert.equal(panelModelLine({ ...session, model: 'vendor-private-id' }, profiles), 'Model name unavailable · medium')
-  assert.equal(panelModelLine({ ...session, harness: 'claude' }, profiles), 'Model name unavailable · medium')
+  assert.equal(panelModelLine(session, profiles), 'GPT-6 Sol · medium')
+  assert.equal(panelModelLine({ ...session, model: null }, profiles, 'sol-medium'), 'GPT-6 Sol · medium')
+  assert.equal(panelModelLine({ ...session, model: 'gpt-6-sol', reasoning_effort: 'xhigh' }, []), 'GPT-6 Sol · xhigh')
+  assert.equal(panelModelLine({ ...session, model: 'sol-medium', reasoning_effort: null }, profiles), 'GPT-6 Sol · medium')
+  assert.equal(panelModelLine({ ...session, model: 'vendor-private-id' }, profiles), 'Vendor Private Id · medium')
+  assert.equal(panelModelLine({ ...session, harness: 'claude' }, profiles), 'GPT-6 Sol · medium')
   assert.equal(panelModelLine({ ...session, model: null }, profiles), '')
+  // AEON-1249 risk: the same session is named differently after a registry miss,
+  // or its pinned level disappears in Details. Compare the real row projection.
+  const names = modelNames(profiles)
+  for (const [model, harness, effort, fallback] of [
+    ['gpt-6-sol', 'codex', 'xhigh', 'sol-medium'],
+    ['sol-medium', 'codex', '', ''],
+    ['gpt-6.1-sol-xhigh', 'codex', '', ''],
+    ['claude-opus-5-5', 'claude', 'high', ''],
+    ['vendor-private-id', 'codex', 'medium', ''],
+    ['gpt-6-sol', 'claude', '', ''],
+    ['', 'codex', '', 'sol-medium'],
+    ['', 'codex', 'xhigh', ''],
+  ]) {
+    const row = { session: { harness, model, reasoning_effort: effort }, model: fallback } as SessionView
+    assert.equal(panelModelLine(row.session, profiles, row.model), sessionExecution(row, names).modelLine)
+  }
 })
 
 test('AEON-1212: an explicit link wins; a real ask, held start and worker problem win over the pinned default; otherwise default then last used', () => {

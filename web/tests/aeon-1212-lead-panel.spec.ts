@@ -33,6 +33,10 @@ const makeQuestion = (): Question => ({
 async function setup(page: Page, options: { denied?: boolean; question?: boolean; german?: boolean; pinned?: string; last?: string; actions?: boolean; workerMetadata?: { model: string; account: string; computer: string } } = {}) {
   await page.clock.setSystemTime(NOW)
   const world = await mockLeadFlow(page, { lead: 'working', personActions: false, longText: options.german, accountLabels: { claude: 'Claude Max', codex: options.workerMetadata?.account ?? 'ChatGPT Pro' }, hostLabel: options.workerMetadata?.computer })
+  // A synthetic registry model retains the long name under the row's resolver;
+  // canonical GPT ids deliberately display their own public model name.
+  const workerModel = options.workerMetadata ? 'fixture-long-sol' : 'gpt-6-sol'
+  if (options.workerMetadata) world.data.live.find(row => row.role === 'worker')!.model = workerModel
   const lead = world.state.leads['p-pharos']!
   lead.actions = Object.fromEntries(['start', 'resume', 'pause', 'adopt', 'cancel_adoption', 'remove'].map(action => [action, { available: action === 'pause', blocked_reason: action === 'pause' ? '' : 'ordinary_succession_required' }]))
   if (options.actions === false) delete lead.actions
@@ -79,7 +83,7 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   await page.route('**/api/**', route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     if (path === '/api/models') return route.fulfill({ json: [
-      { id: 'sol', slug: 'sol-medium', model: 'gpt-6-sol', display_name: options.workerMetadata?.model ?? 'Sol', model_version: '6', harness: 'codex', family: 'openai', effort: 'medium', tier: 'standard', enabled: true },
+      { id: 'sol', slug: 'sol-medium', model: workerModel, display_name: options.workerMetadata?.model ?? 'Sol', model_version: '6', harness: 'codex', family: 'openai', effort: 'medium', tier: 'standard', enabled: true },
       { id: 'opus', slug: 'opus-high', model: 'Claude Opus 5.5', display_name: 'Opus', model_version: '5.5', harness: 'claude', family: 'anthropic', effort: 'high', tier: 'standard', enabled: true },
     ] })
     // Full-viewport evidence also renders the predecessor's background reads.
@@ -550,6 +554,9 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
     const errors = watchErrors(page), world = await setup(page)
+    // Choose Focus explicitly: its wide details pane exposes the worker's
+    // execution columns, independently of the default Overview split.
+    if (width === 1440) world.data.preferences['agents:layout'] = { handle: 320 }
     const shot = async (state: string, captureWidth = width) => {
       await checkPanel(page, width === 400)
       await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${captureWidth}-${look}.png`) })
@@ -621,15 +628,14 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     const row = panel(page).locator('.worker').first()
     await expect(row.locator('.worker-name')).toHaveText('PHAROS-11 · Connect Hetzner Cloud for managed provisioning')
     await expect(row.locator('.worker-name')).not.toContainText('imac0')
-    await expect(row.locator('.worker-execution')).toContainText('Sol 6 · medium')
+    await expect(row.locator('.worker-execution')).toContainText('GPT-6 Sol · medium')
     await expect(row.locator('.worker-execution')).toContainText('Codex')
     await expect(row.locator('.worker-execution')).toContainText('ChatGPT Pro')
     await expect(row.locator('.worker-computer')).toHaveText('imac0')
     await expect(row.locator('.worker-beat')).not.toHaveText('Not reported')
     await expect(row.locator('.listening-label')).toHaveCount(0)
     await expect(panel(page).locator('.worker-columns [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat'])
-    // The current P4 branch has the predecessor's fixed side panel; Focus and
-    // Overview are P5 layouts. Its own rows must also behave in a wide panel.
+    // The worker's metadata must remain visible in the wide Focus pane.
     if (width === 1440) {
       await page.setViewportSize({ width: 1800, height: 1000 })
       await expect(row.locator('.worker-execution')).toBeVisible()
