@@ -744,7 +744,7 @@
         ,
         {"file":"tests/aeon-1210-agents-tree.spec.ts","listedTests":19,"weightSeconds":54,"weightSource":"remote-one-worker-AEON-1210-24s-plus-margin"}
         ,
-        {"file":"tests/aeon-1211-agents-rows.spec.ts","listedTests":10,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1211-15s-plus-margin"}
+        {"file":"tests/aeon-1211-agents-rows.spec.ts","listedTests":33,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1211-15s-plus-margin"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,

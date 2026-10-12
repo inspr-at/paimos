@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref } from 'vue'
 import { LINGER_MS, RELEASE_MS, frameOf, heldChanges, lingers, movesAt, reordered, settle, useSessionHold, type Structure } from '../src/components/agents/sessionHold'
 import { timeShort, timeText, timeTip, timeValue } from '../src/components/agents/sessionTime'
+import { projectGroups } from '../src/components/agents/sessionGroups'
+import type { ProjectLead } from '../src/lib/lead'
 
 type Row = { id: string; group: string; parent?: string; label?: string }
 const structure: Structure<Row> = {
@@ -191,6 +193,74 @@ describe('a filter match is part of a row\'s place', () => {
     expect(matched()).toEqual([false, true, false])
     hold.follow(['b'])
     expect(hold.matched('b'), 'the person\'s own change follows the newest copy').toBeUndefined()
+  })
+})
+
+describe('project headings share the held session structure', () => {
+  // Risk (fix6): independent lead/queue reads insert a heading above a held session,
+  // although no session id changed and the old pending count stayed zero.
+  function setup() {
+    const live = ref<Row[]>([{ id: 'a', group: 'working', label: 'old activity' }])
+    const pointing = ref(false), timers = manualTimers(), scope = effectScope()
+    const lead = ref<ProjectLead>({ project_id: 'p-pharos', state: 'working', reason: '', revision: 1, generation: 1, session_id: 'a', process_active: true })
+    const queued = ref(0)
+    const layout = {
+      read: (views: readonly Row[]) => projectGroups({
+        roots: views.map(row => ({ view: { session: { id: row.id, project_id: 'p-pharos', role: 'coordinator' }, projectKey: 'PHAROS', projectTitle: 'Pharos' } })),
+        projects: [{ id: 'p-aeon', key: 'AEON', title: 'Aeon' }, { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }],
+        lead: id => id === 'p-pharos' ? { ...lead.value } : { ...lead.value, project_id: id, state: 'none', session_id: null, process_active: false },
+        queued: id => id === 'p-aeon' ? queued.value : 0,
+        lines: true,
+      }).groups,
+      headings: (groups: ReturnType<typeof projectGroups>['groups']) => groups.map(g => ({ id: g.project.id, key: g.line?.kind ?? 'session' })),
+    }
+    const hold = scope.run(() => useSessionHold(() => live.value, structure, () => pointing.value, timers, layout))!
+    return { live, pointing, timers, scope, lead, queued, hold }
+  }
+
+  it('keeps a queued-work heading out until Show now, then holds its departure until release', async () => {
+    const { live, pointing, timers, scope, queued, hold } = setup()
+    try {
+      pointing.value = true; await nextTick()
+      queued.value = 1
+      live.value = [{ ...live.value[0]!, label: 'new activity' }]
+      expect(hold.pending.value, 'the new no-lead heading is a waiting change').toBe(1)
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-pharos'])
+      expect(ids(hold.views.value)).toEqual(['a'])
+      expect(hold.views.value[0]!.label, 'row evidence stays live').toBe('new activity')
+      hold.showNow()
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-aeon', 'p-pharos'])
+      expect(hold.pending.value).toBe(0)
+      queued.value = 0
+      expect(hold.pending.value).toBe(1)
+      pointing.value = false; await nextTick()
+      timers.advance(RELEASE_MS - 1)
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-aeon', 'p-pharos'])
+      timers.advance(1)
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-pharos'])
+      expect(hold.pending.value).toBe(0)
+    } finally { scope.stop() }
+  })
+
+  it('keeps a handover heading out through a cancelled release, then applies it on release', async () => {
+    const { pointing, timers, scope, lead, hold } = setup()
+    try {
+      pointing.value = true; await nextTick()
+      lead.value = { ...lead.value, session_id: 'next-generation', state: 'starting', revision: 2, generation: 2 }
+      expect(hold.pending.value, 'the pending lead heading is a waiting change').toBe(1)
+      expect(hold.layout.value![0]!.line).toBeNull()
+      expect(ids(hold.views.value)).toEqual(['a'])
+      pointing.value = false; await nextTick()
+      timers.advance(RELEASE_MS - 1)
+      pointing.value = true; await nextTick()
+      timers.advance(RELEASE_MS)
+      expect(hold.layout.value![0]!.line).toBeNull()
+      expect(hold.pending.value).toBe(1)
+      pointing.value = false; await nextTick()
+      timers.advance(RELEASE_MS)
+      expect(hold.layout.value![0]!.line?.kind).toBe('pending')
+      expect(hold.pending.value).toBe(0)
+    } finally { scope.stop() }
   })
 })
 

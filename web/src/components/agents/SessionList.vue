@@ -22,7 +22,7 @@ import HarnessOpener from './HarnessOpener.vue'
 import SessionsHeld from './SessionsHeld.vue'
 import { currentActivity, currentStep, workerActivity } from './activity'
 import { timeShort, timeText, timeTip } from './sessionTime'
-import { inFrameOrder, lingers, movesAt, useSessionHold, type Structure } from './sessionHold'
+import { inFrameOrder, lingers, movesAt, useSessionHold, type Heading, type Structure } from './sessionHold'
 import { clockTime } from '../../lib/agentPause'
 import { STATE_LABEL } from '../../lib/agentSignals'
 import ExecutionMark from './ExecutionMark.vue'
@@ -160,7 +160,10 @@ const structure: Structure<SessionView> = {
   match: view => liveMatch.value?.(view) ?? true,
   order: views => placementOrder(views),
 }
-const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (pointing.value || keyFocus.value || menuOpen.value))
+const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (pointing.value || keyFocus.value || menuOpen.value), undefined, {
+  read: projectLayout,
+  headings: layout => layout.headings,
+})
 // Whether a row matches is part of its place: a row the hold keeps keeps the match it froze with,
 // so a refresh that changes it, a new copy or a renamed model alike, waits like any other move.
 const filtering = computed<((view: SessionView) => boolean) | null>(() => {
@@ -225,22 +228,64 @@ const orderedProjects = computed<ProjectRef[]>(() => orderProjects(projectStore.
 const leadOf = (projectId: string | null | undefined) => projectId ? props.projects?.lead(projectId) ?? null : null
 const queuedOf = (projectId: string | null | undefined) => projectId ? props.projects?.queued(projectId) ?? null : null
 // A count from a queue read cut short reads “4+”; a queue that can't be read says so below the list (AEON-1210 G2).
-const qWord = (count: number | null) => queuedWord(count ?? 0, !!props.projects?.queuePartial)
-const qTell = (count: number | null) => `${props.projects?.queuePartial ? 'At least ' : ''}${count ?? 0} queued`
+const qWord = (count: number | null) => count === null ? '?' : queuedWord(count, !!props.projects?.queuePartial)
+const qTell = (count: number | null) => count === null ? 'Queued count unknown' : `${props.projects?.queuePartial ? 'At least ' : ''}${count} queued`
 const sourceQueueNote = computed(() => props.projects ? queueNote(props.projects) : '')
 // Lead lines speak for projects, not sessions: they show while nothing but a project filter narrows the list.
 const lines = computed(() => !showRemoved.value && !!props.projects && !stateFilter.value && !terms.value.length && !facets.value.harness.length && !facets.value.computer.length)
 type Header = 'none' | 'static' | 'toggle' | 'fold'
 interface Section { id: string; header: Header; label: string; note?: string; count: number; roots: Branch[]; project?: ProjectRef; line?: LeadLine | null }
+interface ProjectPlacement { project: ProjectRef; lead: ProjectLead | null; queued: number | null; header: Header; line: LeadLine | null; separate: boolean }
+interface ProjectLayout { projects: ProjectRef[]; placements: Map<string, ProjectPlacement>; headings: Heading[] }
 const liveTally = (branch: Branch): number => Number(countedLive(liveOf(branch.view))) + branch.children.reduce((sum, child) => sum + liveTally(child), 0)
 const liveCount = (roots: Branch[]) => roots.reduce((sum, branch) => sum + liveTally(branch), 0)
 const flatten = (roots: Branch[]): Branch[] => roots.flatMap(branch => [branch, ...flatten(branch.children)])
+// Capture the inputs that place project headings with the sessions, including projects with
+// no session. Counts and lead state are evidence; line kind, membership and order are placement.
+function projectLayout(views: readonly SessionView[], match: (view: SessionView) => boolean): ProjectLayout {
+  const keep = (branch: Branch): boolean => match(branch.view) || branch.children.some(keep)
+  const roots = orderForest(sessionForest([...views], props.now, keptRank), sort.value, props.now, false, names.value).filter(branch => !settled(branch) && keep(branch))
+  const grouped = projectGroups({ roots, projects: orderedProjects.value, lead: leadOf, queued: queuedOf, lines: lines.value, onlyProjects: facets.value.project }).groups
+  const projects = [...orderedProjects.value, ...grouped.map(g => g.project).filter(p => !orderedProjects.value.some(known => known.id === p.id))]
+  const placements = new Map<string, ProjectPlacement>(projects.map(project => {
+    const g = grouped.find(g => g.project.id === project.id), current = leadOf(project.id)
+    const lead = current ? { ...current } : null
+    const line = g?.line ? { ...g.line, lead: { ...g.line.lead } } : null
+    return [project.id, { project, lead, queued: queuedOf(project.id), header: g?.leads || line ? 'none' as const : 'static' as const, line, separate: !!line && (line.kind === 'pending' || !!line.queued) }]
+  }))
+  let headings: Heading[] = []
+  if (group.value === 'project') headings = grouped.map(g => ({ id: `p:${g.project.id}`, key: `${placements.get(g.project.id)!.header}|${g.line?.kind ?? ''}|${g.line?.kind === 'pending' || g.leads ? Number(!!placements.get(g.project.id)!.queued) : ''}` }))
+  else if (group.value === 'lead' || group.value === 'none') {
+    if (group.value === 'lead') {
+      const leads = roots.filter(branch => isLeadRoot(branch, leadOf(branch.view.session.project_id)) || branch.children.length > 0)
+      headings = leads.map(branch => ({ id: `l:${branch.view.session.id}`, key: 'fold' }))
+      if (roots.some(branch => !leads.includes(branch))) headings.push({ id: 'nolead', key: 'fold' })
+    }
+    headings.push(...grouped.filter(g => placements.get(g.project.id)!.separate).map(g => ({ id: `p:${g.project.id}`, key: g.line!.kind })))
+    for (const id of queueHeads(roots, leadOf)) {
+      const root = roots.find(branch => branch.view.session.id === id)!
+      const placement = placements.get(root.view.session.project_id)
+      if (!placement?.line && placement?.queued) headings.push({ id: `q:${id}`, key: 'queue' })
+    }
+  }
+  return { projects, placements, headings }
+}
+const placementLeadOf = (id: string | null | undefined) => id ? hold.layout.value?.placements.get(id)?.lead ?? null : null
+const placementQueuedOf = (id: string | null | undefined) => id ? hold.layout.value?.placements.get(id)?.queued ?? null : null
+const hasQueue = (id: string | null | undefined) => !!placementQueuedOf(id)
+const placementProjects = computed(() => hold.layout.value?.projects ?? orderedProjects.value)
+// Rehydrate the held line's evidence from the newest projection without changing its kind.
+const lineOf = (placement: ProjectPlacement): LeadLine | null => {
+  const line = placement.line
+  if (!line) return null
+  const lead = leadOf(placement.project.id) ?? line.lead
+  return line.kind === 'none' ? { kind: 'none', lead, queued: queuedOf(placement.project.id) } : { kind: 'pending', lead }
+}
 // Grouped by lead or not at all, a project's lead line shows where its current lead has no running session here;
 // a no-lead line only for queued work, since the project's sessions are listed elsewhere.
-function lineSections(live: Branch[]): Section[] {
+function lineSections(): Section[] {
   if (!lines.value) return []
-  return projectGroups({ roots: live, projects: orderedProjects.value, lead: leadOf, queued: queuedOf, lines: true, onlyProjects: facets.value.project }).groups
-    .flatMap(g => g.line && (g.line.kind === 'pending' || g.line.queued) ? [{ id: `p:${g.project.id}`, header: 'none' as const, label: g.project.key, count: 0, roots: [], project: g.project, line: g.line }] : [])
+  return [...(hold.layout.value?.placements.values() ?? [])].flatMap(p => p.separate ? [{ id: `p:${p.project.id}`, header: 'none' as const, label: p.project.key, count: 0, roots: [], project: p.project, line: lineOf(p) }] : [])
 }
 // Freeze the order the chosen grouping actually shows. A project's lead heads its group,
 // even when another root has a more urgent state; starting a hold must not reorder them.
@@ -271,18 +316,21 @@ const sections = computed<Section[]>(() => {
   const out: Section[] = []
   const live = liveRoots.value
   if (group.value === 'project') {
-    const { groups, loose } = projectGroups({ roots: live, projects: orderedProjects.value, lead: leadOf, queued: queuedOf, lines: lines.value, onlyProjects: facets.value.project })
-    for (const g of groups) out.push({ id: `p:${g.project.id}`, header: g.leads || g.line ? 'none' : 'static', label: g.project.key, note: g.project.title, count: liveCount(g.roots), roots: hold.rank.value ? inFrameOrder(g.roots, hold.rank.value, branch => branch.view.session.id) : g.roots, project: g.project, line: g.line })
+    const { groups, loose } = projectGroups({ roots: live, projects: placementProjects.value, lead: placementLeadOf, queued: placementQueuedOf, lines: lines.value, onlyProjects: facets.value.project })
+    for (const g of groups) {
+      const placement = hold.layout.value?.placements.get(g.project.id)
+      out.push({ id: `p:${g.project.id}`, header: placement?.header ?? (g.leads || g.line ? 'none' : 'static'), label: g.project.key, note: g.project.title, count: liveCount(g.roots), roots: hold.rank.value ? inFrameOrder(g.roots, hold.rank.value, branch => branch.view.session.id) : g.roots, project: g.project, line: placement ? lineOf(placement) : g.line })
+    }
     if (loose.length) out.push({ id: 'loose', header: 'static', label: 'No project', note: 'personal and workspace sessions', count: liveCount(loose), roots: loose })
   } else if (group.value === 'lead') {
-    const leads = live.filter(branch => isLeadRoot(branch, leadOf(branch.view.session.project_id)) || branch.children.length > 0)
+    const leads = live.filter(branch => isLeadRoot(branch, placementLeadOf(branch.view.session.project_id)) || branch.children.length > 0)
     for (const branch of leads) out.push({ id: `l:${branch.view.session.id}`, header: 'fold', label: branch.view.name, note: branch.view.projectKey, count: liveCount([branch]), roots: [branch] })
     const rest = live.filter(branch => !leads.includes(branch))
     if (rest.length) out.push({ id: 'nolead', header: 'fold', label: 'No lead', count: liveCount(rest), roots: rest })
-    out.push(...lineSections(live))
+    out.push(...lineSections())
   } else if (group.value === 'none') {
     if (live.length) out.push({ id: 'all', header: 'none', label: '', count: liveCount(live), roots: live })
-    out.push(...lineSections(live))
+    out.push(...lineSections())
   } else {
     // By harness, state or computer each live session joins the group of its own value; a worker
     // whose lead sits in another group starts its own line there.
@@ -329,12 +377,12 @@ const prefRoots = computed(() => {
   const ids = new Set<string>()
   if (showRemoved.value || !['project', 'lead', 'none'].includes(group.value)) return ids
   for (const section of sections.value) if (section.id !== 'ended') for (const root of section.roots) {
-    if (root.view.session.project_id && isLeadRoot(root, leadOf(root.view.session.project_id))) ids.add(root.view.session.id)
+    if (root.view.session.project_id && isLeadRoot(root, placementLeadOf(root.view.session.project_id))) ids.add(root.view.session.id)
   }
   return ids
 })
 // One queue chip per project: on its current lead's row, or on its lead line when no running lead session is here.
-const chipRoots = computed(() => queueHeads(liveRoots.value, leadOf))
+const chipRoots = computed(() => queueHeads(liveRoots.value, placementLeadOf))
 // Parents are open by default; a deeper fold lasts for this visit (AEON-784).
 // A head-count filter forces kept parents open through treeRows' match.
 const isExpanded = (branch: Branch): boolean => {
@@ -390,7 +438,7 @@ function lineTwo(branch: Branch, view: SessionView) {
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.
 const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
-type Row = TreeRow<SessionView> & { view: SessionView; primary: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; leadRoot: boolean; queued: number | null; line: string; sub: number; under: ReturnType<typeof below> }
+type Row = TreeRow<SessionView> & { view: SessionView; primary: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; leadRoot: boolean; queueChip: boolean; queued: number | null; line: string; sub: number; under: ReturnType<typeof below> }
 // Sessions as a tree of any depth (AEON-784): the list decides which children a
 // parent offers and whether it is open; sessionTree lays out the rows.
 function rowsOf(section: Section): Row[] {
@@ -411,7 +459,7 @@ function rowsOf(section: Section): Row[] {
       ...row, view, primary, line, exec: sessionExecution(view, names.value),
       family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
       lead: view.session.role === 'coordinator' || row.branch.children.length > 0,
-      leadRoot, queued: leadRoot && !section.line && chipRoots.value.has(view.session.id) ? queuedOf(view.session.project_id) : null, sub, under,
+      leadRoot, queueChip: leadRoot && !section.line && chipRoots.value.has(view.session.id) && hasQueue(view.session.project_id), queued: queuedOf(view.session.project_id), sub, under,
     }
   })
 }
@@ -958,8 +1006,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
                 <span class="l2"><span class="c-state">{{ pendingWord(section.line.lead) }}</span><span class="l2t" :title="pendingBand(section.line.lead, section.project).status">{{ pendingBand(section.line.lead, section.project).status }}</span></span>
               </span>
             </button>
-            <button v-if="queuedOf(section.project.id)" type="button" class="qchip q-l1" :aria-label="`${qTell(queuedOf(section.project.id))} in ${section.project.key}: open Next up`" :data-tip="`${qWord(queuedOf(section.project.id))} queued · open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(queuedOf(section.project.id)) }}<span class="qw"> queued</span></button>
-            <button v-if="queuedOf(section.project.id)" type="button" class="qchip q-l2" :aria-label="`${qTell(queuedOf(section.project.id))} in ${section.project.key}: open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(queuedOf(section.project.id)) }}<span class="qw"> queued</span></button>
+            <button v-if="hasQueue(section.project.id)" type="button" class="qchip q-l1" :aria-label="`${qTell(queuedOf(section.project.id))} in ${section.project.key}: open Next up`" :data-tip="`${qWord(queuedOf(section.project.id))} queued · open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(queuedOf(section.project.id)) }}<span class="qw"> queued</span></button>
+            <button v-if="hasQueue(section.project.id)" type="button" class="qchip q-l2" :aria-label="`${qTell(queuedOf(section.project.id))} in ${section.project.key}: open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(queuedOf(section.project.id)) }}<span class="qw"> queued</span></button>
           </span>
           <span role="gridcell" class="c-time" />
           <span class="execution-host" role="presentation"><span role="gridcell" class="c-exec" /><span role="gridcell" class="c-host" /></span>
@@ -1009,7 +1057,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             </a>
             </RouterLink>
             <!-- The queue chip opens the lead at Next up: on the title line in the wide table, on the state line in compact rows. -->
-            <button v-if="row.queued" type="button" class="qchip q-l1" :aria-label="`${qTell(row.queued)} in ${row.view.projectKey}: open Next up`" :data-tip="`${qWord(row.queued)} queued · open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(row.queued) }}<span class="qw"> queued</span></button>
+            <button v-if="row.queueChip" type="button" class="qchip q-l1" :aria-label="`${qTell(row.queued)} in ${row.view.projectKey}: open Next up`" :data-tip="`${qWord(row.queued)} queued · open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(row.queued) }}<span class="qw"> queued</span></button>
             <span v-if="row.view.session.stopped_at && row.view.session.handed_over_to_id && !keepsPlace(row.branch.view)" class="lineage">
               <RouterLink :to="`/agents/${row.view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(row.view.session.handed_over_to_id)}`">Handed over to {{ lineageName(row.view.session.handed_over_to_id) }}</RouterLink>
               <button v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]" :aria-label="`Show stopped workers of ${row.view.name}`" @click="toggleStopped(row.branch)">{{ stoppedChildren(row.branch) }} stopped</button>
@@ -1021,7 +1069,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
                 :aria-label="`${history[row.view.session.id] ? 'Hide' : 'Show'} stopped workers of ${row.view.name}: ${stoppedChildren(row.branch)} stopped`" @click="toggleStopped(row.branch)"
               >{{ stoppedChildren(row.branch) }} stopped</button>
             </span>
-            <button v-if="row.queued" type="button" class="qchip q-l2" :aria-label="`${qTell(row.queued)} in ${row.view.projectKey}: open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(row.queued) }}<span class="qw"> queued</span></button>
+            <button v-if="row.queueChip" type="button" class="qchip q-l2" :aria-label="`${qTell(row.queued)} in ${row.view.projectKey}: open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(row.queued) }}<span class="qw"> queued</span></button>
             <RouterLink v-if="row.view.session.adopted_from_id" class="lineage adopted" :to="`/agents/${row.view.session.adopted_from_id}`" :title="`Adopted from ${lineageName(row.view.session.adopted_from_id)}`">Adopted from {{ lineageName(row.view.session.adopted_from_id) }}</RouterLink>
           </span>
           <span role="gridcell" class="right c-time mono-cell" :data-tip="timeTip(row.view, now)"><time :datetime="row.view.session.stopped_at ?? row.view.session.created_at">{{ timeText(row.view, now) }}</time></span>

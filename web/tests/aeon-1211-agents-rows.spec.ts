@@ -11,6 +11,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
+import type { ProjectLead } from '../src/lib/lead'
 
 const NOW = Date.parse('2026-10-11T10:00:00Z')
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString()
@@ -30,10 +31,14 @@ const REGISTRY = [
   line('m-composer', 'cursor-composer-2-5-fast', 'cursor', 'cursor', 'composer-2.5-fast', 'default', 'Composer fast', '2.5'),
 ]
 
-async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
+async function setup(page: Page, theme: 'light' | 'dark' = 'light', headings = false) {
   await page.clock.install({ time: NOW })
   const work = fixtures(); work.preferences.theme = { choice: theme }
   work.preferences['ui.agents.sections'] = { dial: false }
+  if (headings) {
+    work.projects.push({ id: 'p-heading', key: 'AHEAD', title: 'Wiederherstellungsprüfung der Produktionsserver', state: 'active', classic: 'AHEAD', description: '', last: new Date(NOW).toISOString() })
+    work.preferences['projects:order'] = { ids: ['p-heading', 'p-pharos'] }
+  }
   await mockWork(page, work, { admin: true })
   const data = agentData({
     now: NOW, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' },
@@ -509,3 +514,80 @@ test('a model renamed in the registry while the pointer rests never adds or remo
   await expect.poll(matchedIds).toEqual([cursor])
   await expect(row(page, cursor).locator('.exec-model')).toHaveText('Zephyr 2.5')
 })
+
+// Fix6: headings from the shared lead/queue projection belong to the held structure too.
+// A project with no sessions gains queued work; an existing lead hands over before its
+// replacement session arrives. Neither read may insert a row above the pointed session.
+async function headingSetup(page: Page, theme: 'light' | 'dark') {
+  const data = await setup(page, theme, true)
+  // Cross a minute boundary on the first poll, so live time updates are observable.
+  data.sessions[0]!.created_at = ago(71.9)
+  const lead = (id: string, session: string | null = null): ProjectLead => ({ project_id: id, state: session ? 'working' : 'none', reason: '', revision: 1, generation: 1, session_id: session, process_active: !!session, automatic_launch_enabled: true })
+  const leads: Record<string, ProjectLead> = {
+    'p-heading': lead('p-heading'), 'p-pharos': lead('p-pharos', data.sessions[0]!.id), 'p-aeon': lead('p-aeon'), 'p-frozen': lead('p-frozen'),
+  }
+  await page.route(/\/api\/projects\/[^/]+\/lead$/, route => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]!)
+    return leads[id] ? route.fulfill({ json: leads[id] }) : route.fulfill({ status: 404, json: { error: 'not found' } })
+  })
+  const queued = ['p-pharos']
+  await page.route(url => url.pathname === '/api/queue', route => {
+    const project = new URL(route.request().url()).searchParams.get('project_id')
+    const items = queued.map((project_id, i) => ({ node_id: `q-heading-${i}`, project_id, key: `QUEUED-${i + 1}`, title: 'Restore verification', state: 'open', priority: 'normal', estimate_hours: 1,
+      queued: { run_id: `r-heading-${i}`, position: i + 1, by: me, at: ago(1), target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: false, wait_reason: '' },
+    })).filter(item => !project || item.project_id === project)
+    return route.fulfill({ json: { items, count: items.length, manual_order: false, capacity: { queued_hours: items.length, parallel_runs: 4, work_hours: null, warning: false } } })
+  })
+  return { data, leads, queued }
+}
+const headingRows = (page: Page) => page.locator('.sessions .grp').evaluateAll(groups => groups.map(group => ({
+  group: group.getAttribute('aria-label'),
+  rows: [...group.querySelectorAll('[role="row"]')].map(el => el.getAttribute('data-row') ?? (el.classList.contains('nolead') ? `no-lead:${el.getAttribute('data-project')}` : 'heading')),
+})))
+
+for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024, 390]) {
+  for (const update of ['queue', 'handover'] as const) test(`${theme} ${width}: held ${update} headings never add a row or move its controls`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    const errors = watchErrors(page)
+    const { data, leads, queued } = await headingSetup(page, theme)
+    await page.goto('/agents')
+    const first = row(page, data.sessions[0]!.id)
+    const chip = first.locator(width === 390 ? '.qchip.q-l2' : '.qchip.q-l1')
+    await expect(chip).toContainText('1 queued')
+    await expect(page.locator('.sessions .row.nolead[data-project="AHEAD"]')).toHaveCount(0)
+    await expect(page.locator('.sessions [data-row="l:p-pharos"]')).toHaveCount(0)
+    await showList(page)
+    await first.locator('.l2').hover()
+    const before = await headingRows(page), beforeIds = await rowIds(page)
+    const time = first.locator(width === 390 ? '.t-inline' : '.c-time'), beforeTime = await time.innerText()
+    const guard = await rowGuard(page)
+    const controls = await controlStability(page, { name: first.locator('.agent-link'), actions: first.locator('.c-actions'), queue: chip })
+    const updateProjection = async () => {
+      if (update === 'queue') queued.push('p-heading')
+      else leads['p-pharos'] = { ...leads['p-pharos']!, state: 'starting', session_id: WORKER(70), revision: 2, generation: 2 }
+      data.sessions[1]!.current_activity = { text: 'Live activity while headings wait', source: 'auto', at: new Date(NOW).toISOString() }
+      await page.clock.runFor(21_000)
+      await expect(note(page), 'a heading-only change is counted').toContainText('1 change waits')
+      await expect(time, 'time evidence updates during the hold').not.toHaveText(beforeTime)
+      await expect(row(page, data.sessions[1]!.id).locator('.l2t')).toHaveText('Live activity while headings wait')
+      expect(await headingRows(page), 'section and heading membership stay frozen').toEqual(before)
+      expect(await rowIds(page), 'no session or pending lead row arrives').toEqual(beforeIds)
+    }
+    await guard.check(() => controls.check(updateProjection))
+    guard.done(); controls.done()
+    await page.screenshot({ path: info.outputPath(`held-${update}-${width}-${theme}.png`) })
+    const newHeading = page.locator(update === 'queue' ? '.sessions .row.nolead[data-project="AHEAD"]' : '.sessions [data-row="l:p-pharos"]')
+    await expect(newHeading).toHaveCount(0)
+    if (update === 'queue') await note(page).getByRole('button', { name: /Show now$/ }).click()
+    else {
+      await page.mouse.move(700, 8)
+      await page.clock.runFor(1400)
+      await expect(newHeading).toHaveCount(0)
+      await page.clock.runFor(200)
+    }
+    await expect(newHeading, 'the allowed moment applies the heading').toBeVisible()
+    await expect(note(page)).toContainText('Live · updated')
+    expect(errors).toEqual([])
+  })
+}

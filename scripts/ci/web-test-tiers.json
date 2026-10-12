@@ -5650,7 +5650,15 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an ended worker keeps its place among its siblings for 10 minutes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: the approved columns, registry model names, a name-only line 1; listening and tier in the details","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -5658,17 +5666,33 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 390: compact rows open with the harness mark and end with the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 390: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 390: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 400: the approved columns, registry model names, a name-only line 1; listening and tier in the details","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"keyboard focus in a row holds changes like the pointer does","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1024: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1024: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1024: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1440: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1440: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1440: the approved columns, registry model names, a name-only line 1; listening and tier in the details","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1440: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 390: compact rows open with the harness mark and end with the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 390: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 390: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 400: the approved columns, registry model names, a name-only line 1; listening and tier in the details","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -18553,6 +18577,10 @@
     {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > cancels its timer when its scope ends","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > follows the list while nobody points, and holds structure while someone does","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"project headings share the held session structure > keeps a handover heading out through a cancelled release, then applies it on release","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"project headings share the held session structure > keeps a queued-work heading out until Show now, then holds its departure until release","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"the Time column > says running time, time since the end, and since when it rests","tier":"GATED-FULL"}
     ,

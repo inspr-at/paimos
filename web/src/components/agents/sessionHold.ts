@@ -35,6 +35,14 @@ export interface Structure<T> {
   match?: (view: T) => boolean
 }
 
+/** Non-session rows share the session frame's capture, Show now and release. */
+export interface Heading { id: string; key: string }
+export interface HoldLayout<T, L> {
+  read: (views: readonly T[], match: (view: T) => boolean) => L
+  headings: (layout: L) => readonly Heading[]
+}
+const headingStructure: Structure<Heading> = { id: heading => heading.id, key: heading => heading.key, order: headings => headings.map(heading => heading.id) }
+
 export function frameOf<T>(views: readonly T[], structure: Structure<T>): Frame<T> {
   const order = structure.order(views), match = structure.match
   return {
@@ -100,7 +108,7 @@ export function inFrameOrder<B extends { view: unknown; children: B[] }>(branche
   return branches.map(branch => branch.children.length ? { ...branch, children: inFrameOrder(branch.children, rank, id) } : branch).sort((a, b) => at(a) - at(b))
 }
 
-export interface SessionHold<T> {
+export interface SessionHold<T, L = never> {
   /** The views to lay out: the live list, or the frame while it holds. */
   views: ComputedRef<T[]>
   /** The frozen order while it holds. */
@@ -109,6 +117,8 @@ export interface SessionHold<T> {
   pending: ComputedRef<number>
   /** The filter match a held row froze with; undefined while nothing holds it or the person's own change follows it. */
   matched: (id: string) => boolean | undefined
+  /** The section/heading placement captured with the session frame; its evidence stays live. */
+  layout: ComputedRef<L | undefined>
   showNow: () => void
   /** The person's own changes (a removal, a move) apply at once. */
   follow: (ids: Iterable<string>) => void
@@ -119,23 +129,45 @@ export interface HoldTimers { set: (run: () => void, ms: number) => unknown; cle
 // Called as functions, never as methods: a browser's setTimeout refuses another `this`.
 const browserTimers: HoldTimers = { set: (run, ms) => setTimeout(run, ms), clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) }
 
-export function useSessionHold<T>(live: () => readonly T[], structure: Structure<T>, holding: () => boolean, timers: HoldTimers = browserTimers): SessionHold<T> {
+export function useSessionHold<T, L = never>(live: () => readonly T[], structure: Structure<T>, holding: () => boolean, timers: HoldTimers = browserTimers, layout?: HoldLayout<T, L>): SessionHold<T, L> {
   const frame = shallowRef<Frame<T> | null>(null)
+  const heldLayout = shallowRef<{ value: L; headings: Frame<Heading> } | null>(null)
   const follows = shallowRef<ReadonlySet<string>>(new Set())
   let release: unknown
   const cancel = () => { if (release !== undefined) timers.clear(release); release = undefined }
-  function reset() { cancel(); frame.value = null; follows.value = new Set() }
-  function showNow() { follows.value = new Set(); frame.value = holding() ? frameOf(live(), structure) : null }
+  const liveMatch = (view: T) => structure.match?.(view) ?? true
+  function capture() {
+    const views = live()
+    if (layout) {
+      const value = layout.read(views, liveMatch)
+      heldLayout.value = { value, headings: frameOf(layout.headings(value), headingStructure) }
+    } else heldLayout.value = null
+    frame.value = frameOf(views, structure)
+  }
+  function reset() { cancel(); frame.value = null; heldLayout.value = null; follows.value = new Set() }
+  function showNow() { follows.value = new Set(); if (holding()) capture(); else reset() }
   watch(holding, held => {
-    if (held) { cancel(); if (!frame.value) frame.value = frameOf(live(), structure) }
+    if (held) { cancel(); if (!frame.value) capture() }
     else if (frame.value && release === undefined) release = timers.set(() => { release = undefined; if (!holding()) reset() }, RELEASE_MS)
   }, { immediate: true })
   onScopeDispose(cancel)
   return {
     views: computed(() => frame.value ? settle(frame.value, live(), structure, follows.value) : [...live()]),
     rank: computed(() => frame.value?.rank ?? null),
-    pending: computed(() => frame.value ? heldChanges(frame.value, live(), structure, follows.value).size : 0),
+    pending: computed(() => {
+      if (!frame.value) return 0
+      const views = live(), changed = heldChanges(frame.value, views, structure, follows.value)
+      if (layout && heldLayout.value) {
+        // Compare headings on the placed sessions: an arriving/departing session is already
+        // counted above. A lead or queue read that inserts a heading is a separate change.
+        const placed = settle(frame.value, views, structure, follows.value)
+        const match = (view: T) => follows.value.has(structure.id(view)) ? liveMatch(view) : frame.value!.matches.get(structure.id(view)) ?? liveMatch(view)
+        for (const id of heldChanges(heldLayout.value.headings, layout.headings(layout.read(placed, match)), headingStructure)) changed.add(`heading:${id}`)
+      }
+      return changed.size
+    }),
     matched: id => frame.value && !follows.value.has(id) ? frame.value.matches.get(id) : undefined,
+    layout: computed(() => heldLayout.value?.value ?? layout?.read(live(), liveMatch)),
     showNow,
     follow(ids) { if (frame.value) follows.value = new Set([...follows.value, ...ids]) },
     reset,
