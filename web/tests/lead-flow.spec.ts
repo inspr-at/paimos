@@ -33,6 +33,9 @@ test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls 
   })
   for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1100 })
+    // The focus refresh starts after the nested responsive containers paint;
+    // a viewport transition is a separate interaction from the held reread.
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
     const guard = await controlStability(page, { aeon: rows.nth(0), pharos: rows.nth(1) })
     for (const look of ['light', 'dark'] as const) {
       await theme(page, look)

@@ -59,11 +59,12 @@ onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() =
 // the wide-only actions (also in More), then the position, then Queue's word,
 // then Edit's word (its aria-label keeps the name; tablet docks need it), then
 // the Unsaved word, which becomes a dot while screen readers keep the word.
-// Each fit starts unfolded and runs synchronously inside the observer callback,
-// so nothing paints in between; folding never changes the bar's own width, so
-// it cannot oscillate. data-fold is outside Vue's class patching.
+// Each fit starts unfolded and measures synchronously. One bounded next-frame
+// confirmation covers viewport/container styles that settle after an observer.
+// Folding never changes the bar's width; data-fold is outside Vue's class patching.
 const main = ref<HTMLElement>()
 let sizing: ResizeObserver | undefined, changes: MutationObserver | undefined
+let fitFrame = 0
 function fit() {
   const el = main.value, bar = el?.parentElement
   if (!el || !bar) return
@@ -71,23 +72,28 @@ function fit() {
   bar.dataset.fold = '0'
   while (level < 5 && el.clientWidth > 0 && el.scrollWidth > el.clientWidth) bar.dataset.fold = String(++level)
 }
+function refit() {
+  fit()
+  if (!fitFrame) fitFrame = requestAnimationFrame(() => { fitFrame = 0; fit() })
+}
 onMounted(() => {
   if (!main.value || typeof ResizeObserver === 'undefined') return
-  sizing = new ResizeObserver(fit)
+  sizing = new ResizeObserver(refit)
   sizing.observe(main.value)
   // A dragged dock may keep the same width while viewport styles or font
   // metrics change its controls. Its width observer cannot see that growth.
-  window.addEventListener('resize', fit)
-  document.fonts?.addEventListener('loadingdone', fit)
+  window.addEventListener('resize', refit)
+  document.fonts?.addEventListener('loadingdone', refit)
   // Slot content (Queue's count, Follow) and edit mode change the needed width.
-  changes = new MutationObserver(fit)
-  changes.observe(main.value, { subtree: true, childList: true, characterData: true })
-  fit()
+  changes = new MutationObserver(refit)
+  changes.observe(main.value, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] })
+  refit()
 })
 onBeforeUnmount(() => {
   sizing?.disconnect(); changes?.disconnect()
-  window.removeEventListener('resize', fit)
-  document.fonts?.removeEventListener('loadingdone', fit)
+  window.removeEventListener('resize', refit)
+  document.fonts?.removeEventListener('loadingdone', refit)
+  if (fitFrame) cancelAnimationFrame(fitFrame)
 })
 const displayIcon = computed<IconName>(() => WORK_ICONS.includes(props.levelIcon as typeof WORK_ICONS[number]) ? props.levelIcon as IconName : props.kind === 'epic' ? 'epic' : props.kind === 'task' ? 'task' : 'ticket')
 const canConvert = computed(() => props.kind !== 'work' && props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
