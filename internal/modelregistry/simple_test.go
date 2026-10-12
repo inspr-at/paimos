@@ -866,18 +866,21 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
  VALUES($1,$2::uuid,'Host regression',replace($2::uuid::text,'-',''),repeat('e',64),ARRAY['run.claim']) RETURNING id::text`, owner.TenantID, runner).Scan(&key); err != nil {
 						return err
 					}
-					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
- VALUES($1,'864864864',repeat('e',64),repeat('e',64),repeat('e',64),'{"platform":"darwin","arch":"arm64"}',repeat('e',64),'redeemed',$2) RETURNING id::text`, owner.TenantID, owner.ID).Scan(&request); err != nil {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),'864864864',repeat('e',64),repeat('e',64),repeat('e',64),'{"platform":"darwin","arch":"arm64"}',repeat('e',64),'redeemed',$2) RETURNING id::text`, owner.TenantID, owner.ID).Scan(&request); err != nil {
 						return err
 					}
 					policy := hostcapacity.Default()
 					policy.Mode = "fixed"
-					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,state,capacity_policy)
- VALUES($1,$2,$3,$4,'minimal',repeat('e',64),'connected',$5) RETURNING id::text`, owner.TenantID, request, runner, key, policy).Scan(&computer); err != nil {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,state,capacity_policy)
+ VALUES($1,gen_random_uuid(),$2,$3,$4,'minimal',repeat('e',64),'connected',$5) RETURNING id::text`, owner.TenantID, request, runner, key, policy).Scan(&computer); err != nil {
 						return err
 					}
-					_, err = tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,state,ongoing_approved_at)
- VALUES($1,$2,$3,$4,$5,'connected',now())`, owner.TenantID, account, computer, request, sol.ID)
+					if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_requests SET computer_id=$2 WHERE id=$1`, request, computer); err != nil {
+						return err
+					}
+					_, err = tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,state,verification_expires_at,ongoing_approved_at)
+ VALUES($1,$2,$3,$4,$5,'connected',now()+interval '1 hour',now())`, owner.TenantID, account, computer, request, sol.ID)
 					return err
 				}
 				// Unknown quota with the next band two days away keeps this
