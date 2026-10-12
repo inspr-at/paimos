@@ -78,6 +78,8 @@ people with current session-read authority. `PersonProjection` strips the URL
 and terminal/Expert/take capabilities for agents; the transport must enforce the
 same policy. The disabled module returns server-side `403/wrong_principal` for
 agent terminal requests and end-control requests.
+Private paired-daemon publication is a producer operation, distinct from viewer
+access; publishing a qualified frame never grants the paired agent a PTY stream.
 
 `POST /api/sessions/{id}/control/end` is reserved for a person who owns the
 session or administers its project. Its exact binding, controller epoch and

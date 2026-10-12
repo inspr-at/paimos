@@ -579,7 +579,8 @@ func (v *Validator) ValidateBoundJSON(name string, data []byte, ctx ValidationCo
 	visit = func(value any) error {
 		switch item := value.(type) {
 		case map[string]any:
-			if item["terminal_viewer_url"] != nil && ctx.PrincipalKind != "person" {
+			publisher := name == "NativePublish" && ctx.Private && ctx.PrincipalKind == "agent"
+			if item["terminal_viewer_url"] != nil && ctx.PrincipalKind != "person" && !publisher {
 				return invalid(ReasonWrongPrincipal, "$.terminal_viewer_url")
 			}
 			for _, field := range []string{"binding", "expected_binding", "current_binding"} {
@@ -628,7 +629,7 @@ func (v *Validator) ValidateBoundJSON(name string, data []byte, ctx ValidationCo
 			field = "items"
 		}
 		for _, event := range value.(map[string]any)[field].([]any) {
-			if err := validateStreamAccess(event.(map[string]any)["kind"].(string), ctx); err != nil {
+			if err := validateFrameAccess(event.(map[string]any)["kind"].(string), ctx, name == "NativePublish"); err != nil {
 				return err
 			}
 		}
@@ -678,9 +679,18 @@ func validateOperationAccess(name string, ctx ValidationContext) error {
 }
 
 func validateStreamAccess(kind string, ctx ValidationContext) error {
+	return validateFrameAccess(kind, ctx, false)
+}
+
+func validateFrameAccess(kind string, ctx ValidationContext, publisher bool) error {
 	terminal := kind == "terminal" || ctx.View == "terminal"
 	expert := kind == "expert" || ctx.View == "expert"
-	if (terminal || expert) && ctx.PrincipalKind != "person" {
+	// A paired daemon can PRODUCE a qualified terminal frame under private
+	// publication authority. That never permits an agent to RECEIVE a stream.
+	if publisher && (!ctx.Private || ctx.PrincipalKind != "agent") {
+		return invalid(ReasonWrongPrincipal, "$")
+	}
+	if !publisher && (terminal || expert) && ctx.PrincipalKind != "person" {
 		return invalid(ReasonWrongPrincipal, "$")
 	}
 	if ctx.Capabilities == nil {

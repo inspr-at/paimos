@@ -122,6 +122,11 @@ func TestNativeContractRejectsUnsafeWire(t *testing.T) {
 			requireReason(t, v.ValidateBoundJSON(tc.schema, wire(t, tc.value), ctx), tc.reason)
 		})
 	}
+	// Negative control: the stale input still passes shape-only validation.
+	// Thus the wrong-runtime assertion depends on the exact-binding guard.
+	if err := v.ValidateJSON("NativeInput", wire(t, wrong)); err != nil {
+		t.Fatalf("wrong-runtime fixture fails for an unrelated shape reason: %v", err)
+	}
 
 	t.Run("unsupported capability", func(t *testing.T) {
 		limited := caps
@@ -202,6 +207,12 @@ func TestNativeContractRejectsUnsafeWire(t *testing.T) {
 		c.State = "taken"
 		c.View = "terminal"
 		c.Capabilities = &terminalCaps
+		requireReason(t, v.ValidateBoundJSON("NativeStreamEvent", wire(t, terminal), c), nativecontract.ReasonWrongPrincipal)
+		c.Private = true
+		publication := nativecontract.Publish{RequestID: testID, ExpectedBinding: b, Events: []nativecontract.StreamEvent{terminal}, Snapshot: nil}
+		if err := v.ValidateBoundJSON("NativePublish", wire(t, publication), c); err != nil {
+			t.Fatalf("private paired producer cannot publish: %v", err)
+		}
 		requireReason(t, v.ValidateBoundJSON("NativeStreamEvent", wire(t, terminal), c), nativecontract.ReasonWrongPrincipal)
 		viewerURL := "https://viewer.example.test/session"
 		projected := nativecontract.PersonProjection(nativecontract.SessionView{TerminalViewerURL: &viewerURL, Capabilities: terminalCaps}, "agent", true)
