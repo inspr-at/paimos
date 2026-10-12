@@ -5486,6 +5486,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestDataMigrationsAsAppOwner","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestDatabaseBackstopsConcurrentFirstStarts","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestDatabaseBackstopsPreserveStreamsAndBackfill","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestDisplayWordsMigrationPreservesExistingEditsAndTenantIsolation","tier":"ESSENTIAL"}

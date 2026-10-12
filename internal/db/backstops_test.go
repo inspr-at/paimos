@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,140 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Risk: simultaneous first starts insert or update the same role/database
+// catalogue row before the migration lock, aborting startup. An uncommitted
+// catalogue write and PostgreSQL's blocking graph establish both installers'
+// overlap before release, for both an absent row and an existing tuning row.
+func TestDatabaseBackstopsConcurrentFirstStarts(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		name := "insert"
+		if existing {
+			name = "update"
+		}
+		t.Run(name, func(t *testing.T) {
+			d := dbtest.Open(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			setting := `ALTER ROLE ` + pgx.Identifier{d.Role}.Sanitize() + ` IN DATABASE ` +
+				pgx.Identifier{d.Name}.Sanitize() + ` SET jit = 'off'`
+			if existing {
+				if _, err := d.Admin.Exec(ctx, setting); err != nil {
+					t.Fatal(err)
+				}
+			}
+			holder, err := d.Admin.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			type opened struct {
+				pool *pgxpool.Pool
+				err  error
+			}
+			done := make(chan opened, 2)
+			pending := 0
+			defer func() {
+				cancel()
+				cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				_ = holder.Rollback(cleanup)
+				for pending > 0 {
+					result := <-done
+					pending--
+					if result.pool != nil {
+						result.pool.Close()
+					}
+				}
+			}()
+			if _, err := holder.Exec(ctx, setting); err != nil {
+				t.Fatal(err)
+			}
+			var holderPID int
+			if err := holder.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+				t.Fatal(err)
+			}
+			start := func() {
+				pending++
+				go func() {
+					pool, err := db.Open(ctx, d.AppURL)
+					done <- opened{pool, err}
+				}()
+			}
+			poll := time.NewTicker(10 * time.Millisecond)
+			defer poll.Stop()
+			waitForBlocked := func(want int) {
+				t.Helper()
+				for {
+					var blocked int
+					// The second start waits behind either the catalogue writer
+					// or the first installer's advisory fence. Follow both paths.
+					if err := d.Admin.QueryRow(ctx, `WITH RECURSIVE waiting(pid) AS (
+						SELECT pid FROM pg_stat_activity WHERE $1::int=ANY(pg_blocking_pids(pid))
+						UNION
+						SELECT a.pid FROM pg_stat_activity a JOIN waiting w ON w.pid=ANY(pg_blocking_pids(a.pid))
+					) SELECT count(*) FROM waiting w JOIN pg_stat_activity a USING(pid)
+					WHERE a.datname=current_database() AND a.usename=$2 AND a.wait_event_type='Lock'`, holderPID, d.Role).Scan(&blocked); err != nil {
+						t.Fatalf("observe concurrent starts: %v", err)
+					}
+					if blocked == want {
+						return
+					}
+					select {
+					case result := <-done:
+						pending--
+						if result.pool != nil {
+							result.pool.Close()
+						}
+						t.Fatalf("start finished before %d installers overlapped at the catalogue barrier: %v", want, result.err)
+					case <-ctx.Done():
+						t.Fatalf("catalogue barrier saw %d blocked starts, want %d: %v", blocked, want, ctx.Err())
+					case <-poll.C: // Pacing only; the blocking graph proves overlap.
+					}
+				}
+			}
+			start()
+			waitForBlocked(1)
+			start()
+			waitForBlocked(2)
+			if err := holder.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for pending > 0 {
+				var result opened
+				select {
+				case result = <-done:
+					pending--
+				case <-ctx.Done():
+					t.Fatalf("concurrent starts did not finish after catalogue release: %v", ctx.Err())
+				}
+				if result.err != nil {
+					t.Errorf("concurrent first start: %v", result.err)
+					continue
+				}
+				defer result.pool.Close()
+				var statement, lock, idle string
+				if err := result.pool.QueryRow(ctx, `SELECT current_setting('statement_timeout'), current_setting('lock_timeout'),
+					current_setting('idle_in_transaction_session_timeout')`).Scan(&statement, &lock, &idle); err != nil {
+					t.Fatal(err)
+				}
+				if statement != "30s" || lock != "5s" || idle != "30s" {
+					t.Errorf("concurrent start budgets = %s/%s/%s, want 30s/5s/30s", statement, lock, idle)
+				}
+			}
+			var settings []string
+			if err := d.Admin.QueryRow(ctx, `SELECT s.setconfig FROM pg_db_role_setting s
+				JOIN pg_database d ON d.oid=s.setdatabase JOIN pg_roles r ON r.oid=s.setrole
+				WHERE d.datname=current_database() AND r.rolname=$1`, d.Role).Scan(&settings); err != nil {
+				t.Fatal(err)
+			}
+			if existing && !slices.Contains(settings, "jit=off") {
+				t.Errorf("concurrent starts lost existing role/database tuning: %v", settings)
+			}
+		})
+	}
+}
 
 // Risk: SQL or abandoned transactions pin connections indefinitely, while a
 // global timeout kills SSE or prevents delivery history from committing after
