@@ -12,6 +12,7 @@ import { toast } from './lib/toast'
 import { announceAttachCode, attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
 import { scopeOwner } from './lib/identityScope'
 import { expiredSignIn, takeSignInReturn } from './lib/signInReturn'
+import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import { DOCK_MEDIA, isKnowledgeType, parseEntryParam } from './lib/knowledge'
@@ -25,7 +26,7 @@ const RouteMarker = defineComponent({ name: 'RouteMarker', render: () => null })
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: () => import('./views/ProjectsView.vue'), meta: { title: 'Projects' } },
+    { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
     { path: '/briefing', redirect: '/agents' },
     { path: '/activity', component: () => import('./views/ActivityView.vue'), meta: { title: 'Activity' } },
     // One record for the project page: its list, the open ticket and its Knowledge

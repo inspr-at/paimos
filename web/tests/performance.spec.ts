@@ -2,34 +2,16 @@
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 
-const pendingRequests = new WeakMap<Page, Set<string>>()
-const networkDiagnostics = new WeakMap<Page, { received: number; finished: number; responses: string[] }>()
-test.afterEach(({ page }, info) => {
-  if (info.status !== info.expectedStatus) {
-    console.log(`PERF pending ${JSON.stringify([...(pendingRequests.get(page) ?? [])].slice(0, 40))}`)
-    console.log(`PERF network ${JSON.stringify(networkDiagnostics.get(page))}`)
-  }
-})
-
 async function throttle(page: Page) {
-  const pending = new Set<string>()
   const panelModules: string[] = []
-  pendingRequests.set(page, pending)
   page.on('request', request => {
     const path = new URL(request.url()).pathname
-    pending.add(path)
-    if (/\/components\/(?:agents\/(?:SessionPanel|SessionChat|ChatLiveBlock)|lead\/(?:LeadPanel|LeadPauseSheet|StartLeadSheet))\.vue$/.test(path)) panelModules.push(path)
+    // Cover both the dev source graph and the bundled performance build.
+    const source = /\/components\/(?:agents\/(?:SessionPanel|SessionChat|ChatLiveBlock)|lead\/(?:LeadPanel|LeadPauseSheet|StartLeadSheet))\.vue$/.test(path)
+    const bundle = /\/assets\/(?:SessionPanel|SessionChat|ChatLiveBlock|LeadPanel|LeadPauseSheet|StartLeadSheet)-[^/]+\.js$/.test(path)
+    if ((source || bundle) && panelModules.length < 12) panelModules.push(path)
   })
-  page.on('requestfinished', request => pending.delete(new URL(request.url()).pathname))
-  page.on('requestfailed', request => pending.delete(new URL(request.url()).pathname))
-  page.on('pageerror', error => console.log(`PERF page error: ${error.message}`))
   const cdp = await page.context().newCDPSession(page)
-  const diagnostic = { received: 0, finished: 0, responses: [] as string[] }
-  networkDiagnostics.set(page, diagnostic)
-  await cdp.send('Network.enable')
-  cdp.on('Network.dataReceived', event => { diagnostic.received += event.dataLength })
-  cdp.on('Network.loadingFinished', () => { diagnostic.finished++ })
-  cdp.on('Network.responseReceived', event => { if (diagnostic.responses.length < 20) diagnostic.responses.push(`${event.response.status} ${new URL(event.response.url).pathname}`) })
   await cdp.send('Network.emulateNetworkConditions', {
     offline: false, latency: 150, downloadThroughput: 200_000, uploadThroughput: 93_750,
   })
@@ -56,8 +38,7 @@ test('cold Projects home has bounded API requests', async ({ page }) => {
   test.setTimeout(60_000)
   const panelModules = await throttle(page)
   const calls = await mockWork(page, fixtures({ bigProject: 200 }))
-  // The rendered data below is the readiness barrier. Development resources
-  // unrelated to these API bounds must not hold navigation open.
+  // Rendered project data is the readiness barrier for these API bounds.
   await page.goto('/', { waitUntil: 'commit' })
   await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link')).toHaveCount(3, { timeout: 30_000 })
   const timings = await paint(page)
