@@ -29,7 +29,9 @@ test('cold Projects home has bounded API requests', async ({ page }) => {
   test.setTimeout(60_000)
   await throttle(page)
   const calls = await mockWork(page, fixtures({ bigProject: 200 }))
-  await page.goto('/')
+  // The rendered data below is the readiness barrier. Development resources
+  // unrelated to these API bounds must not hold navigation open.
+  await page.goto('/', { waitUntil: 'commit' })
   await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link')).toHaveCount(3, { timeout: 30_000 })
   const timings = await paint(page)
   const paths = calls.map(call => call.path)
@@ -52,7 +54,7 @@ test('cold ticket page has bounded API requests', async ({ page }) => {
   const calls = await mockWork(page, data, {
     hold: request => request.path === '/api/nodes' && request.query.get('facets') === 'assignee' ? { until: peopleReady } : undefined,
   })
-  await page.goto('/p/PHAROS/PHAROS-11')
+  await page.goto('/p/PHAROS/PHAROS-11', { waitUntil: 'commit' })
   await expect(page.getByRole('heading', { name: /Hetzner Cloud for managed provisioning/ }).first()).toBeVisible({ timeout: 30_000 })
   const timings = await paint(page)
   const paths = calls.map(call => call.path)
