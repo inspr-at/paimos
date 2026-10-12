@@ -27,7 +27,8 @@ const fs=require('node:fs');
 // Cached discovery probes identity before it enumerates native tests. Keep
 // those reads successful so this fixture fails at enumeration, as asserted.
 if(process.argv.includes('version')) {
-  console.log('go version native-enumeration-fixture');
+  // Each generated executable has its own cache identity and package graph.
+  console.log(${JSON.stringify(`go version native-enumeration-fixture ${directory}`)});
 } else if(process.argv.includes('env')) {
   console.log(JSON.stringify({GOOS:'fixture',GOARCH:'fixture',GOFLAGS:'',CGO_ENABLED:'0',GOVERSION:'fixture',GOEXPERIMENT:'',GOWORK:'off'}));
 } else if(process.argv.includes('run')) {
