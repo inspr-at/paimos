@@ -45,7 +45,7 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
     'Done. AEON-1199 waits behind AEON-1195; next up is AEON-1205.',
     'AEON-1176 passed review and is in the gate.',
   ].map((body, index) => ({ id: `8e000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, sender_principal_id: index === 1 ? me.id : LEAD_AGENT, recipient_principal_id: index === 1 ? LEAD_AGENT : me.id, sender_session_id: index === 1 ? undefined : LEAD_SESSION, recipient_session_id: index === 1 ? LEAD_SESSION : undefined, sender_label: index === 1 ? 'Markus' : 'Claude lead', to: index === 1 ? 'claude:lead' : 'paimos:markus', body, sent_event_id: 100 + index, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', created_at: `2026-10-06T09:${[31,33,33,38][index]}:00Z` }))
-  const state = { question: makeQuestion(), calls: [] as Record<string, unknown>[], hold: false, fail: false, messages, denied: !!options.denied, admission: [makeAdmission()], historyUnreadable: false }
+  const state = { question: makeQuestion(), calls: [] as Record<string, unknown>[], hold: false, fail: false, messages, denied: !!options.denied, admission: [makeAdmission()], historyUnreadable: false, queueUnreadable: false }
   const readMarkers = new Map<string, { last_read_message_id: string | null; last_read_event_id: number }>()
   let release: () => void = () => {}, arrived: () => void = () => {}
   let barrier = Promise.resolve(), started = Promise.resolve()
@@ -60,6 +60,9 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
     return route.fulfill({ json: answer })
   })
   await page.route('**/api/decision-desk?*', route => route.fulfill({ json: { items: options.question === false || state.question.state !== new URL(route.request().url()).searchParams.get('state') ? [] : [state.question], has_more: false } }))
+  await page.route(url => url.pathname === '/api/queue' && url.searchParams.has('project_id'), route => state.queueUnreadable
+    ? route.fulfill({ status: 503, json: { error: 'queue store unavailable' } })
+    : route.fallback())
   await page.route('**/api/projects/p-pharos/lead-decisions*', route => state.historyUnreadable
     ? route.fulfill({ status: 503, json: { error: 'The admission history is temporarily unavailable.' } })
     : route.fulfill({ json: { items: state.admission.filter(item => item.event_id > Number(new URL(route.request().url()).searchParams.get('after') ?? 0)), next_after: null } }))
@@ -614,7 +617,42 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await expect(caption).toHaveText("Couldn't read the last start")
         await expect(checks).toHaveCount(0)
         await expect(panel(page).locator('[aria-labelledby="lp-checks"]').getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+        const failure = panel(page).locator('[data-read-fail="history"]')
+        await expect(failure).toContainText('Recent, Gate and Merged are unknown.')
+        await expect(panel(page)).not.toContainText('The admission history is temporarily unavailable.')
         await admissionShot('unreadable')
+        world.state.historyUnreadable = false
+        await failure.getByRole('button', { name: 'Try again', exact: true }).click()
+        await expect(failure).toHaveCount(0)
+        await expect(caption).toHaveText('No start yet')
+      } },
+      { name: 'unreadable queue retries without moving its controls', run: async () => {
+        world.state.queueUnreadable = true
+        await page.reload()
+        const failure = panel(page).locator('[data-read-fail="queue"]')
+        await expect(failure).toContainText('The queue can’t be read right now, so Next up is unknown.')
+        await expect(panel(page)).not.toContainText('queue store unavailable')
+        const again = failure.getByRole('button', { name: 'Try again', exact: true })
+        await again.scrollIntoViewIfNeeded()
+        let release!: () => void, arrived!: () => void
+        const held = new Promise<void>(resolve => { release = resolve })
+        const started = new Promise<void>(resolve => { arrived = resolve })
+        await page.route(url => url.pathname === '/api/queue' && url.searchParams.get('project_id') === 'p-pharos', async route => {
+          arrived(); await held; return route.fallback()
+        })
+        world.state.queueUnreadable = false
+        try {
+          await expectStableControls({ controls: { ...controls, again }, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+            { name: 'retry the held queue read', run: async () => {
+              await again.click(); await started
+              await expect(again).toHaveAttribute('aria-busy', 'true')
+              await expect(again).toHaveAttribute('aria-disabled', 'true')
+              await expect(again).toHaveText('Try again')
+            } },
+          ] })
+        } finally { release() }
+        await expect(failure).toHaveCount(0)
+        await expect(panel(page).locator('#next-up .wk')).not.toHaveCount(0)
       } },
       { name: 'stale history', run: async () => {
         world.state.historyUnreadable = false

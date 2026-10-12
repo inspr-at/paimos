@@ -82,7 +82,7 @@ const unmanaged = computed(() => {
   const principal = view.value?.principal
   return (leadSession.value?.management_mode ?? (principal?.session === lead.value?.session_id ? principal?.management : undefined)) === 'unmanaged'
 })
-const history = computed(() => admissionHistory(decisions.value, { complete: complete.value, error: view.value?.decisionsError ?? '', sessionStarted: props.sessionStarted ?? leadSession.value?.since, now: now.value }))
+const history = computed(() => admissionHistory(decisions.value, { complete: complete.value, error: view.value?.decisionsError ? 'The last admission report can’t be read right now.' : '', sessionStarted: props.sessionStarted ?? leadSession.value?.since, now: now.value }))
 const recent = computed(() => [...decisions.value].reverse().slice(0, 6).map(d => ({ id: d.event_id, at: time(d.recorded_at), text: decisionLine(d, id => keyOf(id) ?? 'a ticket') })))
 const next = computed(() => (queued.value ?? []).filter(item => !item.target_agent_id).slice(0, 3))
 const href = (key: string) => `/p/${encodeURIComponent(props.routeKey)}/${encodeURIComponent(key)}`
