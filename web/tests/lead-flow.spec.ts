@@ -299,6 +299,21 @@ test('ticket header steps down at every dock width so Close stays inside with a 
       }
       await expect(drawer.getByRole('button', { name: 'Close ticket details' })).toBeInViewport({ ratio: 1 })
     }
+    // A person-sized dock keeps its width during a viewport resize. A later
+    // font metric change must still fold its labels; observing only the bar's
+    // width cannot see this growth.
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+    const before = (await bar.boundingBox())!
+    const fonts = await page.addStyleTag({ content: '.project-page.ticket-dock { --panel-user-w: 560px; } .panel-bar .q-word { font-size: 40px !important; }' })
+    try {
+      await page.setViewportSize({ width: 1441, height: 1000 })
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+      const after = (await bar.boundingBox())!
+      expect(Math.abs(after.width - before.width), 'the dock width stayed fixed').toBeLessThanOrEqual(0.5)
+      expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth), `${key}: late font metrics stay inside the fixed dock`).toBeLessThanOrEqual(0)
+      await expect(drawer.getByRole('button', { name: 'Close ticket details' })).toBeInViewport({ ratio: 1 })
+    } finally { await fonts.evaluate(el => el.remove()) }
   }
 })
 
