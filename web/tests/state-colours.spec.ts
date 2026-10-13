@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SC1 / AEON-221. Coordinator: npm test -- state-colours.spec.ts --workers=2.
-import { test, expect, type Locator } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mockStateColours, states } from './state-colours-fixtures'
 import { STATE_LABEL } from '../src/lib/agentSignals'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
@@ -24,6 +24,34 @@ async function expectStateWordFits(project: Locator) {
   expect(word.x + word.width, await project.getAttribute('data-project-id') ?? '').toBeLessThanOrEqual(chip.x + chip.width)
   expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
   expect(fits).toBe(true)
+}
+
+// The card grid stretches a row to its tallest card, and the link absorbs that
+// stretch, so the border box hides a taller footer. The link's children plus
+// the footer is the height a live chip can change (AEON-1325).
+async function cardFootprints(page: Page) {
+  return page.locator('.cards-view').evaluate(root => [...root.querySelectorAll<HTMLElement>('.card[data-project-id]')].map(el => {
+    const link = el.querySelector('.card-link')!
+    const foot = el.querySelector('.card-foot')!
+    const chip = el.querySelector('.live-chip')
+    const activity = el.querySelector('.activity')!
+    const linkStyle = getComputedStyle(link)
+    const linkHeight = [...link.children].reduce((sum, node) => sum + node.getBoundingClientRect().height, 0)
+      + parseFloat(linkStyle.paddingTop) + parseFloat(linkStyle.paddingBottom)
+    const footHeight = foot.getBoundingClientRect().height
+    const chipBox = chip?.getBoundingClientRect()
+    const activityBox = activity.getBoundingClientRect()
+    return {
+      id: el.dataset.projectId ?? '',
+      height: linkHeight + footHeight,
+      link: linkHeight,
+      foot: footHeight,
+      chipTop: chipBox?.y ?? null,
+      chipRight: chipBox ? chipBox.x + chipBox.width : null,
+      activityTop: activityBox.y,
+      activityLeft: activityBox.x,
+    }
+  }))
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -112,6 +140,21 @@ for (const theme of ['light', 'dark'] as const) {
           if (layout === 'Cards') await expect(project.locator('.activity')).toBeVisible()
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        if (layout === 'Cards') {
+          const rows = await cardFootprints(page)
+          const quiet = rows.find(row => row.id === 'p-sc1-stopped')
+          expect(quiet, 'ended card').toBeTruthy()
+          for (const row of rows.filter(row => row.id.startsWith('p-sc1-') && row.id !== 'p-sc1-stopped')) {
+            // Title length may change the link. The live chip must not add the rest.
+            const delta = Math.abs((row.height - quiet!.height) - (row.link - quiet!.link))
+            expect(delta, `${row.id} @ ${width}px: live chip changes the card height (footer ${row.foot} vs ${quiet!.foot})`).toBeLessThanOrEqual(0.5)
+            if (width === 1024 || width === 1440) {
+              expect(row.chipTop, `${row.id} chip`).not.toBeNull()
+              expect(Math.abs(row.chipTop! - row.activityTop), `${row.id} @ ${width}px: activity shares the live chip's line`).toBeLessThanOrEqual(1)
+              expect(row.activityLeft, `${row.id} @ ${width}px: activity stays after the chip`).toBeGreaterThanOrEqual(row.chipRight! - 1)
+            }
+          }
+        }
         const project = page.locator('[data-project-id="p-sc1-stale"]')
         await project.hover()
         const chip = project.locator('.live-chip')
