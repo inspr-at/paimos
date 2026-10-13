@@ -208,7 +208,7 @@ func TestCoordinatorClaimsReserveQuotaBudgets(t *testing.T) {
 			firstObservation := f.observer.value
 			secondRef := sha256.Sum256([]byte(f.intent.RequestID))
 			f.observer.value.SessionRefDigest = secondRef[:]
-			var failure *Failure
+			var failure *nativecontract.ValidationError
 			if _, err = f.s.Claim(f.daemonCtx(t), f.daemon, f.claim(second)); !errors.As(err, &failure) || failure.Reason != nativecontract.ReasonQuotaLimited {
 				t.Fatalf("second coordinator claim exceeded %s cap; want quota_limited: %v", unit, err)
 			}
@@ -233,6 +233,16 @@ func TestCoordinatorClaimsReserveQuotaBudgets(t *testing.T) {
 				}
 				if held != 1 {
 					t.Fatalf("coordinator budget was missing or counted twice: %d", held)
+				}
+				var saved int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM native_session_roots r,
+ jsonb_to_recordset(r.budget_holds) AS h(window_id uuid,reserved_units bigint),account_allowance_windows w
+ WHERE w.tenant_id=r.tenant_id AND w.id=h.window_id AND h.reserved_units=1 AND w.reserved=1
+ AND r.account_limit_estimates @> '{"runs":1,"requests":1,"tokens":100000,"percent":1,"cost_micros":1000000}'::jsonb`).Scan(&saved); err != nil {
+					return err
+				}
+				if saved != 1 {
+					t.Fatalf("root lost its durable window/period budget snapshot: %d", saved)
 				}
 				return nil
 			})
