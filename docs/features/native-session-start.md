@@ -1,0 +1,248 @@
+# Owned native session starts (AEON-1267 / P1b)
+
+This is disabled groundwork against C0's `native-session/1.0` contract. I1 owns
+production mounting, provider qualification, existing-grant adapters and adding
+root occupancy to every legacy account/host admission query. Automatic routine
+launches remain disabled. No live account, daemon, model or login is changed.
+
+`store.New` requires an existing-grant `Authority` and a paired local-ledger
+`Observer`. No default grants or permissive implementations exist. The native
+module stays disabled. I1 composes `Start`, `Read` and `Claim` with the other
+slices' mutation/receipt/command methods to implement the complete C0 Store.
+`store.WithProject` carries the validated route project for `Start`; `View`
+reads an accepted logical session and `ByHarness` supplies native-context lookup.
+
+A start persists one logical conversation and one request-ID intent. Exact
+retries retain both IDs. Changed payload, actor, key ceiling or grant conflicts.
+Role/project/work/account/computer/workspace/model/policy and actor snapshots
+are immutable. Coordinator starts require the owning person and a current
+person-invoked project grant. Workers require a current leaf and coordinator
+parent plus an existing leaf run reservation. Resume is supplied by P3/I1.
+`expected_project_revision` uses the existing project-lead projection revision,
+with zero before a lead intent exists; native binding revision stays separate.
+
+The daemon observes its private local ledger before the final transaction.
+Claim then takes tenant/tree/pairing fences, rechecks the current daemon and
+original actor with `RequireTx`, validates current grants, target revision,
+parent/leaf, pairing/ledger generations, own account/context/model, account and
+host capacity, and only then registers a fresh harness/runtime epoch and root
+hold. The registration principal is the paired computer principal. The existing
+tenant event log receives content-free metadata last. Claim commits before a
+launcher can open a process. Replayed claims retain their original expiry and
+binding; expired claims never renew by retry.
+
+Coordinator roots use `native_session_roots`, with a null `run_id`. Admission
+carries its exact allowance windows and learned per-unit period estimates into
+the final claim transaction. The root stores those budget holds and increments
+the existing allowance ledgers atomically. Existing worker admission and limit
+projections count root estimates too; claim retries project only their own
+holds out without refunding or renewing the saved budget. Workers use
+their account-backed `agent_runs` and never receive a root reservation. All
+unreleased null-run roots count irrespective of display state or heartbeat:
+queued, starting, running, idle, taken and exit_unconfirmed retain occupancy.
+`NativeRootCountTx` is I1's account/host integration seam. `SetNativeRootStateTx`
+cannot free capacity; confirmed no-fork or exact owned root/group exit must be
+validated by the owning lifecycle service before release. API outage, turn
+completion, generation change or viewer detach never releases a hold.
+
+`start.Starter` uses the already committed server claim, P4's local profile
+resolver, the existing owning supervisor's Launcher and a mandatory LaunchGuard.
+The guard keeps the local shared ledger/writer lock across the final expiry and
+possible-fork check and open. Account homes and physical cwd are resolved only
+locally; cwd symlinks cannot escape the approved workspace. Browser start DTOs
+contain no argv, env, cwd, config path, vendor reference or credential. Process
+lifetime belongs to the supervisor, separately from the request or viewer.
+The request's elapsed monotonic time consumes the server TTL.
+
+The publishing daemon may provide `Observation.TerminalViewerURL` at registration.
+`Options.TerminalViewerHosts` is the setting seam (I1 owns config wiring); nil
+defaults to `100.64.0.0/10` and `*.ts.net`, an empty list denies all URLs.
+Only HTTPS URLs of at most 200 bytes, with one ASCII Zellij session path
+`[A-Za-z0-9._-]{1,64}`, are accepted. Explicit ports are limited to 443. Query,
+fragment, userinfo, path escaping, nested paths and dot traversal are rejected
+with C0's allowlisted `invalid_input`, without echoing the URL. SQL fetches the
+URL only for an authorized person; agent projections remove it independently.
+The URL is not a credential. Zellij's read-only login token stays in the person's
+browser and is never sent to or stored by PAIMOS.
+
+## R0 integration rows (same PR, before merge)
+
+The original slice reserved shared inventories for R0. Fix rounds 2 and 3
+explicitly require their blocking inventory findings to be fixed in this PR;
+the caller, tier and DSAR entries below are now applied.
+
+- Source ownership: `internal/nativesessions/start/**` and
+  `internal/nativesessions/store/**` already match S3's native-session glob.
+  `internal/agentaccounts/native_root*.go` and migration 1346 already match S1's
+  account/db globs. No new route, permission, contract pin or direct
+  `db.LockTenant`/`db.LockTree` caller was added; store uses `agentpairing.Lock`.
+- Register the following Go cases as ESSENTIAL (no browser/shard rows):
+  `internal/nativesessions/store:TestStartClaimRevocationBarrier`,
+  `internal/nativesessions/store:TestStartRegistrationIdempotencyAndPersonViewer`,
+  `internal/nativesessions/store:TestTerminalViewerURLStrictAllowlist`,
+  `internal/nativesessions/store:TestWorkerStartRequiresLeafAndKeepsExistingRun`,
+  `internal/nativesessions/store:TestCoordinatorClaimsReserveQuotaBudgets`,
+  `internal/nativesessions/store:TestStartUsesActiveCanonicalAccountOwner`,
+  `internal/nativesessions/store:TestNativeSessionDSARInventoryMatchesSchema`,
+  `internal/nativesessions/start:TestStartRequiresDurableClaimAndLocalLaunchFence`,
+  `internal/agentaccounts:TestNativeRootHoldsCountUntilVerifiedRelease`.
+- DSAR: all three new tables are `personal`, with locator
+  `{ "tenant_column": "tenant_id", "person_column": "owner_person_id" }`.
+  Complete column classifications follow below. Existing harness proof digests
+  retain the existing harness inventory classification. No raw native ID,
+  credential, prompt, tool body, transcript or local path is added to SQL.
+
+| Table | Personal columns | Metadata columns |
+| --- | --- | --- |
+| `native_session_intents` | `owner_person_id`, `actor_principal_id`, `actor_authority`, `created_at`, `claim_expires_at` | `tenant_id`, `id`, `request_id`, `owned_session_id`, `project_id`, `actor_kind`, `actor_key_id`, `actor_key_ceiling`, `actor_grant_id`, `actor_grant_revision`, `request_digest`, `intent`, `policy`, `launch_config`, `claim_request_id`, `claim_digest` |
+| `native_session_bindings` | `owner_person_id`, `actor_principal_id`, `paired_principal_id`, `view`, `terminal_viewer_url`, `created_at` | `tenant_id`, `id`, `project_id`, `role`, `harness`, `account_id`, `computer_id`, `workspace_id`, `model_profile_id`, `work_id`, `parent_harness_session_id`, `policy_id`, `run_id`, `current_harness_session_id`, `runtime_epoch`, `daemon_id`, `daemon_generation`, `ledger_generation`, `binding_revision` |
+| `native_session_roots` | `owner_person_id`, `created_at`, `released_at` | `tenant_id`, `id`, `owned_session_id`, `project_id`, `account_id`, `computer_id`, `run_id`, `runtime_epoch`, `hold_state`, `budget_holds`, `account_limit_estimates` |
+
+The named risk is retaining the old registration principal or treating a queued
+start as permanent authority. The database test's explicit local-read barrier
+lets revocation commit before final claim; it checks the exact refusal and no
+new registration, root reservation, claim or event, with one intent on retry.
+Other fixtures exercise exact registration retries, person-only URL reads,
+every URL rejection class, retained root occupancy, worker double-count
+prevention, physical cwd escape and monotonic expiry at the local launch fence.
+Only fake grant/native transports are used; no subscription/model call occurs.
+
+Verification results are recorded in the handoff and ignored progress file.
+Browser testing is not applicable. Authoritative PR CI is required before
+merge; this groundwork is hidden from release notes. I1 must reconcile the
+saved root budget holds with verified no-fork/exit evidence before releasing
+allowance ledger quantities; display changes never release them.
+
+## P1b handoff verification
+
+- PASS A1: request-ID retries keep one logical session/intent, one immutable
+  role/project/work/account/computer/workspace/policy/run binding and one current
+  harness/runtime mapping (`TestStartRegistrationIdempotencyAndPersonViewer`).
+- PASS A2: non-leaf work refuses, existing worker runs remain pinned, binding
+  rewrites hit the database fence, and coordinator grants require the owning
+  person; the automatic routine module remains disabled
+  (`TestWorkerStartRequiresLeafAndKeepsExistingRun`).
+- PASS A3: roots reserve without a fake run, worker sidecars cannot count twice,
+  and idle/taken/uncertain holds stay occupied
+  (`TestNativeRootHoldsCountUntilVerifiedRelease`). I1 must still add the root
+  predicate to every legacy admission path before the live pilot.
+- PASS A4: final fenced authorization and current account/context/model/host/
+  ledger admission precede committed registration and any local launch. Exact
+  claim retries retain their original binding, hold and expiry.
+- PASS A5: local profile resolution, physical cwd confinement, pinned launch
+  identity and the final monotonic deadline are enforced before open; browser
+  DTOs carry no launch paths, argv, env or credentials
+  (`TestStartRequiresDurableClaimAndLocalLaunchFence`).
+- PASS A6: the explicit local-read barrier commits start-permission revocation
+  before final claim; no registration/root/claim/event follows and retry retains
+  one intent (`TestStartClaimRevocationBarrier`). The guarded remote negative
+  control removed only the original actor's final permission check; claim then
+  succeeded and this test failed with `wrong refusal after start revocation:
+  <nil>`. The temporary stash tree was tested on detached HEAD, then the work
+  branch and implementation were restored; no negative-control commit is on
+  the work branch.
+- PASS Zellij: accepted URLs, each rejection class and actual database-backed
+  person/agent reads pass; neither URLs nor tokens enter durable event payloads.
+- PASS Go: the final guarded remote run passed `./internal/nativesessions/store/...`,
+  `./internal/nativesessions/start/...`, `./internal/agentaccounts/...` and
+  `./internal/reportercontract/` at implementation commit `664903ed7`.
+- PASS migration guard against `v261012211543.0.0` and all 43 checker tests.
+  Migration 1346 is the brief's ledger reservation, overriding plan slot 1344.
+- PASS affected planner execution: selection is `FULL` because the migration
+  cannot be safely narrowed; authoritative full PR CI remains required.
+- Initial static evidence: the guarded `ci-static-locked.sh --merge-main` completed
+  with 41 passing checks, no optional skips and exit 1 solely for the six new
+  tests absent from R0's Go tier manifest. Fix round 2 adds those six ESSENTIAL
+  rows for the reported CI failure. R0's three DSAR inventory entries above
+  remain required in this same PR. Implementation edits stayed within P1b's
+  exclusive write set.
+
+No browser check applies, and no origin push, deployment, live cutover, model
+call or review gate was performed. Production wiring and qualification remain
+with I1 and the coordinator.
+
+## Fix round 2 verification
+
+The reported CI failures are addressed by additive entries in the shared-fence
+caller inventory, native store order checks in its existing primitive-order
+guard, and six ESSENTIAL Go test-tier entries.
+
+- PASS negative control: guarded `remote-test.sh` on original HEAD `da8a08d88`
+  fails `TestSharedFenceCallerInventory` specifically because native store
+  `claim.go`, `read.go` and `start.go` are missing from `agentpairing.Lock` callers.
+  Its exact inventory assertion is retained.
+- PASS affected Go: guarded remote tests at `da7f4ef31` pass
+  `./internal/agentpairing`, `./internal/nativesessions/start/...`,
+  `./internal/nativesessions/store/...` and `./internal/agentaccounts/...` with
+  `-count=1`, including the caller and order guards and native behavior tests.
+- PASS manifest: at `433fdf740`, all six native test declarations have ESSENTIAL
+  entries and `node scripts/test-tiers/cli.mjs manifests --check` succeeds.
+  Browser checks do not apply to this non-browser slice.
+- PASS static: guarded `ci-static-remote.sh` checks committed HEAD `433fdf740`
+  with `node scripts/ci-static.mjs --merge-main`; exit 0, all 42 checks pass and
+  zero optional checks are skipped. This includes native Go tier reconciliation,
+  test-tier and web-shard policy tests, ownership audit, web typecheck and lint.
+  Authoritative PR CI remains required before merge.
+
+## Fix round 3 implementation
+
+All three Medium findings are addressed. Coordinator roots now persist the
+admitted allowance-window quantities and all five learned/default period-unit
+estimates in migration 1346's two nullable JSONB columns. The final claim
+updates allowance ledgers, stores the root-backed budget snapshot and registers
+the harness in one transaction; event append remains last. Legacy account
+limit projections include these null-run roots. Worker reservations stay in
+their existing run ledger. Exact root retries exclude only their own holds and
+retain the saved binding and launch expiry, including at a percent cap.
+
+Start uses the same active canonical-person lookup as claim for historical
+pairing approvers and account owners. Linked stamps can start and claim; foreign
+or deactivated stamps still fail with `wrong_principal`. All three native tables
+now have complete personal table classifications, owner/tenant locators and
+column classifications, checked against the migrated schema.
+
+The third-round fixes require minimal shared-account changes in `admission.go`
+(replay of the root's one-shot window), `engine_admission.go` (projection of its
+saved holds), and `limits.go` (root period totals and percent retry headroom).
+Shared DSAR and test-tier edits are additive; no new source ownership entry is
+needed. No migration was renumbered and no route, permission, contract pin or
+version changed. Production occupancy wiring, native telemetry/settlement and
+live qualification remain with I1 and the coordinator.
+
+- PASS negative control: final regression tests on tests-only detached snapshot
+  `a23cbadb0`, based on reviewed HEAD `374d6c0a`, fail for the exact three reported
+  reasons. Successive claims exceed the allowance window and runs/requests/
+  tokens/percent day caps; linked pairing/account/both owners get
+  `wrong_principal`; the native intent table has no DSAR entry. The assigned
+  branch is restored, with no negative-control commit on it.
+- PASS affected planner: `node scripts/test-tiers/affected.mjs --base origin/main`
+  selects `FULL` because migration 1346 cannot be safely narrowed. Full hosted
+  PR CI remains a coordinator-owned prerequisite. No browser spec applies to
+  this server-only slice.
+- PASS behavior: `TestCoordinatorClaimsReserveQuotaBudgets` rejects a second
+  claim for each configured cap, permits the original exact retry, retains one
+  root/harness/claim with no fake worker run, and checks the durable window and
+  all-unit budget snapshot. `TestStartUsesActiveCanonicalAccountOwner` exercises
+  separate pairing/account/both linked stamps plus foreign/deactivated refusals.
+  `TestNativeSessionDSARInventoryMatchesSchema` checks all migrated columns and
+  required personal classifications and locators. All three are ESSENTIAL.
+- PASS affected Go: guarded remote `-count=1` checks at `93b2f1cb2` passed
+  `./internal/nativesessions/start`, `./internal/agentpairing`, `./internal/dsar`
+  and `./internal/reportercontract`. After the exact percent retry correction,
+  final `./internal/agentaccounts` and `./internal/nativesessions/store` runs at
+  `2e5580254` both pass. No assertion was skipped or weakened.
+- PASS merge verification: latest main `06929d1a4` is merged in `f6bac1456`.
+  The installed registry driver refused the DSAR merge; resolving from main's
+  inventory and reapplying the three native entries preserves its
+  `check_suite_id` classification. Tier manifests remain canonical with no
+  conflict markers. Guarded remote store, DSAR and reportercontract tests all
+  pass again on this merged HEAD.
+- PASS final static: guarded `ci-static-locked.sh --merge-main` on `f6bac1456`
+  exits 0 with all 42 checks passing and zero optional skips. This includes
+  migration policy/tests, ownership audit, tier/shard inventories and tests,
+  OpenAPI checks, web typecheck and lint. No UI/browser spec is applicable.
+
+All blocking findings are fixed. The source/test changes and this evidence are
+committed locally. No origin push, deployment, live cutover, model CLI call or
+review gate was performed; full hosted CI and the cross-family gate remain
+coordinator-owned.
