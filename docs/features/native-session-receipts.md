@@ -367,6 +367,55 @@ scoped documentation handoff. Source/test code and shared inventories remain
 unchanged. No origin push, deployment, model CLI or review gate is run by this
 worker.
 
+## Fix round 6: repair remains exclusively R0-owned
+
+The supplied `review-ci622-0834.out` and its full agentpairing JSONL target
+`6e4b665b8`. They confirm the missing receipt repository in the shared
+`db.LockTree` caller inventory. The complete failed `go-static` log for job
+`115152143035` confirms exactly the eight unclassified tests listed below;
+the selector tests' synthetic failure output is fixture evidence. Both DSAR
+classifications below also remain absent.
+
+PPM / INSPR / workstation-agents and the coordinator-recorded builder session
+`8d10b6c5-f68b-4547-916e-5d651c26519c` were verified before this handoff edit.
+A fresh fetch finds `origin/main` at `fd8fae22f`. A merge-tree check is clean,
+so the fix brief requires no conflict-resolution merge. Neither this branch
+nor main contains the three outstanding registrations; migration 1347 has
+no main collision. All four web unit shards and twelve browser shards pass
+on the current PR head. No feature web unit or browser check applies to P3a.
+
+The normative plan still assigns `internal/agentpairing/shared_fence_test.go`,
+`scripts/ci/go-test-tiers.json` and `internal/dsar/inventory.json` exclusively
+to R0. The original brief requires stopping a repair that needs files outside
+P3a's write set, and neither the current ticket nor fix6 transfers ownership.
+The builder therefore stops the code repair at that boundary. The exact
+same-PR request below already supplies every required row. R0 must apply it
+before another P3a fix/gate round can resolve these failures.
+
+Fresh guarded validation on committed `6e4b665b8`:
+
+* **PASS 1:** durable pre-write journal and correlated input/exit evidence.
+* **PASS 2:** bounded content-free receipt states, retries and scoped pages.
+* **PASS 3:** approved explicit final outbox and isolated native chat storage.
+* **PASS 4:** outage/exit retention and current fenced final authorization.
+* **PASS 5:** crash uncertainty prevents reinjection; final ID replay stores once.
+* Both receipt packages, `internal/chat` and `internal/dsar` pass. The DSAR
+  package result does not establish the two missing table classifications.
+* `internal/agentpairing` reproduces the reported missing receipt fence caller;
+  the combined five-package command exits **1**. The first attempt refused
+  with **exit 3** for remote load; the guarded retry executed, with no local run.
+* Guarded remote static `--merge-main`: **exit 1**, **41 checks pass, zero
+  optional skips**; the sole failure is the eight missing Go tier rows.
+* Offline affected selector: **exit 0**, **FULL CI required** for migration
+  1347's unsupported or incomplete SQL classification. Public-name and
+  `git diff --check` checks pass after this handoff edit.
+
+**INCOMPLETE:** no behavior, assertion, source ownership or shared inventory
+change is made. No new behavior regression or negative control against
+`6e4b665b8` is required for this documentation-only handoff. The coordinator
+still owns the trusted review verdict and all merge/release decisions. No
+origin push, deployment, model CLI or review gate is run by this worker.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
