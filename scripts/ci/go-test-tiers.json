@@ -156,6 +156,22 @@
     ,
     "internal/nativeattach:TestTerminalRestoredOnEveryExit"
     ,
+    "internal/nativesessions/stream:TestLiveGapClosesAndBindingReplacementRefusesOldView"
+    ,
+    "internal/nativesessions/stream:TestServerHTTPAuthenticatesViewerAndEmitsGapEnd"
+    ,
+    "internal/nativestream:TestHTTPPublisherBoundsAndBindsAcknowledgement"
+    ,
+    "internal/nativestream:TestLocalHostProtocolRequiresPeerGrantAndExactBinding"
+    ,
+    "internal/nativestream:TestNativeExpertProjectionFiltersAndBounds"
+    ,
+    "internal/nativestream:TestOutboundLossRemainsTransientAndFinalUsesSink"
+    ,
+    "internal/nativestream:TestSSEFencesQueuedContentAndKeepalive"
+    ,
+    "internal/nativestream:TestTransientRingReportsLossAndRejectsStaleReplay"
+    ,
     "internal/nodes:TestHeaderSelectorBounds"
     ,
     "internal/nodes:TestHideStatesAPIBucketsFacetsAndPaging"
@@ -7876,6 +7892,14 @@
     ,
     {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadFencesDeadlinesAndRevocationBarrier","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPersonOnlyViewerAndZ1Compatibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPinnedSDKPolicyBoundary","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
@@ -7893,6 +7917,26 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestTerminalViewerURLStrictAllowlist","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestWorkerStartRequiresLeafAndKeepsExistingRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestLiveGapClosesAndBindingReplacementRefusesOldView","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestPublishSnapshotPreservesRegisteredBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestServerHTTPAuthenticatesViewerAndEmitsGapEnd","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestSlowSubscriberRevocationAndViewIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestHTTPPublisherBoundsAndBindsAcknowledgement","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestLocalHostProtocolRequiresPeerGrantAndExactBinding","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestNativeExpertProjectionFiltersAndBounds","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestOutboundLossRemainsTransientAndFinalUsesSink","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestSSEFencesQueuedContentAndKeepalive","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestTransientRingReportsLossAndRejectsStaleReplay","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestAccessWritesDoNotDeadlockNodeMove","tier":"ESSENTIAL"}
     ,
