@@ -181,8 +181,8 @@ func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent na
 		viewRaw, _ = json.Marshal(view)
 		policyRaw, _ := json.Marshal(a.Policy)
 		launchRaw, _ := json.Marshal(a.Launch)
-		_, err = tx.Exec(ctx, `INSERT INTO native_session_bindings(tenant_id,id,project_id,owner_person_id,actor_principal_id,role,harness,account_id,computer_id,paired_principal_id,workspace_id,model_profile_id,work_id,parent_harness_session_id,policy_id,daemon_id,binding_revision,view,created_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,1,$17,$18)`, p.TenantID, session, project, a.OwnerPersonID, p.ID, intent.Role, intent.Harness, intent.AccountID, intent.ComputerID, principal, intent.WorkspaceID, intent.ModelProfileID, intent.WorkID, intent.ParentHarnessSessionID, intent.PolicyID, daemon, viewRaw, at)
+		_, err = tx.Exec(ctx, `INSERT INTO native_session_bindings(tenant_id,id,project_id,owner_person_id,actor_principal_id,role,harness,account_id,computer_id,paired_principal_id,workspace_id,model_profile_id,work_id,parent_harness_session_id,policy_id,daemon_id,binding_revision,view,created_at,run_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,1,$17,$18,$19)`, p.TenantID, session, project, a.OwnerPersonID, p.ID, intent.Role, intent.Harness, intent.AccountID, intent.ComputerID, principal, intent.WorkspaceID, intent.ModelProfileID, intent.WorkID, intent.ParentHarnessSessionID, intent.PolicyID, daemon, viewRaw, at, a.RunID)
 		if err != nil {
 			return err
 		}

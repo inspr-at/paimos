@@ -28,6 +28,7 @@ type pendingRecord struct {
 	launch                  nativecontract.LaunchConfig
 	view                    nativecontract.SessionView
 	pairedPrincipal, daemon string
+	runID                   *string
 	claimDigest             []byte
 	claimExpires            *time.Time
 }
@@ -36,12 +37,12 @@ func loadPending(ctx context.Context, tx pgx.Tx, operation string, lock bool) (p
 	var r pendingRecord
 	var actorRaw, intentRaw, policyRaw, launchRaw, viewRaw []byte
 	query := `SELECT i.id::text,i.owned_session_id::text,i.project_id::text,i.owner_person_id::text,i.actor_authority,i.intent,i.policy,i.launch_config,
- b.view,b.paired_principal_id::text,b.daemon_id,i.claim_digest,i.claim_expires_at FROM native_session_intents i
+ b.view,b.paired_principal_id::text,b.daemon_id,i.claim_digest,i.claim_expires_at,b.run_id::text FROM native_session_intents i
  JOIN native_session_bindings b ON b.tenant_id=i.tenant_id AND b.id=i.owned_session_id WHERE i.id=$1`
 	if lock {
 		query += ` FOR NO KEY UPDATE OF i,b`
 	}
-	err := tx.QueryRow(ctx, query, operation).Scan(&r.OperationID, &r.OwnedSessionID, &r.ProjectID, &r.OwnerPersonID, &actorRaw, &intentRaw, &policyRaw, &launchRaw, &viewRaw, &r.pairedPrincipal, &r.daemon, &r.claimDigest, &r.claimExpires)
+	err := tx.QueryRow(ctx, query, operation).Scan(&r.OperationID, &r.OwnedSessionID, &r.ProjectID, &r.OwnerPersonID, &actorRaw, &intentRaw, &policyRaw, &launchRaw, &viewRaw, &r.pairedPrincipal, &r.daemon, &r.claimDigest, &r.claimExpires, &r.runID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, fail(404, nativecontract.ReasonInvalidInput)
 	}
@@ -153,7 +154,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if err != nil {
 			return err
 		}
-		if grant.OwnerPersonID != r.OwnerPersonID || !reflect.DeepEqual(grant.Policy, r.policy) || !reflect.DeepEqual(grant.Launch, r.launch) {
+		if grant.OwnerPersonID != r.OwnerPersonID || !reflect.DeepEqual(grant.Policy, r.policy) || !reflect.DeepEqual(grant.Launch, r.launch) || !reflect.DeepEqual(grant.RunID, r.runID) {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
 		if err = targetStart(ctx, tx, r.ProjectID, r.Intent, true); err != nil {

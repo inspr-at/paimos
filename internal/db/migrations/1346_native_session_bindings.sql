@@ -98,13 +98,10 @@ CREATE POLICY native_session_roots_tenant ON native_session_roots
 
 CREATE FUNCTION aeon_native_binding_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF (to_jsonb(NEW) - ARRAY['run_id','current_harness_session_id','runtime_epoch','daemon_generation','ledger_generation','binding_revision','view','terminal_viewer_url'])
+    IF (to_jsonb(NEW) - ARRAY['current_harness_session_id','runtime_epoch','daemon_generation','ledger_generation','binding_revision','view','terminal_viewer_url'])
        IS DISTINCT FROM
-       (to_jsonb(OLD) - ARRAY['run_id','current_harness_session_id','runtime_epoch','daemon_generation','ledger_generation','binding_revision','view','terminal_viewer_url']) THEN
+       (to_jsonb(OLD) - ARRAY['current_harness_session_id','runtime_epoch','daemon_generation','ledger_generation','binding_revision','view','terminal_viewer_url']) THEN
         RAISE EXCEPTION 'native session binding is immutable' USING ERRCODE='23514';
-    END IF;
-    IF OLD.run_id IS NOT NULL AND NEW.run_id IS DISTINCT FROM OLD.run_id THEN
-        RAISE EXCEPTION 'native worker reservation is immutable' USING ERRCODE='23514';
     END IF;
     RETURN NEW;
 END;
