@@ -5,21 +5,25 @@ package reportercontract_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/journey"
+	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 )
 
 func TestReporterRoutesDeclareHeaderBeforeAuthentication(t *testing.T) {
-	for _, tc := range []struct {
+	type routeCase struct {
 		name, method, path, version string
 		mount                       func(*http.ServeMux)
-	}{
+	}
+	cases := []routeCase{
 		{"handoff create", "POST", "/api/stage-handoffs", reportercontract.StageHandoffs, stagehandoff.New(nil, nil).Mount},
 		{"handoff get", "GET", "/api/stage-handoffs/00000000-0000-4000-8000-000000000001", reportercontract.StageHandoffs, stagehandoff.New(nil, nil).Mount},
 		{"evidence", "POST", "/api/stage-handoffs/00000000-0000-4000-8000-000000000001/evidence", reportercontract.StageEvidence, stagehandoff.New(nil, nil).Mount},
@@ -38,7 +42,15 @@ func TestReporterRoutesDeclareHeaderBeforeAuthentication(t *testing.T) {
 		{"harness status", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/harness-sessions/00000000-0000-4000-8000-000000000002", reportercontract.HarnessSession, harness.New(nil).Mount},
 		{"harness heartbeat", "POST", "/api/projects/00000000-0000-4000-8000-000000000001/harness-sessions/00000000-0000-4000-8000-000000000002/heartbeat", reportercontract.HarnessSession, harness.New(nil).Mount},
 		{"project lead", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/lead", reportercontract.ProjectLead, harness.New(nil).Mount},
-	} {
+	}
+	for _, route := range nativecontract.PublicRoutes() {
+		path := route.Path
+		for _, name := range []string{"projectId", "ownedSessionId", "sessionId", "approvalId", "id"} {
+			path = strings.ReplaceAll(path, "{"+name+"}", "00000000-0000-4000-8000-000000000001")
+		}
+		cases = append(cases, routeCase{route.OperationID, route.Method, path, reportercontract.NativeSession, nativesessions.NewDisabled().Mount})
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
 			tc.mount(mux)
