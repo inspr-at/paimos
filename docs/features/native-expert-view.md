@@ -91,6 +91,11 @@ The unchanged regression passes with the registrations. Targeted metadata
 checks also verify the 12 exact case identities, essential selection on PRs
 and merge groups, complete scheduled coverage, a single source owner,
 canonical formatting and preservation of all previous registrations.
+The guarded browser run on `a5d187573` passed all 12 cases in 6.9 seconds with
+zero residual browser processes. The remote `ci-static --merge-main` run on
+that commit exited 0: all 42 checks passed with no optional skips, including
+the web shard/selector regressions, strict classification, audit, TypeScript
+and lint. The final follow-up commit changes only this validation record.
 
 Screenshot evidence uses `testInfo.outputPath()` and is copied back by the
 guarded runner to `web/test-results/AEON-1270/`. Each theme/width case emits
