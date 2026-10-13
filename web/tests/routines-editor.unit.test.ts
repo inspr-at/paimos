@@ -84,7 +84,7 @@ describe('today’s route', () => {
     expect(routeWords(sol)).toBe('GPT-6.1 Sol via Codex')
     // A profile the registry has no name for still reads as one.
     const bare: RegistryProfile = { ...opus, display_name: undefined, short_name: undefined }
-    expect(routeWords(bare)).toBe('Claude Opus 5 5 via Claude Code')
+    expect(routeWords(bare)).toBe('Opus 5.5 via Claude Code')
     for (const profile of [opus, sol, bare]) {
       expect(routeWords(profile)).not.toContain(profile.model)
       expect(routeWords(profile)).not.toContain(profile.id)

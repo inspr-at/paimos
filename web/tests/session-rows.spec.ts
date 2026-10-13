@@ -41,12 +41,12 @@ for (const pass of [1, 2]) for (const theme of ['light', 'dark'] as const) for (
     // AEON-1211: the avatar carries the state badge only; the harness is in Execution, or the 12 px opener of a compact row.
     await expect(row.locator('.ava .harness-badge')).toHaveCount(0)
     if (width === 390) {
-      await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', /^Claude Fable · high · Claude Code · Claude Max$/)
+      await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', /^Fable · high · Claude Code · Claude Max$/)
       const mark = (await row.locator('.op-mark').boundingBox())!
       expect([Math.round(mark.width), Math.round(mark.height)]).toEqual([12, 12])
     } else await expect(row.locator('.op-mark')).toBeHidden()
     // A model the registry does not list still reads as a name, never its raw id (AEON-1211).
-    await expect(row.locator('.exec-model')).toHaveText('Claude Fable · high')
+    await expect(row.locator('.exec-model')).toHaveText('Fable · high')
     await expect(row.locator('.exec-account')).toContainText('Claude Max')
     await expect(row.locator('.provider-mark')).toHaveAttribute('data-provider', 'anthropic')
     await expect(row.locator('.result')).not.toContainText('heartbeat')

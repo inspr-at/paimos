@@ -236,5 +236,7 @@ now"; otherwise, quietly, "Live · updated 4 s ago". The changes apply 1.5 s
 after the pointer leaves, on Show now, or when the page loads. Your own
 removals and moves apply at once, and so do a new sort order, filter or search.
 A done or ended session keeps its place among its siblings and its end state
-for 10 minutes (line 2 says when it moves to Ended), then moves to Ended at the
-next allowed moment.
+for 10 minutes, then moves to Ended at the next allowed moment. Line 2 says how
+and when it ended and when it moves: "Finished 11:57 · moves to Ended at 12:07"
+for Done only; any other end names its cause ("Cancelled", "Budget exhausted",
+"Lost contact"), or "Stopped" when the reason is withheld.

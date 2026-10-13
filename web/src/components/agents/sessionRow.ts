@@ -77,8 +77,8 @@ export interface SessionExecution {
 }
 
 // ---------- Model names (AEON-1211) ----------
-// The row names a model the way Settings › Models does, never by its raw id: the registry's
-// display name and version ("Opus 5.5", "GPT-6.1 Sol"), then the level ("Opus 5.5 · xhigh").
+// The row names a model the way Settings › Models does, never by its raw id: its one name
+// ("Opus 5.5", "GPT-6.1 Sol", fullName), then the level ("Opus 5.5 · xhigh").
 export interface ModelNames { bySlug: Map<string, ModelProfile>; byModel: Map<string, ModelProfile> }
 const modelKey = (harness: string, model: string) => `${harness}\u0000${model}`
 export function modelNames(profiles: readonly ModelProfile[]): ModelNames {
@@ -91,13 +91,14 @@ export function modelNames(profiles: readonly ModelProfile[]): ModelNames {
   return names
 }
 const LEVEL_SUFFIX = /^(.+?)[-_](minimal|low|medium|high|xhigh|max)$/i
-// A model the registry does not list still reads as a name (Settings › Models, AEON-1062): "gpt-6.1-sol" →
-// "GPT-6.1 Sol", "claude-opus-5-5" → "Claude Opus 5.5". A trailing level becomes the level.
+// A model the registry does not list still reads as a name, the one Settings › Models gives it (fullName, AEON-1240):
+// "gpt-6.1-sol" → "GPT-6.1 Sol", "claude-opus-5-5" → "Opus 5.5". A trailing level becomes the level.
 function unlistedName(id: string): { name: string; level: string } {
   const suffix = LEVEL_SUFFIX.exec(id)
   const base = suffix ? suffix[1]! : id
-  const gpt = fullName({ id: '', harness: 'codex', family: '', model: base, effort: '', tier: '', enabled: true })
-  return { name: gpt !== base ? gpt : lineFallback(base.replace(/(\d)[-_](?=\d)/g, '$1.')), level: suffix ? suffix[2]!.toLowerCase() : '' }
+  const family = modelProvider(base)
+  const named = fullName({ id: '', harness: family === 'openai' ? 'codex' : '', family, model: base, effort: '', tier: '', enabled: true })
+  return { name: named !== base ? named : lineFallback(base.replace(/(\d)[-_](?=\d)/g, '$1.')), level: suffix ? suffix[2]!.toLowerCase() : '' }
 }
 // A profile slug (the run's pinned profile) names the model and its level; a model id names the model only.
 // A profile's "default" level says nothing, so it is left out.

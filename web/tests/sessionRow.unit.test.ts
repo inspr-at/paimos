@@ -69,7 +69,7 @@ test('execution names the reported model and effort, and omits what is not repor
   assert.equal(modelProvider('codex-astra-xhigh'), 'unknown')
   const missing = view({ harness: 'Grok', model: 'claude-fable-high', account: 'Claude Max', session: { harness: 'grok' } })
   const fallback = sessionExecution(missing)
-  assert.equal(fallback.modelLine, 'Claude Fable · high')
+  assert.equal(fallback.modelLine, 'Fable · high')
   assert.equal(fallback.accountLine, 'Claude Max')
   assert.equal(fallback.provider, 'anthropic')
   const none = view({ harness: 'Grok', session: { harness: 'grok', heartbeat_at: new Date().toISOString() } })
@@ -93,11 +93,11 @@ test('media and terminal use their execution label and never infer an AI vendor'
 
 test('heartbeat model changes refresh the same session row over a stale launch model', () => {
   const row = view({ harness: 'Claude', model: 'claude-sonnet', session: { harness: 'claude', model: 'claude-sonnet', reasoning_effort: 'low' } })
-  assert.equal(sessionExecution(row).modelLine, 'Claude Sonnet · low')
+  assert.equal(sessionExecution(row).modelLine, 'Sonnet · low')
   const sessionID = row.session.id
   row.session = { ...row.session, model: 'claude-opus', reasoning_effort: 'high' }
   assert.equal(row.session.id, sessionID)
-  assert.equal(sessionExecution(row).modelLine, 'Claude Opus · high')
+  assert.equal(sessionExecution(row).modelLine, 'Opus · high')
   assert.equal(sessionExecution(row).provider, 'anthropic')
 })
 

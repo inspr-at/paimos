@@ -262,6 +262,18 @@
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:phone › dark 390: the lead line, the queue chip and every row target reach 44 px"
     ,
+    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1024 dark"
+    ,
+    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1024 light"
+    ,
+    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 dark"
+    ,
+    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 light"
+    ,
+    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 dark"
+    ,
+    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 light"
+    ,
     "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read"
     ,
     "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence"
@@ -760,6 +772,34 @@
     ,
     "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1440"
     ,
+    "browser:tests/header-desk-split.spec.ts:at 1024 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 1024 light the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 1440 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 1440 light the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 320 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 320 light the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 360 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 360 light the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 390 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 390 light the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 400 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 400 light the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 420 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 420 light the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
     "browser:tests/header-desk-split.spec.ts:at 601 dark the trail drops whole segments and never cuts a chip"
     ,
     "browser:tests/header-desk-split.spec.ts:at 601 light the trail drops whole segments and never cuts a chip"
@@ -1252,6 +1292,18 @@
     ,
     "browser:tests/routines-tab.spec.ts:at tablet width the list and one logbook take turns, and the logbook keeps its controls"
     ,
+    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1024 dark"
+    ,
+    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1024 light"
+    ,
+    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1440 dark"
+    ,
+    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1440 light"
+    ,
+    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 390 dark"
+    ,
+    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 390 light"
+    ,
     "browser:tests/routines-tab.spec.ts:one row per routine; filters per kind; failed never green; created is not finished; controls stay put"
     ,
     "browser:tests/routines-tab.spec.ts:phone › the list, then one logbook with a way back, in dark"
@@ -1331,6 +1383,18 @@
     "browser:tests/settings-accounts.spec.ts:an API key shows money, and no account offers a limit by hand"
     ,
     "browser:tests/settings-accounts.spec.ts:an older rule shows as Set by you; Remove asks in place and removes it for good"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 dark"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 light"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 dark"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 light"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 dark"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 light"
     ,
     "browser:tests/settings-accounts.spec.ts:old windows set by hand show as Set by you with Remove, and never repeat"
     ,
@@ -1790,6 +1854,10 @@
     ,
     "vitest:tests/live-ticket.unit.test.ts:parent detail aggregate freshness > refetches an open parent after node.updated on an unseen descendant"
     ,
+    "vitest:tests/models-simple.unit.test.ts:one name per model > keeps a name the registry was given, and a line added by hand keeps its own"
+    ,
+    "vitest:tests/models-simple.unit.test.ts:one name per model > names every route of a version alike, whichever name its route, its provider or its raw id carries"
+    ,
     "vitest:tests/recurrence-marker.unit.test.ts:recurring marker copy > covers daily, quarterly, negative monthly days, events and incomplete legacy triggers honestly"
     ,
     "vitest:tests/recurrence-marker.unit.test.ts:recurring marker copy > describes the actual schedule and receipt number in the app language for English and German profiles"
@@ -1853,6 +1921,8 @@
     "vitest:tests/routines-tab.unit.test.ts:routine rows > counts states, and the Agents line appears only while something waits or failed"
     ,
     "vitest:tests/routines-tab.unit.test.ts:routine rows > names triggers briefly"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:routine rows > never counts \"0+\": a lower bound only for a found count, \"–\" with a tip for a zero not known yet (AEON-1240)"
     ,
     "vitest:tests/routines-tab.unit.test.ts:routine rows > says the reason in words for every state; created is never called done"
     ,
@@ -5646,6 +5716,18 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a filtered row that stops matching waits under the pointer like any other change","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a held move shows the newest line 2: a working row that starts asking says its request","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a model renamed in the registry while the pointer rests never adds or removes a searched row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -5657,6 +5739,8 @@
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an ended session keeps its place and end state for 10 minutes, then moves to Ended","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an ended worker keeps its place among its siblings for 10 minutes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an unfinished session keeps its place and names why it ended, never Finished","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8681,6 +8765,34 @@
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"a long request wraps inside the preview at 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"a long request wraps inside the preview at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1024 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1024 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1440 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1440 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 320 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 320 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 360 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 360 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 390 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 390 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 400 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 400 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 420 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 420 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12262,6 +12374,18 @@
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"at tablet width the list and one logbook take turns, and the logbook keeps its controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"one row per routine; filters per kind; failed never green; created is not finished; controls stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"phone › the list, then one logbook with a way back, in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12819,6 +12943,18 @@
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an API key shows money, and no account offers a limit by hand","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule shows as Set by you; Remove asks in place and removes it for good","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an unpooled account joins every existing member and can leave them sharing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17902,6 +18038,10 @@
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"Why? for the ticket a person clicked > says the ticket waits when nothing runs it, and cuts a long walk honestly","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"one name per model > keeps a name the registry was given, and a line added by hand keeps its own","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"one name per model > names every route of a version alike, whichever name its route, its provider or its raw id carries","tier":"NIGHTLY"}
+    ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"orders and locks > keeps a locked line and a fallback the resolved list omitted","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"orders and locks > moves one line to the front of the stored order and keeps everything else, never writing a rule","tier":"ESSENTIAL"}
@@ -18497,6 +18637,8 @@
     {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"routine rows > counts states, and the Agents line appears only while something waits or failed","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"routine rows > names triggers briefly","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"routine rows > never counts \"0+\": a lower bound only for a found count, \"–\" with a tip for a zero not known yet (AEON-1240)","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"routine rows > says the reason in words for every state; created is never called done","tier":"NIGHTLY"}
     ,

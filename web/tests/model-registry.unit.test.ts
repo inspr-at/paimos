@@ -406,7 +406,7 @@ describe('old versions', () => {
     ]), registry, new Date('2026-10-11T12:00:00Z'))
     expect(entries.map(entry => entry.version)).toEqual(['openai:gpt-6-sol', 'anthropic:claude-opus-5'])
     expect(entries[0]).toMatchObject({ name: 'GPT-6 Sol', successorName: 'GPT-6.1 Sol', harness: 'codex', routes: ['Codex · gpt-6-sol'], source: 'harness', why: 'Its source names GPT-6.1 Sol as the next version' })
-    expect(entries[1]).toMatchObject({ name: 'Claude Opus 5', successorName: 'Claude Opus 5.5', routes: ['pi · anthropic/claude-opus-5'], source: 'provider', why: 'Deprecated since 1 Sep' })
+    expect(entries[1]).toMatchObject({ name: 'Opus 5', successorName: 'Opus 5.5', routes: ['pi · anthropic/claude-opus-5'], source: 'provider', why: 'Deprecated since 1 Sep' })
   })
   it('says why a version is old in words, with a badge only for a named source', () => {
     const now = new Date('2026-10-11T12:00:00Z')
@@ -419,7 +419,7 @@ describe('old versions', () => {
     expect(lifecycleSource('')).toBeNull()
   })
   it('names the two successors that take over most uses, counts the rest, and says nothing uses them only when nothing is hidden', () => {
-    const entry = (name: string, successorName: string, uses: number, incomplete = false) => ({ version: name, name, successor: successorName, successorName, harness: null, route: '', routes: [], why: '', source: null, uses: Array.from({ length: uses }, () => use('Default · other · first')), incomplete })
+    const entry = (name: string, successorName: string, uses: number, incomplete = false) => ({ version: name, name, successor: successorName, successorName, harness: null, route: '', routes: [], why: '', source: null, uses: Array.from({ length: uses }, () => use('Default · other · first')), incomplete, targets: Array.from({ length: uses }, () => successorName) })
     const tray = outdatedTray([entry('Grok 4.5', 'Grok 4.7', 1), entry('GPT Sol 6', 'GPT Sol 6.1', 3), entry('Opus 5', 'Opus 5.5', 2)], false, false)
     expect(tray).toEqual({ named: [{ from: 'GPT Sol 6', to: 'GPT Sol 6.1' }, { from: 'Opus 5', to: 'Opus 5.5' }], count: '3\u00a0old versions', unused: '' })
     expect(outdatedTray([entry('Grok 4.5', 'Grok 4.7', 0), entry('Opus 5', 'Opus 5.5', 0)], false, false).unused).toBe(', nothing uses them')
@@ -476,7 +476,7 @@ describe('the grouped registry', () => {
   it('folds Cursor\'s per-level ids into one route: Grok 4.7 runs through Grok and Cursor, its fast variant is its own line', () => {
     const registry = buildRegistry(many(), NOW)
     const grok = rowOf(registry, 'xai:grok')
-    expect(grok.model).toMatchObject({ name: 'Grok 4.7', lineName: 'Grok', versionLabel: '4.7' })
+    expect(grok.model).toMatchObject({ name: 'Grok 4.7', versionLabel: '4.7' })
     expect(grok.model.routes.map(route => [route.harness, route.id, route.efforts, route.models.length])).toEqual([
       ['grok', 'grok-4.7', ['low', 'medium', 'high', 'xhigh'], 1],
       ['cursor', 'grok-4.7-‹level›', ['low', 'medium', 'high', 'xhigh'], 4],
@@ -486,7 +486,7 @@ describe('the grouped registry', () => {
   })
   it('is one model per version across harnesses: Opus 5.5 through Claude Code, Cursor and pi, the alias as one more route, Opus 5 folded', () => {
     const opus = rowOf(buildRegistry(many(), NOW), 'anthropic:opus')
-    expect(opus.model).toMatchObject({ name: 'Opus 5.5', lineName: 'Claude Opus', versionLabel: '5.5', source: 'provider', note: 'best for design and concepts' })
+    expect(opus.model).toMatchObject({ name: 'Opus 5.5', versionLabel: '5.5', source: 'provider', note: 'best for design and concepts' })
     expect(opus.model.routes.map(route => `${route.harness} ${route.id}`)).toEqual(['claude claude-opus-5-5', 'claude opus', 'cursor claude-opus-5.5', 'pi anthropic/claude-opus-5-5'])
     expect(opus.model.routes.find(route => route.harness === 'pi')).toMatchObject({ via: 'Anthropic', source: 'harness', hand: false })
     expect(opus.older).toHaveLength(1)
