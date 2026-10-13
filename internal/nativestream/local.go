@@ -231,10 +231,10 @@ func (a *LocalAdapter) serve(w http.ResponseWriter, r *http.Request, route nativ
 		}
 		if page, ok := result.(nativecontract.EventPage); ok {
 			for i, event := range page.Items {
-				if !Allows(request.View, event.Kind) {
+				if !Allows(request.View, event.Kind) && event.Kind != "assistant.final" {
 					return Refuse(nativecontract.ReasonUnsupported)
 				}
-				clean, err := a.projector.Sanitize(ctx, event, access)
+				clean, err := a.projector.SanitizeHistory(ctx, event, access)
 				if err != nil {
 					return err
 				}

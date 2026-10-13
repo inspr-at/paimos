@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -326,6 +327,10 @@ func (h *fakeHost) Detach(_ context.Context, value nativecontract.Detach) (nativ
 	return nativecontract.OperationResult{Receipt: nativecontract.Receipt{RequestID: value.RequestID, OperationID: fixtureID, Binding: &value.ExpectedBinding, Operation: "detach", State: "applied", SourceSequence: "0", UpdatedAt: time.Now()}}, nil
 }
 
+func (h *fakeHost) EventsPage(_ context.Context, binding nativecontract.Binding, query nativecontract.EventQuery) (nativecontract.EventPage, error) {
+	return nativecontract.EventPage{Generation: query.Generation, Items: []nativecontract.StreamEvent{fixtureEvent(1, "assistant.final", nativecontract.AssistantFinal{MessageID: fixtureID, Text: "authorized retained final"})}}, nil
+}
+
 // Named risk: an owner socket token, stale body or queued grant could be mistaken
 // for native write authority. Invalid requests must never reach Host.
 func TestLocalHostProtocolRequiresPeerGrantAndExactBinding(t *testing.T) {
@@ -423,6 +428,17 @@ func TestLocalHostProtocolRequiresPeerGrantAndExactBinding(t *testing.T) {
 	if w.Code != 200 || host.detaches != 1 || host.writes != 1 {
 		t.Fatal("detach was not a viewer-only Host operation")
 	}
+	query := url.Values{"generation": {"1"}, "expected_runtime_epoch": {fixtureID}, "expected_harness_session_id": {fixtureID}, "expected_binding_revision": {"1"}}
+	history := httptest.NewRequest("GET", "/v1/native-sessions/"+fixtureID+"/events?"+query.Encode(), nil)
+	history.Header.Set("Authorization", "Bearer local-test-proof")
+	history.Header.Set(nativecontract.LocalProtocolHeader, nativecontract.LocalProtocol)
+	w = newRecorder()
+	mux.ServeHTTP(w, history)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "authorized retained final") {
+		t.Fatal("authorized durable final could not replay through C0 Host.EventsPage")
+	}
+	_, err = fixtureProjector(t).Sanitize(context.Background(), fixtureEvent(1, "assistant.final", nativecontract.AssistantFinal{MessageID: fixtureID, Text: "authorized retained final"}), fixtureAccess("structured", false))
+	requireReason(t, err, nativecontract.ReasonRetentionUnapproved)
 }
 
 type queuedSubscription struct {

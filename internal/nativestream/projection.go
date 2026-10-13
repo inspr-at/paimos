@@ -615,6 +615,36 @@ func (p *Projector) Sanitize(ctx context.Context, event nativecontract.StreamEve
 	return event, err
 }
 
+// SanitizeHistory is exclusively for the authorized Host.EventsPage result.
+// Host proves that a final was retained through FinalSink under the applicable
+// permission/retention policy. Live publication, SSE and RAM replay never use
+// this exception, and Buffer.Append still refuses every assistant.final body.
+func (p *Projector) SanitizeHistory(ctx context.Context, event nativecontract.StreamEvent, access nativecontract.ValidationContext) (nativecontract.StreamEvent, error) {
+	if event.Kind != "assistant.final" {
+		return p.Sanitize(ctx, event, access)
+	}
+	if access.Private {
+		return event, Refuse(nativecontract.ReasonWrongPrincipal)
+	}
+	data, err := Encode(p.validator, "NativeStreamEvent", event)
+	if err != nil {
+		return event, err
+	}
+	if err := p.validator.ValidateBoundJSON("NativeStreamEvent", data, access); err != nil {
+		return event, err
+	}
+	var final nativecontract.AssistantFinal
+	_ = json.Unmarshal(event.Payload, &final)
+	text, err := p.text(ctx, event.Binding, final.Text)
+	if err != nil {
+		return event, err
+	}
+	final.Text = text
+	event.Payload, _ = json.Marshal(final)
+	_, err = Encode(p.validator, "NativeStreamEvent", event)
+	return event, err
+}
+
 func safeRedactionPath(path string) bool {
 	if !strings.HasPrefix(path, "$.") || len(path) > 128 {
 		return false

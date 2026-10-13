@@ -92,6 +92,9 @@ exact binding and validated final IDs. Sink refusal/rejection/expiry is surfaced
 No token assembly, raw transcript import or final text enters live replay. P3a
 owns final-drain authorization, durable retry, retention and current-permission
 rechecks; this transport adds no durable store and preserves legacy chat receipts.
+The local `Host.EventsPage` adapter separately permits already-authorized retained
+`assistant.final` results, rechecking the current read grant and output policy.
+That durable-history exception cannot enter publication, SSE or the RAM ring.
 
 Acceptance verification uses fake ports only. The tests establish queued-frame
 revocation and outbound/subscriber stalls with barriers; clocks control replay
