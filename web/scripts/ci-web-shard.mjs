@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // OPS-257: the manifest owns spec selection, launch policy and timing weights.
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runPlaywright } from '../../scripts/playwright-safe.mjs'
@@ -453,10 +453,6 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
   if (env.RUNNER_ENVIRONMENT !== 'github-hosted') throw new Error('CI web shards require RUNNER_ENVIRONMENT=github-hosted')
   const jsonReport = !!env.PLAYWRIGHT_JSON_OUTPUT_FILE || options.reporter?.split(',').includes('json')
   const aggregatePath = env.PLAYWRIGHT_JSON_OUTPUT_FILE ? resolve(root, env.PLAYWRIGHT_JSON_OUTPUT_FILE) : undefined
-  if (aggregatePath) {
-    mkdirSync(resolve(aggregatePath, '..'), { recursive: true })
-    writeFileSync(aggregatePath, '')
-  }
   const reports = []
   let commands = plans[0].commands
   if (env.CI_FLAKE_PLAYWRIGHT_TESTS) {
@@ -479,51 +475,83 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
       return info.failedTests.length > 0
     })
   }
-  let code = 0
-  for (const command of commands) {
-    out(`CI web shard ${options.shard.index}/${options.count}: ${command.group} (${command.files.join(', ')})`)
-    const childEnv = { ...env, ...command.env }
-    let reporter = options.reporter ?? (jsonReport ? 'line,json' : undefined)
-    if (jsonReport && !reporter.split(',').includes('json')) reporter += ',json'
-    const extraArgs = [
-      ...(options.lastFailed ? ['--last-failed', '--pass-with-no-tests'] : []),
-      ...(options.testList ? ['--test-list', resolve(root, options.testList), '--pass-with-no-tests'] : []),
-      ...(reporter ? ['--reporter', reporter] : []),
-    ]
-    let reportPath
+  let code = 0, activeGroup, completedGroups = 0, interruption
+  const persist = (status, reason) => {
+    const report = mergeReports(reports)
+    Object.assign(report, { runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha: env.GITHUB_SHA,
+      execution: { status, completedGroups, ...(activeGroup ? { activeGroup } : {}), ...(reason ? { reason } : {}) },
+      notRunGroups: commands.slice(completedGroups + (activeGroup ? 1 : 0))
+        .map(command => ({ group: command.group, files: command.files, reason: reason ?? 'Group has not executed' })),
+    })
+    if (status !== 'completed') report.errors.push({ message: reason })
+    if (aggregatePath) {
+      mkdirSync(resolve(aggregatePath, '..'), { recursive: true })
+      const temporary = `${aggregatePath}.${process.pid}.tmp`
+      writeFileSync(temporary, `${JSON.stringify(report)}\n`)
+      renameSync(temporary, aggregatePath)
+    }
+    return report
+  }
+  if (jsonReport) persist('running', 'Shard execution has not finished')
+  try {
+    for (const command of commands) {
+      activeGroup = command.group
+      if (jsonReport) persist('running', 'Shard execution has not finished')
+      out(`CI web shard ${options.shard.index}/${options.count}: ${command.group} (${command.files.join(', ')})`)
+      const childEnv = { ...env, ...command.env }
+      let reporter = options.reporter ?? (jsonReport ? 'line,json' : undefined)
+      if (jsonReport && !reporter.split(',').includes('json')) reporter += ',json'
+      const extraArgs = [
+        ...(options.lastFailed ? ['--last-failed', '--pass-with-no-tests'] : []),
+        ...(options.testList ? ['--test-list', resolve(root, options.testList), '--pass-with-no-tests'] : []),
+        ...(reporter ? ['--reporter', reporter] : []),
+      ]
+      let reportPath
+      if (jsonReport) {
+        reportPath = resolve(reportDirectory ?? resolve(root, 'test-results', 'ci-web-reports'), `shard-${options.shard.index}`, `${command.group}.json`)
+        mkdirSync(resolve(reportPath, '..'), { recursive: true })
+        // Invalidate prior output before launch; startup failures must not inherit
+        // a green report from a previous attempt.
+        writeFileSync(reportPath, '')
+        childEnv.PLAYWRIGHT_JSON_OUTPUT_FILE = reportPath
+      }
+      const result = await run([...command.args, ...extraArgs], { cwd: root, env: childEnv })
+      if (result.code) code = result.code
+      if (reportPath) {
+        try {
+          const report = JSON.parse(readFileSync(reportPath, 'utf8'))
+          if (!report || !Array.isArray(report.suites) || !Array.isArray(report.errors) || !report.stats || typeof report.stats !== 'object') throw new Error('Invalid report schema')
+          reports.push(report)
+        }
+        catch {
+          code ||= 1
+          reports.push({ suites: [], errors: [{ message: `Missing or invalid Playwright JSON report for ${command.group}` }], stats: {} })
+        }
+      }
+      // Failed groups must not suppress later groups; interrupted jobs must stop
+      // after saving every completed report, including earlier failed groups.
+      const signal = result.signal ?? result.metrics?.signal ?? ({129:'SIGHUP',130:'SIGINT',143:'SIGTERM'}[result.code])
+      if (signal) {
+        interruption = `Shard execution interrupted by ${signal}`
+        code = result.code || 1
+        break
+      }
+      completedGroups++
+      activeGroup = undefined
+      if (jsonReport) persist('running', 'Shard execution has not finished')
+    }
     if (jsonReport) {
-      reportPath = resolve(reportDirectory ?? resolve(root, 'test-results', 'ci-web-reports'), `shard-${options.shard.index}`, `${command.group}.json`)
-      mkdirSync(resolve(reportPath, '..'), { recursive: true })
-      // Invalidate prior output before launch; startup failures must not inherit
-      // a green report from a previous attempt.
-      writeFileSync(reportPath, '')
-      childEnv.PLAYWRIGHT_JSON_OUTPUT_FILE = reportPath
+      const report = persist(interruption ? 'interrupted' : 'completed', interruption)
+      if (!aggregatePath) out(JSON.stringify(report))
     }
-    const result = await run([...command.args, ...extraArgs], { cwd: root, env: childEnv })
-    if (result.code) code = result.code
-    if (reportPath) {
-      try {
-        const report = JSON.parse(readFileSync(reportPath, 'utf8'))
-        if (!report || !Array.isArray(report.suites) || !Array.isArray(report.errors) || !report.stats || typeof report.stats !== 'object') throw new Error('Invalid report schema')
-        reports.push(report)
-      }
-      catch {
-        code ||= 1
-        reports.push({ suites: [], errors: [{ message: `Missing or invalid Playwright JSON report for ${command.group}` }], stats: {} })
-      }
-    }
-    // Failed groups must not suppress later groups; interrupted jobs must stop.
-    if ([130, 143, 129].includes(result.code)) return result.code
+    return code
+  } catch (error) {
+    if (jsonReport) persist(error.signal ? 'interrupted' : 'incomplete', error.message.slice(0,4096))
+    throw error
   }
-  if (jsonReport) {
-    const report = JSON.stringify(mergeReports(reports))
-    if (aggregatePath) writeFileSync(aggregatePath, `${report}\n`)
-    else out(report)
-  }
-  return code
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.exitCode = await main(process.argv.slice(2)) }
-  catch (error) { console.error(error.message); process.exitCode = 1 }
+  catch (error) { console.error(error.message); process.exitCode = ({SIGINT:130,SIGTERM:143,SIGHUP:129}[error.signal]) ?? 1 }
 }
