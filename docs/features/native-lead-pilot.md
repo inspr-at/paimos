@@ -132,15 +132,16 @@ the owning coordinator has recorded the final ownership and rollback evidence.
   tenant/tree lock callers are introduced. Existing `internal/native*/**`
   source ownership covers this package. The browser file's source ownership
   remains with the existing web-test glob.
-- R0 must add the four Go tests in `internal/nativequalification` as ESSENTIAL:
+- The four Go tests in `internal/nativequalification` are registered as ESSENTIAL:
   `TestNativeLeadPinnedSDKPolicyBoundary`,
   `TestNativeLeadBackgroundCompactionAndConsumedFinal`,
   `TestNativeLeadFencesDeadlinesAndRevocationBarrier`,
   `TestNativeLeadPersonOnlyViewerAndZ1Compatibility`.
-- R0 must register `web/tests/native-lead-pilot.spec.ts` as ESSENTIAL browser
+- `web/tests/native-lead-pilot.spec.ts` is registered as ESSENTIAL browser
   coverage with six cases, `AEON-1287 LEAD conversation <light|dark> <390|1024|1440>`,
-  and its matching web-shard row. Only these new rows belong to P1c; shared
-  inventories are coordinator-owned and must be in the same PR before merge.
+  and a matching row in the existing `stable-controls` web-shard group. The fix
+  adds only P1c's new tier/shard rows; existing classifications, shard policies
+  and source ownership remain unchanged.
 
 ## Acceptance and validation evidence
 
@@ -188,6 +189,56 @@ static attempt through `ci-static-locked.sh` both exited **3**: the two remote
 slots were occupied (`2/2`, CI pool `1/4`). Neither check ran to completion;
 both are **incomplete locally, awaiting PR CI**. There was no retry or local
 browser/static fallback. The first-round affected selection was `FULL`.
-Authoritative PR CI must be green and R0 must include the tier/shard rows above
-before merge. AEON-1293 and AEON-1290 remain the documented integration
+At that handoff, authoritative PR CI and the tier/shard rows above were still
+required before merge. AEON-1293 and AEON-1290 remain the documented integration
 dependencies; no live qualification or release gate was run by this worker.
+
+## Fix round 3: CI registration drift
+
+CI on `16862178c` rejected the four unclassified Go qualification tests, the six
+unclassified browser cases and the missing `native-lead-pilot.spec.ts` shard row.
+The three existing web selector/inventory regressions failed on that same head.
+The aggregate Go/web failures and missing `web-unit-1` measurement evidence
+followed these failures; the original qualification assertions were unchanged.
+
+`58ae26413` adds the four Go and six browser cases as ESSENTIAL and assigns the
+spec once to the existing `stable-controls` group. Its 30-second shard weight is
+explicitly an estimate for six unmeasured cases, not a fabricated measurement.
+No production behavior, fixture assertion, exclusion or existing row changed.
+
+Focused manifest checks loaded the old manifests directly from `16862178c`,
+without changing the checkout. Strict validation rejected exactly the four Go
+and six browser identities; source inventory rejected exactly the missing spec.
+The current manifests passed those checks, covered all 316 browser specs and
+retained every existing classification and shard setting. These checks did not
+perform native test collection or launch a browser. Existing CI regressions
+provide the negative control; no throwaway commit was added to this branch.
+
+The guarded `ci-static-locked.sh` retry ran the underlying
+`node scripts/ci-static.mjs --merge-main` on mbp2606 at `58ae26413` and exited
+**0**:
+
+```text
+PASSED test-tiers
+PASSED go-tiers
+PASSED audit-tests
+PASSED web-shard-spec-tests
+PASSED web-shard-tests
+PASSED web-tiers
+PASSED web-spec-inventory
+PASSED web-classification
+Static pre-filter: 149.15s; 42 passed, 0 optional skipped.
+```
+
+This includes the three required tier/shard/audit self-checks, strict native
+registration collection and the existing web regressions that failed in CI.
+Canonical `manifests --check` and `git diff --check` also exited 0. The affected
+selection is `FULL`, so authoritative PR CI still runs the full lane.
+
+Three attempts each through `remote-test.sh` for the qualification package and
+`remote-spec.sh` for the six browser cases were capacity-refused with exit **3**;
+the last attempts reported CI pool `3/4`. Fresh Go behavior and browser runs are
+**incomplete, awaiting PR CI**. The earlier four-test remote Go evidence above
+remains valid for the unchanged qualification source; it is not a fresh run of
+this commit. No local Go/browser fallback, actual model call, review gate, push
+to origin, deploy or live qualification was performed.
