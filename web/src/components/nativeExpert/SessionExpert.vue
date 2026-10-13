@@ -194,7 +194,7 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
         <p class="terminal-hint"><span :aria-hidden="!link">Read-only, in a new tab, on the tailnet. The first visit asks for the viewer token.</span><span :aria-hidden="!!link">The live terminal is no longer available.</span></p>
       </div>
     </div>
-    <FloatingPanel v-if="typeAnchor && segment === 'events'" class="expert-types-panel" :anchor="typeAnchor" label="Event types" :width="260" :sheet="true" cycle @close="closeTypes">
+    <FloatingPanel v-if="typeAnchor && segment === 'events'" style="display: flex; flex-direction: column" :anchor="typeAnchor" label="Event types" :width="260" :sheet="true" cycle @close="closeTypes">
       <div class="types-menu" role="group" aria-label="Event types">
         <p>Show these events</p>
         <div class="types-options">
@@ -221,7 +221,6 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
 .grow { flex: 1; }
 .follow { flex: none; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .follow-short { display: none; }
-.expert-types-panel { display: flex; flex-direction: column; }
 .types-menu { display: flex; flex-direction: column; min-height: 0; padding: 12px; }
 .types-menu > p { flex: none; margin-bottom: 6px; font-size: 12.5px; }
 .types-options { min-height: 0; overflow: auto; overscroll-behavior: contain; }
