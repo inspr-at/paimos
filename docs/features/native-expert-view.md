@@ -59,29 +59,38 @@ belongs only in the existing head menu. I2 uses the exported `liveTerminalLink`
 descriptor, whose label is Open live terminal, with terminal and external-link
 SVGs. The slot is withheld without current person/watch/consent authority.
 
-Coordinator handoff (R0, same PR before merge): the two components fall under
+Source ownership: the two components fall under
 the existing S8 `web/src/components/**` audit coverage; the three library files
 fall under S9 `web/src/**` (excluding components and views).
-Register `web/tests/native-expert-stream.spec.ts` in the web tier and browser
-source shard manifests (the `stable-controls` group fits this spec). The 12 collected cases are six behavior scenarios plus
-six viewport/theme cases. Recommended tier: ESSENTIAL for the identity,
-coalescing, bounded replay, earlier-page, agent/revocation and terminal-slot
-cases; NIGHTLY for the six visual cases. Those shared metadata files are
-outside P2d's exclusive write set. No routes, SQL, permissions, versions or
+The CI fix-round brief assigns the missing registrations for
+`web/tests/native-expert-stream.spec.ts`: all 12 cases are now registered in
+the web tier manifest, and the browser source manifest assigns the spec once
+to `stable-controls`. Identity, coalescing, bounded replay, earlier-page,
+agent/revocation and terminal-slot cases are ESSENTIAL; the six viewport/theme
+cases are NIGHTLY with the required new-case inventory. The shared metadata
+change adds only this spec's rows and its scheduling note; existing tiers,
+policies and assertions are retained. No routes, SQL, permissions, versions or
 dependencies are added.
 Tick owns the visual comparison with r2 + A1, and the coordinator owns the
 cross-family gate and release. Browser fixtures use no model/account calls.
 
-Worker validation: the guarded `remote-spec.sh` suite passed all 12 cases,
+Initial worker validation: the guarded `remote-spec.sh` suite passed all 12 cases,
 including control stability within ±0.5 px, viewport-preserving prepend and
 explicit replay/stream barriers. The initial disabled-link regression failed
 before the role fix and passed after it. The guarded static run returned 1:
 37 checks passed, including TypeScript, lint, ownership coverage, tier tooling
 and browser safety; web classification/shard checks failed because R0 has not
 registered this spec. This is an incomplete release check, not a green static
-result. R0 must apply its registrations in this PR and rerun guarded static
-before merge. The affected planner exited 0 with `FULL: complete browser-impact
+result. The registrations are included in fix round 2; guarded static and
+authoritative PR CI must be green before merge. The affected planner exited 0 with `FULL: complete browser-impact
 map unavailable or stale for base tree`; authoritative full PR CI is required.
+
+Fix round 2 reproduces the existing source-inventory regression on `b1bf2d0a`:
+it fails specifically because this spec is missing from the source manifest.
+The unchanged regression passes with the registrations. Targeted metadata
+checks also verify the 12 exact case identities, essential selection on PRs
+and merge groups, complete scheduled coverage, a single source owner,
+canonical formatting and preservation of all previous registrations.
 
 Screenshot evidence uses `testInfo.outputPath()` and is copied back by the
 guarded runner to `web/test-results/AEON-1270/`. Each theme/width case emits
