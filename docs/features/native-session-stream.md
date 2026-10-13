@@ -258,3 +258,66 @@ loosening any assertion. R0 metadata and complete authoritative CI evidence
 remain required before the coordinator's review/merge. No origin push,
 deployment, review gate, other model CLI, live runtime or vendor account change
 was performed.
+
+Fix round 4, 2026-10-13 (reviewed source `055f1be7a`):
+
+- PASS — PPM / INSPR / workstation-agents and the coordinator-recorded builder
+  marker `e55d92a9-5606-480a-ac99-e75745937e47` were verified before writes.
+  Refreshed `origin/main` is still `3507e3319`, already an ancestor of HEAD;
+  PR #621 is mergeable, so no additional merge is required.
+- PASS — guarded remote `-race` tests for `internal/httpapi/...`,
+  `internal/nativestream/...` and `internal/nativesessions/stream/...` on
+  `055f1be7a`. These retain all five P2a acceptance checks: authenticated C0
+  transport, binding/view isolation, bounded transient replay with separate
+  FinalSink, native export filtering and barrier-established revocation.
+- CONFIRMED — CI run `38348344344`, Go static job `115135260857`, fails only
+  at `node scripts/test-tiers/cli.mjs check go --strict`, listing the same nine
+  unclassified stream tests. Go vet, bootstrap and tier selector regressions
+  pass. None of the nine required ESSENTIAL rows exists in the current manifest.
+- CONFIRMED — the web aggregate job `115141679994` fails because
+  `web-shard (2)` job `115135986852` was cancelled. Its first batch reports
+  215 passing cases; its next batch reaches case 93 of 100 before
+  `The operation was canceled`. There is no reported assertion failure to
+  repair. All four web-unit shards passed. Tier measurements report
+  `coverage: incomplete`, `missingEvidence: [web-shard-2]` and
+  `measurementCauses: [missing_case_artifact]`. The coordinator must obtain
+  complete shard evidence from authoritative PR CI; no browser claim is green
+  merely because a partial batch passed.
+- PASS WITH LIMIT — the required offline affected plan exits 0 with mode
+  `essential`, layout `full` and 128 selected Go packages, but omits both
+  `internal/nativestream` and `internal/nativesessions/stream`. Register the
+  rows below before rerunning selection. Browser checks are inapplicable to
+  this non-browser slice; the existing CI cancellation is an incomplete run.
+- NOT GREEN — final guarded `ci-static-locked.sh` on `055f1be7a` exits 1:
+  41 checks pass, zero optional skips. Only `go-tiers` fails, naming exactly
+  the nine missing R0 rows. The mandatory tier selector, web-shard and audit
+  self-checks pass, as do Go vet, web typecheck/lint and audit coverage.
+  R0 must apply its rows and rerun affected selection and guarded static
+  validation before complete authoritative PR CI and the coordinator's gate.
+
+R0's concrete same-PR change is to add these nine rows to the `tests` array in
+`scripts/ci/go-test-tiers.json`, retaining all existing rows and assertions:
+
+```json
+[
+{"kind":"go","package":"internal/nativesessions/stream","name":"TestLiveGapClosesAndBindingReplacementRefusesOldView","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativesessions/stream","name":"TestServerHTTPAuthenticatesViewerAndEmitsGapEnd","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativesessions/stream","name":"TestSlowSubscriberRevocationAndViewIsolation","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativestream","name":"TestHTTPPublisherBoundsAndBindsAcknowledgement","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativestream","name":"TestLocalHostProtocolRequiresPeerGrantAndExactBinding","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativestream","name":"TestNativeExpertProjectionFiltersAndBounds","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativestream","name":"TestOutboundLossRemainsTransientAndFinalUsesSink","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativestream","name":"TestSSEFencesQueuedContentAndKeepalive","tier":"ESSENTIAL"},
+{"kind":"go","package":"internal/nativestream","name":"TestTransientRingReportsLossAndRejectsStaleReplay","tier":"ESSENTIAL"}
+]
+```
+
+The normative P2a brief says to write only its exclusive set and stop/report
+when another file is required. The plan's R0 rule says builders never
+independently rewrite shared inventories. This fix round therefore stops at
+that ownership boundary: no test removal/rename, weakened assertion or runtime
+change can correctly repair a missing manifest registration. There is no
+transport behavior finding requiring a new regression against `055f1be7a`.
+The required R0 change and complete CI evidence remain open. No authored shared
+inventory, API, migration, version, origin push, deployment, review gate, model
+CLI, live runtime or vendor account was changed.
