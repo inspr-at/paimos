@@ -587,10 +587,35 @@ failure, then restored the working file. A lightweight manifest comparison
 confirmed all eight registrations are absent on `62efc7411`; no existing
 classification or assertion was weakened. No throwaway commit remains as HEAD.
 
-Fresh acceptance passes are not claimed for this round. The authoritative CI
-on `62efc7411` passes all four web unit shards and all twelve browser shards;
-this non-browser slice has no feature web unit or browser checks. The
-coordinator still owns the trusted review verdict and merge/release decisions.
+Guarded `ci-static-locked.sh` on corrective commit `fa0aea3f9` completed the
+required remote `node scripts/ci-static.mjs --merge-main`: **exit 1**, **41
+checks pass, zero optional skips**. Its only failure is `go-tiers`, listing
+exactly the eight missing registrations below. Tier/shard unit tests, source
+audit tests/coverage, Go vet, web type/lint, migration and OpenAPI checks pass.
+The offline affected selector exits **0** and requires **FULL CI** for migration
+1347's unsupported or incomplete SQL classification. Public-name and
+whitespace checks pass for this handoff.
+
+The final guarded five-package `remote-test.sh -count=1` retry on `fa0aea3f9`
+executes successfully and reports passing receipt, chat and DSAR packages.
+Agentpairing reproduces the reported missing receipt fence caller, so the
+combined command exits **1** and remains **not green**.
+
+* **PASS 1:** pre-I/O journal barrier, correlated input evidence and false-exit
+  denial.
+* **PASS 2:** content-free bounded receipt states, retries and scoped pages.
+* **PASS 3:** approved explicit final outbox and stopped-lease/chat isolation.
+* **PASS 4:** outage/exit/restart retention and current authority under the
+  access-fence revocation interleaving.
+* **PASS 5:** crash uncertainty prevents reinjection; stable final replay
+  stores once after acknowledgement loss.
+* `internal/dsar` passes its existing package tests; that result does not
+  establish the two missing table classifications.
+
+Authoritative CI on `62efc7411` passes all four web unit shards and all twelve
+browser shards; this non-browser slice has no feature web unit or browser
+checks. The coordinator still owns the trusted review verdict and merge/release
+decisions.
 
 **INCOMPLETE:** R0 must apply the exact shared-fence entry, eight ESSENTIAL
 tier rows and two DSAR classifications below in this PR, then rerun guarded
