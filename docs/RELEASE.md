@@ -58,7 +58,7 @@ node scripts/create-release-tag.mjs --write
 ```
 
 The check reads the exact workflow identity, paginated runs, every job and step,
-and the unexpired receipt artifact for that SHA and run attempt. PR/fork/other
+and the unexpired receipt artifact for that SHA and run attempt. PR/fork/ineligible
 branch runs, a different commit, a newer failed or pending attempt, a skipped
 platform or missing receipt all leave the gate closed. The tag workflow checks
 the same receipt before either native signing work or image publication can
@@ -102,6 +102,32 @@ runs `scripts/build-image-inputs.mjs web`, the production host web build, on PR
 changes to `web/**`, `internal/**/*.json` and its build inputs. Shared JSON
 imports keep their full checkout paths; the obsolete Docker `web` stage no
 longer compiles anything. Both image rehearsals also check these imports.
+
+### Hotfix releases
+
+Use this path for an incident fix with minimal scope on the last released tree.
+Name the branch `hotfix/<seq>` (at least three digits, for example `hotfix/132`)
+and protect it with a ruleset that forbids deletion and force-push. Merge its
+exact tip into `main` with a merge commit **before tagging**; squash or rebase
+would lose the ancestry required by the release gate. Dispatch the rehearsal
+on the hotfix branch while the release commit is its exact tip:
+
+```sh
+gh workflow run release-image-check.yml --ref hotfix/132
+# After the exact-tip rehearsal succeeds, from a clean hotfix/132 checkout:
+node scripts/create-release-tag.mjs --hotfix hotfix/132
+# After the coordinator's release approval, create only the annotated local tag:
+node scripts/create-release-tag.mjs --hotfix hotfix/132 --write
+```
+
+Hotfix mode fetches `origin/main` and requires HEAD to be its ancestor. The
+shared rehearsal check independently reads current `main` through the GitHub
+API and requires an `ahead` or `identical` comparison whose base and merge-base
+both equal the release SHA. API errors or missing proof leave the gate closed.
+The newest eligible run across `main` and hotfix branches still decides, with
+the same required jobs, steps and exact-SHA receipt. The pin bot and nixcfg pin
+gate also check ancestry, so a hotfix merged this way passes their ancestry
+checks. OPS retains the existing tag push, release and deployment procedure.
 
 ### Cross-family verdict and merge queue (AEON-411)
 
