@@ -175,7 +175,10 @@ test('AEON-1289 terminal capture and actions stay fenced through identity, epoch
   await send(page, terminal(1, 'person-two-screen', true), 4)
   await act(page, 'f.state.session.current_binding.runtime_epoch="runtime-b";f.state.session.current_binding.binding_revision=2;await f.nextTick();')
   await expect(page.locator('.terminal-screen')).toBeEmpty()
-  await page.getByRole('button', { name: 'End control…', exact: true }).click()
+  const staleAction = page.getByRole('button', { name: 'End control…', exact: true })
+  await expect(staleAction).toBeDisabled()
+  // A late click must also be rejected by the record fence behind the UI.
+  await staleAction.dispatchEvent('click')
   expect(await page.evaluate(() => (window as any).nativeTerminal.actions)).toEqual([])
   await act(page, 'f.state.consent.binding={...f.state.session.current_binding};f.state.action.binding={...f.state.session.current_binding};f.state.action.revision=f.state.session.revision;await f.nextTick();')
   await page.getByRole('button', { name: 'End control…', exact: true }).click()
