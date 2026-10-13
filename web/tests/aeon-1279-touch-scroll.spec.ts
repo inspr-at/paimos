@@ -2,7 +2,7 @@
 // AEON-1279: phone portrait scrolling ran away. Risk: a live change lands while a finger
 // scrolls, or above the screen without anchoring, and the rows on screen jump; or the footer
 // folding away resizes the page's scroller while momentum runs. Real touch gestures come from
-// Chromium's CDP (Input.synthesizeScrollGesture, a touch source). WebKit has no scroll
+// Chromium's CDP (Input.dispatchTouchEvent). WebKit has no scroll
 // anchoring, so every surface here runs with it off, as on an iPhone. Live changes arrive on
 // the page clock, never after a sleep; the first row on screen is measured before and after.
 import { appendFileSync } from 'node:fs'
@@ -22,20 +22,56 @@ test.use({ hasTouch: true, isMobile: true, viewport: PHONE })
 // ---------- Helpers ----------
 // WebKit (iPhone Safari) has no scroll anchoring: turn Chromium's off everywhere.
 const asOnSafari = (page: Page) => page.addStyleTag({ content: '*, *::before, *::after { overflow-anchor: none !important; }' })
-// One touch swipe; dy < 0 scrolls the content up (the finger moves up). No fling: the
-// Input completion can precede the final compositor scroll on Linux. Wait for the
-// scroller's own scrollend before measuring, never a timed delay after the gesture.
+type SwipeState = { started: boolean; down: number; ended: boolean; start: number; top: number; events: string[] }
+type SwipeWindow = { __swipe: SwipeState; __stopSwipe?: () => void }
+let lastTouchTimestamp = 0
+// One native touch swipe; dy < 0 moves the finger up. A synthesized scroll can finish
+// without delivering a scrollend on Linux. Dispatch the touch sequence explicitly, prove
+// that the intended scroller moved while the finger was down, then wait for its own trusted
+// scrollend after release. The input timestamps give the finger a stationary end (no fling),
+// as Chromium's preventFling does; neither page-clock advances nor sleeps settle the scroll.
 async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, dy: number, scroller = 'main') {
   await page.locator(scroller).evaluate(el => {
-    const state = { ended: false, start: el.scrollTop, top: el.scrollTop, events: [] as string[] }
-    Object.assign(window, { __swipe: state })
-    for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel', 'scroll', 'scrollend']) {
-      el.addEventListener(type, () => { state.top = el.scrollTop; state.events.push(type) }, { passive: true })
+    const win = window as unknown as SwipeWindow
+    win.__stopSwipe?.()
+    const listeners = new AbortController()
+    const state: SwipeState = { started: false, down: 0, ended: false, start: el.scrollTop, top: el.scrollTop, events: [] }
+    Object.assign(win, { __swipe: state, __stopSwipe: () => listeners.abort() })
+    const options = { passive: true, signal: listeners.signal }
+    for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+      el.addEventListener(type, event => {
+        if (!event.isTrusted) return
+        state.events.push(type)
+        state.down = (event as TouchEvent).touches.length
+        if (type === 'touchstart') state.started = true
+      }, options)
     }
-    el.addEventListener('scrollend', () => { state.ended = true }, { once: true })
+    el.addEventListener('scroll', () => { state.top = el.scrollTop; state.events.push('scroll') }, options)
+    el.addEventListener('scrollend', event => {
+      state.events.push('scrollend')
+      // A pending setup scrollend, or one from a nested scroller, cannot finish this swipe.
+      if (event.isTrusted && event.target === el && state.started && state.down === 0 && el.scrollTop !== state.start) state.ended = true
+    }, options)
   })
-  await cdp.send('Input.synthesizeScrollGesture', { x: at.x, y: at.y, xDistance: 0, yDistance: dy, speed: 800, gestureSourceType: 'touch', preventFling: true })
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __swipe: { ended: boolean } }).__swipe), 'the native scroll has finished').toMatchObject({ ended: true })
+  const state = () => page.evaluate(() => (window as unknown as SwipeWindow).__swipe)
+  const timestamp = Math.max(Date.now() / 1000, lastTouchTimestamp + 0.01)
+  lastTouchTimestamp = timestamp + 0.5
+  let down = false
+  try {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', timestamp, touchPoints: [{ ...at, id: 0 }] })
+    down = true
+    for (let step = 1; step <= 4; step++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', timestamp: timestamp + step * 0.016, touchPoints: [{ x: at.x, y: at.y + dy * step / 4, id: 0 }] })
+    }
+    await expect.poll(async () => { const s = await state(); return s.started && s.down === 1 && (s.top - s.start) * -Math.sign(dy) > 0 }, 'the native touch moves the intended scroller with the finger down').toBe(true)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', timestamp: timestamp + 0.49, touchPoints: [{ x: at.x, y: at.y + dy, id: 0 }] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', timestamp: lastTouchTimestamp, touchPoints: [] })
+    down = false
+    await expect.poll(state, 'the native scroll has finished').toMatchObject({ ended: true, down: 0 })
+  } finally {
+    if (down) await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', timestamp: lastTouchTimestamp, touchPoints: [] })
+    await page.evaluate(() => (window as unknown as SwipeWindow).__stopSwipe?.())
+  }
 }
 // The first row fully on screen below the sticky heads that are stuck, and where it is.
 async function firstOnScreen(page: Page, rows: string, heads: string, scroller = 'main') {
