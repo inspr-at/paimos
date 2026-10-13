@@ -321,3 +321,63 @@ transport behavior finding requiring a new regression against `055f1be7a`.
 The required R0 change and complete CI evidence remain open. No authored shared
 inventory, API, migration, version, origin push, deployment, review gate, model
 CLI, live runtime or vendor account was changed.
+
+Fix round 5, 2026-10-13 (reviewed source `8b4090d07`):
+
+- CONFIRMED — CI run `38351733422` is the PR run for `8b4090d07`.
+  Go static job `115145749619` fails only at strict Go tier validation,
+  naming exactly the nine rows above. The failure is a missing registration,
+  not a failed transport assertion. No behavior fix or new regression against
+  `8b4090d07` is indicated by this review.
+- PASS — the run's Go JSONL artifacts record all six `internal/nativestream`
+  tests and all three `internal/nativesessions/stream` tests passing. The CI
+  merge commit `08734bea7` changes neither stream package relative to the
+  reviewed source. These tests retain all five acceptance checks: authenticated
+  C0 transport, shared binding/view isolation, bounded transient replay with
+  separate FinalSink, native export filtering and barrier-established revocation.
+  Their measurement classification is still NIGHTLY; passing execution does
+  not satisfy the required ESSENTIAL registration.
+- CONFIRMED — web aggregate job `115154059022` fails because both browser
+  shards were cancelled. Shard 1 completed a 100-case batch, then reached
+  case 153 of 191; shard 2 completed a 215-case batch, then reached case
+  95 of 100. Both report `The operation was canceled`, without an assertion
+  failure. All four web-unit shards passed. Measurements report
+  `coverage: incomplete`, both browser shards in `missingEvidence`, and
+  `measurementCauses: [missing_case_artifact]`. Complete authoritative CI
+  evidence is still required; partial batches do not establish a browser pass.
+- CONFIRMED — refreshed `origin/main` is `fd8fae22f`. PR #621 is mergeable,
+  so the brief's conflict-triggered merge is unnecessary. That main revision
+  also lacks these nine stream rows; merging it cannot resolve this finding.
+  The selected PPM / INSPR agent and coordinator-recorded builder marker were
+  verified before the handoff edit.
+- PASS WITH LIMIT — the offline affected plan exits 0 in `essential` mode
+  with `full` layout and 128 selected Go packages, but omits both stream
+  packages. Repeat selection after R0 adds the rows. This non-browser slice
+  has no affected web unit tests or browser specs of its own.
+- INCOMPLETE — two guarded remote `-race` attempts for `internal/httpapi`,
+  `internal/nativestream` and `internal/nativesessions/stream`, and two guarded
+  `ci-static-locked.sh` attempts, returned exit 3 because the remote slots/CI
+  pool were full. No local fallback, guard bypass or green static claim was
+  made. The current CI strict-tier failure remains independently confirmed.
+
+R0 can apply the exact nine registrations through the existing classifier in
+its serialized, guarded metadata lane:
+
+```sh
+node scripts/test-tiers/cli.mjs classify go --tier ESSENTIAL --only 'internal/nativestream:'
+node scripts/test-tiers/cli.mjs classify go --tier ESSENTIAL --only 'internal/nativesessions/stream:'
+node scripts/test-tiers/cli.mjs manifests --write
+```
+
+The filters are literal package/test identity prefixes and the classifier adds
+only undeclared tests. They select the six and three rows already listed above,
+preserving every existing tier and assertion. R0 must apply them on this same
+branch, rerun affected selection and guarded static checks, then the coordinator
+must obtain complete PR CI evidence before another release decision.
+
+The exclusive P2a write set and R0 ownership rule still prohibit this builder
+from editing `scripts/ci/go-test-tiers.json`. This round therefore hands off the
+remaining blocking metadata change and cancelled CI evidence explicitly. No
+runtime behavior, test assertion, shared inventory, API, migration or version
+was changed; no origin push, deployment, review gate, model CLI, live runtime or
+vendor account action was performed.
