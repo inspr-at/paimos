@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeinteraction"
 	"github.com/inspr-at/paimos/internal/questions"
@@ -130,6 +131,7 @@ type locked struct {
 	policy                   nativecontract.Policy
 	now                      time.Time
 	paired, computer, ledger string
+	viewerIsOwner            bool
 }
 
 // transaction is the sole mutation entry. Access changes use the same fence;
@@ -179,6 +181,13 @@ func (s *Store) transaction(ctx context.Context, a nativecontract.Actor, b nativ
 		}
 		if l.view.CurrentBinding == nil || !nativeinteraction.SameBinding(*l.view.CurrentBinding, b) {
 			return fault(409, nativecontract.ReasonWrongGeneration)
+		}
+		if p.Kind == tenant.Person {
+			canonical, err := modelprefs.CanonicalPerson(ctx, tx, p.ID)
+			if err != nil {
+				return err
+			}
+			l.viewerIsOwner = canonical != nil && *canonical == l.view.OwnerPersonID
 		}
 		if l.view.State != "running" && l.view.State != "idle" && l.view.State != "requires_action" && l.view.State != "taken" {
 			return fault(409, nativecontract.ReasonOwnershipUnconfirmed)

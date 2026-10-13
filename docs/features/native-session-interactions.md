@@ -19,8 +19,10 @@ the original grant; the client heartbeats every five seconds and subtracts
 monotonic request time from `expires_in_ms`. Renewal requires the exact viewer,
 actor, binding, epoch and transport-header capability. Capabilities are derived
 in process memory; SQL stores only their digests. Detach affects viewing/control
-only. End control requires the owner or project administrator and the current
-revision/epoch. Neither operation changes writer lifetime or root occupancy.
+only. Public snapshots keep quota facts owner-only and never advertise local
+TUI takeover to a web caller. End control requires the owner or project
+administrator and the current revision/epoch. Neither operation changes writer
+lifetime or root occupancy.
 `CheckControlTx` must run again under the final command-claim fence. The stream
 owner enforces its separate global viewer cap and emits lease expiry/end-control
 notifications from these authoritative transitions.
@@ -78,14 +80,14 @@ Worker acceptance evidence (2026-10-13):
 
 - PASS — one bounded holder epoch, concurrent attach serialization, explicit
   control, read-only reconnect, final claim revocation/runtime checks, renewal
-  expiry and detach preserving the running session: guarded mbp2606
+  expiry and detach preserving the running session: guarded remote
   `TestControllerEpochFencesConcurrentAttach`.
 - PASS — existing Decision Desk routing with exact request/turn/effect/runtime
-  metadata and server-owned step-up requirements: guarded mbp2606
+  metadata and server-owned step-up requirements: guarded remote
   `TestDeskDecisionExactEffectExpiryAndRevocation`, including a complete
   2048-byte summary retained in the existing findings slot.
 - PASS — agent/message rejection, wrong-effect rejection, revoked grants and
-  one callback delivery: the desk test plus guarded mbp2606
+  one callback delivery: the desk test plus guarded remote
   `TestCallbackExactOnceAndRuntimeFence`.
 - PASS — only allow-once/deny/exact-answer, protected allows closed without
   human verification, and callbacks/leases expiring on restart: the desk test,

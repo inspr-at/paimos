@@ -172,8 +172,14 @@ func (s *Store) attached(l *locked, viewer, mode string, expires time.Time, c *l
 		value := s.token(c.view.ActorID, viewer, c.view.Epoch)
 		token = &value
 	}
+	// Public v1 attaches cannot advertise local TUI takeover. Account quota
+	// facts stay owner-only, including when another person has project control.
+	snapshot := nativecontract.PersonProjection(l.view, "person", true)
+	if !l.viewerIsOwner {
+		snapshot.Quota = nil
+	}
 	return nativecontract.AttachResult{ViewerID: viewer, Binding: *l.view.CurrentBinding, Mode: mode, ExpiresAt: expires, Controller: l.view.Controller, ControlCapability: token,
-		StreamPath: "/api/projects/" + l.view.CurrentBinding.ProjectID + "/native-sessions/" + l.view.OwnedSessionID + "/stream", Snapshot: l.view, ExpiresInMS: max(0, expires.Sub(l.now).Milliseconds())}
+		StreamPath: "/api/projects/" + l.view.CurrentBinding.ProjectID + "/native-sessions/" + l.view.OwnedSessionID + "/stream", Snapshot: snapshot, ExpiresInMS: max(0, expires.Sub(l.now).Milliseconds())}
 }
 
 type viewerRecord struct {

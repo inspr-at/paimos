@@ -65,6 +65,10 @@ func newFixture(t *testing.T) *fixture {
 	f.agent = tenant.Principal{ID: uid(), TenantID: tenantID, Kind: tenant.Agent, Scopes: []string{"harness.read", "harness.worker", "questions.ask", "questions.read"}}
 	f.binding = nativecontract.Binding{TenantID: tenantID, ProjectID: uid(), OwnedSessionID: uid(), HarnessSessionID: uid(), RuntimeEpoch: uid(), DaemonID: "fixture-daemon", DaemonGeneration: "generation-1", BindingRevision: 2}
 	view := nativecontract.SessionView{OwnedSessionID: f.binding.OwnedSessionID, CurrentBinding: &f.binding, OwnerPersonID: f.person.ID, Role: "coordinator", Profile: "native", Harness: "claude", State: "running", Mode: "structured", Revision: 2, Generation: 1, ConversationRef: f.binding.OwnedSessionID, Capabilities: nativecontract.Capabilities{Steer: "unsupported", Quota: "unsupported", QualificationDigest: strings.Repeat("a", 64), Approvals: true, Questions: true}}
+	view.Capabilities.Take = true
+	view.Capabilities.TakeSupported = true
+	used := 10.0
+	view.Quota = &nativecontract.Quota{AccountID: uid(), ProfileBindingRevision: 1, Source: "claude_stream", Scope: "account", State: "known", UsedPercent: &used, ObservedAt: f.now, FreshUntil: f.now.Add(time.Minute)}
 	policy := nativecontract.Policy{GrantID: uid(), GrantRevision: 1, ExpiresAt: f.now.Add(time.Hour), ToolPolicyDigest: strings.Repeat("a", 64), SettingsPolicyDigest: strings.Repeat("b", 64), PermissionPolicy: "supervised", LocalHistory: "vendor_native", Continuation: "manual", MaximumRuntimeSeconds: 3600, MaximumTurns: 100, MaximumTokens: 10000}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, tenantID, func(tx pgx.Tx) error {
 		for _, q := range []struct {
@@ -158,10 +162,16 @@ func TestControllerEpochFencesConcurrentAttach(t *testing.T) {
 	if a.err != nil || a.out.Controller == nil || a.out.ControlCapability == nil {
 		t.Fatalf("control attach failed: %v", a.err)
 	}
+	if a.out.Snapshot.Capabilities.Take || a.out.Snapshot.Capabilities.TakeSupported || a.out.Snapshot.Quota == nil {
+		t.Fatal("owner public projection lost quota or advertised unqualified web take")
+	}
 	expectFailure(t, b.err, 409, nativecontract.ReasonControllerConflict)
 	view, err := f.s.Attach(f.ctx(t, f.other), actor(f.other), f.attach("view"))
 	if err != nil || view.ControlCapability != nil || view.Controller == nil || view.Controller.Epoch != a.out.Controller.Epoch {
 		t.Fatalf("read-only attach changed control: %v", err)
+	}
+	if view.Snapshot.Quota != nil || view.Snapshot.Capabilities.Take || view.Snapshot.Capabilities.TakeSupported {
+		t.Fatal("non-owner public projection exposed private quota or local take")
 	}
 	// Idempotent reconnect returns the same epoch/capability without renewing.
 	f.now = f.now.Add(5 * time.Second)
