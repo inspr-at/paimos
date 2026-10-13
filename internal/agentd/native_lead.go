@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
-	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 var ErrNativeUnqualified = errors.New("native_coordinator_unqualified")
