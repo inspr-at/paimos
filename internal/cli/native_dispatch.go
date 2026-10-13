@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentdwire"
@@ -139,7 +140,7 @@ func sendNativeWorkerStart(ctx context.Context, client *http.Client, token []byt
 	if err = v.DecodeJSON("NativeOperationResult", body, &out); err != nil {
 		return out, err
 	}
-	if out.Receipt.RequestID != start.Intent.RequestID || out.Receipt.Operation != "start" || out.Session == nil || out.Session.Role != "worker" || out.Session.Profile != "native" || out.Session.Harness != start.Intent.Harness || out.Session.CurrentBinding != nil && (out.Session.CurrentBinding.RunID == nil || out.Receipt.Binding == nil || out.Receipt.Binding.OwnedSessionID != out.Session.OwnedSessionID) {
+	if out.Receipt.RequestID != start.Intent.RequestID || out.Receipt.Operation != "start" || out.Session == nil || out.Session.Role != "worker" || out.Session.Profile != "native" || out.Session.Harness != start.Intent.Harness || out.Session.CurrentBinding != nil && (out.Session.CurrentBinding.RunID == nil || out.Receipt.Binding == nil || !reflect.DeepEqual(out.Receipt.Binding, out.Session.CurrentBinding)) {
 		return out, fmt.Errorf("native dispatch returned a mismatched receipt; outcome unconfirmed")
 	}
 	if out.Receipt.State == "uncertain" || out.Receipt.State == "rejected" || out.Receipt.State == "expired" {

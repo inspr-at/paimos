@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -47,6 +48,7 @@ type Host interface {
 	Input(context.Context, nativecontract.Input) (nativecontract.OperationResult, error)
 	Interrupt(context.Context, nativecontract.Interrupt) (nativecontract.OperationResult, error)
 	Stop(context.Context, nativecontract.Stop) (nativecontract.OperationResult, error)
+	Snapshot(context.Context, nativecontract.Binding) (nativecontract.SessionView, error)
 }
 
 // Ancestry can only update an already registered generation. Its implementation
@@ -199,12 +201,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, request Request) (*Worker, er
 	}
 	w.mu.Lock()
 	w.result, w.err = result, err
-	w.uncertain = err != nil || result.Receipt.State == "uncertain"
+	w.uncertain = err != nil || result.Receipt.State == "uncertain" || result.Receipt.State == "rejected" || result.Receipt.State == "expired"
 	if err == nil && result.Receipt.State == "uncertain" {
 		w.err = receiptFailure(result.Receipt)
 	}
 	if err == nil && (result.Receipt.State == "rejected" || result.Receipt.State == "expired") {
-		w.held = false // authenticated start receipt proves no launch
+		// Refusal alone says nothing about possible earlier fork. Only the
+		// owning supervisor's no-fork/exit evidence may free its real ledger.
 		w.err = receiptFailure(result.Receipt)
 	}
 	w.mu.Unlock()
@@ -238,6 +241,10 @@ func (d *Dispatcher) checkTarget(r Request, t Target) error {
 	if err != nil {
 		return refusal(nativecontract.ReasonInvalidInput)
 	}
+	info, err := os.Stat(assigned)
+	if err != nil || !info.IsDir() {
+		return refusal(nativecontract.ReasonInvalidInput)
+	}
 	cwd, err := filepath.EvalSymlinks(r.Start.Cwd)
 	if err != nil || cwd != assigned {
 		return refusal(nativecontract.ReasonPermissionRevoked)
@@ -257,6 +264,26 @@ func (w *Worker) wait(ctx context.Context) (*Worker, error) {
 }
 
 func sameBinding(a, b nativecontract.Binding) bool { return reflect.DeepEqual(a, b) }
+
+func freezeBinding(b nativecontract.Binding) nativecontract.Binding {
+	if b.RunID != nil {
+		run := *b.RunID
+		b.RunID = &run
+	}
+	return b
+}
+
+func bindingBounds(b nativecontract.Binding) error {
+	for _, s := range []string{b.TenantID, b.ProjectID, b.OwnedSessionID, b.HarnessSessionID, b.RuntimeEpoch, b.DaemonID, b.DaemonGeneration} {
+		if len(s) > 128 {
+			return refusal(nativecontract.ReasonBufferFull)
+		}
+	}
+	if b.RunID != nil && len(*b.RunID) > 36 {
+		return refusal(nativecontract.ReasonBufferFull)
+	}
+	return nil
+}
 
 func (w *Worker) checkResult(r nativecontract.OperationResult, operation, requestID string, binding *nativecontract.Binding) error {
 	if err := validate(w.d.validator, "NativeOperationResult", r); err != nil {
@@ -314,8 +341,8 @@ func (w *Worker) Reservation() Reservation {
 	return Reservation{w.request.TenantID, i.AccountID, i.ComputerID, i.WorkspaceID, *i.WorkID, *i.ParentHarnessSessionID, w.held, w.uncertain}
 }
 
-// Forget reclaims bounded local bookkeeping only after confirmed no-fork or
-// owned stop. Future replay still goes through durable server idempotency.
+// Forget reclaims bounded local bookkeeping only after confirmed owned stop.
+// Future replay still goes through durable server idempotency.
 func (d *Dispatcher) Forget(w *Worker) error {
 	if w == nil || w.d != d {
 		return refusal(nativecontract.ReasonIdentityMismatch)
@@ -346,11 +373,14 @@ func (d *Dispatcher) ChildEvent(ctx context.Context, tenantID, requestID string,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	event.Binding = freezeBinding(event.Binding)
 	if d.onWait != nil {
 		d.onWait("child_event")
 	}
-	if _, err := w.wait(ctx); err != nil {
-		return err
+	select {
+	case <-w.done:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -379,6 +409,12 @@ func (d *Dispatcher) ChildEvent(ctx context.Context, tenantID, requestID string,
 // command captures the registered runtime. Host performs the final ownership,
 // permission and monotonic deadline check under its existing native write lock.
 func (w *Worker) command(ctx context.Context, binding nativecontract.Binding, schema, operation, requestID string, value any, send func(context.Context) (nativecontract.OperationResult, error)) (nativecontract.OperationResult, error) {
+	if len(requestID) > 36 {
+		return nativecontract.OperationResult{}, refusal(nativecontract.ReasonBufferFull)
+	}
+	if err := bindingBounds(binding); err != nil {
+		return nativecontract.OperationResult{}, err
+	}
 	if err := validate(w.d.validator, schema, value); err != nil {
 		return nativecontract.OperationResult{}, err
 	}
@@ -413,16 +449,89 @@ func (w *Worker) command(ctx context.Context, binding nativecontract.Binding, sc
 }
 
 func (w *Worker) Input(ctx context.Context, in nativecontract.Input) (nativecontract.OperationResult, error) {
-	if len(in.Text) > 65536 {
+	if len(in.Text) > 65536 || len(in.InputID) > 36 {
 		return nativecontract.OperationResult{}, refusal(nativecontract.ReasonBufferFull)
 	}
-	return w.command(ctx, in.ExpectedBinding, "NativeInput", "input", in.RequestID, in, func(ctx context.Context) (nativecontract.OperationResult, error) { return w.d.host.Input(ctx, in) })
+	in.ExpectedBinding = freezeBinding(in.ExpectedBinding)
+	return w.command(ctx, in.ExpectedBinding, "NativeInput", "input", in.RequestID, in, func(ctx context.Context) (nativecontract.OperationResult, error) {
+		out, err := w.d.host.Input(ctx, in)
+		if err == nil && (out.Receipt.InputID == nil || *out.Receipt.InputID != in.InputID || (out.Receipt.State == "turn_started" || out.Receipt.State == "turn_completed") && (out.Receipt.TurnRef == nil || *out.Receipt.TurnRef == "")) {
+			err = refusal(nativecontract.ReasonIdentityMismatch)
+		}
+		return out, err
+	})
 }
 
 func (w *Worker) Interrupt(ctx context.Context, in nativecontract.Interrupt) (nativecontract.OperationResult, error) {
-	return w.command(ctx, in.ExpectedBinding, "NativeInterrupt", "interrupt", in.RequestID, in, func(ctx context.Context) (nativecontract.OperationResult, error) { return w.d.host.Interrupt(ctx, in) })
+	if len(in.ExpectedTurnRef) > 256 {
+		return nativecontract.OperationResult{}, refusal(nativecontract.ReasonBufferFull)
+	}
+	in.ExpectedBinding = freezeBinding(in.ExpectedBinding)
+	return w.command(ctx, in.ExpectedBinding, "NativeInterrupt", "interrupt", in.RequestID, in, func(ctx context.Context) (nativecontract.OperationResult, error) {
+		out, err := w.d.host.Interrupt(ctx, in)
+		if err == nil && out.Receipt.State == "applied" && (out.Receipt.TurnRef == nil || *out.Receipt.TurnRef != in.ExpectedTurnRef) {
+			err = refusal(nativecontract.ReasonIdentityMismatch)
+		}
+		return out, err
+	})
 }
 
 func (w *Worker) Stop(ctx context.Context, in nativecontract.Stop) (nativecontract.OperationResult, error) {
+	if len(in.Kind) > 32 || len(in.ExpectedProcessIdentityDigest) > 64 || in.ForceAuthorizationID != nil && len(*in.ForceAuthorizationID) > 36 {
+		return nativecontract.OperationResult{}, refusal(nativecontract.ReasonBufferFull)
+	}
+	in.ExpectedBinding = freezeBinding(in.ExpectedBinding)
+	if in.ForceAuthorizationID != nil {
+		id := *in.ForceAuthorizationID
+		in.ForceAuthorizationID = &id
+	}
 	return w.command(ctx, in.ExpectedBinding, "NativeStop", "stop", in.RequestID, in, func(ctx context.Context) (nativecontract.OperationResult, error) { return w.d.host.Stop(ctx, in) })
+}
+
+// Status reads the authoritative owned runtime. It can bind an accepted start
+// when the supervisor supplies its registered generation, but never adopts a
+// successor or a foreign public ID. Final/idle snapshots alone retain holds.
+func (w *Worker) Status(ctx context.Context, binding nativecontract.Binding) (nativecontract.SessionView, error) {
+	binding = freezeBinding(binding)
+	if err := bindingBounds(binding); err != nil {
+		return nativecontract.SessionView{}, err
+	}
+	if err := validate(w.d.validator, "NativeBinding", binding); err != nil {
+		return nativecontract.SessionView{}, err
+	}
+	w.mu.Lock()
+	valid := w.result.Session != nil && binding.TenantID == w.request.TenantID && binding.ProjectID == w.request.ProjectID && binding.OwnedSessionID == w.result.Session.OwnedSessionID && binding.RunID != nil && (w.result.Session.CurrentBinding == nil || sameBinding(binding, *w.result.Session.CurrentBinding))
+	w.mu.Unlock()
+	if !valid {
+		return nativecontract.SessionView{}, refusal(nativecontract.ReasonWrongGeneration)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	view, err := w.d.host.Snapshot(ctx, binding)
+	if err != nil {
+		return view, err
+	}
+	if err = validate(w.d.validator, "NativeSessionView", view); err != nil {
+		return view, err
+	}
+	if view.CurrentBinding == nil || !sameBinding(binding, *view.CurrentBinding) || view.OwnerPersonID != w.target.Actor.OwnerPersonID || view.Role != "worker" || view.Harness != w.request.Start.Intent.Harness {
+		return view, refusal(nativecontract.ReasonIdentityMismatch)
+	}
+	if view.LastReceipt != nil && (view.LastReceipt.Binding == nil || !sameBinding(binding, *view.LastReceipt.Binding)) {
+		return view, refusal(nativecontract.ReasonIdentityMismatch)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.result.Session.CurrentBinding != nil && !sameBinding(binding, *w.result.Session.CurrentBinding) {
+		return view, refusal(nativecontract.ReasonWrongGeneration)
+	}
+	// Freeze the read before storing it; the caller receives its own copy.
+	raw, _ := json.Marshal(view)
+	var cached nativecontract.SessionView
+	_ = json.Unmarshal(raw, &cached)
+	w.result.Session = &cached
+	if view.LastReceipt != nil && view.LastReceipt.Operation == "stop" && view.LastReceipt.State == "exit_confirmed" {
+		w.held, w.uncertain = false, false
+	}
+	return view, nil
 }

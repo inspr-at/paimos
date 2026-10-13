@@ -51,6 +51,10 @@ type testHost struct {
 	preFork, allowFork                                       chan struct{}
 	startErr                                                 error
 	stopState                                                string
+	startState                                               string
+	wrongInput, wrongTurn                                    bool
+	view                                                     *nativecontract.SessionView
+	snapshots                                                int
 }
 
 func (h *testHost) Start(_ context.Context, in nativecontract.LocalStart) (nativecontract.OperationResult, error) {
@@ -68,7 +72,11 @@ func (h *testHost) Start(_ context.Context, in nativecontract.LocalStart) (nativ
 		return nativecontract.OperationResult{}, h.startErr
 	}
 	h.spawned++
-	return testResult("start", in.Intent.RequestID, "applied"), nil
+	state := h.startState
+	if state == "" {
+		state = "applied"
+	}
+	return testResult("start", in.Intent.RequestID, state), nil
 }
 func (h *testHost) Input(_ context.Context, in nativecontract.Input) (nativecontract.OperationResult, error) {
 	h.mu.Lock()
@@ -76,13 +84,21 @@ func (h *testHost) Input(_ context.Context, in nativecontract.Input) (nativecont
 	h.mu.Unlock()
 	out := testResult("input", in.RequestID, "turn_completed")
 	out.Receipt.InputID, out.Receipt.TurnRef = &in.InputID, ptr("turn-1")
+	if h.wrongInput {
+		out.Receipt.InputID = ptr(parentID)
+	}
 	return out, nil
 }
 func (h *testHost) Interrupt(_ context.Context, in nativecontract.Interrupt) (nativecontract.OperationResult, error) {
 	h.mu.Lock()
 	h.interrupts++
 	h.mu.Unlock()
-	return testResult("interrupt", in.RequestID, "applied"), nil
+	out := testResult("interrupt", in.RequestID, "applied")
+	out.Receipt.TurnRef = &in.ExpectedTurnRef
+	if h.wrongTurn {
+		out.Receipt.TurnRef = ptr("another-turn")
+	}
+	return out, nil
 }
 func (h *testHost) Stop(_ context.Context, in nativecontract.Stop) (nativecontract.OperationResult, error) {
 	h.mu.Lock()
@@ -93,6 +109,16 @@ func (h *testHost) Stop(_ context.Context, in nativecontract.Stop) (nativecontra
 		state = "accepted"
 	}
 	return testResult("stop", in.RequestID, state), nil
+}
+
+func (h *testHost) Snapshot(context.Context, nativecontract.Binding) (nativecontract.SessionView, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.snapshots++
+	if h.view != nil {
+		return *h.view, nil
+	}
+	return *testResult("start", testID, "applied").Session, nil
 }
 
 type testAncestry struct {
@@ -200,6 +226,7 @@ func TestDispatchDuplicateChildBarrierAndOccupancy(t *testing.T) {
 		t.Fatal("child ancestry changed")
 	}
 	// Replay updates only the existing row; wrong parents never reach the sink.
+	d.onWait = nil // both barrier participants have returned
 	if err := d.ChildEvent(ctx, r.TenantID, r.Start.Intent.RequestID, event); err != nil {
 		t.Fatal(err)
 	}
@@ -222,6 +249,10 @@ func TestDispatchDuplicateChildBarrierAndOccupancy(t *testing.T) {
 		t.Fatal("turn/final completion freed a running writer")
 	}
 	badInput := in
+	h.wrongInput = true
+	_, err = w.Input(ctx, in)
+	requireReason(t, err, nativecontract.ReasonIdentityMismatch)
+	h.wrongInput = false
 	badInput.ExpectedBinding.RuntimeEpoch = parentID
 	_, err = w.Input(ctx, badInput)
 	requireReason(t, err, nativecontract.ReasonWrongGeneration)
@@ -229,6 +260,23 @@ func TestDispatchDuplicateChildBarrierAndOccupancy(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := nativecontract.Stop{RequestID: workID, ExpectedBinding: b, Kind: "graceful", ExpectedProcessIdentityDigest: strings.Repeat("a", 64), ExpiresAt: now.Add(time.Minute)}
+	h.wrongTurn = true
+	_, err = w.Interrupt(ctx, nativecontract.Interrupt{RequestID: workID, ExpectedBinding: b, ExpectedTurnRef: "turn-1", ExpiresAt: now.Add(time.Minute)})
+	requireReason(t, err, nativecontract.ReasonIdentityMismatch)
+	h.wrongTurn = false
+	view, err := w.Status(ctx, b)
+	if err != nil || view.State != "running" {
+		t.Fatal("owned status lost", view, err)
+	}
+	view.State = "idle"
+	finalReceipt := testResult("input", workID, "turn_completed").Receipt
+	view.LastReceipt = &finalReceipt
+	h.view = &view
+	if _, err = w.Status(ctx, b); err != nil || !w.Reservation().Held {
+		t.Fatal("idle/final snapshot released occupancy", err)
+	}
+	_, err = w.Status(ctx, badInput.ExpectedBinding)
+	requireReason(t, err, nativecontract.ReasonWrongGeneration)
 	h.stopState = "uncertain"
 	_, err = w.Stop(ctx, stop)
 	requireReason(t, err, nativecontract.ReasonNativeFailure)
@@ -251,7 +299,7 @@ func TestDispatchDuplicateChildBarrierAndOccupancy(t *testing.T) {
 	a.target.Leaf = false
 	_, err = d.Dispatch(ctx, r)
 	requireReason(t, err, nativecontract.ReasonInvalidInput)
-	if h.registered != 1 || h.inputs != 1 || h.interrupts != 1 || h.stops != 2 {
+	if h.registered != 1 || h.inputs != 2 || h.interrupts != 2 || h.stops != 2 || h.snapshots != 2 {
 		t.Fatal("refused work reached a native writer")
 	}
 }
@@ -284,4 +332,16 @@ func TestDispatchChangedGrantAndUnconfirmedStart(t *testing.T) {
 	if h.registered != 1 {
 		t.Fatal("changed/expired grant launched")
 	}
+	// A rejection can arrive after possible fork. It does not prove no-fork.
+	h2 := &testHost{startState: "rejected"}
+	d2, err := New(h2, &testAuthority{target}, &testAncestry{}, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	w3, err := d2.Dispatch(t.Context(), r)
+	requireReason(t, err, nativecontract.ReasonNativeFailure)
+	if w3 == nil || !w3.Reservation().Held || h2.spawned != 1 {
+		t.Fatal("rejection was misread as no-fork evidence")
+	}
+	requireReason(t, d2.Forget(w3), nativecontract.ReasonOwnershipUnconfirmed)
 }

@@ -64,6 +64,13 @@ func TestNativeWorkerDispatchFrozenEnvelopeAndReceipt(t *testing.T) {
 	if _, err = sendNativeWorkerStart(t.Context(), client, []byte("test-owner-proof"), start); err == nil || !strings.Contains(err.Error(), "mismatched") {
 		t.Fatal("foreign receipt reported success", err)
 	}
+	out.Receipt.RequestID = id
+	foreignBinding := binding
+	foreignBinding.RuntimeEpoch = parent
+	out.Receipt.Binding = &foreignBinding
+	if _, err = sendNativeWorkerStart(t.Context(), client, []byte("test-owner-proof"), start); err == nil || !strings.Contains(err.Error(), "mismatched") {
+		t.Fatal("foreign runtime receipt reported success", err)
+	}
 	// The request ID is mandatory and remains unchanged even on transport loss.
 	client.Transport = dispatchTransport(func(*http.Request) (*http.Response, error) { return nil, errors.New("test connection lost") })
 	if _, err = sendNativeWorkerStart(context.Background(), client, []byte("test-owner-proof"), start); err == nil || !strings.Contains(err.Error(), "unconfirmed") {
@@ -73,7 +80,7 @@ func TestNativeWorkerDispatchFrozenEnvelopeAndReceipt(t *testing.T) {
 	if _, err = sendNativeWorkerStart(t.Context(), client, []byte("test-owner-proof"), start); err == nil {
 		t.Fatal("coordinator start accepted as worker")
 	}
-	if calls != 3 {
+	if calls != 4 {
 		t.Fatal("invalid request reached transport", calls)
 	}
 	if _, err = decodeNativeWorkerStart(strings.NewReader(strings.Repeat(" ", 16385))); err == nil {

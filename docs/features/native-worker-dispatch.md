@@ -41,8 +41,10 @@ owner-approved per-session settings overlay, not global personal settings.
 
 ## Inbox, completion and occupancy
 
-The returned worker routes input, interrupt and stop through its registered
-C0 host. Caller changes to a returned snapshot cannot change that binding.
+The returned worker reads status and routes input, interrupt and stop through
+its registered C0 host. An accepted start can learn its registered binding
+through an authenticated host snapshot for the same owned session; it cannot
+adopt a successor generation. Caller changes to a returned snapshot cannot change that binding.
 Input delivery requires correlated native receipts; accepted/queued means
 intent only. Interrupt captures the exact active turn. Stop captures the
 process identity digest; force retains the existing person step-up requirement.
@@ -54,8 +56,9 @@ sink/outbox and drain-only authorization. Token chunks are never assembled
 into a durable final. A final, completed task or `turn_completed` receipt is
 not process exit. A stop request or ambiguous response retains occupancy;
 only the exact owned `exit_confirmed` receipt releases the monitoring hold.
-Rejected/expired start receipts prove no-fork abandonment on the qualified
-host; a transport error does not. Failure and uncertainty return errors.
+Rejected/expired start receipts and transport errors do not by themselves
+prove no-fork abandonment. The owning supervisor must reconcile its actual
+ledger using verified no-fork/exit evidence. Failure and uncertainty return errors.
 
 `Worker.Reservation` is a content-free monitoring projection of one attempt:
 tenant, account, computer, workspace, leaf, parent and held/uncertain state.
@@ -66,7 +69,7 @@ remain the capacity authorities. There is no pooling, token intermediary,
 automatic account hopping or foreign PID adoption.
 
 Local bookkeeping is bounded to 256 dispatches. `Forget` removes only a
-confirmed stopped/no-fork entry, never an uncertain hold; server idempotency
+confirmed stopped entry, never an uncertain hold; server idempotency
 still applies to later replays. A full cache refuses further dispatch visibly.
 
 ## Progress without a status file

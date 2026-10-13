@@ -5,6 +5,7 @@ package nativedispatch
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,6 +79,12 @@ func NewProgress(binding nativecontract.Binding, identity nativecontract.NativeI
 	}
 	if lifetime == nil || binding.RunID == nil || identity.RuntimeEpoch != binding.RuntimeEpoch || (identity.Provider != "claude" && identity.Provider != "codex") || identity.Provider == "claude" && identity.NativeSessionRef == "" || identity.Provider == "codex" && identity.NativeThreadRef == "" {
 		return nil, refusal(nativecontract.ReasonIdentityMismatch)
+	}
+	if len(identity.ProcessIdentityDigest) != 64 || len(identity.NativeSessionRef) > 256 || len(identity.NativeThreadRef) > 256 {
+		return nil, refusal(nativecontract.ReasonPinInvalid)
+	}
+	if _, err := hex.DecodeString(identity.ProcessIdentityDigest); err != nil {
+		return nil, refusal(nativecontract.ReasonPinInvalid)
 	}
 	if now == nil {
 		now = time.Now
