@@ -41,6 +41,9 @@ type LeadSessionIO struct {
 }
 
 type LeadStartRequest struct {
+	// Native is a separately authorized, person-invoked root coordinator.
+	// It never turns a routine grant into native tool or history authority.
+	Native              *NativeLeadSpec
 	Launch              agentsetup.LeadLaunch
 	Session             HarnessSession
 	AccountKey          string
@@ -68,6 +71,7 @@ type leadRuntimeAPI interface {
 }
 
 type leadRecord struct {
+	Native       *nativeLeadRecord      `json:"native,omitempty"`
 	Version      int                    `json:"version"`
 	Pickup       agentsetup.LeadPickup  `json:"pickup"`
 	Launch       *agentsetup.LeadLaunch `json:"launch,omitempty"`
@@ -97,6 +101,7 @@ type leadRuntime struct {
 }
 
 func (s *Supervisor) writeLead(record leadRecord, exclusive bool) error {
+	record.Version = leadRecordSchemaVersion
 	raw, err := json.Marshal(record)
 	if err != nil || len(raw) > 32768 {
 		return ErrRoutineUnavailable
@@ -107,13 +112,13 @@ func (s *Supervisor) writeLead(record leadRecord, exclusive bool) error {
 // PollLeadRuntime is called after workers, retaining their pickup priority.
 // Nil local configuration makes no API calls and never changes legacy work.
 func (s *Supervisor) PollLeadRuntime(ctx context.Context) error {
-	return s.pollLeadRuntime(ctx, true)
+	return errors.Join(s.PollNativeSessions(ctx), s.pollLeadRuntime(ctx, true))
 }
 
 // ReconcileLeadRuntime services retained owners without discovering new demand.
 // Worker pickup failures and shutdown never become fresh lead launch authority.
 func (s *Supervisor) ReconcileLeadRuntime(ctx context.Context) error {
-	return s.pollLeadRuntime(ctx, false)
+	return errors.Join(s.PollNativeSessions(ctx), s.pollLeadRuntime(ctx, false))
 }
 
 func (s *Supervisor) pollLeadRuntime(ctx context.Context, discover bool) error {
@@ -182,8 +187,12 @@ func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRu
 			return e
 		}
 		var r leadRecord
-		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || !uuidPattern.MatchString(r.Pickup.Demand.ID) || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" || r.Pickup.DaemonID != s.daemonID {
+		r, e = decodeLeadRecord(raw)
+		if e != nil || !uuidPattern.MatchString(r.Pickup.Demand.ID) || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" || r.Pickup.DaemonID != s.daemonID {
 			return ErrProcessesUnconfirmed
+		}
+		if r.Native != nil {
+			continue // The explicit native owner services its own bound session.
 		}
 		if r.ExitReported || r.Abandoned {
 			continue
@@ -416,7 +425,8 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 	var resources RoutineResourceLease
 	raw, err := s.state.Read(name, 32768)
 	if err == nil {
-		if json.Unmarshal(raw, &record) != nil || record.Version != 1 || record.Pickup.Demand != demand || record.Pickup.DaemonGeneration != s.generation || record.Pickup.LedgerGeneration != s.ledgerBinding.Generation || record.Attempted {
+		record, err = decodeLeadRecord(raw)
+		if err != nil || record.Native != nil || record.Pickup.Demand != demand || record.Pickup.DaemonGeneration != s.generation || record.Pickup.LedgerGeneration != s.ledgerBinding.Generation || record.Attempted {
 			return ErrProcessesUnconfirmed
 		}
 		local := s.leads.leads[demand.ID]
@@ -612,8 +622,11 @@ func checkRetainedLeads(store *agentsetup.Store) error {
 		if err != nil {
 			return ErrProcessesUnconfirmed
 		}
-		var r leadRecord
-		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || r.Attempted && (!r.ExitReported || !r.ExitObserved || r.Ownership == nil) || !r.Attempted && (r.Ownership != nil || r.ExitObserved || r.ExitReported) {
+		r, err := decodeLeadRecord(raw)
+		if err != nil {
+			return err
+		}
+		if r.Native != nil && !r.ExitReported && !r.Abandoned || r.Attempted && (!r.ExitReported || !r.ExitObserved || r.Ownership == nil) || !r.Attempted && (r.Ownership != nil || r.ExitObserved || r.ExitReported) {
 			return ErrProcessesUnconfirmed
 		}
 	}

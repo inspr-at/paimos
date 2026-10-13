@@ -56,6 +56,7 @@ type ChatBinding struct {
 }
 
 type ChatSessionEvent struct {
+	InputID       string            `json:"-"`
 	Binding       ChatBinding       `json:"binding"`
 	Sequence      uint64            `json:"sequence"`
 	DroppedEvents uint64            `json:"dropped_events"`
@@ -153,6 +154,10 @@ func (c *sessionChat) remove(sub *chatSubscriber) {
 }
 
 func (c *sessionChat) publish(update ChatUpdate) {
+	c.publishCorrelated(update, "")
+}
+
+func (c *sessionChat) publishCorrelated(update ChatUpdate, inputID string) {
 	if !update.valid() {
 		return
 	}
@@ -171,7 +176,7 @@ func (c *sessionChat) publish(update ChatUpdate) {
 			content := *update.Content
 			relayed.Content = &content
 		}
-		c.relay.Observe(ChatSessionEvent{Binding: c.binding, Sequence: c.sequence, Update: &relayed})
+		c.relay.Observe(ChatSessionEvent{InputID: inputID, Binding: c.binding, Sequence: c.sequence, Update: &relayed})
 	}
 	for sub := range c.subscribers {
 		// Every subscriber owns its projection, including its text pointer.
