@@ -73,3 +73,44 @@ human-versus-agent authority, protected allows, exact answers and restart
 expiration. The browser spec measures controls at 390/1024/1440 in light/dark,
 uses long German labels, and rejects stale person/runtime and response identities.
 All browser artifacts use `testInfo.outputPath`; no live model calls are needed.
+
+Worker acceptance evidence (2026-10-13):
+
+- PASS — one bounded holder epoch, concurrent attach serialization, explicit
+  control, read-only reconnect, final claim revocation/runtime checks, renewal
+  expiry and detach preserving the running session: guarded mbp2606
+  `TestControllerEpochFencesConcurrentAttach`.
+- PASS — existing Decision Desk routing with exact request/turn/effect/runtime
+  metadata and server-owned step-up requirements: guarded mbp2606
+  `TestDeskDecisionExactEffectExpiryAndRevocation`, including a complete
+  2048-byte summary retained in the existing findings slot.
+- PASS — agent/message rejection, wrong-effect rejection, revoked grants and
+  one callback delivery: the desk test plus guarded mbp2606
+  `TestCallbackExactOnceAndRuntimeFence`.
+- PASS — only allow-once/deny/exact-answer, protected allows closed without
+  human verification, and callbacks/leases expiring on restart: the desk test,
+  `TestCallbackExpiryRevocationAndRestart` and
+  `TestServerRestartExpiresInteractions`.
+- PASS — injected-clock/observed-lock concurrency and seven remote browser
+  cases for identity and control stability at 390/1024/1440 in light/dark.
+  Screenshots live under `web/test-results/AEON-1304/`; the final worker status
+  identifies the commit used for the refreshed browser evidence.
+
+Strict Go and web tier inventories passed. The guarded static check passed all
+42 checks with zero optional skips, including typecheck, lint, ownership,
+manifests and migration policy. PR CI remains authoritative for merging.
+The initial two desk-fixture failures were corrected by preserving the acting
+key creator identity; the affected server package then passed all three tests.
+No test was loosened or skipped.
+
+R0 additions are exactly five ESSENTIAL Go rows, seven ESSENTIAL browser rows,
+one `stable-controls` spec entry (20 seconds is an unmeasured scheduling estimate),
+three DSAR table/column entries, and
+`nativesessions/interaction/store.go` in `agentpairing.Lock`'s caller inventory.
+Existing source ownership globs already cover all new sources. No permission,
+contract, dependency, version or shared-runtime wiring was changed.
+
+Remaining coordinator gates are I2 integration, a qualified existing human/phone
+step-up adapter, G_UI (needs Opus design), authoritative PR CI and the external
+cross-family review. They are not worker release approvals. No origin push,
+deployment, live cutover or model review was performed.
