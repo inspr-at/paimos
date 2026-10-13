@@ -20,7 +20,12 @@ export class HolderSizeObserver {
   private scheduled = false
   private last = ''
   private disposed = false
-  constructor(private clock: TerminalClock, private sample: () => HolderSample, private emit: (value: HolderMeasurement) => void) {}
+  private readonly clock: TerminalClock
+  private readonly sample: () => HolderSample
+  private readonly emit: (value: HolderMeasurement) => void
+  constructor(clock: TerminalClock, sample: () => HolderSample, emit: (value: HolderMeasurement) => void) {
+    this.clock = clock; this.sample = sample; this.emit = emit
+  }
   changed() {
     if (this.disposed) return
     if (this.scheduled) this.clock.clearTimeout(this.timer)
