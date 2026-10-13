@@ -379,8 +379,8 @@ or the mapping is unknowable.
 
 **Modes and layouts.** The planner publishes `mode` (`full` or `essential`) and
 `layout` (`full` or `static`). `essential`/`full` is the phase-1 shape: two Go
-shards, two browser shards, four unit shards, timing, static, release, smoke and
-migration jobs (22 hosted jobs). `essential`/`static` keeps only `ci-plan`,
+shards, four browser shards, four unit shards, timing, static, release, smoke and
+migration jobs (24 hosted jobs). `essential`/`static` keeps only `ci-plan`,
 `tier-plan`, `runner-route`, `go-static`, `go`, `web-setup`, four `web-unit`
 shards, `web`, `release-check-run`, `release-check`, `e2e`, `migration-compat`
 and `tier-measurements` (16 jobs): no Go shards, no timing, no browsers, no
@@ -518,8 +518,10 @@ essential (20%); new lane 36 of 80 narrowed (45%: 20 newly essential,
 16 unchanged, 0 static
 because every sampled manifest or audit PR also changed sources). Projected
 hosted jobs for the sample fall from 2710 to 2420 (full 37, essential 22,
-static 16, spec-only 12, docs-only 9). The pre-fix lane narrowed 38; two of
-those PRs now correctly stay full on unsupported SQL. PR 235 retains its
+static 16, spec-only 12, docs-only 9). That sample used two essential browser
+shards; the live essential/full path schedules four (24 hosted jobs). The
+pre-fix lane narrowed 38; two of those PRs now correctly stay full on
+unsupported SQL. PR 235 retains its
 essential tier selection but widens its raw spec-only workflow lane to full
 (22 jobs rather than 12), following trusted planner precedence. The 44 PRs that stay
 full: CI machinery
