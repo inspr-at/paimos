@@ -7830,6 +7830,12 @@
     ,
     {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRetainsBackgroundAndUnconfirmedWriter","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnboundedOrAmbiguousFrames","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnqualifiedLaunch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
