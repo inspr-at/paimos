@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import { absoluteTime } from '../../lib/work'
 import { queueHours, type QueuedTicket } from '../../lib/workQueue'
@@ -24,15 +24,29 @@ const shared = computed(() => {
 })
 const targeted = computed(() => snapshot.value?.items.filter(item => item.target_agent_id) ?? [])
 const hours = computed(() => queueHours(snapshot.value))
+function restoreFocus(ticket: string, selector = 'open') {
+  const row = list.value?.querySelector<HTMLElement>(`[data-ticket="${CSS.escape(ticket)}"]`)
+  ;(row?.querySelector<HTMLElement>(`[data-action="${CSS.escape(selector)}"]:not(:disabled)`) ?? row?.querySelector<HTMLElement>('[data-action="open"]'))?.focus({ preventScroll: true })
+}
+// A refresh can move a row focused after the write began. Capture it before
+// Vue moves keyed rows, then restore it after rendering settles.
+watch(shared, async () => {
+  const active = document.activeElement as HTMLElement | null, root = list.value
+  const ticket = active?.closest<HTMLElement>('[data-ticket]')?.dataset.ticket
+  if (!ticket || !active || !root?.contains(active)) return
+  const project = props.projectId, tenant = session.identity?.tenant.id, person = session.identity?.principal.id, selector = active.dataset.action
+  await nextTick()
+  if (root !== list.value || !root.isConnected || project !== props.projectId || tenant !== session.identity?.tenant.id || person !== session.identity?.principal.id) return
+  // Leave a deliberate focus change alone; a DOM move can leave focus on body.
+  if (document.activeElement !== active && document.activeElement !== document.body) return
+  restoreFocus(ticket, selector)
+})
 async function change(action: () => Promise<unknown>, ticket?: string) {
   if (!allowed.value || queue.busy) return
   const active = document.activeElement as HTMLElement | null, selector = active?.dataset.action
   try {
     await action(); await nextTick()
-    if (ticket) {
-      const row = list.value?.querySelector<HTMLElement>(`[data-ticket="${CSS.escape(ticket)}"]`)
-      ;(row?.querySelector<HTMLElement>(`[data-action="${selector ?? 'open'}"]:not(:disabled)`) ?? row?.querySelector<HTMLElement>('[data-action="open"]'))?.focus({ preventScroll: true })
-    }
+    if (ticket) restoreFocus(ticket, selector)
   } catch (e) { toast(e instanceof Error ? e.message : 'The queue change was not saved.', { tone: 'error' }) }
 }
 function move(item: QueuedTicket, direction: -1 | 1 | 'top') { void change(() => queue.move(props.projectId, item.ticket_id, direction), item.ticket_id) }

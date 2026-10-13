@@ -137,8 +137,12 @@ test('keyboard and drag moves persist, use workspace positions, retain focus, re
   await panel.getByRole('button', { name: 'Move PHAROS-13 to the top' }).click()
   expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
   await expect(panel.getByRole('button', { name: 'Move PHAROS-13 to the top' })).toBeDisabled()
+  await expect(panel.getByRole('button', { name: /^Number 5: PHAROS-13/ })).toBeFocused()
   await panel.getByRole('button', { name: 'Reset shared queue across projects' }).click()
+  await expect(panel.getByRole('note')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Move PHAROS-13 to the top' })).toBeEnabled()
   await panel.getByRole('button', { name: /^Number 6: PHAROS-13/ }).focus()
+  await expect(panel.getByRole('button', { name: /^Number 6: PHAROS-13/ })).toBeFocused()
   await page.keyboard.press('Alt+ArrowUp')
   await expect(panel.getByRole('note')).toContainText('Manual order')
   expect(state.queueCalls.find(call => call.path.endsWith('/move'))?.body).toEqual({ position: 5 })
@@ -166,6 +170,49 @@ test('keyboard and drag moves persist, use workspace positions, retain focus, re
   expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
   await expect(drawer.getByRole('button', { name: 'Move to top', exact: true })).toBeDisabled()
 })
+// Risk: a pending queue refresh reorders the focused ticket after the request's
+// original control has lost focus, leaving subsequent keyboard moves on the page.
+for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+  test(`queue refresh preserves the ticket focused while a reset is pending ${width} ${theme}`, async ({ page }, testInfo) => {
+    const { state, data } = await world(page, { offset: 4 })
+    data.nodes.find(node => node.id === 'n-4')!.title = 'Veröffentlichung vorbereiten und die Ergebnisse der automatischen Prüfungen vollständig dokumentieren'
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
+    await opener.click()
+    const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
+    await panel.getByRole('button', { name: 'Move PHAROS-13 to the top' }).click()
+    await expect(panel.getByRole('button', { name: /^Number 5: PHAROS-13/ })).toBeFocused()
+    const reset = panel.getByRole('button', { name: 'Reset shared queue across projects' })
+    await expect(reset).toBeEnabled()
+    let reached!: () => void, release!: () => void
+    const requested = new Promise<void>(resolve => { reached = resolve })
+    const response = new Promise<void>(resolve => { release = resolve })
+    await page.route('**/api/queue/reset', async route => { reached(); await response; await route.fallback() })
+    try {
+      const ticket = panel.locator('[data-ticket="n-4"] [data-action="open"]')
+      await expectStableControls({
+        controls: { opener, reset, ticket, actions: panel.locator('[data-ticket="n-4"] .qv-acts') },
+        scrollAreas: { queue: panel, page: page.locator('html') },
+        interactions: [{ name: 'focus the ticket while reset is pending', run: async () => {
+          await reset.click()
+          await requested
+          await ticket.focus()
+          await expect(ticket).toBeFocused()
+        } }],
+      })
+      release()
+      await expect(panel.getByRole('note')).toHaveCount(0)
+      await expect(panel.getByRole('button', { name: /^Number 5: PHAROS-14/ })).toBeFocused()
+      expect(state.ids).toEqual(['n-4', 'n-3'])
+      await expect(panel.getByRole('button', { name: 'Move PHAROS-14 down' })).toBeEnabled()
+      await page.keyboard.press('Alt+ArrowDown')
+      await expect(panel.getByRole('button', { name: /^Number 6: PHAROS-14/ })).toBeFocused()
+      expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 6 })
+      await page.screenshot({ path: testInfo.outputPath(`queue-focus-${width}-${theme}.png`) })
+    } finally { release() }
+  })
+}
 test('not-ready fixes apply server estimate and explicitly save criteria/blocker without erasing other fields', async ({ page }) => {
   const { data, state } = await world(page, { missing: true })
   await row(page, 'PHAROS-14').hover()
