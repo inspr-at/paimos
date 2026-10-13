@@ -1,0 +1,8 @@
+{"type":"agent_start"}
+{"type":"message_update","message":{"role":"assistant","provider":"openrouter","model":"fixture-model"},"assistantMessageEvent":{"type":"text_delta","delta":"Hello \n","partial":{"thinking":"PRIVATE_SENTINEL"}}}
+{"type":"message_update","message":{"role":"assistant","provider":"wrong-account","model":"wrong-model"},"assistantMessageEvent":{"type":"text_delta","delta":"PRIVATE_SENTINEL"}}
+{"type":"message_update","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_delta","delta":"PRIVATE_SENTINEL"}}
+{"type":"tool_execution_start","toolCallId":"private-tool-id","toolName":"PRIVATE_SENTINEL","args":{"command":"PRIVATE_SENTINEL"}}
+{"type":"tool_execution_end","toolCallId":"private-tool-id","isError":false,"result":{"text":"PRIVATE_SENTINEL"}}
+{"type":"message_end","message":{"role":"assistant","provider":"openrouter","model":"fixture-model","content":[{"type":"text","text":"PRIVATE_SENTINEL"}],"stopReason":"stop","usage":{"input":100,"output":10,"cost":{"total":1}}}}
+{"type":"agent_end","messages":[{"content":"PRIVATE_SENTINEL"}]}

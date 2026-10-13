@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello \n"},"_meta":{"token":"PRIVATE_SENTINEL"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"wrong-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"PRIVATE_SENTINEL"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"PRIVATE_SENTINEL"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"tool_call","toolCallId":"private-native-id","status":"pending","title":"PRIVATE_SENTINEL","rawInput":{"password":"PRIVATE_SENTINEL"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"usage_update","used":10,"size":100,"cost":{"amount":1,"currency":"USD"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"private-native-id","status":"completed","rawOutput":{"text":"PRIVATE_SENTINEL"}}}}
