@@ -560,6 +560,42 @@ behavior fix or new regression test needing a negative control against
 `09aa3a42f`. No origin push, deployment, model CLI or review gate is run;
 the coordinator retains the trusted verdict and release decisions.
 
+## Fix round 10: reproduced failures and corrected ownership boundary
+
+`review-ci622-1041.out` targets `62efc7411`. The full agentpairing JSONL
+identifies exactly the missing `nativesessions/receipts/repository.go` entry
+in `db.LockTree`. The full failed `go-static` log for job `115201329295`
+lists all eight unclassified receipt/final tests in the registration request
+below. Both receipt table classifications are also still absent. PR #622
+reports mergeable; no conflict-resolution merge is required.
+
+The original P3a brief explicitly says, "Write ONLY inside your
+exclusive_write_set. If you need a file outside it, STOP and say so in your
+summary." The current normative `plan.json` reserves the shared fence test,
+Go tier manifest and DSAR inventory exclusively to the single R0 metadata
+integrator. Fix10 identifies the failures but does not transfer that ownership.
+The temporary registration edit in `5dcca2877` was made before checking this
+boundary and is reverted in the corrective handoff commit, without amend.
+The final tree preserves all original source, assertions and shared inventories.
+
+The guarded remote baseline attempts and the subsequent four-package attempt
+refused with **exit 3** for occupied remote slots or CI-pool capacity. The
+permitted single small local run used `GOMAXPROCS=2`, `go test -p 2`,
+`-count=1` and only `TestSharedFenceCallerInventory`, temporarily restoring
+that file from `62efc7411`. It reproduced the exact missing receipt caller
+failure, then restored the working file. A lightweight manifest comparison
+confirmed all eight registrations are absent on `62efc7411`; no existing
+classification or assertion was weakened. No throwaway commit remains as HEAD.
+
+Fresh acceptance passes are not claimed for this round. The authoritative CI
+on `62efc7411` passes all four web unit shards and all twelve browser shards;
+this non-browser slice has no feature web unit or browser checks. The
+coordinator still owns the trusted review verdict and merge/release decisions.
+
+**INCOMPLETE:** R0 must apply the exact shared-fence entry, eight ESSENTIAL
+tier rows and two DSAR classifications below in this PR, then rerun guarded
+Go/static checks. No origin push, deployment, model CLI or review gate was run.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
