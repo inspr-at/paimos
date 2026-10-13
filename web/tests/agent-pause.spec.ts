@@ -242,10 +242,11 @@ test('a failed status read says so with a Retry instead of hiding the wind-down'
 test('without control permission pause actions and wind-down are hidden', async ({ page }) => { await setup(page, true); await page.goto('/agents'); await expect(page.locator('.agents-page .row').first()).toBeVisible(); await expect(windButton(page)).toHaveCount(0); await expect(page.getByRole('button', { name: /^Pause worker/ })).toHaveCount(0) })
 
 test('AEON-783: chosen agents keeps Done in, By, Cancel and Submit still', async ({ page }) => {
-  await setup(page)
+  await setup(page, false, data => { data.sessions.forEach((session, index) => { session.display_label = `Prüfung sämtlicher mandantenbezogener Berechtigungen ${index + 1}` }) })
   await page.goto('/agents')
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     const open = windButton(page)
     if (await formPopover(page).count()) await formPopover(page).getByRole('button', { name: /^Cancel/ }).click()
     await open.click()
@@ -257,6 +258,7 @@ test('AEON-783: chosen agents keeps Done in, By, Cancel and Submit still', async
     await guard.check(async () => { await where.selectOption({ label: 'Markus’s studio · 2 agents' }); await expect(pop.locator('.wdf-prev')).toContainText('2 agents on Markus’s studio') })
     await guard.check(async () => { await where.selectOption('pick'); await expect(pop.getByRole('group', { name: 'Agents to wind down' })).toBeVisible() })
     await guard.check(async () => { await pop.getByRole('group', { name: 'Agents to wind down' }).getByRole('checkbox').nth(2).uncheck(); await expect(pop.locator('.wdf-prev')).toContainText('2 agents you chose') })
+    await page.screenshot({ path: test.info().outputPath(`wind-down-chosen-${width}-${theme}.png`) })
     await guard.check(async () => { await where.selectOption({ label: 'All computers · 3 agents' }); await expect(pop.getByRole('group', { name: 'Agents to wind down' })).toHaveCount(0) })
     await guard.check(async () => { await where.selectOption({ label: 'Build machine · 1 agent' }); await expect(pop.locator('.wdf-prev')).toContainText('1 agent on Build machine') })
     guard.done()

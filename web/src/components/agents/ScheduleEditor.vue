@@ -176,8 +176,27 @@ function trapTab(event: KeyboardEvent) {
 function holdFocus(event: FocusEvent) {
   if (props.sheet && root.value && event.target instanceof Node && !root.value.contains(event.target)) (focusables()[0] ?? title.value)?.focus({ preventScroll: true })
 }
-onMounted(() => { title.value?.focus({ preventScroll: true }); window.addEventListener('pointerup', paintUp); window.addEventListener('pointermove', paintMove); document.addEventListener('focusin', holdFocus) })
-onBeforeUnmount(() => { clearTimeout(previewTimer); window.removeEventListener('pointerup', paintUp); window.removeEventListener('pointermove', paintMove); document.removeEventListener('focusin', holdFocus) })
+// The settings anchor can move when its scrolling page settles. Bound the
+// body to the actual footer, rather than a height measured before placement.
+let viewportObserver: ResizeObserver | undefined
+function fitViewport() {
+  const element = root.value
+  if (!element || props.sheet) return
+  const footer = document.querySelector('.app-footer')?.getBoundingClientRect()
+  const bottom = Math.min(window.innerHeight, footer?.top ?? window.innerHeight) - 8
+  element.style.setProperty('--editor-room', `${Math.max(0, bottom - element.getBoundingClientRect().top)}px`)
+}
+onMounted(() => {
+  title.value?.focus({ preventScroll: true }); window.addEventListener('pointerup', paintUp); window.addEventListener('pointermove', paintMove); document.addEventListener('focusin', holdFocus)
+  viewportObserver = new ResizeObserver(fitViewport)
+  if (root.value) viewportObserver.observe(root.value)
+  window.addEventListener('resize', fitViewport)
+  document.addEventListener('scroll', fitViewport, true)
+})
+onBeforeUnmount(() => {
+  clearTimeout(previewTimer); window.removeEventListener('pointerup', paintUp); window.removeEventListener('pointermove', paintMove); document.removeEventListener('focusin', holdFocus)
+  viewportObserver?.disconnect(); window.removeEventListener('resize', fitViewport); document.removeEventListener('scroll', fitViewport, true)
+})
 const titleText = computed(() => (props.kind === 'week' ? 'Work week' : 'Agents outside your hours'))
 const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone !== props.timezone ? `Times in ${props.timezone}.` : '' } catch { return '' } })
 </script>
@@ -346,6 +365,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 <style scoped>
 .ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: clamp(620px, 50vw, 1040px); max-width: calc(100vw - 24px); max-height: min(720px, calc(100dvh - 96px)); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
 .ed.night { width: clamp(580px, 44vw, 960px); }
+.ed:not(.sheet) { max-height: min(720px, var(--editor-room, calc(100dvh - 96px))) !important; }
 .grab { width: 36px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--line-2); }
 .ed-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 2px 20px; }
 .ed-head h3 { margin: 0 auto 0 0; font: 600 16px/1.3 var(--font); color: var(--ink); }
