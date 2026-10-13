@@ -204,3 +204,57 @@ Fix round 2, 2026-10-13 (reviewed source `140a6982`, implementation `cb33a0b95`)
 - Browser/web-unit execution is inapplicable to this source-only fix. The C0
   contracts, route inventories, permissions, migrations and versions are
   unchanged. No origin push, deployment, review gate or model CLI was run.
+
+Fix round 3, 2026-10-13 (source `8507a74eb`, then R0 merge `4978ebaf3`):
+
+- PASS — selected PPM account and the coordinator's exact worker-session marker
+  were verified on AEON-1268 before material work. Initial `origin/main`
+  `06929d1a4` was already an ancestor. The later R0-only `3507e3319` was merged
+  cleanly into this branch as `4978ebaf3`, without an origin push.
+- PASS — guarded remote `-race` tests for `internal/httpapi/...`,
+  `internal/nativestream/...` and `internal/nativesessions/stream/...` at
+  `8507a74eb`. These retain the authenticated adapter/relay, shared binding/view
+  isolation, bounded replay/FinalSink separation, native redaction and
+  revocation acceptance checks established with barriers. The CI Go shards
+  also passed; measurements report all nine stream tests passing as NIGHTLY.
+- CONFIRMED — CI job `115121536245` failed only at Go tier validation: the nine
+  test names listed in the R0 handoff are unclassified. CI job `115121536319`
+  failed only the two audit assertions because all seven
+  `internal/nativestream` files lacked a source ownership glob. Neither log
+  reports a transport behavior failure requiring a new regression against
+  `8507a74eb`.
+- RESOLVED — the coordinator's audit PR #623 merged during this round. Its one
+  additive S2 glob, `internal/native*/**`, is now inherited from `origin/main`.
+  It covers all seven stream files and adds no runtime changes. Guarded static
+  validation on `4978ebaf3` passes both `audit-tests` and `audit-coverage`; the
+  existing audit assertions failed on the reviewed source and now pass.
+- OPEN — the nine ESSENTIAL Go tier rows are still absent. The normative plan
+  assigns `scripts/ci/go-test-tiers.json` solely to R0 and says builders never
+  independently rewrite these inventories. R0 must apply the exact serialized
+  registrations listed above in this same PR and rerun validation. The worker
+  authored no shared inventory changes and changed no other slice's source.
+- CONFIRMED — CI's `web-shard (2)` was cancelled in its selected-case step.
+  The web aggregate failed as a consequence; tier measurements explicitly
+  report `coverage: incomplete`, `missingEvidence: [web-shard-2]` and
+  `measurementCauses: [missing_case_artifact]`, with no reported failed cases.
+  The coordinator's CI run must obtain the missing shard evidence before merge.
+  All four web-unit shards and the first browser shard passed on the reviewed
+  source.
+  This package has no web source, unit-test or browser-spec changes.
+- PASS WITH LIMIT — offline affected selection against `origin/main` exits 0,
+  but still omits `internal/nativestream` and `internal/nativesessions/stream`.
+  Repeat it after R0 adds the tier rows; an exit-0 plan is not evidence that
+  these unregistered packages were selected or tested.
+- NOT GREEN — the final guarded `ci-static-locked.sh` on `4978ebaf3` returned
+  exit 1: 41 checks passed, zero optional skips. Its only failure is `go-tiers`,
+  listing exactly the nine R0 registrations above. Test-tier tests, web-shard
+  tests, audit tests/coverage, Go vet, web typecheck/lint and public names pass.
+  R0 must apply the tier rows and rerun affected selection and guarded static
+  validation before the coordinator obtains complete authoritative PR CI.
+
+This round records exact CI causes and renewed passing transport checks without
+changing runtime behavior, adding tests that mirror the implementation, or
+loosening any assertion. R0 metadata and complete authoritative CI evidence
+remain required before the coordinator's review/merge. No origin push,
+deployment, review gate, other model CLI, live runtime or vendor account change
+was performed.
