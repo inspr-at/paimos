@@ -838,6 +838,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootHoldsCountUntilVerifiedRelease","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestOldManualWindowCapsOnTopOfReadings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestOverviewValuesMaskingExplicitScopeAndTenantIsolation","tier":"ESSENTIAL"}
@@ -7811,6 +7813,10 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkLatestPinAndAutomaticResidencyReselection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkingEvidenceCannotUseAnotherModelsUsage","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativeadmission","name":"TestNativeAdmissionOverlappingRootWorkerAndRevokedRoute","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeadmission","name":"TestNativeProfileChangeSerializesWithLiveUsers","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,
