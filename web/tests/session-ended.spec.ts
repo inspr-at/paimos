@@ -89,15 +89,17 @@ test('AEON-1313: a different person cannot receive or submit an expired tab’s 
   expect(otherCalls.filter(call => call.method === 'PATCH').map(call => [call.path, call.body])).toEqual([['/api/nodes/n-2', { body: 'Mira’s own description.' }]])
   await expect(area).toHaveValue(draft)
 
-  // Wait on the failed-save feedback, so the no-network assertion cannot race
-  // a pending submit. Protected reads must also stop inside the expired tab.
-  await panel.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(page.getByText(/was not saved: your session has ended/)).toBeVisible()
+  // The shell freezes controls. Await the real API boundary too, so neither
+  // protected operation can reach the network using the new person's cookie.
+  await expect(area).toHaveJSProperty('readOnly', true)
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
   expect(await page.evaluate(async () => {
     // @ts-expect-error Vite serves the actual API module in this document.
     const { api } = await import('/src/lib/api.ts')
-    return (await api('/nodes/n-2')).status
-  })).toBe(401)
+    const read = await api('/nodes/n-2')
+    const write = await api('/nodes/n-2', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Private draft belonging to the original person.' }) })
+    return { read: read.status, write: write.status }
+  })).toEqual({ read: 401, write: 401 })
   expect(expiredWrites).toHaveLength(1)
   expect(revokedRequests).toEqual([])
   expect(original.body).toBe('Mira’s own description.')
