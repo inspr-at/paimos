@@ -127,6 +127,19 @@ const historyTo = (page: Page, url: string) => page.evaluate(to => { history.pus
 // The page scrolls inside main: evidence starts at its top.
 async function shot(page: Page, info: TestInfo, name: string) { await page.evaluate(() => document.querySelector('main')?.scrollTo(0, 0)); await page.screenshot({ path: info.outputPath(`${name}.png`) }) }
 
+// AEON-1240 evidence: the counts while a page is left to read ("1+", "–" with its tip), at three widths, light and dark.
+for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+  test(`counts never read "0+" at ${width} ${colorScheme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
+    await setup(page)
+    await page.goto('/agents/routines')
+    await expect(list(page).locator('[data-routine]')).toHaveCount(5)
+    await expect(page.locator('[data-sf="held"] b')).toHaveText('–')
+    expect(await page.locator('.counts b').allTextContents()).not.toContain('0+')
+    await shot(page, info, `AEON-1240-counts-${width}-${colorScheme}`)
+  })
+}
+
 test('one row per routine; filters per kind; failed never green; created is not finished; controls stay put', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1100 })
   const { errors } = await setup(page, { olderFails: true })
@@ -134,11 +147,18 @@ test('one row per routine; filters per kind; failed never green; created is not 
   await expect(page.getByRole('heading', { level: 1, name: 'Routines' })).toBeVisible()
   await expect(list(page).locator('[data-routine]')).toHaveCount(5)
   await expect(page.locator('[data-scope="all"]')).toContainText('5+')
+  // AEON-1240: with a page left to read, a found count is a lower bound and a zero is not known yet: "–" with a tip, never "0+".
+  await expect(page.locator('[data-sf="failed"] b')).toHaveText('1+')
+  await expect(page.locator('[data-sf="held"] b')).toHaveText('–')
+  await expect(page.locator('[data-sf="held"]')).toHaveAttribute('data-tip', 'Not all loaded yet')
+  await expect(page.locator('[data-sf="held"]')).toHaveAccessibleName(/not all loaded yet/)
   // More routines appends the next page once per definition.
   await list(page).getByRole('button', { name: 'More routines' }).click()
   await expect(list(page).locator('[data-routine]')).toHaveCount(6)
   await expect(row(page, DEPS)).toHaveCount(1)
   await expect(page.locator('[data-scope="all"]')).toContainText('6')
+  await expect(page.locator('[data-sf="held"] b')).toHaveText('0')
+  await expect(page.locator('[data-sf="held"]')).not.toHaveAttribute('data-tip', /./)
   // States and their reasons, in words.
   await expect(row(page, LINKS)).toContainText('Failed')
   await expect(row(page, NOTES)).toContainText('Running')

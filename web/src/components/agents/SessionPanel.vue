@@ -411,7 +411,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div v-if="modelLine" class="fact"><dt>Model</dt><dd class="mono">{{ modelLine }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
           <div v-if="reported?.account_label || view.account" class="fact"><dt>Account</dt><dd>{{ reported?.account_label || view.account }}</dd></div>
           <div class="fact"><dt>Harness</dt><dd>{{ setupLine }}</dd></div>
-          <div v-if="view.ticket" class="fact wide"><dt>Ticket</dt><dd><TicketPeekLink class="ticket-fact" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="key">{{ view.ticket.key }}</span> <span class="ticket-title">{{ view.ticket.title }}</span></TicketPeekLink><span v-if="ticketState" class="faint"> · {{ ticketState }}</span></dd></div>
+          <div v-if="view.ticket" class="fact wide"><dt>Ticket</dt><dd class="ticket-dd"><TicketPeekLink class="ticket-fact" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="key">{{ view.ticket.key }}</span> <span class="ticket-title">{{ view.ticket.title }}</span></TicketPeekLink><span v-if="ticketState" class="faint ticket-state">&nbsp;· {{ ticketState }}</span></dd></div>
         </dl>
         <ol v-if="metadataHistory.length" class="metadata-history" aria-label="Recent session changes">
           <li v-for="item in metadataHistory" :key="item.id"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.text }}</span></li>
@@ -533,10 +533,15 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
 .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .project-link:hover { color: var(--teal-ink); }
-.ticket-fact { min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
+/* The Ticket fact reads as one sentence, "PHAROS-11 Title · In progress" (AEON-1240): the dd flows as text, the
+   link is inline, and its state is glued to the title's last word by a no-break space, so it never starts a line. */
+.fact dd.ticket-dd { display: block; line-height: 1.5; }
+.ticket-fact { color: var(--ink); text-decoration: none; }
 .ticket-fact .key { font: 600 11.5px var(--mono); color: var(--teal-ink); }
 .ticket-fact:hover .ticket-title { text-decoration: underline; }
-@media (max-width: 720px), (pointer: coarse) { .ticket-fact { min-height: 44px; align-content: center; } }
+.ticket-state { white-space: nowrap; }
+/* Touch: the inline link reaches 44 px through its block padding, which moves no text. */
+@media (max-width: 720px), (pointer: coarse) { .ticket-fact { padding-block: calc((44px - 1em) / 2); } }
 .block { margin-top: 24px; }
 .block.first { margin-top: 18px; }
 .block h3 { margin-bottom: 10px; }

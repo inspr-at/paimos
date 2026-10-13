@@ -6,7 +6,7 @@
 import { api } from './api'
 import { StaleScopeError } from './identityScope'
 import { compareModelVersions, profileLine } from './modelPrefs'
-import { fullName, registryLineName, modelLine, providerLabel, providerRank } from './modelsSimple'
+import { fullName, modelLine, providerLabel, providerRank } from './modelsSimple'
 import { validPiModel } from './piModel'
 
 export type Harness = 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor' | 'pi' | 'opencode'
@@ -206,11 +206,9 @@ export interface RegistryRoute {
 /** One version of a line, with every route that runs it. */
 export interface RegistryModel {
   key: string; line: string; version: string; provider: string; family: string
-  /** "Claude Opus": the line, shown with the version beside it. */
-  lineName: string
   /** "5.5"; empty when the registry names no version. */
   versionLabel: string
-  /** "Opus 5.5": the model's name, said the same way in the picker, the registry, the tray and the sheet (fullName). */
+  /** "Opus 5.5": the model's name, said the same way on its row, in the picker, the tray and the sheet (fullName, AEON-1240). */
   name: string
   note: string; routes: RegistryRoute[]; source: FactSource | null; lifecycle: Lifecycle | null
   /** Superseded, deprecated, gone from its source, or retiring with a named successor. */
@@ -277,7 +275,7 @@ function modelOf(line: string, version: string, items: RegistryProfile[], lines:
   const enabled = items.some(profile => profile.enabled), source = profileSource(named)
   return {
     key: `${line}@${version}`, line, version, provider: named.provider || named.family || 'unknown', family: named.family,
-    lineName: registryLineName(named), versionLabel: named.model_version || (version === 'alias' ? '' : version), name: fullName(named),
+    versionLabel: named.model_version || (version === 'alias' ? '' : version), name: fullName(named),
     note: ordered.map(profile => profile.note ?? '').find(note => note.trim()) ?? '',
     routes: routesOf(items), source, lifecycle, old: isOld(lifecycle),
     enabled, isNew: !enabled && source !== 'manual', retireAt: scheduled.sort()[0] ?? null,
@@ -764,6 +762,8 @@ export const refused = (error: unknown): error is RegistryError => error instanc
 export interface OutdatedEntry {
   version: string; name: string; successor: string; successorName: string; harness: Harness | null; route: string
   routes: string[]; why: string; source: FactSource | null; uses: OutdatedUse[]; incomplete: boolean
+  /** Where each use moves, by name as everywhere else: its successor, or the version the server names for it. */
+  targets: string[]
 }
 
 const identityOf = (profile: RegistryProfile) => profile.identity ?? ''
@@ -814,6 +814,7 @@ export function outdatedEntries(doc: OutdatedDocument, profiles: RegistryProfile
       version: version.version, name: nameOfIdentity(version.version, mine.length ? mine : profiles), successor: version.successor, successorName,
       harness: first ? first.harness as Harness : null, route: first ? routeOf(first.harness as Harness, first.model) : '',
       routes, why: outdatedWhy(version, successorName, now), source: lifecycleSource(version.source), uses: version.uses, incomplete: version.incomplete,
+      targets: version.uses.map(use => !use.to || use.to === version.successor ? successorName : nameOfIdentity(use.to, active)),
     })
   }
   return entries
