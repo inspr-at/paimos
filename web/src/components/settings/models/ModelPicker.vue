@@ -71,8 +71,10 @@ function keys(event: KeyboardEvent) {
   else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !query.value) { event.preventDefault(); stepLevel(event.key === 'ArrowRight' ? 1 : -1) }
   else if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); activate(activeItem.value) }
 }
+// An older version's name carries the levels it shows, which its row hides from screen readers (AEON-1240).
+const levels = (entry: ModelEntry) => entry.efforts.length ? `, ${entry.efforts.length > 1 ? 'levels' : 'level'} ${entry.efforts.map(effort => effort.name).join(', ')}` : ''
 const label = (entry: ModelEntry) => entry.replacedBy
-  ? `${entry.name}, older version, replaced by ${entry.replacedBy}. Can’t be picked: its line runs ${entry.replacedBy}.`
+  ? `${entry.name}, older version${levels(entry)}, replaced by ${entry.replacedBy}. Can’t be picked: its line runs ${entry.replacedBy}.`
   : `${entry.name}${entry.efforts.length > 1 ? `, level ${effortOf(entry)}` : ''}${props.cant(entry.line) ? `. ${props.cant(entry.line)}` : ''}`
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
 const routes = (entry: ModelEntry) => entry.routes.map(route => harnessLabel(route.harness)).join(', ')
@@ -94,7 +96,10 @@ const second = (entry: ModelEntry) => entry.replacedBy
             <span v-if="!entry.replacedBy && cant(entry.line)" class="d cant"><AppIcon name="info" :size="12" />{{ routes(entry) }} · {{ cant(entry.line) }}</span>
             <span v-else class="d">{{ second(entry) }}</span>
           </span>
-          <span v-if="entry.replacedBy" />
+          <!-- An older version shows its levels as the current rows do (AEON-1240), only to read: it is never picked. -->
+          <span v-if="entry.replacedBy && entry.efforts.length > 1" class="lvp" data-old-levels><span v-for="effort in entry.efforts" :key="effort.name" class="lvc" :data-eff="effort.name" aria-hidden="true">{{ effort.name }}</span></span>
+          <span v-else-if="entry.replacedBy && entry.efforts.length" class="lvp one" data-old-levels>{{ entry.efforts[0]!.name }}</span>
+          <span v-else-if="entry.replacedBy" />
           <span v-else-if="entry.efforts.length > 1" class="lvp"><span v-for="effort in entry.efforts" :key="effort.name" class="lvc" :data-eff="effort.name" aria-hidden="true" :data-on="effort.name === effortOf(entry) ? '' : undefined" @click.stop="choose(entry, effort.name)">{{ effort.name }}</span></span>
           <span v-else-if="entry.efforts.length" class="lvp one">{{ entry.efforts[0]!.name }}</span>
           <span v-else />
@@ -112,3 +117,7 @@ const second = (entry: ModelEntry) => entry.replacedBy
   <p class="sr-only" aria-live="polite">{{ live }}</p>
   <div v-if="lock" class="pm-lock"><span>Members can’t change this</span><label class="switch"><input type="checkbox" role="switch" :checked="locked" @change="emit('lock', ($event.target as HTMLInputElement).checked)" /><span class="sr-only">Lock for everyone</span></label></div>
 </template>
+<style scoped>
+/* An older version's levels are only read (AEON-1240): no pointer, no hover fill. */
+.opt.is-old .lvc, .opt.is-old .lvc:hover { cursor: default; color: var(--ink-3); background: transparent; }
+</style>
