@@ -103,6 +103,10 @@ type nativeLeadEntry struct {
 	vendorSession chan string
 	done          chan struct{}
 	doneOnce      sync.Once
+	// In-memory reconciliation only; persisted receipts never grant adoption.
+	ownershipSaved bool
+	ledgerRunning  bool
+	relayStarted   bool
 }
 type nativeSessions struct {
 	mu      sync.Mutex
@@ -354,30 +358,66 @@ func (s *Supervisor) launchNative(ctx, lifetime context.Context, entry *nativeLe
 	}
 	entry.process = process
 	go s.waitNative(entry)
-	recovery, ok := process.(RecoveryProcess)
+	return s.reconcileNativeStartupLocked(ctx, entry)
+}
+
+// Called under dispatchMu and entry.mu. A post-fork failure retains its owned
+// process and retries only unfinished initialization, never another fork.
+func (s *Supervisor) reconcileNativeStartupLocked(ctx context.Context, entry *nativeLeadEntry) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			entry.result.State = "exit_unconfirmed"
+		}
+	}()
+	recovery, ok := entry.process.(RecoveryProcess)
 	if !ok {
 		return ErrProcessesUnconfirmed
 	}
 	identity, err := recovery.Ownership()
-	if err != nil || identity.DaemonID != s.daemonID || identity.Generation != s.generation || identity.RootPID != process.PID() {
-		entry.result.State = "exit_unconfirmed"
+	if err != nil || identity.DaemonID != s.daemonID || identity.Generation != s.generation || identity.RootPID != entry.process.PID() {
 		return ErrProcessesUnconfirmed
+	}
+	if previous := entry.record.Ownership; previous != nil && *previous != identity {
+		return ErrNotOwned
 	}
 	entry.record.Ownership = &identity
-	select {
-	case entry.record.Native.VendorSessionID = <-entry.vendorSession:
-	default:
-		return ErrProcessesUnconfirmed
+	if entry.record.Native.VendorSessionID == "" {
+		select {
+		case entry.record.Native.VendorSessionID = <-entry.vendorSession:
+		default:
+			return ErrProcessesUnconfirmed
+		}
+	}
+	if !entry.ownershipSaved {
+		if err := s.writeLead(entry.record, false); err != nil {
+			return err
+		}
+		entry.ownershipSaved = true
+	}
+	if !entry.ledgerRunning {
+		data, _, err := s.ledger.Snapshot()
+		if err != nil {
+			return err
+		}
+		group := data.Groups[entry.record.Group]
+		// A failed fsync may have committed Running without returning success.
+		// Reconcile only this exact retained owner, never another group's PID.
+		if data.Generation != entry.record.Pickup.LedgerGeneration || group.Instance != s.ledgerBinding.Member.ID || group.Generation != entry.record.Pickup.LedgerGeneration || group.State != "running" || group.PID != identity.RootPID || !group.StartedAt.Equal(identity.StartedAt) {
+			if err := s.ledger.Running(s.ledgerBinding.Member.ID, entry.record.Pickup.LedgerGeneration, entry.record.Group, identity.RootPID, identity.StartedAt); err != nil {
+				return err
+			}
+		}
+		entry.ledgerRunning = true
+	}
+	if err := s.native.config.ReportStarted(ctx, entry.plan.Session, identity); err != nil {
+		return err
+	}
+	if !entry.relayStarted {
+		entry.relayStarted = true
+		go entry.relay.Run(s.lifetime)
 	}
 	entry.result.State = "running"
-	if err := s.writeLead(entry.record, false); err != nil {
-		return err
-	}
-	if err := s.ledger.Running(s.ledgerBinding.Member.ID, entry.record.Pickup.LedgerGeneration, entry.record.Group, identity.RootPID, identity.StartedAt); err != nil {
-		return err
-	}
-	go entry.relay.Run(s.lifetime)
-	return c.ReportStarted(ctx, session, identity)
+	return nil
 }
 
 func (s *Supervisor) nativeInputAttempt(ctx context.Context, entry *nativeLeadEntry, id, digest string) error {
@@ -386,6 +426,9 @@ func (s *Supervisor) nativeInputAttempt(ctx context.Context, entry *nativeLeadEn
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if entry.record.ExitObserved || !entry.record.Attempted {
 		return ErrNotOwned
 	}
@@ -497,20 +540,16 @@ func (s *Supervisor) PollNativeSessions(ctx context.Context) error {
 			}
 			continue
 		}
-		identity, err := process.(RecoveryProcess).Ownership()
-		if err != nil {
+		entry.mu.Lock()
+		if entry.record.ExitObserved {
+			entry.mu.Unlock()
+			continue // The waiter won; report its exit on the next poll.
+		}
+		if err := s.reconcileNativeStartupLocked(ctx, entry); err != nil {
+			entry.mu.Unlock()
 			return err
 		}
-		if err := s.native.config.ReportStarted(ctx, session, identity); err != nil {
-			return err
-		}
-		entry.mu.Lock()
-		if !entry.record.ExitObserved {
-			entry.result.State = "running"
-		}
-		entry.mu.Unlock()
-		session.Ownership = &identity
-		entry.mu.Lock()
+		session.Ownership = entry.record.Ownership
 		entry.sequence++
 		session.ActivitySequence = entry.sequence
 		entry.mu.Unlock()

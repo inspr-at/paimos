@@ -223,6 +223,15 @@ func (p *nativeClaudeLead) nativeControl(ctx context.Context, id, op string) err
 	if err := p.native.check(ctx); err != nil {
 		return err
 	}
+	return p.writeNativeControl(ctx, id, op)
+}
+
+// The current grant is checked before this attempt boundary. Keep the caller's
+// deadline through persistence and bridge waits, including local controls.
+func (p *nativeClaudeLead) writeNativeControl(ctx context.Context, id, op string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	attemptID := id
 	if op == "stop" {
 		attemptID = "native-stop"
@@ -294,8 +303,13 @@ func (*ClaudeAdapter) ServiceLead(ctx context.Context, process Process, pause *H
 		return ErrScope
 	}
 	for _, control := range controls {
-		if !uuidPattern.MatchString(control.ID) || control.ExpectedGeneration != p.native.Grant.SessionID || control.ExpiresAt == nil || !time.Now().Before(*control.ExpiresAt) || control.ExpiresInMS < 1 || control.ExpiresInMS > 120000 {
+		if !uuidPattern.MatchString(control.ID) || control.ExpectedGeneration != p.native.Grant.SessionID || control.ExpiresAt == nil || control.ExpiresInMS < 1 || control.ExpiresInMS > 45000 || control.deadline.IsZero() {
 			return ErrScope
+		}
+		// YieldHarness already deducted transit from this monotonic budget.
+		// The server's expires_at is audit metadata, never a local clock.
+		if time.Until(control.deadline) <= 0 {
+			return ErrControlExpired
 		}
 		if expected := control.ExpectedOwnership; expected != nil {
 			actual := p.identity
@@ -313,14 +327,23 @@ func (*ClaudeAdapter) ServiceLead(ctx context.Context, process Process, pause *H
 				return ErrControlUnconfirmed
 			}
 			result = nativeControlResult{digest: digest, outcome: "rejected", reason: "unsupported"}
-			p.controls[control.ID] = result // An uncertain native operation is never repeated.
 			if control.Kind == "interrupt" || control.Kind == "stop" {
-				deadline := time.Now().Add(time.Duration(control.ExpiresInMS) * time.Millisecond)
-				if control.ExpiresAt.Before(deadline) {
-					deadline = *control.ExpiresAt
+				operation, cancel := context.WithDeadline(ctx, control.deadline)
+				err = p.native.check(operation)
+				if contextErr := operation.Err(); contextErr != nil {
+					expired := time.Until(control.deadline) <= 0
+					cancel()
+					if expired {
+						return ErrControlExpired
+					}
+					return contextErr
 				}
-				operation, cancel := context.WithDeadline(ctx, deadline)
-				err = p.nativeControl(operation, control.ID, control.Kind)
+				if err != nil {
+					cancel()
+					return err
+				}
+				p.controls[control.ID] = result // An uncertain native operation is never repeated.
+				err = p.writeNativeControl(operation, control.ID, control.Kind)
 				if err == nil && control.Kind == "stop" {
 					select {
 					case <-p.waitDone:
@@ -334,8 +357,8 @@ func (*ClaudeAdapter) ServiceLead(ctx context.Context, process Process, pause *H
 				if err == nil {
 					result.outcome, result.reason = "applied", ""
 				}
-				p.controls[control.ID] = result
 			}
+			p.controls[control.ID] = result
 		}
 		if err := p.io.CompleteControl(ctx, control.ID, result.outcome, result.reason); err != nil {
 			return err

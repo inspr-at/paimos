@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -355,6 +356,94 @@ func TestNativeCoordinatorGrantChangesRefuseBeforeInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = lead.Wait()
+}
+
+// Risk: native controls restart the transport TTL, trust a skewed server clock,
+// or record/write a control that expired in transit, in a queue or in revalidation.
+// synctest supplies virtual time; the attempt port stops before any SDK write.
+func TestNativeControlsPreserveMonotonicAuthorization(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		transit, authorityWait time.Duration
+		wallSkew               time.Duration
+		ttl                    int64
+		missing, queued        bool
+		want                   error
+		attempts, completions  int
+	}{
+		{name: "live_transit", transit: 2 * time.Second, wallSkew: time.Hour, ttl: 10000, attempts: 1, completions: 1},
+		{name: "server_behind", wallSkew: -time.Hour, ttl: 10000, attempts: 1, completions: 1},
+		{name: "server_ahead", wallSkew: time.Hour, ttl: 10000, attempts: 1, completions: 1},
+		{name: "expired_transit", transit: 11 * time.Second, wallSkew: time.Hour, ttl: 10000, want: ErrControlExpired},
+		{name: "queued", wallSkew: time.Hour, ttl: 10000, queued: true, want: ErrControlExpired, attempts: 1, completions: 1},
+		{name: "expired_revalidation", ttl: 10000, authorityWait: 11 * time.Second, want: ErrControlExpired},
+		{name: "missing_deadline", ttl: 10000, missing: true, want: ErrScope},
+		{name: "oversized_ttl", ttl: 45001, want: ErrScope},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				started := time.Now()
+				deadline := started.Add(time.Duration(tc.ttl) * time.Millisecond)
+				expires := started.Add(10*time.Second + tc.wallSkew)
+				control := HarnessControl{ID: uidLead("71"), Kind: "interrupt", ExpectedGeneration: uidLead("06"), ExpiresAt: &expires, ExpiresInMS: tc.ttl, deadline: deadline}
+				if tc.missing {
+					control.deadline = time.Time{}
+				}
+				controls := []HarnessControl{control}
+				if tc.queued {
+					second := control
+					second.ID, second.Kind = uidLead("72"), "stop"
+					controls = append(controls, second)
+				}
+				attempts, completions, revalidations := 0, 0, 0
+				spec := &NativeLeadSpec{
+					Grant:   NativeLeadGrant{TenantID: uidLead("01"), PrincipalID: uidLead("02"), OwnerID: uidLead("03"), ProjectID: uidLead("04"), AccountID: uidLead("05"), SessionID: uidLead("06"), DaemonID: "fixture-daemon", Generation: "fixture-generation", PolicyDigest: strings.Repeat("a", 64), AccountHomeDigest: strings.Repeat("a", 64), WorkspaceDigest: strings.Repeat("a", 64), Revision: 1, ExpiresAt: started.Add(time.Hour), HistoryApproved: true},
+					Observe: func(AdapterEvent) {},
+					Require: func(context.Context) error {
+						revalidations++
+						if revalidations > 1 {
+							time.Sleep(tc.authorityWait) // Virtual authorization lookup.
+						}
+						return nil
+					},
+					BeforeInput: func(ctx context.Context, id, digest string) error {
+						attempts++
+						if got, ok := ctx.Deadline(); !ok || got != deadline || ctx.Err() != nil || id != control.ID || digest != nativeDigest("interrupt") {
+							t.Error("native attempt lost the original live authorization deadline", got, ctx.Err(), id)
+						}
+						if tc.queued {
+							time.Sleep(11 * time.Second) // First control consumes the queued budget.
+						}
+						return ErrControlUnconfirmed // No SDK operation in this fixture.
+					},
+				}
+				lead := &nativeClaudeLead{claudeProcess: &claudeProcess{native: spec}, controls: map[string]nativeControlResult{}, io: LeadSessionIO{
+					Yield: func(context.Context) ([]HarnessControl, error) {
+						time.Sleep(tc.transit) // Virtual transport/body-decoding delay.
+						return controls, nil
+					},
+					CompleteControl: func(_ context.Context, id, outcome, reason string) error {
+						completions++
+						if id != control.ID || outcome != "rejected" || reason != "native_control_unconfirmed" {
+							t.Error("unexpected native receipt", id, outcome, reason)
+						}
+						return nil
+					},
+					Drain:            func(context.Context) ([]HarnessDelivery, error) { return nil, nil },
+					CompleteDelivery: func(context.Context, HarnessDelivery) error { return nil },
+				}}
+				err := (&ClaudeAdapter{}).ServiceLead(t.Context(), lead, nil)
+				if !errors.Is(err, tc.want) || attempts != tc.attempts || completions != tc.completions || len(lead.controls) != tc.attempts {
+					t.Fatal("native control extended authorization or recorded an expired attempt", err, attempts, completions, len(lead.controls))
+				}
+				if tc.queued {
+					if _, recorded := lead.controls[controls[1].ID]; recorded {
+						t.Fatal("queued expired stop was recorded")
+					}
+				}
+			})
+		})
+	}
 }
 
 // Risk: accepting disappearance, a reused PID, or unreadable metadata can
