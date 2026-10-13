@@ -7888,11 +7888,29 @@
     ,
     {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRetainsBackgroundAndUnconfirmedWriter","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPFailedOpenRetainsOwnerHandle","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPInterruptMatchesCurrentTurn","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPInterruptRequiresNativeCancellation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPProtocolFailuresHoldOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPQualificationMatrix","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPQueueRevalidatesAtCleanBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPQueuedInputWaitsForNativeCompletion","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnboundedOrAmbiguousFrames","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnqualifiedLaunch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/pi","name":"TestPiQualificationMatrix","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/pi","name":"TestPiRefusesUnprovedNativeActions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}
     ,
