@@ -315,18 +315,19 @@ test('an unfinished session keeps its place and names why it ended, never Finish
   const data = await setup(page)
   const id = (n: number) => `5e000000-0000-4000-8000-0000000000${n}`
   const base = data.sessions.find(session => session.id === DONE)!
+  // Every badge says Ended; line 2 says why.
   const ends = [
-    { n: 41, label: 'Cancelled worker', minutes: 2, reason: 'cancelled', badge: 'Ended', line: 'Cancelled', end: '58', moves: '08' },
-    { n: 42, label: 'Budget worker', minutes: 4, reason: 'budget_exhausted', badge: 'Ended', line: 'Budget exhausted', end: '56', moves: '06' },
-    { n: 43, label: 'Silent worker', minutes: 5, reason: 'heartbeat_lost', badge: 'Lost contact', line: 'Lost contact', end: '55', moves: '05' },
-    { n: 44, label: 'Withheld worker', minutes: 6, reason: null, badge: 'Ended', line: 'Stopped', end: '54', moves: '04' },
+    { n: 41, label: 'Cancelled worker', minutes: 2, reason: 'cancelled', line: 'Cancelled', end: '58', moves: '08' },
+    { n: 42, label: 'Budget worker', minutes: 4, reason: 'budget_exhausted', line: 'Budget exhausted', end: '56', moves: '06' },
+    { n: 43, label: 'Silent worker', minutes: 5, reason: 'heartbeat_lost', line: 'Lost contact', end: '55', moves: '05' },
+    { n: 44, label: 'Withheld worker', minutes: 6, reason: null, line: 'Stopped', end: '54', moves: '04' },
   ]
   for (const end of ends) data.sessions.push({ ...base, id: id(end.n), display_label: end.label, stopped_at: ago(end.minutes), heartbeat_at: ago(end.minutes + 0.2), stop_reason: end.reason, finished: false })
   await page.goto('/agents')
   for (const end of ends) {
     const ended = row(page, id(end.n))
     await expect(ended).toBeVisible()
-    await expect(ended.locator('.ava')).toHaveAttribute('aria-label', new RegExp(`: ${end.badge}$`))
+    await expect(ended.locator('.ava')).toHaveAttribute('aria-label', /: Ended$/)
     await expect(ended.locator('.l2t')).toHaveText(new RegExp(`^${end.line} \\d{1,2}:${end.end}( [AP]M)? · moves to Ended at \\d{1,2}:${end.moves}( [AP]M)?$`))
   }
   // The Ended group stays folded: every row sits among the live ones.
