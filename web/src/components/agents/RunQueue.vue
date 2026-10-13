@@ -156,7 +156,9 @@ defineExpose({ reveal })
 </template>
 
 <style scoped>
-.run-queue { overflow: clip; }
+/* The list pane stacks in normal flow, so the section keeps its own gap below the Sessions card;
+   it comes and goes with the section and stays while it folds (AEON-1282). */
+.run-queue { overflow: clip; margin-top: var(--section-gap); }
 .count { font-size: 12px; font-weight: 500; color: var(--ink-3); }
 .fs-sum { min-width: 0; font-size: 13px; color: var(--ink-2); }
 ul { list-style: none; padding: 0 8px 8px; margin: 0; }
