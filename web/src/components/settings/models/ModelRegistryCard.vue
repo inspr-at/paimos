@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import '../../../styles/models.css'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../../AppIcon.vue'
 import ModelLineRow from './ModelLineRow.vue'
@@ -644,4 +645,3 @@ h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); 
 @media (pointer: coarse) { .mi { min-height: 52px; } .reg-switch { min-height: 44px; } }
 </style>
 <style scoped src="../../../styles/settingsButtons.css"></style>
-<style src="../../../styles/models.css"></style>

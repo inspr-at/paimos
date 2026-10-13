@@ -68,6 +68,8 @@ afterEach(() => { for (const s of scopes.splice(0)) s.stop() })
 const session = Vue.reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'admin', kind: 'person' } }, authenticationCurrent: () => true })
 const modules: Record<string, unknown> = {
   vue: { ...Vue, onBeforeUnmount: () => {} },
+  // The script-only harness has no DOM; allow the card's exact shared CSS import.
+  '../../../styles/models.css': {},
   '../../AppIcon.vue': {}, '../../agents/HarnessMark.vue': {}, './ModelRegistryEditor.vue': {}, './ModelOutdatedSheet.vue': {}, './ModelLineRow.vue': {}, './ModelDiscovery.vue': {}, './ModelsPopover.vue': {},
   '../../../lib/api': { api: (path: string, init: RequestInit = {}) => http.handler(path, init) },
   '../../../lib/authz': { can: () => true, onAccessRevalidate: () => () => {} },

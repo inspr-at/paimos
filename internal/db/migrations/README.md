@@ -25,9 +25,13 @@ unqualified lowercase identifiers. Other statements, including `SET`, and
 multiple index builds are rejected in this mode; use separate numbered files.
 
 The runner executes the index build outside a transaction, with a session
-`lock_timeout` of five seconds covering both creation and retry cleanup. This
-bounds lock acquisition, not the total build duration. The previous timeout is
-restored before returning the connection to the pool, including on failure.
+`lock_timeout` of five seconds covering both creation and retry cleanup, and a
+thirty-minute `statement_timeout` for each build/cleanup statement. Ordinary
+migration SQL uses a five-minute statement budget; the migration connection's
+idle transaction budget is one minute. All three previous settings are restored
+before returning the connection to the pool, including on failure. Application
+defaults and SQL-only job overrides are described in
+[`database-backstops.md`](../../../docs/features/database-backstops.md).
 
 The advisory lock covers inspection, creation and recording. On retry, the runner
 keeps a valid index on the expected table, drops an invalid partial index with
