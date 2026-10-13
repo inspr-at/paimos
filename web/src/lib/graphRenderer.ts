@@ -792,7 +792,16 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         installed = true
         pinWindow().__aeonReleaseGlimpsePin = () => {
           released = true
-          maybeRun()
+          // Warmup can precede font/header sizing. Re-seed the test simulation
+          // at the final viewport before taking the fixed number of ticks;
+          // otherwise the same pin retains forces from an earlier aspect.
+          layoutReady = false
+          for (const node of nodes) {
+            delete node.x; delete node.y; delete node.z
+            delete node.vx; delete node.vy; delete node.vz
+          }
+          graph.graphData({ nodes, links })
+          whenLaidOut(() => { fit(); layoutReady = true; maybeRun() })
         }
       }
       return {
