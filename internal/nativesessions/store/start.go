@@ -237,7 +237,7 @@ func targetStart(ctx context.Context, tx pgx.Tx, project string, intent nativeco
 	}
 	if intent.Role == "worker" {
 		var leaf bool
-		err = tx.QueryRow(ctx, `SELECT n.project_id=$2 AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes child WHERE child.parent_id=n.id AND child.deleted_at IS NULL) FROM nodes n WHERE n.id=$1`, *intent.WorkID, project).Scan(&leaf)
+		err = tx.QueryRow(ctx, `SELECT coalesce(n.project_id=$2 AND aeon_work_leaf(n.id),false) FROM nodes n WHERE n.id=$1`, *intent.WorkID, project).Scan(&leaf)
 		if err != nil {
 			return err
 		}

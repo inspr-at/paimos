@@ -304,6 +304,7 @@ func TestWorkerStartRequiresLeafAndKeepsExistingRun(t *testing.T) {
 	leaf, _ := uuid()
 	parentHarness, _ := uuid()
 	run, _ := uuid()
+	workOrder, _ := uuid()
 	ref, lease := sha256.Sum256([]byte("coordinator parent ref")), sha256.Sum256([]byte("coordinator parent lease"))
 	f.seed(t, func(tx pgx.Tx) error {
 		for _, q := range []struct {
@@ -312,8 +313,9 @@ func TestWorkerStartRequiresLeafAndKeepsExistingRun(t *testing.T) {
 		}{
 			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-2',id,'Parent work',$3 FROM node_kinds WHERE slug='work'`, []any{f.person.TenantID, parentWork, f.project}},
 			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-3',id,'Leaf work',$3 FROM node_kinds WHERE slug='work'`, []any{f.person.TenantID, leaf, parentWork}},
-			{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'ready')`, []any{f.person.TenantID, leaf, f.person.ID}},
-			{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,model_profile_id,account_id) VALUES($1,$2,$3,$4,$5,$6)`, []any{f.person.TenantID, run, leaf, f.agent.ID, f.intent.ModelProfileID, f.intent.AccountID}},
+			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-4',id,'Worker order',$3 FROM node_kinds WHERE slug='work_order'`, []any{f.person.TenantID, workOrder, leaf}},
+			{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'ready')`, []any{f.person.TenantID, workOrder, f.person.ID}},
+			{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,model_profile_id,account_id) VALUES($1,$2,$3,$4,$5,$6)`, []any{f.person.TenantID, run, workOrder, f.agent.ID, f.intent.ModelProfileID, f.intent.AccountID}},
 			{`INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,owner_principal_id)
  VALUES($1,$2,$3,$4,'claude','local','unmanaged','coordinator',$5,$6,$7)`, []any{f.person.TenantID, parentHarness, f.project, f.agent.ID, ref[:], lease[:], f.person.ID}},
 		} {
