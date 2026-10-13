@@ -142,7 +142,7 @@ func TestCodexRenewalRuntimeWriteFailure(t *testing.T) {
 	}
 	config, err = ReadRuntimeConfig(e.Store.Path())
 	saved, saveErr := e.load()
-	if err != nil || saveErr != nil || config.Accounts[0].Node != next || saved.Candidates[0].Candidate.Node != next || saved.CodexPins.Renewals[c.Key] != next {
+	if err != nil || saveErr != nil || config.Accounts[0].Node != next || saved.Candidates[0].Candidate.Node != next || saved.CodexPins.Renewals[config.Accounts[0].Key] != next {
 		t.Fatal("failed runtime write prevented a subsequent safe renewal", err, saveErr)
 	}
 }
