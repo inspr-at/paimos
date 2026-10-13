@@ -280,6 +280,10 @@
     ,
     "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory"
     ,
+    "browser:tests/aeon-1279-touch-scroll.spec.ts:dark 390: the footer folds away over the page; the page's scroller never changes size while scrolling"
+    ,
+    "browser:tests/aeon-1279-touch-scroll.spec.ts:ticket list 390: a swipe never resizes the page; a ticket closed elsewhere leaves without moving the rows on screen"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -5903,6 +5907,18 @@
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: the work-area threshold and 240 ms presets honor reduced motion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"touch › AEON-1213: the preset, divider hit area and phone Back target are 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"agents 390: a refresh after one 40 px swipe lands without moving the rows on screen; touch shows no hold","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"agents 390: a refresh during a touch swipe waits until the swipe settles, then lands without moving the rows on screen","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"chat 390: a post that arrives while reading up the thread never moves the posts on screen or the sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"dark 390: the footer folds away over the page; the page's scroller never changes size while scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"light 390: the footer folds away over the page; the page's scroller never changes size while scrolling","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"ticket list 390: a swipe never resizes the page; a ticket closed elsewhere leaves without moving the rows on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -18505,6 +18521,20 @@
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred unchanged recovery decision even after the old 400ms window","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred wrong-version recovery decision even after the old 400ms window","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > drops a mark whose update never restored once its flush is over","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > follows the next row on screen when the first one leaves, and stays still at the top or for a sub-pixel","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > keeps the first capture when the component updates twice before its restore","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > keeps the first row on screen where it was when rows arrive above it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > never restores a pane capture into the page when the split closes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > ends at scrollend once no finger is down, and ignores scrolls without a touch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > runs from the touch until momentum is quiet, never while a finger is down","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"S8-001: changing ticket clears description and comment drafts, including a late save","tier":"ESSENTIAL"}
     ,
