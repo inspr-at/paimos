@@ -5,6 +5,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +20,92 @@ import (
 	"testing"
 	"time"
 )
+
+// Risk: intermediary rewrites (including same-size corruption) must never be
+// published as a successful download, and valid files must retain every byte.
+func TestAttachmentDownloadIntegrity(t *testing.T) {
+	const id = "41ea1228-e717-4e40-8025-cb212f05773e"
+	metadataPath := "/api/attachments/" + id
+	// Match the AIT attachment's exact size and missing final newline.
+	body := append([]byte("<!doctype html>"), bytes.Repeat([]byte("x"), 183795-len("<!doctype html>"))...)
+	withNewline := append(bytes.Clone(body), '\n')
+	corrupt := bytes.Clone(body)
+	corrupt[len(corrupt)-1] = 'y'
+	for _, tc := range []struct {
+		name     string
+		original []byte
+		response []byte
+		hash     string
+		wantErr  string
+	}{
+		{name: "ait-no-final-newline", original: body, response: body},
+		{name: "final-newline", original: withNewline, response: withNewline},
+		{name: "empty"},
+		{name: "extra-newline", original: body, response: withNewline, wantErr: "got 183796 bytes, expected 183795"},
+		{name: "short-body", original: body, response: body[:len(body)-1], wantErr: "got 183794 bytes, expected 183795"},
+		{name: "same-size-corruption", original: body, response: corrupt, wantErr: "attachment download sha256 mismatch"},
+		{name: "malformed-hash", original: body, response: body, hash: "invalid", wantErr: "invalid attachment sha256"},
+	} {
+		for _, mode := range []string{"file", "stdout"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				isolate(t)
+				sum := sha256.Sum256(tc.original)
+				digest := hex.EncodeToString(sum[:])
+				if tc.hash != "" {
+					digest = tc.hash
+				}
+				meta := attachmentView{ID: id, Name: "design.html", ContentType: "text/html", Size: int64(len(tc.original)), SHA256: digest}
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case metadataPath:
+						_ = json.NewEncoder(w).Encode(meta)
+					case metadataPath + "/content":
+						w.Header().Set("Content-Length", strconv.Itoa(len(tc.response)))
+						_, _ = w.Write(tc.response)
+					default:
+						t.Errorf("unexpected request: %s", r.URL.Path)
+						http.NotFound(w, r)
+					}
+				}))
+				defer srv.Close()
+				t.Setenv("AEON_URL", srv.URL)
+				t.Setenv("AEON_API_KEY", testKey)
+				dir := t.TempDir()
+				destination := filepath.Join(dir, "design.html")
+				if mode == "stdout" {
+					destination = "-"
+				} else if err := os.WriteFile(destination, []byte("keep existing bytes"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				code, out, stderr := runCLI([]string{"aeon", "--config", filepath.Join(dir, "missing"), "attach", "get", id, "--download", destination}, "")
+				var downloaded []byte
+				if mode == "stdout" {
+					downloaded = []byte(out)
+				} else {
+					var err error
+					downloaded, err = os.ReadFile(destination)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if tc.wantErr != "" {
+					if code != 1 || out != "" || !strings.Contains(stderr, tc.wantErr) {
+						t.Fatalf("failed download: code %d, stdout %d bytes, stderr %q; want %q", code, len(out), stderr, tc.wantErr)
+					}
+					if mode == "file" && string(downloaded) != "keep existing bytes" {
+						t.Fatal("failed verification overwrote the destination")
+					}
+				} else if code != 0 || stderr != "" || !bytes.Equal(downloaded, tc.original) {
+					t.Fatalf("download changed bytes: code %d, stderr %q, got %d bytes, want %d", code, stderr, len(downloaded), len(tc.original))
+				}
+				spools, err := filepath.Glob(filepath.Join(dir, ".aeon-download-*"))
+				if err != nil || len(spools) != 0 {
+					t.Fatalf("download spool leaked: %v, %v", spools, err)
+				}
+			})
+		}
+	}
+}
 
 // Risk: fetching a known attachment must not enumerate the tenant before
 // downloading, or report success and overwrite a file after a partial read.
