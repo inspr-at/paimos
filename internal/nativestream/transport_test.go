@@ -194,6 +194,16 @@ func TestTransientRingReportsLossAndRejectsStaleReplay(t *testing.T) {
 	bad := fixtureEvent(102, "assistant.delta", nativecontract.AssistantDelta{MessageID: fixtureID, Text: "wrong order"})
 	requireReason(t, buffer.Append([]nativecontract.StreamEvent{bad}), nativecontract.ReasonInvalidInput)
 	clock.advance(nativecontract.LiveReplayIdleSeconds * time.Second)
+	fresh := fixtureEvent(101, "assistant.delta", nativecontract.AssistantDelta{MessageID: fixtureID, Text: "fresh publication"})
+	if err := buffer.Append([]nativecontract.StreamEvent{fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if frames, _, _ := buffer.Stats(); frames != 1 {
+		t.Fatal("new publication resurrected expired raw frames")
+	}
+	_, err = buffer.Position("1:99", 1)
+	requireReason(t, err, nativecontract.ReasonCursorExpired)
+	clock.advance(nativecontract.LiveReplayIdleSeconds * time.Second)
 	if frames, bytes, _ := buffer.Stats(); frames != 0 || bytes != 0 {
 		t.Fatal("idle expiry retained raw content")
 	}

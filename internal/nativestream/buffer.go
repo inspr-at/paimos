@@ -81,6 +81,7 @@ func (b *Buffer) Append(events []nativecontract.StreamEvent) error {
 	if b.closed {
 		return Refuse(nativecontract.ReasonWrongGeneration)
 	}
+	b.expire()
 	next := b.next
 	fresh := make([]storedFrame, 0, len(encoded))
 	for i, item := range encoded {
