@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/nativecontract"
@@ -15,16 +16,32 @@ type viewerHost struct {
 	exact, suffix string
 	prefix        netip.Prefix
 }
-type ViewerHosts struct{ hosts []viewerHost }
+type ViewerHosts struct {
+	hosts []viewerHost
+	ports map[string]struct{}
+}
 
 func NewViewerHosts(setting []string) (ViewerHosts, error) {
+	return newViewerHosts(setting, nil)
+}
+
+func newViewerHosts(setting []string, ports []int) (ViewerHosts, error) {
 	if setting == nil {
 		setting = []string{"100.64.0.0/10", "*.ts.net"}
 	}
-	if len(setting) > 64 {
+	if ports == nil {
+		ports = []int{443, 8082}
+	}
+	if len(setting) > 64 || len(ports) > 64 {
 		return ViewerHosts{}, fail(400, nativecontract.ReasonBufferFull)
 	}
-	out := ViewerHosts{}
+	out := ViewerHosts{ports: make(map[string]struct{}, len(ports))}
+	for _, port := range ports {
+		if port < 1 || port > 65535 {
+			return ViewerHosts{}, fail(400, nativecontract.ReasonInvalidInput)
+		}
+		out.ports[strconv.Itoa(port)] = struct{}{}
+	}
 	for _, value := range setting {
 		if len(value) > 253 || value != strings.TrimSpace(value) || value == "" {
 			return ViewerHosts{}, fail(400, nativecontract.ReasonInvalidInput)
@@ -76,7 +93,11 @@ func (h ViewerHosts) Validate(raw string) error {
 	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.Host == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" {
 		return invalid()
 	}
-	if u.Port() != "" && u.Port() != "443" {
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+	if _, allowed := h.ports[port]; !allowed {
 		return invalid()
 	}
 	host := strings.ToLower(u.Hostname())
