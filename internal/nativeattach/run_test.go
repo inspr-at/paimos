@@ -276,11 +276,22 @@ func TestComposerPreservesShortcutsAndBoundsTerminalData(t *testing.T) {
 		if strings.Contains(SubmitLabel(platform), "Ctrl") != (platform != "darwin") {
 			t.Fatal("wrong submit label")
 		}
+		c.Focused = true
+		if actions := c.feed([]byte("\x1b[27u\x1b[27u"), true); len(actions) != 2 || actions[0] != keyNone || actions[1] != keyDetach {
+			t.Fatal("CSI-u Esc did not leave input before detaching")
+		}
+		c.Focused = true
+		if actions := c.feed([]byte{0x1b, 0x1b}, true); len(actions) != 1 || actions[0] != keyNone || c.Focused || c.flushEscape() != keyDetach {
+			t.Fatal("quick bare Esc presses disappeared")
+		}
 	}
 	if strings.ContainsAny(terminalText("safe\x1b]52;c;payload\x07\u202eevil"), "\x1b\x07\u202e") {
 		t.Fatal("terminal controls survived sanitizing")
 	}
 	log := &tail{}
+	if text := log.put("expanded", strings.Repeat("\t", nativecontract.ExportedFrameBytes), false); !strings.Contains(text, "terminal text omitted") || len(text) > nativecontract.ExportedFrameBytes {
+		t.Fatal("display expansion silently truncated or exceeded its bound")
+	}
 	for i := 0; i < 100; i++ {
 		log.put(fmt.Sprint(i), strings.Repeat("x", nativecontract.ExportedFrameBytes), false)
 	}

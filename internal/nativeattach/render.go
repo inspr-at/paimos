@@ -20,10 +20,12 @@ type tail struct {
 func (t *tail) put(key, text string, appendText bool) string {
 	text = terminalText(text)
 	if len(text) > nativecontract.ExportedFrameBytes {
-		text = text[:nativecontract.ExportedFrameBytes]
+		const marker = "\n[remaining terminal text omitted]"
+		text = text[:nativecontract.ExportedFrameBytes-len(marker)]
 		for !utf8.ValidString(text) {
 			text = text[:len(text)-1]
 		}
+		text += marker
 	}
 	if key != "" {
 		for i := range t.rows {
@@ -32,7 +34,12 @@ func (t *tail) put(key, text string, appendText bool) string {
 				if appendText {
 					text = t.rows[i].text + text
 					if len(text) > nativecontract.ExportedFrameBytes {
-						text = "[earlier message text omitted]\n" + text[len(text)-nativecontract.ExportedFrameBytes/2:]
+						const marker = "[earlier message text omitted]\n"
+						start := len(text) - nativecontract.ExportedFrameBytes + len(marker)
+						for !utf8.RuneStart(text[start]) {
+							start++
+						}
+						text = marker + text[start:]
 					}
 				}
 				t.rows[i].text = text

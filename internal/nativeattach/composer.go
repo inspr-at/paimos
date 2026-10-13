@@ -55,6 +55,15 @@ func (c *Composer) feed(input []byte, control bool) []keyAction {
 	var actions []keyAction
 	for _, ch := range input {
 		if len(c.pending) != 0 || ch == 0x1b {
+			if len(c.pending) == 1 && ch == 0x1b {
+				// Two quick bare Esc presses are still two actions; they must
+				// not disappear as an unrecognized Alt-key sequence.
+				if !c.paste {
+					actions = append(actions, c.Escape())
+				}
+				c.pending = []byte{0x1b}
+				continue
+			}
 			c.pending = append(c.pending, ch)
 			if len(c.pending) == 1 {
 				continue
@@ -71,6 +80,10 @@ func (c *Composer) feed(input []byte, control bool) []keyAction {
 				seq := string(c.pending)
 				c.pending = nil
 				switch seq {
+				case "\x1b[27u", "\x1b[27;1u":
+					if !c.paste {
+						actions = append(actions, c.Escape())
+					}
 				case "\x1b[200~":
 					c.paste = true
 				case "\x1b[201~":

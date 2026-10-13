@@ -26,6 +26,7 @@ as that state, not delivery. Uncertain input is never automatically resent.
 Rendering strips terminal controls and bidi formatting. The tail retains at
 most 64 rows and 256 KiB in RAM; frames, composer input, response bodies and
 queues are bounded. This is a transient tail, not durable transcript history.
+Text omitted at the per-message display bound is marked explicitly.
 `Session.Receipts` exposes bounded pages, their next cursor and truncation.
 
 Every action and stream frame uses the original full binding and generation.
@@ -82,3 +83,39 @@ Run the committed source through the approved remote runner for
 `./internal/nativeattach/... ./internal/cli/...`; then guarded static
 `--merge-main` and the affected-set planner. Browser checks do not apply.
 The coordinator owns R0, cross-family gates, push, release and live verification.
+
+## Builder acceptance and validation
+
+2026-10-13, source slice only:
+
+- PASS: canonical command node, structured tail, honest input receipts and
+  explicit exclusive control lease are implemented. Command-root registration
+  and qualified host wiring remain I1-owned, as specified above.
+- PASS: the additive `attach --session` alias is handed to I1/I2; the existing
+  upload command and attachment subcommands retain their meaning.
+- PASS: EOF, signal cancellation, raw-entry/output/input/resize errors and
+  lease refusal restore the terminal before detaching. The fake host stays
+  running; no process stop or PTY resize is sent.
+- PASS: bare and CSI-u Esc leave input before detaching; quick double Esc is
+  handled. Only deliberate interrupt targets a known turn. Submit labels and
+  modified-Enter handling match the platform; paste cannot trigger actions.
+- PASS: fake Unix-socket scenarios prove read-only clients send no input,
+  multiple viewers coexist with one controller, controller expiry preserves
+  viewers, and stale input/stream bindings never target a successor.
+
+The complete `internal/nativeattach` package passes in the permitted one-package
+local fallback after remote refusal. The new CLI tests plus the existing
+`TestAttachmentGetCLIEndToEnd` regression pass in a separate small CLI run.
+The negative control uses an unreferenced stash object: removing the viewer
+fence makes the exact read-only assertion fail with `grant_missing`. Original
+source and HEAD were restored; no throwaway branch commit or stored stash was
+left behind. Tests use fake sockets, injected clocks and barriers, without
+native vendor/model calls. `git diff --check` passes.
+
+INCOMPLETE: repeated `remote-test.sh` and `ci-static-locked.sh` attempts exit 3
+because both guarded remote slots are occupied. Neither full Go validation nor
+static `--merge-main` is green. The affected planner exits 0 and selects FULL
+Go: 3,219 reverse-dependency cases exceed its 300-case threshold. R0 must apply
+the listed source/tier rows in this same PR, then the coordinator must obtain
+authoritative full Go/static CI before merge. Browser checks do not apply to
+this slice. No push, deployment, review gate or live cutover was performed.
