@@ -139,12 +139,36 @@ required before merge; this groundwork is hidden from release notes.
   Migration 1346 is the brief's ledger reservation, overriding plan slot 1344.
 - PASS affected planner execution: selection is `FULL` because the migration
   cannot be safely narrowed; authoritative full PR CI remains required.
-- INCOMPLETE static: the guarded `ci-static-locked.sh --merge-main` completed
+- Initial static evidence: the guarded `ci-static-locked.sh --merge-main` completed
   with 41 passing checks, no optional skips and exit 1 solely for the six new
-  tests absent from R0's Go tier manifest. R0 must apply the six ESSENTIAL rows
-  and all three DSAR inventory entries above in this same PR, then rerun static
-  and authoritative CI. All edits stayed within P1b's exclusive write set.
+  tests absent from R0's Go tier manifest. Fix round 2 adds those six ESSENTIAL
+  rows for the reported CI failure. R0's three DSAR inventory entries above
+  remain required in this same PR. Implementation edits stayed within P1b's
+  exclusive write set.
 
 No browser check applies, and no origin push, deployment, live cutover, model
 call or review gate was performed. Production wiring and qualification remain
 with I1 and the coordinator.
+
+## Fix round 2 verification
+
+The reported CI failures are addressed by additive entries in the shared-fence
+caller inventory, native store order checks in its existing primitive-order
+guard, and six ESSENTIAL Go test-tier entries.
+
+- PASS negative control: guarded `remote-test.sh` on original HEAD `da8a08d88`
+  fails `TestSharedFenceCallerInventory` specifically because native store
+  `claim.go`, `read.go` and `start.go` are missing from `agentpairing.Lock` callers.
+  Its exact inventory assertion is retained.
+- PASS affected Go: guarded remote tests at `da7f4ef31` pass
+  `./internal/agentpairing`, `./internal/nativesessions/start/...`,
+  `./internal/nativesessions/store/...` and `./internal/agentaccounts/...` with
+  `-count=1`, including the caller and order guards and native behavior tests.
+- PASS manifest: at `433fdf740`, all six native test declarations have ESSENTIAL
+  entries and `node scripts/test-tiers/cli.mjs manifests --check` succeeds.
+  Browser checks do not apply to this non-browser slice.
+- PASS static: guarded `ci-static-remote.sh` checks committed HEAD `433fdf740`
+  with `node scripts/ci-static.mjs --merge-main`; exit 0, all 42 checks pass and
+  zero optional checks are skipped. This includes native Go tier reconciliation,
+  test-tier and web-shard policy tests, ownership audit, web typecheck and lint.
+  Authoritative PR CI remains required before merge.
