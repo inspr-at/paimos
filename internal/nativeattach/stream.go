@@ -22,28 +22,65 @@ type streamItem struct {
 	err   error
 }
 
+var errStreamRotation = errors.New("native stream rotation")
+
 // readStream has bounded per-frame and queue memory and a rotation deadline.
-// The server must still authorize each frame/keepalive. There is no reconnect
-// to a new binding or automatic resending of uncertain input.
+// Only planned rotation resumes the same viewer and gapless sequence guard.
+// The server must still authorize each subscription and frame/keepalive.
+// There is no reconnect to a new binding or resending of uncertain input.
 func (s *Session) readStream(ctx context.Context, send func(streamItem) bool) {
-	ctx, cancel := context.WithTimeout(ctx, (nativecontract.StreamRotationSeconds+5)*time.Second)
-	defer cancel()
+	guard := nativecontract.SequenceGuard{Binding: s.binding, Generation: s.generation}
+	lastID := ""
+	for {
+		err := s.readStreamOnce(ctx, &guard, &lastID, send)
+		if errors.Is(err, errStreamRotation) {
+			if ctx.Err() == nil {
+				continue
+			}
+			err = ctx.Err()
+		}
+		if err != nil {
+			send(streamItem{err: err})
+		}
+		return
+	}
+}
+
+func (s *Session) readStreamOnce(ctx context.Context, guard *nativecontract.SequenceGuard, lastID *string, send func(streamItem) bool) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	rotation := s.clock.After((nativecontract.StreamRotationSeconds + 5) * time.Second)
+	deadlineDone := make(chan struct{})
+	go func() {
+		defer close(deadlineDone)
+		select {
+		case <-rotation:
+			cancel(errStreamRotation)
+		case <-ctx.Done():
+		}
+	}()
+	defer func() {
+		cancel(nil)
+		<-deadlineDone
+	}()
 	b := s.binding
 	q := url.Values{"view": {"structured"}, "expected_runtime_epoch": {b.RuntimeEpoch}, "expected_harness_session_id": {b.HarnessSessionID}, "expected_binding_revision": {strconv.FormatInt(b.BindingRevision, 10)}}
-	res, err := s.wire.request(ctx, http.MethodGet, s.wire.path(b, "stream")+"?"+q.Encode(), nil, s.headers(false))
+	headers := s.headers(false)
+	if *lastID != "" {
+		headers["Last-Event-ID"] = *lastID
+	}
+	res, err := s.wire.request(ctx, http.MethodGet, s.wire.path(b, "stream")+"?"+q.Encode(), nil, headers)
 	if err != nil {
-		send(streamItem{err: err})
-		return
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		return err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK || strings.Split(res.Header.Get("Content-Type"), ";")[0] != "text/event-stream" {
-		send(streamItem{err: errors.New("invalid native event stream")})
-		return
+		return errors.New("invalid native event stream")
 	}
 	validator := s.validator
 	validation := nativecontract.ValidationContext{Binding: &b, OwnedSessionID: b.OwnedSessionID, PrincipalKind: "person", Generation: s.generation, Capabilities: &s.snapshot.Capabilities, View: "structured"}
-	guard := nativecontract.SequenceGuard{Binding: b, Generation: s.generation}
-	first := true
 	scan := bufio.NewScanner(res.Body)
 	scan.Buffer(make([]byte, 4096), nativecontract.ExportedFrameBytes+1024)
 	var data []byte
@@ -54,34 +91,37 @@ func (s *Session) readStream(ctx context.Context, send func(streamItem) bool) {
 		if line == "" {
 			if len(data) != 0 {
 				if err = validator.ValidateBoundJSON("NativeStreamEvent", data, validation); err != nil {
-					send(streamItem{err: safeValidation(err)})
-					return
+					return safeValidation(err)
 				}
 				var event nativecontract.StreamEvent
 				if json.Unmarshal(data, &event) != nil {
-					send(streamItem{err: errors.New("invalid native event")})
-					return
+					return errors.New("invalid native event")
 				}
 				want, _ := nativecontract.EventID(event.Generation, mustSequence(event.Seq))
 				if id != want || (kind != "" && kind != event.Kind && kind != "message") {
-					send(streamItem{err: errors.New("native event correlation mismatch")})
-					return
+					return errors.New("native event correlation mismatch")
 				}
-				if first {
+				if *lastID == "" {
 					guard.Next = mustSequence(event.Seq)
-					first = false
 				}
 				if event.Kind != "gap" {
 					if err = guard.Accept(event); err != nil {
-						send(streamItem{err: errors.New("native stream sequence gap; attach again explicitly")})
-						return
+						return errors.New("native stream sequence gap; attach again explicitly")
+					}
+					*lastID = id
+				}
+				if event.Kind == "end" {
+					var end nativecontract.End
+					_ = json.Unmarshal(event.Payload, &end)
+					if end.Reason == "rotation" {
+						return errStreamRotation
 					}
 				}
 				if !send(streamItem{event: event}) {
-					return
+					return nil
 				}
 				if event.Kind == "gap" || event.Kind == "end" {
-					return
+					return nil
 				}
 			}
 			data, id, kind, frameBytes = nil, "", "", 0
@@ -92,8 +132,7 @@ func (s *Session) readStream(ctx context.Context, send func(streamItem) bool) {
 		}
 		frameBytes += len(line)
 		if frameBytes > nativecontract.ExportedFrameBytes+1024 {
-			send(streamItem{err: errors.New("native stream frame exceeds limit")})
-			return
+			return errors.New("native stream frame exceeds limit")
 		}
 		field, value, _ := strings.Cut(line, ":")
 		value = strings.TrimPrefix(value, " ")
@@ -103,14 +142,12 @@ func (s *Session) readStream(ctx context.Context, send func(streamItem) bool) {
 				data = append(data, '\n')
 			}
 			if len(data)+len(value) > nativecontract.ExportedFrameBytes {
-				send(streamItem{err: errors.New("native stream data exceeds limit")})
-				return
+				return errors.New("native stream data exceeds limit")
 			}
 			data = append(data, value...)
 		case "id":
 			if len(value) > 64 {
-				send(streamItem{err: errors.New("invalid native event id")})
-				return
+				return errors.New("invalid native event id")
 			}
 			id = value
 		case "event":
@@ -118,14 +155,12 @@ func (s *Session) readStream(ctx context.Context, send func(streamItem) bool) {
 		}
 	}
 	if ctx.Err() != nil {
-		send(streamItem{err: ctx.Err()})
-		return
+		return context.Cause(ctx)
 	}
 	if scan.Err() != nil {
-		send(streamItem{err: errors.New("native stream disconnected; delivery not confirmed")})
-		return
+		return errors.New("native stream disconnected; delivery not confirmed")
 	}
-	send(streamItem{err: io.EOF})
+	return io.EOF
 }
 
 func mustSequence(s string) uint64 { n, _ := strconv.ParseUint(s, 10, 64); return n }

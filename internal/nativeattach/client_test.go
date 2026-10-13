@@ -80,6 +80,7 @@ func await[T any](t *testing.T, ch <-chan T) T {
 }
 
 type viewer struct{ client, mode string }
+type streamSubscription struct{ viewerID, path, query, lastEventID string }
 type fakeSocket struct {
 	mu                           sync.Mutex
 	view                         nativecontract.SessionView
@@ -88,6 +89,7 @@ type fakeSocket struct {
 	validator                    *nativecontract.Validator
 	viewers                      map[string]viewer
 	subscribed                   chan string
+	subscriptions                []streamSubscription
 	frames                       map[string]chan nativecontract.StreamEvent
 	inputAttempts                int
 	inputs                       []nativecontract.Input
@@ -100,6 +102,7 @@ type fakeSocket struct {
 	attachEntered, attachRelease chan struct{}
 	leaseMS                      int64
 	rejectRenew                  bool
+	renewals                     int
 	onDetach                     func()
 }
 
@@ -183,6 +186,7 @@ func (f *fakeSocket) serve(w http.ResponseWriter, r *http.Request) {
 		_, authorized := f.viewers[id]
 		ch := make(chan nativecontract.StreamEvent, 1)
 		f.frames[id] = ch
+		f.subscriptions = append(f.subscriptions, streamSubscription{id, r.URL.Path, r.URL.RawQuery, r.Header.Get("Last-Event-ID")})
 		f.mu.Unlock()
 		if !authorized {
 			f.refusal(w, nativecontract.ReasonGrantMissing)
@@ -196,10 +200,16 @@ func (f *fakeSocket) serve(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-r.Context().Done():
 				return
-			case e := <-ch:
+			case e, ok := <-ch:
+				if !ok {
+					return
+				}
 				raw, _ := json.Marshal(e)
 				_, _ = fmt.Fprintf(w, "id: %d:%s\nevent: %s\ndata: %s\n\n", e.Generation, e.Seq, e.Kind, raw)
 				w.(http.Flusher).Flush()
+				if e.Kind == "end" {
+					return
+				}
 			}
 		}
 	}
@@ -269,6 +279,7 @@ func (f *fakeSocket) serve(w http.ResponseWriter, r *http.Request) {
 			f.refusal(w, nativecontract.ReasonPermissionRevoked)
 			return
 		}
+		f.renewals++
 		_ = json.NewEncoder(w).Encode(f.attachResult(id))
 		return
 	}

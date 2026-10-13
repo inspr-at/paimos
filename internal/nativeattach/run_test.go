@@ -253,6 +253,166 @@ func TestStreamRejectsSuccessorBeforeRendering(t *testing.T) {
 	}
 }
 
+// Risk: a planned stream rotation can detach LEAD's controller, or an unsafe
+// replay can silently skip events or display a successor in the old terminal.
+func TestStreamResumesRotationWithoutLosingControl(t *testing.T) {
+	for _, scenario := range []struct{ name, rotation, ending string }{
+		{"server rotation continues", "server", "detach"},
+		{"client deadline continues", "deadline", "detach"},
+		{"resumed sequence gap", "server", "sequence gap"},
+		{"resumed generation change", "server", "generation"},
+		{"resumed binding change", "server", "binding"},
+		{"resumed explicit gap", "server", "gap"},
+		{"resumed revocation", "server", "revoked"},
+		{"resumed disconnect", "server", "EOF"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newFakeSocket(t)
+			s := f.open(t, true)
+			term := newTerminal()
+			ctx, cancel := context.WithCancel(context.Background())
+			done := runTerminal(t, f, s, term, ctx, nil)
+			finished := false
+			defer func() {
+				cancel()
+				if !finished {
+					_ = await(t, done)
+				}
+			}()
+			id := waitRunReady(t, f, term)
+			f.mu.Lock()
+			first := f.subscriptions[0]
+			frames := f.frames[id]
+			controller := *f.view.Controller
+			f.mu.Unlock()
+			if first.viewerID != s.viewerID || first.lastEventID != "" {
+				t.Fatal("initial subscription changed viewer or invented a replay cursor")
+			}
+			message := uuid.NewString()
+			frames <- eventFor(s, "assistant.delta", "41", nativecontract.AssistantDelta{MessageID: message, Text: "before rotation"})
+			waitOutput(t, term, "before rotation")
+			lastSequence, nextSequence := "42", "43"
+			if scenario.rotation == "server" {
+				frames <- eventFor(s, "end", lastSequence, nativecontract.End{Reason: "rotation"})
+			} else {
+				// Establish both timer registrations before advancing time. Every
+				// five-second renewal completes before the next step, preserving
+				// the real thirty-second controller budget throughout 305 seconds.
+				renewReady, rotationReady := false, false
+				for !renewReady || !rotationReady {
+					switch await(t, f.clock.registered) {
+					case nativecontract.ControllerRenewSeconds * time.Second:
+						renewReady = true
+					case (nativecontract.StreamRotationSeconds + 5) * time.Second:
+						rotationReady = true
+					}
+				}
+				for elapsed := 0; elapsed < nativecontract.StreamRotationSeconds+5; elapsed += nativecontract.ControllerRenewSeconds {
+					f.clock.advance(nativecontract.ControllerRenewSeconds * time.Second)
+					for await(t, f.clock.registered) != nativecontract.ControllerRenewSeconds*time.Second {
+					}
+				}
+				lastSequence, nextSequence = "41", "42"
+			}
+			select {
+			case resumedID := <-f.subscribed:
+				if resumedID != id {
+					t.Fatal("rotation replaced the viewer")
+				}
+			case err := <-done:
+				finished = true
+				t.Fatalf("attach ended instead of resuming rotation: %v", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("rotation did not re-subscribe")
+			}
+			f.mu.Lock()
+			resumed := f.subscriptions[1]
+			frames = f.frames[id]
+			retained := len(f.viewers) == 1 && f.detaches == 0 && f.view.Controller != nil && *f.view.Controller == controller
+			renewals := f.renewals
+			f.mu.Unlock()
+			if resumed.viewerID != first.viewerID || resumed.path != first.path || resumed.query != first.query || resumed.lastEventID != fmt.Sprintf("%d:%s", s.generation, lastSequence) {
+				t.Fatal("rotation changed the binding/viewer or used the wrong accepted event cursor")
+			}
+			if !retained || scenario.rotation == "deadline" && renewals != (nativecontract.StreamRotationSeconds+5)/nativecontract.ControllerRenewSeconds {
+				t.Fatal("rotation detached or replaced the controller, or missed a lease renewal")
+			}
+			// Renewal redraws can fill the fixture's bounded notification queue.
+			// Clear those notices before awaiting new post-rotation content.
+		drainWrites:
+			for {
+				select {
+				case <-term.writes:
+				default:
+					break drainWrites
+				}
+			}
+			text := "CONTINUED AFTER ROTATION"
+			next := eventFor(s, "assistant.delta", nextSequence, nativecontract.AssistantDelta{MessageID: message, Text: text})
+			wantError := ""
+			wrongGeneration := false
+			switch scenario.ending {
+			case "detach":
+				frames <- next
+				waitOutput(t, term, text)
+				term.input <- terminalRead{bytes: []byte("acontinuing input\x1b[13;9u")}
+				waitOutput(t, term, ": accepted]")
+				term.input <- terminalRead{err: io.EOF}
+			case "sequence gap":
+				next.Seq, next.Sequence = "44", "44"
+				frames <- next
+				wantError = "native stream sequence gap; attach again explicitly"
+			case "generation":
+				next.Generation++
+				frames <- next
+				wrongGeneration = true
+			case "binding":
+				next.Binding.RuntimeEpoch = uuid.NewString()
+				frames <- next
+				wrongGeneration = true
+			case "gap":
+				frames <- eventFor(s, "gap", nextSequence, nativecontract.Gap{Reason: "cursor_expired", DroppedFrames: "0", ReloadSnapshot: true})
+				wantError = "live stream gap; attach again explicitly"
+			case "revoked":
+				frames <- eventFor(s, "end", nextSequence, nativecontract.End{Reason: "revoked"})
+				wantError = "[stream ended: revoked]"
+			case "EOF":
+				close(frames)
+				wantError = "native stream disconnected; delivery not confirmed"
+			}
+			err := await(t, done)
+			finished = true
+			if wrongGeneration {
+				var refused *nativecontract.ValidationError
+				if !errors.As(err, &refused) || refused.Reason != nativecontract.ReasonWrongGeneration {
+					t.Fatalf("wrong resumed identity refusal: %v", err)
+				}
+			} else if wantError != "" {
+				if err == nil || err.Error() != wantError {
+					t.Fatalf("expected %q, got %v", wantError, err)
+				}
+			} else if err != nil {
+				t.Fatalf("continuation or detach failed: %v", err)
+			}
+			if scenario.ending != "detach" && strings.Contains(term.text(), text) {
+				t.Fatal("invalid resumed content reached the terminal")
+			}
+			if strings.Contains(term.text(), "[stream ended: rotation]") {
+				t.Fatal("planned rotation was displayed as a terminal stream end")
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			wantInputs := 0
+			if scenario.ending == "detach" {
+				wantInputs = 1
+			}
+			if !f.running || f.detaches != 1 || f.view.Controller != nil || len(f.subscriptions) != 2 || len(f.inputs) != wantInputs || wantInputs == 1 && (f.inputs[0].Text != "continuing input" || !f.inputs[0].ExpectedBinding.Equal(s.binding)) {
+				t.Fatal("rotation changed the host, resent input, retried a terminal failure or failed to detach once")
+			}
+		})
+	}
+}
+
 func TestComposerPreservesShortcutsAndBoundsTerminalData(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		c := &Composer{Focused: true, platform: platform}

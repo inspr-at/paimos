@@ -7844,6 +7844,8 @@
     ,
     {"kind":"go","package":"internal/nativeattach","name":"TestStreamRejectsSuccessorBeforeRendering","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestStreamResumesRotationWithoutLosingControl","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeattach","name":"TestTerminalRestoredOnEveryExit","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
