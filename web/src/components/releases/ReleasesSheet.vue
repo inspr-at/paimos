@@ -846,7 +846,6 @@ button.sheet-sum { cursor: pointer; }
 .empty p,.hidden-history { font-size:13px; color:var(--ink-3); }
 .peek-pane,.pending-pane { position:absolute; top:46px; right:0; bottom:8px; width:min(400px,calc(100% - 16px)); z-index:4; display:flex; flex-direction:column; min-height:0; background:var(--surface-raised); border-radius:16px; box-shadow:0 0 0 1px var(--line-2),var(--shadow-pop); }
 .peek-pane > * { flex:1; }
-@media(min-width:1280px) { .peeking .detail-scroll { margin-right:416px; } }
 .peek-pane :deep(.peek.inline) { padding:0; }
 .pending-pane { padding:16px; gap:12px; }
 .pending-controls { display:flex; gap:8px; }

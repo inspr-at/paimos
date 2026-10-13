@@ -705,12 +705,13 @@ test('Settings cases stay classified: strict validation rejects stale and unclas
   const rows = validate(manifest, collected, undefined, { strict: true })
   assert.deepEqual(rows.map(key).sort(), collected.map(key).sort())
   const evidence = rows.filter(row => row.name.startsWith('settings layout evidence'))
-  assert.equal(evidence.length, 1)
-  assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
-  for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+  assert.deepEqual(evidence.map(row => row.name).sort(), [390, 1024, 1440].flatMap(width => ['light', 'dark'].map(theme =>
+    `settings layout evidence in light and dark at phone, tablet and desktop sizes: ${width}px ${theme}`)).sort())
+  for (const row of evidence) assert.equal(row.tier, 'ESSENTIAL', 'AEON-1326 R0 grant gates each independent evidence variant')
+  for (const row of rows) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
   for (const event of ['pull_request', 'merge_group']) {
     const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
-    assert.deepEqual(selected.map(key), rows.filter(row => row !== evidence[0]).map(key), `${event} must gate every functional Settings case`)
+    assert.deepEqual(selected.map(key), rows.map(key), `${event} must gate every Settings case, including evidence`)
   }
   const policy = loadManifest()
   const declarations = policy.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))

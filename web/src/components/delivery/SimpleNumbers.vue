@@ -107,6 +107,8 @@ const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as c
 @container delivery (max-width: 1100px) { .s-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .s-sum .line { min-height: 2lh; } }
 @container delivery (max-width: 640px) {
   .s-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  /* The error title wraps to two lines on a phone. The empty title keeps that slot so Learn does not jump. */
+  .s-sum .big { min-height: 2lh; }
   .s-sum .line { min-height: 3lh; }
   .defs { grid-template-columns: minmax(0, 1fr); }
 }

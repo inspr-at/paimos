@@ -984,8 +984,6 @@
     ,
     "browser:tests/phone-approvals.spec.ts:phone review requires an explicit tap and fresh passkey; cancellation records nothing"
     ,
-    "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build"
-    ,
     "browser:tests/project-delivery-settings.spec.ts:AEON-1253: repository shows the history source without moving its controls"
     ,
     "browser:tests/project-header.spec.ts:delayed assignee labels stay frozen until the filter popover closes"
@@ -1423,8 +1421,6 @@
     "browser:tests/settings-accounts.spec.ts:old windows set by hand show as Set by you with Remove, and never repeat"
     ,
     "browser:tests/settings-computers-table.spec.ts:evidence: the Computers part at 1440, 1024 and 390, light and dark"
-    ,
-    "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
     ,
@@ -11280,15 +11276,47 @@
     ,
     {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: New project retains key conflicts and reports partial group assignment once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 390px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 400px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: approved P4 reference states and check.mjs audit against the build at 400px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-advanced.spec.ts","name":"AEON-1235: stale project responses and missing authority cannot enable admin writes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 390px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 400px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build at 400px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: repository states stay put and delivery edits preserve authority, inheritance and identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1253: repository shows the history source without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-learn-slot stays put when the phone summary title wraps","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-scroll-returns keeps the Actions explainer open so Escape focuses its trigger","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13292,7 +13320,17 @@
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"phone section picker overlays content, changes sections, and restores keyboard focus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes: 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes: 1024px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes: 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes: 1440px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes: 390px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes: 390px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"the account menu opens Settings on Personal: theme, greeting and keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
