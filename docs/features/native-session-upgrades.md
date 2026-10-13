@@ -93,6 +93,11 @@ The injected-clock test expires an uncooperative close, refuses an overlapping
 retry and rejects late readiness. Inventory/provenance fixtures assert the
 specific refusal, and the command test shows pilot/flush deferral honestly.
 
+The admission test's negative control disables only the drain admission fence
+on a private scratch branch. The guarded remote test must fail specifically with
+`new launch during drain`. Restore the implementation branch and remove the
+scratch branch afterward; keep no negative-control commit on the work branch.
+
 Run committed HEAD through the guarded remote lane:
 
 ```sh
