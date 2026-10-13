@@ -254,6 +254,55 @@ The central audit fix and public documentation fix are complete. Browser/web
 unit feature checks do not apply to this non-browser slice. No origin push,
 deployment, live/model call or review gate was run by this worker.
 
+## Fix round 4: confirmed R0 scope conflict
+
+The supplied `review-ci622-0656.out` targets `c68b3becf`, which is also PR
+#622's current head. Its JSONL confirms the same missing
+`nativesessions/receipts/repository.go` caller in
+`TestSharedFenceCallerInventory`. The complete failed `go-static` step,
+job `115132305433`, identifies exactly the eight unclassified tests listed
+below; it is a tier-registration failure. Both DSAR table entries below are
+still absent. No new behavior finding is identified by this review.
+
+A fresh fetch confirms `origin/main` at `3507e3319`, already merged into this
+branch, and PR #622 is mergeable. There is no newer central R0 fix to acquire.
+The P3a exclusive write set and normative R0 metadata lane still reserve
+`internal/agentpairing/shared_fence_test.go`,
+`scripts/ci/go-test-tiers.json` and `internal/dsar/inventory.json` to the
+coordinator or an explicitly assigned metadata integrator. This fix brief
+does not transfer those files to P3a. The exact same-PR registration request
+below remains necessary; the builder does not change lock calls, assertions,
+test names or inventory guards to evade it.
+
+Hosted CI on `c68b3becf` passes all four web unit shards and all twelve browser
+shards. The failed non-required `gate/policy-preview` reports that the current
+head lacks a trusted verdict; only the coordinator supplies that verdict after
+the metadata fixes and final validation. No review gate is run by this worker.
+
+Fresh guarded `remote-test.sh -count=1` on `c68b3becf` completed:
+
+* **PASS 1-5:** `internal/nativereceipts`, `internal/nativesessions/receipts`
+  and `internal/chat` pass, covering the five acceptance items above.
+* `internal/dsar` passes its existing inventory-parsing test. That test does
+  not establish registration of the two missing native tables.
+* **FAIL:** `internal/agentpairing` reproduces the exact shared-fence caller
+  omission. The combined five-package command exits **1**.
+* Offline affected selector: **exit 0**, **FULL CI required** for migration
+  1347's unsupported or incomplete SQL classification.
+* Public-name checker and `git diff --check`: **exit 0** after the handoff edit.
+
+Fresh guarded `ci-static-remote.sh` on committed `c68b3becf` runs the required
+`node scripts/ci-static.mjs --merge-main`: **exit 1**, **41 checks pass, zero
+optional skips**. Its sole failure is `go-tiers`, listing exactly the eight
+missing registrations below. Audit ownership/coverage, tier and web-shard
+unit tests, Go vet, web type/lint, migration and OpenAPI checks all pass.
+
+**INCOMPLETE:** R0 must apply the shared-fence row, eight ESSENTIAL tier rows
+and both DSAR classifications in the same PR. No behavior change or assertion
+change was made; this round has no new regression test requiring a negative
+control against `c68b3becf`. Source/test code and shared inventories remain
+unchanged. No origin push, deployment, model CLI or review gate was run.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
