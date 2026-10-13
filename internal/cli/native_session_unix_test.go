@@ -75,7 +75,8 @@ func TestNativeSessionCLIStartsOnlyThroughOwningDaemon(t *testing.T) {
 	t.Setenv("AEON_API_KEY", testKey)
 	args := []string{"aeon", "--config", filepath.Join(root, "missing"), "--json", "session", "start", "--profile", "native", "--role", "coordinator", "--project", "AEON", "--harness", "claude", "--cwd", root, "--resume", resume, "--after-exit", "123", "--socket", socket}
 	code, stdout, stderr := runCLI(args, "")
-	if code != 0 || !strings.Contains(stdout, `"state": "waiting_for_exit"`) || starts.Load() != 1 {
+	var result agentd.NativeSessionStartResult
+	if code != 0 || json.Unmarshal([]byte(stdout), &result) != nil || result.State != "waiting_for_exit" || result.SessionID != transcriptSessionID || starts.Load() != 1 {
 		t.Fatal("CLI did not queue on daemon", code, stdout, stderr, starts.Load())
 	}
 	state.Store("exit_unconfirmed")

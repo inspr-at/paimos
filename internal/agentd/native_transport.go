@@ -2,6 +2,7 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,7 +32,12 @@ func serveNativeStart(s *Supervisor, authorize func(*http.Request) bool) http.Ha
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-		decoder := json.NewDecoder(r.Body)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil || rejectDuplicateKeys(raw) != nil {
+			http.Error(w, "native_invalid_request", http.StatusBadRequest)
+			return
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
 		decoder.DisallowUnknownFields()
 		var envelope NativeStartEnvelope
 		if decoder.Decode(&envelope) != nil || decoder.Decode(&struct{}{}) != io.EOF || envelope.Protocol != NativeSessionProtocol || envelope.Method != "start" || envelope.RequestID != envelope.Params.RequestID || string(envelope.ExpectedBinding) != "null" {

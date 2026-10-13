@@ -66,11 +66,11 @@ func (rt *runtime) startNativeSession(project string, o nativeSessionOptions) er
 	if request.Validate() != nil {
 		return usagef("invalid native start; --after-exit requires --resume with a Claude conversation UUID")
 	}
-	node, err := rt.projectNode(project)
+	projectID, err := rt.projectIdentityCtx(rt.context(), project)
 	if err != nil {
 		return err
 	}
-	request.ProjectID = node.ID
+	request.ProjectID = projectID
 	var local agentdwire.Client
 	if o.Socket != "" {
 		if !filepath.IsAbs(o.Socket) {
@@ -153,7 +153,11 @@ func requestNativeStart(ctx context.Context, local agentdwire.Client, request ag
 		return agentd.NativeSessionStartResult{}, fmt.Errorf("native protocol mismatch")
 	}
 	var result agentd.NativeSessionStartResult
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 4097))
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 4097))
+	if err != nil || len(responseBody) > 4096 {
+		return agentd.NativeSessionStartResult{}, fmt.Errorf("native start response exceeded its bound or was incomplete")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(responseBody))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&result) != nil || decoder.Decode(&struct{}{}) != io.EOF || result.RequestID != request.RequestID || !validUUID(result.SessionID) || !slices.Contains([]string{"running", "waiting_for_exit", "starting", "exit_unconfirmed", "exited", "abandoned"}, result.State) {
 		return agentd.NativeSessionStartResult{}, fmt.Errorf("native start returned an invalid receipt")

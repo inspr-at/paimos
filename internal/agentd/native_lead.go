@@ -281,6 +281,12 @@ func (*ClaudeAdapter) ServiceLead(ctx context.Context, process Process, pause *H
 		if !uuidPattern.MatchString(control.ID) || control.ExpectedGeneration != p.native.Grant.SessionID || control.ExpiresAt == nil || !time.Now().Before(*control.ExpiresAt) || control.ExpiresInMS < 1 || control.ExpiresInMS > 120000 {
 			return ErrScope
 		}
+		if expected := control.ExpectedOwnership; expected != nil {
+			actual := p.identity
+			if expected.DaemonID != actual.DaemonID || expected.Generation != actual.Generation || expected.ProcessID != actual.ProcessID || expected.RootPID != actual.RootPID || expected.GroupID != actual.GroupID || !expected.StartedAt.Equal(actual.StartedAt) {
+				return ErrNotOwned
+			}
+		}
 		digest := nativeDigest(control.Kind + "\x00" + control.Text)
 		result, attempted := p.controls[control.ID]
 		if attempted && result.digest != digest {
@@ -293,7 +299,11 @@ func (*ClaudeAdapter) ServiceLead(ctx context.Context, process Process, pause *H
 			result = nativeControlResult{digest: digest, outcome: "rejected", reason: "unsupported"}
 			p.controls[control.ID] = result // An uncertain native operation is never repeated.
 			if control.Kind == "interrupt" || control.Kind == "stop" {
-				operation, cancel := context.WithTimeout(ctx, time.Duration(control.ExpiresInMS)*time.Millisecond)
+				deadline := time.Now().Add(time.Duration(control.ExpiresInMS) * time.Millisecond)
+				if control.ExpiresAt.Before(deadline) {
+					deadline = *control.ExpiresAt
+				}
+				operation, cancel := context.WithDeadline(ctx, deadline)
 				err = p.nativeControl(operation, control.ID, control.Kind)
 				if err == nil && control.Kind == "stop" {
 					select {

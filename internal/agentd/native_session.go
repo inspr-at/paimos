@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -180,6 +181,11 @@ func (s *Supervisor) StartNativeSession(ctx context.Context, request NativeSessi
 	if err != nil {
 		return NativeSessionStartResult{}, err
 	}
+	plan.Spec.Grant.AllowedTools = slices.Clone(plan.Spec.Grant.AllowedTools)
+	if plan.Spec.Tools != nil {
+		tools := *plan.Spec.Tools
+		plan.Spec.Tools = &tools
+	}
 	g := plan.Spec.Grant
 	var adapter *ClaudeAdapter
 	for _, account := range s.accounts {
@@ -252,10 +258,15 @@ func (s *Supervisor) StartNativeSession(ctx context.Context, request NativeSessi
 }
 
 // Called under dispatchMu; persist the possible-fork boundary before StartLead.
-func (s *Supervisor) launchNative(ctx, lifetime context.Context, entry *nativeLeadEntry) error {
+func (s *Supervisor) launchNative(ctx, lifetime context.Context, entry *nativeLeadEntry) (resultErr error) {
 	c := s.native.config
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
+	defer func() {
+		if resultErr != nil && entry.result.State != "abandoned" && entry.result.State != "exited" {
+			entry.result.State = "exit_unconfirmed"
+		}
+		entry.mu.Unlock()
+	}()
 	g := entry.plan.Spec.Grant
 	if !s.dispatchAllowed(g.AccountID) || !s.accountAvailable(g.AccountID) {
 		return errors.Join(ErrDraining, s.abandonNativeLocked(entry))
@@ -477,6 +488,11 @@ func (s *Supervisor) PollNativeSessions(ctx context.Context) error {
 		if err := s.native.config.ReportStarted(ctx, session, identity); err != nil {
 			return err
 		}
+		entry.mu.Lock()
+		if !entry.record.ExitObserved {
+			entry.result.State = "running"
+		}
+		entry.mu.Unlock()
 		session.Ownership = &identity
 		entry.mu.Lock()
 		entry.sequence++
