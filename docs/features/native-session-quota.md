@@ -117,20 +117,32 @@ requires separately compiled production pin and quota-neutral exchange evidence.
 
 ## Coordinator R0 registration
 
-Before merge, in this same PR, add `internal/nativequota/**` to audit slice
-`S2` (`agent-runtime`) and register these Go cases in
-`scripts/ci/go-test-tiers.json` with `package=internal/nativequota`,
-`kind=go`, `tier=ESSENTIAL`:
+Before merge, in this same PR, append `internal/nativequota/**` to the `paths`
+of audit slice `S2` (`agent-runtime`) in `scripts/audit/slices.json`. Add these
+exact rows to `tests` in `scripts/ci/go-test-tiers.json`:
 
-- `TestStreamQuotaFreshnessAndAccountIsolation`
-- `TestSparseQuotaDenialPreservesConsumptionAndScope`
-- `TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts`
-- `TestQuotaRejectsUnqualifiedAndMalformedFrames`
+```json
+[
+  {"kind":"go","package":"internal/nativequota","name":"TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativequota","name":"TestQuotaRejectsUnqualifiedAndMalformedFrames","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativequota","name":"TestSparseQuotaDenialPreservesConsumptionAndScope","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativequota","name":"TestStreamQuotaFreshnessAndAccountIsolation","tier":"ESSENTIAL"}
+]
+```
 
 The source files are `binding.go`, `collector.go`, `decode.go`, `ingress.go`,
 `json.go` and `quota_test.go`, all inside `internal/nativequota`. There are no
 browser/shard entries, API routes, permission changes, SQL/DSAR changes or new
 tenant/tree-lock callers. Builders do not edit R0's shared inventories.
+
+Fix round 3 verified these same omissions in PR #619 at `4a5e40209`:
+`go-static` reports the four unclassified cases; `release-check-run` reports
+the six unassigned files and the resulting audit CLI failure. Both repairs
+require the coordinator's R0 lane under the normative plan's exclusive write
+sets. No quota behavior or assertion change is needed for these failures.
+This handoff remains incomplete until R0 applies both additions and the
+required checks pass. The policy preview separately awaits the coordinator's
+trusted review verdict.
 
 Run the named package through the guarded remote Go runner and static checks
 through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
@@ -144,6 +156,8 @@ review remain required before integration or release.
   `fce23905b`; all four named cases and their subcases passed (0.250 s).
 - PASS: final-source guarded remote Go run on `05dbc1069`; all four named
   cases passed, including native turn/cursor changes (0.353 s).
+- PASS: fix-round-3 guarded remote Go run of `./internal/nativequota/...` on
+  `4a5e40209`; all existing quota cases passed (0.297 s).
 - PASS: negative control on a temporary branch from that final source, with
   the freshness deadline check disabled. The named clock test failed on its
   exact stale-reading assertion for both Claude and Codex (exit 1). After
@@ -154,9 +168,11 @@ review remain required before integration or release.
 - PASS: affected planner against refreshed `origin/main`, exit 0,
   `mode=essential`, `layout=full`; selected 128 Go packages, 80 browser specs and
   120 web unit files from the current manifests. `nativequota` awaits R0 rows.
-- INCOMPLETE: guarded static `--merge-main` exited 1. Its 39 other checks passed
-  with no skips, including Go vet. Only Go-tier drift and source ownership/audit
-  coverage failed for the four cases and six files listed above. R0 must apply
-  those rows and rerun static in this same PR; this is not a green merge gate.
+- INCOMPLETE: fix-round-3 guarded static `--merge-main` on `4a5e40209` exited 1.
+  Its 39 other checks passed with no skips, including Go vet, test-tier tests,
+  web-shard tests, web typecheck and web lint. Only Go-tier drift and source
+  ownership/audit coverage failed for the four cases and six files listed
+  above. R0 must apply those rows and rerun static in this same PR; this is
+  not a green merge gate.
 - Browser validation does not apply to this source-only slice. Production pin
   qualification, I2 integration, review and release remain coordinator-owned.
