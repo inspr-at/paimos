@@ -92,6 +92,8 @@
     ,
     "internal/cli:TestMeReportsOwnerWorkstation"
     ,
+    "internal/cli:TestNativeAccountStartBindsAuthorizedProfile"
+    ,
     "internal/cli:TestNativeAttachCommandPreservesAttachmentMeaning"
     ,
     "internal/cli:TestNativeAttachCommandValidation"
@@ -155,6 +157,10 @@
     "internal/nativeattach:TestStreamRejectsSuccessorBeforeRendering"
     ,
     "internal/nativeattach:TestTerminalRestoredOnEveryExit"
+    ,
+    "internal/nativeprofiles:TestProfileDirectoriesRejectAliasesAndUnsafeHomes"
+    ,
+    "internal/nativeprofiles:TestProfileResolutionRejectsForeignStaleAndUnqualifiedAccounts"
     ,
     "internal/nativequota:TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts"
     ,
@@ -4978,6 +4984,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelTicketResolveAndReadOnlyPrefs","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAccountStartBindsAuthorizedProfile","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandPreservesAttachmentMeaning","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandValidation","tier":"NIGHTLY"}
@@ -7915,6 +7923,12 @@
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExactOnceAndRuntimeFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExpiryRevocationAndRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileDirectoriesRejectAliasesAndUnsafeHomes","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileIsolationPreservesCredentialsAndParentEnvironment","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileResolutionRejectsForeignStaleAndUnqualifiedAccounts","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPFailedOpenRetainsOwnerHandle","tier":"ESSENTIAL"}
     ,
