@@ -77,13 +77,14 @@ and changed-directory refusals, including a temporary real filesystem fixture.
 binding, refusal propagation without fallback and copied child environment.
 There are no browser tests or model/subscription calls for this slice.
 
-R0 must apply these registrations in the same PR before merge (this builder does
-not own the shared metadata files): add `internal/nativeprofiles/**` to audit
-slice **S1 security-core**; the two CLI files are already covered by the existing
-**S3 cli-inbox** `internal/cli/**` slice. Register all four named Go tests above as **ESSENTIAL**
-in `scripts/ci/go-test-tiers.json` for `internal/nativeprofiles` (three tests) and
-`internal/cli` (one test). No web shard, route, permission, migration, DSAR or
-shared-fence rows are needed: this slice adds none of those surfaces.
+R0's `internal/native*/**` glob in audit slice **S2 agent-runtime** now covers
+the profile package through PR **#623**, included on this branch. The two CLI
+files are covered by the existing **S3 cli-inbox** `internal/cli/**` slice. The remaining R0 step
+in this PR before merge is to register all four named Go tests above as
+**ESSENTIAL** in `scripts/ci/go-test-tiers.json` for `internal/nativeprofiles`
+(three tests) and `internal/cli` (one test). This builder does not own the shared
+metadata files. No web shard, route, permission, migration, DSAR or shared-fence
+rows are needed: this slice adds none of those surfaces.
 
 The exact additions to the Go manifest's `tests` array are:
 
@@ -258,3 +259,40 @@ migration checks pass. The updated document passes the public-name and Git
 whitespace guards. This is **not a green CI handoff**: both failing inventories
 are outside P4a's exclusive write set. Only this owned feature document changed;
 no origin push, deployment, model call or review gate was performed.
+
+Fix-round 7 (2026-10-13): `go-static` job **115132254013** on baseline
+`5885d384` fails only the four missing **ESSENTIAL** test registrations listed
+above. All seven Go test shards, web unit/browser jobs, release checks and
+migration compatibility pass in that CI run. R0 audit PR **#623** is merged;
+the source ownership failure is resolved by its S2 `internal/native*/**` glob.
+Fetched `origin/main` at `3507e3319` is already included, and PR #615 is mergeable.
+The non-required policy preview separately awaits the coordinator's trusted
+review verdict; this worker does not run that gate.
+
+Each rejected test exists on `5885d384` and is absent from its Go tier manifest.
+A read-only diagnostic using the manifest plus those source-verified tests
+reproduces exactly the four strict-validation errors. Adding only the proposed
+rows in memory passes strict validation; this diagnostic does not replace native
+collection. The manifest remains unchanged. Both normative plan files reserve
+it for R0, so those same-PR registrations remain outside P4a's write set.
+
+Both affected Go packages pass through the guarded remote runner on `5885d384`.
+The affected selector exits 0 and selects **FULL** (3233 reverse-dependency
+cases). No web unit or browser spec is affected by this documentation change.
+Fake-test acceptance remains **PASS** for exact account binding, **PASS** for
+default/dedicated child environments, **PASS** for exclusion of credential and
+settings sharing, **PASS** for refusal without account rotation, and **PASS**
+for retained credentials, unchanged parent environment and distinct overlapping
+children. Live account qualification remains G_ACCOUNTS. No behavior fix or
+regression test is needed for this metadata-only CI finding; source and test
+assertions remain unchanged.
+
+Guarded `ci-static-remote.sh` runs the required merged-main static check and
+returns **exit 1**: **41 checks pass with zero optional skips**. Only `go-tiers`
+fails, on the four missing R0 rows. Both `audit-tests` and `audit-coverage` now
+pass, along with test-tier/web-shard self-checks, Go vet, web typecheck/lint,
+contract and migration checks. The updated document passes the public-name,
+Git whitespace and write-scope checks. This is **not a green CI handoff**: R0
+must complete the Go manifest registration in this PR before merge. Only this
+owned feature document changed; no origin push, deployment, model call or review
+gate was performed.
