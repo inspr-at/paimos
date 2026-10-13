@@ -73,9 +73,9 @@ test('detail shows now, activity, ticket status and hides unreported fields', as
   await expect(panel.locator('.service-tier .tier-head strong')).toHaveText('Default')
   await expect(panel).not.toContainText('Not reported')
   await expect(panel).not.toContainText('Account not reported')
-  await panel.getByRole('region', { name: 'Session controls' }).getByRole('button', { name: 'More session controls', exact: true }).click()
-  await expect(page.getByRole('menuitem', { name: 'Interrupt this step', exact: true })).toBeVisible()
-  await page.keyboard.press('Escape')
+  const actions = panel.getByRole('group', { name: 'Session actions' })
+  await expect(actions.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible()
+  await expect(actions.getByRole('button', { name: 'Interrupt', exact: true })).toBeEnabled()
   await expect(panel.getByRole('button', { name: 'Stop…', exact: true })).toBeVisible()
 })
 

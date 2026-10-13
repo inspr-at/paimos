@@ -306,7 +306,14 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     if (width === 390) for (const item of await page.getByRole('menuitem').all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     if (shots) await page.screenshot({ path: test.info().outputPath(`menu-unmanaged-${width}-${theme}.png`) })
     await page.keyboard.press('Escape')
-    await row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' }).click()
+    if (width === 390) {
+      // AEON-1211 / #590 puts compact row removal in the row menu.
+      await row(page, lost.id).getByRole('button', { name: 'Actions for cursor-275' }).click()
+      const remove = page.getByRole('menuitem', { name: /^Remove/ })
+      expect((await remove.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      await remove.click()
+    } else await row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible()
     if (width === 390) for (const name of ['Undo', 'Dismiss']) {
       const box = (await page.locator('.toast').getByRole('button', { name, exact: true }).boundingBox())!
