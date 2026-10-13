@@ -108,21 +108,23 @@ can invalidate provider capabilities. All qualification tests use an injected
 clock and fake app-server connection; no model, login or subscription calls.
 The pre-ack notification case uses explicit request/release barriers.
 
-Coordinator-owned same-PR registrations:
+Same-PR registrations:
 
-- Source ownership: add `internal/nativeproviders/codex/**` to S2 (agent runtime).
+- Source ownership: S2 (agent runtime) covers `internal/nativeproviders/codex/**`
+  through the centrally registered `internal/native*/**` glob.
 - Go test tiers: `internal/nativeproviders/codex:TestNativeCodexTranscriptQualification`,
   `internal/nativeproviders/codex:TestNativeCodexRejectsUnqualifiedLaunch` and
   `internal/nativeproviders/codex:TestNativeCodexRejectsUnboundedOrAmbiguousFrames`;
-  proposed tier `ESSENTIAL` for all three (fake protocol safety tests).
+  registered as `ESSENTIAL` for all three (fake protocol safety tests).
 - No web/browser shard, route/contract pin, permission registry, database/DSAR
   or shared-fence registration changes are needed by this source-only slice.
 
-Builders do not edit R0's shared inventories. These rows must be applied in
-this PR before final authoritative checks and merge. Run the targeted package
-through `remote-test.sh`, the affected planner against `origin/main`, and the
-guarded static check. A refused/incomplete check is not green and remains an
-explicit coordinator/PR-CI handoff.
+The coordinator's limited R0 grant of 2026-10-13 permits builders to register
+their own tests with the canonical tier writer. Fix round 14 applies only the
+three Codex rows above; other slices' rows and manifest metadata are preserved.
+Run the targeted package through `remote-test.sh`, the affected planner against
+`origin/main`, and the guarded static check. A refused/incomplete check is not
+green and remains an explicit coordinator/PR-CI handoff.
 
 ## Builder handoff evidence
 
@@ -542,3 +544,18 @@ transcript assertions remain unchanged. The final handoff is incomplete on
 R0 registration and guarded/authoritative validation; the trusted review
 verdict remains coordinator-owned. No origin push, deployment, live vendor
 session, model CLI or review gate was run.
+
+## CI fix round 14
+
+At reviewed head `1c97537cd`, [go-static job `115204698107`](https://github.com/inspr-at/paimos/actions/runs/38370048510/job/115204698107)
+fails strict native collection on exactly the three unclassified Codex tests
+listed above. The coordinator's new limited R0 grant authorizes these own-slice
+registrations. The canonical tier writer adds only their `ESSENTIAL` rows to
+`scripts/ci/go-test-tiers.json`; no existing row or metadata is changed.
+
+A bounded manifest validation against immutable `1c97537cd` rejects precisely
+those three identities. The corrected manifest passes the same validation and
+preserves every other row and all manifest metadata. This negative control
+isolates the registration failure; guarded strict native collection remains
+the required validation. Provider behavior and test assertions are unchanged,
+so this metadata correction needs no new behavior test.
