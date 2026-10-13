@@ -2,7 +2,8 @@
 // AEON-1279: live updates without moving the reader. Risk: a touch scroll counts as settled while
 // the finger is still down or momentum still runs (a live change then lands mid-swipe); it never
 // settles where the browser has no scrollend (Safari); the anchor scrolls at the very top, scrolls
-// by a sub-pixel, or follows a row that left instead of one still on screen. Timers are injected.
+// by a sub-pixel, follows a row that left instead of one still on screen, or loses its mark when a
+// component updates twice in one flush. Timers are injected.
 import { describe, expect, it } from 'vitest'
 import { SETTLE_MS, readerAnchor, touchScroll } from '../src/lib/readerAnchor'
 
@@ -84,6 +85,36 @@ describe('readerAnchor', () => {
     for (const r of rows) r.row.top += 180
     anchor.restore()
     expect(scroller.scrollTop).toBe(1080)
+  })
+
+  it('keeps the first capture when the component updates twice before its restore', () => {
+    const scroller = scrollerAt(100, 900)
+    const rows = [rowAt(110), rowAt(170)]
+    const anchor = readerAnchor({ scroller: () => scroller, rows: () => rows.map(r => r.el) })
+    anchor.capture()
+    for (const r of rows) r.row.top += 24
+    // The second pass of the same flush sees the rows already moved; it must not reset the mark.
+    anchor.capture()
+    anchor.restore()
+    expect(scroller.scrollTop).toBe(924)
+    // After the restore the next update captures afresh.
+    anchor.capture()
+    for (const r of rows) r.row.top -= 10
+    anchor.restore()
+    expect(scroller.scrollTop).toBe(914)
+  })
+
+  it('drops a mark whose update never restored once its flush is over', async () => {
+    const scroller = scrollerAt(100, 900)
+    const rows = [rowAt(110)]
+    const anchor = readerAnchor({ scroller: () => scroller, rows: () => rows.map(r => r.el) })
+    anchor.capture()
+    await Promise.resolve()
+    rows[0]!.row.top += 300
+    anchor.capture()
+    rows[0]!.row.top += 24
+    anchor.restore()
+    expect(scroller.scrollTop, 'only this flush’s move counts').toBe(924)
   })
 
   it('follows the next row on screen when the first one leaves, and stays still at the top or for a sub-pixel', () => {

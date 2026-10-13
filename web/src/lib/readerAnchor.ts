@@ -53,7 +53,8 @@ export interface ReaderAnchorOptions {
   top?: () => number
 }
 export interface ReaderAnchor {
-  /** Before the update: remember the first rows on screen and where they are. */
+  /** Before the update: remember the first rows on screen and where they are. A second capture
+   *  before the restore keeps the first: a component can update twice in one flush. */
   capture: () => void
   /** After the update: scroll so the first remembered row still there is where it was. */
   restore: () => void
@@ -66,7 +67,7 @@ export function readerAnchor(options: ReaderAnchorOptions): ReaderAnchor {
   let marks: { el: HTMLElement; top: number }[] = []
   return {
     capture() {
-      marks = []
+      if (marks.length) return
       const scroller = options.scroller()
       if (!scroller || scroller.scrollTop <= 0) return
       const edge = Math.max(scroller.getBoundingClientRect().top, options.top?.() ?? -Infinity)
@@ -76,6 +77,8 @@ export function readerAnchor(options: ReaderAnchorOptions): ReaderAnchor {
         marks.push({ el, top: box.top })
         if (marks.length === CANDIDATES) break
       }
+      // A mark never outlives its flush: an update that never restores cannot leave a stale one.
+      if (marks.length) queueMicrotask(() => { marks = [] })
     },
     restore() {
       const scroller = options.scroller(), mark = marks.find(m => m.el.isConnected)
