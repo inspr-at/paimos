@@ -6,6 +6,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { businessData, mira, mockBusiness, type BusinessMockOptions } from './business-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const world = {
   me: me.id,
@@ -156,7 +157,11 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
     // AEON-313: unbound history of other sessions is no longer shown in this
     // thread, so the audit covers the conversation as the session shows it.
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    await expect(panel.getByRole('region', { name: 'Conversation' })).toBeVisible()
+    // AEON-1212, merge #592: Chat is a named tabpanel in the unified pane.
+    const chat = panel.getByRole('tab', { name: /^Chat/ })
+    await chat.click()
+    await expect(chat).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.getByRole('tabpanel', { name: /^Chat/ })).toBeVisible()
     await expect(panel.getByText(/^Other sessions of/)).toHaveCount(0)
   }],
   ['agents session overview', signedIn, '/agents/5e000000-0000-4000-8000-000000000001?tab=overview', async page => {
@@ -170,7 +175,18 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
     await expect(page.locator('.week-grid tbody tr').first()).toBeVisible()
     await page.getByRole('button', { name: /^Ticket:/ }).click()
     await page.getByRole('combobox', { name: 'Ticket' }).fill('pharos')
-    await expect(page.getByRole('listbox', { name: 'Ticket' }).getByRole('option').first()).toBeVisible()
+    const search = page.getByRole('combobox', { name: 'Ticket' }), list = page.getByRole('listbox', { name: 'Ticket' })
+    const first = list.getByRole('option').first(), second = list.getByRole('option').nth(1)
+    await expect(first).toBeVisible()
+    const read = page.getByRole('group', { name: 'Read full ticket names' }).getByRole('button', { name: /^Read full name:/ }).first()
+    await expectStableControls({
+      controls: { search, list, first, second, read },
+      interactions: [
+        { name: 'read the complete ticket name', run: async () => { await read.focus(); await read.press('Enter'); await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText((await read.getAttribute('aria-label'))!.replace(/^Read full name: /, '')) } },
+        { name: 'leave the disclosure and select by keyboard', run: async () => { await read.press('Escape'); await expect(read).toBeFocused(); await search.focus(); await search.press('ArrowDown'); await expect(second).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'return to the first option', run: async () => { await search.press('ArrowUp'); await expect(first).toHaveAttribute('aria-selected', 'true') } },
+      ],
+    })
   }],
   ['hours editing an entry', business(), '/business/hours', editEntry],
   ['hours entry conflict', businessConflict, '/business/hours', async page => {
@@ -193,8 +209,14 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['knowledge docked entry', signedIn, '/p/PHAROS/knowledge?entry=runbook/deploy-release', async page => { await page.setViewportSize({ width: 1440, height: 900 }); await expect(page.locator('.entry-page.dock .e-body')).toBeVisible() }],
   ['agents approve', signedInAdmin, '/agents', async page => {
     await expect(page.locator('.agents-page .row').first()).toBeVisible()
-    await page.keyboard.press('j'); await page.keyboard.press('a')
-    await expect(page.getByLabel('Reason (optional)')).toBeFocused()
+    // AEON-569, merge #458: approvals open the canonical Decision Desk memo.
+    await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk/ }).click()
+    await page.getByTestId(/^desk-row-a:/).first().click()
+    await expect(page.getByRole('dialog', { name: 'Decision Desk memo', exact: true })).toBeVisible()
+    await expect(page.getByTestId('desk-paper')).toBeFocused()
+    const reason = page.getByRole('textbox', { name: 'Reason', exact: true })
+    await reason.focus()
+    await expect(reason).toBeFocused()
   }],
 ]
 
@@ -205,12 +227,42 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await setup(page)
       await page.goto(path)
       await ready(page)
-      await page.waitForTimeout(250)
-      // The version coordinate (and the footer's calendar version) is the vendored INSPR calendar-version display (pinned presentation);
-      // its digit colours are reported to its owner rather than restyled here.
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
-      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
-      expect(summary, summary.join('\n')).toEqual([])
+      const evidence = name === 'ticket full page' || name === 'hours ticket picker'
+      for (const width of evidence ? [390, 1024, 1440] : [null]) {
+        if (width) await page.setViewportSize({ width, height: 1000 })
+        await page.evaluate(() => document.fonts.ready)
+        if (name === 'ticket full page') {
+          const ticket = page.getByRole('article', { name: 'Ticket details' })
+          // The tablet layout can show both property lists. Measure and read
+          // each list's feedback and selectors together, never across copies.
+          const feedbacks = await ticket.locator('.placement-feedback dd:visible').all()
+          expect(feedbacks.length).toBeGreaterThan(0)
+          for (const feedback of feedbacks) {
+            await expect(feedback).toContainText('Kind of work is unavailable.')
+            const properties = feedback.locator('xpath=ancestor::dl[1]')
+            const controls = { feedback, kind: properties.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity: properties.getByRole('combobox', { name: 'Complexity', exact: true }) }
+            await expectStableControls({
+              controls,
+              interactions: [
+                { name: 'read long classification feedback', run: async () => {
+                  await feedback.evaluate(element => { element.textContent = 'Kind of work is unavailable. Die Klassifizierung konnte nicht geladen werden; sämtliche vorgeschlagenen Werte bleiben unverändert, bis die Berechtigungen und die Verbindung erneut geprüft wurden.' })
+                  await feedback.focus(); await expect(feedback).toBeFocused()
+                  await feedback.press('End')
+                  await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+                } },
+                { name: 'return to the start of feedback', run: async () => { await feedback.press('Home'); await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBe(0) } },
+              ],
+              scrollAreas: { feedback },
+            })
+          }
+        }
+        // The version coordinate (and the footer's calendar version) is the vendored INSPR calendar-version display (pinned presentation);
+        // its digit colours are reported to its owner rather than restyled here.
+        const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+        const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}\n    ${n.html}`).join('\n')}`)
+        expect(summary, summary.join('\n')).toEqual([])
+        if (evidence) await page.screenshot({ path: test.info().outputPath(`${name.replaceAll(' ', '-')}-${width}-${colorScheme}.png`) })
+      }
     })
   }
 }
@@ -247,7 +299,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await signedIn(page)
       await page.goto(path)
       await ready(page)
-      await page.waitForTimeout(250)
+      await page.evaluate(() => document.fonts.ready)
       const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
       const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
       expect(summary, summary.join('\n')).toEqual([])

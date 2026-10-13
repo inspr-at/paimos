@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// AEON-1233 / #583 moved project Routines into settings/routines.
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -81,7 +82,7 @@ async function expectFoldIcons(page: Page) {
   for (const icon of await icons.all()) await expect(icon).toBeVisible()
 }
 async function draftAgentRoutine(page: Page) {
-  await page.goto('/p/PHAROS/settings')
+  await page.goto('/p/PHAROS/settings/routines')
   await page.getByRole('button', { name: 'New routine…', exact: true }).click()
   await expect(editor(page)).toBeVisible()
   await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill('Weekly dependency update')
@@ -208,7 +209,7 @@ test('someone else’s routine says who decides, a stale save keeps unsaved text
   await page.setViewportSize({ width: 1440, height: 1100 })
   const { errors, calls, revoke } = await setup(page, 'member', { items: [owned(OTHER)], staleOnce: true })
   // The Desk link-out opens the editor at the consent step; only the owner decides.
-  await page.goto(`/p/PHAROS/settings?recurrence=${AGENT}&consent=1`)
+  await page.goto(`/p/PHAROS/settings/routines?recurrence=${AGENT}&consent=1`)
   await expect(editor(page)).toHaveAccessibleName('Let agents run it')
   await expect(editor(page).locator('#consent')).toContainText('A PHAROS admin decides.')
   await expect(editor(page).getByRole('button', { name: /^Let agents run it/ })).toHaveCount(0)
@@ -247,7 +248,7 @@ test('someone else’s routine says who decides, a stale save keeps unsaved text
 test('closing after a failed consent says the routine is not paused, never “Kept paused”', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 })
   const { errors, calls } = await setup(page, 'admin', { items: [owned(me.id)], consentFails: 'execution_identity_unavailable' })
-  await page.goto(`/p/PHAROS/settings?recurrence=${AGENT}&consent=1`)
+  await page.goto(`/p/PHAROS/settings/routines?recurrence=${AGENT}&consent=1`)
   await expect(editor(page)).toHaveAccessibleName('Let agents run it')
   await editor(page).getByRole('button', { name: /^Runs as:/ }).click()
   await page.getByRole('option', { name: /PHAROS routines/ }).click()
@@ -298,7 +299,7 @@ for (const [width, theme] of [[1440, 'dark'], [390, 'light']] as const) {
   test(`the Routines box and editor render in ${theme} at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width > 600 ? 1000 : 860 }); await page.emulateMedia({ colorScheme: theme })
     const { errors } = await setup(page, 'admin', { items: [owned(me.id)] })
-    await page.goto('/p/PHAROS/settings')
+    await page.goto('/p/PHAROS/settings/routines')
     await expect(page.getByRole('row', { name: 'Weekly dependency update', exact: true })).toContainText('Waiting for a person')
     await expect(page.getByText('Agents may run routines in PHAROS')).toBeVisible()
     // An agent routine's history is its logbook (AEON-1192), named a routine like the box.

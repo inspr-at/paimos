@@ -68,14 +68,15 @@ test('detail shows now, activity, ticket status and hides unreported fields', as
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel).toContainText('Running PDF tests')
   await expect(panel.locator('.activity-timeline li')).toHaveCount(2)
-  await expect(panel.locator('.head-sub')).toContainText('PHAROS-12')
+  // AEON-1212 / #592 keeps ticket facts in Overview below the unified heading.
+  await expect(panel.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Ticket$/ }) })).toContainText('PHAROS-12')
   await expect(panel.locator('.service-tier .tier-head strong')).toHaveText('Default')
   await expect(panel).not.toContainText('Not reported')
   await expect(panel).not.toContainText('Account not reported')
-  await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
-  await expect(page.getByRole('menuitem', { name: 'Interrupt this step', exact: true })).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(panel.getByRole('button', { name: 'Stop now…', exact: true })).toBeVisible()
+  const actions = panel.getByRole('group', { name: 'Session actions' })
+  await expect(actions.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible()
+  await expect(actions.getByRole('button', { name: 'Interrupt', exact: true })).toBeEnabled()
+  await expect(panel.getByRole('button', { name: 'Stop…', exact: true })).toBeVisible()
 })
 
 test('an unreported service tier stays explicit while optional setup fields stay absent', async ({ page }) => {

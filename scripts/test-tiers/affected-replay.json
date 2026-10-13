@@ -7,7 +7,7 @@
     "ticket": "OPS-257 L4 phase 2 (AEON-743)",
     "consumers": "R2/R4/R6/R7/R8 readers and migration bodies are resolved against the replaying checkout, not each historical PR tree; files deleted since then replay as full.",
     "promotions": "Historical manifest promotions are not reconstructed: R1 manifest edits replay as registration-only (no promoted cases). Hosted runs record the real promotion count per PR.",
-    "jobs": "full 37, essential 22, static 16, spec-only 12, docs-only 9 hosted jobs on the all-success PR path."
+    "jobs": "full 37, essential 24, static 16, spec-only 12, docs-only 9 hosted jobs on the all-success PR path."
   },
   "goImports": {
     "cmd/aeon": [

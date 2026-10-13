@@ -7,6 +7,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness, NOW, type BusinessMockOptions } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const places = (page: Page) => page.getByRole('navigation', { name: 'Places' })
 const crumbs = (page: Page) => page.getByRole('navigation', { name: 'Breadcrumb' })
@@ -181,7 +182,29 @@ test('on phones the places are round buttons and nothing in the header is cut', 
       // Visually hidden text (a 1px box for screen readers) is not clipped content.
       if (r.width <= 1 || r.height <= 1 || getComputedStyle(el).display === 'none') return false
       return r.left < -0.5 || r.right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1
-    }).map(el => el.className || el.tagName)), { message: path }).toEqual([])
+    }).map(el => ({ tag: el.tagName, class: el.className, text: el.textContent, width: el.clientWidth, contentWidth: el.scrollWidth, html: el.outerHTML }))), { message: path }).toEqual([])
+  }
+  // AEON-1313: platform font differences hid the clipped Customers label on
+  // macOS. Exercise intrinsic label room with German length stress as well.
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/business/customers')
+    const tabs = page.getByRole('navigation', { name: 'Business' })
+    await expect(tabs.getByRole('link')).toHaveCount(5)
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await tabs.locator('.biz-tab > span').evaluateAll(elements => {
+      const labels = ['Übersicht', 'Kundenverwaltung', 'Angebotsverwaltung', 'Zeiterfassung', 'Verrechnungssätze']
+      elements.forEach((element, index) => { element.textContent = labels[index]! })
+    })
+    await page.evaluate(() => document.fonts.ready)
+    const cut = await tabs.locator('.biz-tab > span').evaluateAll(elements => elements.filter(element => element.scrollWidth > element.clientWidth).map(element => ({ text: element.textContent, width: element.clientWidth, contentWidth: element.scrollWidth })))
+    expect(cut, `${width} ${theme}: complete Business tab labels`).toEqual([])
+    const links = await tabs.getByRole('link').all()
+    await expectStableControls({
+      controls: { tabs, ...Object.fromEntries(links.map((link, index) => [`tab ${index}`, link])) },
+      interactions: links.map((link, index) => ({ name: `hover tab ${index}`, run: () => link.hover() })),
+    })
+    await page.screenshot({ path: test.info().outputPath(`business-nav-${width}-${theme}.png`) })
   }
 })
 

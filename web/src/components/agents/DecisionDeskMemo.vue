@@ -443,6 +443,9 @@ a.project-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .primary-label::before { content: attr(data-size-label); visibility: hidden; grid-area: 1 / 1; }
 .primary-label > span { grid-area: 1 / 1; }
 .action-buttons .close-desk { width: 42px; padding: 0; display: grid; place-items: center; }
+@media (pointer: coarse) {
+  .action-buttons button { min-width: 44px; min-height: 44px; }
+}
 button { cursor: pointer; } button:disabled { cursor: default; } button:focus-visible, input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; } kbd { font: 11px var(--mono); opacity: .65; margin-left: 7px; }
 .desk-paper { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; padding: 24px 30px 28px; background: var(--surface); border-radius: 0 12px 12px 12px; border: 1px solid var(--line-2); border-top: 0; outline: 0; }
 .desk-paper::before { content: ''; position: absolute; top: 0; left: calc(var(--tab-w, 360px) - 21px); right: 12px; height: 1px; background: var(--line-2); }

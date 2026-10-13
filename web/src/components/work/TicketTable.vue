@@ -351,6 +351,13 @@ function fittedWidth(id: string) {
     const range = document.createRange()
     range.selectNodeContents(content)
     widest = Math.max(widest, inner, text.trim() ? range.getBoundingClientRect().width : 0)
+    // An ETA's nested grid can ellipsize before the first fit. Measure both
+    // time labels intrinsically; the outer span's scrollWidth hides that loss.
+    const eta = cell.querySelector<HTMLElement>('.eta-cell'), when = eta?.querySelector<HTMLElement>('.when')
+    if (eta && when) {
+      const timeWidth = Math.max(...[...when.children].map(label => (label as HTMLElement).scrollWidth))
+      widest = Math.max(widest, eta.getBoundingClientRect().width - when.getBoundingClientRect().width + timeWidth)
+    }
   }
   return Math.max(def.min, Math.min(def.max, Math.ceil(widest + 30)))
 }
