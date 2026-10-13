@@ -202,3 +202,78 @@ validation remain incomplete; no full local fallback was run. `git diff
 non-required policy preview still reports a missing trusted review verdict;
 the coordinator owns that gate after builder exit. No push, deployment, model
 CLI, review gate or live cutover was performed.
+
+## Fix round 4: prepared R0 registration patch
+
+At the requested negative-control revision `facb16772`,
+[Go static job 115109204348](https://github.com/inspr-at/paimos/actions/runs/38340153694/job/115109204348)
+still rejects exactly the nine test identities above, and
+[release check job 115109204383](https://github.com/inspr-at/paimos/actions/runs/38340153694/job/115109204383)
+still fails the two existing audit assertions on the same nine nativeattach
+files. No assertion or behaviour change is needed. PR #618 is `MERGEABLE`.
+
+The normative plan still reserves both files to R0, whose owner is the
+"Coordinator or one explicitly assigned metadata integrator". This round's
+brief does not assign P2b that role, and the original brief requires stopping
+before editing another slice's files. The following additive patch is prepared
+for R0 to apply in this PR. `git apply --check` passes against `facb16772`;
+the proposed JSON parses and preserves every existing test row. The actual
+metadata files remain unchanged, so the CI blockers remain open.
+
+```diff
+--- a/scripts/audit/slices.json
++++ b/scripts/audit/slices.json
+@@ -113,6 +113,7 @@
+       "title": "Agent runtime, harnesses and runs",
+       "paths": [
+         "internal/agentd/**",
++        "internal/nativeattach/**",
+         "internal/nativecontract/**",
+         "internal/nativesessions/**",
+         "internal/agentd/routine_budget.go",
+--- a/scripts/ci/go-test-tiers.json
++++ b/scripts/ci/go-test-tiers.json
+@@ -4906,6 +4906,12 @@
+     ,
+     {"kind":"go","package":"internal/cli","name":"TestModelTicketResolveAndReadOnlyPrefs","tier":"GATED-FULL"}
+     ,
++    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandPreservesAttachmentMeaning","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandValidation","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"ESSENTIAL"}
++    ,
+     {"kind":"go","package":"internal/cli","name":"TestOnboardCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
+     ,
+     {"kind":"go","package":"internal/cli","name":"TestOpenNoFollowReadsRegularFileAndRejectsSymlinkParent","tier":"GATED-FULL"}
+@@ -7769,6 +7775,18 @@
+     {"kind":"go","package":"internal/modelregistry","name":"TestWorkLatestPinAndAutomaticResidencyReselection","tier":"GATED-FULL"}
+     ,
+     {"kind":"go","package":"internal/modelregistry","name":"TestWorkingEvidenceCannotUseAnotherModelsUsage","tier":"GATED-FULL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestAttachLeaseUsesElapsedServerBudget","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestComposerPreservesShortcutsAndBoundsTerminalData","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestComposerReceiptsAndEscapeLeaveSessionRunning","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestFakeSocketDetachViewerAndStaleBinding","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestStreamRejectsSuccessorBeforeRendering","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestTerminalRestoredOnEveryExit","tier":"ESSENTIAL"}
+     ,
+     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
+     ,
+```
+
+The approved remote Go run at `facb16772` passes both complete affected
+packages, `./internal/nativeattach/... ./internal/cli/...`, with exit 0; CLI
+reports 36.784 seconds. There are no affected web or browser cases. The approved
+guarded static `--merge-main` run exits 1: `go-tiers`, `audit-tests` and
+`audit-coverage` reproduce the two missing registrations; the other 39 checks
+pass, with zero optional skips. This also proves the existing negative controls
+fail at `facb16772`. Static validation is failed, not incomplete or green. R0
+must apply the patch and obtain green strict static/release checks before merge.
+The non-required policy preview awaits the coordinator's trusted review verdict.
+No push, deployment, review gate, model CLI or live cutover was performed.
