@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -42,7 +43,7 @@ func New(ctx context.Context, c Candidate, identity nativecontract.NativeIdentit
 	c.AllowedTools = append([]string{}, c.AllowedTools...)
 	// Never retain child capability bytes in qualification evidence.
 	c.Spec.Tools.Token = nil
-	c.Actor.KeyCeiling = append([]string{}, c.Actor.KeyCeiling...)
+	c.Actor.KeyCeiling = slices.Clone(c.Actor.KeyCeiling)
 	deadline := c.Now().Add(time.Duration(c.Spec.Policy.MaximumRuntimeSeconds) * time.Second)
 	if c.Spec.Policy.ExpiresAt.Before(deadline) {
 		deadline = c.Spec.Policy.ExpiresAt

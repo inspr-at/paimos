@@ -13,7 +13,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -70,7 +69,7 @@ func SessionOverlay(tools []string) (Overlay, error) {
 	seen := map[string]bool{}
 	allowed := make([]string, 0, len(tools))
 	for _, name := range tools {
-		if !slices.Contains(leadTools, name) || seen[name] {
+		if !leadTool(name) || seen[name] {
 			return Overlay{}, ErrPolicy
 		}
 		seen[name] = true
@@ -85,7 +84,14 @@ func SessionOverlay(tools []string) (Overlay, error) {
 	}, nil
 }
 
-var leadTools = []string{"aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence", "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"}
+func leadTool(name string) bool {
+	switch name {
+	case "aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence", "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity":
+		return true
+	default:
+		return false
+	}
+}
 
 func (Candidate) MarshalJSON() ([]byte, error) { return nil, ErrPolicy }
 
