@@ -122,8 +122,8 @@ for (const regenerated of [false, true]) {
     // #237 filters classified changes. All six v1 releases have unclassified
     // Git changes (Other), including the release without a ticket mention.
     await expect(options).toHaveCount(6)
-    await expect(options.first()).toContainText('3 other changes')
-    await expect(options.last()).toContainText('1 other change')
+    await expect(options.first().getByRole('img', { name: '3 other changes', exact: true })).toBeVisible()
+    await expect(options.last().getByRole('img', { name: '1 other change', exact: true })).toBeVisible()
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('AEON-75')
     await expect(options).toHaveCount(1)
     await expect(options.first()).toContainText('AEON-75')
