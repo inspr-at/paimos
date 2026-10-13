@@ -290,7 +290,7 @@
       "specs": [
         {"file":"tests/start-agent.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.051,"median":2.213,"min":1.746},"seconds":49.674,"selectedTests":21},"weightSeconds":36.078431,"weightSource":"web-11"}
         ,
-        {"file":"tests/ticket-panel.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":94.816,"median":2.067,"min":1.65},"seconds":156.256,"selectedTests":23},"weightSeconds":34.509803565,"weightSource":"web-11"}
+        {"file":"tests/ticket-panel.spec.ts","listedTests":46,"tierTiming":{"caseSeconds":{"max":94.816,"median":2.067,"min":1.65},"seconds":156.256,"selectedTests":23},"weightSeconds":34.509803565,"weightSource":"web-11"}
         ,
         {"file":"tests/ticket-workers.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":13.203,"median":2.236,"min":1.812},"seconds":44.561,"selectedTests":11},"weightSeconds":19.843137,"weightSource":"web-11"}
       ]
@@ -1128,7 +1128,7 @@
         ,
         {"file":"tests/ui-audit-rules.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/ui-audit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/ui-audit.spec.ts","listedTests":10,"weightSeconds":2400,"weightSource":"aeon-1326-nightly-progress-estimate"}
         ,
         {"file":"tests/usage-accounts.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,

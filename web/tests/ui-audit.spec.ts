@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Offline UI audit. Run `npm run audit:ui` in web. It writes a deduplicated
-// test-results/qa2b-findings.json and screenshots in test-results/qa2b-shots/. Keep audit output
-// in this worktree so parallel workers do not overwrite one another's evidence.
+// findings.json and screenshots in each theme/width test's outputPath. Each
+// combination is independently schedulable; all route/state coverage is retained.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { resolve, join } from 'node:path'
+import { join } from 'node:path'
 import { fixtures, liveAgent, me, mockView, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
@@ -26,9 +26,6 @@ type Finding = Raw & { id: string; route: string; state: string; viewport: strin
 type Setup = 'default' | 'editor' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views' | 'live' | 'live-list'
 type Scenario = { state: string; route: string; setup?: Setup; act?: (page: Page) => Promise<void> }
 
-const output = resolve(process.cwd(), 'test-results/qa2b-findings.json')
-const shotDir = resolve(process.cwd(), 'test-results/qa2b-shots')
-const findings = new Map<string, Finding>()
 const AUDIT_VIEW = '11111111-aaaa-4aaa-8aaa-0000000000a1'
 const widths = process.env.AUDIT_WIDTHS ? process.env.AUDIT_WIDTHS.split(',').map(Number) : [390, 1024, 1280, 1440, 1920]
 const themes = process.env.AUDIT_THEMES ? process.env.AUDIT_THEMES.split(',') as ('light' | 'dark')[] : ['light', 'dark'] as const
@@ -207,14 +204,19 @@ async function focusAudit(page: Page): Promise<Raw[]> {
   return result
 }
 
-test('offline route and state audit', async ({ browser }) => {
-  test.setTimeout(3_600_000)
+// Nightly logs showed 144 states advancing steadily before the shard's 20-minute
+// cap. One hour-long case was weighted as 2.2 seconds and could never be split.
+for (const theme of themes) for (const width of widths) test(`offline route and state audit ${theme} ${width}`, async ({ browser }, testInfo) => {
+  test.setTimeout(600_000)
+  const output = testInfo.outputPath('findings.json')
+  const shotDir = testInfo.outputPath('shots')
+  const findings = new Map<string, Finding>()
   mkdirSync(shotDir, { recursive: true })
   const filtered = scenarios.filter(s => !process.env.AUDIT_FILTER || s.state.includes(process.env.AUDIT_FILTER))
   if (!filtered.length) throw new Error('AUDIT_FILTER matched no states')
   const save = () => writeFileSync(output, `${JSON.stringify([...findings.values()], null, 2)}\n`)
   save()
-  for (const theme of themes) for (const width of widths) for (const scenario of filtered) {
+  for (const scenario of filtered) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme, reducedMotion: 'reduce' })
     const page = await context.newPage()
     page.setDefaultTimeout(7000)

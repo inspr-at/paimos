@@ -1510,6 +1510,24 @@
     ,
     "browser:tests/theme-settings.spec.ts:derived contrast preserves chosen colours and staged edits apply only after Save"
     ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1024"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1280"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1440"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1920"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 390"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1024"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1280"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1440"
+    ,
+    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1920"
+    ,
     "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window"
     ,
     "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named"
@@ -5190,9 +5208,9 @@
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: sign-in in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: ticket full page in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: ticket full page in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: ticket full page in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: ticket full page in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: ticket panel in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -8958,13 +8976,13 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"eight visible tickets with exactly one edge show the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"header shots dark › keeps AA contrast at 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"header shots dark › keeps AA contrast at 1280","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"header shots dark › keeps AA contrast at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"header shots dark › keeps AA contrast at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"header shots light › keeps AA contrast at 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"header shots light › keeps AA contrast at 1280","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"header shots light › keeps AA contrast at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8974,7 +8992,7 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"leaving the project releases the WebGL context","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"long title and description stay separate from the glimpse while resizing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"long title and description stay separate from the glimpse while resizing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"narrow viewports and small or unlinked graphs stay empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13886,7 +13904,53 @@
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the panel shows title, properties, Markdown sections, relations and the timeline","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default plain dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default plain dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default plain dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default plain light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default plain light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default plain light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default search dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default search dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default search dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default search light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default search light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: default search light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide plain dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide plain dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide plain dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide plain light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide plain light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide plain light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide search dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide search dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide search dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide search light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide search light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the routed panel keeps usable list space and stable controls: wide search light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"titles edit inline on click, save with Enter under a precondition, and cancel with Esc","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -13894,13 +13958,13 @@
     ,
     {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"a knowledge-graph ticket node opens the peek instead of leaving the graph","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"a session-row ticket and a panel ticket peek without covering the session text","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"a session-row opens its panel ticket peek without covering the session text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"a ticket from another project in the tickets graph opens the peek","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"a ticket pill on /agents opens the peek and stays on /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"a ticket in the agents session panel opens the peek and keeps the session route","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"cmd-click on an agents ticket keeps the real link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"cmd-click on an agents session ticket keeps the real link","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/ticket-peek.spec.ts","name":"release history still opens its own ticket panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13964,7 +14028,25 @@
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"touch rule uses the actual label and pseudo-element hit area","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1920","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1920","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 390","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/usage-accounts.spec.ts","name":"a failed initial computer read reports incomplete inventory instead of all ready or empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

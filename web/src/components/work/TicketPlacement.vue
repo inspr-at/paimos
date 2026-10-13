@@ -92,7 +92,7 @@ select:focus-visible, button:focus-visible { outline: none; box-shadow: var(--fo
 .placement-prop dd::after { content: ''; width: 65px; flex: 0 0 65px; }
 .placement-prop dd:has(.confirm)::after { display: none; }
 .placement-feedback { flex-basis: 100%; height: 30px; color: var(--ink-3); font-size: 11px; }
-.placement-feedback dd { height: 30px; overflow: auto; }
+.placement-feedback dd { height: 30px; overflow: auto; overflow-wrap: anywhere; }
 .placement-feedback dd:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 720px) { select, .placement-value, .confirm { height: 34px; } }
