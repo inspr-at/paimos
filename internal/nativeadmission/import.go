@@ -21,7 +21,7 @@ import (
 func (g *Gate) HeldGroups(ctx context.Context) ([]agentsetup.LedgerGroup, error) {
 	groups := []agentsetup.LedgerGroup{}
 	err := g.locked(ctx, func(context.Context) error {
-		names, err := g.opts.State.Names(maxRecords + 1)
+		names, err := g.opts.State.Names(maxRecords)
 		if err != nil {
 			return err
 		}

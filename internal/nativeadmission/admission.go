@@ -344,7 +344,7 @@ func (g *Gate) Reserve(ctx context.Context, request Request) (*Permit, error) {
 				return denial(nativecontract.ReasonWrongGeneration)
 			}
 		}
-		names, err := g.opts.State.Names(maxRecords + 1)
+		names, err := g.opts.State.Names(maxRecords)
 		if err != nil {
 			return err
 		}

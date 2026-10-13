@@ -185,6 +185,8 @@ func TestNativeAdmissionOverlappingRootWorkerAndRevokedRoute(t *testing.T) {
 	go func() { p, err := f.root.Reserve(t.Context(), f.request); root <- outcome{p, err} }()
 	select {
 	case <-f.authority.entered:
+	case early := <-root:
+		t.Fatalf("root failed before admission barrier: %v", early.err)
 	case <-barrierCtx.Done():
 		t.Fatal("root never entered final admission")
 	}
@@ -356,6 +358,8 @@ func TestNativeProfileChangeSerializesWithLiveUsers(t *testing.T) {
 	}()
 	select {
 	case <-entered:
+	case early := <-done:
+		t.Fatalf("profile change failed before barrier: %v", early)
 	case <-barrierCtx.Done():
 		t.Fatal("profile change never reached barrier")
 	}

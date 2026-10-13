@@ -168,7 +168,7 @@ func (g *Gate) ChangeProfile(ctx context.Context, profile nativecontract.Profile
 		if err := g.profileClear(profile.AccountID); err != nil {
 			return err
 		}
-		names, err := g.opts.State.Names(maxRecords + 1)
+		names, err := g.opts.State.Names(maxRecords)
 		if err != nil {
 			return err
 		}
