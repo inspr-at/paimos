@@ -448,3 +448,37 @@ guarded profile/CLI run on `6d6b65b0`; its five fake-test acceptance checks
 remain **PASS**, while live account qualification stays **G_ACCOUNTS**.
 Only this owned handoff document changes. No heavy local fallback, origin push,
 deployment, model CLI or review gate was performed.
+
+Fix-round 12 (2026-10-13): CI `go-static` job **115170156521** on supplied
+baseline `ab1edc5e` fails solely on the same four unclassified tests listed
+above. All seven Go shards, four web unit shards, twelve browser shards,
+release checks and migration compatibility pass in that run. The aggregate
+Go failure follows static validation; the separate policy preview still needs
+the coordinator's trusted verdict. No behavior finding was supplied.
+
+Selected PPM account and coordinator-recorded builder attribution were verified.
+Fetched `origin/main` at `fd8fae22f` is already included, PR #615 is mergeable,
+and the read-only merge-tree check exits 0. Main still lacks the four rows.
+Both normative plan files reserve `scripts/ci/go-test-tiers.json` for R0 and
+exclude it from P4a's write set. **R0 must apply the four documented ESSENTIAL
+rows to this branch in the same PR before CI can pass.** No source, assertion
+or shared inventory changed; this owned handoff document is the only change.
+
+The baseline's named declarations were verified directly from its Git objects.
+The existing strict validator rejects exactly those four omissions and passes
+when only the proposed rows are added in memory. This read-only diagnostic is
+not native collection. The affected selector exits 0 and selects **FULL**
+(3236 reverse-dependency cases). No web test is affected by this round.
+
+Two guarded Go attempts and two guarded merged-main static attempts return
+**exit 3** for occupied remote slots; none executes checks. Fresh validation
+is **incomplete**, and CI remains **not green**. Profile and native-account
+source/tests are byte-identical to the last passing guarded run on `6d6b65b0`.
+Its fake acceptance results remain **PASS** for exact account binding, **PASS**
+for default/dedicated environments, **PASS** for excluding credential/settings
+sharing, **PASS** for refusal without rotation, and **PASS** for retained
+credentials, unchanged parent environment and distinct overlapping children.
+Live qualification remains **G_ACCOUNTS**. The document passes the public-name,
+Git whitespace and exclusive-write-set checks. No new regression test is required
+for this registration-only finding. No heavy local fallback, origin push,
+deployment, model CLI or review gate was performed.
