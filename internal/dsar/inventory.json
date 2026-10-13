@@ -1130,6 +1130,34 @@
     {
       "classification": "personal",
       "columns": {
+        "binding": "metadata",
+        "conversation_id": "metadata",
+        "created_at": "personal",
+        "drain_grant_id": "metadata",
+        "final_id": "metadata",
+        "input_id": "metadata",
+        "message_id": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "project_id": "metadata",
+        "publication_sha256": "personal",
+        "reason": "metadata",
+        "sender_principal_id": "personal",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "text_bytes": "metadata",
+        "turn_ref": "metadata",
+        "updated_at": "personal"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_finals"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "actor_authority": "personal",
         "actor_grant_id": "metadata",
         "actor_grant_revision": "metadata",
@@ -1188,6 +1216,29 @@
         "tenant_column": "tenant_id"
       },
       "table": "native_session_interactions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "actor_principal_id": "personal",
+        "attempts": "metadata",
+        "created_at": "personal",
+        "expires_at": "personal",
+        "operation_id": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "payload_sha256": "personal",
+        "project_id": "metadata",
+        "receipt": "personal",
+        "request_id": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "personal"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_receipts"
     },
     {
       "classification": "personal",

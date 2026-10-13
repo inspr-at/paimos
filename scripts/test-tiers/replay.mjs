@@ -36,7 +36,8 @@ const replay=fixture.prs.map(({number,paths})=>{
   // All-success PR path in today's ci.yml. Reusable route contributes one
   // hosted job; skipped tree-reuse/cache-prime do not contribute runner jobs.
   // Static layout drops go-test (7), go-timing, web-shard (12) and e2e-run.
-  const jobs=(lane,mode,layout)=>lane==='docs-only'?9:lane==='spec-only'?12:mode!=='essential'?37:layout==='static'?16:22
+  // Essential/full keeps two Go shards and four browser shards.
+  const jobs=(lane,mode,layout)=>lane==='docs-only'?9:lane==='spec-only'?12:mode!=='essential'?37:layout==='static'?16:24
   const label=decision=>decision.mode==='essential'&&decision.layout==='static'?'static':decision.mode
   return {number,classifiedLane,oldLane,lane,old:before.mode,new:label(after),oldCases:old.tests.length,newCases:next.tests.length,
     oldKinds:kinds(old),newKinds:kinds(next),oldJobs:jobs(oldLane,before.mode,'full'),newJobs:jobs(lane,after.mode,after.layout),

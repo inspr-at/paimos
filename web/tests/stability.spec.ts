@@ -76,7 +76,8 @@ for (const width of [390, 1440]) {
       await base(page)
       await page.goto('/agents')
       await expect(page.locator('.agents-page [data-row^="s:"]').first()).toBeVisible()
-      await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
+      // AEON-569 / #458 and AEON-1209 / #586 route decisions to the Desk.
+      await expect(page.getByRole('link', { name: /Decision Desk/ }).first()).toBeVisible()
       await expectStill(page)
     })
 
@@ -94,7 +95,7 @@ for (const width of [390, 1440]) {
         await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
         release()
         await expect(page.locator('.session-panel .facts')).toBeVisible()
-        await expect(page.locator('.session-panel .pause-controls')).toBeVisible()
+        await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('group', { name: 'Session actions' })).toBeVisible()
         await expectStill(page)
         await page.screenshot({ path: test.info().outputPath(`session-loaded-${sampleWidth}-${theme}.png`) })
       }
@@ -135,14 +136,18 @@ for (const width of [390, 1440]) {
 
 test('the approval queue never says nothing waits before it knows', async ({ page }) => {
   await base(page)
-  let release!: () => void
+  let release!: () => void, arrived!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/approvals?**', async route => { await held; await route.fallback() })
+  const started = new Promise<void>(resolve => { arrived = resolve })
+  // AEON-569 / #458 and AEON-1209 / #586 expose the canonical Desk aggregate.
+  await page.route('**/api/decision-desk/projection?**', async route => { arrived(); await held; await route.fallback() })
   await page.goto('/agents')
-  // Needs you shows only once it knows something waits (AEON-299): no early card, no all-clear.
-  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
-  await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
-  release()
-  await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
+  const desk = page.getByRole('group', { name: 'Decision Desk', exact: true }).getByRole('link')
+  try {
+    await started
+    await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+    await expect(desk).toHaveAccessibleName('Decision Desk, count unavailable')
+    await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
+  } finally { release() }
+  await expect(desk).toHaveAccessibleName('Decision Desk, 4 open')
 })
