@@ -250,6 +250,13 @@ test('AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel s
     try {
       const errors = await setup(page, { theme, full: true })
       await send(page, terminal(1, 'Read-only native terminal\r\nChecking the current binding and permissions.\r\n', true))
+      expect(await grid(page).evaluate(el => getComputedStyle(el).backgroundColor)).toBe(theme === 'dark' ? 'rgb(13, 23, 24)' : 'rgb(244, 247, 247)')
+      await page.emulateMedia({ colorScheme: 'dark' })
+      if (theme === 'dark') {
+        await page.evaluate(() => { delete document.documentElement.dataset.theme })
+        expect(await grid(page).evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(13, 23, 24)')
+        await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+      } else expect(await grid(page).evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(244, 247, 247)')
       const fit = page.getByRole('button', { name: 'Fit to window', exact: true }), action = page.getByRole('button', { name: 'End control…', exact: true })
       await expect(fit).toHaveAttribute('aria-pressed', 'false')
       const guard = await controlStability(page, { fit, action, line: page.locator('.terminal-control'), frame: page.locator('.native-terminal'), box: page.locator('.terminal-box') })
