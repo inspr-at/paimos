@@ -82,7 +82,7 @@ func readinessAction(v View, local LocalStatus) (string, string) {
 		case "binding_missing":
 			stage = "blocked"
 			action = fmt.Sprintf("%s was approved but isn't set up on this computer. Run `aeon-agentd add-harness --harness %s`, or remove %s from this computer in Aeon.", name, a.Harness, name)
-		case "probe_pending", "starting":
+		case "probe_pending", "starting", PinRenewed:
 			if !local.Ready {
 				action = account + " is waiting for its sign-in and availability check (up to 60 seconds after daemon startup)."
 			}
