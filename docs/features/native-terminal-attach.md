@@ -454,3 +454,85 @@ is `MERGEABLE`, so no conflict merge is needed. The P2b write-set check and
 ignored progress file. No origin push, deployment, model CLI, review gate or
 live cutover was performed. The coordinator owns the separate trusted review
 verdict after builder exit.
+
+## Fix round 9: refreshed tier-only patch after main merge
+
+The report `review-ci618-0842.out` targets `1dc911183`. The complete
+[Go static job 115160670838](https://github.com/inspr-at/paimos/actions/runs/38356466040/job/115160670838)
+fails only strict native tier collection on the same nine missing P2b rows.
+Go vet and the tier selector regressions pass; all seven Go shards, four web
+unit shards, twelve browser shards, release checks, E2E and migration
+compatibility pass. The Go aggregate follows the static failure. No behaviour
+fix or assertion change is indicated.
+
+The latest main merge added `TestNativeSessionCLIStartsOnlyThroughOwningDaemon`
+between the old patch's CLI context lines. Consequently, the fix-round-4
+tier patch no longer applies at `1dc911183`. The following **tier-only** patch
+supersedes it; `git apply --check` passes. It adds exactly nine `ESSENTIAL`
+rows, preserving every existing row, its order and all other metadata. The
+central audit ownership fix is already on main and needs no further change.
+
+```diff
+--- a/scripts/ci/go-test-tiers.json
++++ b/scripts/ci/go-test-tiers.json
+@@ -4930,6 +4930,12 @@
+     ,
+     {"kind":"go","package":"internal/cli","name":"TestModelTicketResolveAndReadOnlyPrefs","tier":"GATED-FULL"}
+     ,
++    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandPreservesAttachmentMeaning","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandValidation","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"ESSENTIAL"}
++    ,
+     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+     ,
+     {"kind":"go","package":"internal/cli","name":"TestOnboardCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
+@@ -7811,6 +7817,18 @@
+     {"kind":"go","package":"internal/modelregistry","name":"TestWorkLatestPinAndAutomaticResidencyReselection","tier":"GATED-FULL"}
+     ,
+     {"kind":"go","package":"internal/modelregistry","name":"TestWorkingEvidenceCannotUseAnotherModelsUsage","tier":"GATED-FULL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestAttachLeaseUsesElapsedServerBudget","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestComposerPreservesShortcutsAndBoundsTerminalData","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestComposerReceiptsAndEscapeLeaveSessionRunning","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestFakeSocketDetachViewerAndStaleBinding","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestStreamRejectsSuccessorBeforeRendering","tier":"ESSENTIAL"}
++    ,
++    {"kind":"go","package":"internal/nativeattach","name":"TestTerminalRestoredOnEveryExit","tier":"ESSENTIAL"}
+     ,
+     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
+     ,
+```
+
+The normative P2b write set still excludes the manifest; R0 belongs to the
+"Coordinator or one explicitly assigned metadata integrator". Fix round 9
+does not transfer ownership. R0 must apply this patch in PR #618 before final
+checks and merge. The actual manifest remains unchanged, so CI is failed.
+
+At `1dc911183`, the approved remote runner passes both complete affected Go
+packages with `-count=1`: `internal/nativeattach` in 0.327 seconds and
+`internal/cli` in 109.255 seconds. All nine proposed identities match the
+actual test declarations. The production strict validator rejects unchanged
+manifests at the requested negative-control revision `1dc91118`, HEAD and
+latest fetched `origin/main` for exactly these nine rows; each corresponding
+in-memory additive candidate passes and preserves the original metadata.
+These bounded checks do not replace native collection.
+
+The approved guarded static `--merge-main` run at `1dc911183` exits 1:
+41 checks pass with zero optional skips; only `go-tiers` fails, reproducing
+exactly the nine missing registrations through native collection. Audit
+ownership, web tier/shard checks, web type/lint and migration checks pass.
+Static validation is failed, not incomplete or green. R0 must apply the
+refreshed patch before the coordinator repeats final validation.
+
+The offline affected planner exits 0 and selects FULL Go because 3,236 reverse
+dependency cases exceed its 300-case bound. There are no affected web or browser
+cases in this source-only slice. Latest fetched main is `fd8fae22f`, still
+missing the rows; PR #618 is `MERGEABLE`, so no conflict merge is needed.
+Only this scoped handoff and the ignored progress file changed. No origin
+push, deployment, model CLI, review gate or live cutover was performed.
