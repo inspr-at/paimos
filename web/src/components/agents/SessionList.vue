@@ -23,6 +23,7 @@ import SessionsHeld from './SessionsHeld.vue'
 import { currentActivity, currentStep, workerActivity } from './activity'
 import { timeShort, timeText, timeTip } from './sessionTime'
 import { inFrameOrder, lingers, movesAt, useSessionHold, type Heading, type Structure } from './sessionHold'
+import { useReaderAnchor, useTouchScroll } from '../../lib/readerAnchor'
 import { clockTime } from '../../lib/agentPause'
 import { STATE_LABEL } from '../../lib/agentSignals'
 import ExecutionMark from './ExecutionMark.vue'
@@ -155,7 +156,12 @@ const liveMatch = computed<((view: SessionView) => boolean) | null>(() => {
 })
 // Structure waits while the person points at the list, has keyboard focus in a row or a menu
 // open; a refresh then never moves, adds or removes a row under them (sessionHold.ts).
+// Only a mouse or a pen points. A finger on the list is a scroll: the browser takes it over
+// (pointercancel, then pointerleave), which once released the hold mid-swipe (AEON-1279).
+// Touch instead holds while the finger is down and its scroll still runs, momentum included.
 const pointing = ref(false)
+const touching = useTouchScroll()
+function pointerIn(event: PointerEvent) { if (event.pointerType !== 'touch') pointing.value = true }
 const keyFocus = ref(false)
 // Follows the list's menus (declared below): the row menu, Move to lead, Filter and Display.
 const menuOpen = ref(false)
@@ -165,7 +171,10 @@ const structure: Structure<SessionView> = {
   match: view => liveMatch.value?.(view) ?? true,
   order: views => placementOrder(views),
 }
-const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (pointing.value || keyFocus.value || menuOpen.value), undefined, {
+// What the person holds: Show now offers it. A swipe's own hold ends by itself before a finger
+// could reach Show now, so the note stays calm through it.
+const personHolds = computed(() => pointing.value || keyFocus.value || menuOpen.value)
+const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (personHolds.value || touching.value), undefined, {
   read: projectLayout,
   headings: layout => layout.headings,
   follow: (held, current, ids) => ({
@@ -877,6 +886,16 @@ function measure() {
   stuck.value = root.value.getBoundingClientRect().top < top - 0.5
 }
 const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure) }
+// Every update keeps the first rows on screen where they are (AEON-1279): WebKit has no scroll
+// anchoring, and this page turns Chrome's off, so rows arriving or leaving above would move them.
+// The list scrolls with the page, or in its own pane; the sticky heads cover the top of the view.
+useReaderAnchor({
+  // BeforeUpdate already sees the new props, but the rows still have the old layout.
+  // Read the rendered class so capture and restore each use the container of those rows.
+  scroller: () => root.value?.classList.contains('pane') ? table.value : scroller,
+  rows: () => table.value?.querySelectorAll<HTMLElement>('[role="row"]:not(.thead)'),
+  top: () => Math.max(...[stick.value, table.value?.querySelector<HTMLElement>(':scope > .thead')].map(head => head?.getBoundingClientRect().bottom ?? -Infinity)),
+})
 onMounted(() => {
   scroller = root.value?.closest('main') ?? null
   scroller?.addEventListener('scroll', onScroll, { passive: true })
@@ -895,7 +914,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 </script>
 
 <template>
-  <section ref="root" class="sessions glass-card" :class="{ 'has-layout-dock': layoutDock, pane }" aria-labelledby="sessions-title" @pointerenter="pointing = true" @pointerleave="pointing = false">
+  <section ref="root" class="sessions glass-card" :class="{ 'has-layout-dock': layoutDock, pane }" aria-labelledby="sessions-title" @pointerenter="pointerIn" @pointerleave="pointing = false">
     <!-- The card head (AEON-1209, design AEON-1196): the list's own tools. It sticks inside the card,
          at the card's width, under the app header; the pills and the column heads stick with it. -->
     <div ref="stick" class="th-stick" :class="{ stuck }" data-stick>
@@ -930,7 +949,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         </div>
         <span class="grow" />
         <!-- Rows that wait to enter, leave or move while you point here (AEON-1211); otherwise how fresh the list is. -->
-        <SessionsHeld v-if="loaded && state === 'ready'" :pending="hold.pending.value" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" />
+        <SessionsHeld v-if="loaded && state === 'ready'" :pending="personHolds ? hold.pending.value : 0" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" />
         <span v-if="loaded && state === 'ready'" class="head-tools">
           <button
             v-if="stale.length" type="button" class="btn sm ghost quiet-btn" :class="{ 'clear-stale-off': showRemoved }" :disabled="showRemoved || removal.busy.value" :aria-hidden="showRemoved || undefined"

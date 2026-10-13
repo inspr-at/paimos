@@ -53,6 +53,7 @@ function clearDockInset() {
   if (!main) return
   main.style.marginBottom = ''
   main.style.scrollPaddingBottom = ''
+  main.style.paddingBottom = ''
 }
 function measureSelection() {
   const bar = selectionBar.value
@@ -63,13 +64,15 @@ function measureSelection() {
   if (!bar) { clearDockInset(); return }
   const dock = bar.closest('.selection-dock') ?? bar
   const applied = parseFloat(main.style.marginBottom) || 0
-  // The dock is position:fixed with bottom: var(--footer-h), so this overlap
-  // stays aligned when the phone footer hides and --footer-h falls to 0.
+  // The dock is position:fixed with bottom: var(--footer-h). On phones the page reaches under the
+  // footer, which folds away over it without changing --footer-h (AEON-1279), so this overlap
+  // holds while scrolling. It clears the footer too: the page's own room for it goes.
   const overlap = Math.ceil(Math.max(0, main.getBoundingClientRect().bottom + applied - dock.getBoundingClientRect().top))
   if (Math.abs(applied - overlap) <= 0.5 && Math.abs((parseFloat(main.style.scrollPaddingBottom) || 0) - overlap) <= 0.5) return
   const px = `${overlap}px`
   main.style.marginBottom = px
   main.style.scrollPaddingBottom = px
+  main.style.paddingBottom = '0px'
 }
 watch(selectionBar, bar => {
   selectionResize?.disconnect(); measureSelection()
