@@ -242,6 +242,44 @@ ESSENTIAL rows in this same PR and rerun the required checks. No quota
 behavior or assertions changed, so no new regression against `e9a41a6d` is
 required. All fix-round-7 edits stay inside this feature document.
 
+Fix round 8 inspected both cited jobs and their downstream evidence in Actions
+run `38359304112`, bound to PR head `5625f69d3`. Its tested merge commit
+`5e9cc6343` has identical quota and C0 package sources. `go-static` job
+`115169609169` fails only on the same four unclassified quota tests listed
+above. Refreshed `origin/main` at `fd8fae22f` still lacks those rows. Source
+ownership, tier selector regressions and release checks passed; R0 must still
+register the four ESSENTIAL rows in this same PR. PR #619 is mergeable, so no
+conflict-resolution merge is required.
+
+Current CI artifact `go-test-2-tier-measurements` (`11795025184`) proves all
+four quota tests and the package passed (0.139 s); the C0 package also passed
+(2.429 s). These prove all five P4b acceptance items: qualified stream/account
+binding, independent readiness and allowance, unsupported idle probing,
+private existing-ingress projections, and clock-driven freshness/isolation.
+Their NIGHTLY fallback classification still leaves the strict registration
+check red; passing execution is not a substitute for R0 registration.
+
+`web` job `115177937820` fails because `web-shard (1)` (`115170284675`)
+was cancelled. Catalogue, setup, all four unit shards and browser shard 2
+passed. The cancelled job ran from 06:59:00 to 07:19:28 UTC; its log reports
+`The operation was canceled.` at 07:19:16 without a failing assertion, during
+case 171 of a 191-case group after a preceding 100-case group. Cancellation
+is consistent with its 20-minute job limit in `.github/workflows/ci.yml`;
+the coordinator must resolve browser execution/budget evidence outside P4b's
+write set. `tier-measurements` (`115178131063`) reports `coverage=incomplete`,
+`missing_case_artifact` and only `web-shard-1` missing, with zero failed cases
+in each tier. No browser assertion or execution requirement is weakened.
+
+Both guarded Go attempts in fix round 8 exited 3 for the global 2/2 remote
+capacity limit. Both guarded static attempts exited 3 because the hold/host
+level guard refused execution. No local or browser fallback was used. The
+offline affected planner passed (130 Go packages, 80 browser specs, 120 unit
+files), but still omits quota pending R0 registration. This round changes only
+this handoff document; no behavior fix or regression against `5625f69d` is
+needed. Delivery remains incomplete until R0 registration, completed browser
+evidence, green required checks and the coordinator's review. Repeating a P4b
+fix round cannot repair the R0 manifest or CI workflow ownership boundary.
+
 Run the named package through the guarded remote Go runner and static checks
 through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
 origin/main`. These clock-driven tests use synthetic pins and events, with no
