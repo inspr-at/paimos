@@ -250,8 +250,8 @@ func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) err
 		if e != nil {
 			return e
 		}
-		var r leadRecord
-		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || r.Pickup.DaemonID != s.daemonID || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" {
+		r, e := decodeLeadRecord(raw)
+		if e != nil || r.Pickup.DaemonID != s.daemonID || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" {
 			return ErrProcessesUnconfirmed
 		}
 		if r.Abandoned || r.ExitReported {
