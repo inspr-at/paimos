@@ -216,7 +216,12 @@ export function stateCounts(items: readonly Recurrence[]): Record<RoutineState, 
   for (const item of items) counts[routineState(item)]++
   return counts
 }
-export const countWords = (count: number, more: boolean) => `${count}${more ? '+' : ''}`
+/**
+ * A count from the loaded pages (AEON-1240): with more pages to read, a found count is a lower bound ("3+"), and a
+ * zero says nothing yet, so it reads "–" with countTip, never "0+".
+ */
+export const countWords = (count: number, more: boolean) => count ? `${count}${more ? '+' : ''}` : more ? '–' : '0'
+export const countTip = (count: number, more: boolean) => !count && more ? 'Not all loaded yet' : ''
 const DAY_SHORT: Record<string, string> = { MO: 'Mon', TU: 'Tue', WE: 'Wed', TH: 'Thu', FR: 'Fri', SA: 'Sat', SU: 'Sun' }
 /** The trigger in a few words for a row; the logbook head says it in full, with its zone. */
 export function triggerShort(trigger: RecurrenceTrigger): string {
