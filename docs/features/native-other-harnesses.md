@@ -110,3 +110,25 @@ rows in `scripts/ci/go-test-tiers.json`; source ownership already matches R0's
 `internal/native*/**` coverage. No routes, permissions, migrations, dependency
 versions or release versions change. Production enablement, cross-family
 review and release remain coordinator-owned.
+
+Validation on 2026-10-13, implementation commit `62661b58e`:
+
+- PASS — ACP/Pi worker codecs implement the frozen Launcher/NativeTransport
+  ports using the existing owner seam, with no dependency or contract changes.
+- PASS — exact-pin matrix separates persistence/resume, busy input, approvals,
+  final correlation, graceful/force exit and quota for all five fixture providers.
+- PASS — ACP waits for clean turn completion; Pi local next-step steering
+  produces only a command acknowledgement and leaves C0 input/chat closed.
+- PASS — unsupported operations, permission requests and extension questions
+  refuse visibly; no automatic approvals or free-text delivery evidence.
+- PASS — all eight ESSENTIAL tests passed via remote `go test -race` for both
+  packages, including privacy, wrong-identity/policy and confined-ceiling cases.
+
+Guarded `ci-static-locked.sh` checked committed HEAD plus current main and
+exited 0: 42 checks passed, no optional skips, including Go/web tier checks,
+Go vet, web typecheck/lint, ownership coverage and contract/migration guards.
+The earlier local web-tier attempt had no dependencies; its guarded install
+was refused while mbp2607 was YELLOW. The successful remote static run supplied
+the web validation without bypassing that guard. Authoritative PR CI,
+cross-family review, real provider-pin enablement and production wiring remain
+coordinator-owned. No origin push or deployment was performed.
