@@ -120,7 +120,7 @@ failure under the runner's umask 022: `t.TempDir()` was not private. Commit
 the existing acceptance assertion. The later mode-0755 refusal assertion is
 unchanged, as is production code. This baseline failure and the successful
 guarded rerun provide the negative control; both `./internal/nativeprofiles/...`
-and `./internal/cli/...` now pass on mbp2606. The affected selector exits 0 and
+and `./internal/cli/...` now pass through the guarded remote runner. The affected selector exits 0 and
 selects **FULL** (3225 reverse-dependency cases). No web unit or browser spec is
 affected by this non-browser slice. P4a acceptance checks pass for exact enrolled
 account binding, default/dedicated child environments, exclusion of credential
@@ -128,7 +128,7 @@ sharing, refusal of unqualified accounts without rotation, and retained fake
 credentials with distinct overlapping children and an unchanged parent
 environment. Live account qualification remains G_ACCOUNTS.
 
-Guarded `ci-static-locked.sh --merge-main` completed on mbp2606 with **exit 1**:
+Guarded `ci-static-locked.sh --merge-main` completed remotely with **exit 1**:
 `go-tiers`, `audit-tests` and `audit-coverage` fail solely on those missing R0
 rows. The other **39 checks pass**, with **zero optional skips**, including Go
 vet, test-tier selector regressions, web shard checks, web typecheck/lint and
