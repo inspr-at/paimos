@@ -155,3 +155,42 @@ The temporary negative-control checkout and stash were removed. No negative
 control commit was added to the delivery branch. Browser checks are not
 applicable to this source-only fix. Cross-family review remains with the
 coordinator; no origin push, deployment or model review was performed.
+
+Fix round 4 validation and ownership handoff, reviewed commit `2b6cc8db2`:
+
+- PASS — both provider packages passed guarded remote
+  `go test -race -count=1`. The existing qualification, clean-boundary queue,
+  unsupported-operation and native-cancellation regressions remain intact.
+- PASS — guarded `ci-static-locked.sh --merge-main` exited 0: all 42 checks
+  passed with no optional skips. This includes the strict Go/web tier checks,
+  tier/shard self-tests, source-ownership audit, Go vet, web typecheck and lint.
+- PASS — the existing phone notification case passed through `remote-spec.sh`
+  on mbp2606; the runner selected two cases, both passed in 6.8 seconds. This
+  macOS Chromium result does not clear the hosted Linux failure below. No web
+  source or test changed; all four hosted web-unit jobs also passed on the
+  reviewed commit.
+- OPEN — the supplied CI finding is `tests/phone-approvals.spec.ts:134`,
+  “device notifications replace Enable with state and stable Pause in both
+  themes.” [The failed Linux job](https://github.com/inspr-at/paimos/actions/runs/38405274940/job/115325946555)
+  reports `add.y = 40` against the unchanged 0.5 px stability limit after
+  enabling this device (`phone-approvals.spec.ts:171`). The aggregate web job
+  fails because that shard failed. This is not a provider-code finding, and
+  its cause has not been reproduced on the remote Mac.
+
+P5b's normative write set covers only the ACP/Pi packages and this feature
+document. Both `PhoneApprovalSettings.vue` and `phone-approvals.spec.ts` are
+inherited unchanged from main; neither is in that write set. The original
+brief requires stopping and reporting an out-of-scope file need. The
+coordinator must assign the phone-settings owner a CI-equivalent Linux
+reproduction and fix while preserving the stability assertions. No behavior
+fix or new regression is claimed in this documentation-only round, and no R0
+rows were added or changed.
+
+The fetched `origin/main` at `3339bf7b1` merges cleanly in a read-only
+`merge-tree` check, so no conflict-resolution merge was needed. The separate
+non-required policy preview reports that the coordinator's merge of main
+changed the reviewed branch diff; refreshing the cross-family verdict remains
+the coordinator's task. No review gate was run. Authoritative PR CI is still
+required before merge; the remote passes above do not waive its failure. No
+origin push, deployment, other model CLI, credential access or out-of-scope
+source edit was performed.
