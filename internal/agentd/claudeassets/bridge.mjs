@@ -198,7 +198,23 @@ if ((start?.capabilities !== undefined && (!Array.isArray(start.capabilities) ||
 
 // Older bridge callers required steering support for every non-verification run.
 const capabilities = start.capabilities ?? (start.purpose === "pairing_verification" ? [] : ["steer", "interrupt"]);
-const requiresInterrupt = capabilities.includes("steer") || capabilities.includes("interrupt");
+const native = start.profile === "native";
+const requiresInterrupt = !native && (capabilities.includes("steer") || capabilities.includes("interrupt"));
+const nativeGrant = start.native_grant;
+const grantExpiry = native ? Date.parse(nativeGrant?.expires_at) : 0;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
+if ((start.profile !== undefined && !native) || (!native && (start.resume !== undefined || nativeGrant !== undefined)) ||
+    (native && (start.purpose || start.read_only_review || nativeGrant?.history_approved !== true ||
+      !UUID.test(nativeGrant?.session_id) || !/^[a-f0-9]{64}$/u.test(nativeGrant?.policy_digest) ||
+      !Number.isFinite(grantExpiry) || grantExpiry <= Date.now() || grantExpiry - Date.now() > 86400000 ||
+      !Array.isArray(nativeGrant?.allowed_tools) || nativeGrant.allowed_tools.length > AEON_TOOLS.length ||
+      new Set(nativeGrant.allowed_tools).size !== nativeGrant.allowed_tools.length ||
+      !nativeGrant.allowed_tools.every(tool => AEON_TOOLS.includes(tool)) ||
+      (start.resume !== undefined && !UUID.test(start.resume)) || capabilities.includes("steer")))) {
+  fail("app_server_protocol", "", "native_grant_invalid");
+  process.exit(1);
+}
+const grantCurrent = () => !native || Date.now() < grantExpiry;
 
 let queryHandle;
 let input;
@@ -215,6 +231,9 @@ let initialTurnStarted = false;
 let completedTurns = 0;
 let turnActive = false;
 let interruptReceipt = false;
+let grantTimer;
+let activeInputUUID = "";
+let activeCorrelationID = "";
 const correlations = new Map();
 function deleteCorrelation(uuid) {
   const state = correlations.get(uuid);
@@ -243,6 +262,7 @@ function observeReaction(message) {
   if (!state || state.reacted) return;
   state.reacted = true;
   state.resolveReaction();
+  if (native) { activeInputUUID = uuid; activeCorrelationID = state.correlationID; }
   turnActive = true;
   emit({ kind: "turn_started", correlation_id: state.correlationID });
   if (state.applied) deleteCorrelation(uuid);
@@ -335,6 +355,7 @@ function observeChat(message) {
 function observeChatFinal(message) {
   if (start.purpose === "pairing_verification" || start.read_only_review === true) return;
   if (message?.subtype !== "success" || message.is_error === true || message.parent_tool_use_id) return;
+  if (native && (!activeInputUUID || message.user_message_uuid !== activeInputUUID || message.session_id !== sessionID)) return;
   const text = message.result;
   if (typeof text !== "string" || text.length === 0 || Buffer.byteLength(text) > 65536 || text.includes("\0")) {
     emit({ kind: "chat_dropped" });
@@ -415,14 +436,19 @@ try {
     headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
   const toolInventory = toolBinding?.browser_capture_only === true ? BROWSER_CAPTURE_TOOLS
     : toolBinding?.routine === true ? ROUTINE_TOOLS : AEON_TOOLS;
-  const allowedTools = !verification && toolBinding ? toolInventory.map((name) => `mcp__aeon__${name}`) : [];
+  if (native && (toolBinding?.routine || toolBinding?.browser_capture_only || (!toolBinding && nativeGrant.allowed_tools.length))) throw new Error("native tools");
+  const inventory = native ? nativeGrant.allowed_tools : toolInventory;
+  const allowedTools = !verification && toolBinding ? inventory.map((name) => `mcp__aeon__${name}`) : [];
   start.tools = undefined;
-  input = new InputStream(userMessage(start.prompt));
+  const initialUUID = native ? randomUUID() : undefined;
+  if (native) addCorrelation(initialUUID, "initial");
+  input = new InputStream(userMessage(start.prompt, initialUUID));
   start.prompt = "";
   const queryOptions = {
     cwd: workspace,
     pathToClaudeCodeExecutable: claudePath,
-    persistSession: false,
+    persistSession: native,
+    ...(native && start.resume ? { resume: start.resume } : {}),
     settingSources: [],
     extraArgs: { settings: JSON.stringify({fastMode:false}) },
     strictMcpConfig: true,
@@ -431,9 +457,13 @@ try {
     includePartialMessages: true,
     permissionMode: "dontAsk",
     additionalDirectories: [],
-    hooks: { PreToolUse: [{ matcher: ".*", hooks: [managedToolHook(allowedTools)] }] },
+    hooks: { PreToolUse: [{ matcher: ".*", hooks: [async input => grantCurrent() ? managedToolHook(allowedTools)(input) : {
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Coordinator grant expired" }
+    }] }] },
     allowedTools,
     tools: [],
+    ...(native ? { canUseTool: async (name, input) => grantCurrent() && allowedTools.includes(name)
+      ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "Only current coordinator-bound tools are available" } } : {}),
     ...(verification ? { maxTurns: 1, canUseTool: async () => ({ behavior: "deny", message: "Verification has no tools" }) } : {}),
     systemPrompt: { type: "preset", preset: "claude_code", ...(start.rules ? { append: start.rules } : {}) },
     ...(!verification && Number.isSafeInteger(start.max_turns) && start.max_turns > 0 ? { maxTurns: start.max_turns } : {}),
@@ -444,10 +474,18 @@ try {
     options: queryOptions
   });
   if (!queryHandle || typeof queryHandle.streamInput !== "function" ||
-      (requiresInterrupt && typeof queryHandle.interrupt !== "function") || typeof queryHandle.close !== "function" ||
+      ((native || requiresInterrupt) && typeof queryHandle.interrupt !== "function") || typeof queryHandle.close !== "function" ||
       typeof queryHandle[Symbol.asyncIterator] !== "function") throw new Error("query capabilities");
   controlInput = new ControlStream();
   queryHandle.streamInput(controlInput).catch(() => { controlInput.abort(new Error("stream input failed")); });
+  if (native) {
+    grantTimer = setTimeout(() => {
+      stopping = true;
+      controlInput.close(); input.close(); queryHandle.close(); lines.close();
+      emit({ kind: "budget_exhausted", reason: "native_grant_expired" });
+    }, Math.max(1, grantExpiry - Date.now()));
+    grantTimer.unref?.();
+  }
 } catch {
   fail("app_server_protocol", "", "sdk_query_capability_missing");
   process.exit(1);
@@ -518,6 +556,10 @@ const handleControlLine = (line) => {
     let fatal = false;
     let failureReason = "control_failed";
     try {
+      if (native && (!grantCurrent() || !["inbox", "interrupt", "stop"].includes(request.op)) && request.op !== "stop") {
+        fail("app_server_protocol", correlationID, "native_control_forbidden");
+        return;
+      }
       if ((start.purpose === "pairing_verification" || start.read_only_review === true) && request.op !== "stop") {
         fail("app_server_protocol", correlationID, "verification_control_forbidden");
         return;
@@ -617,7 +659,7 @@ const handleControlLine = (line) => {
         }
         emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "interrupt") {
-        if (!interruptReceipt) {
+        if (!interruptReceipt && !native) {
           fail("app_server_protocol", correlationID);
           return;
         }
@@ -626,11 +668,11 @@ const handleControlLine = (line) => {
           return;
         }
         const receipt = await queryHandle.interrupt();
-        if (!receipt || !Array.isArray(receipt.still_queued)) {
+        if (!native && (!receipt || !Array.isArray(receipt.still_queued))) {
           fatal = true;
           throw new Error("receipt");
         }
-        if (!turnActive) {
+        if (!turnActive && !native) {
           fail("app_server_protocol", correlationID, "not_running");
           return;
         }
@@ -640,7 +682,7 @@ const handleControlLine = (line) => {
         stopping = true;
         controlInput.close();
         input.close();
-        queryHandle.close();
+        await queryHandle.close();
         emit({ kind: "control_applied", correlation_id: correlationID });
         lines.close();
       } else {
@@ -664,7 +706,8 @@ for (const buffered of bufferedLines.splice(0)) handleControlLine(buffered);
 try {
   for await (const message of queryHandle) {
     if (message?.type === "system" && message.subtype === "init") {
-      if (!validID(message.session_id) || !Array.isArray(message.capabilities) ||
+      if (!validID(message.session_id) || (!native && !Array.isArray(message.capabilities)) ||
+          (native && (!UUID.test(message.session_id) || start.resume && message.session_id !== start.resume)) ||
           (requiresInterrupt && !message.capabilities.includes("interrupt_receipt_v1"))) {
         fail("app_server_protocol", "", "interrupt_receipt_v1_missing");
         queryHandle.close();
@@ -678,7 +721,7 @@ try {
       }
       const initModel = initModelMissing ? "" : message.model;
       const initModelEvidenceStatus = initModelMissing ? "unverified" : "vendor_reported";
-      interruptReceipt = message.capabilities.includes("interrupt_receipt_v1");
+      interruptReceipt = message.capabilities?.includes("interrupt_receipt_v1") === true;
       if (!sessionStarted) {
         sessionStarted = true;
         sessionID = message.session_id;
@@ -695,11 +738,16 @@ try {
         queryHandle.close();
         break;
       }
-      if (!initialTurnStarted) {
+      if (!initialTurnStarted && !native) {
         initialTurnStarted = true;
         turnActive = true;
         emit({ kind: "turn_started" });
       }
+    }
+    if (native && sessionStarted && message?.session_id && message.session_id !== sessionID && !message.parent_tool_use_id) {
+      fail("app_server_protocol", "", "native_session_mismatch");
+      queryHandle.close();
+      break;
     }
     observeCapacity(message);
     observeTurnActivity(message);
@@ -707,6 +755,11 @@ try {
     observeTool(message);
     observeChat(message);
     if (message?.type === "result") {
+      if (native && (!activeInputUUID || message.user_message_uuid !== activeInputUUID)) {
+        fail("app_server_protocol", "", "native_turn_correlation_missing");
+        queryHandle.close();
+        break;
+      }
       turnActive = false;
       observeChatFinal(message);
       finishCapacity();
@@ -722,7 +775,7 @@ try {
         emit({ kind: "turn_completed" });
         break;
       }
-      emit({ kind: "turn_completed" });
+      emit({ kind: "turn_completed", ...(native ? { correlation_id: activeCorrelationID } : {}) });
       if (start.purpose === "pairing_verification" || start.read_only_review === true) {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
         if (start.read_only_review === true && verificationSucceeded) {
@@ -738,6 +791,7 @@ try {
     }
   }
   queryEndedResolve();
+  clearTimeout(grantTimer);
   lines.close();
   controlInput.close();
   input.close();
@@ -749,6 +803,7 @@ try {
   }
 } catch {
   queryEndedResolve();
+  clearTimeout(grantTimer);
   lines.close();
   controlInput?.close();
   input?.close();

@@ -79,6 +79,7 @@ type ChatRelayAPI interface {
 }
 
 type ChatRelayOptions struct {
+	RequireInputCorrelation bool // Native receipts must name the exact SDK-reacted input.
 	// Deliver writes one person input to the owned harness; nil disables input.
 	// It calls writing once the harness write begins, after any wait behind
 	// other input: turn markers before that belong to other work.
@@ -166,7 +167,7 @@ func (r *ChatRelay) Observe(ev ChatSessionEvent) {
 	u := ev.Update
 	if u.SessionUpdate == "state" {
 		r.state = u.State
-		if in := r.input; in != nil && in.armed {
+		if in := r.input; in != nil && in.armed && (!r.opts.RequireInputCorrelation || ev.InputID == in.id) {
 			switch {
 			case in.started == 0 && u.State == "running" && ev.Sequence > in.after:
 				// The harness started a turn after agentd wrote the input.
