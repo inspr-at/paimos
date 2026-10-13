@@ -83,7 +83,7 @@ rows in this PR; this is a merge prerequisite, not work deferred to I2.
 | Table | Personal columns | Metadata columns |
 | --- | --- | --- |
 | `native_session_intents` | `owner_person_id`, `actor_principal_id`, `actor_authority`, `created_at`, `claim_expires_at` | `tenant_id`, `id`, `request_id`, `owned_session_id`, `project_id`, `actor_kind`, `actor_key_id`, `actor_key_ceiling`, `actor_grant_id`, `actor_grant_revision`, `request_digest`, `intent`, `policy`, `launch_config`, `claim_request_id`, `claim_digest` |
-| `native_session_bindings` | `owner_person_id`, `actor_principal_id`, `view`, `terminal_viewer_url`, `created_at` | `tenant_id`, `id`, `project_id`, `role`, `harness`, `account_id`, `computer_id`, `paired_principal_id`, `workspace_id`, `model_profile_id`, `work_id`, `parent_harness_session_id`, `policy_id`, `run_id`, `current_harness_session_id`, `runtime_epoch`, `daemon_id`, `daemon_generation`, `ledger_generation`, `binding_revision` |
+| `native_session_bindings` | `owner_person_id`, `actor_principal_id`, `paired_principal_id`, `view`, `terminal_viewer_url`, `created_at` | `tenant_id`, `id`, `project_id`, `role`, `harness`, `account_id`, `computer_id`, `workspace_id`, `model_profile_id`, `work_id`, `parent_harness_session_id`, `policy_id`, `run_id`, `current_harness_session_id`, `runtime_epoch`, `daemon_id`, `daemon_generation`, `ledger_generation`, `binding_revision` |
 | `native_session_roots` | `owner_person_id`, `created_at`, `released_at` | `tenant_id`, `id`, `owned_session_id`, `project_id`, `account_id`, `computer_id`, `run_id`, `runtime_epoch`, `hold_state` |
 
 The named risk is retaining the old registration principal or treating a queued

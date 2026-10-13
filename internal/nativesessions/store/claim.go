@@ -65,6 +65,9 @@ func loadPending(ctx context.Context, tx pgx.Tx, operation string, lock bool) (p
 
 func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in nativecontract.Claim) (nativecontract.ClaimResult, error) {
 	var out nativecontract.ClaimResult
+	if len(in.RequestID) > 36 || len(in.OperationID) > 36 || len(in.DaemonID) > 128 || len(in.DaemonGeneration) > 128 || len(in.LedgerGeneration) > 128 || len(in.CapabilityDigest) > 64 || len(in.ClaimKind) > 32 {
+		return out, fail(413, nativecontract.ReasonBufferFull)
+	}
 	if err := s.validate("NativeClaim", in); err != nil {
 		return out, err
 	}

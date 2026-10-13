@@ -96,6 +96,9 @@ func (s *Store) authorize(ctx context.Context, tx pgx.Tx, actor nativecontract.A
 
 func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent nativecontract.StartIntent) (nativecontract.OperationResult, error) {
 	var out nativecontract.OperationResult
+	if !startBounds(intent) {
+		return out, fail(413, nativecontract.ReasonBufferFull)
+	}
 	if err := s.validate("NativeStartIntent", intent); err != nil {
 		return out, err
 	}
@@ -198,6 +201,20 @@ func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent na
 		return nativecontract.OperationResult{}, err
 	}
 	return out, nil
+}
+
+func startBounds(in nativecontract.StartIntent) bool {
+	for _, v := range []string{in.RequestID, in.ComputerID, in.AccountID, in.ModelProfileID, in.PolicyID} {
+		if len(v) > 36 {
+			return false
+		}
+	}
+	for _, v := range []*string{in.WorkID, in.ParentHarnessSessionID, in.ResumeFromOwnedSessionID} {
+		if v != nil && len(*v) > 36 {
+			return false
+		}
+	}
+	return len(in.WorkspaceID) <= 128 && len(in.Role) <= 32 && len(in.Profile) <= 32 && len(in.Harness) <= 32
 }
 
 func targetStart(ctx context.Context, tx pgx.Tx, project string, intent nativecontract.StartIntent, checkRevision bool) error {

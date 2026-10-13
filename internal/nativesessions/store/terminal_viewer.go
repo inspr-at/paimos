@@ -80,6 +80,9 @@ func (h ViewerHosts) Validate(raw string) error {
 		return invalid()
 	}
 	host := strings.ToLower(u.Hostname())
+	if strings.HasSuffix(u.Host, ":") {
+		return invalid()
+	}
 	if !validHost(host) || u.RawPath != "" || u.EscapedPath() != u.Path || !zellijPath.MatchString(u.Path) || u.Path == "/." || u.Path == "/.." {
 		return invalid()
 	}

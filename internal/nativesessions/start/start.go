@@ -7,6 +7,8 @@ package start
 
 import (
 	"context"
+	"encoding/hex"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -92,7 +94,7 @@ func (s Starter) Start(ctx context.Context, actor nativecontract.DaemonActor, cl
 	if err != nil {
 		return nil, err
 	}
-	if !filepath.IsAbs(profile.AccountHome) || !filepath.IsAbs(profile.UserHome) || !filepath.IsAbs(profile.ConversationRoot) || profile.Binary.Path == "" || profile.Binary.SHA256 == "" {
+	if !filepath.IsAbs(profile.AccountHome) || !filepath.IsAbs(profile.UserHome) || !filepath.IsAbs(profile.ConversationRoot) || !filepath.IsAbs(profile.Binary.Path) || len(profile.Binary.Path) > 4096 || !pinDigest(profile.Binary.SHA256) {
 		return nil, refusal(nativecontract.ReasonPinInvalid)
 	}
 	if !s.Now().Before(deadline) {
@@ -114,9 +116,21 @@ func physicalCwd(root, cwd string) (string, error) {
 	if err != nil {
 		return "", refusal(nativecontract.ReasonInvalidInput)
 	}
+	info, err := os.Stat(physical)
+	if err != nil || !info.IsDir() {
+		return "", refusal(nativecontract.ReasonInvalidInput)
+	}
 	rel, err := filepath.Rel(physicalRoot, physical)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", refusal(nativecontract.ReasonPermissionRevoked)
 	}
 	return physical, nil
+}
+
+func pinDigest(digest string) bool {
+	if len(digest) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
 }
