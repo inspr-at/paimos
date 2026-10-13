@@ -233,9 +233,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await page.evaluate(() => document.fonts.ready)
         if (name === 'ticket full page') {
           const ticket = page.getByRole('article', { name: 'Ticket details' })
-          const feedback = ticket.locator('.placement-feedback dd:visible')
+          // The tablet layout can show both property lists. Measure and read
+          // each list's feedback and selectors together, never across copies.
+          const feedbacks = await ticket.locator('.placement-feedback dd:visible').all()
+          expect(feedbacks.length).toBeGreaterThan(0)
+          for (const feedback of feedbacks) {
           await expect(feedback).toContainText('Kind of work is unavailable.')
-          const controls = { feedback, kind: ticket.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity: ticket.getByRole('combobox', { name: 'Complexity', exact: true }) }
+          const properties = feedback.locator('xpath=ancestor::dl[1]')
+          const controls = { feedback, kind: properties.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity: properties.getByRole('combobox', { name: 'Complexity', exact: true }) }
           await expectStableControls({
             controls,
             interactions: [
@@ -249,6 +254,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
             ],
             scrollAreas: { feedback },
           })
+          }
         }
         // The version coordinate (and the footer's calendar version) is the vendored INSPR calendar-version display (pinned presentation);
         // its digit colours are reported to its owner rather than restyled here.
