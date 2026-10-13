@@ -1646,11 +1646,15 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 		}
 		last.Result = heartbeatLeadFailure(err)
 		if heartbeatStatus(err) != http.StatusConflict || adoption.Refreshed {
+			if heartbeatStatus(err) == http.StatusConflict {
+				last.Result = "Claim conflicted again; reload and confirm this session."
+			}
 			note(last.Result)
 			return
 		}
 		adoption.Refreshed = true
-		note("Lead changed; retrying once with the same confirmed session.")
+		last.Result = "Claim conflicted; checking the same confirmed session."
+		note(last.Result)
 		fresh, readErr := read()
 		if readErr != nil {
 			note(heartbeatLeadFailure(readErr))
@@ -1669,6 +1673,7 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 			note("Session ineligible; check owner, reporting and pause/stop.")
 			return
 		}
+		note("Lead changed; retrying once with the same confirmed session.")
 		lead = fresh
 	}
 }
@@ -1714,7 +1719,7 @@ func heartbeatLeadFailure(err error) string {
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return "Adoption unavailable; upgrade or claim from saved state."
 	case http.StatusConflict:
-		return "Lead changed twice; reload and confirm this session again."
+		return "Claim conflicted; reload and confirm this session again."
 	default:
 		return "Adoption unverified; check lead card and claim from state."
 	}

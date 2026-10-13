@@ -61,7 +61,7 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 		{name: "legacy source mismatch", note: "Reference mismatch"},
 		{name: "missing registered reference", note: "Reference mismatch"},
 		{name: "revision race", claims: 2, claimed: true, refreshed: true},
-		{name: "second revision race", claims: 2, refreshed: true, note: "Lead changed twice"},
+		{name: "second revision race", claims: 2, refreshed: true, note: "Claim conflicted again"},
 		{name: "cancel during claim", claims: 1, refreshed: true, note: "Waiting for a person"},
 		{name: "reselect during claim", claims: 1, refreshed: true, note: "Lead selection changed"},
 		{name: "eligibility conflict", claims: 1, refreshed: true, note: "Session ineligible"},
