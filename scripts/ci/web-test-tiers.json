@@ -976,6 +976,8 @@
     ,
     "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build"
     ,
+    "browser:tests/project-delivery-settings.spec.ts:AEON-1253: repository shows the history source without moving its controls"
+    ,
     "browser:tests/project-header.spec.ts:delayed assignee labels stay frozen until the filter popover closes"
     ,
     "browser:tests/project-header.spec.ts:delayed epic labels stay frozen until the filter popover closes"
@@ -11177,6 +11179,8 @@
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: repository states stay put and delivery edits preserve authority, inheritance and identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1253: repository shows the history source without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
