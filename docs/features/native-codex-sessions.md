@@ -559,3 +559,25 @@ preserves every other row and all manifest metadata. This negative control
 isolates the registration failure; guarded strict native collection remains
 the required validation. Provider behavior and test assertions are unchanged,
 so this metadata correction needs no new behavior test.
+
+The existing Codex package passes through the guarded remote runner at
+`1c97537cd` with `-count=1 -v` (0.220 s). The provider and fixture are identical
+at fix commit `04b2f2fa2`. Manifest-only PR essential and full selections at
+that fix commit both include all three named Codex tests. The official offline
+affected planner exits 0 and selects `FULL` because manifest promotion evidence
+is unavailable; that mode intentionally omits narrowed case lists. This is not
+evidence that the broader selected suites ran. Public-name validation passes.
+
+Guarded remote static validation at `04b2f2fa2` completes
+`node scripts/ci-static.mjs --merge-main` with exit 0: 42 checks pass and none
+are skipped. Strict native Go-tier collection accepts the registrations.
+The required tier-toolkit, web-shard and audit self-checks pass, as do Go vet,
+web typecheck/lint and strict web tiers. Three earlier attempts refuse the
+remote slot cap with exit 3; the completed run supersedes those incomplete
+attempts. Authoritative PR CI remains required after the coordinator pushes.
+
+Fetched main `f571b7765` is already merged and PR #617 is mergeable. No
+web/browser source changes apply to P5a; web unit and browser suite reruns
+remain with authoritative CI. The trusted cross-family verdict remains
+coordinator-owned. No origin push, deployment, live vendor session, model CLI
+or review gate was run.
