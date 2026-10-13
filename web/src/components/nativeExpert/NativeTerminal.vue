@@ -46,6 +46,7 @@ const ownerKey = computed(() => `${props.viewer.tenantId}/${props.viewer.princip
 const scopeKey = computed(() => JSON.stringify([ownerKey.value, props.viewer.kind, props.viewer.canRead, props.viewer.canWatch,
   props.session.owned_session_id, props.session.owner_person_id, bindingKey(props.session.current_binding), props.session.generation,
   props.session.mode, props.session.state, props.session.capabilities.terminal_view, props.session.capabilities.qualification_digest,
+  props.session.controller?.controller_id, props.session.controller?.epoch,
   props.consent?.id, props.consent?.ownerPersonId, props.consent?.active, bindingKey(props.consent?.binding ?? null)]))
 const available = computed(() => !!request.value && props.active && !hidden.value && !!props.rendererFactory && !blocked.value)
 const control = computed(() => readable.value && props.control && props.session.controller &&

@@ -22,7 +22,7 @@ const terminal = (seq: number, text: string, reset = false, epoch = 'terminal-a'
 /** Test-only headless parser double. Query side effects are traps, not stubs
  * that silently accept everything. The actual export filter, cell painter,
  * lifecycle and size observer run unchanged. I2 qualifies @xterm/headless. */
-async function setup(page: Page, options: { holder?: boolean; fontsHeld?: boolean; source?: 'web' | 'cli'; theme?: string; full?: boolean } = {}) {
+async function setup(page: Page, options: { holder?: boolean; fontsHeld?: boolean; source?: 'web' | 'cli'; theme?: string; full?: boolean; direct?: boolean } = {}) {
   const response = await page.request.get('/src/components/nativeExpert/NativeTerminal.vue')
   expect(response.ok()).toBe(true)
   const vue = (await response.text()).match(/from\s*["']([^"']*\/vue\.js[^"']*)["']/)?.[1]
@@ -49,7 +49,7 @@ async function setup(page: Page, options: { holder?: boolean; fontsHeld?: boolea
     import {viewerGeometry} from '/src/lib/nativeTerminal/geometry.ts';
     import {isHolderTerminalTarget} from '/src/lib/nativeTerminal/ports.ts';
     import {setPreferenceOwner} from '/src/lib/preferences.ts';
-    const state=reactive(${JSON.stringify(initial)}), streams=[], writes=[], subscriptions=[], outbound=[], parsers=[], pending=[], measurements=[], actions=[], node=shallowRef(null), pane=shallowRef('terminal');
+    const state=reactive(${JSON.stringify(initial)}), streams=[], writes=[], subscriptions=[], outbound=[], parsers=[], pending=[], measurements=[], actions=[], node=shallowRef(null), pane=shallowRef(${JSON.stringify(options.direct ? 'direct' : 'terminal')});
     let held=false, fontsResolve, now=0, nextId=0, jobs=new Map(), controlHost=null;
     const clock={setTimeout(fn,ms){const id=++nextId;jobs.set(id,{fn,at:now+ms});return id},clearTimeout(id){jobs.delete(id)}};
     function advance(ms){now+=ms;for(;;){const ready=[...jobs].filter(([,job])=>job.at<=now);if(!ready.length)break;for(const[id,job]of ready){jobs.delete(id);job.fn()}}}
@@ -78,7 +78,7 @@ async function setup(page: Page, options: { holder?: boolean; fontsHeld?: boolea
     };
     createApp({setup(){return()=>h('div',{class:'fixture-frame'},[
       h('header',{class:['fixture-head',innerWidth<=600?'phone':'',state.headerControl?'control-head':'']},[h('span',{class:'fixture-title',title:'Koordinator für die vollständige Freigabeprüfung'},'AEON-1289 · Koordinator für die vollständige Freigabeprüfung'),h('span',{class:'fixture-menu'},'Details · Chat · Events · Terminal'),h('div',{id:'header-control'})]),
-      h(pane.value==='events'?SessionEvents:SessionTerminal,{...state,transport:expertTransport,name:'AEON-1289',host:state.host}, {terminal:slot=>h(NativeTerminal,{...state,...slot,modelName:state.modelName,active:state.active,controlTarget:state.headerControl?controlHost:null,transport,rendererFactory,clock,ref:node,onMeasure:m=>measurements.push(m),onAction:a=>actions.push(a)})}),
+      pane.value==='direct'?h(NativeTerminal,{...state,transport,rendererFactory,clock,ref:node,onMeasure:m=>measurements.push(m),onAction:a=>actions.push(a)}):h(pane.value==='events'?SessionEvents:SessionTerminal,{...state,transport:expertTransport,name:'AEON-1289',host:state.host}, {terminal:slot=>h(NativeTerminal,{...state,...slot,modelName:state.modelName,active:state.active,controlTarget:state.headerControl?controlHost:null,transport,rendererFactory,clock,ref:node,onMeasure:m=>measurements.push(m),onAction:a=>actions.push(a)})}),
     ])}}).mount('#app');
   </script></body></html>` }))
   await page.goto('/tests/native-terminal-inline.html')
@@ -93,6 +93,7 @@ async function restart(page: Page, count: number) { await act(page, 'await f.res
 
 test('AEON-1289 untrusted terminal escapes, queries and bounded backpressure have no outbound side effects', async ({ page }) => {
   const errors = await setup(page)
+  const initialTitle = await page.title()
   const requests: string[] = []
   page.on('request', req => { if (/terminal\/(input|resize)|control\/(take|end)|\/take$|\/return$/.test(req.url())) requests.push(req.url()) })
   await send(page, terminal(1, 'safe-prefix\r\n', true))
@@ -107,7 +108,7 @@ test('AEON-1289 untrusted terminal escapes, queries and bounded backpressure hav
   await expect(grid(page)).toContainText('<img src=x onerror=alert(1)>')
   await expect(page.locator('.terminal-grid img, .terminal-grid a, .terminal-grid iframe, .terminal-grid textarea, .terminal-grid input')).toHaveCount(0)
   await expect(page.locator('.terminal-notice')).toContainText('Unsafe terminal controls were omitted')
-  expect(await page.title()).toBe('Terminal fixture')
+  expect(await page.title()).toBe(initialTitle)
   await grid(page).focus(); await page.keyboard.type('typing-is-not-input'); await page.keyboard.press('Escape'); await page.keyboard.press('Control+v')
   await grid(page).evaluate(el => { const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'not-input'); el.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, clipboardData })) })
   expect(await page.evaluate(() => { const f=(window as any).nativeTerminal;return [f.outbound,f.subscriptions,f.measurements] })).toEqual([[], [], []])
@@ -136,7 +137,7 @@ test('AEON-1289 untrusted terminal escapes, queries and bounded backpressure hav
 })
 
 test('AEON-1289 terminal capture and actions stay fenced through identity, epoch, consent and reconnect gaps', async ({ page }) => {
-  const errors = await setup(page)
+  const errors = await setup(page, { direct: true })
   await send(page, terminal(1, 'private-old-screen', true))
   await expect(grid(page)).toContainText('private-old-screen')
   await act(page, 'f.hold(true);')
@@ -280,9 +281,10 @@ test('AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel s
       guard.done()
       await page.screenshot({ path: testInfo.outputPath(`AEON-1289/lease-risk-${theme}-${width}.png`) })
       await act(page, 'f.state.control.atRisk=false;f.state.actionLabels=["Übernahme der Sitzung bestätigen","Steuerung zurückgeben","Steuerung für diese Sitzung beenden…","Abbrechen"];f.state.action.label="Steuerung zurückgeben";await f.nextTick();')
-      const longAction = page.getByRole('button', { name: 'Steuerung zurückgeben', exact: true })
+      const longAction = page.locator('.terminal-action')
+      await expect(longAction).toHaveAccessibleName('Steuerung zurückgeben')
       const labels = await controlStability(page, { action: longAction, box: page.locator('.terminal-box') })
-      await labels.check(async () => { await act(page, 'f.state.action.label="Übernahme der Sitzung bestätigen";await f.nextTick();') })
+      await labels.check(async () => { await act(page, 'f.state.action.label="Übernahme der Sitzung bestätigen";await f.nextTick();'); await expect(longAction).toHaveAccessibleName('Übernahme der Sitzung bestätigen') })
       labels.done()
       await page.screenshot({ path: testInfo.outputPath(`AEON-1289/long-labels-${theme}-${width}.png`) })
       if (width === 390) {
