@@ -160,6 +160,12 @@ test('AEON-1270 bounded replay, cursor failures and gaps never masquerade as com
   await page.getByRole('button', { name: 'Load earlier', exact: true }).click()
   await expect(page.locator('.notice').last()).toContainText('earlier page was rejected')
   expect(Math.abs((await oldest.boundingBox())!.y - y)).toBeLessThanOrEqual(.5)
+  await page.evaluate(page => (window as any).nativeExpert.page(page), replay([frame(17)], '17'))
+  await page.getByRole('button', { name: 'Load earlier', exact: true }).click()
+  // A full buffer cannot sacrifice its live end to retain a requested older page.
+  await expect(page.locator('[data-event-row="event:1:524"]')).toHaveCount(1)
+  await expect(page.locator('[data-event-row="event:1:17"]')).toHaveCount(0)
+  await expect(page.locator('[data-event-row]')).toHaveCount(500)
   await send(page, frame(525, 'gap', { reason: 'cursor_expired', dropped_frames: '12', reload_snapshot: true }))
   await expect(page.locator('.notice').last()).toContainText('cursor_expired · 12 frames unavailable')
   expect(await page.evaluate(() => (window as any).nativeExpert.streams[0].signal.aborted)).toBe(true)

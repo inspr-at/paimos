@@ -89,7 +89,7 @@ export class ExpertBuffer {
   evicted = 0
   private sizes = new Map<string, number>()
   clear() { this.events = []; this.bytes = 0; this.evicted = 0; this.sizes.clear() }
-  add(events: NativeStreamEvent[], earlier = false) {
+  add(events: NativeStreamEvent[]) {
     for (const event of events) {
       if (this.sizes.has(event.seq)) continue
       const size = encoder.encode(JSON.stringify(event)).length
@@ -98,7 +98,7 @@ export class ExpertBuffer {
     this.events.sort((a, b) => BigInt(a.seq) < BigInt(b.seq) ? -1 : BigInt(a.seq) > BigInt(b.seq) ? 1 : 0)
     // An earlier page may not evict the live end. Live arrivals evict the oldest.
     while (this.events.length > bounds.event_page_items || this.bytes > bounds.browser_tail_bytes) {
-      const event = earlier ? this.events.pop()! : this.events.shift()!
+      const event = this.events.shift()!
       this.bytes -= this.sizes.get(event.seq)!; this.sizes.delete(event.seq); this.evicted++
     }
   }

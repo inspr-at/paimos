@@ -126,7 +126,7 @@ async function earlier() {
     if (!current()) return
     const accepted = boundedPage(page, bound, cursor)
     if (accepted === null) { notice.value = 'The earlier page was rejected. Its cursor, generation, binding, ordering or bounds did not match this view.'; return }
-    following.value = false; buffer.add(accepted, true); publish(); before.value = page.next_before
+    following.value = false; buffer.add(accepted); publish(); before.value = page.next_before
     if (page.truncated) notice.value = 'Earlier live frames are unavailable. This replay is incomplete.'
   } catch (error) { if (current()) { if (revoked(error)) accessLost(); else notice.value = errorText(error) } }
   finally { if (epoch === turn) loading.value = false }
