@@ -115,6 +115,7 @@
         "internal/agentd/**",
         "internal/nativecontract/**",
         "internal/nativesessions/**",
+        "internal/native*/**",
         "internal/agentd/routine_budget.go",
         "internal/agentd/routine_budget_test.go",
         "internal/agentsetup/**",
