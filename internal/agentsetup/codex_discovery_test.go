@@ -3,12 +3,105 @@
 package agentsetup
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
+
+// Risk: the guard's successful version/login responses used to bypass Node
+// discovery, leaving account/read with ServicePath and no candidate Node.
+func TestCodexIdentityRetryUsesCandidateNode(t *testing.T) {
+	d, launcher, _, next := codexUpgradeFixture(t)
+	var probes []string
+	d.CodexProbe = func(_ context.Context, path, home, node, dir string) (string, error) {
+		if path != launcher || home != filepath.Join(d.Home, ".codex") || dir == "" {
+			t.Fatal("probe escaped its candidate launcher, home or working directory")
+		}
+		probes = append(probes, node)
+		if node == "" {
+			return "", harnesslaunch.ErrStart
+		}
+		if node != next.Path {
+			t.Fatal("identity probe used a saved or unrelated interpreter")
+		}
+		return "agent@example.test", nil
+	}
+	c, err := d.Detect(t.Context(), "codex", "agent@example.test")
+	if err != nil || c.Node != next || len(probes) != 2 || probes[0] != "" || probes[1] != next.Path {
+		t.Fatalf("candidate Node retry failed: %v, probes=%v", err, probes)
+	}
+}
+
+func TestCodexIdentityFailuresExposeOnlyAllowlistedCauses(t *testing.T) {
+	private := errors.New("/private/fixture agent@example.test synthetic-token")
+	for _, tc := range []struct {
+		cause error
+		code  string
+	}{
+		{errors.Join(context.DeadlineExceeded, private), "identity_timeout"},
+		{errors.Join(context.Canceled, private), "identity_canceled"},
+		{errors.Join(ownedprocess.ErrCleanupUnconfirmed, private), "identity_cleanup_unconfirmed"},
+		{errors.Join(harnesslaunch.ErrStart, private), "identity_interpreter_invalid"},
+		{identityFailure("identity_response_invalid", private), "identity_response_invalid"},
+		{identityFailure("identity_start_failed", private), "identity_start_failed"},
+		{identityFailure("identity_rpc_failed", private), "identity_rpc_failed"},
+		{private, "identity_probe_failed"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			d, _, _, next := codexUpgradeFixture(t)
+			d.NodePath = next.Path
+			d.CodexProbe = func(context.Context, string, string, string, string) (string, error) {
+				return "", tc.cause
+			}
+			_, err := d.Detect(t.Context(), "codex", "")
+			if err == nil || HarnessFailureReason(err) != "probe_failed" || !strings.Contains(err.Error(), tc.code) {
+				t.Fatal("underlying identity failure swallowed", err)
+			}
+			for _, secret := range []string{"/private/", "agent@example.test", "synthetic-token"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatal("private identity diagnostic escaped")
+				}
+			}
+			if !errors.Is(err, tc.cause) {
+				t.Fatal("underlying diagnostic was not retained locally")
+			}
+		})
+	}
+}
+
+func TestCodexIdentityClosesInputBeforeOwnedCleanup(t *testing.T) {
+	// A fake ownership waiter makes forced-cleanup failure deterministic.
+	// The legacy cancel-first sequence is the negative control; no sleeps,
+	// process signals, vendor executable or real account are involved.
+	ctx, cancel := context.WithCancel(t.Context())
+	closed := false
+	wait := func() error {
+		if ctx.Err() != nil || !closed {
+			return ownedprocess.ErrCleanupUnconfirmed
+		}
+		return nil
+	}
+	cancel()
+	if !errors.Is(wait(), ownedprocess.ErrCleanupUnconfirmed) {
+		t.Fatal("negative control did not reproduce the discarded identity")
+	}
+	ctx, cancel = context.WithCancel(t.Context())
+	if err := finishCodexIdentity(ctx, cancel, func() error { closed = true; return nil }, wait); err != nil || ctx.Err() != context.Canceled {
+		t.Fatal("complete identity was forced into teardown before stdin EOF", err)
+	}
+	// Confirmed output never overrides an unconfirmed group cleanup.
+	ctx, cancel = context.WithCancel(t.Context())
+	if err := finishCodexIdentity(ctx, cancel, func() error { return nil }, func() error { return ownedprocess.ErrCleanupUnconfirmed }); !errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
+		t.Fatal("cleanup ownership fence was weakened")
+	}
+}
 
 func TestCodexDiscoveryStderrAndOptionalEmail(t *testing.T) {
 	for _, tc := range []struct {

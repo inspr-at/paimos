@@ -47,6 +47,7 @@ func HarnessFailureReason(err error) string {
 //	profile_permissions  the pi profile directory is not private
 //	pairing_sync_failed  pairing reconciliation or runtime refresh prevented polling
 //	unsettled_previous_run prior-generation accounting needs server confirmation
+//	interpreter_pin_renewed verified local renewal awaits the daemon's fresh probe; no fix
 //
 // The pin_* codes come from the static check before launch; dependency_invalid
 // is the runtime failure of the same dependencies. For Claude the pins are the
@@ -70,6 +71,7 @@ const (
 	PinDrifted    = "pin_drifted"
 	PinInvalid    = "pin_invalid"
 	PinUnsafe     = "pin_unsafe"
+	PinRenewed    = "interpreter_pin_renewed"
 	FixAddHarness = "add_harness"
 	FixRepin      = "repin"
 	FixLogin      = "login"
@@ -77,7 +79,7 @@ const (
 )
 
 // HarnessReasons lists the known reason codes in the order documented above.
-var HarnessReasons = []string{"repin_pending", "dependency_invalid", PinMissing, PinPartial, PinDrifted, PinInvalid, PinUnsafe, "login_required", "starting", "harness_failed", "cli_unavailable", "profile_permissions", "binding_missing", "probe_pending", "probe_timeout", "probe_failed", "capacity_capture", "capacity_timeout", PairingSyncFailed, UnsettledPreviousRun}
+var HarnessReasons = []string{"repin_pending", "dependency_invalid", PinMissing, PinPartial, PinDrifted, PinInvalid, PinUnsafe, "login_required", "starting", "harness_failed", "cli_unavailable", "profile_permissions", "binding_missing", "probe_pending", "probe_timeout", "probe_failed", "capacity_capture", "capacity_timeout", PairingSyncFailed, UnsettledPreviousRun, PinRenewed}
 
 // HarnessFix is the one fix form for blocked_accounts and harness_details: a
 // kind and the exact CLI line. Commands are derived from the harness and reason
