@@ -267,9 +267,15 @@ func excludeWindowReservations(ctx context.Context, tx pgx.Tx, windows []Window,
 	if runID == "" {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT w.id::text,coalesce(w.capacity_kind,''),coalesce(w.capacity_bucket,''),w.starts_at,w.ends_at,r.reserved_units
- FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
- WHERE r.run_id=$1 AND r.state='active' ORDER BY w.id LIMIT 4097`, runID)
+	rows, err := tx.Query(ctx, `WITH holds AS (
+ SELECT tenant_id,window_id,reserved_units FROM account_reservations WHERE run_id=$1 AND state='active'
+ UNION ALL
+ SELECT r.tenant_id,h.window_id,h.reserved_units FROM native_session_roots r,
+ jsonb_to_recordset(r.budget_holds) AS h(window_id uuid,reserved_units bigint)
+ WHERE r.owned_session_id=$1 AND r.run_id IS NULL AND r.released_at IS NULL)
+ SELECT w.id::text,coalesce(w.capacity_kind,''),coalesce(w.capacity_bucket,''),w.starts_at,w.ends_at,h.reserved_units
+ FROM holds h JOIN account_allowance_windows w ON w.tenant_id=h.tenant_id AND w.id=h.window_id
+ ORDER BY w.id LIMIT 4097`, runID)
 	if err != nil {
 		return err
 	}
