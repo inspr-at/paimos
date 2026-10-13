@@ -225,6 +225,37 @@ func harnessPath(s HarnessSession) string {
 	return "/api/projects/" + url.PathEscape(s.ProjectID) + "/harness-sessions/" + url.PathEscape(s.ID)
 }
 
+// RegisterNativeCoordinator uses the existing managed root registration
+// contract. It supplies no leaf run, hook binding or daemon key to the child.
+// The start-intent owner must pin the returned generation in its actor grant
+// before launch; registration alone never grants native execution authority.
+func (r *Remote) RegisterNativeCoordinator(ctx context.Context, plan NativeLeadPlan) (HarnessSession, error) {
+	if err := plan.Spec.checkAuthority(ctx); err != nil {
+		return HarnessSession{}, err
+	}
+	s := plan.Session
+	if s.AttachedHook || s.ProjectID != plan.Spec.Grant.ProjectID || s.Harness != Claude || len(s.Lease) < 16 {
+		return HarnessSession{}, ErrScope
+	}
+	body := map[string]any{
+		"agent_principal_id": plan.Spec.Grant.PrincipalID,
+		"harness":            Claude, "host": plan.Host, "management_mode": "managed", "role": "coordinator", "work_shape": "ship",
+		"advertised_capabilities": []string{"inbox", "interrupt", "stop", "chat"},
+		"harness_session_ref":     s.ID, "worker_lease": s.Lease,
+		"model": plan.Spec.Model, "reasoning_effort": plan.Spec.Effort,
+		"max_session_file_bytes": rules.SessionFileLimit(Claude), "rules_client_version": version.Version,
+	}
+	var result HarnessSession
+	if err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(s.ProjectID)+"/harness-sessions", body, &result); err != nil {
+		return HarnessSession{}, err
+	}
+	if !uuidPattern.MatchString(result.ID) || result.ProjectID != s.ProjectID {
+		return HarnessSession{}, ErrScope
+	}
+	result.Lease, result.Harness = s.Lease, Claude
+	return result, nil
+}
+
 func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID, runID, orderID, harness, host string, caps []string) (HarnessSession, error) {
 	var result HarnessSession
 	body := map[string]any{
