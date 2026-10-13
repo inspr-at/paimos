@@ -139,7 +139,8 @@ for (const older of ['delivered', 'read'] as const) {
     await expect(panel.locator('.queue-item')).toContainText('New message waiting')
     await expect(panel.locator('.queue-item[data-status=sent]')).toHaveCount(1)
     await expect(panel.locator(`.delivery.${older}`)).toHaveCount(1)
-    await expect(panel.getByRole('status').filter({ hasText: "runs outside PAIMOS and is idle at its prompt." })).toHaveText("review-worker runs outside PAIMOS and is idle at its prompt. It sees your message when it takes its next step.")
+    // AEON-1254 / #602 puts the hook wait on the queued send itself.
+    await expect(panel.locator('.queue-item[data-status=sent]')).toContainText('At its next step')
   })
 }
 
@@ -185,7 +186,7 @@ test('a reload keeps the hook wait for the one send that is still pending', asyn
   })
   await page.goto(`/agents/${first.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  const notice = panel.getByRole('status').filter({ hasText: "runs outside PAIMOS and is idle at its prompt." })
+  const notice = panel.locator('.queue-item[data-status=sent]')
   for (const body of ['Failed send', 'Delivered send', 'Pending send']) {
     await panel.getByRole('textbox', { name: 'Message to review-worker' }).fill(body)
     await panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }).click()
@@ -195,12 +196,12 @@ test('a reload keeps the hook wait for the one send that is still pending', asyn
   await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
   await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
   await expect(panel.locator('.queue-item[data-status=sent]')).toHaveCount(1)
-  await expect(notice).toBeVisible()
+  await expect(notice).toContainText('At its next step')
   await page.reload()
   await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
   await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
   await expect(panel.locator('.queue-item[data-status=sent]')).toHaveCount(1)
-  await expect(notice).toBeVisible()
+  await expect(notice).toContainText('At its next step')
   deliverPending = true
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:agents-signal', { detail: 'inbox.message_fetched' })))
   await expect(panel.locator('.delivery.delivered')).toHaveCount(2)
@@ -269,7 +270,7 @@ for (const count of [100, 101, 200]) {
     })
     await page.goto(`/agents/${first.id}?tab=messages`)
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    const notice = panel.getByRole('status').filter({ hasText: "runs outside PAIMOS and is idle at its prompt." })
+    const notice = panel.locator('.queue-item[data-status=sent]')
     // AEON-976 loads 50 at a time. Retain the receipt bound proof as each
     // older page becomes visible instead of assuming the former eager load.
     for (let loaded = 50; loaded < count; loaded += 50) {

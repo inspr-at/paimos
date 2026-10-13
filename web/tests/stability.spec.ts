@@ -76,7 +76,8 @@ for (const width of [390, 1440]) {
       await base(page)
       await page.goto('/agents')
       await expect(page.locator('.agents-page [data-row^="s:"]').first()).toBeVisible()
-      await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
+      // AEON-569 / #458 and AEON-1209 / #586 route decisions to the Desk.
+      await expect(page.getByRole('link', { name: /Decision Desk/ }).first()).toBeVisible()
       await expectStill(page)
     })
 
@@ -94,7 +95,7 @@ for (const width of [390, 1440]) {
         await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
         release()
         await expect(page.locator('.session-panel .facts')).toBeVisible()
-        await expect(page.locator('.session-panel .pause-controls')).toBeVisible()
+        await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('group', { name: 'Session actions' })).toBeVisible()
         await expectStill(page)
         await page.screenshot({ path: test.info().outputPath(`session-loaded-${sampleWidth}-${theme}.png`) })
       }
@@ -144,5 +145,6 @@ test('the approval queue never says nothing waits before it knows', async ({ pag
   await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
   await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
   release()
-  await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
+  // AEON-569 / #458 and AEON-1209 / #586 route decisions to the Desk.
+      await expect(page.getByRole('link', { name: /Decision Desk/ }).first()).toBeVisible()
 })

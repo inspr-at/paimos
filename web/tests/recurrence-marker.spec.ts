@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// AEON-1233 / #583 moved project Routines into settings/routines.
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -192,7 +193,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = workspace(page).getByRole('link', { name: label, exact: true })
     await expect(pill).toBeVisible()
-    await expect(pill).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
+    await expect(pill).toHaveAttribute('href', `/p/PRJ-17/settings/routines?recurrence=${id}`)
     await page.screenshot({ path: join(shots, `ticket-${width}-${theme}.png`) })
     const more = workspace(page).getByRole('button', { name: 'More actions', exact: true })
     await expectStableControls({ controls: { 'header actions': more, 'copy key': workspace(page).getByRole('button', { name: 'Copy PHAROS-11', exact: true }), 'recurring pill': pill }, interactions: [{ name: 'focus pill', run: () => pill.focus() }, { name: 'open action menu', run: async () => { await more.click(); await expect(page.getByRole('menuitem', { name: /Repeat/ })).toBeVisible() } }, { name: 'close action menu', run: async () => { await page.keyboard.press('Escape'); await expect(page.getByRole('menuitem', { name: /Repeat/ })).toHaveCount(0) } }] })
@@ -206,7 +207,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expectStableControls({ controls: { 'help close': sheet.getByRole('button', { name: 'Close the status help' }) }, interactions: [{ name: 'focus sample marker', run: () => sheet.locator('tr.recurring .ticket-type-icon').focus() }], scrollAreas: { 'help body': sheet.locator('.sheet-card') } })
     await page.keyboard.press('Escape')
     await pill.click()
-    await expect(page).toHaveURL(new RegExp(`/p/PRJ-17/settings\\?recurrence=${id}$`))
+    await expect(page).toHaveURL(new RegExp(`/p/PRJ-17/settings/routines\\?recurrence=${id}$`))
     await expect(page.getByRole('heading', { name: 'Routines', exact: true })).toBeVisible()
     await expect(page.locator(`#recurrence-${id}`)).toContainText('Website audit')
     await page.screenshot({ path: join(shots, `settings-${width}-${theme}.png`) })
@@ -294,7 +295,7 @@ test('a linked source outside page one is selected directly and stays selected w
     if (path.endsWith('/preview')) return route.fulfill({ json: { times: [], trigger_kind: 'time' } })
     return route.fulfill({ status: 404, json: { error: 'not found' } })
   })
-  await page.goto(`/p/PHAROS/settings?recurrence=${id}`)
+  await page.goto(`/p/PHAROS/settings/routines?recurrence=${id}`)
   const history = page.getByRole('region', { name: 'Recurrence history' })
   await expect(history.getByRole('heading', { name: target.template.name, exact: true })).toBeVisible()
   expect(gets).toBe(1)
@@ -315,7 +316,7 @@ test('moved ticket provenance and source editing use the receipt source project 
   await page.goto('/p/AEON/AEON-99')
   const line = workspace(page).locator('.recurrence-provenance')
   await expect(line).toContainText('#4')
-  await expect(line.getByRole('link', { name: 'Website audit' })).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
+  await expect(line.getByRole('link', { name: 'Website audit' })).toHaveAttribute('href', `/p/PRJ-17/settings/routines?recurrence=${id}`)
   await workspace(page).getByRole('button', { name: 'More actions', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
   const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
@@ -365,7 +366,7 @@ test('withheld provenance closes an open source editor and clears its source-edi
 
 test('a source link for another project exposes the error without selecting a substitute', async ({ page }) => {
   const { errors } = await setup(page)
-  await page.goto(`/p/AEON/settings?recurrence=${id}`)
+  await page.goto(`/p/AEON/settings/routines?recurrence=${id}`)
   await expect(page.getByRole('alert')).toContainText('This routine belongs to another project.')
   await expect(page.getByRole('region', { name: 'Recurrence history' })).toHaveCount(0)
   expect(errors).toEqual([])
