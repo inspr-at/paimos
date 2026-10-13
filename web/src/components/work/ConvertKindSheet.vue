@@ -136,15 +136,21 @@ async function submit() {
 <template>
   <dialog ref="dialog" class="convert" aria-labelledby="convert-title" @cancel.prevent="close" @click="backdrop">
     <div class="convert-card">
-      <div class="convert-scroll">
+      <div class="convert-controls">
         <h2 id="convert-title">Convert {{ item.key }}</h2>
-        <p class="lead">{{ sentence }}</p>
         <div v-if="targets.length > 1" class="choices" role="radiogroup" aria-label="New kind" @keydown="moveChoice">
           <button v-for="slug in targets" :key="slug" type="button" class="choice" role="radio" :aria-checked="choice === slug" :tabindex="choice === slug ? 0 : -1" :class="{ on: choice === slug }" @click="pick(slug)">
             <AppIcon :name="glyph(slug)" :size="14" />
             <span>{{ kindLabel(slug) }}</span>
           </button>
         </div>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn" @click="close">Cancel</button>
+        <button ref="primary" type="button" class="btn on" :disabled="!canSubmit" @click="submit"><span class="btn-label"><span>{{ primaryLabel }}</span><span v-for="label in reservedLabels" :key="label" aria-hidden="true">{{ label }}</span></span></button>
+      </div>
+      <div class="convert-scroll" role="region" aria-label="Conversion details" tabindex="0">
+        <p class="lead">{{ sentence }}</p>
         <p v-if="waiting" class="note">Checking children…</p>
         <ul v-else-if="blockers.length" class="blockers" aria-label="Blocking children">
           <li v-for="child in blockers" :key="child.key"><span class="mono">{{ child.key }}</span> {{ child.title }}</li>
@@ -158,20 +164,18 @@ async function submit() {
           <li v-for="field in historyFields" :key="field">{{ field }}</li>
         </ul>
       </div>
-      <div class="actions">
-        <button type="button" class="btn" @click="close">Cancel</button>
-        <button ref="primary" type="button" class="btn on" :disabled="!canSubmit" @click="submit"><span class="btn-label"><span>{{ primaryLabel }}</span><span v-for="label in reservedLabels" :key="label" aria-hidden="true">{{ label }}</span></span></button>
-      </div>
     </div>
   </dialog>
 </template>
 
 <style scoped>
-.convert { display: flex; flex-direction: column; width: min(var(--dialog-m), calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
+.convert { --convert-top: min(8dvh, 80px); display: flex; flex-direction: column; width: min(var(--dialog-m), calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - var(--convert-top) - 16px); margin: var(--convert-top) auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
 .convert::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.convert-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 32px); overflow: hidden; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
-.convert-scroll { min-height: 0; overflow: auto; padding: 22px 24px 0; }
-.actions { flex: none; padding: 0 24px 18px; }
+.convert-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - var(--convert-top) - 16px); overflow: hidden; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.convert-controls { flex: none; min-height: 0; max-height: min(50dvh, 360px); overflow: auto; padding: 22px 24px 0; }
+.convert-scroll { min-height: 0; overflow: auto; padding: 0 24px 22px; }
+.convert-scroll:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.actions { flex: none; padding: 0 24px; }
 h2 { font-size: 18px; overflow-wrap: anywhere; }
 .lead, .note { margin-top: 8px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
 .choices { display: grid; gap: 4px; margin-top: 14px; }
@@ -185,12 +189,14 @@ h2 { font-size: 18px; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .actions .btn { min-width: 0; }
 .actions .btn:disabled { opacity: .45; }
+@media (pointer: coarse), (max-width: 600px) { .choice { min-height: 44px; } }
 /* Phones: a full-height sheet with the actions pinned to the bottom (AEON-730). */
 @media (max-width: 600px) {
   .convert { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; }
   .convert-card { flex: 1; max-height: none; border: 0; border-radius: 0; background: var(--surface-raised); }
+  .convert-controls { padding: 18px 16px 0; }
   .convert-scroll { flex: 1; padding: 18px 16px 0; }
-  .actions { margin-top: 0; padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .actions { order: 1; margin-top: 0; padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
   .actions .btn { flex: 1 1 auto; min-height: 44px; }
 }
 </style>
