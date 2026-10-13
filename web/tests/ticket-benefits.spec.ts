@@ -95,7 +95,11 @@ for (const regenerated of [false, true]) {
         Object.assign(release, { notes: { source: 'unavailable', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: [gap] } })
       }
     }
-    await mockWork(page, fixtures())
+    const work = fixtures()
+    // The current workspace can resolve this Git-mentioned ticket; it remains
+    // absent from any captured historical membership/benefit snapshot.
+    work.nodes.push({ ...work.nodes.find(node => node.id === 'n-a1')!, id: 'n-a75', key: 'AEON-75', title: 'Edit time entries in Hours', state: 'done' })
+    await mockWork(page, work)
     await mockReleases(page, history)
     await page.goto(`/releases/${current.version}`)
     const detail = page.locator('article.detail')
@@ -106,20 +110,28 @@ for (const regenerated of [false, true]) {
     await expect(detail.locator('.headline')).toHaveCount(0)
     await expect(page.getByText('Historical tag headline')).toHaveCount(0)
     await expect(detail.getByText('Notes written after release')).toHaveCount(0)
-    await expect(detail.locator('.tickets')).toContainText('AEON-75')
+    // AEON-635 / #237 renders ticket links in classified release change blocks.
+    await expect(detail.getByRole('region', { name: 'Release notes' }).getByRole('link', { name: /^AEON-75:/ }).first()).toBeVisible()
     await expect(detail.locator('.notes')).toContainText('Correct and delete time entries in the Hours view')
     await expect(detail.locator('#release-evidence')).toHaveCount(0)
     // No capture: no header and no note lines, only the changes.
     await expect(detail.locator('.summary')).toHaveCount(0)
     await expect(detail.getByText('Internal changes only.')).toHaveCount(0)
     await expect(detail.getByText(gap, { exact: true })).toHaveCount(0)
-    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
-    await expect(options).toHaveCount(5)
+    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Other', exact: true }).click()
+    // #237 filters classified changes. All six v1 releases have unclassified
+    // Git changes (Other), including the release without a ticket mention.
+    await expect(options).toHaveCount(6)
+    await expect(options.first().getByRole('img', { name: '3 other changes', exact: true })).toBeVisible()
+    await expect(options.last().getByRole('img', { name: '1 other change', exact: true })).toBeVisible()
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('AEON-75')
     await expect(options).toHaveCount(1)
-    await expect(options.first()).toContainText('AEON-75')
+    // #237 keeps list rows to names/counts; the ticket mention still selects
+    // this exact release and remains readable in its inline detail links.
+    await expect(options.first()).toHaveAttribute('id', `release-${current.version.replaceAll('.', '-')}`)
+    await expect(detail.getByRole('region', { name: 'Release notes' }).getByRole('link', { name: /^AEON-75:/ }).first()).toHaveText('AEON-75')
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('')
-    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
+    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Other', exact: true }).click()
     await options.last().click()
     await expect(detail.locator('.headline')).toHaveCount(0)
     await expect(detail.locator('.notes')).toContainText('Projects, tickets and sign-in')
@@ -220,8 +232,20 @@ for (const width of [1600, 390]) {
     const detail = page.locator('article.detail')
     const hint = detail.getByRole('region', { name: 'Release notes' }).getByText('Notes written after release', { exact: true })
     await expect(hint).toBeVisible()
-    await hint.scrollIntoViewIfNeeded()
+    // Bind font/layout and the actual scroll container before testing full visibility.
+    await page.evaluate(() => document.fonts.ready)
+    await hint.evaluate(async element => {
+      element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    })
     await expect(hint).toBeInViewport({ ratio: 1 })
+    const painted = await hint.evaluate(element => {
+      const range = document.createRange(); range.selectNodeContents(element)
+      const glyphs = range.getBoundingClientRect()
+      const area = element.closest('.detail-scroll')!.getBoundingClientRect()
+      return { top: glyphs.top - area.top, bottom: area.bottom - glyphs.bottom, left: glyphs.left - area.left, right: area.right - glyphs.right }
+    })
+    for (const [edge, distance] of Object.entries(painted)) expect(distance, `painted note fits ${edge}`).toBeGreaterThanOrEqual(-0.5)
     await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
     const detailStyle = await hint.evaluate(el => {
       const s = getComputedStyle(el)

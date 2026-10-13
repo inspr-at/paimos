@@ -89,23 +89,22 @@ for (const width of [320, 390]) test(`${width}: phone Change tier menu opens and
   const { writes } = await setup(page, { managedControls: true })
   await page.goto(`/agents/${id}`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  const more = panel.getByRole('button', { name: 'More session controls', exact: true })
-  await expectStableControls({ controls: { more }, interactions: [
-    { name: 'open tier from overflow', run: async () => {
-      await more.click()
-      await page.getByRole('menuitem', { name: 'Change tier…', exact: true }).click()
+  // AEON-1213 / #591 moved tier selection to the Overview Service tier block.
+  const change = panel.getByRole('region', { name: 'Service tier', exact: true }).getByRole('button', { name: 'Change tier', exact: true })
+  await expectStableControls({ controls: { change }, interactions: [
+    { name: 'open tier from Overview', run: async () => {
+      await change.click()
       await expect(picker(page)).toBeVisible()
       await expect(page.getByRole('menu', { name: 'More session actions' })).toHaveCount(0)
       await picker(page).getByRole('button', { name: /Cancel/ }).click()
       await expect(picker(page)).toHaveCount(0)
-      await expect(more).toBeFocused()
+      await expect(change).toBeFocused()
     } },
   ] })
   expect(writes).toHaveLength(0)
-  // Selecting through the same menu targets this session, rather than merely
+  // Selecting through the same trigger targets this session, rather than merely
   // opening an unrelated or detached sheet.
-  await more.click()
-  await page.getByRole('menuitem', { name: 'Change tier…', exact: true }).click()
+  await change.click()
   await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
   await picker(page).locator('[data-option=fast]').click()
   await picker(page).locator('.tp-go').click()
@@ -276,10 +275,10 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
     await setup(page, { active: width === 390 ? 'fast' : 'default' })
     if (width === 390) {
-      // Rows have no Tier cell (AEON-1211): the row menu's Change tier… opens the same picker.
+      // AEON-1213 / #591: use the same details trigger on phones.
       await page.goto('/agents')
-      await row(page).locator('.more').click()
-      await page.getByRole('menuitem', { name: 'Change tier…' }).click()
+      await row(page).locator('.agent-link').click()
+      await glyph(page).click()
     } else {
       await page.goto(`/agents/${id}`)
       await glyph(page).click()

@@ -1178,7 +1178,7 @@ test('offline replay CLI prints every real PR with selected counts, effective la
     assert.ok(['full','essential','static'].includes(row.new))
     assert.equal(row.newCases,Object.values(row.newKinds).reduce((sum,n)=>sum+n,0))
     assert.ok(row.new==='full'||row.newCases<=row.oldCases,`PR ${row.number} narrowed selection must not grow`)
-    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?22:37)
+    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:37)
   }
 })
 

@@ -194,7 +194,8 @@ test('cards: the switch is remembered; a card shows its ring, aligned counts, pe
   // The … menu is the list's.
   await card.hover()
   await card.getByRole('button', { name: 'Actions for PHAROS Pharos' }).click()
-  await expect(page.getByRole('menu', { name: 'Project Pharos' }).getByRole('menuitem')).toHaveText(['OpenEnter', 'Move to group…m', 'Selectx', 'Move earlierIt is already first.', 'Move later', 'Copy link', 'Archive'])
+  // AEON-1233 / #583 added the project settings action after Open.
+  await expect(page.getByRole('menu', { name: 'Project Pharos' }).getByRole('menuitem')).toHaveText(['OpenEnter', 'Project settings', 'Move to group…m', 'Selectx', 'Move earlierIt is already first.', 'Move later', 'Copy link', 'Archive'])
 })
 
 test('cards: arrows walk the cards; x, Shift and Command clicks select; m moves the selection; undo', async ({ page }) => {
