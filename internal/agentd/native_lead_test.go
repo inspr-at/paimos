@@ -381,6 +381,7 @@ func TestNativeCoordinatorRegistrationUsesManagedRootContract(t *testing.T) {
 	defer server.Close()
 	remote := NewRemote(server.URL, "fixture-scoped-key")
 	plan := NativeLeadPlan{Spec: *request.Native, Session: request.Session, AccountKey: request.AccountKey, Workspace: request.Workspace, Host: "fixture"}
+	plan.Spec.BeforeInput, plan.Spec.Observe = nil, nil // Process-only ports are bound after registration.
 	result, err := remote.RegisterNativeCoordinator(t.Context(), plan)
 	if err != nil || result.ID != request.Session.ID || result.Lease != request.Session.Lease || result.AttachedHook || calls != 1 {
 		t.Fatal("managed registration binding changed", result, err, calls)

@@ -72,10 +72,19 @@ type NativeLeadSpec struct {
 }
 
 func (n *NativeLeadSpec) check(ctx context.Context) error {
+	if n == nil || n.BeforeInput == nil || n.Observe == nil {
+		return ErrNativeUnqualified
+	}
+	return n.checkAuthority(ctx)
+}
+
+// Registration precedes the child input/output ports. It still needs the
+// current immutable grant, but does not itself permit a native process.
+func (n *NativeLeadSpec) checkAuthority(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if n == nil || n.Require == nil || n.BeforeInput == nil || n.Observe == nil {
+	if n == nil || n.Require == nil {
 		return ErrNativeUnqualified
 	}
 	now := time.Now()

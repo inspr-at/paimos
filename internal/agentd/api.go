@@ -230,7 +230,7 @@ func harnessPath(s HarnessSession) string {
 // The start-intent owner must pin the returned generation in its actor grant
 // before launch; registration alone never grants native execution authority.
 func (r *Remote) RegisterNativeCoordinator(ctx context.Context, plan NativeLeadPlan) (HarnessSession, error) {
-	if err := plan.Spec.check(ctx); err != nil {
+	if err := plan.Spec.checkAuthority(ctx); err != nil {
 		return HarnessSession{}, err
 	}
 	s := plan.Session
