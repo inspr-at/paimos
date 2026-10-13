@@ -5580,9 +5580,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer light 620: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 1024: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 1024: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 390: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8542,7 +8542,7 @@
     ,
     {"kind":"browser","file":"tests/eta-column.spec.ts","name":"only the server completion evidence reads Done; a full percent with a session still on the ticket stays a quiet 100% (AEON-437)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/eta-column.spec.ts","name":"the ETA column shows fresh, overdue and stale estimates under its header and stays empty when none was reported","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/eta-column.spec.ts","name":"the ETA column shows fresh, overdue and stale estimates under its header and stays empty when none was reported","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/eta-column.spec.ts","name":"the session panel names the estimate next to the running time","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10648,6 +10648,8 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"group preview and autopilot controls preserve scope and positions with a German document","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"group preview, partial bulk Undo and project/rule Undo preserve scope, rights and control positions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"kind counts, project facets and search filter the URL; scrolling loads the next 50","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -12692,13 +12694,13 @@
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"zero-run estimates are explicit in the panel and picker","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"dark 1440: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"dark 1440: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"dark 390: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"dark 390: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"light 1440: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"light 1440: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"light 390: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-attention.spec.ts","name":"light 390: shared replies leave five siblings working and Needs you empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat-cli.spec.ts","name":"person asks and CLI answers in the same thread: dark 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

@@ -750,12 +750,17 @@ test('a filtered empty queue says nothing matches and keeps Clear filters', asyn
  await expect(page.locator('.state h2')).toHaveText('Nothing here needs attention.')
 })
 
-test('group preview, partial bulk Undo and project/rule Undo preserve scope, rights and control positions', async ({ page }, testInfo) => {
-  test.setTimeout(120000)
-  const errors = watchErrors(page)
+function groupPreviewItems() {
   const kinds = ['proposed', 'triage', 'cancel', 'blocked', 'missed'] as const
   const items = Array.from({ length: 120 }, (_, index) => row(index, { project_id: 'p-aeon', kind: kinds[index % 5], from: index % 5 === 0 ? 'open' : index % 5 === 1 ? 'new' : 'backlog', to: index % 5 === 4 ? 'release' : index % 5 === 2 ? 'cancelled' : 'backlog', ...(index % 5 === 4 ? { release_id: 'r-plan', release_title: 'Zuverlässige Zusammenarbeit für sämtliche Arbeitsbereiche', release_revision: 3, release_project_revision: 4 } : {}), ...(index === 3 ? { applicable: false, unavailable_reason: 'Parent statuses follow their children.' } : {}) }))
   items.push(row(120, { project_id: 'p-pharos', editable: false, applicable: false }))
+  return items
+}
+
+test('group preview, partial bulk Undo and project/rule Undo preserve scope, rights and control positions', async ({ page }, testInfo) => {
+  test.setTimeout(120000)
+  const errors = watchErrors(page)
+  const items = groupPreviewItems()
   const data = await groupActions(page, items)
   const head = page.locator('#row-group-p-aeon')
   const more = () => head.getByRole('button', { name: 'More for AEON' })
@@ -900,13 +905,21 @@ test('group preview, partial bulk Undo and project/rule Undo preserve scope, rig
   await page.locator('.toast:not(.toast-leave-active)').getByRole('button', { name: 'Undo', exact: true }).click()
   await expect(page.locator('.toast:not(.toast-leave-active)').filter({ hasText: 'The previous rule setting was restored.' })).toBeVisible()
   expect(data.calls.filter(call => call.path === '/api/settings/status-autopilot').at(-1)?.body).toMatchObject({ expected_revision: 12, rules: { new: { enabled: true } } })
+  expect(errors).toEqual([])
+})
+
+// Keep the existing German-document evidence in its own browser budget. The
+// nightly trace completed 18 of 20 matrix states before the shared 120s limit.
+test('group preview and autopilot controls preserve scope and positions with a German document', async ({ page }, testInfo) => {
+  test.setTimeout(120000)
+  const errors = watchErrors(page)
+  const data = await groupActions(page, groupPreviewItems())
+  const head = page.locator('#row-group-p-aeon')
   data.overrides.set('p-aeon', { mode: 'on', revision: 20 })
   // documentElement.lang stays de. The app language is still English (AEON-998).
   await page.addInitScript(() => { const observer = new MutationObserver(() => { if (document.documentElement) { document.documentElement.lang = 'de'; observer.disconnect() } }); observer.observe(document, { childList: true, subtree: true }) })
   for (const width of [1440, 1280, 1024, 400, 390]) for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 1000 })
-    // The rule Undo section saved grouping by kind. These project controls
-    // deliberately return to project grouping, independent of that preference.
     await page.goto('/tickets?view=needs-attention&group=project')
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
     await expect(head).toBeVisible()
