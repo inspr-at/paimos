@@ -126,7 +126,10 @@ for (const regenerated of [false, true]) {
     await expect(options.last().getByRole('img', { name: '1 other change', exact: true })).toBeVisible()
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('AEON-75')
     await expect(options).toHaveCount(1)
-    await expect(options.first()).toContainText('AEON-75')
+    // #237 keeps list rows to names/counts; the ticket mention still selects
+    // this exact release and remains readable in its inline detail links.
+    await expect(options.first()).toHaveAttribute('id', `release-${current.version.replaceAll('.', '-')}`)
+    await expect(detail.getByRole('region', { name: 'Release notes' }).getByRole('link', { name: /^AEON-75:/ }).first()).toHaveText('AEON-75')
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('')
     await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Other', exact: true }).click()
     await options.last().click()
