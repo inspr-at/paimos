@@ -905,8 +905,11 @@ test('group preview, partial bulk Undo and project/rule Undo preserve scope, rig
   await page.addInitScript(() => { const observer = new MutationObserver(() => { if (document.documentElement) { document.documentElement.lang = 'de'; observer.disconnect() } }); observer.observe(document, { childList: true, subtree: true }) })
   for (const width of [1440, 1280, 1024, 400, 390]) for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 1000 })
-    await page.goto('/tickets?view=needs-attention')
+    // The rule Undo section saved grouping by kind. These project controls
+    // deliberately return to project grouping, independent of that preference.
+    await page.goto('/tickets?view=needs-attention&group=project')
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    await expect(head).toBeVisible()
     await head.getByRole('button', { name: 'Apply all in AEON' }).click()
     const dePreview = page.getByRole('dialog', { name: 'Apply all in AEON' })
     await expect(dePreview).toBeVisible()

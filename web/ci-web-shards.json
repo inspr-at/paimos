@@ -814,7 +814,7 @@
         ,
         {"file":"tests/agents-phone-rows.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agents-worker-tree.spec.ts","listedTests":10,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agents-worker-tree.spec.ts","listedTests":12,"weightSeconds":80,"weightSource":"nightly-38452339044-first-nine-cases-53.9s-plus-remaining-cases-margin"}
         ,
         {"file":"tests/agents.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":3.636,"median":2.408,"min":1.583},"seconds":25.679,"selectedTests":11},"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
         ,
@@ -874,7 +874,7 @@
         ,
         {"file":"tests/estimates.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/eta-column.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/eta-column.spec.ts","listedTests":14,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/first-impression.spec.ts","listedTests":38,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
         ,

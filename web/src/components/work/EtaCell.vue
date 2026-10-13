@@ -45,6 +45,9 @@ const kind = computed(() => view.value?.text && (props.labelled || view.value.ki
 .eta-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; color: var(--ink); font-size: 12.5px; line-height: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .eta-cell.end { justify-content: flex-end; }
 .main { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+/* End-aligned estimates keep their short time intact when a column budget
+   or the platform font leaves slightly less room than its intrinsic width. */
+.eta-cell.end .main { flex: none; }
 .kind { flex: none; font-size: 11.5px; color: var(--ink-3); }
 .when { display: inline-grid; min-width: 0; }
 .when > span { grid-area: 1 / 1; overflow: hidden; text-overflow: ellipsis; }
