@@ -211,6 +211,64 @@ test('a section preference that lands after a run link keeps Queued open until t
   expect(work.preferences['ui.agents.sections']).toMatchObject({ queued: false })
 })
 
+// AEON-1282 risk: since the AEON-1213 split the list pane stacks in normal flow, and Queued sat flush
+// against the Sessions card instead of keeping the page's section gap; a fold or the last cancel must
+// not move the card above it. Screenshots go to the test's output directory.
+test('Queued keeps the page section gap below Sessions; folding and emptying move nothing above it', async ({ page }, testInfo) => {
+  await setup(page, { unfolded: true })
+  await open(page)
+  const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
+  const toggle = queue.locator('.fs-head > .fs-tog')
+  // Both cards mount once the agents store has loaded; measure only after that.
+  await expect(page.getByRole('region', { name: 'Sessions' })).toBeVisible()
+  await expect(queue).toBeVisible()
+  // Offsets inside the list pane, so page scrolling cannot change them; the expected gap is the
+  // page's own section gap, read from the capacity column.
+  const geometry = () => page.evaluate(() => {
+    const pane = document.querySelector('.agents-list-pane')!.getBoundingClientRect()
+    const sessions = document.querySelector('section.sessions')!.getBoundingClientRect()
+    const queued = document.querySelector('.run-queue')?.getBoundingClientRect()
+    return {
+      sectionGap: parseFloat(getComputedStyle(document.querySelector('.main-col')!).rowGap),
+      sessionsTop: sessions.top - pane.top, sessionsBottom: sessions.bottom - pane.top,
+      queueTop: queued ? queued.top - pane.top : null,
+    }
+  })
+  const gap = async () => { const g = await geometry(); return g.queueTop === null ? null : g.queueTop - g.sessionsBottom }
+  const sectionGap = (await geometry()).sectionGap
+  expect(sectionGap).toBeGreaterThan(0)
+  for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect.poll(gap).toBeCloseTo(sectionGap, 0)
+    await queue.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`queued-gap-open-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
+    const shown = await geometry()
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const folded = await geometry()
+    expect(folded.sessionsTop).toBeCloseTo(shown.sessionsTop, 0)
+    expect(folded.sessionsBottom).toBeCloseTo(shown.sessionsBottom, 0)
+    expect(folded.queueTop).toBeCloseTo(shown.queueTop!, 0)
+    await page.screenshot({ path: testInfo.outputPath(`queued-gap-folded-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  }
+  // The last cancel closes Queued: its gap leaves with it and the Sessions card stays put.
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  await expect.poll(gap).toBeCloseTo(sectionGap, 0)
+  const before = await geometry()
+  await queue.locator('li').filter({ hasText: 'Add an Oracle Cloud connector' }).getByRole('button', { name: /^Cancel/ }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel run' }).click()
+  await expect(queue).toHaveCount(0)
+  const after = await geometry()
+  expect(after.queueTop).toBeNull()
+  expect(after.sessionsTop).toBeCloseTo(before.sessionsTop, 0)
+  expect(after.sessionsBottom).toBeCloseTo(before.sessionsBottom, 0)
+})
+
 // AEON-1209: Accounts and computers is the accounts chip in the capacity row; a fold stored for
 // the old card changes nothing, and the popover holds the line and the three tiles.
 test('accounts and computers is one chip whose popover states the state; a stored fold changes nothing', async ({ page }) => {
