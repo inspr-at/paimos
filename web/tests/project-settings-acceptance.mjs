@@ -4,6 +4,18 @@
 // P3 repository callers also use this unchanged audit.
 // P4 also reuses this approved audit for Advanced and the shared project sheet.
 export const approvedCheckSHA = '5f3e1a708081b52a1915d691ce80f300fa67338e4fc9172d02d2dc9392f35429'
+// Beyond-viewport capture clears Chromium's touch emulation. Restore the
+// context's original mode so later interactions and audits still exercise it.
+export async function captureProjectSettings(page, options, touch) {
+  try { return await page.screenshot(options) }
+  finally {
+    if (touch) {
+      const session = await page.context().newCDPSession(page)
+      try { await session.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 }) }
+      finally { await session.detach() }
+    }
+  }
+}
 export async function checkProjectSettings(page, name, touch) {
   const results = []
   const ok = (passed, message) => results.push({ passed, message })

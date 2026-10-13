@@ -140,11 +140,15 @@ for (const state of STATES) {
 test('the new-account and Unassigned items lead to where they are decided', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await setup(page, { chooses: true, awaiting: true, holding: 1 })
+  await page.route('**/api/projects/p-pharos/work-context', route => route.fulfill({ json: { project_id: 'p-pharos', context_id: CTX.hold, revision: 3 } }))
   await visit(page, 'accounts', true)
   await needs(page).locator('[data-need^="new:"]').getByRole('button', { name: 'Choose where' }).click()
   await expect(page.locator('#account-use')).toBeInViewport()
   await needs(page).locator('[data-need="holding"]').getByRole('button', { name: 'Choose its context' }).click()
-  await expect(page).toHaveURL('/p/PHAROS/settings#project-work-context')
+  // AEON-1233 gives the context its own home in project Settings > Agents.
+  await expect(page).toHaveURL('/p/PHAROS/settings/agents#project-work-context')
+  await expect(page.locator('#project-work-context')).toBeInViewport()
+  await expect(page.getByLabel('Context', { exact: true })).toHaveValue(CTX.hold)
 })
 
 test('every old link lands in the right part with the same panel open', async ({ page }) => {

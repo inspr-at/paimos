@@ -211,7 +211,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       await sections(page).getByRole('tab', { name: section, exact: true }).click()
       await expect(sections(page).getByRole('tab', { name: section, exact: true })).toHaveAttribute('aria-selected', 'true')
       await expect(sections(page).locator('[tabindex="0"]')).toHaveCount(1)
-      await expect(sections(page).locator('button > svg')).toHaveCount(4)
+      // AEON-723 retired Journey: every remaining section still owns an SVG.
+      await expect(sections(page).getByRole('tab')).toHaveText(['Tickets', 'Knowledge', 'Settings'])
+      for (const tab of await sections(page).getByRole('tab').all()) await expect(tab.locator(':scope > svg')).toHaveCount(1)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       for (const tab of await sections(page).getByRole('tab').all()) {
         const box = await tab.boundingBox()

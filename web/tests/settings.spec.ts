@@ -312,24 +312,22 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
   guard.done()
 })
 
-test('settings layout evidence in light and dark at phone, tablet and desktop sizes', async ({ page }) => {
-  // Ninety navigations and screenshots form this evidence matrix.
-  test.setTimeout(120_000)
-  await setup(page)
-  await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
-  for (const width of [390, 1024, 1440]) {
+// Each viewport/theme owns its fixture state and timeout; all 90 states remain.
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`settings layout evidence in light and dark at phone, tablet and desktop sizes: ${width}px ${theme}`, async ({ page }) => {
+    test.setTimeout(120_000)
+    await setup(page)
+    await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
     await page.setViewportSize({ width, height: 900 })
-    for (const theme of ['light', 'dark']) {
-      await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
-      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'computers', 'capacity', 'autopilot', 'business', 'portal']) {
-        await page.goto(`/settings/${section}`)
-        const audience = section === 'kinds' ? page.locator('.kinds-section > .who') : page.locator('.body > .who')
-        await expect(audience).toBeVisible()
-        if (section === 'kinds') await expect(audience).toContainText('Admins define the kinds; you can read them.')
-        await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
-        await page.screenshot({ path: test.info().outputPath(`${section}-${width}-${theme}.png`) })
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${section} at ${width}`).toBeLessThanOrEqual(1)
-      }
+    await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
+    for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'computers', 'capacity', 'autopilot', 'business', 'portal']) {
+      await page.goto(`/settings/${section}`)
+      const audience = section === 'kinds' ? page.locator('.kinds-section > .who') : page.locator('.body > .who')
+      await expect(audience).toBeVisible()
+      if (section === 'kinds') await expect(audience).toContainText('Admins define the kinds; you can read them.')
+      await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
+      await page.screenshot({ path: test.info().outputPath(`${section}-${width}-${theme}.png`) })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${section} at ${width}`).toBeLessThanOrEqual(1)
     }
-  }
-})
+  })
+}

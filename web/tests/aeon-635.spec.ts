@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { presentRelease, type ReleaseHistory } from '../src/lib/releases'
 import type { PendingChanges } from '../src/lib/releasePending'
@@ -8,7 +7,6 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockReleases, presentedHistory } from './releases-fixtures'
 
 const NOW = Date.parse('2026-10-03T12:00:00Z')
-const SHOTS = 'test-results/aeon-635'
 const sheet = (page: Page) => page.locator('dialog.releases')
 const detail = (page: Page) => sheet(page).locator('article.detail')
 const detailName = (page: Page) => detail(page).getByRole('heading', { level: 2 }).locator('.rn-name')
@@ -123,8 +121,7 @@ function headerControls(page: Page, phone: boolean): Record<string, Locator> {
 }
 
 async function shot(page: Page, width: number, theme: string, name: string) {
-  mkdirSync(SHOTS, { recursive: true })
-  await sheet(page).screenshot({ path: `${SHOTS}/${width}-${theme}-${name}.png` })
+  await sheet(page).screenshot({ path: test.info().outputPath(`${width}-${theme}-${name}.png`) })
 }
 
 for (const colorScheme of ['light', 'dark'] as const) {
