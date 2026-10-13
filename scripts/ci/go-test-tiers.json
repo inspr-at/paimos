@@ -3448,6 +3448,8 @@
     ,
     {"kind":"go","package":"internal/attachedmsg","name":"TestVolatileReservationCommitRollbackAndTuple","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/attachments","name":"TestAttachmentContentPreventsIntermediaryTransforms","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/attachments","name":"TestAttachmentMutationRechecksLiveAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestAttachmentRoutesRejectCustomersAndAgents","tier":"GATED-FULL"}
@@ -4433,6 +4435,8 @@
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceAndHookOutputBoundaries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachmentDownloadIntegrity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachmentDownloadPublishesOnlyVerifiedBytes","tier":"GATED-FULL"}
     ,

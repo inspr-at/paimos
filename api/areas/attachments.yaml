@@ -39,7 +39,13 @@ paths:
       security: *auth
       parameters: [{name: variant, in: query, schema: {type: string, enum: [original, preview, thumb], default: original}}]
       responses:
-        '200': {description: Tenant-scoped bytes, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
+        '200':
+          description: 'Tenant-scoped bytes, unchanged by intermediary content transformations.'
+          headers:
+            Cache-Control:
+              description: 'Includes no-transform to preserve attachment bytes and the metadata SHA-256; HTML also uses no-store and private.'
+              schema: {type: string}
+          content: {application/octet-stream: {schema: {type: string, format: binary}}}
         '304': {description: ETag matched}
         '404': {$ref: '#/components/responses/Error'}
   /attachments/{id}/preview:
