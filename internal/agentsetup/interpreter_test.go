@@ -84,6 +84,150 @@ func codexUpgradeFixture(t *testing.T) (Discovery, string, harnesslaunch.Node, h
 	return d, launcher, nodes[0], nodes[1]
 }
 
+// Risk: a failed runtime commit must leave renewal retryable and must not
+// publish a successful renewal or discard the existing repair command.
+func TestCodexRenewalRuntimeWriteFailure(t *testing.T) {
+	e, api, local, options, _ := engineFixture(t)
+	defer e.Store.Close()
+	d, _, old, next := codexUpgradeFixture(t)
+	d.NodePath = old.Path
+	c, err := d.Detect(t.Context(), "codex", "agent@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.Candidates, options.Workspace = []Candidate{c}, d.Workspace
+	approveFixture(t, e, api, options)
+	if err := os.Remove(old.Path); err != nil {
+		t.Fatal(err)
+	}
+	// Fake discovery never executes this script. The final OS version read
+	// makes just the runtime artifact unwritable at the exact commit boundary.
+	runtimePath := filepath.Join(e.Store.Path(), RuntimeName)
+	quoted := "'" + strings.ReplaceAll(runtimePath, "'", "'\\''") + "'"
+	if err := os.WriteFile(next.Path, []byte("#!/bin/sh\nchmod 0644 "+quoted+"\nprintf '%s\\n' v26.11.1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	d.NodePath = ""
+	e.PinDiscovery = &d
+	err = e.SyncFences(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "runtime update incomplete") {
+		t.Fatal("did not reach the failed runtime commit", err)
+	}
+	if err := os.Chmod(runtimePath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.CodexPins.Renewals) != 0 || saved.Candidates[0].Candidate.Node != old {
+		t.Fatal("failed runtime write published renewal metadata or advanced the saved pin")
+	}
+	config, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || config.Accounts[0].Node != old {
+		t.Fatal("failed runtime write changed the installed pin", err)
+	}
+	blocked, _ := HarnessReport("codex", "blocked", PinInvalid)
+	blocked.Attention = []AccountAttention{{AccountID: testAccount, Reason: PinInvalid}}
+	local.states[""] = LocalStatus{DaemonID: "paired-daemon", AccountStatuses: map[string]HarnessDetail{testAccount: blocked}, HarnessDetails: map[string]HarnessDetail{"codex": blocked}}
+	p, err := e.Status(t.Context())
+	if err != nil || p.AccountStatuses[testAccount].Reason != PinInvalid || p.HarnessDetails["codex"].Fix != RecoveryFix("codex", PinInvalid) || !strings.Contains(p.Action, "aeon-agentd add-harness --harness codex") {
+		t.Fatal("failed renewal hid its failure or repair command", err)
+	}
+	if err := os.WriteFile(next.Path, []byte("#!/bin/sh\nprintf '%s\\n' v26.11.1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SyncFences(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	config, err = ReadRuntimeConfig(e.Store.Path())
+	saved, saveErr := e.load()
+	if err != nil || saveErr != nil || config.Accounts[0].Node != next || saved.Candidates[0].Candidate.Node != next || saved.CodexPins.Renewals[c.Key] != next {
+		t.Fatal("failed runtime write prevented a subsequent safe renewal", err, saveErr)
+	}
+}
+
+// Risk: renewal advice must belong to the committed pin's pending probe,
+// never replace a new failure or reappear after that probe has finished.
+func TestCodexRenewalProbeLifecycle(t *testing.T) {
+	for _, scenario := range []string{PinInvalid, PinMissing, PinPartial, PinDrifted, PinUnsafe, "probe_failed", "probe_timeout", "login_required", "runtime pin changed"} {
+		t.Run(scenario, func(t *testing.T) {
+			e, api, local, options, _ := engineFixture(t)
+			defer e.Store.Close()
+			d, _, old, _ := codexUpgradeFixture(t)
+			d.NodePath = old.Path
+			c, err := d.Detect(t.Context(), "codex", "agent@example.test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			options.Candidates, options.Workspace = []Candidate{c}, d.Workspace
+			approveFixture(t, e, api, options)
+			if err := os.Remove(old.Path); err != nil {
+				t.Fatal(err)
+			}
+			d.NodePath = ""
+			e.PinDiscovery = &d
+			if err := e.SyncFences(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			pending, _ := HarnessReport("codex", "blocked", "probe_pending")
+			pending.Attention = []AccountAttention{{AccountID: testAccount, Reason: "probe_pending"}}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", AccountStatuses: map[string]HarnessDetail{testAccount: pending}, HarnessDetails: map[string]HarnessDetail{"codex": pending}}
+			if err := e.SyncFences(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if detail := api.progress.HarnessDetails["codex"]; detail.Reason != PinRenewed || detail.ReasonDetail != ProbePinRenewed || detail.Fix != (HarnessFix{}) {
+				t.Fatal("committed renewal absent from the pending probe")
+			}
+			state, reason, cause := "blocked", scenario, ""
+			switch scenario {
+			case "runtime pin changed":
+				config, err := ReadRuntimeConfig(e.Store.Path())
+				if err != nil {
+					t.Fatal(err)
+				}
+				config.Accounts[0].Node.Version = "26.11.2"
+				raw, _ := json.Marshal(config)
+				if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+					t.Fatal(err)
+				}
+				reason = "probe_pending"
+				// Keep automatic renewal out of this lifecycle assertion.
+				e.PinDiscovery.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
+			case "probe_failed":
+				cause = ProbeCommandFailed
+			case "login_required":
+				state, cause = "login_required", ProbeDifferentIdentity
+			}
+			failure, _ := HarnessReport("codex", state, reason)
+			failure = failure.WithProbeDetail("codex", cause)
+			failure.Attention = []AccountAttention{{AccountID: testAccount, Reason: reason, ReasonDetail: cause}}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", AccountStatuses: map[string]HarnessDetail{testAccount: failure}, HarnessDetails: map[string]HarnessDetail{"codex": failure}}
+			p, err := e.Status(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, detail := range []HarnessDetail{p.AccountStatuses[testAccount], p.HarnessDetails["codex"]} {
+				if detail.State != state || detail.Reason != reason || detail.ReasonDetail != cause || detail.Fix != RecoveryFix("codex", reason) || len(detail.Attention) != 1 || detail.Attention[0].Reason != reason || detail.Attention[0].ReasonDetail != cause {
+					t.Fatal("renewal masked a current failure or a different runtime pin")
+				}
+			}
+			if err := e.SyncFences(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := e.load()
+			if err != nil || len(saved.CodexPins.Renewals) != 0 {
+				t.Fatal("completed or replaced pin probe retained its renewal marker", err)
+			}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", AccountStatuses: map[string]HarnessDetail{testAccount: pending}, HarnessDetails: map[string]HarnessDetail{"codex": pending}}
+			p, err = e.Status(t.Context())
+			if err != nil || p.AccountStatuses[testAccount].Reason != "probe_pending" || p.HarnessDetails["codex"].Reason != "probe_pending" {
+				t.Fatal("completed renewal resurfaced during a later probe", err)
+			}
+		})
+	}
+}
+
 func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 	for _, pair := range []struct {
 		old, next string
@@ -285,7 +429,9 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 			}
 			blocked, _ := HarnessReport("codex", "blocked", PinInvalid)
 			blocked.Attention = []AccountAttention{{AccountID: testAccount, Reason: PinInvalid}}
-			local.states[""] = LocalStatus{DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "blocked"}, HarnessDetails: map[string]HarnessDetail{"codex": blocked}, AccountStatuses: map[string]HarnessDetail{testAccount: blocked}}
+			pending, _ := HarnessReport("codex", "blocked", "probe_pending")
+			pending.Attention = []AccountAttention{{AccountID: testAccount, Reason: "probe_pending"}}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "blocked"}, HarnessDetails: map[string]HarnessDetail{"codex": pending}, AccountStatuses: map[string]HarnessDetail{testAccount: pending}}
 			if err := e.SyncFences(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -300,6 +446,13 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 			if probes != 1 {
 				t.Fatal("a healthy pin was automatically replaced")
 			}
+			// The daemon normally reports checking while its fresh probe runs.
+			checking, _ := HarnessReport("codex", "checking", "probe_pending")
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "checking"}, HarnessDetails: map[string]HarnessDetail{"codex": checking}, AccountStatuses: map[string]HarnessDetail{testAccount: checking}}
+			progress, err := e.Status(t.Context())
+			if err != nil || progress.AccountStatuses[testAccount].State != "checking" || progress.AccountStatuses[testAccount].Reason != PinRenewed || progress.HarnessDetails["codex"].State != "checking" || progress.HarnessDetails["codex"].Reason != PinRenewed || !strings.Contains(progress.Action, "waiting for its sign-in and availability check") {
+				t.Fatal("renewal changed pending readiness or lost the current probe", err)
+			}
 			ready, _ := HarnessReport("codex", "ready", "")
 			local.states[""] = LocalStatus{Ready: true, DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "ready"}, HarnessDetails: map[string]HarnessDetail{"codex": ready}, AccountStatuses: map[string]HarnessDetail{testAccount: ready}}
 			if err := e.SyncFences(t.Context()); err != nil {
@@ -309,7 +462,7 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				t.Fatal("ready report retained recovery diagnostics")
 			}
 			local.states[""] = LocalStatus{DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "blocked"}, HarnessDetails: map[string]HarnessDetail{"codex": blocked}, AccountStatuses: map[string]HarnessDetail{testAccount: blocked}}
-			progress, err := e.Status(t.Context())
+			progress, err = e.Status(t.Context())
 			if err != nil || progress.HarnessDetails["codex"].Reason != PinInvalid || progress.HarnessDetails["codex"].ReasonDetail != "" {
 				t.Fatal("past renewal hid a later failure", err)
 			}

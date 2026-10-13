@@ -2956,6 +2956,10 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestCodexNodeUpgradeRenewalFences","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexRenewalProbeLifecycle","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexRenewalRuntimeWriteFailure","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestConcurrentStatusDoesNotBlockPairingWriter","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestDarwinClaudeSDKAdminDirectories","tier":"GATED-FULL"}

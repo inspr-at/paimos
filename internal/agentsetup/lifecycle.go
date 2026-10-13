@@ -165,13 +165,8 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
 	if e.Local != nil {
 		if local, err := e.Local.Status(ctx, ""); err == nil && local.DaemonID == s.View.DaemonID {
-			local = pinRenewalDetails(s, local)
+			local = e.pinRenewalDetails(s, local)
 			proof.Progress = observedProgress(s.View, local)
-			for _, enrolled := range s.View.Enrollments {
-				if local.AccountStatuses[enrolled.AccountID].State == "ready" {
-					delete(s.CodexPins.Renewals, enrolled.AccountKey)
-				}
-			}
 		}
 	}
 	proof.Progress = e.reportInstall(s.View, proof.Progress)
@@ -398,7 +393,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
-			local = pinRenewalDetails(s, local)
+			local = e.pinRenewalDetails(s, local)
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)
 			p.AccountStatuses = local.AccountStatuses
@@ -789,6 +784,13 @@ func (e *Engine) renewPin(ctx context.Context, s *snapshot, enrolled Enrollment,
 	if err := e.Store.Write("pin-renewal-"+id+".json", event, true); err != nil {
 		return Progress{}, err
 	}
+	// The journal is write-ahead history. Saved candidates and pending-probe
+	// advice must describe only a runtime pin that was successfully committed.
+	config.RecordAttachIdentities()
+	raw, _ = json.Marshal(config)
+	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+		return Progress{}, errors.New("pin renewal recorded but runtime update incomplete; rerun add-harness")
+	}
 	s.Candidates[candidate].Candidate.Node, s.Candidates[candidate].Candidate.PiNode = c.Node, c.PiNode
 	c.Key = enrolled.AccountKey
 	recordCodexLauncher(s, c)
@@ -800,11 +802,6 @@ func (e *Engine) renewPin(ctx context.Context, s *snapshot, enrolled Enrollment,
 	}
 	if err := e.save(s, false); err != nil {
 		return Progress{}, err
-	}
-	config.RecordAttachIdentities()
-	raw, _ = json.Marshal(config)
-	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
-		return Progress{}, errors.New("pin renewal recorded but runtime update incomplete; rerun add-harness")
 	}
 	p := e.progress(s)
 	p.Action = "Interpreter pin renewed; the daemon resumes this account on its next check. No approval, sign-in or credential changed."

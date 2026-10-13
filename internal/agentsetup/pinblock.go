@@ -304,11 +304,17 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 	return nil
 }
 
-// The event is advisory and never changes readiness or a recovery command.
-// Blocked accounts retain their existing pin reason in attention_accounts
-// until the daemon's fresh probe. Ready reports continue to omit reason_detail.
-func pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
+// Renewal advice belongs only to the committed interpreter's pending probe.
+// Current failures always keep their reason, detail and recovery command. A
+// terminal report or replaced runtime pin retires the marker; Status only
+// changes its in-memory snapshot, while SyncFences persists the retirement.
+func (e *Engine) pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
 	if len(s.CodexPins.Renewals) == 0 {
+		return local
+	}
+	raw, err := e.Store.Read(RuntimeName, 128<<10)
+	var config RuntimeConfig
+	if err != nil || json.Unmarshal(raw, &config) != nil || config.Schema != "aeon.agent-runtime.v1" || config.Origin != s.Origin || config.Workspace != s.Request.Workspace || config.TenantID != s.View.TenantID || config.PrincipalID != s.BoundPrincipal || config.ComputerID != s.BoundComputer || config.DaemonID != s.BoundDaemon {
 		return local
 	}
 	local.AccountStatuses = maps.Clone(local.AccountStatuses)
@@ -321,19 +327,28 @@ func pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
 		if !found || renewed.Path == "" {
 			continue
 		}
-		account := local.AccountStatuses[enrolled.AccountID]
-		if renewedPinDetail(account) {
-			account.Reason = PinRenewed
-			local.AccountStatuses[enrolled.AccountID] = account.WithProbeDetail("codex", ProbePinRenewed)
+		committed := false
+		for _, current := range config.Accounts {
+			committed = committed || current.AccountID == enrolled.AccountID && current.Key == enrolled.AccountKey && current.Harness == "codex" && current.Node == renewed
 		}
+		account, reported := local.AccountStatuses[enrolled.AccountID]
+		if !committed || reported && !renewedPinDetail(account) {
+			delete(s.CodexPins.Renewals, enrolled.AccountKey)
+			continue
+		}
+		if !reported {
+			continue
+		}
+		account.Reason = PinRenewed
+		local.AccountStatuses[enrolled.AccountID] = account.WithProbeDetail("codex", ProbePinRenewed)
 		if detail, ok := local.HarnessDetails["codex"]; ok {
-			if renewedPinDetail(detail) && account.Reason == PinRenewed {
+			if renewedPinDetail(detail) {
 				detail.Reason = PinRenewed
 				detail = detail.WithProbeDetail("codex", ProbePinRenewed)
 			}
 			detail.Attention = append([]AccountAttention(nil), detail.Attention...)
 			for i := range detail.Attention {
-				if detail.Attention[i].AccountID == enrolled.AccountID && SafeProbeDetail(detail.Attention[i].Reason, ProbePinRenewed) != "" {
+				if detail.Attention[i].AccountID == enrolled.AccountID && pendingPinProbe(detail.Attention[i].Reason) {
 					detail.Attention[i].Reason = PinRenewed
 					detail.Attention[i].ReasonDetail = ProbePinRenewed
 				}
@@ -345,7 +360,11 @@ func pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
 }
 
 func renewedPinDetail(detail HarnessDetail) bool {
-	return detail.State == "blocked" && SafeProbeDetail(detail.Reason, ProbePinRenewed) != ""
+	return (detail.State == "checking" || detail.State == "blocked") && pendingPinProbe(detail.Reason)
+}
+
+func pendingPinProbe(reason string) bool {
+	return reason == "probe_pending" || reason == "starting"
 }
 
 func claudeSharedReason(c RuntimeConfig) string {
