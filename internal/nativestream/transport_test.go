@@ -420,11 +420,15 @@ func TestSSEFencesQueuedContentAndKeepalive(t *testing.T) {
 type fakeFinals struct {
 	values []nativecontract.FinalDelivery
 	fail   bool
+	reject bool
 }
 
 func (s *fakeFinals) Persist(_ context.Context, value nativecontract.FinalDelivery) (nativecontract.FinalReceipt, error) {
 	if s.fail {
 		return nativecontract.FinalReceipt{}, errors.New("synthetic persistence refusal")
+	}
+	if s.reject {
+		return nativecontract.FinalReceipt{FinalID: value.FinalID, State: "rejected", UpdatedAt: time.Now()}, nil
 	}
 	s.values = append(s.values, value)
 	return nativecontract.FinalReceipt{FinalID: value.FinalID, State: "persisted", UpdatedAt: time.Now()}, nil
@@ -493,6 +497,10 @@ func TestOutboundLossRemainsTransientAndFinalUsesSink(t *testing.T) {
 	sink.fail = true
 	err = out.Observe(ctx, nativecontract.ProviderEvent{SourceSequence: 102, Identity: nativecontract.NativeIdentity{RuntimeEpoch: fixtureID}, Final: &final})
 	requireReason(t, err, nativecontract.ReasonNativeFailure)
+	sink.fail = false
+	sink.reject = true
+	err = out.Observe(ctx, nativecontract.ProviderEvent{SourceSequence: 102, Identity: nativecontract.NativeIdentity{RuntimeEpoch: fixtureID}, Final: &final})
+	requireReason(t, err, nativecontract.ReasonFinalDeliveryExpired)
 	publisher.release <- struct{}{}
 	select {
 	case next := <-publisher.batches:

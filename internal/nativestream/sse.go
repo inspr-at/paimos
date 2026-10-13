@@ -5,6 +5,7 @@ package nativestream
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -101,13 +102,18 @@ func ServeEvents(w http.ResponseWriter, r *http.Request, sub nativecontract.Subs
 				return rc.Flush()
 			})
 			if err != nil {
-				end("revoked")
+				end(closureReason(err))
 				return
 			}
 			keepalive = clock.After(nativecontract.KeepaliveSeconds * time.Second)
 		case event, ok := <-sub.Events():
 			if !ok {
-				end("runtime_changed")
+				err := fence(ctx, func(access nativecontract.ValidationContext) error { return nil })
+				if err != nil {
+					end(closureReason(err))
+				} else {
+					end("runtime_changed")
+				}
 				return
 			}
 			err := fence(ctx, func(access nativecontract.ValidationContext) error {
@@ -137,7 +143,7 @@ func ServeEvents(w http.ResponseWriter, r *http.Request, sub nativecontract.Subs
 				if !started {
 					WriteError(w, err)
 				} else {
-					end("revoked")
+					end(closureReason(err))
 				}
 				return
 			}
@@ -150,4 +156,17 @@ func ServeEvents(w http.ResponseWriter, r *http.Request, sub nativecontract.Subs
 			}
 		}
 	}
+}
+
+func closureReason(err error) string {
+	var invalid *nativecontract.ValidationError
+	if errors.As(err, &invalid) {
+		switch invalid.Reason {
+		case nativecontract.ReasonGrantMissing, nativecontract.ReasonGrantExpired, nativecontract.ReasonPermissionRevoked, nativecontract.ReasonWrongPrincipal, nativecontract.ReasonControllerExpired:
+			return "revoked"
+		case nativecontract.ReasonWrongGeneration, nativecontract.ReasonIdentityMismatch:
+			return "runtime_changed"
+		}
+	}
+	return "unsupported"
 }

@@ -156,6 +156,29 @@ func TestSlowSubscriberRevocationAndViewIsolation(t *testing.T) {
 	if err := r.Register(testSnapshot()); err != nil {
 		t.Fatal(err)
 	}
+	// Identical session UUIDs in separate tenants must not replace each other.
+	other := testSnapshot()
+	otherBinding := *other.CurrentBinding
+	otherBinding.TenantID = "00000000-0000-4000-8000-000000000002"
+	other.CurrentBinding = &otherBinding
+	if err := r.Register(other); err != nil {
+		t.Fatal("tenant-scoped owned session collided:", err)
+	}
+	if _, _, _, err := r.Stats(testBinding()); err != nil {
+		t.Fatal("other tenant replaced the current session")
+	}
+	if _, _, _, err := r.Subscribe(context.Background(), testBinding()); err == nil {
+		t.Fatal("FrameSource accepted a caller without authenticated viewer context")
+	}
+	agentAccess := testAccess("expert", false)
+	agentAccess.PrincipalKind = "agent"
+	_, err = r.SubscribeView(context.Background(), testBinding(), Viewer{Query: nativecontract.StreamQuery{Generation: 1, View: "expert"}, Fence: func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
+		return deliver(agentAccess)
+	}})
+	var denied *nativecontract.ValidationError
+	if !errors.As(err, &denied) || denied.Reason != nativecontract.ReasonWrongPrincipal {
+		t.Fatal("agent principal received an Expert view")
+	}
 	structured := subscribe(t, r, newRights("structured"))
 	expert := subscribe(t, r, newRights("expert"))
 	terminal := subscribe(t, r, newRights("terminal"))
