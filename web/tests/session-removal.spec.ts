@@ -21,6 +21,13 @@ async function setup(page: Page, admin = true) {
   })
   return { data, selected, bodies }
 }
+// AEON-1212 / #592 puts panel removal in More session actions.
+async function openPanelRemoval(page: Page) {
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+  return page.getByRole('menuitem', { name: 'Remove ghost-worker', exact: true })
+}
+
 const row = (page: Page, id: string) => page.locator(`[data-row="s:${id}"]`)
 const confirm = (page: Page) => page.getByRole('dialog', { name: 'Remove ghost-worker?' })
 const historyButton = (page: Page) => page.getByRole('button', { name: 'Show history: every ended or removed session' })
@@ -106,12 +113,12 @@ test('panel Remove sits with the controls, closes the panel after confirmation, 
   const { selected, bodies } = await setup(page)
   await page.goto(`/agents/${selected.id}`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  const remove = panel.getByRole('button', { name: 'Remove ghost-worker' })
+  const remove = await openPanelRemoval(page)
   await expect(remove).toHaveText('Remove…')
   await remove.click()
   await confirm(page).getByRole('button', { name: 'Cancel' }).click()
   expect(bodies).toHaveLength(0)
-  await remove.click()
+  await (await openPanelRemoval(page)).click()
   await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
   await expect(page).toHaveURL(/\/agents$/)
   await expect(panel).toHaveCount(0)
@@ -135,7 +142,7 @@ test('phones show the overflow button on every row; the live line carries no rem
 test('project member can remove without force permissions', async ({ page }) => {
   const { selected } = await setup(page, false)
   await page.goto(`/agents/${selected.id}`)
-  await expect(page.getByRole('complementary').getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
+  await expect(await openPanelRemoval(page)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Recover', exact: true })).toHaveCount(0)
 })
 
@@ -224,9 +231,9 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     // AEON-1018 (0dd3a2fa2) exposes State/Execution controls below the identity.
     // A row-centre click can hit one of those controls; its link opens details.
     await row(page, selected.id).locator('.agent-link').click()
-    await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
+    await expect(await openPanelRemoval(page)).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`panel-${width}-${theme}.png`) })
-    await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker' }).click()
+    await page.getByRole('menuitem', { name: 'Remove ghost-worker', exact: true }).click()
     await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
     await historyButton(page).click()
     await expect(row(page, selected.id)).toBeVisible()

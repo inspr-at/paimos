@@ -2,6 +2,8 @@
 // AEON-1062: polish from INSPR QA of release 128. Risks: the chat header squeezes "Stop now…" to an icon's
 // width so its label runs over its neighbours; the dark chat Stop renders light with an unreadable Esc keycap;
 // the account drawer says "1 computers"; a Models row whose profile left the registry shows a raw id.
+// AEON-1212 / #592 moved chat controls into Session actions; retain the Stop
+// contrast contract there and measure Esc on the Close action that now owns it.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -23,8 +25,8 @@ async function chatSetup(page: Page, theme: 'light' | 'dark') {
   await mockWork(page, work, { admin: true })
   const data = agentData(world)
   const worker = data.sessions[0]!
-  // A busy managed session that can pause: Pause…, Stop now…, Recover and Remove… share the header row.
-  Object.assign(worker, { display_label: 'release-lead', run_id: null, activity: 'busy', management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'interrupt', 'stop', 'steer', 'inbox'] })
+  // AEON-1212 / #592: a busy worker's Interrupt, Pause and Stop share the unified head.
+  Object.assign(worker, { display_label: 'release-lead', role: 'worker', run_id: null, activity: 'busy', management_mode: 'managed', advertised_capabilities: ['interrupt', 'stop', 'steer', 'inbox'] })
   data.sessions.splice(1); data.runs.splice(0); data.approvals.splice(0); data.messages.splice(1)
   await mockAgents(page, data)
   return worker
@@ -89,7 +91,8 @@ async function stopContrast(stop: Locator) {
       if (!element.parentElement) throw new Error('No opaque background behind Stop')
       return backgrounds(element.parentElement).flatMap(back => layers.map(front => over(front, back)))
     }
-    const keycap = button.querySelector('.keycap')!
+    // The Esc keycap moved to Close session details in #592.
+    const keycap = button.closest('.pane-bar')!.querySelector('.pane-close .keycap')!
     return {
       hovered: button.matches(':hover'),
       ink: rgba(getComputedStyle(button).color).slice(0, 3),
@@ -100,7 +103,8 @@ async function stopContrast(stop: Locator) {
   })
 }
 
-// 1600 px is QA's case: the docked panel's default width there is about 620 px.
+// Keep the original 1600/panel-620 catalogue name; AEON-1213 / #591 now
+// gives that viewport a resizable split, verified against its live bounds.
 const cases = [{ width: 390 }, { width: 620 }, { width: 1024 }, { width: 1600, panel: 620 }]
 for (const { width, panel } of cases) for (const theme of themes) {
   const label = `${width}${panel ? ` panel ${panel}` : ''}`
@@ -111,20 +115,26 @@ for (const { width, panel } of cases) for (const theme of themes) {
     const frame = page.getByRole('complementary', { name: 'Session details' })
     const composer = frame.getByRole('textbox', { name: 'Message to release-lead' })
     await expect(composer).toBeVisible()
-    if (panel) expect(Math.abs(await frame.evaluate(el => el.getBoundingClientRect().width) - panel)).toBeLessThanOrEqual(10)
-    const pause = frame.getByRole('button', { name: 'Pause…', exact: true }), stopNow = frame.getByRole('button', { name: 'Stop now…', exact: true })
-    const stop = frame.locator('.chat-stop')
+    // AEON-1213 / #591 replaced fixed panel width with a remembered resizable split.
+    if (panel) {
+      await expect(page.getByRole('separator', { name: 'Resize the session list' })).toBeVisible()
+      const bounds = (await frame.boundingBox())!
+      expect(bounds.width).toBeGreaterThanOrEqual(380)
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
+    }
+    const actions = frame.getByRole('group', { name: 'Session actions' })
+    const pause = actions.getByRole('button', { name: 'Pause', exact: true }), stop = actions.getByRole('button', { name: 'Stop…', exact: true })
+    const interrupt = actions.getByRole('button', { name: 'Interrupt', exact: true })
     await expect(stop).toBeEnabled()
-    await expectNoOverlap(frame.locator(width <= 720 ? '.pause-controls' : '.head-actions'))
+    await expectNoOverlap(frame.locator('.pane-bar'))
     // Pointing at and focusing the header actions never moves them or the composer's controls.
-    const guard = await controlStability(page, { pause, stopNow, stop, send: frame.locator('.send') })
+    const guard = await controlStability(page, { pause, interrupt, stop, more: frame.getByRole('button', { name: 'More session actions', exact: true }), close: frame.getByRole('button', { name: 'Close session details' }), send: frame.locator('.send') })
     await guard.check(() => pause.hover())
-    await guard.check(() => stopNow.hover())
+    await guard.check(() => interrupt.hover())
     for (const state of ['normal', 'hovered'] as const) {
       await guard.check(() => state === 'normal' ? pause.hover() : stop.hover())
       const look = await stopContrast(stop)
       expect(look.hovered).toBe(state === 'hovered')
-      expect(look.keycapInk).toEqual(look.ink)
       const stopRatio = Math.min(...look.backgrounds.map(background => contrast(look.ink, background)))
       const escRatio = Math.min(...look.keycapBackgrounds.map(background => contrast(look.keycapInk, background)))
       await testInfo.attach(`contrast-${state}`, { body: JSON.stringify({ theme, width, state, stopRatio, escRatio }), contentType: 'application/json' })
