@@ -35,6 +35,7 @@ import (
 )
 
 type Config struct {
+	NativeSessions    *NativeSessionConfig
 	RoutineWorkspaces *RoutineWorkspaceConfig
 	LeadRuntime       *LeadRuntimeConfig
 	// Internal executor wiring only. Nil yields an explicit capture WAIT;
@@ -167,6 +168,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	native                 *nativeSessions
 	setup                  func(context.Context, agentsetup.SetupRequest) (agentsetup.Progress, error)
 	accountLogins          map[string]agentsetup.AccountLogin // Local status only; never in probe reports.
 	leads                  *leadRuntime
@@ -436,7 +438,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if c.Power == nil {
 		c.Power = systemPower{}
 	}
-	s := &Supervisor{leads: &leadRuntime{config: c.LeadRuntime, leads: map[string]*localLead{}}, queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{native: &nativeSessions{entries: map[string]*nativeLeadEntry{}}, leads: &leadRuntime{config: c.LeadRuntime, leads: map[string]*localLead{}}, queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		power:             c.Power,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
@@ -454,6 +456,10 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		s.leads.config = &copy
 	}
 	s.capacityNow = c.Now
+	if c.NativeSessions != nil {
+		copy := *c.NativeSessions
+		s.native.config = &copy
+	}
 	if c.RoutineWorkspaces != nil {
 		if len(c.RoutineWorkspaces.Repositories) > 64 {
 			return nil, ErrRoutineUnavailable

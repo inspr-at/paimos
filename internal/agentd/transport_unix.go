@@ -115,6 +115,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 	}
 	hooks := hooknote.NewServer()
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/native-sessions/start", serveNativeStart(s, func(r *http.Request) bool { return authorized(r, token) }))
 	mux.Handle("POST /v1/inbox-hook", hooks)
 	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
