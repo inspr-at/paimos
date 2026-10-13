@@ -117,8 +117,9 @@ requires separately compiled production pin and quota-neutral exchange evidence.
 
 ## Coordinator R0 registration
 
-Before merge, in this same PR, append `internal/nativequota/**` to the `paths`
-of audit slice `S2` (`agent-runtime`) in `scripts/audit/slices.json`. Add these
+Audit slice `S2` (`agent-runtime`) already covers `internal/nativequota/**`
+through the central `internal/native*/**` glob merged in PR #623 and included
+in this branch at `38df044aa`. Before merge, in this same PR, R0 must add these
 exact rows to `tests` in `scripts/ci/go-test-tiers.json`:
 
 ```json
@@ -165,6 +166,26 @@ cases in its report.
 No quota implementation or assertion was changed in fix round 4, so there is
 no new behavior fix requiring a negative-control regression.
 
+Fix round 5 inspected the full failing `go-static` job `115140473377` for
+PR head `38df044aa`. Only `Validate every Go tier against native collection`
+failed: it names exactly the four unclassified quota cases above. The audit
+repair is now included and `release-check-run` passed. Refreshed `origin/main`
+at `bf4aa778f` still contains none of the four quota tier rows. PR #619 is
+mergeable, so no conflict-resolution merge is required.
+
+All current Go execution shards, web catalogue/setup/unit/browser checks,
+release checks, e2e and tier measurements passed on that PR head. The `go`
+aggregate fails because of `go-static`; `gate/policy-preview` separately
+awaits the coordinator's trusted review verdict. No review gate was run by
+the builder.
+
+The remaining repair is entirely in R0's exclusive metadata write set. P4b
+owns only `internal/nativequota/**` and this feature document, with no
+ownership transfer for the tier manifest. The coordinator must apply the
+four rows above; this round does not change quota behavior, test assertions
+or shared inventories, and requires no new behavior regression. The handoff
+remains incomplete until those registrations and the required checks pass.
+
 Run the named package through the guarded remote Go runner and static checks
 through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
 origin/main`. These clock-driven tests use synthetic pins and events, with no
@@ -181,6 +202,9 @@ review remain required before integration or release.
   `4a5e40209`; all existing quota cases passed (0.297 s).
 - PASS: fix-round-4 guarded remote Go run of `./internal/nativequota/...` on
   `4ab38db03`; all existing quota cases passed (0.324 s).
+- PASS: fix-round-5 guarded remote Go run of `./internal/nativequota/...` on
+  `38df044aa` with `-count=1 -v`; all four named cases and subcases passed
+  (0.246 s), without vendor account or model calls.
 - PASS: negative control on a temporary branch from that final source, with
   the freshness deadline check disabled. The named clock test failed on its
   exact stale-reading assertion for both Claude and Codex (exit 1). After
@@ -193,6 +217,8 @@ review remain required before integration or release.
   120 web unit files from the current manifests. `nativequota` awaits R0 rows.
   Fix round 4 reproduced this selection against `06929d1a4` and confirmed that
   `internal/nativequota` is absent until its tier rows are registered.
+  Fix round 5 reproduced the same counts against `bf4aa778f`, exit 0, and
+  confirmed that `internal/nativequota` remains absent from the selection.
 - INCOMPLETE: fix-round-3 guarded static `--merge-main` on `4a5e40209` exited 1.
   Its 39 other checks passed with no skips, including Go vet, test-tier tests,
   web-shard tests, web typecheck and web lint. Only Go-tier drift and source
@@ -205,5 +231,11 @@ review remain required before integration or release.
   Only `go-tiers`, `audit-tests` and `audit-coverage` failed, for the same four
   cases and six files. The pending central audit PR #623 was still open after
   this run. No shared-inventory, quota behavior or assertion edits were made.
+- INCOMPLETE: fix-round-5 guarded static `--merge-main` on `38df044aa` exited 1.
+  Its 41 other checks passed with no skips, including Go vet, tier-selector
+  regressions, audit tests/coverage, web-shard tests, web typecheck and web
+  lint. Only `go-tiers` failed, naming exactly the four missing quota rows
+  above. The central source-ownership repair is verified; tier registration
+  remains coordinator-owned. This is not a green merge gate.
 - Browser validation does not apply to this source-only slice. Production pin
   qualification, I2 integration, review and release remain coordinator-owned.
