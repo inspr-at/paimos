@@ -412,3 +412,45 @@ rows. PR #618 remains `MERGEABLE`, so no conflict merge is required. The
 non-required policy preview reports the missing trusted `gate/verdict`; the
 coordinator runs that gate after builder exit. Static/CI is failed, not green.
 No origin push, deployment, model CLI, review gate or live cutover was performed.
+
+## Fix round 8: tier-only integration remains R0-owned
+
+The report `review-ci618-0815.out` targets `2c6f223c1`. The complete
+[Go static job 115152084847](https://github.com/inspr-at/paimos/actions/runs/38353801661/job/115152084847)
+fails only "Validate every Go tier against native collection": exactly the
+nine P2b registrations in the integration handoff are absent. Go vet and tier
+selector regressions pass. All four Go shards, four web unit shards, twelve
+browser shards, release checks, E2E and migration compatibility pass. The
+aggregate Go failure follows the static job; no behaviour fix is indicated.
+
+The original brief and both normative plan artifacts explicitly reserve
+`scripts/ci/go-test-tiers.json` to the "Coordinator or one explicitly assigned
+metadata integrator". Fix round 8 does not transfer that ownership. The
+coordinator must apply the **tier-only** portion of the fix-round-4 patch in
+this PR before final checks; its audit portion is already superseded by main.
+Another P2b round cannot resolve this manifest failure within its write set.
+
+The prepared tier-only patch still passes `git apply --check`. Its nine
+`ESSENTIAL` identities match the actual P2b test declarations. An in-memory
+candidate passes the production strict validator and preserves every existing
+row and all other metadata. The validator rejects the unchanged manifest at
+the required negative-control revision `2c6f223c`, HEAD and latest fetched
+`origin/main` for exactly those nine missing rows. This bounded proof does not
+replace native collection. No R0 file, implementation or assertion was changed.
+
+Two approved remote Go attempts and two guarded remote static attempts refuse
+with exit 3 because both remote slots are occupied. The permitted single small
+local fallback, `GOMAXPROCS=2 go test -p 2 ./internal/nativeattach/...`, passes
+with a cached result. The complete CLI package and strict static checks were
+not rerun this round; their PR CI results above remain the available evidence.
+Current remote/static validation is incomplete, and PR CI is failed, not green.
+
+The offline affected planner exits 0 and selects FULL Go because 3,233 reverse
+dependency cases exceed its 300-case bound; this is selection only. The PR diff
+contains no web source or tests, so this slice has no web unit or browser case
+to run. Latest fetched main is `fd8fae22f`, still missing the nine rows; PR #618
+is `MERGEABLE`, so no conflict merge is needed. The P2b write-set check and
+`git diff --check` pass. This round changes only this scoped handoff and the
+ignored progress file. No origin push, deployment, model CLI, review gate or
+live cutover was performed. The coordinator owns the separate trusted review
+verdict after builder exit.
