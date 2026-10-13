@@ -154,7 +154,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if err != nil {
 			return err
 		}
-		if grant.OwnerPersonID != r.OwnerPersonID || !reflect.DeepEqual(grant.Policy, r.policy) || !reflect.DeepEqual(grant.Launch, r.launch) || !reflect.DeepEqual(grant.RunID, r.runID) {
+		if grant.OwnerPersonID != r.OwnerPersonID || !samePolicy(grant.Policy, r.policy) || !reflect.DeepEqual(grant.Launch, r.launch) || !reflect.DeepEqual(grant.RunID, r.runID) {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
 		if err = targetStart(ctx, tx, r.ProjectID, r.Intent, true); err != nil {
@@ -263,6 +263,13 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		return nativecontract.ClaimResult{}, err
 	}
 	return out, nil
+}
+
+func samePolicy(a, b nativecontract.Policy) bool {
+	expiresA, expiresB := a.ExpiresAt, b.ExpiresAt
+	a.ExpiresAt = time.Time{}
+	b.ExpiresAt = time.Time{}
+	return a == b && expiresA.Equal(expiresB)
 }
 
 func validateObservation(o Observation, d nativecontract.DaemonActor, p PendingStart, now time.Time) error {
