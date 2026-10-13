@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { isTextClipped, vClipTip, type ClipTipValue } from '../src/lib/clipTip'
 import { reactive } from 'vue'
 import { setupSource } from './record-source'
+import { useReaderAnchor } from '../src/lib/readerAnchor'
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
@@ -92,6 +93,7 @@ it('a phone selection hold suppresses only its own row and pointer click', () =>
       '../../stores/workQueue': { useWorkQueue: () => ({ snapshots: {} }) },
       '../../lib/authz': {}, '../../lib/workQueue': { queueable: () => false },
       '../../lib/planning': { planningPresent: () => ({}) }, '../../lib/eta': { etaFromTicket: () => null },
+      '../../lib/readerAnchor': { useReaderAnchor },
     })
     const state = view.state as { pressBegin: (event: unknown, row: unknown) => void; pressFinish: (up: boolean) => void; rowClick: (event: unknown, row: unknown) => void }
     const target = { closest: () => null }, preventDefault = vi.fn()
