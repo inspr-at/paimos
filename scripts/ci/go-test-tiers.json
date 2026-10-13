@@ -7816,7 +7816,17 @@
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExactOnceAndRuntimeFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExpiryRevocationAndRestart","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/interaction","name":"TestControllerEpochFencesConcurrentAttach","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/interaction","name":"TestDeskDecisionExactEffectExpiryAndRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/interaction","name":"TestServerRestartExpiresInteractions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
     ,
