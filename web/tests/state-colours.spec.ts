@@ -41,6 +41,13 @@ async function cardFootprints(page: Page) {
     const footHeight = foot.getBoundingClientRect().height
     const chipBox = chip?.getBoundingClientRect()
     const activityBox = activity.getBoundingClientRect()
+    const faces = chip?.querySelector('.faces')?.getBoundingClientRect().width ?? 0
+    const state = chip?.querySelector('.chip-state')?.getBoundingClientRect().width ?? 0
+    const chipStyle = chip ? getComputedStyle(chip) : null
+    const footStyle = getComputedStyle(foot)
+    const minChip = faces + state + (chipStyle ? parseFloat(chipStyle.paddingLeft) + parseFloat(chipStyle.paddingRight) + parseFloat(chipStyle.columnGap) * 2 : 0)
+    const footGap = parseFloat(footStyle.columnGap)
+    const canShare = !!chip && minChip + activityBox.width + footGap <= foot.clientWidth + 0.5
     return {
       id: el.dataset.projectId ?? '',
       height: linkHeight + footHeight,
@@ -50,6 +57,10 @@ async function cardFootprints(page: Page) {
       chipRight: chipBox ? chipBox.x + chipBox.width : null,
       activityTop: activityBox.y,
       activityLeft: activityBox.x,
+      canShare,
+      minChip,
+      activityWidth: activityBox.width,
+      footWidth: foot.clientWidth,
     }
   }))
 }
@@ -149,9 +160,13 @@ for (const theme of ['light', 'dark'] as const) {
             const delta = Math.abs((row.height - quiet!.height) - (row.link - quiet!.link))
             expect(delta, `${row.id} @ ${width}px: live chip changes the card height (footer ${row.foot} vs ${quiet!.foot})`).toBeLessThanOrEqual(0.5)
             if (width === 1024 || width === 1440) {
-              expect(row.chipTop, `${row.id} chip`).not.toBeNull()
-              expect(Math.abs(row.chipTop! - row.activityTop), `${row.id} @ ${width}px: activity shares the live chip's line`).toBeLessThanOrEqual(1)
-              expect(row.activityLeft, `${row.id} @ ${width}px: activity stays after the chip`).toBeGreaterThanOrEqual(row.chipRight! - 1)
+              // A long name must not wrap the time when robots, the state word and the time fit.
+              if (row.id === 'p-sc1-working' || row.id === 'p-sc1-idle') expect(row.canShare, `${row.id} @ ${width}px fits beside the time`).toBe(true)
+              if (row.canShare) {
+                expect(row.chipTop, `${row.id} chip`).not.toBeNull()
+                expect(Math.abs(row.chipTop! - row.activityTop), `${row.id} @ ${width}px: activity shares the live chip's line (chip min ${row.minChip}, time ${row.activityWidth}, footer ${row.footWidth})`).toBeLessThanOrEqual(1)
+                expect(row.activityLeft, `${row.id} @ ${width}px: activity stays after the chip`).toBeGreaterThanOrEqual(row.chipRight! - 1)
+              }
             }
           }
         }
