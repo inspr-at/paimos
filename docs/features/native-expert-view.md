@@ -35,10 +35,14 @@ frames and open diagnostics, and disables Watch live; late callbacks remain
 discarded. Restoring the capability enables the explicit action without
 starting a stream automatically.
 
-Events retain C0 names, native envelopes, correlation IDs, redacted paths,
+Event rows use harness/tool names, plain status and lifecycle labels, and
+Approval or Question. C0/native event names remain in the details header with
+the sequence, alongside native envelopes, correlation IDs, redacted paths,
 omitted byte counts and receipt states. Message deltas coalesce by message ID,
 finals replace their text, and tool start/result pairs share a call-ID row.
-Inferred reply correlation stays labelled. Review emits the exact approval
+Character counts, tool durations and context share occupy the metadata slot
+without truncation; narrow panes show them in details. Inferred reply
+correlation stays labelled in details. Review emits the exact approval
 for the existing Decision Desk; this component never approves a request.
 Copy JSON is a deliberate authorized reader action, not automatic persistence.
 
@@ -49,9 +53,15 @@ cursor progress. A generation change never attaches to a successor silently.
 No raw frame or cursor is written to local storage or durable history. Type
 filters use the existing per-person `agents:expert.types` server preference.
 
-Controls sit above the scrolling list; expanding a row or scrolling up pauses
-Follow live. Earlier pages preserve the visible row's viewport position. The
-type menu reuses `FloatingPanel` and 44 px rows. JSON wraps and scrolls inside
+Controls sit above the scrolling list. One status line places the event count
+and Load earlier beside Watch live / Stop watching. Notices use “events” and
+plain words; raw reason codes remain in the JSON. Expanding a row or scrolling
+up pauses Follow live. Jump to live appears only after new live events arrive
+while the live end is out of view, with the number of new events. Replay pages
+do not count as live arrivals. Earlier pages preserve the visible row's
+viewport position. The type menu reuses `FloatingPanel` and 44 px rows: a
+compact 240 px popover anchored below Types on desktop, a full-height sheet
+only on phones. JSON wraps and scrolls inside
 its code surface. Both themes use shared tokens and SVG icons.
 
 The type sheet has a 44 px Done action that restores focus to Types. On phones,
@@ -130,3 +140,19 @@ Done and Escape restore trigger focus. The two themes at each width also emit
 the narrow-panel layout. Fix-round evidence is kept under
 `web/test-results/AEON-1270-fix3/`. The worker status records the final tested
 HEAD, browser/static results and any incomplete coordinator-owned checks.
+
+Fix round 4 applies Tick's stream review to the same r2 + A1 design. The existing
+12 registered cases cover the row words and metadata, singular event count,
+plain gap/eviction/omission notices, Watch live / Stop watching copy, genuine
+consent withdrawal from retained expanded diagnostics and an active stream,
+viewport-aware new-event counting, and compact desktop Types placement. The
+consent assertion runs before any capability withdrawal. Its capability case
+then starts with newly retained diagnostics and a fresh active stream as well.
+
+The viewport/theme cases use C0 fixtures for 15 mixed rows in generation 2,
+including a tool start/result pair, context usage, Running/Idle/Needs you,
+Started/Resumed/Interrupted and Approval/Question. No fixture is product data.
+Each captures pre-watch, lock, mixed, jump, earlier and gap states at 390, 1024
+and 1440 px in light and dark, alongside the existing details/Types/Zellij
+shots. These ignored artifacts use `testInfo.outputPath()` and the guarded
+remote runner's output directory `web/test-results/AEON-1270-fix4/`.

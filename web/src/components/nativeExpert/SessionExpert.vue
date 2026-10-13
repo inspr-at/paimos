@@ -7,7 +7,7 @@ import NativeEventList from './NativeEventList.vue'
 import { nativeSessionBounds as bounds, type NativeApproval, type NativeSessionView, type NativeStreamEvent } from '../../lib/nativeSessionContract'
 import { boundedEvent, boundedPage, ExpertBuffer } from '../../lib/nativeExpert/buffer'
 import { bindingKey, expertRequest, liveTerminalLink, type ExpertConsent, type ExpertViewer, type NativeExpertTransport } from '../../lib/nativeExpert/ports'
-import { eventRows, eventTypes, type EventType } from '../../lib/nativeExpert/rows'
+import { endText, eventRows, eventTypes, missingEvents, type EventType } from '../../lib/nativeExpert/rows'
 import { fullName, type RegistryProfile } from '../../lib/modelsSimple'
 import { preferenceOwner, usePreference } from '../../lib/preferences'
 
@@ -28,6 +28,8 @@ const captureKey = computed(() => JSON.stringify([panelKey.value, bindingKey(pro
 const segment = ref<'events' | 'terminal'>('events'), terminalAtOpen = ref(false), viewerAtOpen = ref(false)
 const openedName = ref(''), openedHost = ref('')
 const hidden = ref(false), following = ref(true), hiddenTypes = ref<EventType[]>([]), typeAnchor = ref<HTMLElement | null>(null)
+const phone = ref(window.innerWidth <= 600)
+const resized = () => { phone.value = window.innerWidth <= 600 }
 const preference = usePreference<{ hidden?: string[] }>('agents:expert.types')
 const ownPreference = computed(() => props.viewer.kind === 'person' && preferenceOwner.value === `${props.viewer.tenantId}/${props.viewer.principalId}`)
 watch(() => ownPreference.value ? preference.value.value : null, value => {
@@ -44,9 +46,11 @@ function closeTypes(restoreFocus: boolean) {
 }
 
 const buffer = new ExpertBuffer(), events = shallowRef<NativeStreamEvent[]>([]), evicted = ref(0)
-const notice = ref(''), status = ref('Live events appear after Watch live. Only the bounded live buffer is available.')
+const notice = ref(''), status = ref("Watch live to see this session's events as they happen."), liveArrivals = ref(0)
 const watching = ref(false), loading = ref(false), before = ref<string | null>(null), blocked = ref(false)
-const rows = computed(() => eventRows(events.value).filter(row => !hiddenTypes.value.includes(row.type)))
+const rows = computed(() => eventRows(events.value, props.session.harness).filter(row => !hiddenTypes.value.includes(row.type)))
+const visibleStatus = computed(() => !props.session.capabilities.events_supported ? 'Live events are not available for this session.' :
+  !request.value ? "Live events need watch rights and the owner's consent." : status.value)
 const available = computed(() => !!request.value && props.active && !hidden.value && segment.value === 'events' && !blocked.value)
 const inspectionPermit = computed(() => {
   const key = captureKey.value
@@ -56,7 +60,7 @@ let controller: AbortController | null = null, epoch = 0, lastSeq: bigint | null
 function publish() { events.value = [...buffer.events]; evicted.value = buffer.evicted }
 function stop(clear = true) {
   epoch++; controller?.abort(); controller = null; watching.value = false; loading.value = false
-  if (clear) { buffer.clear(); publish(); before.value = null; notice.value = ''; lastSeq = null }
+  if (clear) { buffer.clear(); publish(); before.value = null; notice.value = ''; lastSeq = null; liveArrivals.value = 0 }
 }
 function errorText(error: unknown) {
   // Never render adapter/native error bodies: they can contain paths or private payloads.
@@ -80,19 +84,19 @@ function receive(event: NativeStreamEvent, current: () => boolean) {
   }
   let safe: NativeStreamEvent | null
   try { safe = boundedEvent(event, bound) } catch { safe = null }
-  if (!safe) { notice.value = 'A frame was omitted because its view, shape or size was not permitted.'; return }
+  if (!safe) { notice.value = 'An event was omitted because its view, shape or size was not permitted.'; return }
   if (safe.kind === 'end' && safe.payload.reason === 'revoked') {
     accessLost(); return
   }
   const seq = BigInt(safe.seq)
-  if (lastSeq !== null && seq > lastSeq + 1n) notice.value = `${seq - lastSeq - 1n} frames are missing from this live view.`
-  if (BigInt(safe.dropped_frames) > 0n) notice.value = `${safe.dropped_frames} frames were dropped by the live transport.`
-  if (lastSeq === null || seq > lastSeq) lastSeq = seq
+  if (lastSeq !== null && seq > lastSeq + 1n) notice.value = missingEvents(seq - lastSeq - 1n)
+  if (BigInt(safe.dropped_frames) > 0n) notice.value = missingEvents(safe.dropped_frames)
+  if (lastSeq === null || seq > lastSeq) { lastSeq = seq; liveArrivals.value++ }
   buffer.add([safe]); publish()
   if (safe.kind === 'gap') {
-    notice.value = `Live gap · ${safe.payload.reason} · ${safe.payload.dropped_frames} frames unavailable.`
-    if (safe.payload.reload_snapshot) { stop(false); status.value = 'Watch live to reload the current snapshot. Earlier live frames may be unavailable.' }
-  } else if (safe.kind === 'end') { stop(false); status.value = `Viewing ended · ${safe.payload.reason}.` }
+    notice.value = missingEvents(safe.payload.dropped_frames)
+    if (safe.payload.reload_snapshot) { stop(false); status.value = 'Watch live to reload the current snapshot. Earlier live events may be unavailable.' }
+  } else if (safe.kind === 'end') { stop(false); status.value = endText(safe.payload.reason) }
   else if (safe.kind === 'stream.paused') status.value = 'Structured events pause while a person has control. Events resume when they hand back.'
   else status.value = 'Live · new events land here'
 }
@@ -110,7 +114,7 @@ async function start() {
     const accepted = boundedPage(page, frozen, null)
     if (accepted === null) { stop(); status.value = 'The replay page was rejected. Its generation, binding, ordering or bounds did not match this view.'; return }
     buffer.add(accepted); publish(); before.value = page.next_before
-    if (page.truncated) notice.value = 'Earlier live frames are unavailable. This replay is incomplete.'
+    if (page.truncated) notice.value = 'Earlier live events are unavailable. This replay is incomplete.'
     lastSeq = accepted.length ? BigInt(accepted.at(-1)!.seq) : null
     loading.value = false; status.value = 'Live · new events land here'
     await props.transport.stream(Object.freeze({ ...frozen, lastEventId: lastSeq === null ? null : `${frozen.generation}:${lastSeq}` }), event => receive(event, current), abort.signal)
@@ -132,7 +136,7 @@ async function earlier() {
     const accepted = boundedPage(page, bound, cursor)
     if (accepted === null) { notice.value = 'The earlier page was rejected. Its cursor, generation, binding, ordering or bounds did not match this view.'; return }
     following.value = false; buffer.add(accepted); publish(); before.value = page.next_before
-    if (page.truncated) notice.value = 'Earlier live frames are unavailable. This replay is incomplete.'
+    if (page.truncated) notice.value = 'Earlier live events are unavailable. This replay is incomplete.'
   } catch (error) { if (current()) { if (revoked(error)) accessLost(); else notice.value = errorText(error) } }
   finally { if (epoch === turn) loading.value = false }
 }
@@ -148,16 +152,16 @@ watch(panelKey, () => {
 watch(captureKey, () => {
   stop(); blocked.value = false; typeAnchor.value = null
   status.value = !props.session.capabilities.events_supported ? 'Live events are not available for this session.' :
-    request.value ? 'Viewing stopped. Watch live to view this session explicitly.' : 'Live diagnostics require current view permission and the owner’s active watch consent.'
+    request.value ? 'Stopped watching. Watch live to continue.' : "Live events need watch rights and the owner's consent."
 }, { flush: 'sync' })
-watch(() => props.active, active => { if (!active) { stop(); status.value = 'Viewing stopped while Expert is hidden.' } }, { flush: 'sync' })
-watch(segment, () => { stop(); typeAnchor.value = null; status.value = 'Viewing stopped. Watch live to view Events again.' }, { flush: 'sync' })
+watch(() => props.active, active => { if (!active) { stop(); status.value = 'Stopped watching while Expert is hidden.' } }, { flush: 'sync' })
+watch(segment, () => { stop(); typeAnchor.value = null; status.value = 'Stopped watching. Watch live to continue.' }, { flush: 'sync' })
 function visibility() {
   hidden.value = document.hidden
-  if (hidden.value) { stop(); status.value = 'Viewing stopped while this page is hidden.' }
+  if (hidden.value) { stop(); status.value = 'Stopped watching while this page is hidden.' }
 }
-onMounted(() => { visibility(); document.addEventListener('visibilitychange', visibility) })
-onBeforeUnmount(() => { stop(); document.removeEventListener('visibilitychange', visibility) })
+onMounted(() => { visibility(); document.addEventListener('visibilitychange', visibility); window.addEventListener('resize', resized) })
+onBeforeUnmount(() => { stop(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('resize', resized) })
 defineExpose({ stop, liveTerminalLink: link, modelName })
 </script>
 
@@ -181,7 +185,7 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
         <label class="switch follow"><input type="checkbox" role="switch" aria-label="Follow live" :checked="following" @change="following = ($event.target as HTMLInputElement).checked"><span class="follow-long">Follow live</span><span class="follow-short" aria-hidden="true">Follow</span></label>
       </template>
     </div>
-    <NativeEventList v-if="segment === 'events'" :key="captureKey" :rows="rows" :retained="events.length" :evicted="evicted" :notice="notice" :status="status" :before="before" :loading="loading" :watching="watching" :can-start="available" :can-inspect="inspectionPermit" :follow="following" @start="start" @stop="stop(); status = 'Viewing stopped. The transient buffer was cleared.'" @earlier="earlier" @follow="following = $event" @review="emit('review', $event)" />
+    <NativeEventList v-if="segment === 'events'" :key="captureKey" :rows="rows" :retained="events.length" :live-arrivals="liveArrivals" :evicted="evicted" :notice="notice" :status="visibleStatus" :before="before" :loading="loading" :watching="watching" :can-start="available" :can-inspect="inspectionPermit" :follow="following" @start="start" @stop="stop(); status = 'Stopped watching. Watch live to continue.'" @earlier="earlier" @follow="following = $event" @review="emit('review', $event)" />
     <div v-else-if="viewer.kind === 'person'" class="terminal-pane">
       <p v-if="!readable">You cannot read this session.</p>
       <template v-else-if="session.mode === 'terminal' || !viewerAtOpen">
@@ -194,7 +198,7 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
         <p class="terminal-hint"><span :aria-hidden="!link">Read-only, in a new tab, on the tailnet. The first visit asks for the viewer token.</span><span :aria-hidden="!!link">The live terminal is no longer available.</span></p>
       </div>
     </div>
-    <FloatingPanel v-if="typeAnchor && segment === 'events'" style="display: flex; flex-direction: column" :anchor="typeAnchor" label="Event types" :width="260" :sheet="true" cycle @close="closeTypes">
+    <FloatingPanel v-if="typeAnchor && segment === 'events'" :key="phone ? 'sheet' : 'popover'" style="display: flex; flex-direction: column" :anchor="typeAnchor" label="Event types" :width="240" :sheet="phone" cycle @close="closeTypes">
       <div class="types-menu" role="group" aria-label="Event types">
         <p>Show these events</p>
         <div class="types-options">

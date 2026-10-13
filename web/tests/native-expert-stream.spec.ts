@@ -18,13 +18,14 @@ const replay = (items: NativeStreamEvent[] = [], next_before: string | null = nu
  * The component and Vue import share Vite's resolved module (no duplicate Vue runtime).
  * All replay/stream completions are explicit barriers, including callbacks after abort.
  */
-async function setup(page: Page, options: { terminal?: boolean; take?: boolean; agent?: boolean; theme?: string; page?: NativeEventPage; hold?: boolean } = {}) {
+async function setup(page: Page, options: { terminal?: boolean; take?: boolean; agent?: boolean; theme?: string; page?: NativeEventPage; hold?: boolean; session?: NativeSessionView } = {}) {
   const response = await page.request.get('/src/components/nativeExpert/SessionExpert.vue')
   expect(response.ok()).toBe(true)
   const source = await response.text(), vue = source.match(/from\s*["']([^"']*\/vue\.js[^"']*)["']/)?.[1]
   expect(vue, 'the real Vite Vue module').toBeTruthy()
-  const view = { ...session, mode: options.terminal ? 'terminal' : 'structured', capabilities: { ...session.capabilities, take_supported: options.take ?? false } }
-  const state = { session: view, viewer: { tenantId: binding.tenant_id, principalId: options.agent ? 'agent-1' : 'person-1', kind: options.agent ? 'agent' : 'person', canRead: true, canWatch: !options.agent, canReadStructured: !!options.agent }, consent: { id: 'consent-a', ownerPersonId: session.owner_person_id, binding, active: true }, active: true,
+  const base = options.session ?? session
+  const view = { ...base, mode: options.terminal ? 'terminal' : 'structured', capabilities: { ...base.capabilities, take_supported: options.take ?? false } }
+  const state = { session: view, viewer: { tenantId: binding.tenant_id, principalId: options.agent ? 'agent-1' : 'person-1', kind: options.agent ? 'agent' : 'person', canRead: true, canWatch: !options.agent, canReadStructured: !!options.agent }, consent: { id: 'consent-a', ownerPersonId: base.owner_person_id, binding: base.current_binding, active: true }, active: true,
     name: 'Koordinator für die vollständige Freigabeprüfung', host: 'Arbeitsrechner-Wien', modelProfile: { harness: 'codex', model: 'gpt-6.1-sol', display_name: 'GPT Sol', model_version: '6.1' },
   }
   const errors: string[] = []
@@ -62,10 +63,105 @@ const start = async (page: Page, expected = 1) => {
 }
 const switchTo = (page: Page, segment: string) => page.getByRole('radio', { name: segment, exact: true }).click()
 
+// C0 fixtures only: a new generation has its own runtime binding. The product
+// receives these through exactly the same bounded replay/stream ports as real data.
+const mixedBinding = { ...binding, harness_session_id: 'harness-mixed', runtime_epoch: 'runtime-mixed', binding_revision: 2 }
+const mixedSession = { ...session, current_binding: mixedBinding, generation: 2 }
+const mixedFrame = (seq: number, kind: NativeStreamEvent['kind'], payload: unknown) => frame(seq, kind, payload, mixedBinding, 2)
+const textFrame = (seq: number, text: string) => mixedFrame(seq, 'assistant.final', { message_id: `mixed-${seq}`, input_id: null, inferred: false, text })
+const stateFrame = (seq: number, state: string) => mixedFrame(seq, 'structured', { kind: 'turn_state', text: null, reference: null, state })
+function receiptFrame(seq: number, operation: 'start' | 'resume' | 'interrupt') {
+  return mixedFrame(seq, 'receipt', { request_id: `request-${seq}`, operation_id: `operation-${seq}`, binding: mixedBinding, operation, state: 'applied', input_id: null, turn_ref: null, source_sequence: String(seq), updated_at: '2026-10-13T02:03:04Z', reason: null })
+}
+function approvalFrame(seq: number, kind: 'command' | 'question') {
+  return mixedFrame(seq, 'approval', { request_id: `ask-${seq}`, binding: mixedBinding, turn_ref: 'turn-mixed', native_request_ref: `native-${seq}`, kind, effect_digest: 'fixture-effect', summary: kind === 'question' ? 'Which verification should run next?' : 'Freigabe für die vollständige Prüfung des Übergabeberichts und der Eigentumsgrenzen', allowed_decisions: kind === 'question' ? ['answer'] : ['allow_once', 'deny'], expires_at: '2026-10-13T02:33:04Z', desk_item_id: kind === 'command' ? 'desk-mixed' : null, step_up_required: false, approval_id: `approval-${seq}`, expires_in_ms: 1800000 })
+}
+const mixedEvents = [
+  receiptFrame(10, 'resume'), stateFrame(11, 'running'),
+  textFrame(12, 'Checking the owned session, its current permissions, and the complete event stream before the next action.'),
+  mixedFrame(13, 'tool.start', { call_id: 'mixed-read', name: 'Read', args_summary: 'Read the verification report' }),
+  mixedFrame(14, 'tool.result', { call_id: 'mixed-read', result_summary: 'Report checked', duration_ms: 400 }),
+  mixedFrame(15, 'quota', { account_id: 'account-mixed', profile_binding_revision: 2, source: 'codex_stream', scope: 'context', state: 'known', used_percent: 23, observed_at: '2026-10-13T02:03:04Z', fresh_until: '2026-10-13T02:13:04Z', resets_at: null }),
+  stateFrame(16, 'idle'), textFrame(17, 'The report preserves the current owner and permission boundaries.'),
+  mixedFrame(18, 'tool.start', { call_id: 'mixed-bash', name: 'Bash', args_summary: 'Run the targeted verification' }),
+  approvalFrame(19, 'command'), mixedFrame(20, 'input.delivered', { input_id: 'input-mixed', from: { id: 'person-1', kind: 'person' }, level: 'next_step', text: 'Keep the current ownership boundaries.' }),
+  stateFrame(21, 'requires_action'), textFrame(22, 'Die vollständige Freigabeprüfung mit ausführlichem Übergabebericht und unveränderten Eigentumsgrenzen ist abgeschlossen.'),
+  receiptFrame(23, 'start'), approvalFrame(24, 'question'), receiptFrame(25, 'interrupt'),
+]
+
+async function mixedEvidence(page: Page, theme: string, width: number, shot: (name: string) => Promise<unknown>) {
+  const errors = await setup(page, { theme, session: mixedSession, page: replay([...mixedEvents].reverse(), '10', false, 2) })
+  const watch = page.getByRole('button', { name: 'Watch live', exact: true }), earlier = page.getByRole('button', { name: 'Load earlier', exact: true })
+  const watchAction = page.locator('.replay-controls > button:last-child')
+  const events = page.getByRole('radio', { name: 'Events', exact: true }), terminal = page.getByRole('radio', { name: 'Terminal', exact: true })
+  const follow = page.getByRole('switch', { name: 'Follow live' }), scroll = page.getByLabel('Events, oldest first'), tail = page.locator('.event-tail')
+  await expect(tail).toHaveText("Watch live to see this session's events as they happen.")
+  await shot('pre-watch')
+  const consentGuard = await controlStability(page, { watch: watchAction, earlier, events, terminal, follow })
+  await consentGuard.check(async () => { await act(page, 'f.state.consent.active=false; await f.nextTick();'); await expect(watch).toBeDisabled() })
+  await expect(tail).toHaveText("Live events need watch rights and the owner's consent.")
+  await shot('lock')
+  await consentGuard.check(async () => { await act(page, 'f.state.consent.active=true; await f.nextTick();'); await expect(watch).toBeEnabled() })
+  await consentGuard.check(() => start(page))
+  consentGuard.done()
+  await expect(page.locator('[data-event-row]')).toHaveCount(15)
+  await expect(page.locator('[data-event-row] strong')).toHaveText(['Resumed · generation 2', 'Running', 'Codex', 'Read', 'Usage', 'Idle', 'Codex', 'Bash', 'Approval', 'Delivered', 'Needs you', 'Codex', 'Started', 'Question', 'Interrupted'])
+  await expect(page.locator('[data-event-row="call:2:mixed-read"] .event-measure')).toHaveText('400 ms')
+  await expect(page.locator('[data-event-row="event:2:15"] .event-measure')).toHaveText('23 % of context')
+  if (width > 560) {
+    for (const meta of await page.locator('.event-measure').all()) {
+      expect(await meta.evaluate(el => el.scrollWidth <= el.clientWidth), 'row metadata is never truncated').toBe(true)
+    }
+  }
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeVisible()
+  await expect(page.locator('[data-event-row="event:2:19"]').locator('..')).toHaveCSS('box-shadow', /inset/)
+  await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
+  await shot('mixed')
+  await scroll.evaluate(el => { el.scrollTop = 0 })
+  await expect(follow).not.toBeChecked()
+  await expect(tail).not.toBeInViewport()
+  await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
+  const read = page.locator('[data-event-row="event:2:10"]'), stopWatching = page.getByRole('button', { name: 'Stop watching', exact: true })
+  const readGuard = await controlStability(page, { read, earlier, stopWatching, events, terminal, follow })
+  await readGuard.check(() => page.evaluate(items => { const f = (window as any).nativeExpert; for (const event of items) f.emit(0, event) }, [textFrame(26, 'The current checks passed.'), textFrame(27, 'The stream stays bound to this generation.'), textFrame(28, 'The next action is ready for review.')]))
+  const jump = page.getByRole('button', { name: 'Jump to live · 3 new', exact: true })
+  await expect(jump).toBeVisible()
+  await expect(tail).not.toBeInViewport()
+  await shot('jump')
+  readGuard.done()
+  const position = (await read.boundingBox())!.y
+  await page.evaluate(result => (window as any).nativeExpert.page(result), replay([stateFrame(9, 'idle'), textFrame(8, 'Earlier verification completed.')], '8', false, 2))
+  const replayGuard = await controlStability(page, { earlier, stopWatching, events, terminal, follow })
+  await replayGuard.check(() => earlier.click())
+  await expect(page.locator('[data-event-row]')).toHaveCount(20)
+  expect(Math.abs((await read.boundingBox())!.y - position), 'replay preserves the row being read').toBeLessThanOrEqual(.5)
+  await expect(jump).toBeVisible() // The two replay events are not new live arrivals.
+  await shot('earlier')
+  replayGuard.done()
+  await send(page, mixedFrame(29, 'gap', { reason: 'cursor_expired', dropped_frames: '3', reload_snapshot: false }))
+  await scroll.evaluate(el => { el.scrollTop = 0 })
+  await expect(page.locator('.notice')).toHaveText('3 events are missing from this live view.')
+  await expect(page.locator('.notice')).toBeVisible()
+  await expect(page.locator('.notice')).not.toContainText('cursor_expired')
+  await shot('gap')
+  await page.getByRole('button', { name: 'Jump to live · 4 new', exact: true }).click()
+  await expect(tail).toBeInViewport()
+  await expect(follow).toBeChecked()
+  await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
+  const stopGuard = await controlStability(page, { earlier, watch: watchAction, events, terminal, follow })
+  await stopGuard.check(() => stopWatching.click())
+  await expect(tail).toHaveText('Stopped watching. Watch live to continue.')
+  await expect(page.locator('[data-event-row]')).toHaveCount(0)
+  stopGuard.done()
+  expect(errors).toEqual([])
+}
+
 // Risk: capability withdrawal must end either authorized stream view, including
 // retained diagnostics and callbacks the transport delivers after abort.
 async function withdrawEvents(page: Page) {
   const captures = await page.evaluate(() => { const f = (window as any).nativeExpert; return { reads: f.reads.length, streams: f.streams.length } })
+  expect(await page.locator('[data-event-row]').count()).toBeGreaterThan(0)
+  expect(await page.evaluate(() => (window as any).nativeExpert.streams.at(-1).signal.aborted)).toBe(false)
   await act(page, 'f.state.session.capabilities.events_supported = false; await f.nextTick();')
   expect(await page.evaluate(() => (window as any).nativeExpert.streams.at(-1).signal.aborted)).toBe(true)
   await expect(page.locator('[data-event-row]')).toHaveCount(0)
@@ -73,7 +169,8 @@ async function withdrawEvents(page: Page) {
   const restart = page.getByRole('button', { name: 'Watch live', exact: true })
   await expect(restart).toBeDisabled()
   await expect(page.getByText('Live events are not available for this session.', { exact: true })).toBeVisible()
-  await send(page, frame(900, 'assistant.final', { message_id: 'withdrawn', input_id: null, inferred: false, text: 'withdrawn-capability-late-frame' }), captures.streams - 1)
+  const current = await page.evaluate(() => { const s = (window as any).nativeExpert.state.session; return { binding: s.current_binding, generation: s.generation } })
+  await send(page, frame(900, 'assistant.final', { message_id: 'withdrawn', input_id: null, inferred: false, text: 'withdrawn-capability-late-frame' }, current.binding, current.generation), captures.streams - 1)
   await expect(page.locator('[data-event-row]')).toHaveCount(0)
   await expect(page.getByText('withdrawn-capability-late-frame', { exact: false })).toHaveCount(0)
   await restart.dispatchEvent('click')
@@ -96,9 +193,14 @@ test('AEON-1270 raw diagnostics stay bound to session, person, consent and tab t
   await expect(page.locator('.correlations')).toContainText('opaque-turn')
   await expect(page.locator('.redactions')).toContainText('session_id')
   guard.done()
-  await withdrawEvents(page)
+  // Consent withdrawal must begin with retained, expanded diagnostics and a live
+  // signal. A previous capability withdrawal would make these checks vacuous.
+  await expect(page.locator('[data-event-row]')).toHaveCount(1)
+  await expect(page.locator('.event-detail')).toHaveCount(1)
+  expect(await page.evaluate(() => (window as any).nativeExpert.streams[0].signal.aborted)).toBe(false)
   await act(page, 'f.state.consent.active = false; await f.nextTick();')
   await expect(page.locator('[data-event-row]')).toHaveCount(0)
+  await expect(page.locator('.event-detail')).toHaveCount(0)
   expect(await page.evaluate(() => (window as any).nativeExpert.streams[0].signal.aborted)).toBe(true)
   await send(page, frame(2, 'assistant.final', { message_id: 'old-message', input_id: null, inferred: false, text: 'late-private-frame' }))
   await expect(page.getByText('late-private-frame', { exact: false })).toHaveCount(0)
@@ -132,35 +234,55 @@ test('AEON-1270 raw diagnostics stay bound to session, person, consent and tab t
   await expect(page.locator('[data-event-row]')).toHaveCount(0)
   await act(page, 'Object.defineProperty(document,"hidden",{configurable:true,get:()=>false}); document.dispatchEvent(new Event("visibilitychange")); await f.nextTick();')
   expect(await page.evaluate(() => (window as any).nativeExpert.streams.length)).toBe(4)
+  await start(page, 5)
+  await send(page, frame(5, 'assistant.final', { message_id: 'current', input_id: null, inferred: false, text: 'Current diagnostics before capability withdrawal' }, nextBinding), 4)
+  await page.locator('[data-event-row]').click()
+  await expect(page.locator('.event-detail')).toHaveCount(1)
+  await withdrawEvents(page)
   expect(errors).toEqual([])
 })
 
 test('AEON-1270 coalescing keeps native envelopes, inferred correlations, receipts and omitted bodies honest', async ({ page }) => {
   const errors = await setup(page)
+  await expect(page.getByText("Watch live to see this session's events as they happen.", { exact: true })).toBeVisible()
   await start(page)
+  await expect(page.getByRole('button', { name: 'Stop watching', exact: true })).toBeVisible()
   await send(page, frame(1, 'assistant.delta', { message_id: 'message-1', text: 'First ' }))
+  await expect(page.locator('.retained')).toHaveText('Showing the last event')
   await send(page, frame(2, 'assistant.delta', { message_id: 'message-1', text: 'delta' }))
   await expect(page.locator('[data-event-row]')).toHaveCount(1)
   await send(page, frame(3, 'assistant.final', { message_id: 'message-1', input_id: 'input-1', inferred: true, text: 'Explicit final' }))
   await send(page, frame(4, 'tool.start', { call_id: 'call-1', name: 'Read', args_summary: 'Approved summary' }))
-  await send(page, frame(5, 'tool.result', { call_id: 'call-1', result_summary: 'Finished summary', duration_ms: 120 }))
+  await send(page, frame(5, 'tool.result', { call_id: 'call-1', result_summary: 'Finished summary', duration_ms: 400 }))
   await expect(page.locator('[data-event-row]')).toHaveCount(2)
+  const textRow = page.locator('[data-event-row="message:1:message-1"]'), toolRow = page.locator('[data-event-row="call:1:call-1"]')
+  await expect(textRow.locator('strong')).toHaveText('Codex')
+  await expect(textRow.locator('.event-measure')).toHaveText('14 chars')
+  await expect(toolRow.locator('strong')).toHaveText('Read')
+  await expect(toolRow.locator('.event-measure')).toHaveText('400 ms')
+  await expect(page.locator('.retained')).toHaveText('Showing the last 5 events')
+  expect(await page.locator('.event-measure').allTextContents()).not.toContain('Reply correlation inferred')
   await page.locator('[data-event-row]').first().click()
+  await expect(page.locator('.raw-head')).toContainText('assistant.final · seq 3')
   await expect(page.getByLabel('C0 event envelope')).toContainText('assistant.delta')
   await expect(page.getByLabel('C0 event envelope')).toContainText('assistant.final')
   await expect(page.locator('.event-detail')).toContainText('Reply correlation inferred')
   await expect(page.locator('.event-detail')).toContainText('input-1')
+  await toolRow.click()
+  await expect(toolRow.locator('..').locator('..').locator('.raw-head')).toContainText('tool.result · seq 5')
   await send(page, frame(6, 'receipt', { request_id: 'request-1', operation_id: 'operation-1', binding, operation: 'input', state: 'uncertain', input_id: 'input-1', turn_ref: 'turn-1', source_sequence: '5', updated_at: '2026-10-13T02:03:04Z', reason: 'input_outcome_unconfirmed' }))
   await expect(page.locator('[data-event-row]').filter({ hasText: 'uncertain' })).toHaveCount(1)
   const omitted = frame(7)
   Object.assign(omitted.payload, { event_name: 'unknown_native_frame', omitted: true, frame_json: '', original_bytes: 900 })
   await send(page, omitted)
-  await page.locator('[data-event-row]').filter({ hasText: 'unknown_native_frame' }).click()
+  await page.locator('[data-event-row="event:1:7"]').click()
+  await expect(page.locator('[data-event-row="event:1:7"] strong')).toHaveText('Native event')
+  await expect(page.locator('.raw-head').last()).toContainText('unknown_native_frame · seq 7')
   await expect(page.getByText('Native body omitted · 900 original bytes.', { exact: true })).toBeVisible()
   const unsafe = frame(8)
   Object.assign(unsafe.payload, { frame_json: '{"thinking":"synthetic-private-canary"}' })
   await send(page, unsafe)
-  await expect(page.getByText('A frame was omitted because its view, shape or size was not permitted.')).toBeVisible()
+  await expect(page.getByText('An event was omitted because its view, shape or size was not permitted.')).toBeVisible()
   await expect(page.getByText('synthetic-private-canary', { exact: false })).toHaveCount(0)
   expect(errors).toEqual([])
 })
@@ -168,10 +290,10 @@ test('AEON-1270 coalescing keeps native envelopes, inferred correlations, receip
 test('AEON-1270 bounded replay, cursor failures and gaps never masquerade as complete history', async ({ page }) => {
   await setup(page, { page: replay([frame(20), frame(19), frame(18)], '18', true) })
   await start(page)
-  await expect(page.getByText('Earlier live frames are unavailable. This replay is incomplete.')).toBeVisible()
+  await expect(page.getByText('Earlier live events are unavailable. This replay is incomplete.')).toBeVisible()
   expect(await page.evaluate(() => (window as any).nativeExpert.streams[0].request.lastEventId)).toBe('1:20')
   await send(page, frame(23))
-  await expect(page.getByText('2 frames are missing from this live view.')).toBeVisible()
+  await expect(page.getByText('2 events are missing from this live view.')).toBeVisible()
   const many = Array.from({ length: 501 }, (_, index) => frame(index + 24))
   await page.evaluate(events => { const f = (window as any).nativeExpert; for (const event of events) f.emit(0, event) }, many)
   await expect(page.locator('[data-event-row]')).toHaveCount(500)
@@ -191,7 +313,8 @@ test('AEON-1270 bounded replay, cursor failures and gaps never masquerade as com
   await expect(page.locator('[data-event-row="event:1:17"]')).toHaveCount(0)
   await expect(page.locator('[data-event-row]')).toHaveCount(500)
   await send(page, frame(525, 'gap', { reason: 'cursor_expired', dropped_frames: '12', reload_snapshot: true }))
-  await expect(page.locator('.notice').last()).toContainText('cursor_expired · 12 frames unavailable')
+  await expect(page.locator('.notice').last()).toHaveText('12 events are missing from this live view.')
+  await expect(page.locator('.notice').last()).not.toContainText('cursor_expired')
   expect(await page.evaluate(() => (window as any).nativeExpert.streams[0].signal.aborted)).toBe(true)
   await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toBeVisible()
 })
@@ -213,7 +336,8 @@ test('AEON-1270 earlier pages keep the read row still; stale revisions and 512 K
   await page.evaluate(events => { const f = (window as any).nativeExpert; for (const event of events) f.emit(0, event) }, large)
   await expect(page.locator('.notice').first()).toContainText('left the local buffer')
   expect(await page.locator('[data-event-row]').count()).toBeLessThan(12)
-  await page.getByRole('button', { name: 'Stop viewing', exact: true }).click()
+  await page.getByRole('button', { name: 'Stop watching', exact: true }).click()
+  await expect(page.getByText('Stopped watching. Watch live to continue.', { exact: true })).toBeVisible()
   await act(page, 'f.setHeld(true);')
   await page.getByRole('button', { name: 'Watch live', exact: true }).click()
   await act(page, 'f.state.session.revision++; f.resolve(2,{generation:1,items:[],next_before:null,truncated:false}); await f.nextTick();')
@@ -290,6 +414,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       await start(page)
       await send(page, frame(1, 'assistant.final', { message_id: 'long-german', input_id: 'input-1', inferred: true, text: 'Die vollständige Freigabeprüfung mit ausführlichem Übergabebericht und unveränderten Eigentumsgrenzen ist abgeschlossen.' }))
       const follow = page.getByRole('switch', { name: 'Follow live' }), row = page.locator('[data-event-row]').first()
+      // Turning Follow off does not imply the live end is out of view. Even an
+      // arrival must leave Jump hidden while the live tail remains on-screen.
+      await follow.uncheck()
+      await send(page, frame(2, 'assistant.final', { message_id: 'visible-arrival', input_id: null, inferred: false, text: 'A new event still fits in the visible stream.' }))
+      await expect(page.locator('.event-tail')).toBeInViewport()
+      await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
       const rowGuard = await controlStability(page, { row, follow, events, terminal })
       await rowGuard.check(() => row.click())
       await expect(page.getByLabel('C0 event envelope')).toContainText('long-german')
@@ -341,9 +471,14 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
         await trigger.click()
         const group = page.getByRole('dialog', { name: 'Event types', exact: true }), done = group.getByRole('button', { name: 'Done', exact: true })
         await expect(done).toBeVisible()
+        const popover = (await group.boundingBox())!, anchor = (await trigger.boundingBox())!
+        expect(popover.width).toBe(240)
+        expect(Math.abs(popover.x - anchor.x)).toBeLessThanOrEqual(1)
+        expect(Math.abs(popover.y - (anchor.y + anchor.height + 6))).toBeLessThanOrEqual(1)
+        expect(popover.height).toBeLessThan(420)
         expect((await done.boundingBox())!.height).toBeGreaterThanOrEqual(44)
         const textOption = group.getByRole('checkbox', { name: 'Text', exact: true }), toolOption = group.getByRole('checkbox', { name: 'Tools', exact: true })
-        const menuGuard = await controlStability(page, { text: textOption, tools: toolOption, done })
+        const menuGuard = await controlStability(page, { text: textOption, tools: toolOption, done, trigger })
         await menuGuard.check(() => toolOption.check())
         menuGuard.done()
         await page.screenshot({ path: testInfo.outputPath(`AEON-1270/types-${theme}-${width}.png`) })
@@ -352,6 +487,10 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
         await expect(trigger).toBeFocused()
       }
       guard.done()
+      // A bounded height makes the mixed stream scroll at every width without
+      // inventing extra rows just to make a screenshot look populated.
+      await page.setViewportSize({ width, height: 720 })
+      await mixedEvidence(page, theme, width, name => page.screenshot({ path: testInfo.outputPath(`AEON-1270/${name}-${theme}-${width}.png`) }))
       expect(errors).toEqual([])
     } finally { await context.close() }
   })
