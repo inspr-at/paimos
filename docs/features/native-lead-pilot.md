@@ -116,13 +116,13 @@ the owning coordinator has recorded the final ownership and rollback evidence.
 
 ## Integration blockers and R0 handoff
 
-- **Z1 port incompatibility:** the merged P1b `ViewerHosts.Validate` accepts only
+- **Z1 port incompatibility (AEON-1293):** the merged P1b `ViewerHosts.Validate` accepts only
   explicit port 443 and currently rejects the required `:8082/LEAD` with
   `invalid_input`. The qualification intentionally proves that refusal; it does
   not substitute a 443 link or weaken the allowlist. The coordinator must route
   the narrowly scoped port qualification to P1b/I1 before live launch. P1c has
   no write authority over `internal/nativesessions/store/terminal_viewer.go`.
-- **Native metadata/final wiring:** P1a's bridge currently does not forward task
+- **Native metadata/final wiring (I1, AEON-1290):** P1a's bridge currently does not forward task
   or compaction metadata to C0, and `chat_final` does not carry the consumed
   input correlation ID. I1 must map a pinned reader into the C0 observer and
   correlated final path before claiming these behaviors for a live session.
@@ -146,3 +146,48 @@ the owning coordinator has recorded the final ownership and rollback evidence.
 
 Validation results and any incomplete checks are recorded here before handoff.
 No fixture result authorizes push, merge, deploy, model review or live cutover.
+
+The coordinator's finishing brief records all four Go qualification behaviors
+as remotely passed at `9e975e2d2`. This is prior-run evidence, rather than a new
+full package run in the finishing round:
+
+| Acceptance item | Offline evidence and remaining boundary |
+| --- | --- |
+| Pinned SDK, tools, settings, workspace/resource fences, deadlines and child environment | `TestNativeLeadPinnedSDKPolicyBoundary` and `TestNativeLeadFencesDeadlinesAndRevocationBarrier` passed remotely. Actual vendor terms, production pins and the live grant remain coordinator gates. |
+| Explicit exclusion of attached-inbox, cswap and duplicate registration hooks | The policy-boundary test passed remotely; the overlay clears all seven legacy hook buckets. I1 must apply the overlay through the approved vendor settings interface. |
+| Separate native-history approval; existing confined/routine ceilings | The policy and fence tests passed remotely, including missing/refused history consent and routine rejection. No approval is issued by these fixtures. |
+| Exact-conversation self-handover, after-exit proof and rollback | The runbook above records the approved path. The background/compaction test passed remotely with missing-exit and wrong-process refusals. Production one-writer wiring and upgrade freeze remain I1/coordinator work. |
+| Background pinning, compaction references, consumed-input finals and revocation | The background/compaction and revocation-barrier tests passed remotely. The corrected replay/correlation scenario also passed locally at `135d00d70` in this finishing round. Live metadata/final wiring remains AEON-1290. |
+| Z1 person-only terminal projection and required port | `TestNativeLeadPersonOnlyViewerAndZ1Compatibility` passed remotely, proving person-only projection and the current `:8082` refusal. Required port publication remains blocked by AEON-1293. |
+
+The finishing-round negative control compiled the preceding text-only replay
+digest from `135d00d70^` through a temporary Go source overlay, against the
+current test. It failed at the exact intended assertion:
+
+```text
+qualification_test.go:261: changed input replay accepted <nil>
+--- FAIL: TestNativeLeadBackgroundCompactionAndConsumedFinal (0.04s)
+```
+
+The unmodified current source then passed the same targeted test with
+`GOMAXPROCS=2 go test -p 2 -count=1 -timeout 45s -run
+'^TestNativeLeadBackgroundCompactionAndConsumedFinal$' -v
+./internal/nativequalification`:
+
+```text
+--- PASS: TestNativeLeadBackgroundCompactionAndConsumedFinal (0.48s)
+PASS
+ok  github.com/inspr-at/paimos/internal/nativequalification  0.713s
+```
+
+The temporary overlay was trashed. No production source was changed, no new
+test was added and no negative-control commit was left on the work branch.
+
+Exactly one finishing-round browser attempt through `remote-spec.sh` and one
+static attempt through `ci-static-locked.sh` both exited **3**: the two remote
+slots were occupied (`2/2`, CI pool `1/4`). Neither check ran to completion;
+both are **incomplete locally, awaiting PR CI**. There was no retry or local
+browser/static fallback. The first-round affected selection was `FULL`.
+Authoritative PR CI must be green and R0 must include the tier/shard rows above
+before merge. AEON-1293 and AEON-1290 remain the documented integration
+dependencies; no live qualification or release gate was run by this worker.
