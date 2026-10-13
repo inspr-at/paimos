@@ -95,11 +95,11 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 .ring-wrap { display: inline-flex; }
 .counts { display: grid; gap: 7px; width: min(100%, 176px); }
 .counts :deep(.stat-count) { gap: 8px; }
-/* Reserve one footer line so a live pill does not change the card's height. */
+/* Reserve one footer line so a live chip does not change the card's height. */
 .card-foot { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; min-height: 60px; margin: 18px 18px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
-/* Keep the state readable; when both cannot fit, activity grows below the chip. */
+/* Basis 0: the name shrinks first. The time wraps only when robots, the state word and the time cannot share the line. */
 .card { container: live-card / inline-size; }
-.card-live { flex: 0 1 auto; min-width: min-content; }
+.card-live { flex: 1 1 0; min-width: min-content; }
 .activity { flex: 0 0 auto; margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .card-more { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; color: var(--ink-3); opacity: 0; }
 .card:hover .card-more, .card:focus-within .card-more, .card.menu .card-more { opacity: 1; }
