@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
 import { controlStability } from './control-stability'
-import type { NativeBinding, NativeEventPage, NativeSessionView, NativeStreamEvent } from '../src/lib/nativeSessionContract'
+import type { NativeBinding, NativeEventPage, NativeQuota, NativeSessionView, NativeStreamEvent } from '../src/lib/nativeSessionContract'
 
 const binding: NativeBinding = { tenant_id: 'tenant-1', project_id: 'project-1', owned_session_id: 'owned-a', harness_session_id: 'harness-a', runtime_epoch: 'runtime-a', daemon_id: 'daemon-1', daemon_generation: 'daemon-generation-1', binding_revision: 1, run_id: null }
 const session: NativeSessionView = {
@@ -88,6 +88,51 @@ const mixedEvents = [
   stateFrame(21, 'requires_action'), textFrame(22, 'Die vollständige Freigabeprüfung mit ausführlichem Übergabebericht und unveränderten Eigentumsgrenzen ist abgeschlossen.'),
   receiptFrame(23, 'start'), approvalFrame(24, 'question'), receiptFrame(25, 'interrupt'),
 ]
+
+// Risk: account throttling and stale readings must not masquerade as context
+// exhaustion; a known context quota keeps Tick's r2 metadata wording.
+const quotaCases: { scope: string; state: NativeQuota['state']; percent: number | null; text: string; measure: string }[] = [
+  { scope: 'context', state: 'known', percent: 23, text: 'Context usage', measure: '23 % of context' },
+  { scope: 'account', state: 'known', percent: 62, text: 'Account usage', measure: '62 %' },
+  { scope: 'account', state: 'limited', percent: 100, text: 'Account usage · limited', measure: '100 %' },
+  { scope: 'context', state: 'limited', percent: 100, text: 'Context usage · limited', measure: '100 % of context' },
+  { scope: 'account', state: 'stale', percent: 62, text: 'Account usage · stale', measure: '62 %' },
+  { scope: 'context', state: 'stale', percent: 23, text: 'Context usage · stale', measure: '23 % of context' },
+  { scope: 'account', state: 'unknown', percent: null, text: 'Account usage · unknown', measure: '' },
+  { scope: 'context', state: 'unsupported', percent: null, text: 'Context usage · unsupported', measure: '' },
+]
+const quotaEvents = quotaCases.map(({ scope, state, percent }, i) => frame(i + 1, 'quota', {
+  account_id: 'account-quota', profile_binding_revision: 1, source: 'codex_stream', scope, state, used_percent: percent,
+  observed_at: '2026-10-13T02:03:04Z', fresh_until: '2026-10-13T02:13:04Z', resets_at: null,
+}))
+
+async function quotaEvidence(page: Page, theme: string, width: number, shot: (name: string) => Promise<unknown>) {
+  await page.setViewportSize({ width, height: 900 })
+  const errors = await setup(page, { theme, page: replay([...quotaEvents].reverse()) })
+  await start(page)
+  await expect(page.locator('[data-event-row]')).toHaveCount(quotaCases.length)
+  for (const [i, quota] of quotaCases.entries()) {
+    const row = page.locator(`[data-event-row="event:1:${i + 1}"]`)
+    await expect(row.locator('strong')).toHaveText('Usage')
+    await expect(row.locator('.event-summary > span')).toHaveText(quota.text)
+    await expect(row.locator('.event-measure')).toHaveText(quota.measure)
+    if (width > 560 && quota.measure) expect(await row.locator('.event-measure').evaluate(el => el.scrollWidth <= el.clientWidth), 'quota metadata is never truncated').toBe(true)
+  }
+  await shot('usage')
+  const row = page.locator('[data-event-row="event:1:3"]')
+  const guard = await controlStability(page, { row, follow: page.getByRole('switch', { name: 'Follow live' }), watch: page.getByRole('button', { name: 'Stop watching', exact: true }), events: page.getByRole('radio', { name: 'Events', exact: true }) })
+  await guard.check(() => row.click())
+  await expect(page.locator('.event-detail .event-text')).toHaveText('Account usage · limited')
+  await expect(page.locator('.event-detail > .faint')).toHaveText('100 %')
+  const envelope = page.getByLabel('C0 event envelope')
+  await expect(envelope).toContainText('"scope": "account"')
+  await expect(envelope).toContainText('"state": "limited"')
+  await expect(envelope).toContainText('"used_percent": 100')
+  await shot('usage-detail')
+  await guard.check(() => row.click())
+  guard.done()
+  expect(errors).toEqual([])
+}
 
 async function mixedEvidence(page: Page, theme: string, width: number, shot: (name: string) => Promise<unknown>) {
   const errors = await setup(page, { theme, session: mixedSession, page: replay([...mixedEvents].reverse(), '10', false, 2) })
@@ -251,6 +296,13 @@ test('AEON-1270 raw diagnostics stay bound to session, person, consent and tab t
 
 test('AEON-1270 coalescing keeps native envelopes, inferred correlations, receipts and omitted bodies honest', async ({ page }) => {
   const errors = await setup(page)
+  const quotas = await page.evaluate(async items => {
+    const { eventRows } = await import('/src/lib/nativeExpert/rows.ts')
+    return eventRows(items, 'codex').map(row => [row.type, row.name, row.text, row.measure, row.wireName])
+  }, quotaEvents)
+  for (const [i, quota] of quotaCases.entries()) {
+    expect.soft(quotas[i], `${quota.scope} quota in ${quota.state} state`).toEqual(['usage', 'Usage', quota.text, quota.measure, 'quota'])
+  }
   // Collect label and metadata regressions together, so the baseline diagnostic
   // reports both even if its unrelated pre-watch copy fails later in this case.
   const projected = await page.evaluate(async items => {
@@ -512,6 +564,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       // Capture the complete mixed list first, then reduce the height for the
       // scrolling checks without inventing extra rows to force overflow.
       await mixedEvidence(page, theme, width, name => page.screenshot({ path: testInfo.outputPath(`AEON-1270/${name}-${theme}-${width}.png`) }))
+      await quotaEvidence(page, theme, width, name => page.screenshot({ path: testInfo.outputPath(`AEON-1270-fix5/${name}-${theme}-${width}.png`) }))
       expect(errors).toEqual([])
     } finally { await context.close() }
   })

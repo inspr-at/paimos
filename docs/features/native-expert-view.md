@@ -40,11 +40,14 @@ Approval or Question. C0/native event names remain in the details header with
 the sequence, alongside native envelopes, correlation IDs, redacted paths,
 omitted byte counts and receipt states. Message deltas coalesce by message ID,
 finals replace their text, and tool start/result pairs share a call-ID row.
-Character counts, tool durations and context share occupy the metadata slot
+Character counts, tool durations and quota percentages occupy the metadata slot
 without truncation; narrow panes show them in details. Inferred reply
 correlation stays labelled in details. Review emits the exact approval
 for the existing Decision Desk; this component never approves a request.
 Copy JSON is a deliberate authorized reader action, not automatic persistence.
+Quota descriptions name their scope and explicitly show limited, stale,
+unknown or unsupported readings. Only context quotas use “% of context”; other
+scopes use “%” alongside their scope description. Raw quota envelopes stay intact.
 
 The local tail holds at most 500 frames and 512 KiB. Eviction, missing sequence
 numbers, truncated pages, cursor failures and transport gaps are visible.

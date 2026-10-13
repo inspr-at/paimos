@@ -90,7 +90,13 @@ function description(event: NativeStreamEvent, harness: string): [string, string
       return [label ?? 'Receipt', `${operationNames[operation] ?? 'Operation'} · ${receiptStates[state] ?? 'pending'}`, '']
     }
     case 'approval': return [event.payload.kind === 'question' ? 'Question' : 'Approval', event.payload.summary, '']
-    case 'quota': return ['Usage', event.payload.state === 'known' ? 'Context usage' : 'Context usage unavailable', event.payload.used_percent === null ? '' : `${event.payload.used_percent} % of context`]
+    case 'quota': {
+      const { scope, state, used_percent } = event.payload
+      const label = scope.replace(/[_-]/g, ' ')
+      const usage = `${label.charAt(0).toUpperCase() + label.slice(1)} usage`
+      return ['Usage', state === 'known' ? usage : `${usage} · ${state}`,
+        used_percent === null ? '' : `${used_percent} %${scope === 'context' ? ' of context' : ''}`]
+    }
     case 'snapshot': return [statusNames[event.payload.state] ?? 'Status', '', '']
     case 'structured': {
       const frame = event.payload
