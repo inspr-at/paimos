@@ -451,11 +451,12 @@ function lineTwo(branch: Branch, view: SessionView) {
   return [lead, precise, step].filter(Boolean).join(' · ')
 }
 // A session that ended in the last 10 minutes and keeps its place says so, never its last activity or an
-// estimate (AEON-1240): "Finished 22:20 · moves to Ended at 22:30"; an end it did not choose says which.
+// estimate (AEON-1240): "Finished 22:20 · moves to Ended at 22:30". Only Done finished; any other
+// end (a cancel, a spent budget, a lost contact) keeps the badge's own word: "Ended 22:20 · …".
 function endedLine(view: SessionView) {
   const at = Date.parse(view.session.stopped_at ?? '')
   if (!Number.isFinite(at)) return ''
-  const how = view.status.state === 'stopped' && view.status.label !== STATE_LABEL.stopped ? view.status.label : 'Finished'
+  const how = view.status.state === 'done' ? 'Finished' : view.status.label
   return `${how} ${clockTime(at)} · moves to Ended at ${clockTime(movesAt(view.session))}`
 }
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.

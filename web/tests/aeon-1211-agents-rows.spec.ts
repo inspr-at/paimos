@@ -306,6 +306,30 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   await expect(done).toHaveCount(0)
 })
 
+// AEON-1240 fix round 2: only Done finished. A cancelled run and a spent budget keep their place
+// the same 10 minutes, but their line says Ended, as their badge does, never Finished.
+test('an unfinished session keeps its place and says Ended, not Finished', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  const cancelled = '5e000000-0000-4000-8000-000000000041', spent = '5e000000-0000-4000-8000-000000000042'
+  const base = data.sessions.find(session => session.id === DONE)!
+  data.sessions.push(
+    { ...base, id: cancelled, display_label: 'Cancelled worker', stopped_at: ago(2), heartbeat_at: ago(2.2), stop_reason: 'cancelled', finished: false },
+    { ...base, id: spent, display_label: 'Budget worker', stopped_at: ago(4), heartbeat_at: ago(4.2), stop_reason: 'budget_exhausted', finished: false },
+  )
+  await page.goto('/agents')
+  for (const [id, end, moves] of [[cancelled, '58', '08'], [spent, '56', '06']] as const) {
+    const ended = row(page, id)
+    await expect(ended).toBeVisible()
+    await expect(ended.locator('.ava')).toHaveAttribute('aria-label', /: Ended$/)
+    await expect(ended.locator('.l2t')).toHaveText(new RegExp(`^Ended \\d{1,2}:${end}( [AP]M)? · moves to Ended at \\d{1,2}:${moves}( [AP]M)?$`))
+  }
+  // The Ended group stays folded: both rows sit among the live ones.
+  await expect(page.locator('.sessions .ended-head .group-toggle')).toHaveAttribute('aria-expanded', 'false')
+  await expect(row(page, DONE).locator('.l2t')).toHaveText(/^Finished \d{1,2}:57( [AP]M)? · /)
+})
+
 // AEON-1240 evidence: a finished row that keeps its place, at three widths, light and dark.
 for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
   test(`a finished row says when it finished and when it moves at ${width} ${colorScheme}`, async ({ page }, testInfo) => {
