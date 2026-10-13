@@ -101,3 +101,50 @@ Only fake grant/native transports are used; no subscription/model call occurs.
 Verification results are recorded in the handoff and ignored progress file.
 Browser testing is not applicable. R0 inventories and authoritative PR CI are
 required before merge; this groundwork is hidden from release notes.
+
+## P1b handoff verification
+
+- PASS A1: request-ID retries keep one logical session/intent, one immutable
+  role/project/work/account/computer/workspace/policy/run binding and one current
+  harness/runtime mapping (`TestStartRegistrationIdempotencyAndPersonViewer`).
+- PASS A2: non-leaf work refuses, existing worker runs remain pinned, binding
+  rewrites hit the database fence, and coordinator grants require the owning
+  person; the automatic routine module remains disabled
+  (`TestWorkerStartRequiresLeafAndKeepsExistingRun`).
+- PASS A3: roots reserve without a fake run, worker sidecars cannot count twice,
+  and idle/taken/uncertain holds stay occupied
+  (`TestNativeRootHoldsCountUntilVerifiedRelease`). I1 must still add the root
+  predicate to every legacy admission path before the live pilot.
+- PASS A4: final fenced authorization and current account/context/model/host/
+  ledger admission precede committed registration and any local launch. Exact
+  claim retries retain their original binding, hold and expiry.
+- PASS A5: local profile resolution, physical cwd confinement, pinned launch
+  identity and the final monotonic deadline are enforced before open; browser
+  DTOs carry no launch paths, argv, env or credentials
+  (`TestStartRequiresDurableClaimAndLocalLaunchFence`).
+- PASS A6: the explicit local-read barrier commits start-permission revocation
+  before final claim; no registration/root/claim/event follows and retry retains
+  one intent (`TestStartClaimRevocationBarrier`). The guarded remote negative
+  control removed only the original actor's final permission check; claim then
+  succeeded and this test failed with `wrong refusal after start revocation:
+  <nil>`. The temporary stash tree was tested on detached HEAD, then the work
+  branch and implementation were restored; no negative-control commit is on
+  the work branch.
+- PASS Zellij: accepted URLs, each rejection class and actual database-backed
+  person/agent reads pass; neither URLs nor tokens enter durable event payloads.
+- PASS Go: the final guarded remote run passed `./internal/nativesessions/store/...`,
+  `./internal/nativesessions/start/...`, `./internal/agentaccounts/...` and
+  `./internal/reportercontract/` at implementation commit `664903ed7`.
+- PASS migration guard against `v261012211543.0.0` and all 43 checker tests.
+  Migration 1346 is the brief's ledger reservation, overriding plan slot 1344.
+- PASS affected planner execution: selection is `FULL` because the migration
+  cannot be safely narrowed; authoritative full PR CI remains required.
+- INCOMPLETE static: the guarded `ci-static-locked.sh --merge-main` completed
+  with 41 passing checks, no optional skips and exit 1 solely for the six new
+  tests absent from R0's Go tier manifest. R0 must apply the six ESSENTIAL rows
+  and all three DSAR inventory entries above in this same PR, then rerun static
+  and authoritative CI. All edits stayed within P1b's exclusive write set.
+
+No browser check applies, and no origin push, deployment, live cutover, model
+call or review gate was performed. Production wiring and qualification remain
+with I1 and the coordinator.
