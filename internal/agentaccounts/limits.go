@@ -321,7 +321,9 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 				continue
 			}
 			left := float64(rule.Amount) - used + float64(w.Reserved)
-			if claiming {
+			// Native replay projects its own window hold out; its final fits
+			// check adds that hold once, so retain it in the returned budget.
+			if claiming && run.Purpose != "native_root" {
 				left -= need
 			}
 			if w.capacityBudget == nil || *w.capacityBudget > left {
