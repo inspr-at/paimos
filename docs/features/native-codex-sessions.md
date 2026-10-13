@@ -169,14 +169,15 @@ No shared inventory, contract, permission, migration or release-version file was
 changed. No origin push, deployment, live vendor session, model CLI or review
 gate was run.
 
-## CI fix round 4
+## CI fix round 5
 
-The full logs at PR head `e81db5761` confirm two outstanding R0 registrations:
+The full failed-step logs at PR head `77520cb0` confirm two outstanding R0
+registrations:
 
-- `go-static` job `115112079251` failed `check go --strict` on the three
+- `go-static` job `115120755491` failed `check go --strict` on the three
   unclassified Codex tests listed below. Its full failed-step log contains no
   provider compilation or behavior failure.
-- `release-check-run` job `115112079249` failed
+- `release-check-run` job `115120755358` failed
   `test_current_snapshot_has_no_unassigned_code` and
   `test_delta_cli_and_malformed_input_exit_codes`. Both failures come from
   missing slice ownership for `codec.go`, `launch.go`, `notifications.go`,
@@ -185,9 +186,14 @@ The full logs at PR head `e81db5761` confirm two outstanding R0 registrations:
   an invalid ownership map before it reports the delta; its assertion must not
   be weakened.
 
-R0 must add exactly `internal/nativeproviders/codex/**` to the `paths` array of
-the existing S2 slice in `scripts/audit/slices.json`, and add these three rows
-to `tests` in `scripts/ci/go-test-tiers.json`, retaining canonical ordering:
+R0's central [PR #623](https://github.com/inspr-at/paimos/pull/623) adds
+`internal/native*/**` to S2 in `scripts/audit/slices.json`, which covers the
+Codex package. It is still open and the glob is absent from fetched
+`origin/main` (`06929d1a4`). The worker rules added on 2026-10-13 explicitly say
+"Do NOT edit scripts/audit/slices.json in your branch" and require merging main
+once that central fix lands. No merge is needed for conflicts: PR #617 is
+mergeable. R0 also needs these three rows in `scripts/ci/go-test-tiers.json`,
+retaining canonical ordering; PR #623 contains only the audit-map change:
 
 ```json
 [
@@ -201,28 +207,28 @@ The strict Go-tier check and manifest-based selection must include this
 package. The normative P5a plan explicitly reserves both inventory files for
 R0: "Builders send exact row/registration intents; they never independently
 rewrite these shared inventories." P5a owns only
-`internal/nativeproviders/codex/**` and this feature document. Fix round 4
+`internal/nativeproviders/codex/**` and this feature document. Fix round 5
 requires preserving ownership and records no transfer of either registry.
-The required edits therefore remain with R0 in this PR before merge.
+The required registrations therefore remain with R0 before this PR can merge.
 
 At this PR head, all seven Go shards, Go timing, all four web unit shards, all
 twelve browser shards and e2e passed in hosted CI. Those results do not replace
 the missing registrations or establish that the Codex package was selected.
 No provider behavior change is needed for these findings; no behavior, assertion
 or existing test tier was changed. The ownership checker reproduced exactly
-the six unassigned files against immutable `e81db5761`. Adding only the proposed
+the six unassigned files against immutable `77520cb0`. Adding only the proposed
 S2 path in memory made full-tree ownership pass with zero errors; the on-disk
 registry stayed unchanged. The assigned Codex package passed through the
-guarded remote runner with `-count=1` (0.261 s). Web and browser reruns are not
+guarded remote runner with `-count=1` (0.296 s). Web and browser reruns are not
 applicable to this documentation-only handoff.
 
-The fix round 4 `ci-static-locked.sh` attempt at `e81db5761` exited 3 because
-the guarded remote runner had both slots occupied. No heavy local fallback
-was run. This attempt did not execute static checks or the tier/web-shard/audit
-self-checks and is incomplete. The last completed guarded static run, at
-`db7188be2`, exited 1 with 39 checks passed and none skipped; only `go-tiers`,
-`audit-tests` and `audit-coverage` failed for the same R0 registrations.
-The current hosted CI logs independently confirm those blockers.
+The fix round 5 `ci-static-locked.sh` run at `77520cb0` completed remotely with
+exit 1: 39 checks passed and none were skipped. Only `go-tiers`, `audit-tests`
+and `audit-coverage` failed, for exactly the registrations above. The required
+tier-toolkit and web-shard self-checks passed; the audit self-check reproduced
+the two ownership failures. Public names, Go vet, web typecheck/lint and strict
+web tiers passed. This is not static-green, and no heavy local fallback was
+run.
 
 The non-required `gate/policy-preview` diagnostic reports a missing trusted
 verdict. That decision remains with the coordinator's cross-family gate.
