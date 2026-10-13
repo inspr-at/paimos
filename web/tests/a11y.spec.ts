@@ -238,22 +238,22 @@ for (const colorScheme of ['light', 'dark'] as const) {
           const feedbacks = await ticket.locator('.placement-feedback dd:visible').all()
           expect(feedbacks.length).toBeGreaterThan(0)
           for (const feedback of feedbacks) {
-          await expect(feedback).toContainText('Kind of work is unavailable.')
-          const properties = feedback.locator('xpath=ancestor::dl[1]')
-          const controls = { feedback, kind: properties.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity: properties.getByRole('combobox', { name: 'Complexity', exact: true }) }
-          await expectStableControls({
-            controls,
-            interactions: [
-              { name: 'read long classification feedback', run: async () => {
-                await feedback.evaluate(element => { element.textContent = 'Kind of work is unavailable. Die Klassifizierung konnte nicht geladen werden; sämtliche vorgeschlagenen Werte bleiben unverändert, bis die Berechtigungen und die Verbindung erneut geprüft wurden.' })
-                await feedback.focus(); await expect(feedback).toBeFocused()
-                await feedback.press('End')
-                await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
-              } },
-              { name: 'return to the start of feedback', run: async () => { await feedback.press('Home'); await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBe(0) } },
-            ],
-            scrollAreas: { feedback },
-          })
+            await expect(feedback).toContainText('Kind of work is unavailable.')
+            const properties = feedback.locator('xpath=ancestor::dl[1]')
+            const controls = { feedback, kind: properties.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity: properties.getByRole('combobox', { name: 'Complexity', exact: true }) }
+            await expectStableControls({
+              controls,
+              interactions: [
+                { name: 'read long classification feedback', run: async () => {
+                  await feedback.evaluate(element => { element.textContent = 'Kind of work is unavailable. Die Klassifizierung konnte nicht geladen werden; sämtliche vorgeschlagenen Werte bleiben unverändert, bis die Berechtigungen und die Verbindung erneut geprüft wurden.' })
+                  await feedback.focus(); await expect(feedback).toBeFocused()
+                  await feedback.press('End')
+                  await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+                } },
+                { name: 'return to the start of feedback', run: async () => { await feedback.press('Home'); await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBe(0) } },
+              ],
+              scrollAreas: { feedback },
+            })
           }
         }
         // The version coordinate (and the footer's calendar version) is the vendored INSPR calendar-version display (pinned presentation);
