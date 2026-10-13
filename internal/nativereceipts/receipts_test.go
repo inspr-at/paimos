@@ -82,6 +82,8 @@ func await(t *testing.T, ch <-chan struct{}) {
 	case <-ch:
 	case <-t.Context().Done():
 		t.Fatal("barrier did not complete")
+	case <-time.After(10 * time.Second):
+		t.Fatal("barrier hung")
 	}
 }
 func openStore(t *testing.T, path string, now func() time.Time) *Store {
@@ -396,6 +398,11 @@ func TestPrivateStoreBoundsAndRejectsSymlinkOrSharedState(t *testing.T) {
 	}
 	shared := filepath.Join(t.TempDir(), "shared")
 	if err := os.Mkdir(shared, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Mkdir is narrowed by the host umask. Establish the shared mode being
+	// asserted explicitly, so a private fixture cannot satisfy this denial.
+	if err := os.Chmod(shared, 0755); err != nil {
 		t.Fatal(err)
 	}
 	_, err = Open(shared, clock)

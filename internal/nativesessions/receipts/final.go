@@ -76,6 +76,7 @@ func (s *Repository) Persist(ctx context.Context, daemon nativecontract.DaemonAc
 		if !a.RetentionApproved || a.IssuedAt.IsZero() || a.Grant.ExpiresAt.After(a.IssuedAt.Add(nativereceipts.MaxRetention)) {
 			return nativereceipts.Fail(nativecontract.ReasonRetentionUnapproved)
 		}
+		a.Target.ExpiresAt, a.Target.Now = a.Grant.ExpiresAt, s.now
 		if err = authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: b.ProjectID}); err != nil {
 			return err
 		}
@@ -152,6 +153,7 @@ func (s *Repository) Persist(ctx context.Context, daemon nativecontract.DaemonAc
 	reason, state := nativecontract.Reason(""), "rejected"
 	var refused *nativereceipts.Error
 	var target *workorders.Error
+	var deadline *nativecontract.ValidationError
 	if errors.Is(err, authz.ErrForbidden) || errors.As(err, &target) && (target.Status == 403 || target.Status == 404) {
 		reason = nativecontract.ReasonPermissionRevoked
 	}
@@ -162,6 +164,9 @@ func (s *Repository) Persist(ctx context.Context, daemon nativecontract.DaemonAc
 		case nativecontract.ReasonRetentionUnapproved, nativecontract.ReasonPermissionRevoked, nativecontract.ReasonWrongGeneration, nativecontract.ReasonGrantMissing:
 			reason = refused.Reason
 		}
+	}
+	if errors.As(err, &deadline) && deadline.Reason == nativecontract.ReasonPublicationGrantExpired {
+		reason, state = deadline.Reason, "expired"
 	}
 	if reason != "" {
 		return nativecontract.NativeFinalReceipt{FinalID: in.FinalID, State: state, Reason: &reason, UpdatedAt: s.now().UTC()}, nil

@@ -40,6 +40,9 @@ func (s *Store) recover() error {
 		if len(in.Reports) < 1 || len(in.Reports) > 16 || in.ReportOffset < 0 || in.ReportOffset > len(in.Reports) || in.ReportAttempts > 65535 {
 			return Fail(nativecontract.ReasonInvalidInput)
 		}
+		if in.Reports[0].State != "accepted" || in.Reports[0].SourceSequence != "0" || in.Reports[0].Reason != nil {
+			return Fail(nativecontract.ReasonInvalidInput)
+		}
 		for j, report := range in.Reports {
 			if err := Validate(s.validator, "NativeReceipt", report); err != nil {
 				return err
@@ -68,6 +71,14 @@ func (s *Store) recover() error {
 				r = nativecontract.ReasonOwnershipUnconfirmed
 			}
 			in.Receipt.State, in.Receipt.Reason, in.Receipt.UpdatedAt = "uncertain", &r, s.now().UTC()
+			if len(in.Reports) == 16 {
+				return Fail(nativecontract.ReasonBufferFull)
+			}
+			in.Reports = append(in.Reports, cloneReceipt(in.Receipt))
+			changed = true
+		} else if (in.Receipt.State == "accepted" || in.Receipt.State == "queued") && !s.now().Before(in.ExpiresAt) {
+			r := nativecontract.ReasonGrantExpired
+			in.Receipt.State, in.Receipt.Reason, in.Receipt.UpdatedAt = "expired", &r, s.now().UTC()
 			if len(in.Reports) == 16 {
 				return Fail(nativecontract.ReasonBufferFull)
 			}

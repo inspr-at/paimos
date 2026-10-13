@@ -71,7 +71,7 @@ func (s *Store) recoverFinals() error {
 		f := &s.finals[i]
 		if !validUUID(f.Delivery.FinalID) || ids[f.Delivery.FinalID] || !f.Approval.Approved || !validUUID(f.Approval.OwnerPersonID) ||
 			!ValidDigest(f.SHA256) || f.ExpiresAt.IsZero() || f.CreatedAt.IsZero() || f.ExpiresAt.After(f.CreatedAt.Add(MaxRetention)) ||
-			f.ExpiresAt.After(f.Grant.ExpiresAt) || f.ExpiresAt.After(f.Approval.Until) || f.Attempts > 128 {
+			f.ExpiresAt.After(f.Grant.ExpiresAt) || f.ExpiresAt.After(f.Approval.Until) || f.Attempts > 128 || f.TextBytes < 1 || f.TextBytes > MaxTextBytes {
 			return Fail(nativecontract.ReasonRetentionUnapproved)
 		}
 		ids[f.Delivery.FinalID] = true
@@ -164,7 +164,8 @@ func (s *Store) RetainFinal(ctx context.Context, in nativecontract.FinalPublish,
 	}
 	for _, f := range s.finals {
 		if f.Delivery.FinalID == in.FinalID {
-			if f.SHA256 != digest || f.Approval != approval {
+			if f.SHA256 != digest || f.Approval.OwnerPersonID != approval.OwnerPersonID || f.Approval.Approved != approval.Approved || !f.Approval.Until.Equal(approval.Until) ||
+				f.Grant.ConversationRef != grant.ConversationRef || !f.Grant.ExpiresAt.Equal(grant.ExpiresAt) || f.Grant.MaximumFinals != grant.MaximumFinals || f.Grant.MaximumBytes != grant.MaximumBytes {
 				return FinalStatus{}, Fail(nativecontract.ReasonIdentityMismatch)
 			}
 			return finalStatus(f), nil
@@ -251,7 +252,7 @@ func (s *Store) RetryFinal(ctx context.Context, finalID string, sink nativecontr
 	}
 	s.busy[finalID] = true
 	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, min(20*time.Second, f.ExpiresAt.Sub(s.now())))
 	defer cancel()
 	ack, err := sink.Persist(ctx, f.Delivery)
 	s.mu.Lock()
@@ -261,6 +262,13 @@ func (s *Store) RetryFinal(ctx context.Context, finalID string, sink nativecontr
 		return finalStatus(f), Fail(nativecontract.ReasonOwnershipUnconfirmed)
 	}
 	if err != nil {
+		if !s.now().Before(f.ExpiresAt) {
+			expireFinal(&f)
+			if saveErr := s.replaceFinal(i, f); saveErr != nil {
+				return finalStatus(s.finals[i]), saveErr
+			}
+			return finalStatus(f), nil
+		}
 		return finalStatus(f), err
 	}
 	if err = Validate(s.validator, "NativeFinalReceipt", ack); err != nil {

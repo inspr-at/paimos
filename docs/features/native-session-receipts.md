@@ -28,6 +28,7 @@ Uncertain operations are retained and never silently evicted.
 transport. While the supervisor holds its native mutation/ownership lock, the
 authorizer must recheck the actor/controller and the monotonic claim deadline.
 `BeginWrite` is durably committed before touching native stdin/control I/O.
+Input authority/runtime/deadline are checked again after that disk barrier.
 Provider evidence must match the exact request/input/runtime, increasing source
 sequence and any expected effect/turn. Stop requires matching process identity,
 observed root exit AND group absence through `ConfirmExit`; a final is no exit
@@ -131,7 +132,7 @@ Required guarded commands (committed HEAD; no real native accounts):
 /Users/markus/.aeon/lead/aeon/remote-test.sh "$PWD" ./internal/nativereceipts/... ./internal/nativesessions/receipts/... ./internal/chat/...
 /Users/markus/.aeon/lead/aeon/ci-static-locked.sh
 node scripts/test-tiers/affected.mjs --base origin/main
-node scripts/check-migrations.mjs
+node scripts/check-migrations.mjs --base-ref v261012211543.0.0
 ```
 
 No browser check applies to this non-browser slice. Exit 3 means incomplete,

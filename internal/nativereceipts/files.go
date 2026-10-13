@@ -66,10 +66,10 @@ func Open(path string, now func() time.Time) (*Store, error) {
 	v, err := nativecontract.NewValidator()
 	s := &Store{dir: dir, lock: lock, now: now, validator: v, busy: map[string]bool{}}
 	if err == nil {
-		err = s.read("receipts.json", journalFileBytes, &s.entries)
+		err = s.read("receipts.json", journalFileBytes, MaxReceipts, &s.entries)
 	}
 	if err == nil {
-		err = s.read("finals.json", outboxFileBytes, &s.finals)
+		err = s.read("finals.json", outboxFileBytes, MaxFinals, &s.finals)
 	}
 	if err == nil {
 		// At most two crash leftovers exist. Remove only our exact temporary
@@ -106,7 +106,7 @@ func privateFile(f *os.File, directory bool) error {
 	return nil
 }
 
-func (s *Store) read(name string, limit int64, out any) error {
+func (s *Store) read(name string, limit int64, maxItems int, out any) error {
 	fd, err := unix.Openat(int(s.dir.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return nil
@@ -136,15 +136,43 @@ func (s *Store) read(name string, limit int64, out any) error {
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '[' {
 		return Fail(nativecontract.ReasonInvalidInput)
 	}
+	switch dst := out.(type) {
+	case *[]Intent:
+		*dst, err = readArray[Intent](raw, maxItems)
+	case *[]finalEntry:
+		*dst, err = readArray[finalEntry](raw, maxItems)
+	default:
+		return Fail(nativecontract.ReasonInvalidInput)
+	}
+	return err
+}
+
+// Count before decoding each record: a large corrupt array must not allocate
+// arbitrarily many structs merely because the file itself fits the byte cap.
+func readArray[T any](raw []byte, maxItems int) ([]T, error) {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if err = d.Decode(out); err != nil {
-		return Fail(nativecontract.ReasonInvalidInput)
+	if token, err := d.Token(); err != nil || token != json.Delim('[') {
+		return nil, Fail(nativecontract.ReasonInvalidInput)
 	}
-	if err = d.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return Fail(nativecontract.ReasonInvalidInput)
+	items := []T{}
+	for d.More() {
+		if len(items) == maxItems {
+			return nil, Fail(nativecontract.ReasonBufferFull)
+		}
+		var item T
+		if err := d.Decode(&item); err != nil {
+			return nil, Fail(nativecontract.ReasonInvalidInput)
+		}
+		items = append(items, item)
 	}
-	return nil
+	if token, err := d.Token(); err != nil || token != json.Delim(']') {
+		return nil, Fail(nativecontract.ReasonInvalidInput)
+	}
+	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, Fail(nativecontract.ReasonInvalidInput)
+	}
+	return items, nil
 }
 
 // Rename plus file/directory fsync is the commit boundary. A failed commit

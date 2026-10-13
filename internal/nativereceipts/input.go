@@ -68,7 +68,19 @@ func (w *InputWriter) Send(ctx context.Context, actorID, operationID string, in 
 	if r, err = w.Journal.BeginWrite(ctx, b, operationID); err != nil {
 		return r, err
 	}
-	e, err := w.Transport.Send(ctx, in)
+	// File fsync can outlast a short claim. Recheck the current deadline and
+	// owned runtime again after that disk barrier, immediately before stdin.
+	err = ctx.Err()
+	if err == nil {
+		err = w.Authority.RequireWrite(ctx, b, intent)
+	}
+	if err == nil && identity != w.Transport.Identity() {
+		err = Fail(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	var e nativecontract.NativeEvidence
+	if err == nil {
+		e, err = w.Transport.Send(ctx, in)
+	}
 	if err == nil && e.Stage == "write_acknowledged" {
 		r, err = w.Journal.Observe(ctx, b, operationID, e)
 	} else if err == nil {
