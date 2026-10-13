@@ -86,7 +86,7 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 		}
 		scheduleRaw, _ := json.Marshal(schedule)
-		_, err := tx.Exec(seedCtx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3,$4)`, person.TenantID, person.ID, in.AccountID, scheduleRaw)
+		_, err := tx.Exec(seedCtx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::text,$3::uuid,$4)`, person.TenantID, person.ID, in.AccountID, scheduleRaw)
 		return err
 	})
 	var binding NativeAccountBinding
