@@ -277,3 +277,48 @@ fail at `facb16772`. Static validation is failed, not incomplete or green. R0
 must apply the patch and obtain green strict static/release checks before merge.
 The non-required policy preview awaits the coordinator's trusted review verdict.
 No push, deployment, review gate, model CLI or live cutover was performed.
+
+## Fix round 5: central R0 audit integration pending
+
+The report `review-ci618-0618.out` targets `320d8362d`. Its complete job logs
+confirm the same two metadata blockers, without a behaviour finding:
+
+- [Go static job 115122561642](https://github.com/inspr-at/paimos/actions/runs/38344438107/job/115122561642)
+  rejects exactly the nine unclassified test identities in the integration
+  handoff. The tier self-check itself has zero failures. R0 must register all
+  nine as `ESSENTIAL`; the additive tier patch in fix round 4 remains applicable.
+- [Release check job 115122561162](https://github.com/inspr-at/paimos/actions/runs/38344438107/job/115122561162)
+  fails the existing whole-tree coverage and delta CLI assertions on exactly
+  the nine `internal/nativeattach/` files. Both failures share the missing
+  source-ownership root cause; neither assertion should be changed.
+
+These existing CI assertions fail at the required negative-control revision
+`320d8362d`; no new behaviour fix or regression test is needed. The normative
+P2b write set still excludes both metadata files, and the updated worker-common
+rule explicitly says not to edit `scripts/audit/slices.json` in builder branches.
+
+At 2026-10-13 04:23 UTC, latest `origin/main` is still `06929d1a4` and
+[central R0 PR #623](https://github.com/inspr-at/paimos/pull/623) is open. It
+adds `internal/native*/**` to S2, which will cover this package once merged;
+it does not add the nine test-tier rows. The coordinator must integrate that
+released main change and the missing tiers before final checks. PR #618 is
+`MERGEABLE`, so no conflict merge or unapproved R0-branch merge was performed.
+
+Both complete affected Go packages pass through the approved remote runner at
+`320d8362d`: `./internal/nativeattach/... ./internal/cli/...`, exit 0
+(nativeattach 0.351 seconds, CLI 37.483 seconds). The offline affected planner
+also exits 0 and selects FULL Go because 3,233 reverse-dependency cases exceed
+its 300-case limit. That selection is not evidence of a full-suite run. There
+are no affected web or browser cases in this non-browser slice.
+
+The approved guarded static `--merge-main` run exits 1 at `320d8362d`:
+`go-tiers`, `audit-tests` and `audit-coverage` reproduce exactly those R0
+blockers. The other 39 checks pass with zero optional skips, including Go vet,
+test-tier/web-shard self-checks, web typecheck/lint and migration checks. Static
+validation is failed, not incomplete or green. Both metadata changes and green
+strict static/release checks remain required before merge.
+
+The separate non-required policy preview reports no trusted `gate/verdict`;
+the coordinator owns that review after builder exit. All R0 metadata and test
+assertions remain unchanged. No push to origin, deployment, model CLI, review
+gate or live cutover was performed.
