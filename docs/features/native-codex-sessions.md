@@ -496,8 +496,8 @@ does not transfer ownership. R0 must apply the existing three-row handoff in
 this PR and rerun strict native validation and authoritative CI.
 
 Both guarded Go attempts refuse remote capacity, and both guarded static
-attempts exit 3 under host policy (`mbp2607 YELLOW` at the observed refusal;
-no remote hold). Static validation remains incomplete. The one permitted
+attempts exit 3 under host policy (daily workstation at `YELLOW` at the
+observed refusal; no remote hold). Static validation remains incomplete. The one permitted
 quick-package fallback passes with `GOMAXPROCS=2`, `-p 2` and `-count=1`
 (0.273 s), exercising the existing acceptance 1–5 fake transcripts without a
 vendor process. The offline affected planner exits 0: essential/full selection,
