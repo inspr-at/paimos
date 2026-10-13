@@ -4718,6 +4718,10 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatAppliedModelRequestFencesHistoricalTranscript","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatBeatLookupHonorsCancellation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatCapacityProjection","tier":"GATED-FULL"}
