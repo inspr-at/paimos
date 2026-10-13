@@ -135,3 +135,33 @@ Remaining coordinator gates are I2 integration, a qualified existing human/phone
 step-up adapter, G_UI (needs Opus design), authoritative PR CI and the external
 cross-family review. They are not worker release approvals. No origin push,
 deployment, live cutover or model review was performed.
+
+Merge-main round (2026-10-13): normal merge `8362dbbfc` incorporates
+`origin/main` at `c90420b30`. All nine incoming files and all fifteen branch
+files were checked: nonshared files match their source parent byte for byte,
+and the three CI manifests initially contained the exact union of both sides
+without duplicate rows. Migration 1348 has no collision. Production behavior,
+API contract, permissions and ownership rows are unchanged.
+
+The guarded remote runner passed `internal/nativeinteraction`,
+`internal/nativesessions/interaction` and `internal/nativequalification`, plus
+all 43 migration-policy tests. The migration guard passed against the latest
+published release, `v261013103112.0.0`, with 349 unique numbers. Its first
+standalone invocation lacked the required `--base-ref` and was rerun with that
+published tag. Remote Playwright passed all seven interaction cases and all six
+incoming LEAD pilot cases, one spec at a time with one worker. Both owned browser
+groups reported zero remaining processes. The twelve screenshots remain
+untracked under `web/test-results/remote/`, named
+`AEON-1304-requests-<390|1024|1440>-<light|dark>.png` and
+`native-lead-<light|dark>-<390|1024|1440>.png` in their per-case directories.
+
+The first full remote static run passed 40 checks without skips and exposed
+the unchanged shard-budget assertion in both web-shard check groups: the merge
+increased its prior-gate estimate from 299.492 to 301.155 seconds. The only R0
+adjustment replaces this ticket's unmeasured 20-second shard weight with its
+observed 4.219-second serial Playwright wall time at `8362dbbfc`, using the
+canonical manifest writer. That gives a 299.839-second prior-gate estimate.
+Every test, classification, gate policy and other ticket's row is retained.
+This is scheduling evidence from the approved remote host, not a hosted-runtime
+promise. The unchanged assertion's failure on the merged head provides the
+negative control; no throwaway commit or test relaxation is needed.
