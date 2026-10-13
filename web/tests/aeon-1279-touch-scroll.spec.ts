@@ -24,7 +24,6 @@ test.use({ hasTouch: true, isMobile: true, viewport: PHONE })
 const asOnSafari = (page: Page) => page.addStyleTag({ content: '*, *::before, *::after { overflow-anchor: none !important; }' })
 type SwipeState = { started: boolean; down: number; ended: boolean; start: number; top: number; events: string[] }
 type SwipeWindow = { __swipe: SwipeState; __stopSwipe?: () => void }
-let lastTouchTimestamp = 0
 // One native touch swipe; dy < 0 moves the finger up. A synthesized scroll can finish
 // without delivering a scrollend on Linux. Dispatch the touch sequence explicitly, prove
 // that the intended scroller moved while the finger was down, then wait for its own trusted
@@ -54,8 +53,10 @@ async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, 
     }, options)
   })
   const state = () => page.evaluate(() => (window as unknown as SwipeWindow).__swipe)
-  const timestamp = Math.max(Date.now() / 1000, lastTouchTimestamp + 0.01)
-  lastTouchTimestamp = timestamp + 0.5
+  // Keep the entire input history in the past: future touch samples can be resampled
+  // against an earlier compositor frame and lose part of the requested movement.
+  const releasedAt = Date.now() / 1000
+  const timestamp = releasedAt - 0.5
   let down = false
   try {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', timestamp, touchPoints: [{ ...at, id: 0 }] })
@@ -65,13 +66,13 @@ async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, 
     }
     await expect.poll(async () => { const s = await state(); return s.started && s.down === 1 && (s.top - s.start) * -Math.sign(dy) > 0 }, 'the native touch moves the intended scroller with the finger down').toBe(true)
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', timestamp: timestamp + 0.49, touchPoints: [{ x: at.x, y: at.y + dy, id: 0 }] })
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', timestamp: lastTouchTimestamp, touchPoints: [] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', timestamp: releasedAt, touchPoints: [] })
     down = false
     await expect.poll(state, 'the native scroll has finished').toMatchObject({ ended: true, down: 0 })
     const finished = await state()
     note(test.info(), `native finger travel ${dy} px; ${scroller} moved ${(finished.top - finished.start).toFixed(1)} px; events: ${finished.events.join(' ')}`)
   } finally {
-    if (down) await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', timestamp: lastTouchTimestamp, touchPoints: [] })
+    if (down) await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', timestamp: releasedAt, touchPoints: [] })
     await page.evaluate(() => (window as unknown as SwipeWindow).__stopSwipe?.())
   }
 }
