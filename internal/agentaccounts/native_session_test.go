@@ -89,6 +89,8 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 		_, err := tx.Exec(seedCtx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::text,$3::uuid,$4)`, person.TenantID, person.ID, in.AccountID, scheduleRaw)
 		return err
 	})
+	dbtest.BindRole(t, d, person.TenantID, person.ID, "admin")
+	dbtest.BindRole(t, d, person.TenantID, paired.ID, "member")
 	var binding NativeAccountBinding
 	seed(func(tx pgx.Tx) error {
 		if err := agentpairing.Lock(seedCtx, tx); err != nil {
