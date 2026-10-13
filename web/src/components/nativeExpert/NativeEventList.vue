@@ -80,7 +80,8 @@ onBeforeUnmount(() => { disposed = true; copying++; resized?.disconnect() })
   <div class="event-main">
     <div class="replay-controls">
       <div class="replay-history">
-        <span class="retained"><template v-if="retained === 0">No events yet</template><template v-else-if="retained === 1">Showing the last event</template><template v-else>Showing the last <span class="count">{{ retained }}</span> events</template></span>
+        <span class="retained"><span class="retained-size" aria-hidden="true">Showing the last <span class="count">500</span> events</span><span class="retained-value"><template v-if="retained === 0">No events yet</template><template v-else-if="retained === 1">Showing the last event</template><template v-else>Showing the last <span class="count">{{ retained }}</span> events</template></span></span>
+        <span aria-hidden="true">·</span>
         <button class="btn sm ghost" type="button" :disabled="loading || before === null || !watching" @click="emit('earlier')">Load earlier</button>
       </div>
       <button class="btn sm ghost" type="button" :disabled="!watching && !canStart" @click="watching ? emit('stop') : emit('start')">
@@ -133,8 +134,11 @@ onBeforeUnmount(() => { disposed = true; copying++; resized?.disconnect() })
 <style scoped>
 .event-main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .replay-controls { display: flex; align-items: center; flex: none; gap: 4px; height: 52px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
-.replay-history { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; flex: 1; min-width: 0; gap: 4px; }
-.retained { min-width: 0; line-height: 1.3; }
+.replay-history { display: flex; align-items: center; flex: 1; min-width: 0; gap: 4px; }
+.retained { display: inline-grid; min-width: 0; line-height: 1.3; }
+.retained > span { grid-area: 1 / 1; }
+.retained-size { visibility: hidden; }
+.retained-value { align-self: center; }
 .count { font-variant-numeric: tabular-nums; }
 .replay-controls button { flex: none; }
 .event-scroll { flex: 1; min-height: 0; padding: 4px 8px 12px; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }

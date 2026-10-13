@@ -78,7 +78,7 @@ function approvalFrame(seq: number, kind: 'command' | 'question') {
 }
 const mixedEvents = [
   receiptFrame(10, 'resume'), stateFrame(11, 'running'),
-  textFrame(12, 'Checking the owned session, its current permissions, and the complete event stream before the next action.'),
+  textFrame(12, 'Checking the owned session, its current permissions, and the complete event stream before the next step.'),
   mixedFrame(13, 'tool.start', { call_id: 'mixed-read', name: 'Read', args_summary: 'Read the verification report' }),
   mixedFrame(14, 'tool.result', { call_id: 'mixed-read', result_summary: 'Report checked', duration_ms: 400 }),
   mixedFrame(15, 'quota', { account_id: 'account-mixed', profile_binding_revision: 2, source: 'codex_stream', scope: 'context', state: 'known', used_percent: 23, observed_at: '2026-10-13T02:03:04Z', fresh_until: '2026-10-13T02:13:04Z', resets_at: null }),
@@ -117,6 +117,7 @@ async function mixedEvidence(page: Page, theme: string, width: number, shot: (na
   await expect(page.locator('[data-event-row="event:2:19"]').locator('..')).toHaveCSS('box-shadow', /inset/)
   await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
   await shot('mixed')
+  await page.setViewportSize({ width, height: 720 })
   await scroll.evaluate(el => { el.scrollTop = 0 })
   await expect(follow).not.toBeChecked()
   await expect(tail).not.toBeInViewport()
@@ -244,11 +245,24 @@ test('AEON-1270 raw diagnostics stay bound to session, person, consent and tab t
 
 test('AEON-1270 coalescing keeps native envelopes, inferred correlations, receipts and omitted bodies honest', async ({ page }) => {
   const errors = await setup(page)
+  // Collect label and metadata regressions together, so the baseline diagnostic
+  // reports both even if its unrelated pre-watch copy fails later in this case.
+  const projected = await page.evaluate(async items => {
+    const { eventRows } = await import('/src/lib/nativeExpert/rows.ts')
+    return eventRows(items, 'codex').map(row => [row.name, row.measure, row.wireName])
+  }, mixedEvents)
+  expect.soft(projected).toEqual([
+    ['Resumed · generation 2', '', 'receipt'], ['Running', '', 'structured'], ['Codex', '104 chars', 'assistant.final'],
+    ['Read', '400 ms', 'tool.result'], ['Usage', '23 % of context', 'quota'], ['Idle', '', 'structured'],
+    ['Codex', '65 chars', 'assistant.final'], ['Bash', 'Running', 'tool.start'], ['Approval', '', 'approval'],
+    ['Delivered', 'Next step', 'input.delivered'], ['Needs you', '', 'structured'], ['Codex', '120 chars', 'assistant.final'],
+    ['Started', '', 'receipt'], ['Question', '', 'approval'], ['Interrupted', '', 'receipt'],
+  ])
   await expect(page.getByText("Watch live to see this session's events as they happen.", { exact: true })).toBeVisible()
   await start(page)
   await expect(page.getByRole('button', { name: 'Stop watching', exact: true })).toBeVisible()
   await send(page, frame(1, 'assistant.delta', { message_id: 'message-1', text: 'First ' }))
-  await expect(page.locator('.retained')).toHaveText('Showing the last event')
+  await expect(page.locator('.retained-value')).toHaveText('Showing the last event')
   await send(page, frame(2, 'assistant.delta', { message_id: 'message-1', text: 'delta' }))
   await expect(page.locator('[data-event-row]')).toHaveCount(1)
   await send(page, frame(3, 'assistant.final', { message_id: 'message-1', input_id: 'input-1', inferred: true, text: 'Explicit final' }))
@@ -260,7 +274,7 @@ test('AEON-1270 coalescing keeps native envelopes, inferred correlations, receip
   await expect(textRow.locator('.event-measure')).toHaveText('14 chars')
   await expect(toolRow.locator('strong')).toHaveText('Read')
   await expect(toolRow.locator('.event-measure')).toHaveText('400 ms')
-  await expect(page.locator('.retained')).toHaveText('Showing the last 5 events')
+  await expect(page.locator('.retained-value')).toHaveText('Showing the last 5 events')
   expect(await page.locator('.event-measure').allTextContents()).not.toContain('Reply correlation inferred')
   await page.locator('[data-event-row]').first().click()
   await expect(page.locator('.raw-head')).toContainText('assistant.final · seq 3')
@@ -419,7 +433,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       await follow.uncheck()
       await send(page, frame(2, 'assistant.final', { message_id: 'visible-arrival', input_id: null, inferred: false, text: 'A new event still fits in the visible stream.' }))
       await expect(page.locator('.event-tail')).toBeInViewport()
-      await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
+      // A soft assertion still fails the case, while letting the negative
+      // control independently reach the compact-popover regression below.
+      await expect.soft(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
       const rowGuard = await controlStability(page, { row, follow, events, terminal })
       await rowGuard.check(() => row.click())
       await expect(page.getByLabel('C0 event envelope')).toContainText('long-german')
@@ -487,9 +503,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
         await expect(trigger).toBeFocused()
       }
       guard.done()
-      // A bounded height makes the mixed stream scroll at every width without
-      // inventing extra rows just to make a screenshot look populated.
-      await page.setViewportSize({ width, height: 720 })
+      // Capture the complete mixed list first, then reduce the height for the
+      // scrolling checks without inventing extra rows to force overflow.
       await mixedEvidence(page, theme, width, name => page.screenshot({ path: testInfo.outputPath(`AEON-1270/${name}-${theme}-${width}.png`) }))
       expect(errors).toEqual([])
     } finally { await context.close() }
