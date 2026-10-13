@@ -10488,6 +10488,8 @@
     ,
     {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 only the current holder tab measures after fonts with debounced visibility, zoom and lease fences","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 phone actions keep their labels and read-only states omit terminal keys","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel sizes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 terminal capture and actions stay fenced through identity, epoch, consent and reconnect gaps","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

@@ -301,10 +301,7 @@ test('AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel s
       if (width === 390) {
         await act(page, 'f.state.session.controller.actor_id=f.state.viewer.principalId;f.state.action.label="Hand back";f.state.actionLabels=["Take over","Hand back","End control…","Cancel"];await f.nextTick();')
         await expect(fit).toHaveCount(0)
-        await expect(page.getByRole('group', { name: 'Terminal keys, read-only here' })).toBeVisible()
-        const keys = page.locator('.phone-keys button')
-        expect(await keys.count()).toBe(7)
-        for (const key of await keys.all()) { await expect(key).toBeDisabled(); expect((await key.boundingBox())!.height).toBeGreaterThanOrEqual(44) }
+        await expect(page.getByRole('group', { name: 'Terminal keys, read-only here' })).toHaveCount(0)
         await act(page, 'f.setHeaderControl(document.querySelector("#header-control"));await f.nextTick();')
         await expect(page.locator('.fixture-head .terminal-control')).toBeVisible()
         await page.screenshot({ path: testInfo.outputPath(`AEON-1289/holder-phone-${theme}.png`) })
@@ -316,6 +313,110 @@ test('AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel s
       await expect(page.locator('.control-text')).toContainText('Nobody has control')
       await expect(page.locator('.terminal-screen')).toBeEmpty()
       await page.screenshot({ path: testInfo.outputPath(`AEON-1289/nobody-${theme}-${width}.png`) })
+      expect(await page.evaluate(() => (window as any).nativeTerminal.outbound)).toEqual([])
+      expect(errors).toEqual([])
+    } finally { await context.close() }
+  }
+})
+
+// Risk: phone actions can look like navigation when their label disappears,
+// and holder identity must never advertise keyboard input in a read-only tab.
+test('AEON-1289 phone actions keep their labels and read-only states omit terminal keys', async ({ browser }, testInfo) => {
+  for (const width of [390, 1440]) for (const theme of ['light', 'dark']) {
+    const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height: 900 }, hasTouch: width === 390, reducedMotion: 'reduce' })
+    const page = await context.newPage()
+    try {
+      const errors = await setup(page, { theme, full: true })
+      await send(page, terminal(1, 'Read-only native terminal\r\nChecking the current binding and permissions.\r\n', true))
+      const action = page.locator('.terminal-action'), line = page.locator('.terminal-control'), box = page.locator('.terminal-box')
+      const fit = page.getByRole('button', { name: 'Fit to window', exact: true })
+      const checkAction = async (label: string) => {
+        await expect(action).toHaveAccessibleName(label)
+        await expect(action.locator('.action-label')).toHaveText(label)
+        const visible = await action.evaluate(el => {
+          const label = el.querySelector('.action-label')!, text = [...label.childNodes].find(node => node.nodeType === Node.TEXT_NODE)!
+          const range = document.createRange(); range.selectNode(text)
+          const button = el.getBoundingClientRect(), rect = range.getBoundingClientRect(), icon = label.querySelector('svg')!.getBoundingClientRect()
+          return { font: parseFloat(getComputedStyle(label).fontSize), height: button.height, textWidth: rect.width,
+            textInside: rect.left >= button.left && rect.right <= button.right, iconOffset: (icon.top + icon.bottom - button.top - button.bottom) / 2 }
+        })
+        expect(visible.font, 'the action label has visible text').toBeGreaterThan(0)
+        expect(visible.height).toBe(28)
+        expect(visible.textWidth).toBeGreaterThan(0)
+        expect(visible.textInside, 'the whole label fits inside the button').toBe(true)
+        expect(Math.abs(visible.iconOffset), 'the SVG is centred in the action').toBeLessThanOrEqual(.5)
+        await expect(page.locator('.phone-keys')).toHaveCount(0)
+        await expect(page.getByRole('group', { name: 'Terminal keys, read-only here' })).toHaveCount(0)
+        expect(await line.evaluate(el => el.scrollWidth - el.clientWidth), 'the control line stays inside the pane').toBeLessThanOrEqual(1)
+      }
+      await checkAction('End control…')
+      await expect(page.locator('.control-text')).toContainText('Read-only · Anna Kogler has control')
+      await expect(page.locator('.control-text')).toHaveAttribute('title', /sized for Anna’s window/)
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1289-fix3/viewer-${theme}-${width}.png`) })
+      const guard = await controlStability(page, { action, fit, line, frame: page.locator('.native-terminal'), box })
+      await guard.check(async () => { await fit.click(); await expect(fit).toHaveAttribute('aria-pressed', 'true') })
+      await guard.check(async () => { await fit.click(); await expect(fit).toHaveAttribute('aria-pressed', 'false') })
+      if (width === 390) {
+        // CLI holding leaves this tab a viewer. Changes to state and action
+        // labels must preserve both the action's size and its neighbours.
+        await guard.check(async () => {
+          await act(page, 'f.state.session.controller.actor_id=f.state.viewer.principalId;f.state.control.source="cli";f.state.action.kind="return";f.state.action.label="Hand back";await f.nextTick();')
+          await expect(page.locator('.control-text')).toContainText('You have control in a terminal (aeon take)')
+          await checkAction('Hand back')
+        })
+        await page.screenshot({ path: testInfo.outputPath(`AEON-1289-fix3/holder-cli-${theme}-390.png`) })
+        await guard.check(async () => {
+          await act(page, 'f.state.control.atRisk=true;f.state.control.remainingSeconds=24;await f.nextTick();')
+          await expect(line).toHaveClass(/risk/)
+          await expect(action).toBeDisabled()
+          await expect(page.locator('.control-text')).toContainText('Reconnecting to Arbeitsrechner-Wien')
+          await checkAction('Hand back')
+        })
+        await page.screenshot({ path: testInfo.outputPath(`AEON-1289-fix3/lease-risk-${theme}-390.png`) })
+        await guard.check(async () => {
+          await act(page, 'f.state.control.atRisk=false;f.state.session.controller.actor_id="holder-1";f.state.control.source="web";f.state.action.kind="end";f.state.action.label="End control…";await f.nextTick();')
+          await checkAction('End control…')
+        })
+        // I2's phone full-screen slot renders the same labelled control line.
+        await act(page, 'f.setHeaderControl(document.querySelector("#header-control"));await f.nextTick();')
+        await expect(page.locator('.fixture-head .terminal-control')).toBeVisible()
+        await checkAction('End control…')
+        const header = await controlStability(page, { action, line, box })
+        await header.check(async () => {
+          await act(page, 'f.state.session.controller.actor_id=f.state.viewer.principalId;f.state.action.kind="return";f.state.action.label="Hand back";await f.nextTick();')
+          await expect(fit).toHaveCount(0)
+          await expect(page.locator('.control-text')).toContainText('You have control')
+          await checkAction('Hand back')
+        })
+        await header.check(async () => {
+          await act(page, 'f.state.control.source="cli";await f.nextTick();')
+          await expect(fit).toBeVisible()
+          await checkAction('Hand back')
+        })
+        header.done()
+        const empty = await controlStability(page, { line, frame: page.locator('.native-terminal'), box })
+        await empty.check(async () => {
+          await act(page, 'f.state.session.controller=null;f.state.session.mode="structured";f.state.session.state="running";f.state.action=null;await f.nextTick();')
+          await expect(page.locator('.control-text')).toHaveText('Nobody has control')
+          await expect(page.locator('.control-text > span')).toHaveCount(0)
+          await expect(page.locator('.terminal-empty p')).toHaveText('No terminal is open. Read structured output in Events.')
+          await expect(page.locator('.terminal-screen')).toBeEmpty()
+          await expect(page.locator('.phone-keys')).toHaveCount(0)
+        })
+        await page.screenshot({ path: testInfo.outputPath(`AEON-1289-fix3/nobody-${theme}-390.png`) })
+        await empty.check(async () => {
+          await act(page, 'f.state.action={kind:"take",label:"Take over",disabled:false,reason:"",binding:f.state.session.current_binding,revision:f.state.session.revision,controllerEpoch:null};await f.nextTick();')
+          await checkAction('Take over')
+        })
+        empty.done()
+        const take = await controlStability(page, { action, line, box })
+        await take.check(async () => {
+          await action.click()
+          expect(await page.evaluate(() => (window as any).nativeTerminal.actions)).toEqual([{ kind: 'take', binding, ownedSessionId: 'owned-a', revision: 1, controllerEpoch: null }])
+        })
+        take.done()
+      }
+      guard.done()
       expect(await page.evaluate(() => (window as any).nativeTerminal.outbound)).toEqual([])
       expect(errors).toEqual([])
     } finally { await context.close() }

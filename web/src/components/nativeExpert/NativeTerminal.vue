@@ -89,7 +89,7 @@ const heading = computed(() => {
 const detail = computed(() => {
   if (!readable.value) return ''
   if (risk.value) return 'input paused'
-  if (!props.session.controller) return props.session.mode === 'structured' ? 'structured events are in Events' : 'no terminal is open'
+  if (!props.session.controller) return ''
   if (holding.value) return 'read-only here · use your local terminal'
   return `sized for ${props.session.controller.actor_id === props.viewer.principalId ? 'your terminal' : control.value?.holderName ? `${control.value.holderName.split(' ')[0]}’s window` : 'the holder’s window'}`
 })
@@ -271,10 +271,6 @@ defineExpose({ stop, start, measureBox, holding })
       </div>
       <p v-if="hasGrid && (notice || fitMessage)" class="terminal-notice" role="status">{{ notice || fitMessage }}</p>
     </div>
-    <div v-if="phone && holding" class="phone-keys" role="group" aria-label="Terminal keys, read-only here" title="Use these keys in the holder’s local terminal. This view sends no input.">
-      <button type="button" disabled>Esc</button><button type="button" disabled>Tab</button><button type="button" disabled>Ctrl</button>
-      <button v-for="direction in ['arrow-up', 'arrow-down', 'arrow-left', 'arrow'] as const" :key="direction" type="button" disabled :aria-label="direction"><AppIcon :name="direction" :size="15" /></button>
-    </div>
     <span ref="probe" class="terminal-probe" aria-hidden="true">{{ 'M'.repeat(200) }}</span>
   </section>
 </template>
@@ -316,11 +312,6 @@ defineExpose({ stop, start, measureBox, holding })
 .terminal-notice { position: absolute; left: 10px; right: 10px; bottom: 8px; padding: 4px 8px; background: var(--nt-bg); color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
 .terminal-probe { position: absolute; visibility: hidden; width: max-content; max-width: none; white-space: pre; font: 13px/17px var(--mono); font-variant-ligatures: none; pointer-events: none; }
 .phone { padding: 0 var(--session-content-inset, 8px) max(8px, env(safe-area-inset-bottom)); }
-.phone .terminal-action { width: 28px; padding: 0; }
-.phone .action-size { display: none; }
-.phone .action-label { font-size: 0; }
 .phone .terminal-box { margin-top: 0; }
-.phone-keys { display: flex; flex: none; justify-content: space-between; min-height: 44px; }
-.phone-keys button { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; }
 @media (pointer: coarse) { .fit-toggle::after, .terminal-action::after { content: ''; position: absolute; top: -8px; bottom: -8px; left: 0; right: 0; } .fit-toggle::after, .phone .terminal-action::after { left: -8px; right: -8px; } .control-tools { gap: 16px; } }
 </style>

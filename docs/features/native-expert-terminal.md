@@ -48,9 +48,10 @@ and a CLI holder remain viewers here.
 
 I2 owns sidebar and Full screen controls and remembered layouts. On a phone in
 Full screen, pass the header's control-slot element as `controlTarget`; the same
-line moves there without creating another control. Phone holders have a pinned
-key row with safe-area space. Its keys are disabled because browser input is
-outside this read-only slice. The local holder's terminal stays the writer.
+line moves there without creating another control. Actions retain their labels
+and 28 px height on phones; the muted control detail truncates before the action.
+No phone key row appears because this tab cannot type in any P2e state.
+The local holder's terminal stays the writer.
 The panel's shortcut registry should consult `isHolderTerminalTarget` before
 Esc, F or numbered view shortcuts. This view absorbs a holder's Esc without
 forwarding it; other browser and OS shortcuts remain native.
@@ -107,11 +108,19 @@ case checks Fit, dotted-facing edges, long German action labels and phone contro
 using the shared ±0.5 px guard. Screenshots contain test fixtures only and use
 `testInfo.outputPath('AEON-1289/...')`.
 
+An ESSENTIAL phone regression case checks viewer, holder via CLI, lease-risk and
+nobody at 390 px in both themes, plus the viewer at 1440 px. It measures visible
+action text, the 28 px button and centred SVG, rejects key rows in every state,
+and guards Fit, action-label changes and the phone header slot against movement.
+The nobody line keeps only its bold state; the centre explains where to read
+structured output. Screenshots use `testInfo.outputPath('AEON-1289-fix3/...')`.
+
 Source ownership is already covered by S8 (`web/src/components/**`) and S9
 (`web/src/**` excluding components, plus tests). The three authority/bounds
-cases belong in ESSENTIAL; the viewport/evidence case belongs in NIGHTLY, with
-one four-case row in the web shard manifest. No API, permission, database,
-migration, release-version or model-account change is required.
+cases and the phone regression belong in ESSENTIAL; the viewport/evidence case
+belongs in NIGHTLY, with one five-case row in the web shard manifest. No API,
+permission, database, migration, release-version or model-account change is
+required.
 
 Release stays behind `G_UI` (including Tick's visual check),
 `G_TERMINAL_EXPORT`, I2's dependency/stream/panel wiring and authoritative PR CI.
