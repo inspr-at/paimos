@@ -482,3 +482,36 @@ Live qualification remains **G_ACCOUNTS**. The document passes the public-name,
 Git whitespace and exclusive-write-set checks. No new regression test is required
 for this registration-only finding. No heavy local fallback, origin push,
 deployment, model CLI or review gate was performed.
+
+Fix-round 13 (2026-10-13): the complete log for CI `go-static` job
+**115181687703** on supplied baseline `2bac3ec1` rejects exactly the same four
+unclassified Go tests listed above. All seven Go shards, four web unit shards,
+twelve browser shards, release checks and migration compatibility pass; the
+aggregate Go failure follows static validation. The separate policy preview
+remains coordinator-owned. No behavior finding was supplied.
+
+Fetched `origin/main` at `f571b7765` also lacks those four rows. PR #615 is
+mergeable and the read-only merge-tree check exits 0, so no conflict merge is
+needed. Both normative plan files still exclude `scripts/ci/go-test-tiers.json`
+from P4a and reserve it exclusively for R0. **R0 must apply the four documented
+ESSENTIAL rows to this branch before CI can pass; another P4a fix round cannot
+complete that registration without an explicit ownership transfer.** The
+baseline's test declarations were verified from Git objects. The existing
+strict validator rejects exactly those omissions and passes with only the four
+rows added in memory; this diagnostic leaves the manifest unchanged and does
+not replace native collection.
+
+Both affected Go packages pass through the guarded remote runner on `2bac3ec1`.
+The five fake-test acceptance checks are **PASS**: exact account binding,
+default/dedicated child environments, exclusion of credential/settings sharing,
+refusal without rotation, and retained credentials with an unchanged parent
+environment and distinct overlapping children. Live qualification remains
+**G_ACCOUNTS**. The affected selector exits 0 and selects **FULL** (3236 reverse
+dependency cases); no web unit or browser test is affected by this round.
+
+Both guarded merged-main static attempts return **exit 3** for occupied remote
+slots and execute no checks. Fresh static validation is **incomplete**, and CI
+remains **not green**. No behavior change requires a new regression test. Only
+this owned handoff document changes; no source, assertion or shared inventory
+is edited. No heavy local fallback, origin push, deployment, model CLI or review
+gate was performed.
