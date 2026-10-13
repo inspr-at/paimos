@@ -135,6 +135,10 @@ node scripts/test-tiers/affected.mjs --base origin/main
 node scripts/check-migrations.mjs --base-ref v261012211543.0.0
 ```
 
+The chat package's test setup generates the ignored OpenAPI bundle with the
+prescribed generator when a fresh guarded checkout lacks it. The existing
+legacy schema assertions stay unchanged; no authored contract is modified.
+
 No browser check applies to this non-browser slice. Exit 3 means incomplete,
 never green. Authoritative PR CI and the coordinator's cross-family review
 remain prerequisites to merge; workers neither push nor run model gates.

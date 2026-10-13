@@ -4,6 +4,9 @@ package chat
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -12,6 +15,24 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// The guarded runner tests committed HEAD in a fresh checkout. The OpenAPI
+// bundle is deliberately git-ignored; prepare it with the prescribed generator
+// before the unchanged legacy schema assertions run. No authored API is edited.
+func TestMain(m *testing.M) {
+	if _, err := os.Stat("../../api/openapi.yaml"); os.IsNotExist(err) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		command := exec.CommandContext(ctx, "node", "api/generate.mjs", "--write")
+		command.Dir = "../.."
+		output, err := command.CombinedOutput()
+		cancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "OpenAPI test preparation: %v\n%s", err, output)
+			os.Exit(1)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 // Risk: making a final-only drain use a stopped writer could accidentally relax
 // the ordinary final route or leak its body into legacy inbox/wake machinery.

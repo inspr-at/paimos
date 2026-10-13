@@ -160,7 +160,9 @@ func (f *fixture) complete(t *testing.T) {
 func TestFinalDrainReplayAfterExitPersistsOnceAndRechecksAuthority(t *testing.T) {
 	f := newFixture(t)
 	f.complete(t)
-	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),archived_at=clock_timestamp() WHERE id=$1`, f.binding.HarnessSessionID); err != nil {
+	// Archival keeps the existing recovery constraint: even an archived
+	// registration must retain its request, actor and unknown-process evidence.
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped',archived_at=clock_timestamp(),recovery_process_state='unknown',recovery_request_id=$2,recovery_request_digest=$3,recovery_actor_id=$4,recovery_reason='fixture archived registration' WHERE id=$1`, f.binding.HarnessSessionID, uuid.NewString(), bytes.Repeat([]byte{3}, 32), f.owner.ID); err != nil {
 		t.Fatal(err)
 	}
 	f.actor.DaemonGeneration = "restarted-generation"
