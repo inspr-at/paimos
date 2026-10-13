@@ -208,6 +208,40 @@ four existing ESSENTIAL cases in this same PR. No quota behavior, assertion
 or shared inventory is changed, so there is no new behavior fix requiring
 a regression against `217901899`. The delivery remains incomplete.
 
+Fix round 7 inspected full job logs and the Go JSONL artifact for PR head
+`e9a41a6d6`, Actions run `38356096419`. `go-static` job `115159401094` still
+fails only at strict tier collection, naming exactly the four quota cases
+above. Refreshed `origin/main` at `fd8fae22f` still lacks their rows; the central
+source-ownership glob is present. PR #619 remains mergeable, so no
+conflict-resolution merge is required. Quota and C0 package sources are
+unchanged from the passing fix-round-6 package run.
+
+Current CI independently proves the quota behavior: artifact
+`go-test-2-tier-measurements` (`11793350744`) contains a passing result for
+each of the four named quota tests and the package (0.133 s). The CI selector
+runs these unclassified cases as NIGHTLY; that fallback does not satisfy the
+required ESSENTIAL registration or strict manifest check.
+
+`web` job `115166145652` fails because both `web-shard (1)` (`115159941621`)
+and `web-shard (2)` (`115159941400`) were cancelled during `Run selected UI
+cases without retries`. Their logs report `The operation was canceled.`
+without a reported failing assertion. Catalogue, setup and all four web unit
+shards passed. `tier-measurements` job `115166182078` reports
+`coverage=incomplete`, `missing_case_artifact` and missing evidence for both
+browser shards, with zero failed cases in every tier. Coordinator CI reruns
+must complete that browser and measurement evidence; review approval remains
+coordinator-owned.
+
+Both guarded Go attempts and both guarded static attempts in fix round 7
+exited 3 before execution because the global remote slots were full. No local
+suite or browser fallback was used. The offline affected planner passed,
+selecting 130 Go packages, 80 browser specs and 120 web unit files, but still
+omits `internal/nativequota` pending R0 registration. This is an incomplete
+handoff, not a green static or merge check. R0 must apply the four exact
+ESSENTIAL rows in this same PR and rerun the required checks. No quota
+behavior or assertions changed, so no new regression against `e9a41a6d` is
+required. All fix-round-7 edits stay inside this feature document.
+
 Run the named package through the guarded remote Go runner and static checks
 through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
 origin/main`. These clock-driven tests use synthetic pins and events, with no
@@ -232,6 +266,10 @@ review remain required before integration or release.
   named cases and subcases passed (0.261 s). Both preceding guarded remote
   attempts exited 3 for the busy CI pool/global remote capacity limit. No
   vendor account or model call was made; no broader local suite was run.
+- PASS: fix-round-7 current-head CI JSONL evidence on `e9a41a6d6`: all four
+  quota cases passed, with package result 0.133 s. Stream qualification,
+  independent readiness/allowance, unsupported idle probing, private ingress
+  and injected-clock account isolation are covered by these named cases.
 - PASS: negative control on a temporary branch from that final source, with
   the freshness deadline check disabled. The named clock test failed on its
   exact stale-reading assertion for both Claude and Codex (exit 1). After
@@ -248,6 +286,8 @@ review remain required before integration or release.
   confirmed that `internal/nativequota` remains absent from the selection.
   Fix round 6 reproduced the same counts against `fd8fae22f`, exit 0, and
   again confirmed that `internal/nativequota` is absent from the selection.
+  Fix round 7 selected 130 Go packages, 80 browser specs and 120 web unit
+  files against `fd8fae22f`, exit 0; `internal/nativequota` remains absent.
 - INCOMPLETE: fix-round-3 guarded static `--merge-main` on `4a5e40209` exited 1.
   Its 39 other checks passed with no skips, including Go vet, test-tier tests,
   web-shard tests, web typecheck and web lint. Only Go-tier drift and source
@@ -271,5 +311,10 @@ review remain required before integration or release.
   Static checks were not run locally. Current PR CI independently identifies
   the same four R0-owned tier omissions; the earlier static pass lines do not
   establish a green check for this round.
+- INCOMPLETE: both fix-round-7 `remote-test.sh` attempts and both
+  `ci-static-locked.sh` attempts exited 3 for the full global remote slots.
+  The current-head CI package pass above is separate evidence, not a green
+  guarded static run. Strict Go-tier registration and cancelled browser
+  execution/measurement evidence remain unresolved coordinator actions.
 - Browser validation does not apply to this source-only slice. Production pin
   qualification, I2 integration, review and release remain coordinator-owned.
