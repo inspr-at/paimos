@@ -148,9 +148,9 @@ Builder handoff, 2026-10-13:
   tool-body removal, duplicate/depth/size/redaction bounds and unknown omissions.
 - PASS — slow-subscriber, API-outage and access-revocation barriers demonstrate
   bounded memory, visible loss and no queued delivery after revocation.
-- PASS — both targeted Go packages with `-race` on mbp2606 at `4477de1f8`;
+- PASS — both targeted Go packages with `-race` on the approved remote runner at `4477de1f8`;
   retention negative control with `-race -v -args -native-negative-control`
-  passed on mbp2606 at `380477742` (the buffer implementation is unchanged).
+  passed on the approved remote runner at `380477742` (the buffer implementation is unchanged).
 - PASS — affected-set selection exited 0. Its initial selection omitted these
   unregistered packages; R0 must register the nine tests and rerun selection.
 - NOT GREEN — guarded `ci-static-locked.sh` exited 1: go-tiers, audit-tests and
@@ -165,3 +165,34 @@ API sources, migrations, versions, live daemons and vendor logins are unchanged.
 No other builder worktree was touched; no production deployment, origin push,
 review gate or model CLI was run. I1/I2 own integration; R0 and authoritative
 PR CI remain required before merge.
+
+Fix round 2, 2026-10-13 (reviewed source `140a6982`, implementation `cb33a0b95`):
+
+- PASS — the reported `TestHTTPReadDeadlineOwnership` failure reproduced on
+  `140a6982` through `remote-test.sh`; the fixed adapter has no private HTTP
+  read-deadline calls and uses the shared bounded body reader.
+- PASS — `remote-test.sh` with `-race` for `internal/httpapi/...`,
+  `internal/nativestream/...` and `internal/nativesessions/stream/...`.
+  Regression subtests extend the existing registered-name handoff; they assert
+  exact body-error responses, connection closure, an unchanged earlier caller
+  deadline, no reset after failure, joined readers and zero Host admission.
+- PASS — remote `-race -v -args -native-negative-control` for
+  `internal/nativestream/...`. The actual adapter source from `140a6982` fails
+  specifically for leaving a failed-body connection reusable; the existing
+  idle-expiry mutation also fails for its claimed retained-content risk.
+- PASS — offline `node scripts/test-tiers/affected.mjs --base origin/main`
+  exited 0. It still cannot select the two unregistered native-stream packages;
+  the nine ESSENTIAL test rows in the R0 handoff remain required.
+- OPEN — the CI audit failures require the single S2 path
+  `internal/nativestream/**` in `scripts/audit/slices.json`. Ownership lookup
+  confirms all seven files in that directory are unassigned. The normative
+  P2a plan reserves audit/tier metadata exclusively for R0; this fix round
+  preserves that ownership and does not edit those shared files.
+- NOT GREEN — guarded `ci-static-locked.sh` exited 1 at `cb33a0b95`:
+  38 checks passed, with zero optional skips. Audit tests, audit coverage and
+  Go tiers require the R0 entries above. The public-name guard additionally
+  rejected operator host names in the earlier handoff; those references have
+  been replaced with value-free remote-runner descriptions.
+- Browser/web-unit execution is inapplicable to this source-only fix. The C0
+  contracts, route inventories, permissions, migrations and versions are
+  unchanged. No origin push, deployment, review gate or model CLI was run.
