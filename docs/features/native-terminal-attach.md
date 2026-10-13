@@ -366,3 +366,49 @@ PR policy preview still requires the coordinator's trusted review verdict.
 this feature handoff and the ignored progress file; implementation, test
 assertions and R0 metadata remain unchanged. No origin push, deployment,
 model CLI, review gate or live cutover was performed.
+
+## Fix round 7: R0 must apply the nine tier rows
+
+The report `review-ci618-0743.out` targets `4558b9ad2`. The complete
+[Go static job 115143342439](https://github.com/inspr-at/paimos/actions/runs/38351009686/job/115143342439)
+fails only strict tier collection on the same nine P2b tests in the integration
+handoff. Its tier self-check has zero failures. All four Go shards, web unit and
+browser shards, release checks, E2E and migration compatibility pass. The
+aggregate Go failure follows the failed static job; there is no behaviour
+finding or assertion to change.
+
+The P2b write set still excludes `scripts/ci/go-test-tiers.json`, reserved to
+R0's explicitly assigned integrator. Fix round 7 does not transfer ownership.
+The coordinator must apply the **tier-only** portion of the fix-round-4 patch
+to this branch in the same PR before final checks. Its audit portion is already
+superseded by central R0 PR #623. Repeating a P2b builder round cannot apply
+this R0-owned fix within the authorized write set.
+
+The tier-only patch passes `git apply --check` at `4558b9ad2`. Its in-memory
+candidate adds exactly nine `ESSENTIAL` rows, preserves every existing row and
+all other metadata, and passes the production strict manifest validator against
+the existing manifest identities plus those nine source test identities. The same
+validator rejects the unchanged manifest at both `4558b9ad2` and HEAD for
+exactly those nine missing identities. This is bounded metadata validation,
+not a replacement for native collection or the required final CI run. No
+manifest, implementation, assertion or other slice's file was changed.
+
+Both complete affected Go packages pass through `remote-test.sh` at
+`4558b9ad2`: `./internal/nativeattach/... ./internal/cli/...`, exit 0
+(nativeattach 0.364 seconds, CLI 36.867 seconds). The first two attempts refused
+with exit 3 because both remote slots were occupied; the successful retry used
+the approved runner, with no local fallback.
+
+Guarded static `--merge-main` exits 1: only `go-tiers` fails on those nine rows;
+41 checks pass with zero optional skips. The passing checks include audit
+tests/coverage, Go vet, tier/web-shard self-checks, web typecheck/lint and
+migrations. The offline affected planner exits 0 and selects FULL Go because
+3,233 reverse-dependency cases exceed its 300-case bound; this is a selection,
+not a full-suite result. The PR diff contains only P2b Go files and this feature
+document, so this non-browser slice has no web unit or browser spec to run.
+
+Latest fetched `origin/main` is `a633f5118`, still without any of the nine tier
+rows. PR #618 remains `MERGEABLE`, so no conflict merge is required. The
+non-required policy preview reports the missing trusted `gate/verdict`; the
+coordinator runs that gate after builder exit. Static/CI is failed, not green.
+No origin push, deployment, model CLI, review gate or live cutover was performed.
