@@ -153,7 +153,7 @@ func TestNativeLeadPinnedSDKPolicyBoundary(t *testing.T) {
 	var settings struct {
 		Hooks map[string][]any `json:"hooks"`
 	}
-	if json.Unmarshal(overlay.Settings, &settings) != nil || len(settings.Hooks) != 6 {
+	if json.Unmarshal(overlay.Settings, &settings) != nil || len(settings.Hooks) != 7 {
 		t.Fatal("legacy session overlay missing")
 	}
 	for _, bucket := range settings.Hooks {
@@ -206,6 +206,9 @@ func TestNativeLeadPinnedSDKPolicyBoundary(t *testing.T) {
 	if json.Unmarshal(boundary, &facts) != nil {
 		t.Fatal("bad fixture facts")
 	}
+	if facts["protocol"] != sdkProtocol {
+		t.Fatal("fixture protocol pin changed")
+	}
 	for _, fact := range []string{"legacyHooksAbsent", "ambientToolsDenied", "boundToolAllowed", "daemonCredentialAbsent", "persistentNativeOnly", "accountHomePreserved"} {
 		if facts[fact] != true {
 			t.Fatal("SDK boundary failed", fact)
@@ -256,12 +259,22 @@ func TestNativeLeadBackgroundCompactionAndConsumedFinal(t *testing.T) {
 	defer cancel()
 	command := exec.CommandContext(ctx, node, c.Spec.Profile.SDK.Path, "qualification-trace")
 	command.Env = []string{"HOME=" + c.Spec.Profile.UserHome}
-	data, err := command.Output()
+	stdout, err := command.StdoutPipe()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(stdout, (16<<10)+1))
+	if readErr != nil || len(data) > 16<<10 {
+		cancel()
+	}
+	if err := command.Wait(); err != nil {
 		t.Fatal("offline trace failed", err)
 	}
-	if len(data) > 16<<10 {
-		t.Fatal("offline trace exceeded bound")
+	if readErr != nil || len(data) > 16<<10 {
+		t.Fatal("offline trace exceeded read bound")
 	}
 	var trace []struct{ Kind, Input, Turn, Text, Task, State, Thread, Cursor string }
 	if json.Unmarshal(data, &trace) != nil || len(trace) != 8 {
@@ -387,9 +400,13 @@ func TestNativeLeadFencesDeadlinesAndRevocationBarrier(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var revoked atomic.Bool
 	barrier := c
-	barrier.Require = func(context.Context, nativecontract.Actor, nativecontract.Policy) error {
+	barrier.Require = func(ctx context.Context, _ nativecontract.Actor, _ nativecontract.Policy) error {
 		close(entered)
-		<-release
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		if revoked.Load() {
 			return ErrGrant
 		}

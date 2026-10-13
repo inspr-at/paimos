@@ -19,7 +19,7 @@ to the vendor binary.
 
 `SessionOverlay` contains no inherited setting sources, plugins, additional
 directories or ambient tools. It explicitly clears session-start, prompt,
-post-tool, stop and subagent hook buckets and records the disabled
+pre/post-tool, stop and subagent hook buckets and records the disabled
 `attached-inbox`, `cswap` and duplicate subagent-registration hooks. Apply only
 this session overlay; never write personal/global/workspace settings. Keep the
 runtime PreToolUse and current bound-tool checks enabled. Do not use

@@ -77,7 +77,7 @@ func SessionOverlay(tools []string) (Overlay, error) {
 	}
 	return Overlay{
 		SettingSources:      []string{},
-		Settings:            json.RawMessage(`{"fastMode":false,"hooks":{"SessionStart":[],"UserPromptSubmit":[],"PostToolUse":[],"Stop":[],"SubagentStart":[],"SubagentStop":[]}}`),
+		Settings:            json.RawMessage(`{"fastMode":false,"hooks":{"SessionStart":[],"UserPromptSubmit":[],"PreToolUse":[],"PostToolUse":[],"Stop":[],"SubagentStart":[],"SubagentStop":[]}}`),
 		DisabledLegacyHooks: []string{"attached-inbox", "cswap", "duplicate-subagent-registration"},
 		AllowedTools:        allowed, Tools: []string{}, Plugins: []string{}, AdditionalDirectories: []string{},
 		StrictMCPConfig: true, PermissionMode: "dontAsk", PersistSession: true,
