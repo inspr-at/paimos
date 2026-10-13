@@ -719,7 +719,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
               await expect(caption).toHaveText('No start yet')
             } },
           ] })
-          } else {
+        } else {
           await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
             { name: 'unreadable queue retries without moving its controls', run: async () => {
               world.state.queueUnreadable = true
@@ -754,8 +754,8 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
       }
       expect(errors).toEqual([])
     })
-    }
   }
+}
 
 test('AEON-1212 approved check.mjs: the round-7 design passes and supplies the reference screenshots', async ({}, info) => {
   test.setTimeout(240_000)

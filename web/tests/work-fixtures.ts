@@ -308,7 +308,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       readonly id = streams.length + 1
       closed = false
       opened = false
-      private timer = setInterval(() => this.dispatchEvent(new Event('stream.ping')), 5_000)
+      private timer = setInterval(() => { if (this.opened && !this.closed) this.dispatchEvent(new Event('stream.ping')) }, 5_000)
       constructor() {
         super()
         streams.push(this)
