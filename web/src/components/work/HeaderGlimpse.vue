@@ -30,13 +30,13 @@ const compact = ref(false), spotLabel = ref('none')
 const shown = ref(0), truncated = ref(false)
 const canvas = ref<{ setPaused: (value: boolean) => void } | null>(null)
 const allowed = computed(() => headerGlimpseAllowed({ enabled: props.enabled, reduced: reduced.value, wide: wide.value, tickets: props.ticketCount }))
-let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, measureFrame = 0
+let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, measureFrame = 0, sizingPaused = false
 
 function controlBox(compactMode: boolean) {
   const el = controls.value
   if (!el) return { width: 310, height: 34 }
-  // Class changes are measured while the resize observer is disconnected, so
-  // trying the labelled width cannot schedule another pass.
+  // Read both widths in this turn. The observer is told to ignore the trial
+  // sizes; reconnecting it would schedule a new pass on every measurement.
   el.classList.toggle('is-compact', compactMode)
   el.classList.remove('is-parked')
   return { width: el.offsetWidth || 310, height: el.offsetHeight || 34 }
@@ -45,7 +45,7 @@ function measureRegion() {
   const header = column.value?.closest<HTMLElement>('.project-head')
   const page = header?.closest<HTMLElement>('.project-page')
   if (!header || !page || !column.value) return
-  sizing?.disconnect()
+  sizingPaused = true
   try {
     const box = header.getBoundingClientRect()
     const padding = parseFloat(getComputedStyle(page).paddingTop) || 0
@@ -68,12 +68,14 @@ function measureRegion() {
     measuredViewport.value = window.innerWidth
     measured.value = true
   } finally {
-    attachSizing()
+    sizingPaused = false
   }
 }
 function scheduleMeasure() {
+  // Trial widths change the bar while a measurement is already reading it.
   // Resize/content changes invalidate both the mask and the hit target until
   // their next shared measurement; stale controls cannot cover new text.
+  if (sizingPaused) return
   measured.value = false
   cancelAnimationFrame(measureFrame)
   measureFrame = requestAnimationFrame(measureRegion)
