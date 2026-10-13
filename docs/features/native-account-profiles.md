@@ -416,3 +416,35 @@ parent environment and distinct overlapping children. No new regression test
 is needed for this registration-only finding. No heavy local fallback was used.
 Only this owned feature document changes; R0 registration and authoritative CI
 remain required before merge. This worker exits after the local handoff commit.
+
+Fix-round 11 (2026-10-13): baseline `37abcbcad` still fails CI `go-static`
+job **115162027964** solely on the four missing Go registrations listed above.
+The aggregate Go failure follows static validation; all seven Go shards, four
+web unit shards, twelve browser shards, release checks and migration
+compatibility pass. The non-required policy preview lacks a trusted verdict for
+this head and remains coordinator-owned; this worker ran no review gate.
+
+Fetched `origin/main` at `fd8fae22f` is already included, PR #615 is mergeable,
+and the read-only merge-tree check has no conflicts. Neither main nor this
+branch contains the four rows. Both normative plan files still reserve
+`scripts/ci/go-test-tiers.json` exclusively for R0. **The next action is R0's
+same-PR registration of those exact four ESSENTIAL rows, followed by CI; another
+P4a fix round cannot close this ownership blocker.** No shared file, production
+source or assertion changes in this round.
+
+A read-only diagnostic verifies the four named test declarations on
+`37abcbcad`, rejects exactly their missing classifications, and passes the
+existing manifest validator with only the documented rows added in memory.
+It leaves the shared manifest unchanged and does not replace native collection.
+The affected selector exits 0 and selects **FULL** (3236 reverse-dependency
+cases). No P4a web unit or browser test is affected, and no behavior fix requires
+a new regression test.
+
+Both guarded Go attempts and the guarded merged-main static attempt return
+**exit 3** for occupied remote slots; none executes tests or static checks.
+Fresh targeted Go and static validation are **incomplete**, and CI remains
+**not green**. The source and tests remain unchanged from the last passing
+guarded profile/CLI run on `6d6b65b0`; its five fake-test acceptance checks
+remain **PASS**, while live account qualification stays **G_ACCOUNTS**.
+Only this owned handoff document changes. No heavy local fallback, origin push,
+deployment, model CLI or review gate was performed.
