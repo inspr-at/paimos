@@ -536,3 +536,41 @@ cases in this source-only slice. Latest fetched main is `fd8fae22f`, still
 missing the rows; PR #618 is `MERGEABLE`, so no conflict merge is needed.
 Only this scoped handoff and the ignored progress file changed. No origin
 push, deployment, model CLI, review gate or live cutover was performed.
+
+## Fix round 10: coordinator-owned tier registration still blocks CI
+
+`review-ci618-0917.out` targets `76aec94dc`. The complete
+[Go static job 115170211347](https://github.com/inspr-at/paimos/actions/runs/38359445080/job/115170211347)
+fails only strict collection on the same nine missing P2b tier rows. Go vet,
+rules bootstrap drift and tier selector regressions pass. All seven Go shards,
+four web unit shards, twelve browser shards, release checks, E2E and migration
+compatibility pass at that revision. The Go aggregate follows the static failure.
+
+The original brief requires stopping before an edit outside the P2b write set.
+Both normative plan artifacts reserve `scripts/ci/go-test-tiers.json` to R0,
+the coordinator or an explicitly assigned metadata integrator. Fix10 preserves
+ownership and makes no transfer. The coordinator must apply the **tier-only
+patch in fix round 9 above** in this PR before final validation; the builder
+cannot resolve this failure within its authorized scope.
+
+That patch still passes `git apply --check` and its nine `ESSENTIAL` identities
+match the actual source tests. The production strict validator rejects unchanged
+manifests at the required negative-control revision `76aec94d`, HEAD and latest
+main for exactly those nine rows. Each in-memory patched candidate passes,
+preserving every existing row, its order and all other metadata. These bounded
+checks do not replace native collection. No behaviour fix, new regression test
+or assertion change is indicated by this metadata failure.
+
+Two approved remote Go attempts refuse with exit 3 because the remote slots are
+occupied. Two locked static attempts also refuse with exit 3 under the host
+guard. Neither check ran; current remote validation is incomplete and existing
+PR CI remains failed. The offline affected planner exits 0 and selects FULL Go
+because 3,236 reverse-dependency cases exceed its 300-case limit; this is selection
+only. This slice changes no web source or tests, so there is no affected web case.
+
+Latest fetched main remains `fd8fae22f`; PR #618 is `MERGEABLE`, so no conflict
+merge is required. The separate non-required policy preview reports no trusted
+`gate/verdict`; the coordinator owns that review after builder exit. The P2b
+write-set check and `git diff --check` pass. Only this scoped handoff and the
+ignored progress file changed; no R0 file, implementation or assertion changed.
+No origin push, deployment, model CLI, review gate or live cutover was performed.
