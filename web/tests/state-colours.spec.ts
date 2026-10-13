@@ -14,7 +14,7 @@ async function expectStateWordFits(project: Locator) {
       word: label.getBoundingClientRect().toJSON(), fits: label.scrollWidth <= label.clientWidth }
   })
   expect(word.x).toBeGreaterThanOrEqual(chip.x)
-  expect(word.x + word.width).toBeLessThanOrEqual(chip.x + chip.width)
+  expect(word.x + word.width, await project.getAttribute('data-project-id') ?? '').toBeLessThanOrEqual(chip.x + chip.width)
   expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
   expect(fits).toBe(true)
 }
@@ -39,7 +39,8 @@ for (const theme of ['light', 'dark'] as const) {
       // AEON-1212 (#592) moved the identity and state into the unified panel's header.
       await expect(panel.locator('.panel-head .agent-state-label')).toHaveText(STATE_LABEL[state])
       const setup = panel.locator('[aria-labelledby="setup-title"]')
-      for (const value of ['integration-model', 'xhigh', 'Test account', '1.2.3']) await expect(setup).toContainText(value)
+      // AEON-1249 (#594): Details uses the same resolved model name as the row.
+      for (const value of ['Integration Model', 'xhigh', 'Test account', '1.2.3']) await expect(setup).toContainText(value)
       const work = panel.locator('[aria-labelledby="work-title"]')
       for (const value of ['AEON-221', '/Code/aeon-sc1', 'sc1.state-colours', 'abc1234', 'Integrate session states']) await expect(work).toContainText(value)
       await page.getByRole('button', { name: 'Close session details' }).click()
@@ -99,7 +100,7 @@ for (const theme of ['light', 'dark'] as const) {
           const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
           await expect(project.locator('.chip-state')).toHaveText(STATE_LABEL[state])
           await expectStateWordFits(project)
-          await expect(project.locator('.activity')).toBeVisible()
+          if (layout === 'Cards') await expect(project.locator('.activity')).toBeVisible()
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       }

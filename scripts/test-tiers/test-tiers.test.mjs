@@ -1800,7 +1800,7 @@ test('AEON-1325 nightly shards retain every browser case and require all 24 meas
   const indices=JSON.parse(/shard: (\[[^\n]+\])/.exec(job)[1])
   assert.deepEqual(indices,Array.from({length:24},(_,i)=>i+1))
   assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
-  const rows=load('web').tests
+  const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
   const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
   const weights=tierWeights(JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url))),selected)
   const bins=indices.map(index=>shard(selected,index,indices.length,weights))
