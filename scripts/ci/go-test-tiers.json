@@ -872,6 +872,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootHoldsCountUntilVerifiedRelease","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestOldManualWindowCapsOnTopOfReadings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestOverviewValuesMaskingExplicitScopeAndTenantIsolation","tier":"ESSENTIAL"}
@@ -4978,6 +4980,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeWorkerDispatchFrozenEnvelopeAndReceipt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestOnboardCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestOpenNoFollowReadsRegularFileAndRejectsSymlinkParent","tier":"GATED-FULL"}
@@ -7862,6 +7866,12 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkingEvidenceCannotUseAnotherModelsUsage","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nativeadmission","name":"TestNativeAdmissionOverlappingRootWorkerAndRevokedRoute","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeadmission","name":"TestNativeAdmissionPreForkRefusalReleasesReservation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeadmission","name":"TestNativeProfileChangeSerializesWithLiveUsers","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeattach","name":"TestAttachLeaseUsesElapsedServerBudget","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nativeattach","name":"TestComposerPreservesShortcutsAndBoundsTerminalData","tier":"NIGHTLY"}
@@ -7879,6 +7889,14 @@
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedispatch","name":"TestDispatchChangedGrantAndUnconfirmedStart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedispatch","name":"TestDispatchDuplicateChildBarrierAndOccupancy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedispatch","name":"TestNativeProgressPlansToolAndHeartbeat","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedispatch","name":"TestOwnedWorkerMissingProgressAttentionClock","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainDeadlineKeepsUnconfirmedAttemptFenced","tier":"ESSENTIAL"}
     ,
