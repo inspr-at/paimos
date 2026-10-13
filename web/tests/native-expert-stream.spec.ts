@@ -118,7 +118,10 @@ async function mixedEvidence(page: Page, theme: string, width: number, shot: (na
   await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
   await shot('mixed')
   await page.setViewportSize({ width, height: 720 })
-  await scroll.evaluate(el => { el.scrollTop = 0 })
+  // ResizeObserver and the following update first finish at the live end. The
+  // explicit scroll notification then establishes the user's scroll barrier.
+  await expect.poll(() => scroll.evaluate(el => el.scrollHeight > el.clientHeight && el.scrollHeight - el.scrollTop - el.clientHeight <= 2)).toBe(true)
+  await scroll.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')) })
   await expect(follow).not.toBeChecked()
   await expect(tail).not.toBeInViewport()
   await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)

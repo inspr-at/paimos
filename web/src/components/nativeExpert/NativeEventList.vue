@@ -45,7 +45,13 @@ function measureEnd() {
   if (liveEndVisible.value) newEvents.value = 0
 }
 function scrolled() { measureEnd(); emit('follow', liveEndVisible.value) }
-async function jump() { emit('follow', true); await nextTick(); if (scroll.value) scroll.value.scrollTop = scroll.value.scrollHeight; measureEnd() }
+async function jump() {
+  emit('follow', true)
+  await nextTick()
+  if (!props.follow || disposed) return
+  if (scroll.value) scroll.value.scrollTop = scroll.value.scrollHeight
+  measureEnd()
+}
 watch(() => props.follow, follow => { if (follow) void jump() })
 // Replay pages never count as new live events. Expanding a row alone is not an arrival.
 watch(() => props.liveArrivals, (count, previous) => { if (!props.follow) newEvents.value += Math.max(0, count - previous) })
