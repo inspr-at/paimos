@@ -245,7 +245,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-step')).toHaveText('Reported stop reason: worker failed: exit 2')
     if (width === 1600) {
-      const listBounds = (await page.locator('.main-col').boundingBox())!
+      // AEON-1213 (#591) split the rendered list into its own pane.
+      const listBounds = (await page.locator('.agents-list-pane').boundingBox())!
       const panelBounds = (await panel.boundingBox())!
       expect(listBounds.x + listBounds.width).toBeLessThanOrEqual(panelBounds.x)
       expect(panelBounds.x - listBounds.x - listBounds.width).toBeLessThan(40)
