@@ -21,7 +21,7 @@ var sharedFenceCallers = map[string][]string{
 	"db.LockTenant":             {"accountuse/module.go", "accountuse/policy.go", "auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/flow_store.go", "delivery/metrics_api.go", "delivery/metrics_worker.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/webhook_receipts.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/proposals.go", "routineexec/recovery.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
 	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
-	"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/routine_launch.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "harness/lead_runtime.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/harness_probes.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go", "routineactions/catalog.go", "routineactions/pipeline.go", "routineactions/pr.go", "routinebudget/store.go", "routineexec/dispatch.go", "routineexec/recovery.go", "routineexec/review.go"},
+	"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/routine_launch.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "harness/lead_runtime.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/harness_probes.go", "modelregistry/preparation.go", "nativesessions/store/claim.go", "nativesessions/store/read.go", "nativesessions/store/start.go", "nodes/bulk.go", "nodes/nodes.go", "routineactions/catalog.go", "routineactions/pipeline.go", "routineactions/pr.go", "routinebudget/store.go", "routineexec/dispatch.go", "routineexec/recovery.go", "routineexec/review.go"},
 	"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go", "questions/store.go"},
 	"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
 	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
@@ -114,6 +114,19 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../agentruns/review.go", "QueueRoutineFixTx", "aeon_account_allows_profile(", "INSERT INTO agent_runs"},
 		{"../db/fences.go", "LockTree", "LockTenant(", "pg_advisory_xact_lock"},
 		{"lifecycle.go", "Lock", "db.LockCurrentTree(", "aeon-pairing:"},
+		// Native intent, claim and read entries (AEON-1267) take tenant/tree/pairing
+		// before current authority and target rows. Claim observation stays outside
+		// the final fenced transaction; registration and reservation precede events.
+		{"../nativesessions/store/start.go", "Start", "agentpairing.Lock(", "requireStart("},
+		{"../nativesessions/store/start.go", "Start", "requireStart(", "INSERT INTO native_session_bindings"},
+		{"../nativesessions/store/start.go", "Start", "INSERT INTO native_session_intents", "appendEvent("},
+		{"../nativesessions/store/claim.go", "Claim", "s.observer.Observe(", "agentpairing.Lock("},
+		{"../nativesessions/store/claim.go", "Claim", "agentpairing.Lock(", "loadPending(ctx, tx, in.OperationID, true)"},
+		{"../nativesessions/store/claim.go", "Claim", "loadPending(ctx, tx, in.OperationID, true)", "requireStart("},
+		{"../nativesessions/store/claim.go", "Claim", "requireStart(", "nativeCapacity("},
+		{"../nativesessions/store/claim.go", "Claim", "agentaccounts.ReserveNativeRootTx(", "appendEvent("},
+		{"../nativesessions/store/read.go", "read", "agentpairing.Lock(", "authz.RequireTx("},
+		{"../nativesessions/store/read.go", "read", "authz.RequireTx(", "SELECT b.view"},
 		{"../auth/store.go", "revokeAgentKeyTx", "db.LockTenant(", "lockAgentKey("},
 		{"../rules/module.go", "endpoint", "lockAccess(", "pg_advisory_xact_lock"},
 		{"../rules/learning_draft.go", "PrepareWrite", "lockAccess(", "pg_advisory_xact_lock"},
