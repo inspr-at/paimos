@@ -70,7 +70,7 @@ func (s *Session) readStreamOnce(ctx context.Context, guard *nativecontract.Sequ
 	}
 	res, err := s.wire.request(ctx, http.MethodGet, s.wire.path(b, "stream")+"?"+q.Encode(), nil, headers)
 	if err != nil {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 			return context.Cause(ctx)
 		}
 		return err
