@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
 .glimpse-col[data-measured="false"] { visibility: hidden; }
 .glimpse-canvas {
   position: absolute; inset: 0; opacity: .35; pointer-events: none;
-  mask-image: var(--glimpse-text-mask), linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent);
+  mask-image: var(--glimpse-text-mask), linear-gradient(to right, transparent 8px, #000 4%, #000 96%, transparent calc(100% - 8px)), linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent);
   mask-composite: intersect;
   mask-repeat: no-repeat;
   mask-size: 100% 100%;

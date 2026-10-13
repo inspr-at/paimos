@@ -840,23 +840,18 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       const centre = right.clone().multiplyScalar(span(right)).add(up.clone().multiplyScalar(span(up))).add(back.clone().multiplyScalar(span(back)))
       const tan = Math.tan(camera.fov * Math.PI / 360), aspect = Math.max(1, g3.width()) / Math.max(1, g3.height())
       let distance = glimpse ? 1 : g3.height() / (2 * tan * MAX_ZOOM)
-      let widthDistance = 1
       for (const n of fitted) {
         const v = new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).sub(centre), depth = v.dot(back)
         // Fit only the dense core's HEIGHT in a glimpse. Outliers and sides
         // can enter the fade without shrinking the entire cloud into a strip.
         if (glimpse) {
           distance = Math.max(distance, depth + Math.abs(v.dot(up)) / (tan * (1.20 - 8 / g3.height())))
-          widthDistance = Math.max(widthDistance, depth + Math.abs(v.dot(right)) / (tan * aspect * .95))
         }
         else {
           const r = graphRadius(n)
           distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
         }
       }
-      // A short header must still fill its width. Keep height-led framing when
-      // it does; otherwise bring the dense core to the existing side fade.
-      if (glimpse) distance = Math.min(distance, widthDistance)
       const at = centre.clone().add(back.multiplyScalar(distance))
       g3.cameraPosition({ x: at.x, y: at.y, z: at.z }, { x: centre.x, y: centre.y, z: centre.z }, duration())
       publishLabels()
