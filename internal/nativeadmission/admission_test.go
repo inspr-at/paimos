@@ -29,9 +29,15 @@ type fakeAuthority struct {
 	revoked          atomic.Bool
 	entered, release chan struct{}
 	once             sync.Once
+	check            func(context.Context) error
 }
 
 func (a *fakeAuthority) Revalidate(ctx context.Context, _ Request) error {
+	if a.check != nil {
+		if err := a.check(ctx); err != nil {
+			return err
+		}
+	}
 	if a.entered != nil {
 		var err error
 		a.once.Do(func() {
@@ -308,6 +314,115 @@ func TestNativeAdmissionOverlappingRootWorkerAndRevokedRoute(t *testing.T) {
 }
 
 func reserveError(_ *Permit, err error) error { return err }
+
+// Risk: refusal after durable possible-fork evidence permanently consumes the
+// machine's only slot even though the owning launch callback was never called.
+func TestNativeAdmissionPreForkRefusalReleasesReservation(t *testing.T) {
+	for _, failure := range []struct {
+		name   string
+		err    error
+		cancel bool
+	}{
+		{name: "revoked", err: denial(nativecontract.ReasonPermissionRevoked)},
+		{name: "authority_unavailable", err: errors.New("fake authority unavailable")},
+		{name: "cancelled", err: context.Canceled, cancel: true},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			f := newAdmissionFixture(t)
+			p, err := f.root.Reserve(t.Context(), f.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attemptCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			barrierCtx, stopBarrier := context.WithTimeout(t.Context(), 15*time.Second)
+			defer stopBarrier()
+			entered, release := make(chan struct{}), make(chan struct{})
+			t.Cleanup(func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			})
+			var checks int
+			// The first Attempt check passes; only the final check after durable
+			// journal/ledger transitions fails. The worker keeps valid authority.
+			f.root.opts.Authority = &fakeAuthority{check: func(ctx context.Context) error {
+				checks++
+				if checks == 1 {
+					return nil
+				}
+				close(entered)
+				select {
+				case <-release:
+					if failure.cancel {
+						cancel()
+						return ctx.Err()
+					}
+					return failure.err
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}}
+			var forks atomic.Int32
+			done := make(chan error, 1)
+			go func() {
+				done <- f.root.Attempt(attemptCtx, p, func(context.Context, nativecontract.LocalProfile) (nativecontract.NativeIdentity, error) {
+					forks.Add(1)
+					return nativecontract.NativeIdentity{}, nil
+				})
+			}()
+			select {
+			case <-entered:
+			case early := <-done:
+				t.Fatalf("attempt failed before final-check barrier: %v", early)
+			case <-barrierCtx.Done():
+				t.Fatal("attempt never reached final-check barrier")
+			}
+			r, err := f.root.read(f.request.Binding.OwnedSessionID)
+			if err != nil || !r.Attempted || r.State != "possible_fork" {
+				t.Fatalf("final check lacks durable possible-fork evidence: %+v, %v", r, err)
+			}
+			data, _, err := f.ledger.Snapshot()
+			if err != nil || data.Groups[p.group].State != "launching" {
+				t.Fatalf("final check lacks launching hold: %+v, %v", data.Groups, err)
+			}
+			worker := workerRequest(f)
+			if _, err = f.worker.Reserve(t.Context(), worker); !errors.Is(err, agentsetup.ErrLedgerOccupied) {
+				t.Fatalf("reservation released before final refusal: %v", err)
+			}
+			close(release)
+			select {
+			case err = <-done:
+			case <-barrierCtx.Done():
+				t.Fatal("attempt did not return after final refusal")
+			}
+			if !errors.Is(err, failure.err) || checks != 2 || forks.Load() != 0 {
+				t.Fatalf("wrong refusal or fork: err=%v checks=%d forks=%d", err, checks, forks.Load())
+			}
+			wp, err := f.worker.Reserve(t.Context(), worker)
+			if err != nil {
+				t.Fatalf("provably unlaunched root still blocks worker: %v", err)
+			}
+			if err = f.worker.Abandon(t.Context(), wp); err != nil {
+				t.Fatal(err)
+			}
+			r, err = f.root.read(f.request.Binding.OwnedSessionID)
+			if err != nil || r.State != "released" || !r.Attempted || r.IdentityDigest != "" {
+				t.Fatalf("refusal lacks released tombstone: %+v, %v", r, err)
+			}
+			reopened, err := New(f.root.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			groups, err := reopened.HeldGroups(t.Context())
+			if err != nil || len(groups) != 0 {
+				t.Fatalf("reopen re-imports unlaunched root: %+v, %v", groups, err)
+			}
+		})
+	}
+}
 
 // Risk: logout/relogin races a live or uncertain writer, or a callback failure
 // silently permits new use of a profile whose sign-in operation is still live.

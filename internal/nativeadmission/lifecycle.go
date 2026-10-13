@@ -74,14 +74,18 @@ func (g *Gate) Attempt(ctx context.Context, p *Permit, start func(context.Contex
 			return err
 		}
 		if err = g.opts.Ledger.Launching(r.MemberID, r.Generation, r.Group); err != nil {
-			return err
+			// Under the admission lock, start has provably never been called.
+			return errors.Join(err, g.release(r))
 		}
 		// Repeat identity and current server admission immediately at the fork
 		// boundary, after the durable writes. The profile/login hold serializes
 		// person/OPS profile changes for the entire lifetime of the process.
 		_, profile, err = g.current(ctx, p)
 		if err != nil {
-			return err
+			// Durable possible-fork evidence protects a crash, but this owner
+			// knows the callback was not invoked. Release journal-first even
+			// if the admission context expired; cleanup failures stay visible.
+			return errors.Join(err, g.release(r))
 		}
 		identity, startErr := start(ctx, profile)
 		valid := identity.RuntimeEpoch == r.Binding.RuntimeEpoch && identity.PID > 0 &&

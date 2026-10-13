@@ -50,6 +50,11 @@ Idle, turn completion, takeover, detach, API outage and grant expiry do not free
 capacity. Possible-fork evidence is durable before launch. Failed/unconfirmed
 fork or exit stays held. `Abandon` releases only a never-attempted reservation;
 `ConfirmExit` requires matching process identity, root exit and group absence.
+If the ledger launch transition or final admission check fails before the launch
+callback is invoked, `Attempt` records a released tombstone and releases the
+shared ledger hold under the admission lock, including on cancellation. Cleanup
+errors are returned alongside the refusal. A crash before that proof is recorded
+still retains the possible-fork hold.
 Unknown exit cannot become running through a state update. A taken writer needs
 confirmed exit and a fresh admitted epoch before structured hand-back. The
 owning lifecycle updates/releases the server reservation separately with the
@@ -72,7 +77,8 @@ separate current authorization, with no quota-evading rotation.
 Named behaviour tests use admission/profile-change barriers, injected clocks,
 fake transports/resolvers and isolated temporary stores. They cover root/worker
 overlap at `max_parallel=1`, revocation after routing, retained idle/PTY/unknown
-fork holds, immutable profile/account binding, and current server
+fork holds, final pre-fork refusal freeing the slot without a launch, immutable
+profile/account binding, and current server
 identity/context/model/account/host checks. Builders make no subscription/model
 calls. No migration, permission, dependency or public contract change is needed.
 
@@ -85,6 +91,7 @@ revocation test fail as expected; the delivery branch retains the check.
 
 The only R0 additions are ESSENTIAL rows for
 `TestNativeAdmissionOverlappingRootWorkerAndRevokedRoute`,
+`TestNativeAdmissionPreForkRefusalReleasesReservation`,
 `TestNativeProfileChangeSerializesWithLiveUsers`, and
 `TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity`, plus
 the `agentpairing.Lock` caller `agentaccounts/native_session.go`. The existing

@@ -7820,6 +7820,8 @@
     ,
     {"kind":"go","package":"internal/nativeadmission","name":"TestNativeAdmissionOverlappingRootWorkerAndRevokedRoute","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeadmission","name":"TestNativeAdmissionPreForkRefusalReleasesReservation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeadmission","name":"TestNativeProfileChangeSerializesWithLiveUsers","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
