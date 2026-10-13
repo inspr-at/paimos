@@ -91,6 +91,31 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
   }
 })
 
+// R18: platform font metrics can exceed the fitted ETA slot by a few pixels.
+// Keep the whole overdue estimate inside its cell and preserve hover geometry.
+test('AEON-1326: a wide-font overdue estimate stays whole inside its saved column', async ({ page }) => {
+  await pinClock(page)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  const data = world()
+  data.preferences['list:p-pharos'] = { widths: { eta: 114 } }
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS')
+  const overdue = row(page, 'PHAROS-12').locator('.eta-cell')
+  await expect(overdue.locator('.shown')).toHaveText('overdue 5 min')
+  // The bundled font makes the nightly Linux width reproducible on macOS too.
+  await page.addStyleTag({ content: '.eta-cell .when { font-family: "JetBrains Mono"; letter-spacing: .3px; }' })
+  await page.evaluate(() => document.fonts.ready)
+  const label = overdue.locator('.shown')
+  expect(await label.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  const value = (await label.boundingBox())!, cell = (await row(page, 'PHAROS-12').locator('.c-eta').boundingBox())!
+  expect(value.x).toBeGreaterThanOrEqual(cell.x)
+  expect(value.x + value.width).toBeLessThanOrEqual(cell.x + cell.width)
+  await expectStableControls({
+    controls: { estimate: overdue, row: row(page, 'PHAROS-12'), header: page.getByRole('columnheader', { name: 'ETA' }) },
+    interactions: [{ name: 'read the overdue estimate', run: async () => { await overdue.hover(); await expect(page.locator('.tooltip')).toContainText('Estimated by Beau') } }],
+  })
+})
+
 test('with both forms chosen, the clock time shows on hover', async ({ page }) => {
   await pinClock(page)
   await mockWork(page, world('both'))

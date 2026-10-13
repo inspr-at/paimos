@@ -381,6 +381,11 @@ test('AEON-1071 a cached watermark on a chat-native final never reaches the sess
   const marks = () => calls.filter(call => call.method === 'PUT' && call.path.endsWith('/read-marker')).map(call => call.body as { last_read_message_id: string; last_read_event_id: number })
   // The session marker gets the newest project message before the final.
   await expect.poll(marks).toEqual([{ last_read_message_id: data.messages[2]!.id, last_read_event_id: 202 }])
+  // Re-entering Chat re-observes the same rows after acknowledgement. This
+  // establishes the duplicate-write trigger without depending on refresh timing.
+  await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
+  await panel.getByRole('tab', { name: /Chat/ }).click()
+  await expect(panel.locator('.msg', { hasText: 'Final: the release checks pass.' })).toBeVisible()
   await page.clock.runFor(4_000)
   expect(refused).toEqual([])
   expect(marks()).toHaveLength(1)

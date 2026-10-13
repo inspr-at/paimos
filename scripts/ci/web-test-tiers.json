@@ -8522,6 +8522,8 @@
     ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"read-only work and epic rollups have no estimate editor","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/eta-column.spec.ts","name":"AEON-1326: a wide-font overdue estimate stays whole inside its saved column","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/eta-column.spec.ts","name":"an unbound coordinator has no missing-ETA hint in its row or panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/eta-column.spec.ts","name":"an unbound worker has no missing-ETA hint in its row or panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10641,6 +10643,8 @@
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"group preview and autopilot controls preserve scope and positions with a German document","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"group preview, partial bulk Undo and project/rule Undo preserve scope, rights and control positions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
