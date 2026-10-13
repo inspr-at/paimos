@@ -12812,6 +12812,8 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"wheel before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-ended.spec.ts","name":"AEON-1313: a different person cannot receive or submit an expired tab’s draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-ended.spec.ts","name":"at 1440px a save after the session ended keeps the draft and offers sign-in","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-ended.spec.ts","name":"at 390px a save after the session ended keeps the draft and offers sign-in","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

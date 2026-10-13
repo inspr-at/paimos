@@ -175,3 +175,28 @@ policy and OpenAPI checks. A final fetch confirmed `c90420b30` remains the
 newest `origin/main` and is contained in this branch. This round adds no new
 registry identities or feature behavior. Origin push, deployment and the
 cross-family review remain with the coordinator.
+
+Merge-main refresh (2026-10-13): the initial fetch and remote-ref check confirmed
+`3339bf7b1` was the newest `origin/main`. The coordinator already incorporated it
+in the normal merge `16aa102cd` (parents `1e1274003` and `3339bf7b1`); a further
+normal merge reports "Already up to date." All fifteen incoming files preserve
+main, all fifteen branch files preserve the reviewed branch parent, and the
+shared Go manifest contains the exact duplicate-free union of both parents'
+tests and post-gate identities. Its other metadata is unchanged. Both web
+manifests remain valid and duplicate-free. Migration 1348 is unique and absent
+from main. No feature, contract, permission or registry row changes are needed.
+
+The guarded remote runner passed all six affected Go packages on `16aa102cd`:
+`nativeinteraction`, `nativesessions/interaction`, `nativequalification`,
+`nativestream`, `nativesessions/stream` and `agentpairing`. All 43 migration-policy
+tests passed without skips, and the migration guard passed against published
+`v261013103112.0.0` with 349 unique numbers. All seven interaction browser cases
+passed remotely with one worker and zero remaining owned browser processes.
+
+Main then advanced to `b199dc53c`, adding the session-expiry draft fix. A normal
+merge incorporates its five incoming files without conflicts. All three source
+and spec files match main exactly; the web tier manifest is the exact union of
+both parents and the shard manifest changes only the incoming spec's case count,
+preserving this ticket's measured row. All other reviewed branch files remain
+unchanged, and migration 1348 still has no collision. This round adds no new
+test identities or R0 rows of its own.
