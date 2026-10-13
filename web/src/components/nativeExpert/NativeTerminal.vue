@@ -246,7 +246,7 @@ defineExpose({ stop, start, measureBox, holding })
   <section v-if="viewer.kind === 'person'" ref="root" class="native-terminal" :class="{ phone }" :style="viewportSpace === null ? undefined : { maxHeight: `${viewportSpace}px` }" :aria-label="modelName ? `Live terminal · ${modelName}` : 'Live terminal'" :data-layout="layout">
     <Teleport :to="controlTarget || 'body'" :disabled="!controlTarget">
       <div class="terminal-control" :class="{ risk }" data-terminal-control>
-        <AppIcon :name="risk ? 'refresh' : session.controller ? holding ? 'hand' : 'eye' : 'terminal'" :size="15" />
+        <AppIcon :name="risk ? 'refresh' : session.controller ? session.controller.actor_id === viewer.principalId ? control?.source === 'cli' ? 'terminal' : 'hand' : 'eye' : 'terminal'" :size="15" />
         <span class="control-text" tabindex="0" :title="tooltip" :data-tip="tooltip" :aria-label="tooltip"><b>{{ heading }}</b><span v-if="detail"> · {{ detail }}</span></span>
         <div class="control-tools">
           <button v-if="readable && session.controller && !holding" type="button" class="fit-toggle" aria-label="Fit to window" :aria-pressed="fit" :title="fit ? 'Actual size' : 'Fit to window'" @click="toggleFit"><AppIcon :name="fit ? 'collapse' : 'expand'" :size="15" /></button>
@@ -320,7 +320,7 @@ defineExpose({ stop, start, measureBox, holding })
 .phone .action-size { display: none; }
 .phone .action-label { font-size: 0; }
 .phone .terminal-box { margin-top: 0; }
-.phone-keys { display: flex; flex: none; justify-content: space-between; min-height: 44px; padding-bottom: env(safe-area-inset-bottom); }
+.phone-keys { display: flex; flex: none; justify-content: space-between; min-height: 44px; }
 .phone-keys button { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; }
 @media (pointer: coarse) { .fit-toggle::after, .terminal-action::after { content: ''; position: absolute; top: -8px; bottom: -8px; left: 0; right: 0; } .fit-toggle::after, .phone .terminal-action::after { left: -8px; right: -8px; } .control-tools { gap: 16px; } }
 </style>

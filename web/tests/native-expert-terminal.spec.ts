@@ -276,6 +276,7 @@ test('AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel s
         const b = (await page.locator('.terminal-box').boundingBox())!, g = (await grid(page).boundingBox())!, font = Number(await grid(page).getAttribute('data-font'))
         expect(g.width / b.width >= .9 || font === 16).toBe(true)
       }
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1289/viewer-fit-${theme}-${width}.png`) })
       const shared = await page.evaluate(() => {
         const b=document.querySelector('.terminal-box')!.getBoundingClientRect(), c=document.querySelector('.terminal-control')!.getBoundingClientRect(), h=document.querySelector('.fixture-head')!.getBoundingClientRect()
         const inset=innerWidth<=600?8:12
@@ -308,6 +309,13 @@ test('AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel s
         await expect(page.locator('.fixture-head .terminal-control')).toBeVisible()
         await page.screenshot({ path: testInfo.outputPath(`AEON-1289/holder-phone-${theme}.png`) })
       }
+      await act(page, 'f.state.session.controller.actor_id=f.state.viewer.principalId;f.state.control.source="cli";f.state.action.label="Hand back";f.state.action.kind="return";f.state.actionLabels=["Take over","Hand back","End control…","Cancel"];await f.nextTick();')
+      await expect(page.locator('.control-text')).toContainText('You have control in a terminal (aeon take)')
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1289/holder-cli-${theme}-${width}.png`) })
+      await act(page, 'f.state.session.controller=null;f.state.session.mode="structured";f.state.session.state="running";f.state.action=null;await f.nextTick();')
+      await expect(page.locator('.control-text')).toContainText('Nobody has control')
+      await expect(page.locator('.terminal-screen')).toBeEmpty()
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1289/nobody-${theme}-${width}.png`) })
       expect(await page.evaluate(() => (window as any).nativeTerminal.outbound)).toEqual([])
       expect(errors).toEqual([])
     } finally { await context.close() }
