@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -86,7 +87,7 @@ func newStartFixture(t *testing.T) *startFixture {
 			{`INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'native-test','1','claude','anthropic','claude-opus-4-6','high','strong')`, []any{f.person.TenantID, profile}},
 		} {
 			if _, e := tx.Exec(seed, q.sql, q.args...); e != nil {
-				return e
+				return fmt.Errorf("seed %s: %w", strings.Fields(q.sql)[2], e)
 			}
 		}
 		if e := tx.QueryRow(seed, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'native fixture','native_fixture',$3,$4,$5) RETURNING id::text`, f.person.TenantID, f.agent.ID, strings.Repeat("a", 64), f.agent.Scopes, f.person.ID).Scan(&f.agent.KeyID); e != nil {
@@ -106,10 +107,10 @@ func newStartFixture(t *testing.T) *startFixture {
 			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision,allowed_model_profile_ids,last_probe_at,last_probe_ok,last_daemon_generation)
  VALUES($1,$2,'own-account','claude','daemon-native',$3,'Own',$4,$6,1,ARRAY[$5::uuid],$6,true,'generation-1')`, []any{f.person.TenantID, account, f.agent.ID, f.person.ID, profile, f.now}},
 			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at)
- VALUES($1,$2,$3,$4,$5,$6,$6+interval '1 hour')`, []any{f.person.TenantID, account, computer, request, profile, f.now}},
+ VALUES($1,$2,$3,$4,$5,$6::timestamptz,$6::timestamptz+interval '1 hour')`, []any{f.person.TenantID, account, computer, request, profile, f.now}},
 		} {
 			if _, e := tx.Exec(seed, q.sql, q.args...); e != nil {
-				return e
+				return fmt.Errorf("seed %s: %w", strings.Fields(q.sql)[2], e)
 			}
 		}
 		schedule := capacity.DefaultSchedule("UTC")
