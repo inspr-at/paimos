@@ -77,7 +77,7 @@ func (r *Relay) Register(snapshot nativecontract.SessionView) error {
 	if old != nil {
 		old.mu.Lock()
 		defer old.mu.Unlock()
-		if old.snapshot.CurrentBinding.Equal(*snapshot.CurrentBinding) && old.snapshot.Generation == snapshot.Generation {
+		if old.snapshot.CurrentBinding != nil && old.snapshot.CurrentBinding.Equal(*snapshot.CurrentBinding) && old.snapshot.Generation == snapshot.Generation {
 			buffer.Close()
 			if snapshot.Revision < old.snapshot.Revision {
 				return nativestream.Refuse(nativecontract.ReasonStaleRevision)
@@ -104,7 +104,7 @@ func (r *Relay) Remove(binding nativecontract.Binding) {
 	if session := r.sessions[sessionKey(binding)]; session != nil {
 		session.mu.Lock()
 		defer session.mu.Unlock()
-		if session.snapshot.CurrentBinding.Equal(binding) {
+		if session.snapshot.CurrentBinding == nil || session.snapshot.CurrentBinding.Equal(binding) {
 			session.buffer.Close()
 			delete(r.sessions, sessionKey(binding))
 		}
@@ -127,7 +127,7 @@ func (r *Relay) find(binding nativecontract.Binding) (*liveSession, error) {
 	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
-	if !session.snapshot.CurrentBinding.Equal(binding) {
+	if session.snapshot.CurrentBinding == nil || !session.snapshot.CurrentBinding.Equal(binding) {
 		return nil, nativestream.Refuse(nativecontract.ReasonWrongGeneration)
 	}
 	return session, nil
@@ -156,8 +156,16 @@ func (r *Relay) Publish(ctx context.Context, request nativecontract.Publish, fen
 		}
 		session.mu.Lock()
 		defer session.mu.Unlock()
-		if session.snapshot.Generation != access.Generation || !session.snapshot.CurrentBinding.Equal(request.ExpectedBinding) {
+		if session.snapshot.Generation != access.Generation || session.snapshot.CurrentBinding == nil || !session.snapshot.CurrentBinding.Equal(request.ExpectedBinding) {
 			return nativestream.Refuse(nativecontract.ReasonWrongGeneration)
+		}
+		if request.Snapshot != nil {
+			if request.Snapshot.CurrentBinding == nil || !request.Snapshot.CurrentBinding.Equal(request.ExpectedBinding) || request.Snapshot.Generation != session.snapshot.Generation {
+				return nativestream.Refuse(nativecontract.ReasonWrongGeneration)
+			}
+			if request.Snapshot.Revision < session.snapshot.Revision {
+				return nativestream.Refuse(nativecontract.ReasonStaleRevision)
+			}
 		}
 		frames := make([]nativecontract.StreamEvent, 0, len(request.Events))
 		for _, event := range request.Events {
@@ -166,9 +174,6 @@ func (r *Relay) Publish(ctx context.Context, request nativecontract.Publish, fen
 				return err
 			}
 			frames = append(frames, clean)
-		}
-		if request.Snapshot != nil && request.Snapshot.Revision < session.snapshot.Revision {
-			return nativestream.Refuse(nativecontract.ReasonStaleRevision)
 		}
 		if len(frames) > 0 {
 			if err := session.buffer.Append(frames); err != nil {

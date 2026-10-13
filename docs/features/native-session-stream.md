@@ -36,7 +36,11 @@ does not invent a new receipt operation or change the frozen C0 enum.
 `stream.Relay.Register` takes a trusted current Store projection. Publishers
 cannot create a binding. `Relay.Publish` requires a paired private publisher
 fence and independently validates/filters every frame before an atomic RAM
-append. `Relay` implements C0 FrameSource through a request-scoped authenticated
+append. A published snapshot must retain the registered non-null binding and
+generation, checked under the session lock before either snapshot or frame
+mutation. Missing stored bindings refuse lookups; removal frees the unusable
+entry and a newer trusted Store projection can replace it safely.
+`Relay` implements C0 FrameSource through a request-scoped authenticated
 `Viewer` context. `HTTPHandler.Stream` provides the authorized public SSE read
 handler for later mounting. Its first event is a permission-filtered snapshot.
 Agents receive structured events only; terminal viewer URLs, Expert and terminal
@@ -111,6 +115,9 @@ because expired content was retained. Replacing the local adapter with the
 reviewed `140a6982` source must fail because a body read left its connection
 reusable. Fixtures use `t.TempDir`; the real source and work branch remain valid,
 with no throwaway commit or second worktree.
+The relay snapshot regression uses the same opt-in flag to compile against
+`8297e912`, proving that snapshot changes at the final access fence and nil-binding
+registry recovery fail the unchanged behavior assertions on the reviewed source.
 
 R0 handoff for this same PR:
 

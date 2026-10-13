@@ -7,9 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +25,8 @@ import (
 )
 
 const testID = "00000000-0000-4000-8000-000000000001"
+
+var relayNegativeControl = flag.Bool("native-negative-control", false, "prove relay snapshot assertions reject the reviewed implementation")
 
 func testBinding() nativecontract.Binding {
 	return nativecontract.Binding{TenantID: testID, ProjectID: testID, OwnedSessionID: testID, HarnessSessionID: testID, RuntimeEpoch: testID, DaemonID: testID, DaemonGeneration: testID, BindingRevision: 1}
@@ -143,6 +149,223 @@ func subscribe(t *testing.T, r *Relay, guard *rights) nativecontract.Subscriptio
 	t.Cleanup(func() { _ = sub.Close() })
 	requireEvent(t, sub, "snapshot")
 	return sub
+}
+
+// Named risk: a publisher snapshot changes the trusted relay identity, poisons
+// the registry, or appends part of a refused batch. The fence callback establishes
+// the validation/write boundary without a race or a timing assumption.
+func TestPublishSnapshotPreservesRegisteredBinding(t *testing.T) {
+	requireReason := func(t *testing.T, err error) {
+		t.Helper()
+		var refusal *nativecontract.ValidationError
+		if !errors.As(err, &refusal) || refusal.Reason != nativecontract.ReasonWrongGeneration {
+			t.Fatalf("snapshot identity refusal = %v; want wrong_generation", err)
+		}
+	}
+	newRelay := func(t *testing.T) *Relay {
+		t.Helper()
+		r, err := NewRelay(testProjector(t), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Register(testSnapshot()); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	mutations := []struct {
+		name   string
+		change func(*nativecontract.SessionView)
+	}{
+		{"null_binding", func(snapshot *nativecontract.SessionView) {
+			snapshot.CurrentBinding = nil
+			snapshot.State = "stopped"
+			snapshot.Mode = "none"
+		}},
+		{"different_binding", func(snapshot *nativecontract.SessionView) {
+			snapshot.CurrentBinding.RuntimeEpoch = "00000000-0000-4000-8000-000000000002"
+		}},
+		{"different_generation", func(snapshot *nativecontract.SessionView) { snapshot.Generation++ }},
+	}
+	for _, phase := range []string{"before_publish", "inside_fence"} {
+		t.Run(phase, func(t *testing.T) {
+			for _, mutation := range mutations {
+				t.Run(mutation.name, func(t *testing.T) {
+					r := newRelay(t)
+					snapshot := testSnapshot()
+					snapshot.Revision++
+					fence := privateFence
+					if phase == "before_publish" {
+						mutation.change(&snapshot)
+					} else {
+						fence = func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
+							mutation.change(&snapshot)
+							return privateFence(ctx, deliver)
+						}
+					}
+					text := "refused batch content"
+					err := r.Publish(context.Background(), nativecontract.Publish{RequestID: testID, ExpectedBinding: testBinding(), Snapshot: &snapshot, Events: []nativecontract.StreamEvent{testEvent(1, "structured", nativecontract.StructuredFrame{Kind: "assistant_delta", Text: &text})}}, fence)
+					requireReason(t, err)
+					guard := newRights("structured")
+					sub, err := r.SubscribeView(context.Background(), testBinding(), Viewer{Query: nativecontract.StreamQuery{Generation: 1, View: "structured"}, Fence: guard.fence})
+					if err != nil {
+						t.Fatal("refused snapshot poisoned subscription:", err)
+					}
+					t.Cleanup(func() { _ = sub.Close() })
+					event := requireEvent(t, sub, "snapshot")
+					var retained nativecontract.SessionView
+					if err := json.Unmarshal(event.Payload, &retained); err != nil {
+						t.Fatal(err)
+					}
+					if retained.CurrentBinding == nil || !retained.CurrentBinding.Equal(testBinding()) || retained.Generation != 1 || retained.Revision != 1 {
+						t.Fatal("refused snapshot changed the registered identity or revision")
+					}
+					frames, bytes, _, err := r.Stats(testBinding())
+					if err != nil || frames != 0 || bytes != 0 {
+						t.Fatalf("refused snapshot appended a partial batch: frames=%d bytes=%d err=%v", frames, bytes, err)
+					}
+					sub.Close()
+					requireClosed(t, sub)
+					r.Remove(testBinding())
+					_, _, _, err = r.Stats(testBinding())
+					requireReason(t, err)
+					if err := r.Register(testSnapshot()); err != nil {
+						t.Fatal("refused snapshot stranded the registry slot:", err)
+					}
+				})
+			}
+		})
+	}
+	t.Run("valid_update", func(t *testing.T) {
+		r := newRelay(t)
+		snapshot := testSnapshot()
+		snapshot.Revision++
+		if err := r.Publish(context.Background(), nativecontract.Publish{RequestID: testID, ExpectedBinding: testBinding(), Snapshot: &snapshot, Events: []nativecontract.StreamEvent{}}, privateFence); err != nil {
+			t.Fatal("matching snapshot was refused:", err)
+		}
+		guard := newRights("structured")
+		sub, err := r.SubscribeView(context.Background(), testBinding(), Viewer{Query: nativecontract.StreamQuery{Generation: 1, View: "structured"}, Fence: guard.fence})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sub.Close() })
+		event := requireEvent(t, sub, "snapshot")
+		var retained nativecontract.SessionView
+		if err := json.Unmarshal(event.Payload, &retained); err != nil {
+			t.Fatal(err)
+		}
+		if retained.CurrentBinding == nil || !retained.CurrentBinding.Equal(testBinding()) || retained.Generation != snapshot.Generation || retained.Revision != snapshot.Revision {
+			t.Fatal("matching snapshot update was not delivered")
+		}
+	})
+	// Independently exercise recovery from a missing stored binding so schema
+	// validation cannot mask the nil-safety of lookup, removal or replacement.
+	for _, operation := range []string{"lookup", "remove", "replace"} {
+		t.Run("missing_registered_binding/"+operation, func(t *testing.T) {
+			defer func() {
+				if recover() != nil {
+					t.Fatal("nil registered binding panicked during " + operation)
+				}
+			}()
+			r := newRelay(t)
+			session := r.sessions[sessionKey(testBinding())]
+			session.mu.Lock()
+			session.snapshot.CurrentBinding = nil
+			session.mu.Unlock()
+			switch operation {
+			case "lookup":
+				guard := newRights("structured")
+				sub, err := r.SubscribeView(context.Background(), testBinding(), Viewer{Query: nativecontract.StreamQuery{Generation: 1, View: "structured"}, Fence: guard.fence})
+				if sub != nil {
+					t.Cleanup(func() { _ = sub.Close() })
+				}
+				requireReason(t, err)
+				_, _, _, err = r.Stats(testBinding())
+				requireReason(t, err)
+				_, err = r.Page(context.Background(), testBinding(), nativecontract.EventQuery{Generation: 1, Limit: 1}, Viewer{Query: nativecontract.StreamQuery{Generation: 1, View: "structured"}, Fence: guard.fence})
+				requireReason(t, err)
+				err = r.Publish(context.Background(), nativecontract.Publish{RequestID: testID, ExpectedBinding: testBinding(), Events: []nativecontract.StreamEvent{}}, privateFence)
+				requireReason(t, err)
+			case "remove":
+				r.Remove(testBinding())
+				if len(r.sessions) != 0 {
+					t.Fatal("missing registered binding stranded the registry slot")
+				}
+				if err := r.Register(testSnapshot()); err != nil {
+					t.Fatal("removed registry slot could not be reused:", err)
+				}
+			case "replace":
+				successor := testSnapshot()
+				successor.CurrentBinding.RuntimeEpoch = "00000000-0000-4000-8000-000000000002"
+				successor.CurrentBinding.BindingRevision++
+				successor.Generation++
+				successor.Revision++
+				if err := r.Register(successor); err != nil {
+					t.Fatal("missing registered binding prevented trusted replacement:", err)
+				}
+				if _, _, _, err := r.Stats(*successor.CurrentBinding); err != nil {
+					t.Fatal("trusted replacement was not registered:", err)
+				}
+			}
+		})
+	}
+	if *relayNegativeControl {
+		proveSnapshotNegativeControl(t)
+	}
+}
+
+func proveSnapshotNegativeControl(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	prior, err := exec.CommandContext(ctx, "git", "show", "8297e912:internal/nativesessions/stream/relay.go").Output()
+	if err != nil {
+		t.Fatal("negative control could not read the reviewed relay implementation")
+	}
+	dir := t.TempDir()
+	replacement := filepath.Join(dir, "relay.go")
+	overlayPath := filepath.Join(dir, "overlay.json")
+	if err := os.WriteFile(replacement, prior, 0600); err != nil {
+		t.Fatal(err)
+	}
+	source, err := filepath.Abs("relay.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{source: replacement}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(overlayPath, overlay, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// No opt-in flag reaches the child, so the real assertion cannot recurse.
+	cmd := exec.CommandContext(ctx, "go", "test", "-p", "2", "-timeout", "60s", "-count=1", "-overlay", overlayPath, "-run", "^TestPublishSnapshotPreservesRegisteredBinding$", ".")
+	output := &relayTestOutput{}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	err = cmd.Run()
+	var failed *exec.ExitError
+	if !errors.As(err, &failed) {
+		t.Fatal("negative control did not reject the reviewed relay implementation")
+	}
+	for _, assertion := range []string{"snapshot identity refusal = <nil>; want wrong_generation", "nil registered binding panicked during lookup", "nil registered binding panicked during remove", "nil registered binding panicked during replace"} {
+		if !strings.Contains(output.data.String(), assertion) {
+			t.Fatal("negative control did not fail for the claimed regression:", assertion)
+		}
+	}
+	t.Log("negative control PASS: snapshot write and registry recovery assertions reject 8297e912")
+}
+
+type relayTestOutput struct{ data strings.Builder }
+
+func (w *relayTestOutput) Write(data []byte) (int, error) {
+	const limit = 64 << 10
+	n := len(data)
+	if remaining := limit - w.data.Len(); remaining > 0 {
+		_, _ = w.data.Write(data[:min(len(data), remaining)])
+	}
+	return n, nil
 }
 
 // Named risk: a slow raw relay leaks private vendor data, grows memory, or sends
