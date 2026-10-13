@@ -474,3 +474,40 @@ worker exit. No provider behavior or assertion changed, so no new regression
 test is warranted. This round changes only this feature document and remains
 blocked on R0 registration and authoritative validation. No origin push,
 deployment, live model CLI or review gate was run.
+
+## CI fix round 12
+
+At reviewed head `fa97591ef`, [go-static job `115174766700`](https://github.com/inspr-at/paimos/actions/runs/38360905567/job/115174766700)
+fails `Validate every Go tier against native collection` on exactly the three
+Codex identities listed in the fix round 5 registration handoff. Go vet,
+bootstrap drift and tier-selector regressions pass; no provider compilation or
+behavior failure is reported. The four Go shards, four web unit shards,
+twelve browser shards, release checks and e2e pass, but do not establish that
+the unregistered Codex package ran. Freshly fetched main remains `fd8fae22f`,
+already merged, and PR #617 is mergeable.
+
+A bounded manifest-only diagnosis rejects exactly those three missing entries
+on `fa97591ef`, HEAD and the main manifest. Adding only their proposed
+`ESSENTIAL` rows in memory passes that diagnosis; the shared manifest remains
+byte-identical. This is not a replacement for native collection. P5a's
+exclusive write set still contains only the Codex provider and this document.
+The normative plan reserves `scripts/ci/go-test-tiers.json` for R0, and fix12
+does not transfer ownership. R0 must apply the existing three-row handoff in
+this PR and rerun strict native validation and authoritative CI.
+
+Both guarded Go attempts refuse remote capacity, and both guarded static
+attempts exit 3 under host policy (`mbp2607 YELLOW` at the observed refusal;
+no remote hold). Static validation remains incomplete. The one permitted
+quick-package fallback passes with `GOMAXPROCS=2`, `-p 2` and `-count=1`
+(0.273 s), exercising the existing acceptance 1–5 fake transcripts without a
+vendor process. The offline affected planner exits 0: essential/full selection,
+130 Go packages, 120 web unit files and 80 browser specs; Codex is still absent.
+Separate tier-toolkit, web-shard and audit self-checks were not rerun outside
+the refused guarded static runner. Web/browser reruns are not applicable to
+this source-only slice and documentation-only round.
+
+Only this feature document changes. No provider behavior or assertion changes,
+so no new behavior regression test is warranted. The CI blocker remains
+outside this worker's write set; the trusted review verdict remains
+coordinator-owned. No origin push, deployment, live model CLI or review gate
+was run.
