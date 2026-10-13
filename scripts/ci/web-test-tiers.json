@@ -18470,7 +18470,11 @@
     ,
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred wrong-version recovery decision even after the old 400ms window","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > drops a mark whose update never restored once its flush is over","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > follows the next row on screen when the first one leaves, and stays still at the top or for a sub-pixel","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > keeps the first capture when the component updates twice before its restore","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > keeps the first row on screen where it was when rows arrive above it","tier":"ESSENTIAL"}
     ,
