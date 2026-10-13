@@ -49,7 +49,7 @@ async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, 
     el.addEventListener('scrollend', event => {
       state.events.push('scrollend')
       // A pending setup scrollend, or one from a nested scroller, cannot finish this swipe.
-      if (event.isTrusted && event.target === el && state.started && state.down === 0 && el.scrollTop !== state.start) state.ended = true
+      if (event.isTrusted && event.target === el && state.started && state.down === 0 && state.events.includes('touchend') && el.scrollTop !== state.start) state.ended = true
     }, options)
   })
   const state = () => page.evaluate(() => (window as unknown as SwipeWindow).__swipe)
