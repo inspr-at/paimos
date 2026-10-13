@@ -146,14 +146,25 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 	})
 	check("")
 	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(seedCtx, `UPDATE model_profiles SET enabled=false WHERE id=$1`, in.ModelProfileID)
+		_, err := tx.Exec(seedCtx, `UPDATE agent_accounts SET allowed_model_profile_ids='{}' WHERE id=$1`, in.AccountID)
 		return err
 	})
 	check(nativecontract.ReasonQualificationMissing)
 	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(seedCtx, `UPDATE model_profiles SET enabled=true WHERE id=$1`, in.ModelProfileID)
+		_, err := tx.Exec(seedCtx, `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$2::uuid,$3::uuid] WHERE id=$1`, in.AccountID, in.ModelProfileID, uid(13))
+		if err != nil {
+			return err
+		}
+		// Profiles are immutable. Withheld activation is an inserted disabled
+		// pin, never an UPDATE that bypasses the append-only model boundary.
+		_, err = tx.Exec(seedCtx, `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,enabled) VALUES($1,$2,'withheld-native','1','claude','anthropic','claude-opus-4-6','high','strong',false)`, person.TenantID, uid(13))
 		return err
 	})
+	activeProfile := in.ModelProfileID
+	in.ModelProfileID = uid(13)
+	check(nativecontract.ReasonQualificationMissing)
+	in.ModelProfileID = activeProfile
+	check("")
 	seed(func(tx pgx.Tx) error {
 		_, err := tx.Exec(seedCtx, `UPDATE agent_accounts SET link_revision=link_revision+1 WHERE id=$1`, in.AccountID)
 		return err
