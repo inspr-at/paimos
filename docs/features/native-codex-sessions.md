@@ -386,3 +386,48 @@ The existing focus assertion and all provider assertions remain intact. No
 shared inventory, web source, contract, permission, migration or release
 version was edited. No origin push, deployment, live vendor session, model
 CLI or review gate was run.
+
+## CI fix round 9
+
+The complete failed-step log for `go-static` job `115147238424` at reviewed
+head `3afe428ad` again identifies exactly the three missing Codex `ESSENTIAL`
+rows listed in the fix round 5 handoff. Go vet, bootstrap drift and tier-selector
+regressions passed; strict native Go-tier validation failed. No provider
+compilation or behavior failure is reported. All seven Go shards, four web
+unit shards, twelve browser shards, release checks and e2e passed in this CI
+round, including the Work Queue browser shard that failed in round 8. These
+passes do not establish selection of the unregistered Codex tests.
+
+Fetched main is now `fd8fae22f`, and PR #617 remains mergeable. The three rows
+are absent from main as well as the reviewed head. No conflict merge is needed
+and main contains no central fix for this remaining classification failure.
+A bounded manifest-only diagnosis against `3afe428ad`, current HEAD and main
+rejects exactly the three missing identities; adding the proposed rows in
+memory resolves that diagnosis. No shared registry was written. Native
+collection and authoritative CI must still validate the registered rows.
+
+The original brief requires "Write ONLY inside your exclusive_write_set" and
+"If you need a file outside it, STOP and say so in your summary." The normative
+plan reserves `scripts/ci/go-test-tiers.json` for R0 and says builders "never
+independently rewrite these shared inventories." Fix round 9 preserves this
+ownership and gives no transfer. Source edits therefore stop at that boundary;
+R0 must apply the three exact rows in this PR before it can be static-green.
+
+Both attempts at guarded Go and static validation refused remote capacity with
+exit 3; static validation remains incomplete, not green. The tier-toolkit,
+web-shard and audit self-checks were not rerun separately from guarded static.
+The permitted single-package fallback passed at `3afe428ad` with
+`GOMAXPROCS=2`, `-p 2` and `-count=1` (0.295 s). It exercises the existing
+acceptance 1–5 fake transcripts without starting a vendor process. The offline
+affected planner exited 0 with essential/full selection: 128 Go packages,
+120 web unit files and 80 browser specs. Codex is absent from that selection
+until R0 registers its tests, so the package was run explicitly. No web or
+browser source changed and those scoped reruns are not applicable to P5a.
+
+The existing `gate/policy-preview` check also requires a trusted verdict for
+the reviewed commit. That is the coordinator's cross-family gate after worker
+exit; the builder did not run or bypass it. No provider behavior fix was made,
+so no new regression test or assertion change is warranted. This round changes
+only this feature document; the PR remains blocked on R0 registration and
+authoritative validation. No origin push, deployment, live model CLI or review
+gate was run.
