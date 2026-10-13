@@ -144,6 +144,27 @@ This handoff remains incomplete until R0 applies both additions and the
 required checks pass. The policy preview separately awaits the coordinator's
 trusted review verdict.
 
+Fix round 4 inspected the full failing-job logs for the same PR head,
+`4ab38db03`. `go-static` still names exactly the four unclassified cases above;
+`release-check-run` still names exactly the six unassigned source files. The
+refreshed `origin/main` at `06929d1a4` contains neither repair. The central audit
+repair is open PR #623 (`work/aeon-1259-r0-audit`), which changes only
+`scripts/audit/slices.json`; it does not supply the four quota tier rows. R0
+must apply both registrations before this PR can pass. PR #619 is mergeable,
+so no conflict-resolution merge is required in this round.
+
+The separate `web` aggregate failure is caused by cancelled `web-shard (1)`
+and `web-shard (2)` executions, both during `Run selected UI cases without
+retries`. Web catalogue, setup and all four unit shards passed. Cancelled
+browser runs remain incomplete and need coordinator CI reruns; no browser
+behavior failure is identified by the cited findings. `gate/policy-preview`
+reports no trusted verdict for this head, which remains coordinator-owned.
+`tier-measurements` reports `coverage=incomplete`, `missing_case_artifact` and
+missing evidence for those same two cancelled browser shards, with no failed
+cases in its report.
+No quota implementation or assertion was changed in fix round 4, so there is
+no new behavior fix requiring a negative-control regression.
+
 Run the named package through the guarded remote Go runner and static checks
 through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
 origin/main`. These clock-driven tests use synthetic pins and events, with no
@@ -158,6 +179,8 @@ review remain required before integration or release.
   cases passed, including native turn/cursor changes (0.353 s).
 - PASS: fix-round-3 guarded remote Go run of `./internal/nativequota/...` on
   `4a5e40209`; all existing quota cases passed (0.297 s).
+- PASS: fix-round-4 guarded remote Go run of `./internal/nativequota/...` on
+  `4ab38db03`; all existing quota cases passed (0.324 s).
 - PASS: negative control on a temporary branch from that final source, with
   the freshness deadline check disabled. The named clock test failed on its
   exact stale-reading assertion for both Claude and Codex (exit 1). After
@@ -168,11 +191,19 @@ review remain required before integration or release.
 - PASS: affected planner against refreshed `origin/main`, exit 0,
   `mode=essential`, `layout=full`; selected 128 Go packages, 80 browser specs and
   120 web unit files from the current manifests. `nativequota` awaits R0 rows.
+  Fix round 4 reproduced this selection against `06929d1a4` and confirmed that
+  `internal/nativequota` is absent until its tier rows are registered.
 - INCOMPLETE: fix-round-3 guarded static `--merge-main` on `4a5e40209` exited 1.
   Its 39 other checks passed with no skips, including Go vet, test-tier tests,
   web-shard tests, web typecheck and web lint. Only Go-tier drift and source
   ownership/audit coverage failed for the four cases and six files listed
   above. R0 must apply those rows and rerun static in this same PR; this is
   not a green merge gate.
+- INCOMPLETE: fix-round-4 guarded static `--merge-main` on `4ab38db03` exited 1.
+  Again, 39 checks passed with no skips, including Go vet, test-tier tests,
+  audit tooling's other cases, web-shard tests, web typecheck and web lint.
+  Only `go-tiers`, `audit-tests` and `audit-coverage` failed, for the same four
+  cases and six files. The pending central audit PR #623 was still open after
+  this run. No shared-inventory, quota behavior or assertion edits were made.
 - Browser validation does not apply to this source-only slice. Production pin
   qualification, I2 integration, review and release remain coordinator-owned.
