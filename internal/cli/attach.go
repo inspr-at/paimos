@@ -158,8 +158,10 @@ func (rt *runtime) findAttachment(id string) (attachmentView, error) {
 	return meta, err
 }
 
-// Verify bytes in a unique private spool before publishing any output. A file
-// destination uses a spool in the same directory so rename is atomic.
+// Verify size and the available metadata SHA-256 in a unique private spool
+// before publishing any output, including stdout. A file destination uses a
+// spool in the same directory so rename is atomic. A stdout write failure can
+// still leave partial output and must return an error.
 func (rt *runtime) downloadAttachment(meta attachmentView, destination string) error {
 	if meta.Size < 0 || meta.Size == math.MaxInt64 {
 		return fmt.Errorf("invalid attachment size")
