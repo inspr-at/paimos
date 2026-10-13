@@ -7820,6 +7820,12 @@
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnboundedOrAmbiguousFrames","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnqualifiedLaunch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadFencesDeadlinesAndRevocationBarrier","tier":"ESSENTIAL"}
