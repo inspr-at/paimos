@@ -92,7 +92,7 @@ Required validation is the guarded remote Go run for
 exit 3 is an explicit incomplete handoff, never a passing result; PR CI and the
 coordinator's cross-family release gates remain authoritative.
 
-Builder handoff (2026-10-13): the affected-set command exited 0 and selected
+Initial builder handoff (2026-10-13): the affected-set command exited 0 and selected
 **FULL** (`Go reverse dependencies exceed 300 extra cases (3219)`). Formatting,
 Git whitespace and exclusive-write-set checks passed. The required guarded Go
 run was attempted three times and guarded static twice; all returned **exit 3**
@@ -102,3 +102,37 @@ performed. R0 must register the source and the four tests in this same PR; then
 the coordinator retries the guarded checks and requires authoritative PR CI.
 G_ACCOUNTS and P4c/I2 integration remain separate coordinator-owned work. No
 origin push, deployment, model CLI or cross-family gate was performed.
+
+Fix-round 2 (2026-10-13): PR #615 `go-static` job **115092406004** rejects
+exactly the four unclassified Go tests listed above. `release-check-run` job
+**115092406143** rejects the five files in `internal/nativeprofiles` as
+unassigned; both reported audit test failures have this same cause. The local
+audit suite reproduces those two failures (31 of 33 tests pass). A read-only,
+in-memory ownership check passes for the entire current snapshot after adding
+`internal/nativeprofiles/**` to S1. The exact R0 change remains that one glob and
+the four **ESSENTIAL** test rows described above. P4a has no authority to edit
+these coordinator-owned inventories under `plan.json` / `plan.md`; they must
+be applied by R0 in this PR before the CI failures can be closed.
+
+The guarded remote Go run of baseline `1907d7e0` also exposed a fixture setup
+failure under the runner's umask 022: `t.TempDir()` was not private. Commit
+`5452d0d4a` explicitly sets the physical fixture directory to mode 0700 before
+the existing acceptance assertion. The later mode-0755 refusal assertion is
+unchanged, as is production code. This baseline failure and the successful
+guarded rerun provide the negative control; both `./internal/nativeprofiles/...`
+and `./internal/cli/...` now pass on mbp2606. The affected selector exits 0 and
+selects **FULL** (3225 reverse-dependency cases). No web unit or browser spec is
+affected by this non-browser slice. P4a acceptance checks pass for exact enrolled
+account binding, default/dedicated child environments, exclusion of credential
+sharing, refusal of unqualified accounts without rotation, and retained fake
+credentials with distinct overlapping children and an unchanged parent
+environment. Live account qualification remains G_ACCOUNTS.
+
+Guarded `ci-static-locked.sh --merge-main` completed on mbp2606 with **exit 1**:
+`go-tiers`, `audit-tests` and `audit-coverage` fail solely on those missing R0
+rows. The other **39 checks pass**, with **zero optional skips**, including Go
+vet, test-tier selector regressions, web shard checks, web typecheck/lint and
+OpenAPI/migration checks. This is a failed CI handoff, not a green result. Only
+the test fixture and this feature document changed in this round; the worktree
+has no shared-metadata edits, origin push, deployment, model invocation or
+review-gate action.
