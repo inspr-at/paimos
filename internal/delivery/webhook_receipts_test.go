@@ -203,6 +203,9 @@ func TestDeliveryWebhookAcceptsOpaqueInstallationToken(t *testing.T) {
 			app := &crossreview.GitHubApp{Config: f.m.config, Client: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
 				var response any
 				status := http.StatusOK
+				if r.URL.Path != "/app/installations/456/access_tokens" && r.Header.Get("Authorization") != "Bearer "+mintedToken {
+					t.Fatal("reader did not forward the opaque minted token")
+				}
 				switch {
 				case r.Method == http.MethodPost && r.URL.Path == "/app/installations/456/access_tokens":
 					var request struct {
@@ -212,13 +215,9 @@ func TestDeliveryWebhookAcceptsOpaqueInstallationToken(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 						t.Fatal("invalid fake mint request")
 					}
-					if len(request.Permissions) != 5 || !reflect.DeepEqual(request.Repositories, []string{"delivery"}) {
+					wantPermissions := map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
+					if !reflect.DeepEqual(request.Permissions, wantPermissions) || !reflect.DeepEqual(request.Repositories, []string{"delivery"}) {
 						t.Fatal("mint changed the existing repository/permission scope")
-					}
-					for _, level := range request.Permissions {
-						if level != "read" {
-							t.Fatal("observer requested write authority")
-						}
 					}
 					minted++
 					status = http.StatusCreated
