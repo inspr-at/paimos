@@ -16,11 +16,11 @@ test.setTimeout(60_000)
 // The graph composition was designed for the roomy header; the default is now Compact.
 async function mockHeaderGraph(page: Page, world = ticketGraphWorld()) {
   await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
-  await mockTicketGraph(page, world)
+  const mocked = await mockTicketGraph(page, world)
   // The header reads Queue independently. A real-server 404 used to insert
   // Queue unavailable during the geometry/pinned-frame checks (AEON-1261).
   await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], count: 0, manual_order: false, capacity: { queued_hours: 0, parallel_runs: 1, work_hours: 0, warning: false } } }))
-  return world
+  return mocked
 }
 
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
