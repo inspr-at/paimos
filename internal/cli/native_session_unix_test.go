@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"

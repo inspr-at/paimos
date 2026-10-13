@@ -149,6 +149,15 @@ func TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit(t *testing.T) {
 	if !slices.Contains(lead.cmd.Env, "HOME="+userHome) || !slices.Contains(lead.cmd.Env, "CLAUDE_CONFIG_DIR="+adapter.Homes["local"]) {
 		t.Fatal("native account changed login HOME or config dir")
 	}
+	defaultEnv, err := nativeClaudeEnvironment(filepath.Join(userHome, ".claude"), adapter.NodePath, adapter.ClaudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range defaultEnv {
+		if strings.HasPrefix(entry, "CLAUDE_CONFIG_DIR=") {
+			t.Fatal("default native profile selected a different login")
+		}
+	}
 	waitNativeEvent(t, events, func(event AdapterEvent) bool {
 		return event.Chat != nil && event.Chat.SessionUpdate == "state" && event.Chat.State == "idle" && event.InputID == "initial"
 	})
@@ -216,7 +225,11 @@ func TestNativeCoordinatorGrantChangesRefuseBeforeInput(t *testing.T) {
 				copy.Grant.ExpiresAt = time.Now().Add(-time.Hour)
 			}
 			process, err := adapter.StartLead(t.Context(), changed)
-			if process != nil || !(errors.Is(err, ErrScope) || errors.Is(err, ErrNativeUnqualified)) {
+			expected := ErrNativeUnqualified
+			if change == "workspace" || change == "resume" {
+				expected = ErrScope
+			}
+			if process != nil || !errors.Is(err, expected) {
 				t.Fatal("changed authority launched", process, err)
 			}
 		})
