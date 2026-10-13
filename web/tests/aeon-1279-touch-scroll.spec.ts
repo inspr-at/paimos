@@ -50,8 +50,8 @@ const rectOf = (page: Page, selector: string) => page.locator(selector).evaluate
 // An in-page record: touches down, pointer events on the list, the scroller's height on every
 // scroll event, and whether the rows changed while a finger was down.
 async function watchTouch(page: Page, rows: string, list = '.sessions', scroller = 'main') {
-  await page.evaluate(([rows, list, scroller]) => {
-    const log = { down: 0, events: [] as string[], changedWhileDown: 0, heights: [] as number[] }
+  await page.evaluate(([rows, list, scroller, offer]) => {
+    const log = { down: 0, events: [] as string[], changedWhileDown: 0, offeredWhileDown: 0, heights: [] as number[] }
     Object.assign(window, { __touch: log })
     const ids = () => Array.from(document.querySelectorAll(rows), el => el.getAttribute('data-row') ?? el.id).join(',')
     let shown = ids()
@@ -63,11 +63,15 @@ async function watchTouch(page: Page, rows: string, list = '.sessions', scroller
     target?.addEventListener('focusin', event => log.events.push(`focusin:${(event.target as HTMLElement).className}`))
     const el = document.querySelector<HTMLElement>(scroller)!
     el.addEventListener('scroll', () => log.heights.push(Math.round(el.getBoundingClientRect().height * 100) / 100), { passive: true })
-    new MutationObserver(() => { const now = ids(); if (now !== shown && log.down > 0) log.changedWhileDown++; shown = now })
-      .observe(document.body, { childList: true, subtree: true })
-  }, [rows, list, scroller] as const)
+    new MutationObserver(() => {
+      const now = ids()
+      if (now !== shown && log.down > 0) log.changedWhileDown++
+      if (log.down > 0 && document.querySelector(offer)) log.offeredWhileDown++
+      shown = now
+    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
+  }, [rows, list, scroller, SHOW_NOW] as const)
 }
-type TouchLog = { down: number; events: string[]; changedWhileDown: number; heights: number[] }
+type TouchLog = { down: number; events: string[]; changedWhileDown: number; offeredWhileDown: number; heights: number[] }
 const touchLog = (page: Page) => page.evaluate(() => (window as unknown as { __touch: TouchLog }).__touch)
 // The measured numbers, beside the test's screenshots (the evidence for the ticket).
 function note(info: TestInfo, line: string) { appendFileSync(info.outputPath('aeon-1279-numbers.md'), `- ${info.title}: ${line}\n`) }
@@ -93,6 +97,8 @@ function arrive(data: AgentData) {
 const SESSION_ROWS = '.sessions .row[data-row]'
 const SESSION_HEADS = '.sessions .th-stick, .sessions .thead'
 const sessionRow = (ref: string) => `.sessions ${ref}`
+// The held note's Show now face (its unseen sizing twin carries .held-face too).
+const SHOW_NOW = '.sessions [data-held-note] button.held-face:not(.off)'
 const arrivalRow = (n: number) => sessionRow(`[data-row="s:${ARRIVALS[n]}"]`)
 async function openAgents(page: Page, theme: 'light' | 'dark' = 'light') {
   const data = await agentsPage(page, theme)
@@ -119,8 +125,9 @@ test('agents 390: a refresh during a touch swipe waits until the swipe settles, 
   const during = await touchLog(page)
   await swiping
   const log = await touchLog(page)
-  note(info, `finger down when the refresh landed: ${during.down > 0}; row changes while a finger was down: ${log.changedWhileDown}; events: ${log.events.filter(e => !e.startsWith('touchmove')).join(' ')}`)
+  note(info, `finger down when the refresh landed: ${during.down > 0}; row changes while a finger was down: ${log.changedWhileDown}; Show now offered while down: ${log.offeredWhileDown}; events: ${log.events.filter(e => !e.startsWith('touchmove')).join(' ')}`)
   expect(log.changedWhileDown, 'no row arrives, leaves or moves while a finger is on the screen').toBe(0)
+  expect(log.offeredWhileDown, 'a swipe never offers Show now: its hold ends by itself').toBe(0)
   // The swipe has settled: the change lands and the first row on screen stays where it is.
   const settled = (await firstOnScreen(page, SESSION_ROWS, SESSION_HEADS))!
   await page.clock.runFor(2_000)
@@ -138,7 +145,7 @@ test('agents 390: a refresh after one 40 px swipe lands without moving the rows 
   await swipe(cdp, { x: 195, y: 600 }, -40)
   note(info, `events: ${(await touchLog(page)).events.join(' ')}`)
   // A finger is not a pointer that rests on the list: nothing waits behind Show now.
-  await expect(page.locator('.sessions [data-held-note] .held-face:not(.off)')).toHaveCount(0)
+  await expect(page.locator(SHOW_NOW)).toHaveCount(0)
   arrive(data)
   const before = (await firstOnScreen(page, SESSION_ROWS, SESSION_HEADS))!
   await page.clock.runFor(21_000)
@@ -147,7 +154,7 @@ test('agents 390: a refresh after one 40 px swipe lands without moving the rows 
   note(info, `first row on screen ${before.ref} at ${before.top.toFixed(1)} px before the refresh, ${after.toFixed(1)} px after (Δ ${(after - before.top).toFixed(1)})`)
   expect(await topOf(page, arrivalRow(0)), 'the arrivals sit above the rows on screen').toBeLessThan(before.edge)
   expect(Math.abs(after - before.top), 'the first row on screen keeps its place').toBeLessThanOrEqual(0.5)
-  await expect(page.locator('.sessions [data-held-note] .held-face:not(.off)')).toHaveCount(0)
+  await expect(page.locator(SHOW_NOW)).toHaveCount(0)
 })
 
 for (const theme of ['light', 'dark'] as const) {
