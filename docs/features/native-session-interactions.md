@@ -105,6 +105,17 @@ The initial two desk-fixture failures were corrected by preserving the acting
 key creator identity; the affected server package then passed all three tests.
 No test was loosened or skipped.
 
+Fix round 2 corrected the injected fixture clock to PostgreSQL's microsecond
+precision. A deterministic submicrosecond sample reproduced the reported
+reconnect failure twice against `d6ff2ff3`'s interaction logic: SQL discarded
+789 nanoseconds, making an unchanged lease report 24999 rather than 25000 ms.
+The existing concurrency test retains its exact TTL assertions and additionally
+checks the original viewer and unchanged viewer/controller expiry instants on
+reconnect. Production lease, permission and expiry behavior is unchanged.
+After correction, all five behavior tests across both affected Go packages passed
+twice through the guarded remote runner. The final worker status records the
+browser and static-check results for this round.
+
 R0 additions are exactly five ESSENTIAL Go rows, seven ESSENTIAL browser rows,
 one `stable-controls` spec entry (20 seconds is an unmeasured scheduling estimate),
 three DSAR table/column entries, and
