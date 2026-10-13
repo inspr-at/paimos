@@ -10468,6 +10468,14 @@
     ,
     {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one terminal and a head-menu descriptor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 only the current holder tab measures after fonts with debounced visibility, zoom and lease fences","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel sizes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 terminal capture and actions stay fenced through identity, epoch, consent and reconnect gaps","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 untrusted terminal escapes, queries and bounded backpressure have no outbound side effects","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business shows only while one of its parts is open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tabs: a closed Customers or Quotes says how to open it; earlier links lead there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
