@@ -105,6 +105,8 @@
   --footer-h: 40px;
   /* Page gutter: 28px at 1440 growing to about 48px at 2560. */
   --gutter: clamp(28px, calc(28px + (100vw - 1440px) / 56), 48px);
+  /* Vertical gap between a page's stacked sections (cards and fold sections). */
+  --section-gap: 16px;
   /* Docked panel: ~560px at 1440 growing towards 40% on wide screens (two columns
      from 1800px). A width the person dragged (--panel-user-w) wins, within 72vw. */
   --panel-default: clamp(440px, calc(560px + (100vw - 1440px) * .4), 40vw);

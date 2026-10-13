@@ -328,6 +328,8 @@
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.896,"median":2.507,"min":2.352},"seconds":65.324,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
+        {"file":"tests/native-expert-stream.spec.ts","listedTests":12,"weightSeconds":10,"weightSource":"aeon-1270-guarded-serial-wall"}
+        ,
         {"file":"tests/no-shift-agents.spec.ts","listedTests":29,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimateReason":"AEON-1211: six added cases estimated at the existing median; measured cases retained.","estimatedTests":9,"measuredTests":20,"seconds":234.6792,"selectedTests":29},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
         ,
         {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":5.68,"median":3.5155,"min":2.121},"seconds":81.696,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
@@ -1476,6 +1478,8 @@
     "AEON-1024: split clip-tip into lifecycle, disclosure, overflow and touch owners; split aeon-632b planning from restricted-group touch; split no-shift agents from dialogs and guard checks. Native before/after catalogues preserve all 224 executable cases, original policies and tiers. Tier scheduling costs derive from run 37377299349 per-case duration; historical exact-spec weight budgets are redistributed in proportion to these costs; each new file retains its full original owner residual. Cases added since that run retain an explicit owner-average estimate. The baseline and executable equality/weight proof live in scripts/ci/slow-owner-baseline.json and scripts/test-tiers/slow-owners.mjs. No shard count or worker count changes."
     ,
     "AEON-1040 fix2: replace model-prefs' stale 29-second local estimate with the complete three-case hosted measurement from PR #445 run 37948687065 attempt 1 (merge SHA 63841419452e1bfb206e6505b8051b8083527654, head d9287d401d5faee2223a04d7d805f84509c46c8b). All three cases passed once in web-shard-9-stable-controls-combined.json. Native durations total 5.222 seconds; apportioned launch overhead adds 0.112131 seconds (3 of 80 launch cases), and remaining shard collection/planning overhead adds 0.231546 seconds (3 of 142 shard cases). tierTiming retains their 5.565677-second total; weightSeconds rounds that total with a 20% margin up to 7 seconds. This restores the merged twelve-shard prior estimate budget using runtime evidence; coverage, tiers, launch policies, shard/worker counts and budget assertions remain unchanged."
+    ,
+    "AEON-1270: native-expert-stream has twelve cases in stable-controls. The prior guarded one-worker run passed all twelve in 7.3 seconds including startup; the ten-second weight is a conservative scheduling estimate from that observation, not a hosted-runtime promise. Six authority/replay/terminal behavior cases are ESSENTIAL; six viewport/theme cases are newly classified NIGHTLY."
   ]
   ,
   "originalNpmScripts": {
