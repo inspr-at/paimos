@@ -321,6 +321,49 @@ func (g *GitHubApp) ReadShippingInstallation(ctx context.Context, read func(func
 	})
 }
 
+// ReadHistoryInstallation selects a read-only history channel from the actual
+// installation grants. Never request Actions on an installation without it,
+// and never widen the token to an unrelated repository or a write permission.
+func (g *GitHubApp) ReadHistoryInstallation(ctx context.Context, read func(get func(string, any) error, source string) error) error {
+	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
+		return errGitHub
+	}
+	jwt, err := g.jwt()
+	if err != nil {
+		return err
+	}
+	var installation struct {
+		ID          int64             `json:"id"`
+		AppID       int64             `json:"app_id"`
+		Permissions map[string]string `json:"permissions"`
+		Suspended   *time.Time        `json:"suspended_at"`
+	}
+	if err = g.request(ctx, jwt, "GET", "/app/installations/"+g.Config.InstallationID, nil, &installation); err != nil {
+		return err
+	}
+	if strconv.FormatInt(installation.ID, 10) != g.Config.InstallationID || strconv.FormatInt(installation.AppID, 10) != g.Config.ID || installation.Suspended != nil {
+		return errGitHub
+	}
+	scopes := map[string]string{"checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read"}
+	for name := range scopes {
+		if level := installation.Permissions[name]; level != "read" && level != "write" {
+			return errGitHub
+		}
+	}
+	source := "checks"
+	if level := installation.Permissions["actions"]; level == "read" || level == "write" {
+		scopes["actions"], source = "read", "actions"
+	}
+	return g.readScopedInstallation(ctx, jwt, scopes, func(get func(string, any) error, _ func(int64, string) (bool, string, error), _ func(int64) ([]byte, error)) error {
+		return read(func(path string, out any) error {
+			if source != "actions" && strings.HasPrefix(path, "/actions/") {
+				return errGitHub
+			}
+			return get(path, out)
+		}, source)
+	})
+}
+
 // ReadArtifactInstallation uses the same existing, repository-scoped read-only
 // authority as shipping. Signed artifact URLs and tokens never leave this layer.
 func (g *GitHubApp) ReadArtifactInstallation(ctx context.Context, read func(func(string, any) error, func(int64) ([]byte, error)) error) error {
@@ -337,6 +380,14 @@ func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read fu
 	if err != nil {
 		return err
 	}
+	scopes := map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
+	if shipping {
+		scopes["actions"] = "read"
+	}
+	return g.readScopedInstallation(ctx, jwt, scopes, read)
+}
+
+func (g *GitHubApp) readScopedInstallation(ctx context.Context, jwt string, scopes map[string]string, read func(func(string, any) error, func(int64, string) (bool, string, error), func(int64) ([]byte, error)) error) error {
 	var token struct {
 		Token        string            `json:"token"`
 		Permissions  map[string]string `json:"permissions"`
@@ -344,11 +395,7 @@ func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read fu
 			FullName string `json:"full_name"`
 		} `json:"repositories"`
 	}
-	scopes := map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
-	if shipping {
-		scopes["actions"] = "read"
-	}
-	if err = g.request(ctx, jwt, "POST", "/app/installations/"+g.Config.InstallationID+"/access_tokens", map[string]any{"repositories": []string{filepath.Base(g.Config.Repository)}, "permissions": scopes}, &token); err != nil {
+	if err := g.request(ctx, jwt, "POST", "/app/installations/"+g.Config.InstallationID+"/access_tokens", map[string]any{"repositories": []string{filepath.Base(g.Config.Repository)}, "permissions": scopes}, &token); err != nil {
 		return err
 	}
 	if !appToken.MatchString(token.Token) {

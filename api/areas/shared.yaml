@@ -485,6 +485,7 @@ components:
         repository: {type: string}
         ci_workflow: {type: string}
         nightly_workflow: {type: string}
+        history_source: {type: [string, 'null'], enum: [actions, checks, null], description: 'Source selected by the last successful history step. Actions reads workflow attempts when the installation grants Actions read; checks derives partial history from known check names on reachable commits and queue heads. Null until a successful step.'}
         app_connected: {type: boolean, description: 'True when the workspace GitHub App receives events for this repository.'}
         backfill: {type: string, enum: [not_started, running, done]}
         backfill_since: {type: [string, 'null'], format: date-time}
@@ -548,7 +549,7 @@ components:
         pulls: {type: integer, minimum: 0}
         jobs: {type: integer, minimum: 0, description: 'Runs whose jobs this step read (the jobs pass).'}
         retry_at: {type: [string, 'null'], format: date-time, description: 'Earliest retry of a failed history or jobs read; the server waits until this time. Absent when no retry is deferred.'}
-        truncated: {type: boolean, description: 'A day had more runs than GitHub lists; metrics stay partial.'}
+        truncated: {type: boolean, description: 'GitHub listing bounds or checks-derived history leave incomplete workflow coverage; affected metrics stay partial.'}
     DeliveryMetricsBackfillInput:
       type: object
       additionalProperties: false
