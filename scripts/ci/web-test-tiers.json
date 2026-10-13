@@ -1510,23 +1510,23 @@
     ,
     "browser:tests/theme-settings.spec.ts:derived contrast preserves chosen colours and staged edits apply only after Save"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1024"
+    "browser:tests/ui-audit-dark-1024.spec.ts:offline route and state audit dark 1024"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1280"
+    "browser:tests/ui-audit-dark-1280.spec.ts:offline route and state audit dark 1280"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1440"
+    "browser:tests/ui-audit-dark-1440.spec.ts:offline route and state audit dark 1440"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 1920"
+    "browser:tests/ui-audit-dark-1920.spec.ts:offline route and state audit dark 1920"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit dark 390"
+    "browser:tests/ui-audit-dark-390.spec.ts:offline route and state audit dark 390"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1024"
+    "browser:tests/ui-audit-light-1024.spec.ts:offline route and state audit light 1024"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1280"
+    "browser:tests/ui-audit-light-1280.spec.ts:offline route and state audit light 1280"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1440"
+    "browser:tests/ui-audit-light-1440.spec.ts:offline route and state audit light 1440"
     ,
-    "browser:tests/ui-audit.spec.ts:offline route and state audit light 1920"
+    "browser:tests/ui-audit-light-1920.spec.ts:offline route and state audit light 1920"
     ,
     "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window"
     ,
@@ -14012,6 +14012,24 @@
     ,
     {"kind":"browser","file":"tests/title-divider.spec.ts","name":"the title width is still applied after a reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/ui-audit-dark-1024.spec.ts","name":"offline route and state audit dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-dark-1280.spec.ts","name":"offline route and state audit dark 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-dark-1440.spec.ts","name":"offline route and state audit dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-dark-1920.spec.ts","name":"offline route and state audit dark 1920","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-dark-390.spec.ts","name":"offline route and state audit dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-light-1024.spec.ts","name":"offline route and state audit light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-light-1280.spec.ts","name":"offline route and state audit light 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-light-1440.spec.ts","name":"offline route and state audit light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-light-1920.spec.ts","name":"offline route and state audit light 1920","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a sideways strip is assessed as it stands; a control under a vertical scroller’s edge waits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"known fixture responses and decorative labelled versions are filtered precisely","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14027,24 +14045,6 @@
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"touch rule lets an open menu cover controls and exempts dates in the paper’s text","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"touch rule uses the actual label and pseudo-element hit area","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 1920","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 1920","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit.spec.ts","name":"offline route and state audit light 390","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
