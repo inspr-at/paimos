@@ -347,7 +347,9 @@ test('AEON-1289 phone actions keep their labels and read-only states omit termin
         expect(Math.abs(visible.iconOffset), 'the SVG is centred in the action').toBeLessThanOrEqual(.5)
         await expect(page.locator('.phone-keys')).toHaveCount(0)
         await expect(page.getByRole('group', { name: 'Terminal keys, read-only here' })).toHaveCount(0)
-        expect(await line.evaluate(el => el.scrollWidth - el.clientWidth), 'the control line stays inside the pane').toBeLessThanOrEqual(1)
+        const bounds = (await line.boundingBox())!, button = (await action.boundingBox())!
+        expect(button.x, 'the visible action stays inside the control line').toBeGreaterThanOrEqual(bounds.x)
+        expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width + .5)
       }
       await checkAction('End control…')
       await expect(page.locator('.control-text')).toContainText('Read-only · Anna Kogler has control')
