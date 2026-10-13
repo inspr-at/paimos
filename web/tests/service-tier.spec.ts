@@ -92,7 +92,7 @@ for (const width of [320, 390]) test(`${width}: phone Change tier menu opens and
   // AEON-1213 / #591 moved tier selection to the Overview Service tier block.
   const change = panel.getByRole('region', { name: 'Service tier', exact: true }).getByRole('button', { name: 'Change tier', exact: true })
   await expectStableControls({ controls: { change }, interactions: [
-    { name: 'open tier from overflow', run: async () => {
+    { name: 'open tier from Overview', run: async () => {
       await change.click()
       await expect(picker(page)).toBeVisible()
       await expect(page.getByRole('menu', { name: 'More session actions' })).toHaveCount(0)

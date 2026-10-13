@@ -2,6 +2,8 @@
 // AEON-1062: polish from INSPR QA of release 128. Risks: the chat header squeezes "Stop now…" to an icon's
 // width so its label runs over its neighbours; the dark chat Stop renders light with an unreadable Esc keycap;
 // the account drawer says "1 computers"; a Models row whose profile left the registry shows a raw id.
+// AEON-1212 / #592 moved chat controls into Session actions; retain the Stop
+// contrast contract there and measure Esc on the Close action that now owns it.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -101,7 +103,8 @@ async function stopContrast(stop: Locator) {
   })
 }
 
-// 1600 px is QA's case: the docked panel's default width there is about 620 px.
+// Keep the original 1600/panel-620 catalogue name; AEON-1213 / #591 now
+// gives that viewport a resizable split, verified against its live bounds.
 const cases = [{ width: 390 }, { width: 620 }, { width: 1024 }, { width: 1600, panel: 620 }]
 for (const { width, panel } of cases) for (const theme of themes) {
   const label = `${width}${panel ? ` panel ${panel}` : ''}`
