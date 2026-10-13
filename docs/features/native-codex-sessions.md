@@ -1,0 +1,125 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
+# Native Codex sessions
+
+AEON-1274 supplies the P5a native Codex codec behind C0's `Launcher` and
+`NativeTransport`. It is an integration component with no default process
+opener or grant source. It is not enabled by this change. `G_TERMS` and
+`G_PROVIDER_PINS` remain coordinator gates before any live provider use.
+
+The intended deployment uses the workspace owner's own enrolled Codex CLI
+account. Each child receives its own `CODEX_HOME`; no account credential file
+is read, no token is passed through PAIMOS, and no managed OAuth provider or
+shared subscription pool is created. Login and profile enrollment remain
+person/OPS operations. The official vendor binary stays unchanged.
+
+## Integration and qualification
+
+I2 implements `WireOpener`/`Wire` around agentd's existing `launchWire` and
+owned-process lifecycle, rather than adding another supervisor. There is one
+app-server process per logical session. The opener must verify the physical
+binary and workspace/profile paths, exact binary digest and version, existing
+server/local admission, exclusive owned-writer reservation and policy lifetime
+before possible fork. RPC result dispatch must be independent of bounded
+notification consumption. Overflow or pipe loss is lost evidence, never proof
+that the process exited.
+
+The codec fixture is identified by `codex-app-server/0.157.1`, matching the
+version referenced by the existing Codex qualification boundary. It freezes
+the tested request vocabulary; it is not live qualification of that binary.
+The coordinator must compare the exact official binary-generated schemas and
+tool/settings behavior to this fixture at `G_PROVIDER_PINS`. A different schema
+or binary needs its own qualification; there is no version fallback.
+
+`GrantSource` resolves an existing supervised native worker grant, bound to the
+full C0 binding, account/profile revision, binary and tool/settings digests.
+It must qualify inherited hooks and MCP/settings, enforce existing authority
+and budgets, and serialize profile login/rebind against live use. A read-only
+sandbox alone does not prove this boundary. Routine, confined, verification and
+bounded-preapproved paths stay unavailable. Run-bound MCP tool injection is
+also unavailable in this codec until independently qualified.
+
+The launch environment is explicit and excludes ambient credentials/provider
+overrides. Native account identity is checked through `account/read` before
+thread creation, every input/control write, quota projection and final
+publication. Account change notifications invalidate the writer's evidence;
+the adapter never logs in or rotates accounts to recover it. The grant is
+rechecked after the identity read under the adapter's native-I/O lock.
+
+The Host/server integration still owns command actor/controller verification,
+`write_started` journaling before native I/O, retention/output consent and
+receipt persistence. These responsibilities cannot be inferred from a successful
+native RPC. `ApprovalAuthority` must recheck the exact command actor, effect and
+person step-up before replying to a native approval request. `FinalGrants`
+supplies only a server-issued drain grant for the same binding and opaque
+conversation reference. It grants no launch or control authority.
+
+## Protocol and evidence
+
+The handshake is `initialize`, `initialized`, `account/read`, then
+`thread/start` or exact-ID `thread/resume`. Thread requests use `sandbox`;
+turn requests use `sandboxPolicy`. The codec checks the resolved model,
+provider, cwd, sandbox and approval policy before input. Resume response history
+is ignored as evidence for the new writer. Experimental APIs are not enabled.
+
+`turn/start` acknowledges a write. A correlated `turn/started` supplies consumed
+input evidence. `turn/steer` contains only the thread, text input and exact
+`expectedTurnId`, and its reply must match that turn. Steering acknowledges
+injection; it does not claim which steered input a final answered. Final
+correlation retains the original turn-start input. `after_turn` returns busy
+while a turn is active, leaving queueing/revalidation to the Host. Interrupt
+uses the exact opaque current-turn reference and native `turn/interrupt`; the
+RPC acknowledgement never means process exit.
+
+An explicit completed `agentMessage` is a final candidate. Only a successful
+`turn/completed` for this writer/turn, after current account/grant checks, can
+produce `FinalPublish`. Commentary, token assembly, failed/interrupted turns,
+historical items and duplicate/foreign terminal evidence never publish finals.
+Without publication authority, only a live final reference is emitted. Public
+thread/turn/item/final references are domain-separated by tenant, session and
+runtime. Native correlation stays local.
+
+Only command/file approvals are mapped, with generic safe summaries and a
+digest of the complete native effect. Replies are `accept` for `allow_once`
+or `decline` for `deny`, once per request; session-wide/policy amendments and
+permission/OAuth requests are unavailable. Callbacks expire at turn end or
+grant expiry and do not transfer to another runtime.
+
+Token counters are bounded and scoped to the current native thread/turn.
+Rate-limit windows carry the exact enrolled account and profile revision,
+measurement time and a one-minute freshness bound. Live text, tool statuses,
+safe token counters and quota facts use C0 projections. Raw commands, paths,
+tool arguments/results, private reasoning and unknown native fields are omitted.
+Native JSON is bounded to 1 MiB and depth 16 before typed decoding; duplicate
+keys and trailing JSON are rejected. C0 payload and exported-frame limits are
+checked before publication. There are 32 buffered provider events and at most
+32 pending approvals. Overflow loses evidence visibly instead of truncating a
+successful final or automatically replaying an uncertain write.
+
+Close/Wait require matching owned root/group exit evidence. Completed turns,
+idle state, frame EOF and cancelled watchers never release occupancy.
+
+Protocol reference: [official Codex app-server documentation](https://learn.chatgpt.com/docs/app-server).
+
+## Validation and R0 handoff
+
+Named risk: app-server/schema drift and native-versus-exec tool-policy parity
+can invalidate provider capabilities. All qualification tests use an injected
+clock and fake app-server connection; no model, login or subscription calls.
+The pre-ack notification case uses explicit request/release barriers.
+
+Coordinator-owned same-PR registrations:
+
+- Source ownership: add `internal/nativeproviders/codex/**` to S3 (agent runtime).
+- Go test tiers: `internal/nativeproviders/codex:TestNativeCodexTranscriptQualification`,
+  `internal/nativeproviders/codex:TestNativeCodexRejectsUnqualifiedLaunch` and
+  `internal/nativeproviders/codex:TestNativeCodexRejectsUnboundedOrAmbiguousFrames`;
+  proposed tier `ESSENTIAL` for all three (fake protocol safety tests).
+- No web/browser shard, route/contract pin, permission registry, database/DSAR
+  or shared-fence registration changes are needed by this source-only slice.
+
+Builders do not edit R0's shared inventories. These rows must be applied in
+this PR before final authoritative checks and merge. Run the targeted package
+through `remote-test.sh`, the affected planner against `origin/main`, and the
+guarded static check. A refused/incomplete check is not green and remains an
+explicit coordinator/PR-CI handoff.
