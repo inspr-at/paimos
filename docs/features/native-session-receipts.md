@@ -228,6 +228,32 @@ This round preserves that ownership. Applying the remaining exact registration
 request below remains necessary before CI can be green. There is no behavior
 change requiring a new regression test against `bd7b9b6dc`.
 
+Fresh guarded `remote-test.sh -count=1` on `bd7b9b6dc` completed:
+
+* **PASS 1-5:** `internal/nativereceipts`, `internal/nativesessions/receipts`
+  and `internal/chat` pass, covering all five acceptance items above.
+* `internal/dsar` passes its existing package tests; the two missing table
+  classifications below still require registration.
+* **FAIL:** `internal/agentpairing` reproduces the exact missing
+  `nativesessions/receipts/repository.go` entry in
+  `TestSharedFenceCallerInventory`. The five-package command exits **1**.
+* Public-name checker: **exit 1** on the starting HEAD for the document's host
+  name, **exit 0** after the fix. `git diff --check` also passes.
+
+Guarded `ci-static-remote.sh` on committed `e6247e4ab` runs the required
+underlying `node scripts/ci-static.mjs --merge-main`: **exit 1**, **41 checks
+pass, zero optional skips**. Public names, source audit tests/coverage, test-tier
+unit tests, web shard tests, Go vet, web type/lint, migration and OpenAPI checks
+pass. Its only failure is `go-tiers`, which lists exactly the eight unclassified
+Go cases below. Earlier static attempts refused with **exit 3** for occupied
+remote slots; no heavy local fallback was used.
+
+**INCOMPLETE:** R0 must apply the shared-fence row, eight ESSENTIAL tier rows
+and both DSAR table classifications before the next guarded static/PR checks.
+The central audit fix and public documentation fix are complete. Browser/web
+unit feature checks do not apply to this non-browser slice. No origin push,
+deployment, live/model call or review gate was run by this worker.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
