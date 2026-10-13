@@ -37,6 +37,11 @@ function toggleType(key: EventType) {
   hiddenTypes.value = hiddenTypes.value.includes(key) ? hiddenTypes.value.filter(value => value !== key) : [...hiddenTypes.value, key]
   if (ownPreference.value) preference.save({ hidden: [...hiddenTypes.value] })
 }
+function closeTypes(restoreFocus: boolean) {
+  const anchor = typeAnchor.value
+  typeAnchor.value = null
+  if (restoreFocus) anchor?.focus({ preventScroll: true })
+}
 
 const buffer = new ExpertBuffer(), events = shallowRef<NativeStreamEvent[]>([]), evicted = ref(0)
 const notice = ref(''), status = ref('Live events appear after Watch live. Only the bounded live buffer is available.')
@@ -142,7 +147,8 @@ watch(panelKey, () => {
 }, { immediate: true, flush: 'sync' })
 watch(captureKey, () => {
   stop(); blocked.value = false; typeAnchor.value = null
-  status.value = request.value ? 'Viewing stopped. Watch live to view this session explicitly.' : 'Live diagnostics require current view permission and the owner’s active watch consent.'
+  status.value = !props.session.capabilities.events_supported ? 'Live events are not available for this session.' :
+    request.value ? 'Viewing stopped. Watch live to view this session explicitly.' : 'Live diagnostics require current view permission and the owner’s active watch consent.'
 }, { flush: 'sync' })
 watch(() => props.active, active => { if (!active) { stop(); status.value = 'Viewing stopped while Expert is hidden.' } }, { flush: 'sync' })
 watch(segment, () => { stop(); typeAnchor.value = null; status.value = 'Viewing stopped. Watch live to view Events again.' }, { flush: 'sync' })
@@ -188,10 +194,13 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
         <p class="terminal-hint"><span :aria-hidden="!link">Read-only, in a new tab, on the tailnet. The first visit asks for the viewer token.</span><span :aria-hidden="!!link">The live terminal is no longer available.</span></p>
       </div>
     </div>
-    <FloatingPanel v-if="typeAnchor && segment === 'events'" :anchor="typeAnchor" label="Event types" :width="260" :sheet="true" @close="restore => { if (restore) typeAnchor?.focus(); typeAnchor = null }">
+    <FloatingPanel v-if="typeAnchor && segment === 'events'" class="expert-types-panel" :anchor="typeAnchor" label="Event types" :width="260" :sheet="true" cycle @close="closeTypes">
       <div class="types-menu" role="group" aria-label="Event types">
         <p>Show these events</p>
-        <label v-for="type in eventTypes" :key="type.key" class="type-option"><input type="checkbox" :checked="!hiddenTypes.includes(type.key)" @change="toggleType(type.key)"><AppIcon :name="type.icon" :size="16" /><span>{{ type.label }}</span></label>
+        <div class="types-options">
+          <label v-for="type in eventTypes" :key="type.key" class="type-option"><input type="checkbox" :checked="!hiddenTypes.includes(type.key)" @change="toggleType(type.key)"><AppIcon :name="type.icon" :size="16" /><span>{{ type.label }}</span></label>
+        </div>
+        <div class="types-actions"><button class="btn" type="button" @click="closeTypes(true)">Done</button></div>
       </div>
     </FloatingPanel>
   </section>
@@ -212,8 +221,12 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
 .grow { flex: 1; }
 .follow { flex: none; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .follow-short { display: none; }
-.types-menu { padding: 12px; }
-.types-menu > p { margin-bottom: 6px; font-size: 12.5px; }
+.expert-types-panel { display: flex; flex-direction: column; }
+.types-menu { display: flex; flex-direction: column; min-height: 0; padding: 12px; }
+.types-menu > p { flex: none; margin-bottom: 6px; font-size: 12.5px; }
+.types-options { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.types-actions { display: flex; justify-content: flex-end; flex: none; padding-top: 12px; border-top: 1px solid var(--line); }
+.types-actions .btn { min-height: 44px; }
 .type-option { display: flex; align-items: center; justify-content: flex-start; gap: 12px; height: 44px; cursor: pointer; font-size: 13px; }
 .type-option input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
 .terminal-pane { flex: 1; min-height: 0; overflow: auto; }
@@ -237,5 +250,9 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
   .expert-bar { height: 56px; }
   .expert-segments button, .types-button, .follow, .terminal-link { min-height: 44px; }
   .native-expert { padding-bottom: env(safe-area-inset-bottom); }
+}
+@media (max-width: 600px) {
+  .types-menu { flex: 1; padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .types-options { flex: 1; }
 }
 </style>

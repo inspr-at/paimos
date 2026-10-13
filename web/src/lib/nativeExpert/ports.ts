@@ -46,10 +46,10 @@ export const bindingKey = (binding: NativeBinding | null) => binding ? JSON.stri
 
 export function expertRequest(session: NativeSessionView, viewer: ExpertViewer, consent: ExpertConsent | null): ExpertRequest | null {
   const binding = session.current_binding
-  if (!binding || !viewer.canRead || viewer.tenantId !== binding.tenant_id || !viewer.principalId || binding.owned_session_id !== session.owned_session_id) return null
+  if (!session.capabilities.events_supported || !binding || !viewer.canRead || viewer.tenantId !== binding.tenant_id || !viewer.principalId || binding.owned_session_id !== session.owned_session_id) return null
   const approved = viewer.kind === 'person' && viewer.canWatch && session.capabilities.expert && consent?.active &&
     consent.id && consent.ownerPersonId === session.owner_person_id && bindingKey(consent.binding) === bindingKey(binding)
-  const view = approved ? 'expert' : viewer.canReadStructured && session.capabilities.events_supported ? 'structured' : null
+  const view = approved ? 'expert' : viewer.canReadStructured ? 'structured' : null
   return view ? { binding: { ...binding }, generation: session.generation, revision: session.revision,
     principalId: viewer.principalId, view, consentId: approved ? consent!.id : null, lastEventId: null } : null
 }

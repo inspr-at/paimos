@@ -29,6 +29,12 @@ returning to a tab or visible page requires Watch live again. Late replay and
 stream callbacks cannot populate another view. Server revocation blocks
 restart until the current authority projection changes.
 
+Both raw Expert and structured Events require the current C0
+`events_supported` capability. Withdrawal aborts capture, clears retained
+frames and open diagnostics, and disables Watch live; late callbacks remain
+discarded. Restoring the capability enables the explicit action without
+starting a stream automatically.
+
 Events retain C0 names, native envelopes, correlation IDs, redacted paths,
 omitted byte counts and receipt states. Message deltas coalesce by message ID,
 finals replace their text, and tool start/result pairs share a call-ID row.
@@ -47,6 +53,10 @@ Controls sit above the scrolling list; expanding a row or scrolling up pauses
 Follow live. Earlier pages preserve the visible row's viewport position. The
 type menu reuses `FloatingPanel` and 44 px rows. JSON wraps and scrolls inside
 its code surface. Both themes use shared tokens and SVG icons.
+
+The type sheet has a 44 px Done action that restores focus to Types. On phones,
+the full-height sheet pins this action below the scrolling options and respects
+both safe areas. Escape also restores focus; keyboard Tab stays inside the sheet.
 
 Terminal availability is fixed on panel opening. A person with a viewer URL
 gets the A1 plain Zellij block with Open live terminal, a new-tab link with
@@ -103,3 +113,20 @@ guarded runner to `web/test-results/AEON-1270/`. Each theme/width case emits
 `AEON-1270/events-{light,dark}-{390,1024,1440}.png` inside its result directory.
 The final worker status records the exact tested commit. Screenshots are
 ignored and not committed. No Go package changed; P2d specifies no Go suite.
+
+Fix round 3 extends the existing 12 registered cases. Its test-only negative
+control `161186cc7` retains the product code from `1cd50600`: the raw-authority
+case fails because capability withdrawal leaves the stream signal un-aborted,
+and both 390 px touch cases fail because Done is absent. The other nine cases
+pass. The temporary branch was removed; no negative-control commit is part of
+the delivery branch.
+
+The same spec covers structured capability withdrawal, discards late callbacks,
+requires explicit restart after capability restoration, and measures Done and
+selector positions with the shared stability guard. Phone taps and a 320 px
+viewport-height check prove dismissal remains reachable while options scroll;
+Done and Escape restore trigger focus. The two themes at each width also emit
+`AEON-1270/types-{light,dark}-{390,1024,1440}.png`; wide-viewport type sheets use
+the narrow-panel layout. Fix-round evidence is kept under
+`web/test-results/AEON-1270-fix3/`. The worker status records the final tested
+HEAD, browser/static results and any incomplete coordinator-owned checks.
