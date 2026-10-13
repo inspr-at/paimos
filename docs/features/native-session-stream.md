@@ -14,6 +14,10 @@ resolve the current binding and validate the server-issued operation grant,
 viewer/client, consent, expiry, controller capability and any effect/step-up.
 The bounded envelope is available to that authorizer as untrusted selectors.
 The adapter does not open a network listener or create/read a credential file.
+HTTP bodies use `httpapi.ReadRequestBody` with the frozen C0 size/time bounds.
+The shared reader preserves an earlier caller deadline and closes a failed or
+oversized read before decoding, grant checks or Host admission; failed reads
+never clear the transport deadline or leave the connection reusable.
 Control writes require `X-Aeon-Attach-Capability`; streams require the attach
 result's nonsecret `X-Aeon-Viewer-ID`. Proofs never enter URLs, logs or frames.
 Detach calls only Host.Detach. Host retains the final native-write/ownership
@@ -101,11 +105,12 @@ revocation and outbound/subscriber stalls with barriers; clocks control replay
 expiry and keepalives, while timeouts only detect hangs. No real model account,
 browser, review gate, release or live cutover is involved.
 
-The opt-in `-args -native-negative-control` test flag reruns the retention
-assertion with a temporary Go compiler overlay removing the pre-publication
-expiry. It must fail specifically because expired content was retained. Fixtures
-use `t.TempDir`; the real source and work branch remain valid, with no throwaway
-commit or second worktree.
+The opt-in `-args -native-negative-control` test flag reruns regression assertions
+with temporary Go compiler overlays. Removing pre-publication expiry must fail
+because expired content was retained. Replacing the local adapter with the
+reviewed `140a6982` source must fail because a body read left its connection
+reusable. Fixtures use `t.TempDir`; the real source and work branch remain valid,
+with no throwaway commit or second worktree.
 
 R0 handoff for this same PR:
 

@@ -27,7 +27,7 @@ const fixtureID = "00000000-0000-4000-8000-000000000001"
 
 // Opt-in mutation evidence runs through the same guarded Go runner. Production
 // source/HEAD never changes, and ordinary CI does not recursively compile tests.
-var nativeNegativeControl = flag.Bool("native-negative-control", false, "prove idle replay test rejects the implementation without expiry")
+var nativeNegativeControl = flag.Bool("native-negative-control", false, "prove native transport tests reject the prior implementations")
 
 func fixtureBinding() nativecontract.Binding {
 	return nativecontract.Binding{TenantID: fixtureID, ProjectID: fixtureID, OwnedSessionID: fixtureID, HarnessSessionID: fixtureID, RuntimeEpoch: fixtureID, DaemonID: fixtureID, DaemonGeneration: fixtureID, BindingRevision: 1}
@@ -245,13 +245,18 @@ func proveIdleExpiryNegativeControl(t *testing.T) {
 		t.Fatal("negative control no longer identifies the pre-publication expiry")
 	}
 	withoutExpiry := strings.Replace(string(source), needle, "\tnext := b.next", 1)
+	proveNativeNegativeControl(t, "buffer.go", []byte(withoutExpiry), "TestTransientRingReportsLossAndRejectsStaleReplay", "new publication resurrected expired raw frames")
+}
+
+func proveNativeNegativeControl(t *testing.T, source string, replacementSource []byte, testName, assertion string) {
+	t.Helper()
 	dir := t.TempDir()
-	replacement := filepath.Join(dir, "buffer.go")
+	replacement := filepath.Join(dir, source)
 	overlayPath := filepath.Join(dir, "overlay.json")
-	if err := os.WriteFile(replacement, []byte(withoutExpiry), 0600); err != nil {
+	if err := os.WriteFile(replacement, replacementSource, 0600); err != nil {
 		t.Fatal("negative control could not write its temporary fixture")
 	}
-	absoluteSource, err := filepath.Abs("buffer.go")
+	absoluteSource, err := filepath.Abs(source)
 	if err != nil {
 		t.Fatal("negative control could not resolve its source")
 	}
@@ -263,16 +268,16 @@ func proveIdleExpiryNegativeControl(t *testing.T) {
 	defer cancel()
 	// The nested test receives no opt-in flag, so it cannot recurse. Its named
 	// behavior assertion runs against the changed compiler input, not a mock.
-	cmd := exec.CommandContext(ctx, "go", "test", "-p", "2", "-timeout", "30s", "-overlay", overlayPath, "-run", "^TestTransientRingReportsLossAndRejectsStaleReplay$", ".")
+	cmd := exec.CommandContext(ctx, "go", "test", "-p", "2", "-timeout", "30s", "-overlay", overlayPath, "-run", "^"+testName+"$", ".")
 	output := &boundedTestOutput{}
 	cmd.Stdout = output
 	cmd.Stderr = output
 	err = cmd.Run()
 	var failed *exec.ExitError
-	if !errors.As(err, &failed) || !strings.Contains(output.data.String(), "new publication resurrected expired raw frames") {
-		t.Fatal("negative control did not fail for the claimed expired-content risk")
+	if !errors.As(err, &failed) || !strings.Contains(output.data.String(), assertion) {
+		t.Fatal("negative control did not fail for the claimed regression:", testName)
 	}
-	t.Log("negative control PASS: without expiry, the retained-content assertion fails")
+	t.Log("negative control PASS:", testName, "rejects prior behavior:", assertion)
 }
 
 type deadlineRecorder struct {
@@ -292,6 +297,34 @@ func (w *deadlineRecorder) Flush() {
 	default:
 	}
 }
+
+type localBodyDeadlineRecorder struct {
+	*deadlineRecorder
+	deadlines []time.Time
+	setupErr  error
+}
+
+func (w *localBodyDeadlineRecorder) SetReadDeadline(at time.Time) error {
+	w.deadlines = append(w.deadlines, at)
+	return w.setupErr
+}
+
+type trackedLocalBody struct {
+	io.Reader
+	readErr error
+	reads   int
+	closed  bool
+}
+
+func (b *trackedLocalBody) Read(p []byte) (int, error) {
+	b.reads++
+	if b.readErr != nil {
+		return 0, b.readErr
+	}
+	return b.Reader.Read(p)
+}
+
+func (b *trackedLocalBody) Close() error { b.closed = true; return nil }
 
 type fakeAuthority struct {
 	actor   nativecontract.Actor
@@ -414,6 +447,63 @@ func TestLocalHostProtocolRequiresPeerGrantAndExactBinding(t *testing.T) {
 	}
 	if w := send(body, "Bearer local-test-proof", nativecontract.LocalProtocol, "test-controller"); w.Code != 200 || host.writes != 1 || w.Header().Get(nativecontract.LocalProtocolHeader) != nativecontract.LocalProtocol {
 		t.Fatal("valid bounded input did not reach Host exactly once")
+	}
+	// Risk: failed or oversized body reads clear the deadline and leave the
+	// connection reusable, or extend the caller's earlier deadline before Host.
+	for _, variant := range []string{"oversize", "read error", "deadline setup"} {
+		t.Run("failed body/"+variant, func(t *testing.T) {
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*time.Second))
+			defer cancel()
+			r := httptest.NewRequest("POST", "/v1/native-sessions/"+fixtureID+"/input", nil).WithContext(ctx)
+			r.Header.Set("Authorization", "Bearer local-test-proof")
+			r.Header.Set(nativecontract.LocalProtocolHeader, nativecontract.LocalProtocol)
+			r.Header.Set(nativecontract.ControlHeader, "test-controller")
+			requestBody := &trackedLocalBody{Reader: strings.NewReader(string(body))}
+			r.Body = requestBody
+			w := &localBodyDeadlineRecorder{deadlineRecorder: newRecorder()}
+			wantStatus, wantReason := http.StatusBadRequest, nativecontract.ReasonInvalidInput
+			switch variant {
+			case "oversize":
+				requestBody.Reader = strings.NewReader(strings.Repeat("x", nativecontract.RequestBodyBytes+1))
+				wantStatus, wantReason = http.StatusRequestEntityTooLarge, nativecontract.ReasonBufferFull
+			case "read error":
+				requestBody.readErr = io.ErrUnexpectedEOF
+			case "deadline setup":
+				w.setupErr = os.ErrPermission
+				wantStatus, wantReason = http.StatusServiceUnavailable, nativecontract.ReasonQualificationMissing
+			}
+			mux.ServeHTTP(w, r)
+			var failure nativecontract.Error
+			if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
+				t.Fatal("failed body did not produce a contract error")
+			}
+			if w.Code != wantStatus || failure.Reason != wantReason || host.writes != 1 || host.detaches != 0 {
+				t.Fatalf("failed body: HTTP %d / %s, want %d / %s; writes=%d detaches=%d", w.Code, failure.Reason, wantStatus, wantReason, host.writes, host.detaches)
+			}
+			if w.Header().Get("Connection") != "close" {
+				t.Fatal("failed native body left its connection reusable")
+			}
+			deadline, _ := ctx.Deadline()
+			if len(w.deadlines) != 1 || !w.deadlines[0].Equal(deadline) {
+				t.Fatalf("failed native body cleared or extended its deadline: %v", w.deadlines)
+			}
+			if variant == "deadline setup" {
+				if requestBody.reads != 0 {
+					t.Fatal("deadline setup failure admitted a body read")
+				}
+			} else if !requestBody.closed || requestBody.reads == 0 {
+				t.Fatal("failed native body reader was not read, closed and joined")
+			}
+		})
+	}
+	if *nativeNegativeControl {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		prior, err := exec.CommandContext(ctx, "git", "show", "140a6982:internal/nativestream/local.go").Output()
+		if err != nil {
+			t.Fatal("negative control could not read the reviewed implementation")
+		}
+		proveNativeNegativeControl(t, "local.go", prior, "TestLocalHostProtocolRequiresPeerGrantAndExactBinding", "failed native body left its connection reusable")
 	}
 	detach := nativecontract.Detach{RequestID: fixtureID, ExpectedBinding: fixtureBinding(), ViewerID: fixtureID}
 	params, _ := json.Marshal(detach)

@@ -6,13 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 )
 
@@ -255,19 +255,16 @@ func (a *LocalAdapter) serve(w http.ResponseWriter, r *http.Request, route nativ
 }
 
 func readBody(w http.ResponseWriter, r *http.Request, limit int) ([]byte, error) {
-	rc := http.NewResponseController(w)
-	// The surrounding existing server also owns header/idle timeouts. This
-	// read deadline bounds a slow body before any JSON work or Host invocation.
-	if err := rc.SetReadDeadline(time.Now().Add(nativecontract.BodyWorkDeadlineSeconds * time.Second)); err != nil {
-		return nil, Refuse(nativecontract.ReasonQualificationMissing)
-	}
-	defer rc.SetReadDeadline(time.Time{})
-	r.Body = http.MaxBytesReader(w, r.Body, int64(limit))
-	data, err := io.ReadAll(r.Body)
+	// The shared reader bounds the transport and disposes failed connections
+	// before JSON decoding, access checks or any Host invocation.
+	data, err := httpapi.ReadRequestBody(w, r, int64(limit), nativecontract.BodyWorkDeadlineSeconds*time.Second)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			return nil, Refuse(nativecontract.ReasonBufferFull)
+		}
+		if errors.Is(err, httpapi.ErrBodyDeadlineUnavailable) {
+			return nil, Refuse(nativecontract.ReasonQualificationMissing)
 		}
 		return nil, Refuse(nativecontract.ReasonInvalidInput)
 	}
