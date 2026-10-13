@@ -201,6 +201,37 @@ func TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit(t *testing.T) {
 	if _, err := adapter.StartLead(t.Context(), LeadStartRequest{}); !errors.Is(err, ErrNativeUnqualified) {
 		t.Fatal("ordinary lead label granted native authority", err)
 	}
+	// Negative control in an isolated fixture copy: restore the pre-change
+	// persistSession:false behavior. The same SDK fidelity guard must reject
+	// startup. No throwaway commit, real account or other worktree is used.
+	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBridge := strings.Replace(string(bridge), "persistSession: native,", "persistSession: false,", 1)
+	if oldBridge == string(bridge) {
+		t.Fatal("negative control did not remove native history")
+	}
+	copyPath := filepath.Join(t.TempDir(), "old-bridge.mjs")
+	if err := os.WriteFile(copyPath, []byte(oldBridge), 0600); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := json.Marshal(map[string]any{"op": "start", "profile": "native", "native_grant": request.Native.bridgeGrant(), "prompt": "initial", "model": "fixture-model", "effort": "high", "resume": request.Native.Resume, "capabilities": []string{"interrupt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	negativeCtx, cancelNegative := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancelNegative()
+	command := exec.CommandContext(negativeCtx, adapter.NodePath, copyPath, adapter.SDKPath, adapter.ClaudePath, request.Workspace)
+	command.Env, err = nativeClaudeEnvironment(adapter.Homes["local"], adapter.NodePath, adapter.ClaudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.Stdin = strings.NewReader(string(frame) + "\n")
+	output, err := command.Output()
+	if negativeCtx.Err() != nil || err == nil || !strings.Contains(string(output), `"reason":"sdk_query_capability_missing"`) || strings.Contains(string(output), `"kind":"session_started"`) {
+		t.Fatal("native history regression did not fail for the expected SDK fidelity reason", err, string(output))
+	}
 }
 
 // Risk: revocation/profile/workspace changes after authorization can still
