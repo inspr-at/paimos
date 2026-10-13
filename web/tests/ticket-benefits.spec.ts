@@ -95,7 +95,11 @@ for (const regenerated of [false, true]) {
         Object.assign(release, { notes: { source: 'unavailable', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: [gap] } })
       }
     }
-    await mockWork(page, fixtures())
+    const work = fixtures()
+    // The current workspace can resolve this Git-mentioned ticket; it remains
+    // absent from any captured historical membership/benefit snapshot.
+    work.nodes.push({ ...work.nodes.find(node => node.id === 'n-a1')!, id: 'n-a75', key: 'AEON-75', title: 'Edit time entries in Hours', state: 'done' })
+    await mockWork(page, work)
     await mockReleases(page, history)
     await page.goto(`/releases/${current.version}`)
     const detail = page.locator('article.detail')

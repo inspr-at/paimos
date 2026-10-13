@@ -239,6 +239,7 @@ test('changes by the same person in another tab reach the list; the tab’s own 
     // AEON-1239 / #580 gave SSE subscribers independent cursors. Bind the
     // actual node subscriber and its completed aggregate/list reply, not a count.
     const listReply = a.waitForResponse(response => { const url = new URL(response.url()); return url.pathname === '/api/nodes' && (url.searchParams.get('ids') ?? '').split(',').includes('n-2') })
+    void listReply.catch(() => {}) // Closing on an earlier failure must not mask that failure.
     await b.goto('/p/PHAROS/PHAROS-12')
     await panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
     await panel(b).getByLabel('Title', { exact: true }).fill('Add an Oracle Cloud Always Free connector')
@@ -268,6 +269,7 @@ test('changes by the same person in another tab reach the list; the tab’s own 
     // If the own revision was reread it is now in the request ledger as n-4.
     release = live.holdAnswers('a')
     const sentinelReply = a.waitForResponse(response => { const url = new URL(response.url()); return url.pathname === '/api/nodes' && (url.searchParams.get('ids') ?? '').split(',').includes('n-1') })
+    void sentinelReply.catch(() => {})
     const sentinel = data.nodes.find(node => node.id === 'n-1')!
     sentinel.title = 'External completion barrier'
     sentinel.updated_at = new Date(Date.parse(sentinel.updated_at) + 1000).toISOString()
