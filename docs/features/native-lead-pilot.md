@@ -215,7 +215,7 @@ perform native test collection or launch a browser. Existing CI regressions
 provide the negative control; no throwaway commit was added to this branch.
 
 The guarded `ci-static-locked.sh` retry ran the underlying
-`node scripts/ci-static.mjs --merge-main` on mbp2606 at `58ae26413` and exited
+`node scripts/ci-static.mjs --merge-main` on the approved test host at `58ae26413` and exited
 **0**:
 
 ```text
