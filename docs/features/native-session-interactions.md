@@ -113,8 +113,16 @@ The existing concurrency test retains its exact TTL assertions and additionally
 checks the original viewer and unchanged viewer/controller expiry instants on
 reconnect. Production lease, permission and expiry behavior is unchanged.
 After correction, all five behavior tests across both affected Go packages passed
-twice through the guarded remote runner. The final worker status records the
-browser and static-check results for this round.
+twice through the guarded remote runner, then passed again after merging current
+main at `85c5ef4ad`. Guarded `ci-static --merge-main` on that merged commit passed
+all 42 checks with zero skips, including strict Go/web tiers and web-shard unit
+regressions. The canonical tier merge preserved all five ESSENTIAL Go rows and
+seven browser rows; this round adds no test identities or registry rows.
+The fresh browser spec could not start: two attempts stopped at other live
+browser-suite locks, and the final attempt hit the remote capacity guard (exit
+3). The component and spec are unchanged by this fix; fresh Linux Chromium
+evidence remains with authoritative PR CI. No foreign process was touched and
+no local browser fallback was used.
 
 R0 additions are exactly five ESSENTIAL Go rows, seven ESSENTIAL browser rows,
 one `stable-controls` spec entry (20 seconds is an unmeasured scheduling estimate),
