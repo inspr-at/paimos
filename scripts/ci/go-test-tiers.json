@@ -3698,6 +3698,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestNativeCandidateArtifactAgentCeiling","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestNativeRoutesThroughProductionAuthentication","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestNewDefaults","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestNewRejectsShortKey","tier":"GATED-FULL"}
@@ -7755,6 +7757,12 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkLatestPinAndAutomaticResidencyReselection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkingEvidenceCannotUseAnotherModelsUsage","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestAccessWritesDoNotDeadlockNodeMove","tier":"ESSENTIAL"}
     ,

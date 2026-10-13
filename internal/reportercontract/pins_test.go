@@ -346,10 +346,14 @@ var jsonSchemaKeywords = map[string]bool{
 }
 
 func TestVersionShape(t *testing.T) {
+	versions := map[string]string{"native-session": NativeSession}
 	for name, s := range surfaces {
-		parts := strings.Split(s.version, "/")
+		versions[name] = s.version
+	}
+	for name, version := range versions {
+		parts := strings.Split(version, "/")
 		if len(parts) != 2 || parts[0] != name {
-			t.Errorf("%s: invalid contract name %s", name, s.version)
+			t.Errorf("%s: invalid contract name %s", name, version)
 			continue
 		}
 		v := strings.Split(parts[1], ".")
@@ -359,7 +363,7 @@ func TestVersionShape(t *testing.T) {
 		}
 		for _, number := range v {
 			if _, err := strconv.Atoi(number); err != nil {
-				t.Errorf("%s: invalid version %s", name, s.version)
+				t.Errorf("%s: invalid version %s", name, version)
 			}
 		}
 	}
