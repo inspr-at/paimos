@@ -235,6 +235,12 @@ meanwhile. The card head then says "2 changes wait while you point here · Show
 now"; otherwise, quietly, "Live · updated 4 s ago". The changes apply 1.5 s
 after the pointer leaves, on Show now, or when the page loads. Your own
 removals and moves apply at once, and so do a new sort order, filter or search.
+Only a mouse or a pen points: on a touch screen the changes wait while a
+finger is down and its scroll still runs, momentum included, and apply 1.5 s
+after the scroll settles, without Show now. Whenever changes apply, the first
+rows on screen keep their place, on phones too (Safari does not keep them in
+place by itself). On phones the footer folds away over the page while reading
+down; the page itself never changes size while it scrolls.
 A done or ended session keeps its place among its siblings and its end state
 for 10 minutes, then moves to Ended at the next allowed moment. Line 2 says how
 and when it ended and when it moves: "Finished 11:57 · moves to Ended at 12:07"
