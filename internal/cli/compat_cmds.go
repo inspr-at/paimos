@@ -189,11 +189,13 @@ func (rt *runtime) cmdSessionStart() *Command {
 	var project, agent, format, bundle string
 	var ruleOpts rulesOptions
 	var receiveOpts rulesReceiveOptions
+	var native nativeSessionOptions
 	return &Command{
 		Name:  "start",
 		Short: "Mint an attribution id, preview rules, or explicitly receive rules for a registered session",
 		Use:   "session start --project KEY --agent NAME",
 		addFlags: func(fs *flagSet) {
+			native.flags(fs)
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&agent, "agent", 0, "agent name (required)")
 			fs.string(&format, "format", 0, "env (default) or json")
@@ -202,6 +204,18 @@ func (rt *runtime) cmdSessionStart() *Command {
 			receiveOpts.flags(fs)
 		},
 		run: func(args []string) error {
+			if native.Profile != "" {
+				if native.Profile != "native" {
+					return usagef("--profile must be native")
+				}
+				if len(args) != 0 || agent != "" || format != "" || bundle != "" || ruleOpts.Preview || receiveOpts.used() {
+					return usagef("native start is separate from attribution and rules flags")
+				}
+				return rt.startNativeSession(project, native)
+			}
+			if native.used() {
+				return usagef("native session flags require --profile native")
+			}
 			if strings.TrimSpace(project) == "" {
 				return usagef("--project is required")
 			}
