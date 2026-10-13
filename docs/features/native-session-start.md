@@ -231,3 +231,18 @@ live qualification remain with I1 and the coordinator.
   and `./internal/reportercontract`. After the exact percent retry correction,
   final `./internal/agentaccounts` and `./internal/nativesessions/store` runs at
   `2e5580254` both pass. No assertion was skipped or weakened.
+- PASS merge verification: latest main `06929d1a4` is merged in `f6bac1456`.
+  The installed registry driver refused the DSAR merge; resolving from main's
+  inventory and reapplying the three native entries preserves its
+  `check_suite_id` classification. Tier manifests remain canonical with no
+  conflict markers. Guarded remote store, DSAR and reportercontract tests all
+  pass again on this merged HEAD.
+- PASS final static: guarded `ci-static-locked.sh --merge-main` on `f6bac1456`
+  exits 0 with all 42 checks passing and zero optional skips. This includes
+  migration policy/tests, ownership audit, tier/shard inventories and tests,
+  OpenAPI checks, web typecheck and lint. No UI/browser spec is applicable.
+
+All blocking findings are fixed. The source/test changes and this evidence are
+committed locally. No origin push, deployment, live cutover, model CLI call or
+review gate was performed; full hosted CI and the cross-family gate remain
+coordinator-owned.
