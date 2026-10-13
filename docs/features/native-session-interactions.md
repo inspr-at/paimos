@@ -252,3 +252,47 @@ Both full guarded remote `node scripts/ci-static.mjs --merge-main` runs exited
 on `d7ecc72fe`. A final fetch confirmed `154a4a30f` remains the newest main and
 is included in this branch. The final commit records validation only. No
 origin push, deployment, review gate or model CLI call was performed.
+
+Merge-main refresh (2026-10-13, PR #634, gated head `6ebe09678`): the
+coordinator's normal merge already included main `b7f93914f`; the requested
+merge initially reported "Already up to date." Every tracked tree entry was
+checked against both parents, including all eleven incoming files and fifteen
+reviewed branch files. The shared Go manifest retained the exact duplicate-free
+union; the web manifests and migration 1348 were unchanged.
+
+Main advanced during validation. Normal merge `0ff37c0cf` incorporates
+`48785629c`, resolving the shared fence inventory conflict by retaining both
+`agentaccounts/native_session.go` and `nativesessions/interaction/store.go`
+in sorted order. All seventeen incoming files and fifteen branch files were
+checked, with both shared inventories retaining their exact unions. Normal
+merge `085f1f669` then incorporates quota main `b85d6d37b`: all eight incoming
+files match main, every nonshared branch file is preserved, and both tier
+manifests retain the exact duplicate-free union, including post-gate identities.
+All 5,843 tracked entries were checked. This round authors no feature change,
+new test identity, permission, contract, version or R0 registry addition.
+
+Guarded remote validation passed all six initial Go packages at `6ebe09678`,
+including ACP, Pi, both interaction packages, pairing and DSAR. At
+`085f1f669`, all twenty-one selected behavior and inventory tests across quota,
+admission, dispatch, accounts, pairing, CLI and both interaction packages passed.
+Both runs passed all forty-three migration-policy tests without skips and the
+migration guard against published `v261013103112.0.0`, with 350 unique numbers.
+Migration 1348 remains unique and reserved for this branch.
+
+The full guarded remote `node scripts/ci-static.mjs --merge-main` run on
+`085f1f669` exited 0: all forty-two checks passed and zero optional checks
+were skipped, including Go/web tier inventories, shared registry checks,
+ownership, typecheck, lint, migration policy and OpenAPI checks. Earlier
+capacity refusals returned 3 and were never counted as passing. The initial
+static merge preview found newly advanced main's shared fence conflict; the
+normal merge resolved that conflict before the passing run. A final fetch
+confirmed `b85d6d37b` is the newest main and is included in this branch.
+
+Four guarded attempts to refresh the interaction browser spec were refused
+by shared remote capacity (exit 3). The entire web tree, including the component,
+spec and web manifests, is byte-for-byte identical to gated head `6ebe09678`
+and the previous passing browser run at `d7ecc72fe`. Existing seven-case browser
+evidence is retained; fresh browser execution remains with authoritative PR CI.
+No local browser fallback or host-control change was used. The final commit
+records validation only. No origin push, deployment, review gate or model CLI
+call was performed; the coordinator owns the remaining review and release controls.
