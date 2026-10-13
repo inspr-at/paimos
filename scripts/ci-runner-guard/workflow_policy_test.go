@@ -621,7 +621,7 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 				if event == "pull_request" && lane == "spec-only" {
 					want = "[1]"
 				} else if mode == "essential" && event == "pull_request" {
-					want = "[1, 2]"
+					want = "[1, 2, 3, 4]"
 				}
 				if got != want {
 					t.Fatalf("%s/%s/%s matrix = %s, want %s", lane, event, mode, got, want)

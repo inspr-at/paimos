@@ -549,194 +549,212 @@ test('AEON-1212: pinned and last-used tabs belong to the person; queue links for
   await expect(panel(page).locator('.why')).toContainText('Next up')
 })
 
+// AEON-1212 / #592 originally put all five risks under one 30-second budget.
+// Each scenario retains its evidence and control guards with a fresh fixture.
 for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as const) {
-  test(`AEON-1212 fix3: ${width} ${look} G3 results and G6 admission evidence stay honest and the owned worker row stays put`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: 1000 })
-    await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
-    const errors = watchErrors(page), world = await setup(page)
-    // Choose Focus explicitly: its wide details pane exposes the worker's
-    // execution columns, independently of the default Overview split.
-    if (width === 1440) world.data.preferences['agents:layout'] = { handle: 320 }
-    const shot = async (state: string, captureWidth = width) => {
-      await checkPanel(page, width === 400)
-      await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${captureWidth}-${look}.png`) })
-    }
-    await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
-    await expect(question(page)).toContainText('Asks you')
-    await expect(panel(page).locator('.pt-sub')).toContainText('Opus 5.5 · high')
-    const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist') }
-    world.hold()
-    try {
-      await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
-        { name: 'pending', run: async () => {
-          await expectStableControls({ controls: { options: question(page).locator('.question-options'), pressed: question(page).locator('.question-options button').first(), other: question(page).locator('.question-options button').last() }, interactions: [
-            { name: 'choose the real server option', run: async () => {
-              await question(page).getByRole('button', { name: 'Yes, merge now', exact: true }).click()
-              await world.started()
-              await expect(question(page).getByRole('button', { name: 'Recording…', exact: true })).toBeDisabled()
-            } },
-          ] })
-          await shot('g3-pending')
-        } },
-        { name: 'recorded', run: async () => {
-          world.release()
-          await expect(question(page)).toContainText('Answered: Yes, merge now')
-          await expect(question(page)).toContainText('by you')
-          await expect(question(page).getByRole('button')).toHaveCount(0)
-          await shot('g3-recorded')
-        } },
-      ] })
-    } finally { world.release() }
-    world.state.question = makeQuestion()
-    await page.reload()
-    await expect(question(page).getByRole('button', { name: 'Not now', exact: true })).toBeVisible()
-    world.state.fail = true
-    await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
-      { name: 'failed answer', run: async () => {
-        await question(page).getByRole('button', { name: 'Not now', exact: true }).click()
-        await expect(question(page)).toContainText('Not recorded. Try again')
-        await expect(question(page).getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
-        await shot('g3-failed')
-      } },
-      { name: 'decided elsewhere', run: async () => {
-        world.state.question = { ...world.state.question, revision: 2, state: 'answered', answer: { id: 'desk-answer', revision: 2, option_id: 'later', answer: 'Not now', outcome: 'once', decided_by: 'another-person', created_at: NOW, deliver_after: NOW } }
-        await page.evaluate(async () => { await (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().refresh() })
-        await expect(question(page)).toContainText('Answered on the Desk: Not now')
-        await expect(question(page).getByRole('button')).toHaveCount(0)
-        await shot('g3-decided-elsewhere')
-      } },
-    ] })
-    world.state.question = makeQuestion(); world.state.denied = true
-    await page.reload()
-    await expect(question(page)).toContainText('Waits for a project admin')
-    await expect(question(page).getByRole('button')).toHaveCount(0)
-    await expect(question(page).getByRole('link', { name: 'Open on the Desk' })).toHaveAttribute('href', `/decision-desk?item=q:${Q}`)
-    expect(world.state.calls).toHaveLength(2)
-    await shot('g3-no-permission')
-
-    world.state.denied = false
-    await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
-    const caption = panel(page).locator('.admission-caption')
-    const checks = panel(page).locator('[data-check]')
-    const admissionShot = async (state: string) => {
-      await panel(page).locator('#lp-checks').scrollIntoViewIfNeeded()
-      await shot(`g6-${state}`)
-    }
-    await expect(caption).toContainText('All passed at the last start')
-    await expect(checks).toHaveCount(4)
-    await admissionShot('all-passed')
-    const row = panel(page).locator('.worker').first()
-    await expect(row.locator('.worker-name')).toHaveText('PHAROS-11 · Connect Hetzner Cloud for managed provisioning')
-    await expect(row.locator('.worker-name')).not.toContainText('imac0')
-    await expect(row.locator('.worker-execution')).toContainText('GPT-6 Sol · medium')
-    await expect(row.locator('.worker-execution')).toContainText('Codex')
-    await expect(row.locator('.worker-execution')).toContainText('ChatGPT Pro')
-    await expect(row.locator('.worker-computer')).toHaveText('imac0')
-    await expect(row.locator('.worker-beat')).not.toHaveText('Not reported')
-    await expect(row.locator('.listening-label')).toHaveCount(0)
-    await expect(panel(page).locator('.worker-columns [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat'])
-    // The worker's metadata must remain visible in the wide Focus pane.
-    if (width === 1440) {
-      await page.setViewportSize({ width: 1800, height: 1000 })
-      await expect(row.locator('.worker-execution')).toBeVisible()
-    }
-    await row.scrollIntoViewIfNeeded()
-    await expectStableControls({ controls: { ...controls, row }, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
-      { name: 'hover the owned worker row', run: async () => { await row.hover(); await expect(row).toBeVisible() } },
-    ] })
-    await shot('worker-row', width === 1440 ? 1800 : width)
-    if (width === 1440) await page.setViewportSize({ width, height: 1000 })
-    await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
-      { name: 'held history', run: async () => {
-        world.state.admission = [{ ...makeAdmission(), reason_codes: ['dial_full'] }]
-        await page.reload()
-        await expect(caption).toContainText('1 held the last start')
-        await expect(checks).toHaveCount(4)
-        await expect(checks.first()).toHaveText('Dial held it: the dial was full')
-        await expect(checks.first()).toHaveAttribute('data-tip', 'dial_full')
-        await admissionShot('held')
-      } },
-      { name: 'held history with an unknown reason', run: async () => {
-        world.state.admission = [{ ...makeAdmission(), outcome: 'wait', reason_codes: ['future_check'], request: { ...makeAdmission().request, outcome: 'wait', reason_codes: ['future_check'], gates: [{ kind: 'dial', state: 'full' }] } }]
-        await page.reload()
-        await expect(caption).toContainText('1 held the last start')
-        await expect(checks.first()).toHaveText('Dial held it: a check said no')
-        await expect(checks.first()).toHaveAttribute('data-tip', 'future_check')
-        await expect(panel(page).locator('.lead-content')).not.toContainText('future_check')
-        await checks.first().focus()
-        await expect(page.locator('.tooltip')).toHaveText('future_check')
-        await checks.first().blur()
-        await panel(page).locator('.pane-bar').hover()
-        await admissionShot('unknown-reason')
-      } },
-      { name: 'no start yet', run: async () => {
-        world.state.admission = []
-        await page.reload()
-        await expect(caption).toHaveText('No start yet')
-        await expect(checks).toHaveCount(0)
-        await expect(panel(page)).toContainText('The checks run when this lead starts its next worker.')
-        await admissionShot('no-start-yet')
-      } },
-      { name: 'unreadable history', run: async () => {
-        world.state.historyUnreadable = true
-        await page.reload()
-        await expect(caption).toHaveText("Couldn't read the last start")
-        await expect(checks).toHaveCount(0)
-        await expect(panel(page).locator('[aria-labelledby="lp-checks"]').getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
-        const failure = panel(page).locator('[data-read-fail="history"]')
-        await expect(failure).toContainText('Recent, Gate and Merged are unknown.')
-        await expect(panel(page)).not.toContainText('The admission history is temporarily unavailable.')
-        await admissionShot('unreadable')
-        world.state.historyUnreadable = false
-        await failure.getByRole('button', { name: 'Try again', exact: true }).click()
-        await expect(failure).toHaveCount(0)
-        await expect(caption).toHaveText('No start yet')
-      } },
-      { name: 'unreadable queue retries without moving its controls', run: async () => {
-        world.state.queueUnreadable = true
-        await page.reload()
-        const failure = panel(page).locator('[data-read-fail="queue"]')
-        await expect(failure).toContainText('The queue can’t be read right now, so Next up is unknown.')
-        await expect(panel(page)).not.toContainText('queue store unavailable')
-        const again = failure.getByRole('button', { name: 'Try again', exact: true })
-        await again.scrollIntoViewIfNeeded()
-        let release!: () => void, arrived!: () => void
-        const held = new Promise<void>(resolve => { release = resolve })
-        const started = new Promise<void>(resolve => { arrived = resolve })
-        await page.route(url => url.pathname === '/api/queue' && url.searchParams.get('project_id') === 'p-pharos', async route => {
-          arrived(); await held; return route.fallback()
-        })
-        world.state.queueUnreadable = false
+  for (const scenario of ['question results', 'owned worker', 'admission states', 'unreadable history', 'unreadable queue'] as const) {
+    test(`AEON-1212 fix3: ${width} ${look} ${scenario} stay honest and controls stay put`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
+      const errors = watchErrors(page), world = await setup(page)
+      if (scenario === 'unreadable history') world.state.admission = []
+      // Choose Focus explicitly: its wide details pane exposes the worker's
+      // execution columns, independently of the default Overview split.
+      if (width === 1440) world.data.preferences['agents:layout'] = { handle: 320 }
+      const shot = async (state: string, captureWidth = width) => {
+        await checkPanel(page, width === 400)
+        await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${captureWidth}-${look}.png`) })
+      }
+      const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist') }
+      if (scenario === 'question results') {
+        await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
+        await expect(question(page)).toContainText('Asks you')
+        await expect(panel(page).locator('.pt-sub')).toContainText('Opus 5.5 · high')
+        world.hold()
         try {
-          await expectStableControls({ controls: { ...controls, again }, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
-            { name: 'retry the held queue read', run: async () => {
-              await again.click(); await started
-              await expect(again).toHaveAttribute('aria-busy', 'true')
-              await expect(again).toHaveAttribute('aria-disabled', 'true')
-              await expect(again).toHaveText('Try again')
+          await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
+            { name: 'pending', run: async () => {
+              await expectStableControls({ controls: { options: question(page).locator('.question-options'), pressed: question(page).locator('.question-options button').first(), other: question(page).locator('.question-options button').last() }, interactions: [
+                { name: 'choose the real server option', run: async () => {
+                  await question(page).getByRole('button', { name: 'Yes, merge now', exact: true }).click()
+                  await world.started()
+                  await expect(question(page).getByRole('button', { name: 'Recording…', exact: true })).toBeDisabled()
+                } },
+              ] })
+              await shot('g3-pending')
+            } },
+            { name: 'recorded', run: async () => {
+              world.release()
+              await expect(question(page)).toContainText('Answered: Yes, merge now')
+              await expect(question(page)).toContainText('by you')
+              await expect(question(page).getByRole('button')).toHaveCount(0)
+              await shot('g3-recorded')
             } },
           ] })
-        } finally { release() }
-        await expect(failure).toHaveCount(0)
-        await expect(panel(page).locator('#next-up .wk')).not.toHaveCount(0)
-      } },
-      { name: 'stale history', run: async () => {
-        world.state.historyUnreadable = false
-        world.state.admission = [{ ...makeAdmission(), recorded_at: '2026-10-04T09:02:00Z' }]
+        } finally { world.release() }
+        world.state.question = makeQuestion()
         await page.reload()
-        await expect(caption).toContainText('may be out of date')
-        await expect(checks).toHaveCount(4)
-        await admissionShot('stale')
-      } },
-    ] })
-    if (width === 1440) {
-      await panel(page).getByRole('button', { name: 'Close session details' }).click()
-      await page.locator('.sessions .row[data-row^="s:"] .agent-link').last().click()
-      await expect(tab(page, 'Overview')).toHaveAttribute('aria-selected', 'true')
-      await page.screenshot({ path: info.outputPath(`AEON-1212/pick-last-row-${width}-${look}.png`) })
-    }
-    expect(errors).toEqual([])
-  })
+        await expect(question(page).getByRole('button', { name: 'Not now', exact: true })).toBeVisible()
+        world.state.fail = true
+        await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
+          { name: 'failed answer', run: async () => {
+            await question(page).getByRole('button', { name: 'Not now', exact: true }).click()
+            await expect(question(page)).toContainText('Not recorded. Try again')
+            await expect(question(page).getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
+            await shot('g3-failed')
+          } },
+          { name: 'decided elsewhere', run: async () => {
+            world.state.question = { ...world.state.question, revision: 2, state: 'answered', answer: { id: 'desk-answer', revision: 2, option_id: 'later', answer: 'Not now', outcome: 'once', decided_by: 'another-person', created_at: NOW, deliver_after: NOW } }
+            await page.evaluate(async () => { await (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().refresh() })
+            await expect(question(page)).toContainText('Answered on the Desk: Not now')
+            await expect(question(page).getByRole('button')).toHaveCount(0)
+            await shot('g3-decided-elsewhere')
+          } },
+        ] })
+        world.state.question = makeQuestion(); world.state.denied = true
+        await page.reload()
+        await expect(question(page)).toContainText('Waits for a project admin')
+        await expect(question(page).getByRole('button')).toHaveCount(0)
+        await expect(question(page).getByRole('link', { name: 'Open on the Desk' })).toHaveAttribute('href', `/decision-desk?item=q:${Q}`)
+        expect(world.state.calls).toHaveLength(2)
+        await shot('g3-no-permission')
+
+      } else {
+        await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
+        const caption = panel(page).locator('.admission-caption')
+        const checks = panel(page).locator('[data-check]')
+        await expect(tab(page, 'Lead')).toHaveAttribute('aria-selected', 'true')
+        await expect(caption).toContainText(scenario === 'unreadable history' ? 'No start yet' : 'All passed at the last start')
+        const admissionShot = async (state: string) => {
+          await panel(page).locator('#lp-checks').scrollIntoViewIfNeeded()
+          await shot(`g6-${state}`)
+        }
+        if (scenario === 'owned worker') {
+          await expect(caption).toContainText('All passed at the last start')
+          await expect(checks).toHaveCount(4)
+          await admissionShot('all-passed')
+          const row = panel(page).locator('.worker').first()
+          await expect(row.locator('.worker-name')).toHaveText('PHAROS-11 · Connect Hetzner Cloud for managed provisioning')
+          await expect(row.locator('.worker-name')).not.toContainText('imac0')
+          await expect(row.locator('.worker-execution')).toContainText('GPT-6 Sol · medium')
+          await expect(row.locator('.worker-execution')).toContainText('Codex')
+          await expect(row.locator('.worker-execution')).toContainText('ChatGPT Pro')
+          await expect(row.locator('.worker-computer')).toHaveText('imac0')
+          await expect(row.locator('.worker-beat')).not.toHaveText('Not reported')
+          await expect(row.locator('.listening-label')).toHaveCount(0)
+          await expect(panel(page).locator('.worker-columns [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat'])
+          // The worker's metadata must remain visible in the wide Focus pane.
+          if (width === 1440) {
+            await page.setViewportSize({ width: 1800, height: 1000 })
+            await expect(row.locator('.worker-execution')).toBeVisible()
+          }
+          await row.scrollIntoViewIfNeeded()
+          await expectStableControls({ controls: { ...controls, row }, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+            { name: 'hover the owned worker row', run: async () => { await row.hover(); await expect(row).toBeVisible() } },
+          ] })
+          await shot('worker-row', width === 1440 ? 1800 : width)
+          if (width === 1440) await page.setViewportSize({ width, height: 1000 })
+          if (width === 1440) {
+            await panel(page).getByRole('button', { name: 'Close session details' }).click()
+            await page.locator('.sessions .row[data-row^="s:"] .agent-link').last().click()
+            await expect(tab(page, 'Overview')).toHaveAttribute('aria-selected', 'true')
+            await page.screenshot({ path: info.outputPath(`AEON-1212/pick-last-row-${width}-${look}.png`) })
+          }
+        } else if (scenario === 'admission states') {
+          await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+            { name: 'held history', run: async () => {
+              world.state.admission = [{ ...makeAdmission(), reason_codes: ['dial_full'] }]
+              await page.reload()
+              await expect(caption).toContainText('1 held the last start')
+              await expect(checks).toHaveCount(4)
+              await expect(checks.first()).toHaveText('Dial held it: the dial was full')
+              await expect(checks.first()).toHaveAttribute('data-tip', 'dial_full')
+              await admissionShot('held')
+            } },
+            { name: 'held history with an unknown reason', run: async () => {
+              world.state.admission = [{ ...makeAdmission(), outcome: 'wait', reason_codes: ['future_check'], request: { ...makeAdmission().request, outcome: 'wait', reason_codes: ['future_check'], gates: [{ kind: 'dial', state: 'full' }] } }]
+              await page.reload()
+              await expect(caption).toContainText('1 held the last start')
+              await expect(checks.first()).toHaveText('Dial held it: a check said no')
+              await expect(checks.first()).toHaveAttribute('data-tip', 'future_check')
+              await expect(panel(page).locator('.lead-content')).not.toContainText('future_check')
+              await checks.first().focus()
+              await expect(page.locator('.tooltip')).toHaveText('future_check')
+              await checks.first().blur()
+              await panel(page).locator('.pane-bar').hover()
+              await admissionShot('unknown-reason')
+            } },
+            { name: 'no start yet', run: async () => {
+              world.state.admission = []
+              await page.reload()
+              await expect(caption).toHaveText('No start yet')
+              await expect(checks).toHaveCount(0)
+              await expect(panel(page)).toContainText('The checks run when this lead starts its next worker.')
+              await admissionShot('no-start-yet')
+            } },
+            { name: 'stale history', run: async () => {
+              world.state.historyUnreadable = false
+              world.state.admission = [{ ...makeAdmission(), recorded_at: '2026-10-04T09:02:00Z' }]
+              await page.reload()
+              await expect(caption).toContainText('may be out of date')
+              await expect(checks).toHaveCount(4)
+              await admissionShot('stale')
+            } },
+          ] })
+        } else if (scenario === 'unreadable history') {
+          await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+            { name: 'unreadable history', run: async () => {
+              world.state.historyUnreadable = true
+              await page.reload()
+              await expect(caption).toHaveText("Couldn't read the last start")
+              await expect(checks).toHaveCount(0)
+              await expect(panel(page).locator('[aria-labelledby="lp-checks"]').getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+              const failure = panel(page).locator('[data-read-fail="history"]')
+              await expect(failure).toContainText('Recent, Gate and Merged are unknown.')
+              await expect(panel(page)).not.toContainText('The admission history is temporarily unavailable.')
+              await admissionShot('unreadable')
+              world.state.historyUnreadable = false
+              await failure.getByRole('button', { name: 'Try again', exact: true }).click()
+              await expect(failure).toHaveCount(0)
+              await expect(caption).toHaveText('No start yet')
+            } },
+          ] })
+        } else {
+          await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+            { name: 'unreadable queue retries without moving its controls', run: async () => {
+              world.state.queueUnreadable = true
+              await page.reload()
+              const failure = panel(page).locator('[data-read-fail="queue"]')
+              await expect(failure).toContainText('The queue can’t be read right now, so Next up is unknown.')
+              await expect(panel(page)).not.toContainText('queue store unavailable')
+              const again = failure.getByRole('button', { name: 'Try again', exact: true })
+              await again.scrollIntoViewIfNeeded()
+              let release!: () => void, arrived!: () => void
+              const held = new Promise<void>(resolve => { release = resolve })
+              const started = new Promise<void>(resolve => { arrived = resolve })
+              await page.route(url => url.pathname === '/api/queue' && url.searchParams.get('project_id') === 'p-pharos', async route => {
+                arrived(); await held; return route.fallback()
+              })
+              world.state.queueUnreadable = false
+              try {
+                await expectStableControls({ controls: { ...controls, again }, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+                  { name: 'retry the held queue read', run: async () => {
+                    await again.click(); await started
+                    await expect(again).toHaveAttribute('aria-busy', 'true')
+                    await expect(again).toHaveAttribute('aria-disabled', 'true')
+                    await expect(again).toHaveText('Try again')
+                  } },
+                ] })
+              } finally { release() }
+              await expect(failure).toHaveCount(0)
+              await expect(panel(page).locator('#next-up .wk')).not.toHaveCount(0)
+            } },
+          ] })
+        }
+      }
+      expect(errors).toEqual([])
+    })
+  }
 }
 
 test('AEON-1212 approved check.mjs: the round-7 design passes and supplies the reference screenshots', async ({}, info) => {

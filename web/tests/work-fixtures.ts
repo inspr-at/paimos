@@ -301,21 +301,34 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     // Scenarios that install an event-driven stream keep their own transport,
     // regardless of Playwright's unspecified init-script order.
     if (window.EventSource.name !== 'EventSource') return
+    const streams: QuietStream[] = []
+    let automaticOpen = true
     class QuietStream extends EventTarget {
       onopen: ((event: Event) => void) | null = null
-      private closed = false
-      private timer = setInterval(() => this.dispatchEvent(new Event('stream.ping')), 5_000)
+      readonly id = streams.length + 1
+      closed = false
+      opened = false
+      private timer = setInterval(() => { if (this.opened && !this.closed) this.dispatchEvent(new Event('stream.ping')) }, 5_000)
       constructor() {
         super()
+        streams.push(this)
         queueMicrotask(() => {
-          if (this.closed) return
-          this.onopen?.(new Event('open'))
-          this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 0, resumed: false }) }))
+          if (automaticOpen) this.open()
         })
+      }
+      open() {
+        if (this.closed || this.opened) return
+        this.opened = true
+        this.onopen?.(new Event('open'))
+        this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 0, resumed: false }) }))
       }
       close() { this.closed = true; clearInterval(this.timer) }
     }
-    Object.assign(window, { EventSource: QuietStream })
+    Object.assign(window, { EventSource: QuietStream, fixtureQuietStreams: {
+      holdOpen() { automaticOpen = false },
+      open() { automaticOpen = true; streams.forEach(stream => stream.open()) },
+      active() { return streams.filter(stream => !stream.closed).map(stream => ({ id: stream.id, opened: stream.opened })) },
+    } })
   })
   const calls: Call[] = []
   const defaultTheme = { id: 'fixture-default-theme', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '', values: structuredClone(PORCELAIN) }

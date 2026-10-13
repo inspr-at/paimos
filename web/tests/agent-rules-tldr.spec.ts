@@ -134,7 +134,8 @@ test('people who may not write see explanations without edit controls', async ({
 
 test('the preview is an explanation ↔ exact rule table with search, harness filter, layer budget and the exact file', async ({ page }) => {
   await setup(page, { budget: { max_bytes: 12000, layer_max_bytes: { company: 8000 } } })
-  await page.getByRole('button', { name: 'Preview' }).click()
+  // AEON-1214 / #564 also added a Desk Preview to the global header.
+  await page.getByRole('region', { name: 'Agent rules', exact: true }).getByRole('button', { name: 'Preview', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'What agents receive' })
   const table = dialog.getByRole('table', { name: 'Explanation and exact rule' })
   await expect(table.getByRole('columnheader')).toHaveText(['Explanation', 'Exact rule'])

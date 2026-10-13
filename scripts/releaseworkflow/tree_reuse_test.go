@@ -605,6 +605,16 @@ func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 					v = strings.Replace(v, guard, "needs.tier-plan.outputs.layout != 'static'", 1)
 				}
 				if key == "shard" {
+					// AEON-1322: essential PRs run four web shards. Assert that
+					// width, then project the historical two-shard pin.
+					if id == "web-shard" {
+						const widened = "needs.tier-plan.outputs.mode == 'essential' && '[1, 2, 3, 4]'"
+						const historical = "needs.tier-plan.outputs.mode == 'essential' && '[1, 2]'"
+						if !strings.Contains(v, widened) {
+							t.Fatal("essential PR web shards must be four rows")
+						}
+						v = strings.Replace(v, widened, historical, 1)
+					}
 					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential'`, 1)
 					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only'", "needs.tier-plan.outputs.lane == 'spec-only'", 1)
 				}

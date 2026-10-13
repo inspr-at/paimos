@@ -22,7 +22,8 @@ const namedTarget = {
 }
 const ahead = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
-const queue = (page: Page) => page.getByRole('region', { name: 'Needs you' })
+// AEON-569 / #458 and AEON-1209 / #586 moved person decisions into the Desk.
+const request = (page: Page) => page.getByRole('region', { name: 'Permission request', exact: true })
 
 async function openAgents(page: Page) {
   await mockWork(page, fixtures(), { admin: true })
@@ -45,38 +46,31 @@ async function openAgents(page: Page) {
       target: { ...namedTarget, hosts: ['app-02'], environment: 'staging' }, target_digest_sha256: otherDigest,
     },
   )
-  await mockAgents(page, data)
-  await page.goto('/agents')
-  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  await expect(queue(page).getByText('app-01 · production', { exact: true }).first()).toBeVisible()
-  return data
+  const calls = await mockAgents(page, data)
+  await page.goto('/decision-desk?item=a:a9000000-0000-4000-8000-000000000091')
+  await expect(request(page).getByText('app-01 · production', { exact: true })).toBeVisible()
+  return { data, calls }
 }
 
-
-function namedJourney() {
-  const world = journeyWorld('deploy')
-  Object.assign(world.approvals[0], { target: namedTarget, target_digest_sha256: digest })
-  Object.assign(world.journey.stages.find(stage => stage.key === 'deploy')!, { target: namedTarget, target_digest_sha256: digest })
-  return world
-}
 
 test('Needs you names destinations and keeps target-less approvals usable', async ({ page }) => {
-  await openAgents(page)
-  const named = queue(page).locator('.item', { hasText: 'app-01' })
+  const { data, calls } = await openAgents(page)
+  const named = request(page)
   await expect(named.getByRole('region', { name: /Deploy target: app-01/ })).toContainText(namedTarget.change)
   await expect(named.getByText('named by the agent', { exact: true })).toBeVisible()
-  await expect(named.getByRole('region')).not.toContainText('imac0')
-  const absent = queue(page).locator('.item', { hasText: 'Deploy wherever the session host is' })
-  await expect(absent.getByRole('region', { name: 'Target not named' })).toBeVisible()
-  await absent.getByRole('button', { name: 'Approve', exact: true }).click()
-  await expect(absent.getByLabel('Reason (optional)')).toBeVisible()
-  await absent.getByRole('button', { name: 'Approve permission', exact: true }).click()
-  await expect(absent).toHaveCount(0)
-  await queue(page).getByRole('button', { name: /^Decided/ }).click()
-  const historical = queue(page).locator('.past', { hasText: 'app-02' })
-  await expect(historical).toContainText('staging')
-  await expect(historical.locator('.past-outcome')).toHaveText('Approved')
+  await expect(named).not.toContainText('imac0')
+  await page.getByTestId('desk-close').click()
+  await page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000092').click()
+  await expect(request(page).getByRole('region', { name: 'Target not named' })).toBeVisible()
+  await page.getByTestId('choice-0').click()
+  await expect(page.getByRole('textbox', { name: 'Reason', exact: true })).toBeEnabled()
+  await page.getByTestId('desk-decide').click()
+  await expect.poll(() => data.approvals.find(item => item.id.endsWith('92'))?.decision).toBe('approved')
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/decision'))).toMatchObject([{ path: '/api/approvals/a9000000-0000-4000-8000-000000000092/decision', body: { decision: 'approved' } }])
+  await page.getByTestId('desk-close').click()
+  await expect(page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000092')).toHaveCount(0)
+  await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000093').click()
+  await expect(request(page)).toContainText('app-02 · staging')
+  await expect(page.getByTestId('desk-body')).toContainText('Approved')
 })
-
-for (const width of [390, 1600]) for (const named of [true, false]) {
-}
