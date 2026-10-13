@@ -69,6 +69,18 @@ caches; its failure fails the required aggregates. A queue run that itself
 reused PR evidence is **not** full execution evidence for main: main runs its
 normal fallback suite. There is no transitive reuse or PR-to-main shortcut.
 
+Main pushes tolerate the Actions run listing lag by retrying discovery after
+15, 30, 45 and 60 seconds (at most five lookups and 150 seconds of waiting).
+Each listing and its candidate verification share a fresh 10-second deadline;
+API time counts toward a 180-second overall budget. A retry starts only when
+its wait and full lookup deadline still fit that budget. Verified proof stops
+lookup immediately. Rejected completed successful evidence retains full CI;
+an unavailable or malformed run listing also stops retries. Exhausted
+discovery reports `after N lookups over T s`, preserving
+any search-truncation notice. The existing five-minute `tree-reuse` job timeout
+leaves two minutes beyond the lookup budget for checkout and job overhead.
+The merge-group and PR proof paths keep their existing deadlines and behavior.
+
 Merge-group reuse is separately opt-in: only `CI_MG_REUSE=on` enables lookup;
 unset, `off` or any other value preserves the existing queue execution.
 The queue may reuse one successful **full** same-repository `pull_request` run
