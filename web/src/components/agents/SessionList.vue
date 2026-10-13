@@ -947,7 +947,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         </div>
         <span class="grow" />
         <!-- Rows that wait to enter, leave or move while you point here (AEON-1211); otherwise how fresh the list is. -->
-        <SessionsHeld v-if="loaded && state === 'ready'" :pending="personHolds ? hold.pending.value : 0":updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" />
+        <SessionsHeld v-if="loaded && state === 'ready'" :pending="personHolds ? hold.pending.value : 0" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" />
         <span v-if="loaded && state === 'ready'" class="head-tools">
           <button
             v-if="stale.length" type="button" class="btn sm ghost quiet-btn" :class="{ 'clear-stale-off': showRemoved }" :disabled="showRemoved || removal.busy.value" :aria-hidden="showRemoved || undefined"
