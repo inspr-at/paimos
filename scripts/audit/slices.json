@@ -80,6 +80,9 @@
         "internal/db/acquire_metrics.go",
         "internal/db/acquire_metrics_test.go",
         "internal/db/cancel_pool_test.go",
+        "internal/db/backstops.go",
+        "internal/db/backstops_test.go",
+        "internal/db/migrations/1344_work_kind_counts.sql",
         "cmd/**",
         "embed.go",
         "internal/phoneapprovals/**",
@@ -110,6 +113,8 @@
       "title": "Agent runtime, harnesses and runs",
       "paths": [
         "internal/agentd/**",
+        "internal/nativecontract/**",
+        "internal/nativesessions/**",
         "internal/agentd/routine_budget.go",
         "internal/agentd/routine_budget_test.go",
         "internal/agentsetup/**",
@@ -137,6 +142,7 @@
         "internal/modelprovider/**",
         "internal/openrouter/**",
         "internal/modelregistry/**",
+        "internal/modelregistry/work_kind_counts_test.go",
         "internal/modelreport/**",
         "internal/modelprefs/**",
         "internal/crossreview/**",
@@ -287,6 +293,7 @@
         "internal/quotepdf/**",
         "internal/deliveryvote/**",
         "internal/workorders/**",
+        "internal/workorders/build_guard.go",
         "internal/nodes/project_lookup.go",
         "internal/nodes/project_lookup_test.go"
       ]

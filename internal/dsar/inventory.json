@@ -760,6 +760,8 @@
       "columns": {
         "agent_principal_id": "personal",
         "inbox_binding_error": "metadata",
+        "parallel_reason": "personal",
+        "started_by_principal_id": "personal",
         "tenant_id": "metadata"
       },
       "locator": {

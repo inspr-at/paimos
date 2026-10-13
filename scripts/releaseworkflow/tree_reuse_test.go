@@ -443,6 +443,7 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	want := cloneStep(t, before)
 	want["steps"] = wantSteps
 	setup = cloneStep(t, setup)
+	normalizeWebReproducibility(t, setup)
 	normalizeWebCatalogueOverlap(t, jobs, setup)
 	if condition, _ := setup["if"].(string); !strings.Contains(condition, " && needs.tree-reuse.outputs.reuse != 'pull_request'") {
 		t.Fatal("missing PR tree skip")
@@ -455,6 +456,47 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
 	return before
+}
+
+// AEON-1276 adds a blocking rebuild proof and failure evidence to runtime
+// preparation. Check both steps exactly before projecting onto the historical
+// setup; every older check and the immutable job pins remain unchanged.
+func normalizeWebReproducibility(t *testing.T, setup map[string]any) {
+	t.Helper()
+	steps := reuseSteps(setup)
+	proofName := "Prove web build reproducibility"
+	evidenceName := "Preserve web reproducibility failure evidence"
+	proofAt, evidenceAt := -1, -1
+	for i, value := range steps {
+		switch treeMap(value)["name"] {
+		case proofName:
+			if proofAt != -1 {
+				t.Fatal("web reproducibility proof must run exactly once")
+			}
+			proofAt = i
+		case evidenceName:
+			if evidenceAt != -1 {
+				t.Fatal("web reproducibility evidence must be preserved exactly once")
+			}
+			evidenceAt = i
+		}
+	}
+	if proofAt < 1 || evidenceAt != proofAt+1 || evidenceAt+1 >= len(steps) || treeMap(steps[proofAt-1])["name"] != "Build web" || treeMap(steps[evidenceAt+1])["name"] != "Cache Playwright browsers" {
+		t.Fatal("web reproducibility proof and evidence must follow Build web before browser preparation")
+	}
+	wantProof := map[string]any{"name": proofName, "run": "node scripts/check-web-reproducibility.mjs"}
+	wantEvidence := map[string]any{
+		"name": evidenceName, "if": "failure()",
+		"uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+		"with": map[string]any{
+			"name": "web-reproducibility", "path": "tmp/web-reproducibility\nweb/dist\n",
+			"retention-days": 1, "if-no-files-found": "ignore",
+		},
+	}
+	if !reflect.DeepEqual(treeMap(steps[proofAt]), wantProof) || !reflect.DeepEqual(treeMap(steps[evidenceAt]), wantEvidence) {
+		t.Fatal("web reproducibility proof must remain unconditional and blocking with pinned failure evidence")
+	}
+	setup["steps"] = append(append([]any{}, steps[:proofAt]...), steps[evidenceAt+1:]...)
 }
 
 // Risk: moving native discovery off the runtime path could drop identities or

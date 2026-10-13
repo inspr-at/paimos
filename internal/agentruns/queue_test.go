@@ -1042,7 +1042,19 @@ func TestStaleQueueSessionEligibility(t *testing.T) {
 		if stopped {
 			f.addQueue(t, id, nil)
 		} else {
-			f.call(t, f.person, "POST", "/api/queue", map[string]string{"node_id": id}, 422, nil)
+			// Admission now explains the active builder before general readiness.
+			var refusal struct {
+				Code      string  `json:"code"`
+				Reason    string  `json:"reason"`
+				SessionID *string `json:"session_id"`
+			}
+			f.call(t, f.person, "POST", "/api/queue", map[string]string{"node_id": id}, 409, &refusal)
+			if refusal.Code != "build_in_flight" || refusal.Reason != "active_builder" || refusal.SessionID == nil {
+				t.Fatalf("active worker refused for the wrong reason: %+v", refusal)
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE queue_node_id=$1`, id) != 0 {
+				t.Fatal("refused active worker created queue work")
+			}
 		}
 	}
 }

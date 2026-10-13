@@ -50,6 +50,15 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				return nil
 			}
 		case "agentd":
+			switch r.Pattern {
+			case "POST /api/agentd/native-sessions/claim", "POST /api/agentd/native-sessions/receipts",
+				"POST /api/agentd/native-sessions/events", "POST /api/agentd/native-sessions/finals",
+				"GET /api/agentd/native-sessions/commands":
+				// Only the C0 daemon producer/command routes cross this ceiling.
+				// They remain disabled until exact generations, leases and actor
+				// grants are enforced by the implementation inside its write.
+				return nil
+			}
 			if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
 				return nil // Handler requires the runtime key plus the computer lifecycle proof.
 			}

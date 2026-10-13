@@ -343,6 +343,9 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if err := queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return queuePrepared{}, err
 	}
+	if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil); err != nil {
+		return queuePrepared{}, err
+	}
 	if err := escalation.CheckLaunchTx(ctx, tx, t.ID, "", "", nil); err != nil {
 		return queuePrepared{}, err
 	}
