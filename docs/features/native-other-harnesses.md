@@ -165,10 +165,10 @@ Fix round 4 validation and ownership handoff, reviewed commit `2b6cc8db2`:
   passed with no optional skips. This includes the strict Go/web tier checks,
   tier/shard self-tests, source-ownership audit, Go vet, web typecheck and lint.
 - PASS — the existing phone notification case passed through `remote-spec.sh`
-  on mbp2606; the runner selected two cases, both passed in 6.8 seconds. This
-  macOS Chromium result does not clear the hosted Linux failure below. No web
-  source or test changed; all four hosted web-unit jobs also passed on the
-  reviewed commit.
+  on the approved remote test host; the runner selected two cases, both passed
+  in 6.8 seconds. This macOS Chromium result does not clear the hosted Linux
+  failure below. No web source or test changed; all four hosted web-unit jobs
+  also passed on the reviewed commit.
 - OPEN — the supplied CI finding is `tests/phone-approvals.spec.ts:134`,
   “device notifications replace Enable with state and stable Pause in both
   themes.” [The failed Linux job](https://github.com/inspr-at/paimos/actions/runs/38405274940/job/115325946555)
