@@ -281,3 +281,53 @@ test-tier registry, contract, permission, migration or release version was
 edited. No origin push, deployment, live vendor session, model CLI or review
 gate was run. R0's three tier registrations and green authoritative CI remain
 the coordinator's next required work before merge.
+
+## CI fix round 7
+
+The complete failed-step log for `go-static` job `115133739874` at reviewed
+head `6d57938f6` identifies exactly the three unclassified Codex tests listed
+in the fix round 5 handoff. `go vet`, bootstrap drift and tier-selector
+regressions passed; `Validate every Go tier against native collection` failed
+on those missing rows. There is no provider compilation or behavior finding.
+The source-ownership fix remains effective: `release-check-run` passed in this
+CI round, as did all seven Go shards, four web unit shards, twelve browser
+shards and e2e. These shard passes do not establish selection of the
+unregistered Codex tests.
+
+Fetched `origin/main` is still `3507e3319`, already an ancestor of this branch,
+and PR #617 is mergeable. Neither reviewed head nor current main contains any
+Codex tier row. No merge is needed for this round. The remaining fix is to add
+the three exact `ESSENTIAL` rows above to `scripts/ci/go-test-tiers.json` in
+this PR, then rerun strict native Go-tier validation and authoritative CI.
+
+That manifest remains outside P5a's exclusive write set. The original brief
+requires "Write ONLY inside your exclusive_write_set" and the normative plan's
+R0 rule says "Builders send exact row/registration intents; they never
+independently rewrite these shared inventories." Fix round 7 preserves
+ownership and supplies no metadata-lane transfer. The builder therefore leaves
+the shared manifest with R0 and reports the outstanding failure explicitly.
+
+A bounded manifest-only check against immutable `6d57938f6` rejects exactly
+those three missing identities. Adding only the proposed `ESSENTIAL` rows in
+memory resolves that classification failure. The shared registry stayed
+unchanged; this diagnostic does not replace native test enumeration.
+
+The unchanged Codex package passed through `remote-test.sh` with `-count=1`
+at `6d57938f6` (0.250 s). The affected planner against `origin/main` exited 0
+with essential/full selection; the Codex package remains absent because it
+has no tier registrations. No web or browser source changed, so their scoped
+reruns are not applicable to this non-browser slice. No behavior fix was made;
+no regression test or assertion change is warranted for this metadata failure.
+
+The guarded `ci-static-locked.sh` run at `6d57938f6` completed remotely with
+exit 1: 41 checks passed, none were skipped, and only `go-tiers` failed,
+naming exactly the three missing Codex rows. The tier-toolkit, web-shard and
+audit self-checks passed, along with ownership coverage, Go vet and web
+typecheck/lint. This confirms the remaining R0 metadata blocker; this handoff
+is not static-green.
+
+This round changes only this feature document. R0 must apply the three tier
+rows before this PR can be static-green or merge. No shared inventory,
+contract, permission, migration, release version or provider behavior was
+edited. No origin push, deployment, live vendor session, model CLI or review
+gate was run.
