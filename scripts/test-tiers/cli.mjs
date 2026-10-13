@@ -199,7 +199,7 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
     const runSeconds=(now()-begin)/1000
     const report=reportCases(selection.tests,outcomes,runSeconds,job)
     Object.assign(report,{runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,sha:env.GITHUB_SHA,
-      execution:{...execution,completedBatches:batches.length,...(activeBatch?{activeBatch}:{})},runnerFailure})
+      execution:{...execution,completedBatches:batches.filter(batch=>!batch.runnerFailure).length,...(activeBatch?{activeBatch}:{})},runnerFailure})
     const terminal=new Map(outcomes.map(outcome=>[outcome.key,outcome]))
     report.notRunCases=selection.tests.filter(row=>!(row.kind==='go'&&!row.active)&&!terminal.has(key(row)))
       .map(row=>({key:key(row),reason:execution.reason??'No terminal native result was reported'}))
@@ -227,8 +227,10 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
     save(resolve(evidence,`${job}-measurement.json`),report)
     return report
   }
+  // Uploaded checkpoints must flag the unfinished runner even when a hard
+  // kill prevents the finalizer from observing a signal or writing again.
   const checkpoint = error => runner?persist(batches.flatMap(batch=>batch.outcomes),
-    interruption?.code??1,!!error||batches.some(batch=>batch.runnerFailure),
+    interruption?.code??1,true,
     {status:interruption?'interrupted':error?'incomplete':'running',
       reason:interruption?.reason??error?.message?.slice(0,4096)??'Execution has not finished',
       ...(interruption?.signal?{signal:interruption.signal}:{})}):undefined
