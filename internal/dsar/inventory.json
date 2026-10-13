@@ -1110,6 +1110,26 @@
     {
       "classification": "personal",
       "columns": {
+        "actor_person_id": "personal",
+        "binding_digest": "metadata",
+        "boot_id": "metadata",
+        "capability_digest": "secret",
+        "client_id": "metadata",
+        "epoch": "metadata",
+        "expires_at": "personal",
+        "owned_session_id": "metadata",
+        "tenant_id": "metadata",
+        "viewer_id": "metadata"
+      },
+      "locator": {
+        "person_column": "actor_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_controllers"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "binding": "metadata",
         "conversation_id": "metadata",
         "created_at": "personal",
@@ -1169,6 +1189,37 @@
     {
       "classification": "personal",
       "columns": {
+        "actor_person_id": "personal",
+        "binding_digest": "metadata",
+        "boot_id": "metadata",
+        "created_at": "personal",
+        "decided_by": "personal",
+        "decision_digest": "metadata",
+        "decision_request_id": "metadata",
+        "desk_item_id": "metadata",
+        "effect_digest": "metadata",
+        "expires_at": "personal",
+        "id": "metadata",
+        "kind": "metadata",
+        "native_request_ref": "metadata",
+        "owned_session_id": "metadata",
+        "request_digest": "metadata",
+        "request_id": "metadata",
+        "requester_principal_id": "personal",
+        "resolved_at": "personal",
+        "step_up_required": "metadata",
+        "tenant_id": "metadata",
+        "turn_ref": "metadata"
+      },
+      "locator": {
+        "person_column": "actor_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_interactions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "actor_principal_id": "personal",
         "attempts": "metadata",
         "created_at": "personal",
@@ -1212,6 +1263,31 @@
         "tenant_column": "tenant_id"
       },
       "table": "native_session_roots"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "actor_person_id": "personal",
+        "binding_digest": "metadata",
+        "boot_id": "metadata",
+        "client_id": "metadata",
+        "consent_id": "metadata",
+        "controller_epoch": "metadata",
+        "detached_at": "personal",
+        "expires_at": "personal",
+        "id": "metadata",
+        "mode": "metadata",
+        "owned_session_id": "metadata",
+        "request_digest": "metadata",
+        "request_id": "metadata",
+        "tenant_id": "metadata",
+        "view_kind": "metadata"
+      },
+      "locator": {
+        "person_column": "actor_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_viewers"
     },
     {
       "classification": "personal",

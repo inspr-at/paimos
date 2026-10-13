@@ -7912,6 +7912,10 @@
     ,
     {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRetainsBackgroundAndUnconfirmedWriter","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExactOnceAndRuntimeFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExpiryRevocationAndRestart","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPFailedOpenRetainsOwnerHandle","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPInterruptMatchesCurrentTurn","tier":"ESSENTIAL"}
@@ -7961,6 +7965,12 @@
     {"kind":"go","package":"internal/nativereceipts","name":"TestReceiptEvidenceRejectsWrongInputAndFalseExit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/interaction","name":"TestControllerEpochFencesConcurrentAttach","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/interaction","name":"TestDeskDecisionExactEffectExpiryAndRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/interaction","name":"TestServerRestartExpiresInteractions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestFinalDrainReplayAfterExitPersistsOnceAndRechecksAuthority","tier":"ESSENTIAL"}
     ,

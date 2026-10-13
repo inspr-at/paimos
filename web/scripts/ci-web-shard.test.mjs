@@ -592,20 +592,23 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   // screenshots moved out of models-registry.spec.ts); charge its weight like the specs above.
   const registryShots = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/models-registry-shots.spec.ts')
   assert.ok(registryShots && gated.some(spec => spec.file === registryShots.file), 'The registry design check must remain in the gate')
+  // AEON-1289 adds its terminal regressions after the prior baseline; charge the spec's weight separately.
+  const expertTerminal = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/native-expert-terminal.spec.ts')
+  assert.ok(expertTerminal && gated.some(spec => spec.file === expertTerminal.file), 'Expert terminal regressions must remain in the gate')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application and registry design-check specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check and expert terminal specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
