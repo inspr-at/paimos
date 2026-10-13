@@ -97,6 +97,9 @@ type ciIndex struct {
 func indexCI(runs []metricRun, workflow string, now time.Time) ciIndex {
 	x := ciIndex{attempts: map[int64][]metricRun{}, first: map[string][]metricRun{}}
 	for _, run := range runs {
+		if checksRun(run) {
+			continue
+		}
 		// A run that completes after now is not a fact yet.
 		if !sameWorkflow(run, workflow) || run.Completed.After(now) {
 			continue
@@ -250,6 +253,13 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 // numbers against a fixed measure-v2 window.
 func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 	now = now.UTC()
+	in.Runs = preferredMetricRuns(in.Runs)
+	var observed []metricRun
+	for _, run := range in.Runs {
+		if checksRun(run) && !run.Completed.After(now) {
+			observed = append(observed, run)
+		}
+	}
 	ci := path.Base(in.CIWorkflow)
 	nightly := path.Base(in.NightlyWorkflow)
 	preflight := in.PreflightWorkflow
@@ -321,6 +331,18 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 			continue
 		}
 		if point, ok := wall(run); ok {
+			queueWall = append(queueWall, point)
+		}
+	}
+	for _, run := range observed {
+		if !sameWorkflow(run, in.CIWorkflow) || notCounted(run.Conclusion) {
+			continue
+		}
+		point := metricPoint{at: run.Created, value: minutes2(run.Started, run.Completed)}
+		if run.Event == "pull_request" {
+			prWall = append(prWall, point)
+		}
+		if run.Event == "merge_group" {
 			queueWall = append(queueWall, point)
 		}
 	}
@@ -663,6 +685,9 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 	out = append(out, build(metricSpec{number: 18, key: "escaped_defects", label: "Escaped defects", unit: "defects", source: "Defects reported through POST …/delivery/metrics/facts (kind escaped_defect) and rollout incidents",
 		def:       "Bug or incident tickets linked as caused by a merged pull request or a release (reported with the link), plus rollout incidents of releases (down counts as high, degraded as medium), counted on the day they were reported or began, with their severity. Main-branch red is not a defect that escaped.",
 		aggregate: "count", target: nil, tagNames: []string{"high", "medium", "low"}, coverage: defectCovered, noDataReason: "No escaped defect has been reported and no rollout incident recorded yet.", readFrom: in.ReadFrom}, defects))
+	if in.ChecksHistory || len(observed) > 0 {
+		annotateChecksMetrics(out, in.ChecksHistory || len(x.attempts) == 0)
+	}
 	return out
 }
 

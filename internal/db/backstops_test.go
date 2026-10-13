@@ -321,6 +321,7 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 
 	// Delay the vendor read past the same SQL/idle budgets. The observer rejects
 	// a hidden auth transaction before the final revision-checked write proceeds.
+	// The fixture must identify its history source to remain a connected reader.
 	reader := backstopMetricsReader{wait: func() {
 		var idle int
 		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE usename=$1 AND state LIKE 'idle in transaction%'`, d.Role).Scan(&idle); err != nil {
@@ -363,9 +364,10 @@ func TestDatabaseBackstopsPreserveStreamsAndBackfill(t *testing.T) {
 	var done bool
 	if err := db.InTenant(dbtest.Seed(ctx), pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT backfill_done_at IS NOT NULL AND backfill_cursor->>'phase'='done'
+			AND backfill_cursor->>'read_source'='actions'
 			FROM delivery_metric_sources WHERE project_id=$1`, project).Scan(&done)
 	}); err != nil || !done {
-		t.Fatalf("backfill progress was not committed: done=%v err=%v", done, err)
+		t.Fatalf("backfill progress and Actions history source were not committed: done=%v err=%v", done, err)
 	}
 }
 
@@ -402,7 +404,7 @@ func (backstopMetricsReader) OpenPulls(context.Context) ([]delivery.Pull, error)
 func (backstopMetricsReader) Group(context.Context, string, string, string) ([]delivery.Pull, error) {
 	return nil, errors.New("unexpected group read")
 }
-func (g backstopMetricsReader) MetricsRead(_ context.Context, _ string, read func(func(string, any) error) error) error {
+func (g backstopMetricsReader) MetricsRead(_ context.Context, _ string, read func(func(string, any) error, string) error) error {
 	g.wait()
 	return read(func(path string, out any) error {
 		var body any
@@ -421,5 +423,5 @@ func (g backstopMetricsReader) MetricsRead(_ context.Context, _ string, read fun
 			return err
 		}
 		return json.Unmarshal(raw, out)
-	})
+	}, "actions")
 }

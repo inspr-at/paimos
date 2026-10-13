@@ -28,6 +28,7 @@ type MetricReadError struct {
 }
 
 type MetricSource struct {
+	HistorySource   *string          `json:"history_source"`
 	LastReadError   *MetricReadError `json:"last_read_error"`
 	LastEventAt     *time.Time       `json:"last_event_at"`
 	RetryAt         *time.Time       `json:"retry_at"`
@@ -211,6 +212,10 @@ func githubCoverageEnd(s metricSourceRow, in metricInput, now time.Time) time.Ti
 
 func (m *Module) sourceView(tenantID string, s metricSourceRow, covered *time.Time) *MetricSource {
 	out := &MetricSource{Repository: s.Repository, CIWorkflow: s.CIWorkflow, NightlyWorkflow: s.NightlyWorkflow, AppConnected: m.appConnected(tenantID, s.Repository), Backfill: "not_started", BackfillSince: s.Since, BackfillDoneAt: s.DoneAt, CoveredSince: covered, LastReadError: s.LastReadError, LastEventAt: s.LastEventAt, RetryAt: s.RetryAt}
+	if s.Cursor != nil && (s.Cursor.ReadSource == historyChecks || s.Cursor.ReadSource == historyActions) {
+		source := s.Cursor.ReadSource
+		out.HistorySource = &source
+	}
 	if s.Cursor != nil && s.Cursor.Phase != "done" {
 		out.Backfill = "running"
 	} else if s.DoneAt != nil {
@@ -431,29 +436,44 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 	// A finished backfill that never listed preflight catches that workflow up
 	// once, then returns to the jobs pass. It does not read CI again and it
 	// does not walk pulls again.
-	if !in.Restart && source.DoneAt != nil && needsPreflightCatchup(cursor) {
+	if !in.Restart && source.DoneAt != nil && cursor.ReadSource != historyChecks && needsPreflightCatchup(cursor) {
 		caught := startPreflightCatchup(cursor, source)
 		cursor = &caught
 	}
 	result := BackfillResult{Since: cursor.Since, Phase: cursor.Phase, Truncated: cursor.Truncated}
-	if source.DoneAt != nil && cursor.ResumePhase == "" && (cursor.Phase == "done" || cursor.Phase == "jobs") {
-		// The runs and pulls are in. The jobs pass reads what the check suites
-		// did not bring, including a legacy map that is not complete, until
-		// nothing unfinished remains. A deferred failure stays phase jobs.
-		result, err = m.fillJobs(ctx, p, project, source, reader, cursor, now)
-		if err != nil {
-			return BackfillResult{}, err
-		}
-		return result, nil
-	}
-	workflows := backfillWorkflowList(source, cursor)
 	next := *cursor
 	var batch backfillBatch
-	err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
+	var jobsPass, changedSource bool
+	err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error, readSource string) error {
+		if readSource != historyChecks && readSource != historyActions {
+			return errRead
+		}
+		changedSource = cursor.ReadSource != readSource && (cursor.ReadSource != "" || readSource == historyChecks)
+		if changedSource {
+			// Capabilities changed: do not reuse a position from the other API.
+			next = backfillCursor{Since: cursor.Since, Phase: "runs", Day: cursor.Since.Format("2006-01-02"), Page: 1, Workflows: fullBackfillWorkflows(source)}
+		}
+		next.ReadSource = readSource
+		if readSource == historyChecks {
+			var err error
+			next, batch, err = checksBackfillStep(get, source.Repository, source.CIWorkflow, source.NightlyWorkflow, next, now)
+			return err
+		}
+		if !changedSource && source.DoneAt != nil && next.ResumePhase == "" && (next.Phase == "done" || next.Phase == "jobs") {
+			jobsPass = true
+			var err error
+			result, err = m.fillJobs(ctx, p, project, source, get, &next, now)
+			return err
+		}
+		workflows := backfillWorkflowList(source, &next)
 		var err error
-		next, batch, err = backfillStep(get, source.Repository, workflows, *cursor, now)
+		next, batch, err = backfillStep(get, source.Repository, workflows, next, now)
+		next.ReadSource = readSource
 		return err
 	})
+	if jobsPass {
+		return result, err
+	}
 	if err != nil {
 		// Preserve the cursor while recording the failed read and next retry.
 		if saveErr := m.metricReadFailed(ctx, p, project, source, err); saveErr != nil {
@@ -480,6 +500,10 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
 		}
 		at := m.now()
+		if next.ReadSource == historyChecks && next.Phase != "done" {
+			paced := at.Add(time.Minute)
+			retryAt = &paced
+		}
 		if err = upsertRunsTx(ctx, tx, p.TenantID, source.Repository, "backfill", batch.Runs, at); err != nil {
 			return err
 		}
@@ -489,7 +513,7 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 		// Runs and pulls are in. Stay on the jobs phase while any first
 		// attempt still lacks a complete job map. The cursor records that, so a
 		// caller that stops at done cannot stop early.
-		if next.Phase == "done" {
+		if next.Phase == "done" && next.ReadSource != historyChecks {
 			pending, err := jobWorklistTx(ctx, tx, current, now, 1)
 			if err != nil {
 				return err
@@ -505,12 +529,12 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 		done := (*time.Time)(nil)
 		switch {
 		case next.Phase == "done" || next.Phase == "jobs":
-			if current.DoneAt != nil {
+			if current.DoneAt != nil && !changedSource {
 				done = current.DoneAt
 			} else {
 				done = &at
 			}
-		case cursor.ResumePhase != "" && current.DoneAt != nil:
+		case !changedSource && cursor.ResumePhase != "" && current.DoneAt != nil:
 			// A preflight catch-up still walking days keeps the finished time.
 			done = current.DoneAt
 		}
@@ -521,7 +545,7 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 		return BackfillResult{}, err
 	}
 	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated, RetryAt: retryAt}
-	if next.Phase == "runs" {
+	if next.Phase == "runs" && next.ReadSource != historyChecks {
 		day := next.Day
 		result.Day = &day
 	}
@@ -750,7 +774,7 @@ func startPreflightCatchup(cursor *backfillCursor, source *metricSourceRow) back
 func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time, limit int) ([]int64, error) {
 	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
 	rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
-		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
+		WHERE repository=$1 AND run_id>0 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
 		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
 		ORDER BY completed_at DESC LIMIT $4`, source.Repository, from, path.Base(source.CIWorkflow), limit)
 	if err != nil {
@@ -768,7 +792,7 @@ func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now 
 	return out, rows.Err()
 }
 
-func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, reader metricsReader, cursor *backfillCursor, now time.Time) (BackfillResult, error) {
+func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, get func(string, any) error, cursor *backfillCursor, now time.Time) (BackfillResult, error) {
 	result := BackfillResult{State: "running", Since: cursor.Since, Phase: "jobs", Truncated: cursor.Truncated}
 	var runs []int64
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -787,7 +811,7 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 	var readFailure error
 	calls := 0
 	if len(runs) > 0 {
-		err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
+		err = func() error {
 			counted := func(path string, out any) error { calls++; return get(path, out) }
 			for _, id := range runs {
 				if calls >= jobFillBudget {
@@ -807,7 +831,7 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				facts[id] = f
 			}
 			return nil
-		})
+		}()
 		// Nothing read at all is GitHub's fault, not the runs': report it and keep
 		// every run eligible. Failures among successes mark only those runs.
 		if err != nil || len(facts) == 0 {
