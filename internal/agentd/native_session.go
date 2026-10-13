@@ -165,6 +165,20 @@ func (s *Supervisor) StartNativeSession(ctx context.Context, request NativeSessi
 		}
 		return entry.result, nil
 	}
+	// A fresh request ID must not create another writer for a conversation
+	// already owned (or awaiting handover) by this daemon, even if account/host
+	// policy permits several different conversations concurrently.
+	if request.Resume != "" {
+		for _, entry := range s.native.entries {
+			entry.mu.Lock()
+			occupied := !entry.record.ExitObserved && !entry.record.Abandoned && (entry.record.Native.Request.Resume == request.Resume || entry.record.Native.VendorSessionID == request.Resume)
+			entry.mu.Unlock()
+			if occupied {
+				s.native.mu.Unlock()
+				return NativeSessionStartResult{}, ErrProcessesUnconfirmed
+			}
+		}
+	}
 	if len(s.native.entries) >= 32 {
 		s.native.mu.Unlock()
 		return NativeSessionStartResult{}, ErrHostCapacity

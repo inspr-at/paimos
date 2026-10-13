@@ -101,6 +101,11 @@ func TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts(t *testing.T) 
 	if replay, err := s.StartNativeSession(t.Context(), request); err != nil || replay != result || authorizations.Load() != 1 {
 		t.Fatal("same start repeated authorization or fork", replay, err)
 	}
+	secondWriter := request
+	secondWriter.RequestID = uidLead("44")
+	if _, err := s.StartNativeSession(t.Context(), secondWriter); !errors.Is(err, ErrProcessesUnconfirmed) || authorizations.Load() != 1 {
+		t.Fatal("fresh request ID created a second writer", err)
+	}
 	conflict := request
 	conflict.Resume = uidLead("42")
 	if _, err := s.StartNativeSession(t.Context(), conflict); !errors.Is(err, ErrReplay) {
