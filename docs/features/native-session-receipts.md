@@ -143,7 +143,7 @@ No browser check applies to this non-browser slice. Exit 3 means incomplete,
 never green. Authoritative PR CI and the coordinator's cross-family review
 remain prerequisites to merge; workers neither push nor run model gates.
 
-Guarded validation of implementation commit `d01501a87` on mbp2606:
+Guarded validation of implementation commit `d01501a87` on the approved remote runner:
 
 * **PASS 1:** pre-write journal barrier, correlated evidence and false-exit denial.
 * **PASS 2:** bounded content-free journal/report retries, receipt pages and RLS.
@@ -204,6 +204,28 @@ remain same-PR R0 prerequisites. Apply the exact rows below, merge the central
 audit registration once released to main, and rerun guarded Go/static checks
 before the coordinator's cross-family gate. This documentation handoff does not
 mark CI green or authorize merge/release.
+
+## Fix round 3: public documentation check and remaining R0 prerequisites
+
+The full `go-static` CI log for `bd7b9b6dc` identifies an additional failure:
+the public-name guard rejects this document's operator-specific host name.
+`node scripts/check-public-names.mjs` reproduces that exact failure on the
+round's starting HEAD. The validation evidence now names the approved remote
+runner generically; no guard, allowlist or test assertion is changed.
+
+A fresh fetch confirms `origin/main` at `06929d1a4`, already an ancestor of
+this branch; PR #622 is mergeable. The central native-package audit ownership
+change has not merged. The full supplied JSONL and release-check logs confirm
+the missing shared-fence row and all seven unassigned receipt files. Inspection
+also confirms that the eight ESSENTIAL test rows and two DSAR table entries
+below remain absent.
+
+The normative plan assigns these four shared files exclusively to the single
+R0 metadata lane, and the worker rules require the native audit fix centrally.
+This round preserves that ownership. Applying the existing exact registration
+request below remains necessary before CI can be green; public documentation
+cleanup does not resolve those blockers. There is no behavior change requiring
+a new regression test against `bd7b9b6dc`.
 
 ## Exact R0 registration request (same PR, before merge)
 
