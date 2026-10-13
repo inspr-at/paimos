@@ -92,6 +92,8 @@
     ,
     "internal/cli:TestMeReportsOwnerWorkstation"
     ,
+    "internal/cli:TestNativeAccountStartBindsAuthorizedProfile"
+    ,
     "internal/cli:TestOwnerWorkstationKeyCommands"
     ,
     "internal/cli:TestPersonAPIErrorPreservesStatusAndRedactsSession"
@@ -139,6 +141,10 @@
     "internal/knowledge:TestLearningDraftTenantBeforeAdvisory"
     ,
     "internal/markdownsource:TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks"
+    ,
+    "internal/nativeprofiles:TestProfileDirectoriesRejectAliasesAndUnsafeHomes"
+    ,
+    "internal/nativeprofiles:TestProfileResolutionRejectsForeignStaleAndUnqualifiedAccounts"
     ,
     "internal/nodes:TestHeaderSelectorBounds"
     ,
@@ -4930,6 +4936,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelTicketResolveAndReadOnlyPrefs","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAccountStartBindsAuthorizedProfile","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestOnboardCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -7815,6 +7823,12 @@
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileDirectoriesRejectAliasesAndUnsafeHomes","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileIsolationPreservesCredentialsAndParentEnvironment","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileResolutionRejectsForeignStaleAndUnqualifiedAccounts","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
