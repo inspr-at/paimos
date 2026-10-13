@@ -136,3 +136,22 @@ was refused by the local host load guard. The successful remote static run
 supplied the web validation without bypassing that guard. Authoritative PR CI,
 cross-family review, real provider-pin enablement and production wiring remain
 coordinator-owned. No origin push or deployment was performed.
+
+Fix round 3 validation, implementation commit `da06a70aa`:
+
+- PASS — the cancel/end-turn barrier regression fails on reviewed `fc594dc0e`
+  for Cursor, Gemini and OpenCode, rejecting the prior false interrupt success.
+  Two guarded remote-slot refusals preceded the permitted single local ACP
+  package run used for this negative control.
+- PASS — both targeted provider packages passed guarded remote
+  `go test -race -count=1`, including the new ESSENTIAL regression and existing
+  native-cancellation fixtures. Normal completion still permits a successor.
+- INCOMPLETE — guarded `ci-static-locked.sh --merge-main` returned exit 3 on
+  four attempts because the shared remote slot was busy. Static validation
+  must obtain exit 0 on the final branch before coordinator merge; these
+  refusals do not count as passed checks.
+
+The temporary negative-control checkout and stash were removed. No negative
+control commit was added to the delivery branch. Browser checks are not
+applicable to this source-only fix. Cross-family review remains with the
+coordinator; no origin push, deployment or model review was performed.
