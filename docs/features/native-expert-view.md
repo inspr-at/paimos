@@ -155,4 +155,21 @@ Started/Resumed/Interrupted and Approval/Question. No fixture is product data.
 Each captures pre-watch, lock, mixed, jump, earlier and gap states at 390, 1024
 and 1440 px in light and dark, alongside the existing details/Types/Zellij
 shots. These ignored artifacts use `testInfo.outputPath()` and the guarded
-remote runner's output directory `web/test-results/AEON-1270-fix4/`.
+remote runner's final output directory `web/test-results/AEON-1270-fix4/final/`.
+The evidence set is `pre-watch`, `lock`, `mixed`, `jump`, `earlier`, `gap`,
+`events`, `types` and `zellij`, each suffixed with theme and viewport width.
+The complete mixed list is captured before resizing for the scroll checks;
+scroll notifications and observed layout bounds establish the interleavings,
+with no sleeps or weakened assertions. Deferred follow actions also re-check
+the current Follow setting and component lifetime before moving the view.
+
+The test-only negative control `e0fb5a175` changes only this spec over
+`45cdcd5c`: nine cases fail for the reviewed row/metadata, event-language,
+watch-copy, visible-tail Jump and desktop-popover defects. The three authority
+and terminal cases pass, including the now non-vacuous consent checks. Soft
+assertions collect independent regressions and still fail their case. The
+scratch branch was deleted without putting its commit on the delivery branch.
+The corrected source on `3975f1227` passes all 12 cases in the guarded remote
+Chromium run, with zero residual browser processes. The final worker status
+and ignored `validation.json` pin the exact final HEAD, matching screenshots,
+browser/static results and coordinator-owned Linux/visual/release checks.
