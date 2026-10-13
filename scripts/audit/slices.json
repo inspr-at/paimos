@@ -226,7 +226,10 @@
         "internal/delivery/routine.go",
         "internal/delivery/routine_test.go",
         "internal/crossreview/routine_pr.go",
-        "internal/crossreview/routine_pr_app.go"
+        "internal/crossreview/routine_pr_app.go",
+        "internal/crossreview/github_history_test.go",
+        "internal/delivery/metrics_checks.go",
+        "internal/delivery/metrics_checks_test.go"
       ]
     },
     {
