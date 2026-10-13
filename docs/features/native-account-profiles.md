@@ -339,3 +339,40 @@ unchanged parent environment and distinct overlapping child profiles. Live
 account qualification remains **G_ACCOUNTS**. This round changes only this owned
 feature document; CI is **not green**. No origin push, deployment, model call
 or review gate was performed.
+
+Fix-round 9 (2026-10-13): complete logs for baseline `6d6b65b0` show that
+`go-static` job **115145773107** fails only native tier validation for the four
+existing tests listed above. All seven Go shards, four web unit shards, twelve
+browser shards, release checks and migration compatibility pass. The previous
+queue-focus failure is absent from this CI run. The non-required policy preview
+in job **115145381136** lacks a trusted verdict for this head; that review
+remains coordinator-owned and was not run by this worker.
+
+A source-verified, read-only baseline diagnostic reproduces exactly the four
+strict tier errors and passes after adding only the proposed **ESSENTIAL** rows
+in memory. This does not replace native collection. Fetched `origin/main` at
+`fd8fae22f` also lacks these rows; the read-only merge-tree check exits 0 with no
+conflicts, so no main merge is required. Both normative plan files still reserve
+the shared Go manifest for R0. Closing this failure needs R0 to apply the four
+rows in this PR; P4a cannot edit that file within its exclusive write set.
+
+Both affected Go packages pass through the guarded remote runner on
+`6d6b65b0`. The affected selector exits 0 and selects **FULL** (3233
+reverse-dependency cases). No P4a web unit or browser test is affected; the
+passing CI jobs on this exact baseline provide the available web evidence.
+Both guarded merged-main static attempts return **exit 3** because the remote
+slots are occupied; neither executes any checks. Static verification is
+**incomplete**, and the authoritative CI failure above remains open. The
+updated document passes the public-name, Git whitespace and exclusive-write-set
+checks; no heavy local fallback was used.
+
+Fake-test acceptance remains **PASS** for exact enrolled account binding,
+**PASS** for default/dedicated child environments, **PASS** for exclusion of
+credential/settings sharing, **PASS** for refusal without account rotation,
+and **PASS** for retained credentials, unchanged parent environment and distinct
+overlapping child profiles. Live qualification remains **G_ACCOUNTS**. No
+behavior fix was supplied or made, so no new regression test is needed; source
+and all assertions remain unchanged. This round changes only this owned
+feature document. CI remains **not green** pending R0 registration and the
+coordinator's review; no origin push, deployment, model call or review gate
+was performed.
