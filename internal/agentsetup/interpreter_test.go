@@ -212,10 +212,14 @@ func TestCodexRenewalProbeLifecycle(t *testing.T) {
 					t.Fatal("renewal masked a current failure or a different runtime pin")
 				}
 			}
+			saved, err := e.load()
+			if err != nil || len(saved.CodexPins.Renewals) != 1 {
+				t.Fatal("read-only Status persisted renewal marker retirement", err)
+			}
 			if err := e.SyncFences(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			saved, err := e.load()
+			saved, err = e.load()
 			if err != nil || len(saved.CodexPins.Renewals) != 0 {
 				t.Fatal("completed or replaced pin probe retained its renewal marker", err)
 			}
