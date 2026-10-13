@@ -68,6 +68,8 @@ async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, 
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', timestamp: lastTouchTimestamp, touchPoints: [] })
     down = false
     await expect.poll(state, 'the native scroll has finished').toMatchObject({ ended: true, down: 0 })
+    const finished = await state()
+    note(test.info(), `native finger travel ${dy} px; ${scroller} moved ${(finished.top - finished.start).toFixed(1)} px; events: ${finished.events.join(' ')}`)
   } finally {
     if (down) await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', timestamp: lastTouchTimestamp, touchPoints: [] })
     await page.evaluate(() => (window as unknown as SwipeWindow).__stopSwipe?.())
