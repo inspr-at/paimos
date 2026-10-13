@@ -890,7 +890,9 @@ const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure) }
 // anchoring, and this page turns Chrome's off, so rows arriving or leaving above would move them.
 // The list scrolls with the page, or in its own pane; the sticky heads cover the top of the view.
 useReaderAnchor({
-  scroller: () => props.pane ? table.value : scroller,
+  // BeforeUpdate already sees the new props, but the rows still have the old layout.
+  // Read the rendered class so capture and restore each use the container of those rows.
+  scroller: () => root.value?.classList.contains('pane') ? table.value : scroller,
   rows: () => table.value?.querySelectorAll<HTMLElement>('[role="row"]:not(.thead)'),
   top: () => Math.max(...[stick.value, table.value?.querySelector<HTMLElement>(':scope > .thead')].map(head => head?.getBoundingClientRect().bottom ?? -Infinity)),
 })
