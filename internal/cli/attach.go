@@ -165,8 +165,10 @@ func (rt *runtime) downloadAttachment(meta attachmentView, destination string) e
 		return fmt.Errorf("invalid attachment size")
 	}
 	if meta.SHA256 != "" {
-		digest, err := hex.DecodeString(meta.SHA256)
-		if err != nil || len(digest) != sha256.Size {
+		if len(meta.SHA256) != hex.EncodedLen(sha256.Size) {
+			return fmt.Errorf("invalid attachment sha256")
+		}
+		if _, err := hex.DecodeString(meta.SHA256); err != nil {
 			return fmt.Errorf("invalid attachment sha256")
 		}
 	}

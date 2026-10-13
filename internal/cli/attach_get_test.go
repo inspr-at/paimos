@@ -45,6 +45,7 @@ func TestAttachmentDownloadIntegrity(t *testing.T) {
 		{name: "short-body", original: body, response: body[:len(body)-1], wantErr: "got 183794 bytes, expected 183795"},
 		{name: "same-size-corruption", original: body, response: corrupt, wantErr: "attachment download sha256 mismatch"},
 		{name: "malformed-hash", original: body, response: body, hash: "invalid", wantErr: "invalid attachment sha256"},
+		{name: "non-hex-hash", original: body, response: body, hash: strings.Repeat("g", 64), wantErr: "invalid attachment sha256"},
 	} {
 		for _, mode := range []string{"file", "stdout"} {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
