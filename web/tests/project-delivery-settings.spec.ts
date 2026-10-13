@@ -346,3 +346,80 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     expect(failures).toEqual([])
   })
 }
+
+// The scroll listener attaches on the frame after the explainer opens.
+async function frames(page: Page, count = 2) {
+  await page.evaluate(count => new Promise<void>(resolve => {
+    const step = (left: number) => left === 0 ? resolve() : requestAnimationFrame(() => step(left - 1))
+    step(count)
+  }), count)
+}
+// Twenty pixels moves the trigger without folding the phone footer (that latch starts above 24).
+// Chromium coalesces two scrollTop writes in one turn into the restored position, so the
+// displaced scroll is delivered explicitly while the trigger is still moved, then undone
+// before the next frame, the same order a full-page capture uses.
+async function nudgeMain(page: Page, restore: boolean) {
+  await page.evaluate(restore => {
+    const main = document.querySelector('#main')
+    if (!(main instanceof HTMLElement)) throw new Error('#main missing')
+    const top = main.scrollTop
+    const max = main.scrollHeight - main.clientHeight
+    if (max < 20) throw new Error(`#main cannot scroll (${max})`)
+    const next = top + 20 <= max ? top + 20 : top - 20
+    main.scrollTop = next
+    if (Math.abs(main.scrollTop - top) < 1) throw new Error('scrollTop ignored')
+    main.dispatchEvent(new Event('scroll'))
+    if (restore) main.scrollTop = top
+  }, restore)
+}
+
+test('AEON-1326: nr3b-scroll-returns keeps the Actions explainer open so Escape focuses its trigger', async ({ browser }) => {
+  // Risk: a capture that scrolls away and back in one turn dismisses the explainer
+  // without restoring focus, so Escape no longer lands on How this works.
+  test.setTimeout(120_000)
+  const context = await browser.newContext({ viewport: { width: 400, height: 860 }, hasTouch: true, reducedMotion: 'reduce', colorScheme: 'light' })
+  const page = await context.newPage()
+  const { world, errors } = await setup(page)
+  await choose(page, world, 'noactions')
+  const how = page.locator('[data-how=actions]')
+  const heading = page.getByRole('heading', { name: 'The Actions read permission' })
+  await how.click()
+  await expect(heading).toBeFocused()
+  await frames(page)
+  await nudgeMain(page, true)
+  await frames(page)
+  await expect(heading).toBeVisible()
+  await expect(how).toHaveAttribute('aria-expanded', 'true')
+  await page.keyboard.press('Escape')
+  await expect(heading).toHaveCount(0)
+  await expect(how).toBeFocused()
+  await how.click()
+  await expect(heading).toBeFocused()
+  await frames(page)
+  await nudgeMain(page, false)
+  await frames(page)
+  await expect(heading).toHaveCount(0)
+  await expect(how).not.toBeFocused()
+  expect(errors).toEqual([])
+  await context.close()
+})
+
+test('AEON-1326: nr3b-learn-slot stays put when the phone summary title wraps', async ({ browser }) => {
+  // Risk: the empty summary title is one line and the error title wraps, so the first Learn button jumps.
+  test.setTimeout(120_000)
+  const context = await browser.newContext({ viewport: { width: 360, height: 860 }, hasTouch: true, reducedMotion: 'reduce', colorScheme: 'light' })
+  const page = await context.newPage()
+  const { world, errors } = await setup(page)
+  world.state = 'none'; world.source = null
+  await page.goto('/p/AEON/delivery')
+  await expect(page.getByRole('link', { name: 'Link repository', exact: true })).toBeVisible()
+  const stable = await controlStability(page, { firstLearn: page.locator('.s-tile .learn').first() })
+  await stable.check(async () => {
+    world.state = 'error'
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await expect(page.getByTestId('delivery-load-error')).toBeVisible()
+  })
+  stable.done()
+  expect(errors).toEqual([])
+  await context.close()
+})

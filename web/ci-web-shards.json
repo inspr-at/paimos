@@ -984,7 +984,7 @@
         ,
         {"file":"tests/project-advanced.spec.ts","listedTests":11,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
         ,
-        {"file":"tests/project-delivery-settings.spec.ts","listedTests":10,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
+        {"file":"tests/project-delivery-settings.spec.ts","listedTests":12,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
         ,
         {"file":"tests/project-groups.spec.ts","listedTests":18,"weightSeconds":39.95122,"weightSource":"unmeasured-test-rate"}
         ,

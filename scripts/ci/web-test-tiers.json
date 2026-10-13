@@ -11314,6 +11314,10 @@
     ,
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1253: repository shows the history source without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-learn-slot stays put when the phone summary title wraps","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-scroll-returns keeps the Actions explainer open so Escape focuses its trigger","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
