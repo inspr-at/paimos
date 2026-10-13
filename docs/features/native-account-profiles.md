@@ -187,3 +187,36 @@ the coordinator's trusted review verdict. This round changes only this owned
 document; CI remains blocked by R0's exclusive metadata ownership and the
 coordinator's review. No origin push, deployment, model call or review gate was
 performed.
+
+Fix-round 5 (2026-10-13): the complete logs for `go-static` job
+**115114897307** reject exactly the four **ESSENTIAL** rows above;
+`release-check-run` job **115114897389** reports the same two audit failures
+and five unassigned profile files. Baseline `d47f561b` reproduces the full-tree
+ownership errors. Its delta CLI exits 1 even with zero changed files, because
+ownership must cover the entire tree. Supplying the proposed S1 glob through
+stdin makes that CLI exit 0 with no errors; the same read-only proposal passes
+full-tree ownership. Neither shared inventory was edited.
+
+At validation start, the fetched `origin/main` at `828bf8697` was already an
+ancestor of this branch. A final fetch advances main to `06929d1a4`; the read-only
+merge-tree check exits 0 with no conflicts, so this round requires no main merge.
+The central R0 ownership fix is still in open PR **#623**, which changes only
+`scripts/audit/slices.json`. After that fix reaches main, R0 must also apply the
+four test-tier rows above in this PR. Both inventories remain outside P4a's
+exclusive write set under `plan.json` and `plan.md`.
+
+The guarded remote run passes `internal/nativeprofiles` on `d47f561b`. The first
+full CLI run exited 1; its full-package JSON diagnostic rerun passes without
+source or assertion changes. The affected selector exits 0 and selects **FULL**
+(3225 reverse-dependency cases). Web unit/browser tests remain inapplicable to
+this non-browser slice. This round changes only this owned document and does
+not change production behavior; the existing four behavior tests remain intact.
+
+Guarded `ci-static-locked.sh --merge-main` on `d47f561b` returns **exit 1**:
+**39 checks pass with zero optional skips**. Only `go-tiers`, `audit-tests` and
+`audit-coverage` fail, on the exact missing R0 registrations above. This includes
+passing test-tier/web-shard regressions, web typecheck/lint, Go vet, public-name,
+contract and migration checks. The updated document also passes the public-name
+and Git whitespace guards. CI remains **not green**; R0 must finish the same-PR
+metadata work before the coordinator reruns CI and its release gates. No origin
+push, deployment, model call or review gate was performed.
