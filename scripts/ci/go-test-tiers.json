@@ -5516,6 +5516,10 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestDataMigrationsAsAppOwner","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestDatabaseBackstopsConcurrentFirstStarts","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestDatabaseBackstopsPreserveStreamsAndBackfill","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestDisplayWordsMigrationPreservesExistingEditsAndTenantIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestEnsureTenant","tier":"GATED-FULL"}
@@ -7757,6 +7761,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestVendorListBoundsPaginationRedirectionAndSanitizedErrors","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestVendorSuccessorWithheldDoesNotRewireLadder","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestWorkKindGroupedCountsPreserveVisibilityAndPagination","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkKindLifecyclePaginationAndTenantIsolation","tier":"GATED-FULL"}
     ,
