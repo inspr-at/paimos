@@ -84,6 +84,10 @@ func (m *Module) flowFromRuns(ctx context.Context, runs []metricRun) error {
 	byPR := map[int64][]metricRun{}
 	var prs []int64
 	for _, r := range runs {
+		// A checks envelope has no attempt or queue-wait facts for Flow.
+		if checksRun(r) {
+			continue
+		}
 		if r.PR == nil || r.Event != "pull_request" && r.Event != "merge_group" {
 			continue
 		}

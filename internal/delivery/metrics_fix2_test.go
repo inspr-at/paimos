@@ -276,6 +276,8 @@ func TestDeliveryMetricsFix2ReadBindsTenantAndActionsScope(t *testing.T) {
 	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
 		var body any
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/app/installations/456":
+			body = map[string]any{"id": 456, "app_id": 123, "permissions": map[string]string{"actions": "read", "checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read"}}
 		case r.Method == "POST" && r.URL.Path == "/app/installations/456/access_tokens":
 			var in struct {
 				Permissions  map[string]string `json:"permissions"`
@@ -306,13 +308,13 @@ func TestDeliveryMetricsFix2ReadBindsTenantAndActionsScope(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
 	})}
 	reader := AppReader{App: &crossreview.GitHubApp{Config: crossreview.AppConfig{ID: "123", InstallationID: "456", TenantID: tenantID, Repository: "example/delivery", KeyFile: keyFile}, Client: client}}
-	if err = reader.MetricsRead(t.Context(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", func(func(string, any) error) error {
+	if err = reader.MetricsRead(t.Context(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", func(func(string, any) error, string) error {
 		t.Fatal("another tenant read the installation")
 		return nil
 	}); err == nil || minted != 0 {
 		t.Fatalf("another tenant minted a token: %v calls %d", err, minted)
 	}
-	if err = reader.MetricsRead(t.Context(), tenantID, func(get func(string, any) error) error {
+	if err = reader.MetricsRead(t.Context(), tenantID, func(get func(string, any) error, source string) error {
 		var repo struct {
 			FullName string `json:"full_name"`
 		}
@@ -320,7 +322,7 @@ func TestDeliveryMetricsFix2ReadBindsTenantAndActionsScope(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"actions": "read", "pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
+	want := map[string]string{"actions": "read", "pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read"}
 	if minted != 1 || len(got) != len(want) {
 		t.Fatalf("scopes %#v minted %d", got, minted)
 	}

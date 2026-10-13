@@ -104,6 +104,49 @@ async function bannerContainsAction(page: Page, name: string) {
   return { passed: true, message: `${name}: banner contains its ${bounds.height}px action on all four sides` }
 }
 
+test('AEON-1253: repository shows the history source without moving its controls', async ({ page }, testInfo) => {
+  // Risk: a successful least-privilege history still asks for Actions, conceals
+  // incomplete metrics, or shifts controls when the source changes.
+  test.setTimeout(120_000)
+  const { world, errors } = await setup(page)
+  world.state = 'done'
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: { choice: theme } } }))
+    world.source = { ...source('done')!, history_source: 'checks' }
+    await page.goto('/p/AEON/settings/delivery')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    const card = page.locator('#repository'), line = card.locator('[data-history-source]')
+    await expect(line).toContainText('GitHub checks · partial history; attempt and runner wait metrics unavailable.')
+    await expect(card.getByText('accept Actions: Read', { exact: false })).toHaveCount(0)
+    const more = card.locator('[data-act=repo-more]')
+    const stable = await controlStability(page, { change: card.locator('[data-act=change]'), more, actions: card.locator('.repo-acts'), historyActions: card.locator('.ds-acts') })
+    await stable.check(async () => {
+      await more.click()
+      await expect(page.getByRole('menuitem', { name: /^Read history again/ })).toBeVisible()
+      await page.keyboard.press('Escape')
+    })
+    await stable.check(async () => {
+      world.source!.history_source = 'actions'
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(line).toHaveText('History source: GitHub Actions')
+    })
+    await stable.check(async () => {
+      world.source!.history_source = 'checks'
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(line).toContainText('GitHub checks')
+    })
+    // Stress variable text at every evidence width without changing the UI copy.
+    await stable.check(() => line.evaluate(element => { element.textContent = 'Quelle der Lieferhistorie: GitHub-Prüfungen · Die Historie ist unvollständig; Kennzahlen zu ersten Versuchen und Wartezeiten auf Runner sind nicht verfügbar.' }))
+    stable.done()
+    await card.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`history-source-${width}-${theme}.png`), fullPage: true })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  expect(errors).toEqual([])
+})
+
 test('AEON-1226: repository states stay put and delivery edits preserve authority, inheritance and identity', async ({ page }) => {
   test.setTimeout(180_000)
   const { world, errors } = await setup(page)
