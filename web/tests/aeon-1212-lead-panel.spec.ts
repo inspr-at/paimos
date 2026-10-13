@@ -557,6 +557,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
       const errors = watchErrors(page), world = await setup(page)
+      if (scenario === 'unreadable history') world.state.admission = []
       // Choose Focus explicitly: its wide details pane exposes the worker's
       // execution columns, independently of the default Overview split.
       if (width === 1440) world.data.preferences['agents:layout'] = { handle: 320 }
@@ -622,6 +623,8 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
         const caption = panel(page).locator('.admission-caption')
         const checks = panel(page).locator('[data-check]')
+        await expect(tab(page, 'Lead')).toHaveAttribute('aria-selected', 'true')
+        await expect(caption).toContainText(scenario === 'unreadable history' ? 'No start yet' : 'All passed at the last start')
         const admissionShot = async (state: string) => {
           await panel(page).locator('#lp-checks').scrollIntoViewIfNeeded()
           await shot(`g6-${state}`)
