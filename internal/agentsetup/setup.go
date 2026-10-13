@@ -116,6 +116,11 @@ type snapshot struct {
 	Cleaned            []string              `json:"cleaned"`
 	ComputerCleaned    bool                  `json:"computer_cleaned"`
 	NextPoll           time.Time             `json:"next_poll"`
+	// Local approval and renewal metadata are never part of pairing telemetry.
+	CodexPins struct {
+		LauncherHashes map[string]string             `json:"launcher_hashes,omitempty"`
+		Renewals       map[string]harnesslaunch.Node `json:"renewals,omitempty"`
+	} `json:"codex_pins,omitzero"`
 }
 
 // Only Progress is printable. The snapshot and HTTP request bodies contain
@@ -205,6 +210,8 @@ type Engine struct {
 	GrokProbe          func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
 	// InstallMethod is the detected add-harness entry point (see InstallMethod).
 	InstallMethod string
+	// PinDiscovery substitutes only local discovery in hermetic renewal tests.
+	PinDiscovery *Discovery
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -466,6 +473,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		c.Key = key
 		s.Request.Accounts = append(s.Request.Accounts, c)
 		s.Candidates = append(s.Candidates, LocalCandidate{c, c.Path, c.Home, c.Identity, c.Version})
+		recordCodexLauncher(s, c)
 	}
 	if err = e.save(s, true); err != nil {
 		return Progress{}, err

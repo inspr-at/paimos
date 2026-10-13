@@ -165,6 +165,7 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
 	if e.Local != nil {
 		if local, err := e.Local.Status(ctx, ""); err == nil && local.DaemonID == s.View.DaemonID {
+			local = e.pinRenewalDetails(s, local)
 			proof.Progress = observedProgress(s.View, local)
 		}
 	}
@@ -188,7 +189,10 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 	s.View = v
 	s.View.RuntimePrefix = prefix
 	cause = PairingLocalUnavailable
-	return e.save(s, false)
+	if err := e.save(s, false); err != nil {
+		return err
+	}
+	return e.autoRenewCodexPins(ctx, s)
 }
 
 func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
@@ -389,6 +393,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
+			local = e.pinRenewalDetails(s, local)
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)
 			p.AccountStatuses = local.AccountStatuses
@@ -596,7 +601,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		for _, a := range s.View.Enrollments {
 			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
 				if len(candidates) == 1 && !s.Removed[a.AccountID] {
-					return e.renewPin(s, a, c)
+					return e.renewPin(ctx, s, a, c)
 				}
 				return e.progress(s), errors.New("this harness account is already connected; no new request was created")
 			}
@@ -633,6 +638,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		c.Key = key
 		s.Request.Accounts = append(s.Request.Accounts, c)
 		s.Candidates = append(s.Candidates, LocalCandidate{c, c.Path, c.Home, c.Identity, c.Version})
+		recordCodexLauncher(s, c)
 	}
 	s.Response = DeviceResponse{}
 	s.NextPoll = e.now()
@@ -687,7 +693,7 @@ func renewsExistingPin(s *snapshot, candidates []Candidate) bool {
 // discovered. No request, approval, credential, identity or launcher changes,
 // and a healthy pin is never replaced. The daemon lifts the block on its next
 // runtime check. Claude pins are shared and change only through repin.
-func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progress, error) {
+func (e *Engine) renewPin(ctx context.Context, s *snapshot, enrolled Enrollment, c Candidate) (Progress, error) {
 	exists := errors.New("this harness account is already connected; no new request was created")
 	if c.Harness == "claude" || c.Harness == "grok" {
 		return e.progress(s), exists
@@ -716,7 +722,10 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if current.Path != c.Path || current.Home != c.Home || current.Identity != c.Identity {
 		return e.progress(s), errors.New("the signed-in account or executable differs from the enrolled one; remove this enrollment, then add the harness again")
 	}
-	if !pinBlocked(config, enrolled.AccountID) {
+	if hash := s.CodexPins.LauncherHashes[current.Key]; hash != "" && codexLauncherHash(c.Path, config.Workspace) != hash {
+		return e.progress(s), errors.New("the enrolled launcher content changed; use the existing person-approved enrollment flow")
+	}
+	if nodePinReasonWithExecutor(ctx, current.Path, config.Workspace, currentInterpreter(current), OSExecutor{}) == "" {
 		identity := RecordAttachIdentity(c.Harness, c.Path, config.Workspace)
 		if identity == nil || config.AttachIdentities[c.Harness] == *identity {
 			return e.progress(s), exists
@@ -745,16 +754,24 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 		p.Action = "Local attach identity recorded; restart agentd to use it. No enrollment or interpreter pin changed."
 		return p, nil
 	}
+	old := current.Node
+	if current.Harness == "pi" {
+		old = current.PiNode
+	}
 	current.Node, current.PiNode = c.Node, c.PiNode
 	config.Accounts[index] = current
-	if pinBlocked(config, enrolled.AccountID) {
+	if ctx.Err() != nil || nodePinReasonWithExecutor(ctx, current.Path, config.Workspace, currentInterpreter(current), OSExecutor{}) != "" {
 		return Progress{Stage: "blocked", Action: "the discovered interpreter is still unusable; pass --node-path to an installed Node executable outside the workspace"}, errors.New("interpreter pin still blocked")
+	}
+	// A package update can overlap the interpreter's final version read.
+	// Recheck the approved launcher immediately before recording the write.
+	if hash := s.CodexPins.LauncherHashes[current.Key]; hash != "" && codexLauncherHash(current.Path, config.Workspace) != hash {
+		return e.progress(s), errors.New("the enrolled launcher content changed during renewal; use the existing person-approved enrollment flow")
 	}
 	id, err := uuid()
 	if err != nil {
 		return Progress{}, err
 	}
-	old := s.Candidates[candidate].Candidate.Interpreter()
 	event, _ := json.Marshal(struct {
 		Kind      string             `json:"kind"`
 		ID        string             `json:"id"`
@@ -767,27 +784,35 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if err := e.Store.Write("pin-renewal-"+id+".json", event, true); err != nil {
 		return Progress{}, err
 	}
-	s.Candidates[candidate].Candidate.Node, s.Candidates[candidate].Candidate.PiNode = c.Node, c.PiNode
-	if err := e.save(s, false); err != nil {
-		return Progress{}, err
-	}
+	// The journal is write-ahead history. Saved candidates and pending-probe
+	// advice must describe only a runtime pin that was successfully committed.
 	config.RecordAttachIdentities()
 	raw, _ = json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return Progress{}, errors.New("pin renewal recorded but runtime update incomplete; rerun add-harness")
+	}
+	s.Candidates[candidate].Candidate.Node, s.Candidates[candidate].Candidate.PiNode = c.Node, c.PiNode
+	c.Key = enrolled.AccountKey
+	recordCodexLauncher(s, c)
+	if c.Harness == "codex" {
+		if s.CodexPins.Renewals == nil {
+			s.CodexPins.Renewals = map[string]harnesslaunch.Node{}
+		}
+		s.CodexPins.Renewals[c.Key] = c.Node
+	}
+	if err := e.save(s, false); err != nil {
+		return Progress{}, err
 	}
 	p := e.progress(s)
 	p.Action = "Interpreter pin renewed; the daemon resumes this account on its next check. No approval, sign-in or credential changed."
 	return p, nil
 }
 
-func pinBlocked(c RuntimeConfig, accountID string) bool {
-	for _, block := range AccountPinBlocks(c) {
-		if block.AccountID == accountID {
-			return true
-		}
+func currentInterpreter(a RuntimeAccount) harnesslaunch.Node {
+	if a.Harness == "pi" {
+		return a.PiNode
 	}
-	return false
+	return a.Node
 }
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
