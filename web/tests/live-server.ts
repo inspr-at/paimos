@@ -147,5 +147,10 @@ export async function openBoth(browser: Browser, url: string, viewport?: Viewpor
   await Promise.all([a.goto(url), b.goto(url)])
   // Both listen from here on: their first stream requests have been answered.
   await expect.poll(() => new Set(live.requests.map(r => r.page)).size).toBe(2)
+  // Agent subscriptions may connect before the node stream. Bind the initial
+  // node handshake in each tab before either browser is allowed to mutate data.
+  for (const page of [a, b]) await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { fixtureStreamCompletions: { nodes: boolean }[] }).fixtureStreamCompletions.some(item => item.nodes),
+  )).toBe(true)
   return { data, live, a, b, errors, errorsA, close: () => Promise.all(contexts.map(context => context.close())) }
 }
