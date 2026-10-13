@@ -116,7 +116,7 @@ onBeforeUnmount(() => { disposed = true; copying++ })
 .event-main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .replay-controls { display: flex; align-items: center; flex: none; gap: 4px; min-height: 44px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
 .retained { flex: 1; min-width: 0; }
-.count { display: inline-block; min-width: 3ch; font-variant-numeric: tabular-nums; }
+.count { font-variant-numeric: tabular-nums; }
 .replay-controls button { flex: none; }
 .event-scroll { flex: 1; min-height: 0; padding: 4px 8px 12px; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
 .notice { margin: 0 12px 8px; color: var(--warn-ink); font-size: 12px; overflow-wrap: anywhere; }
@@ -127,7 +127,7 @@ onBeforeUnmount(() => { disposed = true; copying++ })
 .event-row:hover { background: var(--row-hover); }
 .event-time { font: 500 11.5px var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .event-summary { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
-.event-summary strong { font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
+.event-summary strong { flex: none; max-width: 100%; font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
 .event-summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
 .event-measure { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; font: 11.5px var(--mono); color: var(--ink-3); white-space: nowrap; }
 .event-chevron { color: var(--ink-3); }

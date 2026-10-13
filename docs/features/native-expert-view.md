@@ -59,10 +59,33 @@ belongs only in the existing head menu. I2 uses the exported `liveTerminalLink`
 descriptor, whose label is Open live terminal, with terminal and external-link
 SVGs. The slot is withheld without current person/watch/consent authority.
 
-Coordinator handoff (R0, same PR before merge): assign the two component files
-and `web/src/lib/nativeExpert/{ports,buffer,rows}.ts` to the Agents UI audit
-slice; register `web/tests/native-expert-stream.spec.ts` in the web tier and
-Agents shard manifests. Those shared metadata files are outside P2d's exclusive
-write set. No routes, SQL, permissions, versions or dependencies are added.
+Coordinator handoff (R0, same PR before merge): the two components fall under
+the existing S8 `web/src/components/**` audit coverage; the three library files
+fall under S9 `web/src/**` (excluding components and views).
+Register `web/tests/native-expert-stream.spec.ts` in the web tier and browser
+source shard manifests (the `stable-controls` group fits this spec). The 12 collected cases are six behavior scenarios plus
+six viewport/theme cases. Recommended tier: ESSENTIAL for the identity,
+coalescing, bounded replay, earlier-page, agent/revocation and terminal-slot
+cases; NIGHTLY for the six visual cases. Those shared metadata files are
+outside P2d's exclusive write set. No routes, SQL, permissions, versions or
+dependencies are added.
 Tick owns the visual comparison with r2 + A1, and the coordinator owns the
 cross-family gate and release. Browser fixtures use no model/account calls.
+
+Worker validation: the guarded `remote-spec.sh` suite passed all 12 cases,
+including control stability within ±0.5 px, viewport-preserving prepend and
+explicit replay/stream barriers. The initial disabled-link regression failed
+before the role fix and passed after it. The guarded static run returned 1:
+37 checks passed, including TypeScript, lint, ownership coverage, tier tooling
+and browser safety; web classification/shard checks failed because R0 has not
+registered this spec. This is an incomplete release check, not a green static
+result. R0 must apply its registrations in this PR and rerun guarded static
+before merge. The affected planner exited 0 with `FULL: complete browser-impact
+map unavailable or stale for base tree`; authoritative full PR CI is required.
+
+Screenshot evidence uses `testInfo.outputPath()` and is copied back by the
+guarded runner to `web/test-results/AEON-1270/`. Each theme/width case emits
+`AEON-1270/zellij-{light,dark}-{390,1024,1440}.png` and
+`AEON-1270/events-{light,dark}-{390,1024,1440}.png` inside its result directory.
+The final worker status records the exact tested commit. Screenshots are
+ignored and not committed. No Go package changed; P2d specifies no Go suite.
