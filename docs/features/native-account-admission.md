@@ -98,3 +98,17 @@ the `agentpairing.Lock` caller `agentaccounts/native_session.go`. The existing
 native-source audit glob covers the package. No push to origin, deployment,
 model CLI or review gate was run by this worker. I1/I2 wiring and `G_ACCOUNTS`
 remain coordinator-owned.
+
+Fix-round-3 implementation snapshot `2674edcc5` releases a provably unlaunched
+reservation when its final check or ledger launch transition fails. The new
+ESSENTIAL regression uses a barrier after durable `possible_fork`/`launching`
+evidence and covers revocation, authority outage and cancellation, zero launch
+callbacks, worker reacquisition and released-journal import. A detached negative
+control with `lifecycle.go` identical to `db28357c5` fails all three cases with
+the expected `ErrLedgerOccupied` for the worker; the delivery branch was restored.
+The manifest is canonical and has exactly one ESSENTIAL row for the regression.
+Guarded affected-package and static-check attempts, including retries, all
+refused with exit 3 because the shared remote slots were occupied. Current
+positive Go suites, strict Go/web tier checks and `ci-static --merge-main` remain
+incomplete and must run in coordinator/PR CI. This source-only fix adds no web
+unit or browser spec. Non-blocking review findings remain follow-up work.
