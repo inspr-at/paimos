@@ -6611,11 +6611,11 @@
         }
       ]
     },
-    "261013084255.0.0": {
+    "261013103112.0.0": {
       "release_channel": "stable",
       "release_sequence": 132,
-      "snapshot_sha256": "52614271c914efa6e169fe9a205ce89e4909b85944ebb2f0f280247f842b641d",
-      "captured_at": "2026-10-13T08:46:05Z",
+      "snapshot_sha256": "1cf1c47a944009760b02ae2ff219087227561ff014cf2b8e0592b9be68e1b287",
+      "captured_at": "2026-10-13T10:31:17Z",
       "release_revision": 1,
       "items": [
         {
