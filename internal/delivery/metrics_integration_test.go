@@ -24,6 +24,7 @@ type metricsFake struct {
 	*auditFake
 	respond func(path string) (any, error)
 	calls   []string
+	source  string
 }
 
 // A green queue suite has no failed checks to quarantine. Keep that ingress
@@ -34,9 +35,13 @@ func (g *metricsQueueFake) QueueChecks(context.Context, queueSuite, *queueRun) (
 	return "CI", nil, nil
 }
 
-func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(func(string, any) error) error) error {
+func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(func(string, any) error, string) error) error {
 	if tenantID == "" {
 		return errRead
+	}
+	source := g.source
+	if source == "" {
+		source = historyActions
 	}
 	return read(func(path string, out any) error {
 		g.calls = append(g.calls, path)
@@ -46,7 +51,7 @@ func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(
 		}
 		raw, _ := json.Marshal(body)
 		return json.Unmarshal(raw, out)
-	})
+	}, source)
 }
 
 func newMetricsFixture(t *testing.T) (*fixture, *metricsFake) {
