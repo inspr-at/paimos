@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -57,13 +58,33 @@ const nativeSDKFixture = `export function query({ prompt, options }) {
  };
 }`
 
+// Copy the interpreter into this test's owned installation. Hosted Node
+// prefixes can have untrusted ancestors; production pin checks still apply.
+func copyNativeFixtureNode(t *testing.T, source, destination string) {
+	t.Helper()
+	input, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, copyErr := io.Copy(output, input)
+	closeErr := output.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func nativeLeadFixture(t *testing.T) (*ClaudeAdapter, LeadStartRequest, chan AdapterEvent) {
 	t.Helper()
-	node, err := exec.LookPath("node")
+	installedNode, err := exec.LookPath("node")
 	if err != nil {
 		t.Fatal("fake SDK requires Node", err)
 	}
-	node, err = filepath.EvalSymlinks(node)
+	installedNode, err = filepath.EvalSymlinks(installedNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +100,8 @@ func nativeLeadFixture(t *testing.T) (*ClaudeAdapter, LeadStartRequest, chan Ada
 		t.Fatal(err)
 	}
 	cli := fakeVendorPath(t, "claude")
-	_, sdk := claudeAdapterDependencies(t, cli)
+	node, sdk := claudeAdapterDependencies(t, cli)
+	copyNativeFixtureNode(t, installedNode, node)
 	if err := os.WriteFile(sdk, []byte(nativeSDKFixture), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +138,43 @@ func waitNativeEvent(t *testing.T, events <-chan AdapterEvent, match func(Adapte
 		case <-ctx.Done():
 			t.Fatal("fake SDK event did not arrive")
 		}
+	}
+}
+
+// Risk: a trusted development host masks CI failures caused by an untrusted
+// Node installation prefix or UTC's distinct time.Local/time.UTC identities.
+// Re-run the four affected behaviors under those host conditions, keeping
+// production dependency validation and every original assertion intact.
+func TestNativeFixturesSurviveUntrustedNodePrefixAndUTCTimezone(t *testing.T) {
+	installedNode, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(prefix, 0777); err != nil {
+		t.Fatal(err)
+	}
+	ambientNode := filepath.Join(prefix, "node")
+	copyNativeFixtureNode(t, installedNode, ambientNode)
+	_, sdk := claudeAdapterDependencies(t, fakeVendorPath(t, "claude"))
+	_, err = agentsetup.ResolveClaudeRuntime(agentsetup.ClaudeDependencies{NodePath: ambientNode, SDKPath: sdk}, "")
+	if !errors.Is(err, agentsetup.ErrUnsafePath) || !strings.Contains(err.Error(), "world-writable") {
+		t.Fatal("untrusted ambient Node refused for wrong reason", err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, executable, "-test.v", "-test.run=^(TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit|TestNativeCoordinatorGrantChangesRefuseBeforeInput|TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion|TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts)$")
+	command.Env = append(os.Environ(), "TZ=UTC", "PATH="+prefix+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("CI host conditions broke native behavior: %v\n%s", err, output)
 	}
 }
 
@@ -341,7 +400,7 @@ func TestNativeAfterExitPinsIdentityAndWaitsForObservedExit(t *testing.T) {
 // Risk: upgrading persisted local records invents native authority or permits
 // a downgrade to forget retained native writers. The old envelope stays pinned.
 func TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion(t *testing.T) {
-	old := leadRecord{Version: 1, Attempted: true, Ownership: &ownedprocess.Identity{ProcessID: "old-owned", RootPID: 99, GroupID: 99, StartedAt: time.Unix(100, 0)}, Pickup: agentsetup.LeadPickup{Demand: agentsetup.LeadDemand{ID: uidLead("01")}}}
+	old := leadRecord{Version: 1, Attempted: true, Ownership: &ownedprocess.Identity{ProcessID: "old-owned", RootPID: 99, GroupID: 99, StartedAt: time.Unix(100, 0).UTC()}, Pickup: agentsetup.LeadPickup{Demand: agentsetup.LeadDemand{ID: uidLead("01")}}}
 	raw, err := json.Marshal(old)
 	if err != nil {
 		t.Fatal(err)

@@ -1722,6 +1722,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeCoordinatorRegistrationUsesManagedRootContract","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeFixturesSurviveUntrustedNodePrefixAndUTCTimezone","reason":"AEON-1261: preserve native fixture security and ownership assertions across CI hosts","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"GATED-FULL"}
