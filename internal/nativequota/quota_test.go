@@ -142,6 +142,12 @@ func TestStreamQuotaFreshnessAndAccountIsolation(t *testing.T) {
 			if zero.Quota.UsedPercent == nil || *zero.Quota.UsedPercent != 0 || zero.Measurement != "fresh" {
 				t.Fatal("explicit vendor zero was confused with absence")
 			}
+			// Account quota outlives individual turns/cursors on this connection.
+			nextTurn := b
+			nextTurn.Identity.NativeTurnRef, nextTurn.Identity.ResumeCursor = "turn-two", "cursor-two"
+			if err := c.Observe(nextTurn, 3, event(harness, 0, reset)); err != nil {
+				t.Fatalf("persistent connection metadata retargeted account quota: %v", err)
+			}
 			if err := c.Failed(b, "timeout"); err != nil {
 				t.Fatal(err)
 			}

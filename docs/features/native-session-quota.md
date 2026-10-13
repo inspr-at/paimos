@@ -19,6 +19,8 @@ the enrollment's `link_revision`, the local profile revision and executable/SDK
 pins. Every observation, snapshot, health update and ingress projection checks
 that same binding. Resume, restart or account rebind creates a new collector;
 old observations never migrate to it.
+Native turn and resume-cursor references may change on that same connection;
+they are correlation data and do not retarget its account quota binding.
 
 The integrator supplies `Qualification` only from its compiled, release-approved
 registry: exact path/digest/version/protocol, exact Claude SDK pin, evidence
@@ -135,3 +137,17 @@ through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
 origin/main`. These clock-driven tests use synthetic pins and events, with no
 vendor account/model call. Authoritative PR CI and coordinator qualification/
 review remain required before integration or release.
+
+## Builder validation (2026-10-13)
+
+- PASS: initial guarded mbp2606 Go run of `./internal/nativequota/...` on
+  `fce23905b`; all four named cases and their subcases passed (0.250 s).
+- PASS: affected planner against refreshed `origin/main`, exit 0,
+  `mode=essential`, `layout=full`; selected 128 Go packages, 80 browser specs and
+  120 web unit files from the current manifests. `nativequota` awaits R0 rows.
+- INCOMPLETE: guarded static `--merge-main` exited 1. Its 39 other checks passed
+  with no skips, including Go vet. Only Go-tier drift and source ownership/audit
+  coverage failed for the four cases and six files listed above. R0 must apply
+  those rows and rerun static in this same PR; this is not a green merge gate.
+- Browser validation does not apply to this source-only slice. Production pin
+  qualification, I2 integration, review and release remain coordinator-owned.

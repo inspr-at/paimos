@@ -90,13 +90,20 @@ func (b Binding) check(other Binding) error {
 	if b.AccountBindingRevision != other.AccountBindingRevision || b.ProfileBindingRevision != other.ProfileBindingRevision {
 		return ErrRevision
 	}
-	if !b.Runtime.Equal(other.Runtime) || b.Identity != other.Identity || b.Harness != other.Harness {
+	if !b.Runtime.Equal(other.Runtime) || !sameConnection(b.Identity, other.Identity) || b.Harness != other.Harness {
 		return ErrRuntime
 	}
 	if b.Binary != other.Binary || b.SDK != other.SDK {
 		return ErrQualification
 	}
 	return nil
+}
+
+// Turn/cursor refs are mutable correlation data on a persistent owned stream.
+// They neither change the account quota scope nor confer runtime authority.
+func sameConnection(a, b nativecontract.NativeIdentity) bool {
+	return a.Provider == b.Provider && a.RuntimeEpoch == b.RuntimeEpoch && a.NativeSessionRef == b.NativeSessionRef &&
+		a.NativeThreadRef == b.NativeThreadRef && a.ProcessIdentityDigest == b.ProcessIdentityDigest && a.PID == b.PID && a.StartedAt.Equal(b.StartedAt)
 }
 
 func qualified(b Binding, q Qualification) bool {
