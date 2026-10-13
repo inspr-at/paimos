@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
 import { isClipped, vClipTip } from '../directives/clipTip'
-import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
+import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
@@ -35,7 +35,7 @@ import { ticketRef } from '../lib/ticketLinks'
 import { scopeOwner } from '../lib/identityScope'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, normaliseState, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
-import { useProjects } from '../stores/projects'
+import { useProjects, type Project } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
 import { ticketsFooter, withAgentsIsPartial } from '../lib/footerProviders'
 import { useFooterSummary } from '../lib/footerSummary'
@@ -102,8 +102,19 @@ provide(TICKET_PEEK, {
   open: (key, from) => { if (ticketKey.value) void openRelated(key); else appPeek?.open(key, from) },
   openKey: computed(() => ticketKey.value ? ticketKey.value.toUpperCase() : appPeek?.openKey.value ?? null),
 })
-const project = computed(() => projects.byRouteKey(projectKey.value))
-const projectId = computed(() => project.value?.id ?? null)
+// Recovery belongs only to this mounted editor, never to the authorized cache.
+// Its node copy retains the revision the draft was based on; the actual draft
+// stays in the same TicketWorkspace instance while all grants are revoked.
+const recovery = shallowRef<{
+  owner: string; projectKey: string; ticketKey: string; project: Project
+  person: { id: string; name: string }; item: ListItem
+} | null>(null)
+const recovering = computed(() => !!recovery.value && session.requiresSignIn && !session.identity
+  && recovery.value.projectKey === projectKey.value && recovery.value.ticketKey === ticketKey.value)
+const authorizedProject = computed(() => projects.byRouteKey(projectKey.value))
+const project = computed(() => authorizedProject.value ?? (recovering.value ? recovery.value!.project : undefined))
+// Reads and their generation fences still follow the authorized cache only.
+const projectId = computed(() => authorizedProject.value?.id ?? null)
 const descriptionExpanded = ref(false)
 const descriptionClipped = ref(false)
 const descriptionBlock = ref<HTMLElement>()
@@ -390,6 +401,8 @@ const creating = ref(false)
 // Full page: the same ticket workspace in a two-column page instead of the side panel.
 const fullView = fullViewQuery
 const me = computed(() => session.identity ? { id: session.identity.principal.id, name: session.identity.principal.name } : null)
+const workspaceOwner = computed(() => recovering.value ? recovery.value!.owner : scopeOwner(session.identity))
+const workspacePerson = computed(() => recovering.value ? recovery.value!.person : me.value)
 const writable = computed(() => can('nodes.write', projectId.value ?? undefined))
 const nodeDeletable = computed(() => can('nodes.delete', projectId.value ?? undefined))
 const nodeMovable = computed(() => can('nodes.move', projectId.value ?? undefined))
@@ -707,10 +720,29 @@ const panelError = ref('')
 const panelLoading = ref(false)
 let panelGeneration = 0
 const panelItem = computed(() => {
+  if (recovering.value) return recovery.value!.item
   const key = ticketKey.value.toLowerCase()
   if (!key) return null
   return list.rows.value.find(row => row.key.toLowerCase() === key) ?? outline.findByKey(key) ?? (fetched.value?.key.toLowerCase() === key ? fetched.value : null)
 })
+watch(() => session.requiresSignIn, ended => {
+  const who = session.identity, current = authorizedProject.value, item = panelItem.value
+  if (!ended || !who || !current || !item || !panel.value?.isDirty()) return
+  recovery.value = {
+    owner: scopeOwner(who), projectKey: projectKey.value, ticketKey: ticketKey.value,
+    project: { ...current }, person: { id: who.principal.id, name: who.principal.name },
+    item: { ...item, fields: { ...item.fields } },
+  }
+}, { flush: 'sync' })
+watch(() => scopeOwner(session.identity), owner => {
+  // A new authenticated document/owner never resumes the old editor, even if
+  // it opens the same project and node. Drop pending lookups and list answers.
+  if (owner) recovery.value = null
+  panelGeneration++
+  list.invalidate()
+  fetched.value = null
+  list.rows.value = []
+}, { flush: 'sync' })
 const panelPosition = computed(() => {
   if (graphActive.value) return null // Graph selection has no list-page order.
   const item = panelItem.value
@@ -725,23 +757,25 @@ async function resolvePanel() {
   const request = ++panelGeneration
   const key = ticketKey.value
   const within = projectId.value
+  const owner = scopeOwner(session.identity)
   panelError.value = ''
   panelLoading.value = false
-  if (!key || !within) return
+  if (!key || !within || !owner) return
+  const current = () => request === panelGeneration && owner === scopeOwner(session.identity) && session.authenticationCurrent()
   if (list.rows.value.some(row => row.key.toLowerCase() === key.toLowerCase()) || fetched.value?.key.toLowerCase() === key.toLowerCase()) return
   panelLoading.value = true
   try {
     const sent = rowStore.mark()
     const result = await listNodes({ within, q: key, sort: 'key', limit: 50 })
-    if (request !== panelGeneration) return
+    if (!current()) return
     const hit = result.items.find(item => item.key.toLowerCase() === key.toLowerCase())
     // The row store's display object for it; one it knows deleted opens as gone.
     if (hit) fetched.value = rowStore.adopt(hit, sent) ?? hit
     else if (!list.rows.value.some(row => row.key.toLowerCase() === key.toLowerCase())) panelError.value = `${key.toUpperCase()} is not part of ${project.value?.title ?? 'this project'}.`
   } catch (e) {
-    if (request === panelGeneration) panelError.value = e instanceof Error ? e.message : 'The ticket could not be loaded.'
+    if (current()) panelError.value = e instanceof Error ? e.message : 'The ticket could not be loaded.'
   } finally {
-    if (request === panelGeneration) panelLoading.value = false
+    if (current()) panelLoading.value = false
   }
 }
 watch([ticketKey, projectId], resolvePanel, { immediate: true })
@@ -1920,9 +1954,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <PanelSplitter v-if="knowledgeDocked" field="knowledgePanel" css-var="--knowledge-panel-user-w" target=".entry-page.dock" :reserve="DOCK_LIST_RESERVE" />
       <PanelSplitter v-if="ticketKey && !fullView" class="early" :reserve="500" />
       <TicketWorkspace
-        v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
+        v-if="ticketKey" :key="`${workspaceOwner}/${project.id}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
-        :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
+        :names="list.names" :me="workspacePerson" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
         :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :ensure-people="loadProjectPeople" :native-releases="nativeReleases"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
