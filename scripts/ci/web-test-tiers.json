@@ -358,6 +358,8 @@
     ,
     "browser:tests/agents-cleanup.spec.ts:Queued folds per person, says what waits, and a run link opens it without changing the preference"
     ,
+    "browser:tests/agents-cleanup.spec.ts:Queued keeps the page section gap below Sessions; folding and emptying move nothing above it"
+    ,
     "browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it"
     ,
     "browser:tests/agents-cleanup.spec.ts:accounts and computers is one chip whose popover states the state; a stored fold changes nothing"
@@ -6429,6 +6431,8 @@
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"rule details stay behind the row disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued folds per person, says what waits, and a run link opens it without changing the preference","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued keeps the page section gap below Sessions; folding and emptying move nothing above it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a queued run can be cancelled from /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
