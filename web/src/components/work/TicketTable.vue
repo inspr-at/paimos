@@ -624,10 +624,11 @@ onMounted(() => {
 })
 watch(() => [props.scrollRoot, props.hasMore, props.loadingMore, !!props.outline], observe)
 // A row patched, marked, added or removed above the screen never moves the rows on it (AEON-1279):
-// WebKit has no scroll anchoring. Explicit anchors (a folded group's head) still apply after this.
+// WebKit has no scroll anchoring. Ticket rows anchor; a group's head sticks, so it never moves.
+// Explicit anchors (a folded group's head) still apply after this.
 useReaderAnchor({
   scroller: () => props.scrollRoot ?? grid.value?.closest('main'),
-  rows: () => grid.value?.querySelectorAll<HTMLElement>('tbody > tr'),
+  rows: () => grid.value?.querySelectorAll<HTMLElement>('tbody > tr.ticket-row:not(.ghost)'),
   top: () => grid.value?.tHead?.getBoundingClientRect().bottom ?? -Infinity,
 })
 onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer); document.removeEventListener('pointerdown', clearHoldClick, true) })

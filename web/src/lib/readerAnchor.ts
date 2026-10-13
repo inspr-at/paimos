@@ -47,7 +47,7 @@ export function useTouchScroll(target?: Pick<EventTarget, 'addEventListener' | '
 export interface ReaderAnchorOptions {
   /** The element that scrolls. */
   scroller: () => HTMLElement | null | undefined
-  /** The rows that may anchor, in document order. */
+  /** The rows that may anchor, in document order. Never a sticky one: it stays put while the rest moves. */
   rows: () => Iterable<HTMLElement> | ArrayLike<HTMLElement> | null | undefined
   /** Where the visible part starts below sticky heads; never above the scroller's top. */
   top?: () => number
