@@ -331,3 +331,58 @@ rows before this PR can be static-green or merge. No shared inventory,
 contract, permission, migration, release version or provider behavior was
 edited. No origin push, deployment, live vendor session, model CLI or review
 gate was run.
+
+## CI fix round 8
+
+The full failed-step logs for the review of `688aa63c7` identify two blockers:
+
+- `go-static` job `115140282870` fails strict native Go-tier collection on
+  exactly the three unclassified Codex tests listed in the fix round 5
+  handoff. No provider compilation or behavior failure is reported. R0 must
+  apply those three `ESSENTIAL` rows in `scripts/ci/go-test-tiers.json` in this
+  PR; the source-ownership registration already passes.
+- `web-shard (11)` job `115140667871` fails the existing Work Queue regression,
+  `keyboard and drag moves persist, use workspace positions, retain focus,
+  reset and filter membership`, at `web/tests/work-queue.spec.ts:145`. After
+  resetting the queue and pressing `Alt+ArrowUp` on PHAROS-13, its updated
+  `Number 5` open button exists but is inactive instead of focused. The
+  remaining 31 cases in that grouped invocation passed. The `web` aggregate
+  job `115144743454` fails because of this browser failure.
+
+Read-only comparison confirms that `web/src/components/work/QueueView.vue`,
+`web/src/stores/workQueue.ts` and `web/tests/work-queue.spec.ts` are identical
+to current `origin/main` (`3507e3319`). The Work Queue owner must reproduce and
+fix focus retention across the reset/move sequence, preserving the existing
+assertion. The hosted Linux Chromium failure is evidence of the regression;
+no successful browser reproduction is claimed in this round.
+
+Both required fixes are outside P5a's exclusive write set, which contains only
+`internal/nativeproviders/codex/**` and this feature document. The original
+brief requires "Write ONLY inside your exclusive_write_set" and "If you need
+a file outside it, STOP and say so in your summary." The normative plan also
+reserves shared test-tier registrations for R0. Fix round 8 preserves those
+ownership constraints and supplies no transfer. The builder therefore stops
+source edits and supplies this handoff; the PR remains blocked until R0 and
+the Work Queue owner resolve the two failures and authoritative CI is green.
+
+Fetching main confirmed that its audit fix is already an ancestor of this
+branch; PR #617 is mergeable, so no merge is required. A bounded manifest-only
+diagnostic against immutable `688aa63c7`, current HEAD and current main finds
+exactly the three missing Codex identities. Adding only the proposed rows in
+memory makes that diagnostic pass; no registry was written. This does not
+replace strict native test collection after registration.
+
+Both attempts at guarded Go, targeted Work Queue browser and static validation
+refused remote capacity with exit 3. After the first Go refusal, the permitted small
+local package fallback passed at `688aa63c7` with `GOMAXPROCS=2`, `-p 2` and
+`-count=1` (0.262 s). These are fake app-server tests; no vendor process was
+started. Static and browser refusals are incomplete, never green. The affected
+planner and tier/web-shard/audit self-checks were not rerun independently;
+guarded static and authoritative PR CI remain the validation handoff.
+
+This round changes only this feature document. No provider behavior fix was
+made, so no new regression test or negative-control source change is warranted.
+The existing focus assertion and all provider assertions remain intact. No
+shared inventory, web source, contract, permission, migration or release
+version was edited. No origin push, deployment, live vendor session, model
+CLI or review gate was run.
