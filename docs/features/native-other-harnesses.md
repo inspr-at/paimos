@@ -128,7 +128,7 @@ Guarded `ci-static-locked.sh` checked committed HEAD plus current main and
 exited 0: 42 checks passed, no optional skips, including Go/web tier checks,
 Go vet, web typecheck/lint, ownership coverage and contract/migration guards.
 The earlier local web-tier attempt had no dependencies; its guarded install
-was refused while mbp2607 was YELLOW. The successful remote static run supplied
-the web validation without bypassing that guard. Authoritative PR CI,
+was refused by the local host load guard. The successful remote static run
+supplied the web validation without bypassing that guard. Authoritative PR CI,
 cross-family review, real provider-pin enablement and production wiring remain
 coordinator-owned. No origin push or deployment was performed.
