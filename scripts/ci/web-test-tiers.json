@@ -10484,6 +10484,18 @@
     ,
     {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one terminal and a head-menu descriptor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 discards stale identities and rejects wrong request completions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
