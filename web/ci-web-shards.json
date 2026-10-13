@@ -334,6 +334,8 @@
         ,
         {"file":"tests/native-lead-pilot.spec.ts","listedTests":6,"weightSeconds":30,"weightSource":"AEON-1287: conservative estimate for six unmeasured conversation/stability cases"}
         ,
+        {"file":"tests/native-session-requests.spec.ts","listedTests":7,"weightSeconds":4.219,"weightSource":"AEON-1304: guarded remote serial Playwright wall 4219ms for seven cases at 8362dbbfc"}
+        ,
         {"file":"tests/no-shift-agents.spec.ts","listedTests":29,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimateReason":"AEON-1211: six added cases estimated at the existing median; measured cases retained.","estimatedTests":9,"measuredTests":20,"seconds":234.6792,"selectedTests":29},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
         ,
         {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":5.68,"median":3.5155,"min":2.121},"seconds":81.696,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
