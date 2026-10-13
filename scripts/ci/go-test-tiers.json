@@ -5418,6 +5418,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestCompositeBoundariesAcquireNoResourceAfterEvent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestGitHubInstallationAcceptsOpaqueTokens","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubPublishPostsGateReason","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubReadRetainsMissingActionsPermission","tier":"ESSENTIAL"}
