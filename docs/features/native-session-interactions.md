@@ -200,3 +200,24 @@ both parents and the shard manifest changes only the incoming spec's case count,
 preserving this ticket's measured row. All other reviewed branch files remain
 unchanged, and migration 1348 still has no collision. This round adds no new
 test identities or R0 rows of its own.
+
+Fresh remote Playwright validation on merge `a3600edbb` passed all nineteen
+cases: seven in `native-session-requests.spec.ts`, nine in
+`usage-accounts.spec.ts` and three in `session-ended.spec.ts`, one spec at a time
+with one worker. Every owned browser group reported zero remaining processes.
+The Go and migration tree is byte-for-byte unchanged from the passing remote
+run. Refreshed screenshots remain untracked under `web/test-results/remote/`:
+`AEON-1304-requests-<390|1024|1440>-<light|dark>.png`,
+`usage-<390|1440>-<light|dark>.png` and
+`aeon-1313-capacity-restricted-<390|1024|1440>-<light|dark>.png`
+in their per-case directories.
+
+The full guarded remote `node scripts/ci-static.mjs --merge-main` run on
+`a3600edbb` exited 0: all 42 checks passed, zero optional checks skipped. This
+includes strict Go/web tier and shard inventories, ownership, typecheck, lint,
+migration policy and OpenAPI checks. Earlier static attempts were refused by
+the shared remote capacity guard (exit 3); no local fallback was used. A final
+fetch confirmed `b199dc53c` is still the newest main and is included in this
+branch. The final commit records validation only. Origin push, deployment,
+review gates and model CLI calls were not performed; the coordinator owns
+the remaining review and release controls.
