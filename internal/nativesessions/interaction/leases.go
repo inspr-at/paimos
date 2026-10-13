@@ -5,6 +5,7 @@ package interaction
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -289,14 +290,44 @@ func (s *Store) CheckControlTx(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	if len(capability) > 4096 {
 		return fault(413, nativecontract.ReasonBufferFull)
 	}
+	if err := nativeinteraction.Validate(s.validator, "NativeBinding", b); err != nil {
+		return err
+	}
+	if p.TenantID != b.TenantID {
+		return fault(403, nativecontract.ReasonWrongInstance)
+	}
 	if err := human(p); err != nil {
 		return err
 	}
 	if err := require(ctx, tx, p, b, "harness.control"); err != nil {
 		return err
 	}
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT b.view FROM native_session_bindings b
+ JOIN nodes n ON n.tenant_id=b.tenant_id AND n.id=b.project_id
+ JOIN harness_sessions h ON h.tenant_id=b.tenant_id AND h.id=b.current_harness_session_id
+ WHERE b.id=$1 AND b.project_id=$2 AND n.deleted_at IS NULL AND h.stopped_at IS NULL AND h.archived_at IS NULL
+ FOR NO KEY UPDATE OF b`, b.OwnedSessionID, b.ProjectID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fault(410, nativecontract.ReasonControllerExpired)
+	}
+	if err != nil {
+		return err
+	}
+	if len(raw) > 131072 {
+		return fault(413, nativecontract.ReasonBufferFull)
+	}
+	var snapshot nativecontract.SessionView
+	if err = json.Unmarshal(raw, &snapshot); err != nil {
+		return err
+	}
+	if snapshot.CurrentBinding == nil || !nativeinteraction.SameBinding(*snapshot.CurrentBinding, b) {
+		return fault(409, nativecontract.ReasonWrongGeneration)
+	}
+	if err = s.authority.AuthorizeTx(ctx, tx, p, b, "control_claim"); err != nil {
+		return err
+	}
 	var now time.Time
-	var err error
 	if s.clock == nil {
 		err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
 	} else {

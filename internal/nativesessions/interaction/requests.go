@@ -137,7 +137,17 @@ func deskInput(a nativecontract.Approval) questions.Input {
 	if a.Kind == "question" {
 		options = []questions.Option{{ID: "answer", Title: "Answer this request", Answer: "Enter the exact answer"}, {ID: "deny", Title: "Deny", Answer: "deny"}}
 	}
-	return questions.Input{RequestID: a.RequestID, Question: a.Summary, Context: string(contextRaw), Options: options, SessionID: a.Binding.HarnessSessionID, Meanwhile: "paused", SuggestedOutcome: "once"}
+	input := questions.Input{RequestID: a.RequestID, Question: a.Summary, Context: string(contextRaw), Options: options, SessionID: a.Binding.HarnessSessionID, Meanwhile: "paused", SuggestedOutcome: "once"}
+	// C0 summaries allow 2048 bytes; desk question titles allow 2000. Keep the
+	// whole approved summary in the desk's existing findings slot, never clip.
+	if len(a.Summary) > 2000 {
+		input.Question = "Session permission request"
+		if a.Kind == "question" {
+			input.Question = "Session question"
+		}
+		input.Findings = a.Summary
+	}
+	return input
 }
 
 // Resolution is local-only delivery context. Accepted is a decision recorded
@@ -205,6 +215,11 @@ func (s *Store) Decide(ctx context.Context, a nativecontract.Actor, in nativecon
 		if err = s.authority.AuthorizeTx(ctx, tx, p, in.ExpectedBinding, "native_decision:"+approval.TurnRef+":"+approval.NativeRequestRef+":"+approval.EffectDigest); err != nil {
 			return err
 		}
+		required, err := s.authority.AuthorizeRequestTx(ctx, tx, p, approval)
+		if err != nil {
+			return err
+		}
+		approval.StepUpRequired = approval.StepUpRequired || required
 		if err = s.refresh(ctx, tx, l); err != nil {
 			return err
 		}
@@ -233,6 +248,9 @@ func (s *Store) Decide(ctx context.Context, a nativecontract.Actor, in nativecon
 		}
 		// Summary lives solely in the existing authorized desk content store.
 		approval.Summary = questionInput.Question
+		if questionInput.Findings != "" {
+			approval.Summary = questionInput.Findings
+		}
 		if actor != p.ID || outcome != "once" || answeredAt.Before(created) || !answeredAt.Before(approval.ExpiresAt) || questionInput.Context != deskInput(approval).Context {
 			return fault(403, nativecontract.ReasonGrantMissing)
 		}

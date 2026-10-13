@@ -87,6 +87,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f.agent.AuthKeyID = f.agent.KeyID
+	f.agent.KeyCreatorID = f.person.ID
 	for _, p := range []tenant.Principal{f.person, f.other, f.agent} {
 		dbtest.BindRole(t, f.d, tenantID, p.ID, "admin")
 	}
@@ -193,7 +194,7 @@ func TestControllerEpochFencesConcurrentAttach(t *testing.T) {
 	}
 }
 
-func (f *fixture) request(t *testing.T, kind string, stepUp bool) nativecontract.Approval {
+func (f *fixture) request(t *testing.T, kind string, stepUp bool, summary ...string) nativecontract.Approval {
 	t.Helper()
 	id, _ := uuid()
 	req, _ := uuid()
@@ -201,6 +202,9 @@ func (f *fixture) request(t *testing.T, kind string, stepUp bool) nativecontract
 	if kind == "question" {
 		in.AllowedDecisions = []string{"answer", "deny"}
 		in.Summary = "Which authorized result should be used?"
+	}
+	if len(summary) > 0 {
+		in.Summary = summary[0]
 	}
 	var computer string
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
@@ -291,7 +295,7 @@ func TestDeskDecisionExactEffectExpiryAndRevocation(t *testing.T) {
 		t.Fatalf("resolution cardinality %d: %v", count, err)
 	}
 	f.authority.protected.Store(true)
-	protected := f.request(t, "tool", false)
+	protected := f.request(t, "tool", false, strings.Repeat("x", 2048))
 	if !protected.StepUpRequired {
 		t.Fatal("producer removed the server's step-up requirement")
 	}
