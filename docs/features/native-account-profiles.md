@@ -85,6 +85,17 @@ in `scripts/ci/go-test-tiers.json` for `internal/nativeprofiles` (three tests) a
 `internal/cli` (one test). No web shard, route, permission, migration, DSAR or
 shared-fence rows are needed: this slice adds none of those surfaces.
 
+The exact additions to the Go manifest's `tests` array are:
+
+```json
+[
+  {"kind":"go","package":"internal/cli","name":"TestNativeAccountStartBindsAuthorizedProfile","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileDirectoriesRejectAliasesAndUnsafeHomes","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileIsolationPreservesCredentialsAndParentEnvironment","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativeprofiles","name":"TestProfileResolutionRejectsForeignStaleAndUnqualifiedAccounts","tier":"ESSENTIAL"}
+]
+```
+
 Required validation is the guarded remote Go run for
 `./internal/nativeprofiles/... ./internal/cli/...`, guarded
 `ci-static-locked.sh --merge-main`, and
@@ -154,3 +165,25 @@ and the four **ESSENTIAL** Go test rows specified above. The reported
 A read-only in-memory application of that glob clears all five ownership
 errors. `plan.json` and `plan.md` explicitly reserve both inventories for R0;
 P4a's exclusive write set remains unchanged. This handoff is **not CI green**.
+
+Fix-round 4 (2026-10-13): baseline `02e5ef46` reproduces the same R0 omissions.
+`go-static` job **115106235132** rejects exactly the four manifest rows above;
+`release-check-run` job **115106235117** rejects exactly the five unassigned
+profile files. The aggregate Go job reports successful Go tests and failed static
+checks. Read-only proposals pass both full-tree ownership and strict tier
+validation. Feeding only the proposed S1 glob to the delta CLI through stdin
+changes its exit from 1 to 0 with zero changed files and no ownership errors;
+neither shared inventory was edited. The exact Go rows are now provided above
+for R0 to apply together with that glob.
+
+Both affected Go packages pass through the guarded remote runner on `02e5ef46`.
+The affected selector exits 0 and selects **FULL** (3225 reverse-dependency
+cases). Guarded merged-main static returns **exit 1**: **39 checks pass, zero
+optional skips**, and only `go-tiers`, `audit-tests` and `audit-coverage` fail on
+the R0 omissions. The updated document passes the public-name guard, its four
+rows match the existing tests, and Git whitespace checks pass. Web unit/browser
+tests remain inapplicable to this slice. The policy preview separately awaits
+the coordinator's trusted review verdict. This round changes only this owned
+document; CI remains blocked by R0's exclusive metadata ownership and the
+coordinator's review. No origin push, deployment, model call or review gate was
+performed.
