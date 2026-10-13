@@ -94,7 +94,7 @@ const detail = computed(() => {
   return `sized for ${props.session.controller.actor_id === props.viewer.principalId ? 'your terminal' : control.value?.holderName ? `${control.value.holderName.split(' ')[0]}’s window` : 'the holder’s window'}`
 })
 const tooltip = computed(() => [heading.value, detail.value, control.value?.since ? `Since ${control.value.since}.` : '',
-  hasGrid.value ? `${cols.value} × ${rows.value}.` : '', risk.value && control.value?.remainingSeconds != null ? `Control grace: ${control.value.remainingSeconds} s; the server decides when it expires.` : '',
+  hasGrid.value ? `${cols.value} columns, ${rows.value} rows.` : '', risk.value && control.value?.remainingSeconds != null ? `Control grace: ${control.value.remainingSeconds} s; the server decides when it expires.` : '',
   'Live output only, read-only here. Messages in Chat wait until control is handed back.', notice.value, fitMessage.value,
   preferenceSaves.failed.has(`${ownerKey.value}/agents:terminal.fit`) ? 'Fit could not be saved. Try again.' : ''].filter(Boolean).join(' '))
 const visibleStatus = computed(() => !readable.value ? 'You cannot read this session.' :
