@@ -55,8 +55,7 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
       <span class="ln-mark" aria-hidden="true"><HarnessMark v-if="first" :harness="first.harness" :provider="routeOf(first.harness, first.models[0] ?? '')" :size="13" /></span>
       <span class="ln-main">
         <span class="ln-n">
-          <span class="ln-name">{{ model.lineName }}</span>
-          <span v-if="model.versionLabel" class="ln-v">{{ model.versionLabel }}</span>
+          <span class="ln-name">{{ model.name }}</span>
           <span v-if="model.source" class="srcb sm" :data-tip="SOURCE_TIP[model.source]"><AppIcon :name="SOURCE_ICON[model.source]" :size="11" />{{ SOURCE_NAME[model.source] }}</span>
           <span v-else class="srcb sm unk" data-tip="No provider or harness has reported where this model comes from.">unknown</span>
           <template v-if="model.isNew"><span class="tag-new">New</span><span class="tag-off">off until used</span></template>
@@ -142,7 +141,6 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
 .ln-main { display: grid; min-width: 0; }
 .ln-n { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; font-weight: 600; }
 .ln-name { overflow-wrap: anywhere; }
-.ln-v { padding: 1px 7px; border-radius: 6px; background: var(--surface-sunken); font: 600 11.5px/1.5 var(--mono); color: var(--ink); }
 .ln-m { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 .ln-m .tag-pause { flex: none; font-weight: 500; }
 .ln-mt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

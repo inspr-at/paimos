@@ -45,9 +45,10 @@ onMounted(() => {
 })
 onBeforeUnmount(() => controller.abort())
 // Each use moves from the old version to its successor, at the level it runs now and the nearest one it lands on
-// ("Opus 5 · xhigh → Opus 5.5 · xhigh"). The server names both by identity and sends the levels (AEON-1163).
+// ("Opus 5 · xhigh → Opus 5.5 · xhigh"). The server names both by identity and sends the levels (AEON-1163); the page
+// names them as every other place does (AEON-1240).
 const moving = computed(() => chosen.value.flatMap(entry => entry.uses.map((use, index) => ({
-  key: `${entry.version}\u0000${index}`, from: atLevel(entry.name, use.from_effort), to: atLevel(use.to && use.to !== entry.successor ? use.to : entry.successorName, use.to_effort),
+  key: `${entry.version}\u0000${index}`, from: atLevel(entry.name, use.from_effort), to: atLevel(entry.targets[index] ?? entry.successorName, use.to_effort),
   ...outdatedUseText(use, kinds.value, names.value, me.value),
 }))))
 
