@@ -14064,6 +14064,18 @@
     ,
     {"kind":"browser","file":"tests/work-queue.spec.ts","name":"phone header retains the queue when the activity timestamp folds","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"queue refresh preserves the ticket focused while a reset is pending 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"queue refresh preserves the ticket focused while a reset is pending 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"queue refresh preserves the ticket focused while a reset is pending 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"queue refresh preserves the ticket focused while a reset is pending 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"queue refresh preserves the ticket focused while a reset is pending 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"queue refresh preserves the ticket focused while a reset is pending 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/work-queue.spec.ts","name":"shared queued rows without expected start show a labeled local release prediction","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-queue.spec.ts","name":"stale progress hints and ticket actions stay still in both themes at phone tablet and desktop widths","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
