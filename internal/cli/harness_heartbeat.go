@@ -1579,6 +1579,16 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 		return
 	}
 	if !pending(lead) {
+		// A coordinator with no adoption intent keeps its normal activity. A
+		// previous own-session attempt still needs its cancellation/failure note.
+		related := lead.SessionID != nil && strings.EqualFold(*lead.SessionID, session.id) || session.disk.LeadAdoption != nil && len(session.disk.LeadAdoption.Attempts) > 0
+		if !related && lead.SessionID == nil {
+			if session.disk.LeadAdoption != nil {
+				session.disk.LeadAdoption = nil
+				_ = saveHeartbeatSession(session)
+			}
+			return
+		}
 		if session.disk.LeadAdoption != nil {
 			session.disk.LeadAdoption.Ended = true
 		}
@@ -1593,6 +1603,8 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 			}
 		} else if lead.Reason == "owner_revoked" {
 			note("Owner grants revoked; restore grants and confirm again.")
+		} else if lead.Reason == "adoption_pending" && lead.Revision > 0 {
+			note("Session ineligible; check owner, reporting and pause/stop.")
 		} else if lead.Generation == 0 {
 			// Retain the attempt journal until another confirmation replaces it.
 			note("Waiting for a person to confirm adoption; use the lead card.")

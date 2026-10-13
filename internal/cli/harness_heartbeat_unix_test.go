@@ -75,7 +75,7 @@ func TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration(t *testing.T) {
 		}
 	}
 	beat()
-	if session.disk.LeadAdoption == nil || len(session.disk.LeadAdoption.Attempts) != 0 {
+	if session.disk.LeadAdoption != nil {
 		t.Fatal("unconfirmed coordinator attempted an automatic claim")
 	}
 	jar, err := cookiejar.New(nil)

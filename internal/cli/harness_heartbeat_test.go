@@ -50,7 +50,9 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 		{name: "another session"},
 		{name: "another project", note: "Adoption unverified"},
 		{name: "zero revision", note: "Waiting for a person"},
-		{name: "ordinary start", note: "Waiting for a person"},
+		{name: "ordinary start"},
+		{name: "no lead intent"},
+		{name: "paused selection", note: "Session ineligible"},
 		{name: "existing generation"},
 		{name: "worker"},
 		{name: "child coordinator"},
@@ -79,8 +81,14 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 			ref := heartbeatRegistrationRef(o, "")
 			source := o.SourceSession
 			switch tc.name {
-			case "unconfirmed", "ordinary start":
+			case "unconfirmed":
+				lead.Reason = "awaiting_generation"
+			case "ordinary start":
 				lead.SessionID, lead.Reason = nil, "awaiting_generation"
+			case "no lead intent":
+				lead.SessionID, lead.Reason, lead.State, lead.Revision = nil, "", "none", 0
+			case "paused selection":
+				lead.State = "paused"
 			case "another session":
 				lead.SessionID = &other
 			case "another project":
@@ -223,6 +231,9 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 			}
 			if tc.note != "" && (journal == nil || !strings.Contains(journal.Note, tc.note)) {
 				t.Fatal("missing human-readable adoption reason and fix")
+			}
+			if (tc.name == "ordinary start" || tc.name == "no lead intent") && journal != nil {
+				t.Fatal("automatic adoption overwrote activity without an adoption intent")
 			}
 			beats := hbWhere(calls, "POST", "/heartbeat")
 			if len(beats) < 3 || tc.note != "" && !strings.Contains(fmt.Sprint(beats[len(beats)-1].body["activity_note"]), tc.note) {
