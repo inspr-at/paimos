@@ -451,6 +451,8 @@ func TestStartClaimRevocationBarrier(t *testing.T) {
 
 func TestStartRegistrationIdempotencyAndPersonViewer(t *testing.T) {
 	f := newStartFixture(t)
+	viewer := "https://box.ts.net:8082/LEAD"
+	f.observer.value.TerminalViewerURL = &viewer
 	accepted := f.begin(t)
 	claim := f.claim(accepted)
 	registered, err := f.s.Claim(f.daemonCtx(t), f.daemon, claim)

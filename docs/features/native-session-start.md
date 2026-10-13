@@ -55,13 +55,19 @@ lifetime belongs to the supervisor, separately from the request or viewer.
 The request's elapsed monotonic time consumes the server TTL.
 
 The publishing daemon may provide `Observation.TerminalViewerURL` at registration.
-`Options.TerminalViewerHosts` is the setting seam (I1 owns config wiring); nil
-defaults to `100.64.0.0/10` and `*.ts.net`, an empty list denies all URLs.
+`Options.TerminalViewerHosts` and `Options.TerminalViewerPorts` are the setting
+seam (I1 owns config wiring). Nil hosts default to `100.64.0.0/10` and `*.ts.net`;
+nil ports default to `[443, 8082]`. Explicit lists replace the respective
+defaults; an empty host or port list denies all URLs.
 Only HTTPS URLs of at most 200 bytes, with one ASCII Zellij session path
-`[A-Za-z0-9._-]{1,64}`, are accepted. Explicit ports are limited to 443. Query,
-fragment, userinfo, path escaping, nested paths and dot traversal are rejected
-with C0's allowlisted `invalid_input`, without echoing the URL. SQL fetches the
-URL only for an authorized person; agent projections remove it independently.
+`[A-Za-z0-9._-]{1,64}`, are accepted. The port must be allowlisted; an omitted
+port means 443, and an empty port suffix (`host:`) is rejected. For example,
+`https://100.64.0.14:8082/LEAD` and `https://box.ts.net:8082/LEAD` use the
+default Zellij viewer port. Port settings accept at most 64 integers from 1 to
+65535. Query, fragment, userinfo, path escaping, nested paths and dot traversal
+are rejected with C0's allowlisted `invalid_input`, without echoing the URL.
+SQL fetches the URL only for an authorized person; agent projections remove it
+independently.
 The URL is not a credential. Zellij's read-only login token stays in the person's
 browser and is never sent to or stored by PAIMOS.
 
