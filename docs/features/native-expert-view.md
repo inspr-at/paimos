@@ -15,7 +15,8 @@ defaults to Events with no internal selector; `pane="terminal"` selects the
 Terminal pane. Only the standalone harness passes `standalone`, retaining the
 fixed-at-open Events / Terminal selector. Panel views never render that selector,
 and Terminal has no Events toolbar or empty selector row. The panel owns the
-opening item, menu order and keyboard navigation. Model names use
+opening item, menu order and keyboard navigation. Set `active` to false before
+hiding a mounted view; unmounting also aborts its capture. Model names use
 `modelsSimple.fullName`; I2 must use that same function for Recent runs.
 
 The transport in `web/src/lib/nativeExpert/ports.ts` is an integration port,
@@ -211,3 +212,31 @@ The final worker status and ignored `validation.json` pin the evidence HEAD
 and final checks. Linux browser CI, Tick comparison and all review/release
 gates remain coordinator-owned. The existing policy-preview diagnostic
 requires the coordinator's trusted verdict for the new HEAD.
+
+Fix round 6 applies A3's three P2d findings. `SessionEvents` and
+`SessionTerminal` are named Vue components with the existing C0 state, consent,
+active-view and transport props. They forward Review and the authorized PTY
+slot through the same implementation and force the standalone selector off.
+The standalone fixture explicitly retains its fixed-at-open selector. UI
+labels, accessible names and hidden-view feedback use Events or Terminal;
+native C0 field names and the fix5 quota projection remain unchanged. I2 owns
+the flat panel menu, its defaults and keyboard navigation.
+
+The same 12 registered browser cases now cover direct panel mounts without a
+selector, exact Review forwarding, PTY slot props and consent withdrawal,
+agent exclusion, unmount cancellation and late callbacks. The six viewport/theme
+cases also measure the panel's event controls, Types popup and vanished viewer
+link with the shared stability guard. Their changed-chrome screenshots are
+`AEON-1270-fix6/panel-{events,types,terminal}-{light,dark}-{390,1024,1440}.png`,
+created only through `testInfo.outputPath()`. No tier/shard identity or assertion
+was removed, skipped or weakened. The negative control uses the identical spec
+over `a3534eea` with no product changes; it is outside delivery history.
+
+Validation runs only through the guarded remote browser and static runners.
+The initial attempts were refused with exit 3 for shared remote capacity;
+those attempts are incomplete, with no test or screenshot pass claimed. Final
+HEAD, command results and any remaining validation limits are recorded in the
+worker status and ignored `web/test-results/AEON-1270-fix6/validation.json`.
+P2d's test plan has no Go package or separate web unit suite. The offline
+affected selector requested FULL because manifest promotions were unavailable;
+the authoritative full CI run and policy-preview verdict remain coordinator-owned.
