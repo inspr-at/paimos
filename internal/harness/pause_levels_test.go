@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func registerPauseWorker(t *testing.T, f *harnessFixture, caps []string) (string, string) {
+func registerPauseWorker(t *testing.T, f *harnessFixture, caps []string, parallelReason ...string) (string, string) {
 	t.Helper()
-	body := pauseRegistration(f)
+	body := pauseRegistration(f, parallelReason...)
 	body["advertised_capabilities"] = caps
 	w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
 	expect(t, w, 201)
@@ -41,7 +41,7 @@ func TestPauseLevelsDefaultAndCapabilityHonesty(t *testing.T) {
 	if deadline.Sub(at) != 3*time.Minute {
 		t.Fatal("quick pause limit is not three minutes")
 	}
-	path, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"})
+	path, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"}, "Compare simultaneous pause and owned-stop capabilities")
 	w = f.call(f.person, "GET", path, nil, "")
 	expect(t, w, 200)
 	out := decode(t, w)
@@ -79,8 +79,8 @@ func TestPauseLevelsDefaultAndCapabilityHonesty(t *testing.T) {
 func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 	f := fixture(t)
 	waiting, waitingLease := registerPauseWorker(t, f, []string{"pause"})
-	finishing, finishingLease := registerPauseWorker(t, f, []string{"pause"})
-	stopOnly, _ := registerPauseWorker(t, f, []string{"owned_stop_v1"})
+	finishing, finishingLease := registerPauseWorker(t, f, []string{"pause"}, "Compare waiting and finishing worker wind-down")
+	stopOnly, _ := registerPauseWorker(t, f, []string{"owned_stop_v1"}, "Compare simultaneous pause and owned-stop capabilities")
 	expect(t, f.call(f.agent, "POST", finishing+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "eta_ready_at": time.Now().Add(5 * time.Minute).Format(time.RFC3339Nano)}, finishingLease), 200)
 	// Force sub-microsecond input so retry coverage does not depend on host clock
 	// precision (Darwin often supplies only microseconds, unlike Linux CI).
@@ -239,7 +239,7 @@ func TestLeavingDeadlineEscalatesStopsOnceAndIsAudited(t *testing.T) {
 
 func TestStopOnlyBatchSkipsCooperativeLevelsButAcceptsStopNow(t *testing.T) {
 	f := fixture(t)
-	_, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"})
+	_, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"}, "Compare simultaneous pause and owned-stop capabilities")
 	base := "/api/projects/" + f.project + "/harness-sessions/pause"
 	w := f.call(f.person, "POST", base, map[string]any{"level": "pause"}, "")
 	expect(t, w, http.StatusOK)

@@ -14,8 +14,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func pauseRegistration(f *harnessFixture) map[string]any {
-	return map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "advertised_capabilities": []string{"pause"}, "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "pause-ref-" + uid(), "worker_lease": "pause-lease-" + uid(), "ticket_node_id": f.ticket, "work_shape": "ship", "worktree": "/owned/worktree", "branch": "work/owned", "model": "fixture-model", "reasoning_effort": "high"}
+func pauseRegistration(f *harnessFixture, parallelReason ...string) map[string]any {
+	body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "advertised_capabilities": []string{"pause"}, "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "pause-ref-" + uid(), "worker_lease": "pause-lease-" + uid(), "ticket_node_id": f.ticket, "work_shape": "ship", "worktree": "/owned/worktree", "branch": "work/owned", "model": "fixture-model", "reasoning_effort": "high"}
+	if len(parallelReason) > 0 {
+		body["parallel_reason"] = parallelReason[0]
+	}
+	return body
 }
 
 func pauseHandover() map[string]any {
@@ -192,7 +196,7 @@ func TestPauseRejectsManagedSessionsWithoutInboxDelivery(t *testing.T) {
 	f := fixture(t)
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	for _, harnessName := range []string{"claude", "codex", "pi", "cursor", "grok"} {
-		body := pauseRegistration(f)
+		body := pauseRegistration(f, "Compare parallel harness pause capabilities")
 		body["harness"], body["management_mode"], body["advertised_capabilities"] = harnessName, "managed", []string{"stop"}
 		w := f.call(f.person, "POST", base, body, "")
 		expect(t, w, 201)
@@ -215,12 +219,12 @@ func TestPauseRejectsManagedSessionsWithoutInboxDelivery(t *testing.T) {
 		})
 	}
 	for _, harnessName := range []string{"claude", "codex", "pi"} {
-		body := pauseRegistration(f)
+		body := pauseRegistration(f, "Compare parallel harness pause capabilities")
 		body["harness"], body["management_mode"], body["advertised_capabilities"] = harnessName, "managed", []string{"stop", "inbox"}
 		pauseSession(t, f, body)
 	}
 	for _, harnessName := range []string{"cursor", "grok"} {
-		body := pauseRegistration(f)
+		body := pauseRegistration(f, "Compare parallel harness pause capabilities")
 		body["harness"] = harnessName
 		path, lease, control := pauseSession(t, f, body)
 		w := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease)
@@ -236,7 +240,7 @@ func TestPauseAllSkipsManagedSessionsWithoutInbox(t *testing.T) {
 		t.Run(scope, func(t *testing.T) {
 			f := fixture(t)
 			base := "/api/projects/" + f.project + "/harness-sessions"
-			bodies := []map[string]any{pauseRegistration(f), pauseRegistration(f)}
+			bodies := []map[string]any{pauseRegistration(f, "Compare parallel workers with and without inbox delivery"), pauseRegistration(f, "Compare parallel workers with and without inbox delivery")}
 			bodies[0]["management_mode"], bodies[0]["advertised_capabilities"] = "managed", []string{"stop", "inbox"}
 			bodies[0]["display_label"] = "Inbox batch worker"
 			bodies[1]["harness"], bodies[1]["management_mode"], bodies[1]["advertised_capabilities"] = "cursor", "managed", []string{"stop"}
@@ -598,7 +602,7 @@ func TestPauseAuthorizationOwnerScopeAndProvenCoordinator(t *testing.T) {
 	w = f.call(f.agent, "POST", path+"/pause", map[string]any{"coordinator_session_id": parent}, parentBody["worker_lease"].(string))
 	expect(t, w, 200)
 	// A same-principal sibling is outside the proven coordinator's children.
-	siblingBody := pauseRegistration(f)
+	siblingBody := pauseRegistration(f, "Compare coordinator descendants with an unrelated sibling")
 	w = f.call(f.person, "POST", base, siblingBody, "")
 	expect(t, w, 201)
 	sibling := base + "/" + decode(t, w)["id"].(string)
@@ -607,7 +611,7 @@ func TestPauseAuthorizationOwnerScopeAndProvenCoordinator(t *testing.T) {
 	// even when the agent happens to have an admin role.
 	var unsupportedChild string
 	for _, child := range []bool{true, false} {
-		body := pauseRegistration(f)
+		body := pauseRegistration(f, "Compare unsupported child and sibling pause scope")
 		body["harness"], body["management_mode"], body["advertised_capabilities"] = "cursor", "managed", []string{"stop"}
 		if child {
 			body["parent_harness_session_id"] = parent
@@ -633,7 +637,7 @@ func TestPauseBatchExclusionsAndResumeRegistration(t *testing.T) {
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	var ids, leases []string
 	for range 3 {
-		body := pauseRegistration(f)
+		body := pauseRegistration(f, "Compare parallel batch exclusions and authorized continuations")
 		w := f.call(f.person, "POST", base, body, "")
 		expect(t, w, 201)
 		ids = append(ids, decode(t, w)["id"].(string))

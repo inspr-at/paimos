@@ -1072,6 +1072,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVersionOnlyProbeNeverEstablishesReadiness","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestAEON1254RefusedBindingDoesNotInterceptGenericInbox","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestAccountEnvironmentRequiresLocalEnrollment","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAccountLinkPromptAndTerminalInjection","tier":"GATED-FULL"}
@@ -2184,6 +2186,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentWorktreeIdentityIgnoresDaemon","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestAEON1254AttachedHookRefusalsAreValueFree","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachConflictDiagnosticIsSurfacedAndBounded","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookInboxResponseBoundsAndStrictJSON","tier":"ESSENTIAL"}
@@ -2233,6 +2237,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestArchiveAccountCancelsQueuedHandoffRetry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestArchiveAccountDisconnectsBindingAndKeepsHistory","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachActivationRefusesOccupiedTicket","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachActivityRequiresActiveApprovalAndHonorsPolicy","tier":"GATED-FULL"}
     ,
@@ -3524,6 +3530,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAttach","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestAuthenticationActivityRenewalKeepsLiveValidity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestBootstrapAdminRequiresASCIIMailboxMatch","tier":"GATED-FULL"}
@@ -4381,6 +4389,10 @@
     {"kind":"go","package":"internal/ciproof","name":"TestVMArgumentsAndBoundaryRejectCandidateControls","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/ciproof","name":"TestWebhookAuthentication","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestAEON1254GenericHookUsesIndexedAccountAcrossSuccessor","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestAEON1254HookDoctorClassifiesCLIAndInstance","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAccountLinkLaunchUsesPrivateLoginAndPrintsOneLine","tier":"GATED-FULL"}
     ,
@@ -6152,6 +6164,10 @@
     ,
     {"kind":"go","package":"internal/grokprobe","name":"TestTrustedProbeDerivesOnlyVerifiedIdentity","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAEON1254BindingReportsPersistRefusalTransitions","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesRejectCredentialsAndRevalidateStoredText","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesValidationHistoryAndIsolation","tier":"GATED-FULL"}
@@ -6378,6 +6394,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestLostContactWorkerStopReplacesReason","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedBuilderDeliveryAndParallelAuditUseOriginTicket","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestManagedControlFreshnessUsesDatabaseClock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedControlsIdentityReplayPrivacyAndExpiry","tier":"ESSENTIAL"}
@@ -6393,6 +6411,8 @@
     {"kind":"go","package":"internal/harness","name":"TestManagedRulesRespectRequestAndRegisteredCeilings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedSettingsCatalogLifecycleAndFencing","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedTicketBuilderAdmissionSharesBindingsAndQueue","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManualReparentPermissionsAndUndo","tier":"GATED-FULL"}
     ,
@@ -6612,7 +6632,13 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestThrottledHeartbeatAndStateEvidence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketBuilderAdmissionRaceBindingRevivalAndQueue","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketBuiltUnmergedAdmissionUsesLinkedDeliveryAndMerge","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestTicketEtaRetainsWorkingHintWithoutReport","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketParallelBuildRequiresCurrentAuthorityAndAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestTierAlreadyActiveRetainsIdempotencyReceipt","tier":"GATED-FULL"}
     ,
@@ -6830,6 +6856,8 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHealthDatabase","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestLongMutationPreservesEventPositionAfterAuthentication","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadStatementTimeoutReturns503","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyGate","tier":"GATED-FULL"}
@@ -6837,6 +6865,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadyPoolSaturationAndDatabaseFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestRequestBudgetPrecedesAuthenticationAndPreservesHandlerLifetime","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}
     ,

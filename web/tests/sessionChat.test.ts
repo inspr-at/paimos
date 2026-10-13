@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { advanceReceipt, chatSendLevel, awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { inboxBindingReason, advanceReceipt, chatSendLevel, awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import { chatCapability, isQueuedMessage } from '../src/components/agents/sessionChat.ts'
@@ -274,4 +274,11 @@ test('chat queue placement respects evidence and the per-session capability flag
   assert.equal(isQueuedMessage(m, sent, false, true), true)
   assert.equal(isQueuedMessage({ ...m, queue_pending: true }, { ...sent, status: 'delivered' }, true, true), false)
   assert.equal(isQueuedMessage({ ...m, queue_pending: true }, { ...sent, cancelled: true }, true, true), false)
+})
+
+test('AEON-1254 binding reasons show value-free diagnostics in both languages', () => {
+ assert.match(inboxBindingReason('principal_mismatch', 'en'), /different agent identity/)
+ assert.match(inboxBindingReason('hook_cli_mismatch', 'de'), /ältere oder andere CLI/)
+ assert.equal(inboxBindingReason('private-canary-error-body', 'en'), '')
+ assert.equal(inboxBindingReason(null, 'en'), '')
 })

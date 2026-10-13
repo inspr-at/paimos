@@ -10,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -193,6 +194,9 @@ func digest64(s string) bool {
 // Tenant/tree fence serializes this check with every queue/claim writer.
 // Lost heartbeat, administrative archival and terminal labels never free it.
 func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string) error {
+	if err := workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, ticket, "", nil); err != nil {
+		return err
+	}
 	var busy bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id
 	 WHERE (r.queue_node_id=$1 OR o.parent_id=$1) AND r.id::text<>$2

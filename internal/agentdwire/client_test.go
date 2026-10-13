@@ -6,6 +6,7 @@ package agentdwire
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 )
 
 func TestAuthenticatedLocalControl(t *testing.T) {
@@ -296,4 +298,53 @@ func attachedInboxTestClient(t *testing.T, handler http.HandlerFunc) Client {
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 	return Client{Socket: socket, TokenFile: socket + ".token"}
+}
+
+// The authenticated socket may still return an old, malformed or hostile body.
+func TestAEON1254AttachedHookRefusalsAreValueFree(t *testing.T) {
+	for _, tc := range []struct {
+		status     int
+		body, want string
+	}{
+		{409, `{"code":"principal_mismatch"}`, "principal_mismatch"},
+		{409, `{"code":"instance_mismatch"}`, "instance_mismatch"},
+		{409, `{"code":"private-canary-lease"}`, "daemon_refused"},
+		{409, "private-canary-lease", "daemon_refused"},
+		{409, strings.Repeat("x", 1025), "daemon_refused"},
+		{404, "old daemon", "daemon_unavailable"},
+	} {
+		t.Run(tc.want+"/"+fmt.Sprint(len(tc.body)), func(t *testing.T) {
+			root, err := os.MkdirTemp("", "ah-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.RemoveAll(root) })
+			root, err = filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(root, "h.sock")
+			if err := os.WriteFile(socket+".token", []byte(strings.Repeat("fixture-", 4)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("fixture-", 4) {
+					t.Error("unauthenticated binding request")
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			})}
+			go func() { _ = server.Serve(listener) }()
+			defer server.Close()
+			err = (Client{Socket: socket, TokenFile: socket + ".token"}).BindAttachedHook(t.Context(), agentd.AttachedHookRequest{})
+			var refusal *hookbinding.Refusal
+			if !errors.As(err, &refusal) || refusal.Code != tc.want || strings.Contains(err.Error(), "private-canary") {
+				t.Fatalf("unsafe refusal %v", err)
+			}
+		})
+	}
 }

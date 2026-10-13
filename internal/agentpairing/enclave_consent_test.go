@@ -347,6 +347,7 @@ func TestEnclaveMigrationEndsLegacyStrictWatchesUnderForcedRLS(t *testing.T) {
 	preserved := in
 	preserved.RequestID = uuid(t, f.db)
 	preserved.Snapshot.Process.PID++
+	preserved.Snapshot.TicketID = siblingWatchTicket(t, f, in.Snapshot.ProjectID)
 	preserved.Digest = preserved.Snapshot.Digest()
 	preserved.Operation = "request"
 	preserved.Sequence = 0

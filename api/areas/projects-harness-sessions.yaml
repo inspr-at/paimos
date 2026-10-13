@@ -25,7 +25,14 @@ paths:
               schema: {$ref: '#/components/schemas/HarnessSessionHierarchy'}
         '400': {description: Invalid registration or label}
         '403': {description: Scope required or another agent requested}
-        '409': {description: 'Active harness_session_ref has a different worker lease or registration metadata, vendor_session_ref is already active for this agent in the tenant across any harness, or hierarchy/predecessor binding conflicts. Vendor binding conflicts identify the supplied reference by the first 16 hex characters of its domain-separated SHA-256 digest. Private references and leases are never returned.'}
+        '409':
+          description: 'Active harness_session_ref has a different worker lease or registration metadata, vendor_session_ref is already active for this agent in the tenant across any harness, or hierarchy/predecessor binding conflicts. A worker on a ticket also returns build_in_flight while another worker is not stopped or the linked repository has unmerged delivery evidence. Exact active replay remains allowed. Private references and leases are never returned.'
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - {$ref: '#/components/schemas/BuildInFlightError'}
+                  - {$ref: '#/components/schemas/Error'}
   /projects/{projectId}/harness-sessions/pause:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -67,6 +74,30 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/binding:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    patch:
+      operationId: bindHarnessSession
+      description: 'Rebind an active generation under its expected revision. Workers entering another ticket repeat builder admission; an explicitly authorized parallel_reason is scoped to that ticket and audited there. Omitting it on an unchanged binding preserves the stored reason.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, parent_harness_session_id, ticket_node_id, work_shape]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                parent_harness_session_id: {type: [string, 'null'], format: uuid}
+                ticket_node_id: {type: [string, 'null'], format: uuid}
+                work_shape: {type: string, enum: [unknown, ship, scout]}
+                parallel_reason: {$ref: '#/components/schemas/BuildParallelReason'}
+      responses:
+        '200': {description: 'Updated public generation', content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: 'Revision, hierarchy or builder admission conflict', content: {application/json: {schema: {anyOf: [{$ref: '#/components/schemas/BuildInFlightError'}, {$ref: '#/components/schemas/Error'}]}}}}
   /projects/{projectId}/harness-sessions/{sessionId}/archive:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -233,6 +264,8 @@ paths:
                 rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
                 attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
+                inbox_binding_report: {type: boolean, default: false, description: "Update only the refusal after an accepted heartbeat. Requires the same phase, activity and sequence; never renews liveness or changes progress, rules capabilities or process authority."}
+                inbox_binding_error: {$ref: '#/components/schemas/InboxBindingError'}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
@@ -913,8 +946,12 @@ paths:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
 components:
   headers:
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts.", schema: {type: string, enum: ['harness-session/3.0']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts. Version 3.1 adds an optional value-free inbox binding refusal code. Version 3.2 adds the public parallel reason and initiating principal.", schema: {type: string, enum: ['harness-session/3.2']}}
   schemas:
+    InboxBindingError:
+      type: [string, 'null']
+      enum: [instance_mismatch, principal_mismatch, worker_proof_rejected, hook_cli_mismatch, hook_instance_mismatch, hook_unavailable, hook_index_mismatch, daemon_unavailable, process_unverified, harness_identity_mismatch, generation_mismatch, pairing_unavailable, daemon_refused, null]
+      description: "Value-free refusal from the registered worker. Null clears a previous refusal; omission preserves it. No credentials or transcript content."
     HarnessManagedControl:
       type: object
       required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
