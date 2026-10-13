@@ -27,12 +27,15 @@ const asOnSafari = (page: Page) => page.addStyleTag({ content: '*, *::before, *:
 // scroller's own scrollend before measuring, never a timed delay after the gesture.
 async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, dy: number, scroller = 'main') {
   await page.locator(scroller).evaluate(el => {
-    const state = { ended: false }
+    const state = { ended: false, start: el.scrollTop, top: el.scrollTop, events: [] as string[] }
     Object.assign(window, { __swipe: state })
+    for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel', 'scroll', 'scrollend']) {
+      el.addEventListener(type, () => { state.top = el.scrollTop; state.events.push(type) }, { passive: true })
+    }
     el.addEventListener('scrollend', () => { state.ended = true }, { once: true })
   })
   await cdp.send('Input.synthesizeScrollGesture', { x: at.x, y: at.y, xDistance: 0, yDistance: dy, speed: 800, gestureSourceType: 'touch', preventFling: true })
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __swipe: { ended: boolean } }).__swipe.ended), 'the native scroll has finished').toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __swipe: { ended: boolean } }).__swipe), 'the native scroll has finished').toMatchObject({ ended: true })
 }
 // The first row fully on screen below the sticky heads that are stuck, and where it is.
 async function firstOnScreen(page: Page, rows: string, heads: string, scroller = 'main') {
