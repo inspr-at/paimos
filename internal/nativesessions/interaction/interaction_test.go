@@ -58,7 +58,11 @@ func newFixture(t *testing.T) *fixture {
 		}
 		return id
 	}
-	f := &fixture{d: dbtest.Open(t), now: time.Now().UTC(), authority: &testAuthority{}}
+	// Match clock_timestamp()/timestamptz precision so a SQL round trip cannot
+	// shave a millisecond off an unchanged lease. The sample includes submicrosecond
+	// precision on every host, including Macs whose wall clock is already coarser.
+	now := time.Now().UTC().Truncate(time.Second).Add(123456789 * time.Nanosecond)
+	f := &fixture{d: dbtest.Open(t), now: now.Truncate(time.Microsecond), authority: &testAuthority{}}
 	tenantID := uid()
 	f.person = tenant.Principal{ID: uid(), TenantID: tenantID, Kind: tenant.Person, BrowserSession: true}
 	f.other = tenant.Principal{ID: uid(), TenantID: tenantID, Kind: tenant.Person, BrowserSession: true}
@@ -176,8 +180,8 @@ func TestControllerEpochFencesConcurrentAttach(t *testing.T) {
 	// Idempotent reconnect returns the same epoch/capability without renewing.
 	f.now = f.now.Add(5 * time.Second)
 	retry, err := f.s.Attach(f.ctx(t, f.person), actor(f.person), first)
-	if err != nil || retry.Controller.Epoch != a.out.Controller.Epoch || retry.ExpiresInMS != 25000 || *retry.ControlCapability != *a.out.ControlCapability {
-		t.Fatalf("retry implicitly acquired/renewed: %v", err)
+	if err != nil || retry.Controller == nil || retry.ControlCapability == nil || retry.ViewerID != a.out.ViewerID || retry.Controller.Epoch != a.out.Controller.Epoch || retry.ExpiresInMS != 25000 || !retry.ExpiresAt.Equal(a.out.ExpiresAt) || !retry.Controller.ExpiresAt.Equal(a.out.Controller.ExpiresAt) || *retry.ControlCapability != *a.out.ControlCapability {
+		t.Fatalf("retry implicitly acquired/renewed: %v; remaining_ms=%d; initial_expires=%s; retry_expires=%s", err, retry.ExpiresInMS, a.out.ExpiresAt.Format(time.RFC3339Nano), retry.ExpiresAt.Format(time.RFC3339Nano))
 	}
 	renew := nativecontract.AttachRenew{RequestID: second.RequestID, ExpectedBinding: f.binding, ViewerID: a.out.ViewerID, ControllerEpoch: &a.out.Controller.Epoch}
 	_, err = f.s.Renew(f.ctx(t, f.person), actor(f.person), renew, "wrong proof")
