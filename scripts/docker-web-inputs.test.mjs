@@ -1,13 +1,55 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { checkWebReproducibility } from './check-web-reproducibility.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const web = join(root, 'web');
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue']);
+
+test('AEON-1276 web reproducibility guard rejects changed names and bytes and propagates build failures', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'aeon-web-repro-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const dist = join(cwd, 'web/dist');
+  const seed = () => {
+    rmSync(dist, { recursive: true, force: true });
+    mkdirSync(join(dist, 'assets'), { recursive: true });
+    writeFileSync(join(dist, 'index.html'), '<script src="/assets/app-1.js"></script>');
+    writeFileSync(join(dist, 'assets/app-1.js'), 'export const value = 1;');
+  };
+  seed();
+  let calls = 0;
+  assert.equal(checkWebReproducibility(cwd, (file, args, directory) => {
+    calls++;
+    assert.equal(file, 'npx');
+    assert.deepEqual(args, ['--no-install', 'vite', 'build']);
+    assert.equal(directory, join(cwd, 'web'));
+    seed();
+  }), 2);
+  assert.equal(calls, 1, 'only one extra bundle, without another dependency install');
+  assert.deepEqual(readFileSync(join(cwd, 'tmp/web-reproducibility/first.json')),
+    readFileSync(join(cwd, 'tmp/web-reproducibility/second.json')));
+  for (const mutation of [
+    () => writeFileSync(join(dist, 'assets/app-1.js'), 'export const value = 2;'),
+    () => {
+      rmSync(join(dist, 'assets/app-1.js'));
+      writeFileSync(join(dist, 'assets/app-2.js'), 'export const value = 1;');
+    },
+    () => writeFileSync(join(dist, 'assets/extra.css'), '.extra { color: red; }'),
+  ]) {
+    seed();
+    assert.throws(() => checkWebReproducibility(cwd, mutation), /web asset filenames or bytes differ/);
+    assert.equal(readFileSync(join(cwd, 'tmp/web-reproducibility/first/assets/app-1.js'), 'utf8'), 'export const value = 1;');
+  }
+  seed();
+  assert.throws(() => checkWebReproducibility(cwd, () => { throw new Error('vite build failed'); }), /vite build failed/);
+  rmSync(join(dist, 'index.html'));
+  assert.throws(() => checkWebReproducibility(cwd, () => assert.fail('must not build without a baseline')), /web build lacks index.html/);
+});
 
 function importSpecifiers(source) {
   // Preserve quoted strings while removing comments, including commented imports.

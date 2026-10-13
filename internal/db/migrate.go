@@ -55,11 +55,20 @@ func migrateWithHooks(ctx context.Context, pool *pgxpool.Pool, before, beforePha
 	}
 	defer conn.Release()
 
+	restore, err := migrationTimeouts(ctx, conn, MigrationStatementTimeout)
+	if err != nil {
+		return fmt.Errorf("migration budgets: %w", err)
+	}
+	defer restore()
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLock); err != nil {
 		return fmt.Errorf("migration lock: %w", err)
 	}
 	defer func() {
-		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLock)
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(cleanup, `SELECT pg_advisory_unlock($1)`, migrationLock); err != nil {
+			_ = conn.Conn().Close(cleanup)
+		}
 	}()
 
 	// pgvector is created by the deployment as superuser. Migrations only
@@ -630,22 +639,12 @@ func concurrentIndex(body string, stmts []string) (string, string, error) {
 
 func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, index, table string) error {
 	// SET LOCAL cannot cover nontransactional DDL. Bound lock acquisition on
-	// this connection, then restore its previous setting even after cancellation.
-	var lockTimeout string
-	if err := conn.QueryRow(ctx, `SHOW lock_timeout`).Scan(&lockTimeout); err != nil {
-		return fmt.Errorf("read lock timeout for %s: %w", name, err)
+	// this connection and the entire build, including invalid-index cleanup.
+	restore, err := migrationTimeouts(ctx, conn, IndexBuildStatementTimeout)
+	if err != nil {
+		return fmt.Errorf("index budgets for %s: %w", name, err)
 	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := conn.Exec(cleanup, `SELECT set_config('lock_timeout', $1, false)`, lockTimeout); err != nil {
-			// Never return a connection with a changed setting to the pool.
-			_ = conn.Conn().Close(cleanup)
-		}
-	}()
-	if _, err := conn.Exec(ctx, `SET lock_timeout = '5s'`); err != nil {
-		return fmt.Errorf("set lock timeout for %s: %w", name, err)
-	}
+	defer restore()
 	// The migration advisory lock remains held on this connection. A crash can
 	// leave either a valid index before recording, or an invalid partial build.
 	// Reuse only a valid index on the expected table; rebuild an invalid one.
@@ -653,7 +652,7 @@ func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, i
 	var unique bool
 	requiresUnique := strings.HasPrefix(stmt, "CREATE UNIQUE INDEX ")
 	var existingTable string
-	err := conn.QueryRow(ctx, `SELECT i.indisvalid, i.indisunique, t.relname
+	err = conn.QueryRow(ctx, `SELECT i.indisvalid, i.indisunique, t.relname
 		FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
 		JOIN pg_namespace n ON n.oid=c.relnamespace
 		JOIN pg_class t ON t.oid=i.indrelid
