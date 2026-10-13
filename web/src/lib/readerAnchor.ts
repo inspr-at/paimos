@@ -65,11 +65,13 @@ const CANDIDATES = 4
 
 export function readerAnchor(options: ReaderAnchorOptions): ReaderAnchor {
   let marks: { el: HTMLElement; top: number }[] = []
+  let capturedScroller: HTMLElement | null | undefined
   return {
     capture() {
       if (marks.length) return
       const scroller = options.scroller()
       if (!scroller || scroller.scrollTop <= 0) return
+      capturedScroller = scroller
       const edge = Math.max(scroller.getBoundingClientRect().top, options.top?.() ?? -Infinity)
       for (const el of Array.from(options.rows() ?? [])) {
         const box = el.getBoundingClientRect()
@@ -83,7 +85,9 @@ export function readerAnchor(options: ReaderAnchorOptions): ReaderAnchor {
     restore() {
       const scroller = options.scroller(), mark = marks.find(m => m.el.isConnected)
       marks = []
-      if (!scroller || !mark) return
+      // Opening or closing a split changes the scroll container. Its layout is the reader's
+      // choice; a position captured inside the pane must never scroll the page instead.
+      if (!scroller || scroller !== capturedScroller || !mark) return
       const moved = mark.el.getBoundingClientRect().top - mark.top
       if (Math.abs(moved) >= 0.5) scroller.scrollTop += moved
     },

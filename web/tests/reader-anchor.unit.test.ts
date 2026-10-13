@@ -5,7 +5,9 @@
 // by a sub-pixel, follows a row that left instead of one still on screen, or loses its mark when a
 // component updates twice in one flush. Timers are injected.
 import { describe, expect, it } from 'vitest'
-import { SETTLE_MS, readerAnchor, touchScroll } from '../src/lib/readerAnchor'
+import { sourceModule } from './record-source'
+
+const { SETTLE_MS, readerAnchor, touchScroll } = sourceModule<typeof import('../src/lib/readerAnchor')>('lib/readerAnchor.ts', {})
 
 function manualTimers() {
   let now = 0, serial = 0
@@ -76,6 +78,24 @@ function scrollerAt(top: number, scrollTop: number) {
 }
 
 describe('readerAnchor', () => {
+  it('never restores a pane capture into the page when the split closes', () => {
+    const pane = scrollerAt(100, 600), page = scrollerAt(50, 134)
+    let scroller = pane
+    const rows = [rowAt(110), rowAt(170)]
+    const anchor = readerAnchor({ scroller: () => scroller, rows: () => rows.map(r => r.el) })
+    anchor.capture()
+    scroller = page
+    for (const row of rows) row.row.top += 1195
+    anchor.restore()
+    expect(page.scrollTop, 'closing the split preserves the page scroll').toBe(134)
+    expect(pane.scrollTop, 'the former pane is unchanged too').toBe(600)
+    // Subsequent live updates in the page still anchor normally.
+    anchor.capture()
+    for (const row of rows) row.row.top += 60
+    anchor.restore()
+    expect(page.scrollTop).toBe(194)
+  })
+
   it('keeps the first row on screen where it was when rows arrive above it', () => {
     const scroller = scrollerAt(100, 900)
     const rows = [rowAt(20), rowAt(80), rowAt(140), rowAt(200)]

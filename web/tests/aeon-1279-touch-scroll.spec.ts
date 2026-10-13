@@ -115,21 +115,30 @@ test('agents 390: a refresh during a touch swipe waits until the swipe settles, 
   const { data, cdp } = await openAgents(page)
   await watchTouch(page, SESSION_ROWS)
   arrive(data)
-  // A slow 600 px swipe keeps the finger down for about 3 s.
-  const swiping = swipe(cdp, { x: 195, y: 760 }, -600, 200)
-  // The browser takes the scroll over from the page (pointercancel); the next refresh lands while the finger moves.
+  // Keep the native touch down across the response barrier. A timed synthesizeScrollGesture
+  // can finish before polling notices its cancellation, especially in Linux Chromium.
+  const top = await page.locator('main').evaluate(el => el.scrollTop)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 195, y: 600, id: 0 }] })
+  for (const y of [580, 560, 520, 480]) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 195, y, id: 0 }] })
+    await page.clock.runFor(32)
+  }
+  await expect.poll(() => page.locator('main').evaluate(el => el.scrollTop)).toBeGreaterThan(top)
+  // The browser takes the scroll over from the page (pointercancel); the next refresh lands with the finger down.
   await expect.poll(async () => (await touchLog(page)).events.join(' ')).toContain('pointercancel:touch')
   const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/harness-sessions')
   await page.clock.runFor(21_000)
   await refreshed
   const during = await touchLog(page)
-  await swiping
+  expect(during.down, 'the refresh is proven to overlap the native touch').toBe(1)
+  await expect(page.locator(arrivalRow(0))).toHaveCount(0)
+  const settled = (await firstOnScreen(page, SESSION_ROWS, SESSION_HEADS))!
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   const log = await touchLog(page)
   note(info, `finger down when the refresh landed: ${during.down > 0}; row changes while a finger was down: ${log.changedWhileDown}; Show now offered while down: ${log.offeredWhileDown}; events: ${log.events.filter(e => !e.startsWith('touchmove')).join(' ')}`)
   expect(log.changedWhileDown, 'no row arrives, leaves or moves while a finger is on the screen').toBe(0)
   expect(log.offeredWhileDown, 'a swipe never offers Show now: its hold ends by itself').toBe(0)
   // The swipe has settled: the change lands and the first row on screen stays where it is.
-  const settled = (await firstOnScreen(page, SESSION_ROWS, SESSION_HEADS))!
   await page.clock.runFor(2_000)
   await expect(page.locator(arrivalRow(0))).toBeAttached()
   const after = await topOf(page, sessionRow(settled.ref))
@@ -167,6 +176,8 @@ for (const theme of ['light', 'dark'] as const) {
     const footer = page.locator('.app-footer')
     await expect(footer).not.toHaveClass(/hidden/)
     await expect(footer).toBeInViewport()
+    // Showing it starts a 260 ms cooldown. Advance the injected clock before reversing again.
+    await page.clock.runFor(400)
     const before = await rectOf(page, 'main')
     await page.screenshot({ path: info.outputPath(`agents-390-${theme}-footer-shown.png`) })
     await swipe(cdp, { x: 195, y: 600 }, -200)
@@ -271,8 +282,10 @@ test('chat 390: a post that arrives while reading up the thread never moves the 
   await asOnSafari(page)
   const cdp = await page.context().newCDPSession(page)
   const box = (await thread.boundingBox())!
+  const bottom = await thread.evaluate(el => el.scrollTop)
   // Read up the thread with a finger.
   await swipe(cdp, { x: box.x + box.width / 2, y: box.y + 80 }, 300)
+  await expect.poll(() => thread.evaluate(el => el.scrollTop), 'the native swipe actually leaves the bottom').toBeLessThan(bottom - 160)
   const sheet = await rectOf(page, '.session-panel')
   const mainTop = await page.locator('main').evaluate(el => el.scrollTop)
   const before = (await firstOnScreen(page, '.session-panel .thread-scroll .msg[data-id]', '.session-panel .thread-scroll .never', '.session-panel .thread-scroll'))!

@@ -18478,6 +18478,8 @@
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > keeps the first row on screen where it was when rows arrive above it","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > never restores a pane capture into the page when the split closes","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > ends at scrollend once no finger is down, and ignores scrolls without a touch","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > runs from the touch until momentum is quiet, never while a finger is down","tier":"ESSENTIAL"}
