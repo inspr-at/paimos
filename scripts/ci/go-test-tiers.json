@@ -4316,6 +4316,8 @@
     ,
     {"kind":"go","package":"internal/chat","name":"TestNativeContextSurvivesRegistrationGenerations","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/chat","name":"TestNativeFinalStorageKeepsStoppedLeaseAndChatIsolation","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/chat","name":"TestNativeStoreComponentBoundAndVisibilityRestore","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/chat","name":"TestNativeStoreDatabaseGuardDeniesBypass","tier":"GATED-FULL"}
@@ -7816,7 +7818,21 @@
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestFinalOutboxSurvivesOutageExitAndLostAck","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestPrivateStoreBoundsAndRejectsSymlinkOrSharedState","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestReceiptEvidenceRejectsWrongInputAndFalseExit","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestFinalDrainReplayAfterExitPersistsOnceAndRechecksAuthority","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestFinalDrainRevocationWinsBeforeFinalWrite","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
     ,
