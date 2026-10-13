@@ -690,20 +690,21 @@ test('phone selection keeps rows reachable, keys whole and zero-apply controls a
   const row = (await table(page).locator('#row-attention-20').boundingBox())!
   const metrics = await page.locator('#main').evaluate(el => {
    const style = getComputedStyle(el)
-   return { bottom: el.getBoundingClientRect().bottom, pad: parseFloat(style.scrollPaddingBottom), margin: parseFloat(style.marginBottom) }
+   return { bottom: el.getBoundingClientRect().bottom, pad: parseFloat(style.scrollPaddingBottom), margin: parseFloat(style.marginBottom), shell: el.parentElement!.getBoundingClientRect().bottom - parseFloat(getComputedStyle(el.parentElement!).paddingBottom) }
   })
-  return { barTop: barBox.y, barHeight: barBox.height, rowBottom: row.y + row.height, ...metrics }
+  return { barTop: barBox.y, barHeight: barBox.height, rowBottom: row.y + row.height, under: metrics.shell - barBox.y - barBox.height, ...metrics }
  }
  const fit = await dockFit()
  expect(fit.bottom).toBeLessThanOrEqual(fit.barTop + .5)
  expect(fit.barTop - fit.bottom).toBeLessThanOrEqual(1.5)
  expect(fit.rowBottom).toBeLessThanOrEqual(fit.barTop + .5)
  expect(Math.abs(fit.pad - fit.margin)).toBeLessThanOrEqual(.5)
- expect(Math.abs(fit.margin - fit.barHeight)).toBeLessThanOrEqual(1.5)
+ // The page reaches under the phone footer (AEON-1279): its margin clears the bar and the footer's room under it.
+ expect(Math.abs(fit.margin - fit.barHeight - fit.under)).toBeLessThanOrEqual(1.5)
  await page.locator('.app-shell').evaluate(el => el.classList.add('footer-hidden'))
  await expect.poll(async () => {
   const next = await dockFit()
-  return next.bottom <= next.barTop + .5 && next.barTop - next.bottom <= 1.5 && next.rowBottom <= next.barTop + .5 && Math.abs(next.margin - next.barHeight) <= 1.5
+  return next.bottom <= next.barTop + .5 && next.barTop - next.bottom <= 1.5 && next.rowBottom <= next.barTop + .5 && Math.abs(next.margin - next.barHeight - next.under) <= 1.5
  }).toBe(true)
  await page.locator('.app-shell').evaluate(el => el.classList.remove('footer-hidden'))
  await page.screenshot({ path: testInfo.outputPath(`attention-phone-selection.png`), fullPage: true })
