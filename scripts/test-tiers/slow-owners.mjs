@@ -62,7 +62,8 @@ export function proveSlowOwners(browserRows, goRows) {
     }
     const selected = select(browserRows, { event, paths: ['.github/workflows/ci.yml'] }).tests.filter(row => row.kind === 'browser')
     const weights = tierWeights(policy, selected)
-    const bins = Array.from({ length: 12 }, (_, i) => shard(selected, i + 1, 12, weights))
+    const count = event === 'schedule' ? 24 : 12
+    const bins = Array.from({ length: count }, (_, i) => shard(selected, i + 1, count, weights))
     provePartition(selected, bins)
     const loads = bins.map(bin => [...new Set(bin.map(row => row.file))].reduce((n, file) => n + weights[file], 0))
     const sorted = [...loads].sort((a, b) => a - b)
@@ -89,7 +90,7 @@ export function main() {
     if (!stored && row.package === 'internal/nodes') throw new Error(`Missing native Go classification: ${key(row)}`)
     return { ...row, ...(stored ?? { tier: 'NIGHTLY' }) }
   })
-  // Whole browser ledger checks the twelve-shard weight balance as well as
+  // Whole browser ledger checks full-gate and nightly shard layouts as well as
   // the targeted native inventory equality above.
   const rest = manifest.tests.filter(row => !Object.hasOwn(baseline.browserOwners, row.file))
   console.log(JSON.stringify(proveSlowOwners([...rest, ...rows], goRows)))

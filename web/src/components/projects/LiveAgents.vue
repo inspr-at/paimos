@@ -203,7 +203,8 @@ onBeforeUnmount(() => {
 
 
 .live-chip {
-  position: relative; display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 5px; min-width: 0; width: max-content; max-width: 100%; min-height: 28px; padding: 0 8px 0 6px;
+  /* Only the name column may shrink; the robot and complete state word retain their intrinsic widths. */
+  position: relative; display: inline-grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 5px; min-width: 0; max-width: 100%; min-height: 28px; padding: 0 8px 0 6px;
   border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 14%, var(--chip-line));
   color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; -webkit-user-select: none; user-select: none; transition: none;
 }

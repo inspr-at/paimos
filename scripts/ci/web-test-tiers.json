@@ -13454,6 +13454,10 @@
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"screenshot 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/state-colours.spec.ts","name":"AEON-1325 dark: wider fonts keep every state word inside narrow project chips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/state-colours.spec.ts","name":"AEON-1325 light: wider fonts keep every state word inside narrow project chips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/state-colours.spec.ts","name":"SC2 dark 1600: neutral surfaces and grounded state detail","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/state-colours.spec.ts","name":"SC2 dark 390: neutral surfaces and grounded state detail","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

@@ -1,10 +1,70 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SC1 / AEON-221. Coordinator: npm test -- state-colours.spec.ts --workers=2.
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mockStateColours, states } from './state-colours-fixtures'
 import { STATE_LABEL } from '../src/lib/agentSignals'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
 import { saveAgentTheme } from './agent-theme-fixtures'
+import { controlStability } from './control-stability'
+
+async function expectStateWordFits(project: Locator) {
+  await expect(project.locator('.chip-state')).toBeVisible()
+  // Sample one layout so a font swap cannot leave the chip and label from different frames.
+  const { bounds, chip, word, fits } = await project.evaluate(el => {
+    const chip = el.querySelector('.live-chip')!, label = el.querySelector('.chip-state')!
+    return { bounds: el.getBoundingClientRect().toJSON(), chip: chip.getBoundingClientRect().toJSON(),
+      word: label.getBoundingClientRect().toJSON(), fits: label.scrollWidth <= label.clientWidth }
+  })
+  for (const box of [bounds, chip, word]) {
+    expect(box.width).toBeGreaterThan(0)
+    expect(box.height).toBeGreaterThan(0)
+  }
+  expect(chip.x).toBeGreaterThanOrEqual(bounds.x)
+  expect(word.x).toBeGreaterThanOrEqual(chip.x)
+  expect(word.x + word.width, await project.getAttribute('data-project-id') ?? '').toBeLessThanOrEqual(chip.x + chip.width)
+  expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
+  expect(fits).toBe(true)
+}
+
+// The card grid stretches a row to its tallest card, and the link absorbs that
+// stretch, so the border box hides a taller footer. The link's children plus
+// the footer is the height a live chip can change (AEON-1325).
+async function cardFootprints(page: Page) {
+  return page.locator('.cards-view').evaluate(root => [...root.querySelectorAll<HTMLElement>('.card[data-project-id]')].map(el => {
+    const link = el.querySelector('.card-link')!
+    const foot = el.querySelector('.card-foot')!
+    const chip = el.querySelector('.live-chip')
+    const activity = el.querySelector('.activity')!
+    const linkStyle = getComputedStyle(link)
+    const linkHeight = [...link.children].reduce((sum, node) => sum + node.getBoundingClientRect().height, 0)
+      + parseFloat(linkStyle.paddingTop) + parseFloat(linkStyle.paddingBottom)
+    const footHeight = foot.getBoundingClientRect().height
+    const chipBox = chip?.getBoundingClientRect()
+    const activityBox = activity.getBoundingClientRect()
+    const faces = chip?.querySelector('.faces')?.getBoundingClientRect().width ?? 0
+    const state = chip?.querySelector('.chip-state')?.getBoundingClientRect().width ?? 0
+    const chipStyle = chip ? getComputedStyle(chip) : null
+    const footStyle = getComputedStyle(foot)
+    const minChip = faces + state + (chipStyle ? parseFloat(chipStyle.paddingLeft) + parseFloat(chipStyle.paddingRight) + parseFloat(chipStyle.columnGap) * 2 : 0)
+    const footGap = parseFloat(footStyle.columnGap)
+    // One pixel of slack: a flex line wraps when the sum merely touches the content box.
+    const canShare = !!chip && minChip + activityBox.width + footGap <= foot.clientWidth - 1
+    return {
+      id: el.dataset.projectId ?? '',
+      height: linkHeight + footHeight,
+      link: linkHeight,
+      foot: footHeight,
+      chipTop: chipBox?.y ?? null,
+      chipRight: chipBox ? chipBox.x + chipBox.width : null,
+      activityTop: activityBox.y,
+      activityLeft: activityBox.x,
+      canShare,
+      minChip,
+      activityWidth: activityBox.width,
+      footWidth: foot.clientWidth,
+    }
+  }))
+}
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme}: every state agrees across /agents, detail, cards and list rows`, async ({ page }) => {
@@ -23,9 +83,11 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(row.locator('.provider-mark')).toHaveAttribute('data-provider', 'unknown')
       await row.locator('.agent-link').click()
       const panel = page.getByRole('complementary', { name: 'Session details' })
-      await expect(panel.locator('.head-top .agent-state-label')).toHaveText(STATE_LABEL[state])
+      // AEON-1212 (#592) moved the identity and state into the unified panel's header.
+      await expect(panel.locator('.panel-head .agent-state-label')).toHaveText(STATE_LABEL[state])
       const setup = panel.locator('[aria-labelledby="setup-title"]')
-      for (const value of ['integration-model', 'xhigh', 'Test account', '1.2.3']) await expect(setup).toContainText(value)
+      // AEON-1249 (#594): Details uses the same resolved model name as the row.
+      for (const value of ['Integration Model', 'xhigh', 'Test account', '1.2.3']) await expect(setup).toContainText(value)
       const work = panel.locator('[aria-labelledby="work-title"]')
       for (const value of ['AEON-221', '/Code/aeon-sc1', 'sc1.state-colours', 'abc1234', 'Integrate session states']) await expect(work).toContainText(value)
       await page.getByRole('button', { name: 'Close session details' }).click()
@@ -63,14 +125,61 @@ for (const theme of ['light', 'dark'] as const) {
           const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
           const label = project.locator('.chip-state')
           await expect(label).toHaveText(STATE_LABEL[state])
-          const bounds = (await project.boundingBox())!, chip = (await project.locator('.live-chip').boundingBox())!
-          const word = (await label.boundingBox())!
-          expect(word.x).toBeGreaterThanOrEqual(chip.x)
-          expect(word.x + word.width).toBeLessThanOrEqual(chip.x + chip.width)
-          expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
-          expect(await label.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+          await expectStateWordFits(project)
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      }
+    }
+  })
+
+  test(`AEON-1325 ${theme}: wider fonts keep every state word inside narrow project chips`, async ({ page }, testInfo) => {
+    const { agents, appearance } = await mockStateColours(page, theme)
+    for (const session of agents.sessions) session.display_label = `Sicherungskopien aller Produktionsserver überprüfen: ${session.display_label}`
+    appearance.saved.values.agents = { ...appearance.saved.values.agents, hover: false }
+    await page.goto('/')
+    // The hosted Linux font metrics are wider than macOS's. Exercise that risk
+    // deterministically with the bundled font, including the activity timestamp.
+    await page.evaluate(() => document.documentElement.style.setProperty('--font', '"JetBrains Mono", monospace'))
+    await page.evaluate(() => document.fonts.load('500 12px "JetBrains Mono"'))
+    for (const width of [320, 390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 844 })
+      for (const layout of ['Cards', 'List']) {
+        await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
+        for (const state of states.filter(state => state !== 'stopped')) {
+          const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
+          await expect(project.locator('.chip-state')).toHaveText(STATE_LABEL[state])
+          await expectStateWordFits(project)
+          if (layout === 'Cards') await expect(project.locator('.activity')).toBeVisible()
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        if (layout === 'Cards') {
+          const rows = await cardFootprints(page)
+          const quiet = rows.find(row => row.id === 'p-sc1-stopped')
+          expect(quiet, 'ended card').toBeTruthy()
+          for (const row of rows.filter(row => row.id.startsWith('p-sc1-') && row.id !== 'p-sc1-stopped')) {
+            // Title length may change the link. The live chip must not add the rest.
+            const delta = Math.abs((row.height - quiet!.height) - (row.link - quiet!.link))
+            expect(delta, `${row.id} @ ${width}px: live chip changes the card height (footer ${row.foot} vs ${quiet!.foot})`).toBeLessThanOrEqual(0.5)
+            if (width === 1024 || width === 1440) {
+              // A long name must not wrap the time when robots, the state word and the time fit.
+              if (row.id === 'p-sc1-working' || row.id === 'p-sc1-idle') expect(row.canShare, `${row.id} @ ${width}px fits beside the time (chip min ${row.minChip}, time ${row.activityWidth}, footer ${row.footWidth})`).toBe(true)
+              if (row.canShare) {
+                expect(row.chipTop, `${row.id} chip`).not.toBeNull()
+                expect(Math.abs(row.chipTop! - row.activityTop), `${row.id} @ ${width}px: activity shares the live chip's line (chip min ${row.minChip}, time ${row.activityWidth}, footer ${row.footWidth})`).toBeLessThanOrEqual(1)
+                expect(row.activityLeft, `${row.id} @ ${width}px: activity stays after the chip`).toBeGreaterThanOrEqual(row.chipRight! - 1)
+              }
+            }
+          }
+        }
+        const project = page.locator('[data-project-id="p-sc1-stale"]')
+        await project.hover()
+        const chip = project.locator('.live-chip')
+        const guard = await controlStability(page, { chip, actions: project.getByRole('button', { name: /^Actions for/ }) })
+        const pop = page.getByRole('dialog', { name: `Active agents on ${STATE_LABEL.stale} team` })
+        await guard.check(async () => { await chip.click(); await expect(pop).toBeVisible() })
+        await guard.check(async () => { await page.keyboard.press('Escape'); await expect(pop).toHaveCount(0) })
+        guard.done()
+        await page.screenshot({ path: testInfo.outputPath(`aeon-1325-${theme}-${width}-${layout.toLowerCase()}.png`), fullPage: true })
       }
     }
   })
@@ -207,7 +316,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-step')).toHaveText('Reported stop reason: worker failed: exit 2')
     if (width === 1600) {
-      const listBounds = (await page.locator('.main-col').boundingBox())!
+      // AEON-1213 (#591) split the rendered list into its own pane.
+      const listBounds = (await page.locator('.agents-list-pane').boundingBox())!
       const panelBounds = (await panel.boundingBox())!
       expect(listBounds.x + listBounds.width).toBeLessThanOrEqual(panelBounds.x)
       expect(panelBounds.x - listBounds.x - listBounds.width).toBeLessThan(40)
@@ -219,7 +329,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     missing.heartbeat_at = null
     await page.goto(`/agents/${missing.id}`)
     const evidence = panel.getByRole('region', { name: 'Session state evidence' })
-    await expect(panel.locator('.head-top .agent-state-label')).toHaveText('No heartbeat')
+    await expect(panel.locator('.panel-head .agent-state-label')).toHaveText('No heartbeat')
     await expect(panel.locator('.now-step')).toHaveText('No heartbeat has been received since this session registered.')
     await expect(evidence).toContainText('does not establish that the worker failed')
     await expect(evidence).toContainText('Registered')
