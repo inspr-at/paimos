@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -128,6 +129,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 // request context. Unauthenticated /api requests get 401 JSON unless the
 // matched pattern is a public declaration (authz.PatternIsPublic).
 func (m *Module) Middleware(next http.Handler) http.Handler {
+	return nativesessions.AuthenticationMiddleware(m.authenticateAndAuthorize)(next)
+}
+
+func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.Delegated != nil && m.Delegated(w, r, next) {
 			return
@@ -343,6 +348,35 @@ func customerRouteAllowed(r *http.Request, p tenant.Principal) bool {
 // The key is an outer ceiling for every agent route. Modules retain their own
 // resource, grant and actor checks. Unlisted paths have no agent authority.
 func coreAgentScope(r *http.Request) (string, bool) {
+	// Native routes use an exact matched allowlist. Existing role/key scopes
+	// are only the outer ceiling; future handlers must also fence actor grants.
+	switch r.Pattern {
+	case "POST /api/agentd/native-sessions/claim", "POST /api/agentd/native-sessions/receipts",
+		"POST /api/agentd/native-sessions/events", "POST /api/agentd/native-sessions/finals",
+		"GET /api/agentd/native-sessions/commands":
+		return "harness.worker", true
+	case "GET /api/projects/{projectId}/native-sessions/{ownedSessionId}",
+		"GET /api/projects/{projectId}/harness-sessions/{sessionId}/native-context",
+		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/stream",
+		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/receipts",
+		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/events":
+		return "harness.read", true
+	case "POST /api/projects/{projectId}/native-sessions",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/resume",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/interrupt",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/stop":
+		return "harness.control", true
+	case "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/input":
+		return "chat.send|inbox.send", true
+	case "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach/renew",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/detach",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/take",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/return",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/approvals/{approvalId}/decision",
+		"POST /api/sessions/{id}/control/end":
+		return "", false
+	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
 	if !strings.HasPrefix(r.URL.Path, "/api/") || len(parts) == 0 {
 		return "", false
