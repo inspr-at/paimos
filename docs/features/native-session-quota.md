@@ -186,6 +186,28 @@ four rows above; this round does not change quota behavior, test assertions
 or shared inventories, and requires no new behavior regression. The handoff
 remains incomplete until those registrations and the required checks pass.
 
+Fix round 6 inspected the failing jobs on PR head `217901899`.
+`go-static` job `115149804389` again fails only at strict native test
+collection, naming exactly the four unclassified quota cases above. Refreshed
+`origin/main` at `fd8fae22f` still lacks those rows. PR #619 remains mergeable,
+so no conflict-resolution merge is required. Its quota and C0 package sources
+are unchanged since the passing fix-round-5 run on `38df044aa`.
+
+`web` job `115156140924` fails because `web-shard (1)` job `115150348299` was
+cancelled during `Run selected UI cases without retries`; its log ends with
+`The operation was canceled.` without a reported failing assertion. Catalogue,
+setup, all four unit shards and browser shard 2 passed. `tier-measurements`
+job `115156166810` reports `coverage=incomplete`, `missing_case_artifact` and
+missing evidence for `web-shard-1`, with no failed cases. These are incomplete
+browser execution and measurement results requiring coordinator CI reruns,
+not evidence for changing quota code or browser assertions. The trusted
+review verdict remains coordinator-owned.
+
+Fix round 6 preserves the P4b/R0 ownership boundary: R0 must register the
+four existing ESSENTIAL cases in this same PR. No quota behavior, assertion
+or shared inventory is changed, so there is no new behavior fix requiring
+a regression against `217901899`. The delivery remains incomplete.
+
 Run the named package through the guarded remote Go runner and static checks
 through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
 origin/main`. These clock-driven tests use synthetic pins and events, with no
@@ -205,6 +227,11 @@ review remain required before integration or release.
 - PASS: fix-round-5 guarded remote Go run of `./internal/nativequota/...` on
   `38df044aa` with `-count=1 -v`; all four named cases and subcases passed
   (0.246 s), without vendor account or model calls.
+- PASS: fix-round-6 single permitted local package run on `217901899`,
+  `GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/nativequota/...`; all four
+  named cases and subcases passed (0.261 s). Both preceding guarded remote
+  attempts exited 3 for the busy CI pool/global remote capacity limit. No
+  vendor account or model call was made; no broader local suite was run.
 - PASS: negative control on a temporary branch from that final source, with
   the freshness deadline check disabled. The named clock test failed on its
   exact stale-reading assertion for both Claude and Codex (exit 1). After
@@ -219,6 +246,8 @@ review remain required before integration or release.
   `internal/nativequota` is absent until its tier rows are registered.
   Fix round 5 reproduced the same counts against `bf4aa778f`, exit 0, and
   confirmed that `internal/nativequota` remains absent from the selection.
+  Fix round 6 reproduced the same counts against `fd8fae22f`, exit 0, and
+  again confirmed that `internal/nativequota` is absent from the selection.
 - INCOMPLETE: fix-round-3 guarded static `--merge-main` on `4a5e40209` exited 1.
   Its 39 other checks passed with no skips, including Go vet, test-tier tests,
   web-shard tests, web typecheck and web lint. Only Go-tier drift and source
@@ -237,5 +266,10 @@ review remain required before integration or release.
   lint. Only `go-tiers` failed, naming exactly the four missing quota rows
   above. The central source-ownership repair is verified; tier registration
   remains coordinator-owned. This is not a green merge gate.
+- INCOMPLETE: both fix-round-6 `ci-static-locked.sh` attempts exited 3 before
+  collection because the remote CI pool/global capacity limit was busy.
+  Static checks were not run locally. Current PR CI independently identifies
+  the same four R0-owned tier omissions; the earlier static pass lines do not
+  establish a green check for this round.
 - Browser validation does not apply to this source-only slice. Production pin
   qualification, I2 integration, review and release remain coordinator-owned.
