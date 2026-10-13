@@ -1,0 +1,27 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/agentd/native-sessions/commands": "harness.worker",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/native-context": "harness.read",
+    "GET /api/projects/{projectId}/native-sessions/{ownedSessionId}": "harness.read",
+    "GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/events": "harness.read",
+    "GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/receipts": "harness.read",
+    "GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/stream": "harness.read",
+    "POST /api/agentd/native-sessions/claim": "harness.worker",
+    "POST /api/agentd/native-sessions/events": "harness.worker",
+    "POST /api/agentd/native-sessions/finals": "harness.worker",
+    "POST /api/agentd/native-sessions/receipts": "harness.worker",
+    "POST /api/projects/{projectId}/native-sessions": "harness.control",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/approvals/{approvalId}/decision": "questions.decide",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach": "harness.read",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach/renew": "harness.read",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/detach": "harness.read",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/input": "chat.send|inbox.send",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/interrupt": "harness.control",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/resume": "harness.control",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/return": "harness.control",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/stop": "harness.control",
+    "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/take": "harness.control",
+    "POST /api/sessions/{id}/control/end": "harness.control"
+  }
+}

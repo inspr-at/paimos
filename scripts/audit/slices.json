@@ -113,6 +113,8 @@
       "title": "Agent runtime, harnesses and runs",
       "paths": [
         "internal/agentd/**",
+        "internal/nativecontract/**",
+        "internal/nativesessions/**",
         "internal/agentd/routine_budget.go",
         "internal/agentd/routine_budget_test.go",
         "internal/agentsetup/**",
