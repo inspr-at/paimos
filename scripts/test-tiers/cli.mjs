@@ -227,11 +227,11 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
     save(resolve(evidence,`${job}-measurement.json`),report)
     return report
   }
-  const checkpoint = error => persist(batches.flatMap(batch=>batch.outcomes),
+  const checkpoint = error => runner?persist(batches.flatMap(batch=>batch.outcomes),
     interruption?.code??1,!!error||batches.some(batch=>batch.runnerFailure),
     {status:interruption?'interrupted':error?'incomplete':'running',
       reason:interruption?.reason??error?.message?.slice(0,4096)??'Execution has not finished',
-      ...(interruption?.signal?{signal:interruption.signal}:{})})
+      ...(interruption?.signal?{signal:interruption.signal}:{})}):undefined
 
   const finish=(owner,rows,result,outcomes,failures,reportError=false)=>{
     const signal=interruptedSignal(result)
