@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -61,8 +62,12 @@ type startFixture struct {
 	project       string
 }
 
-func newStartFixture(t *testing.T) *startFixture {
+func newStartFixture(t *testing.T, parallel ...int) *startFixture {
 	t.Helper()
+	maximum := 1
+	if len(parallel) > 0 {
+		maximum = parallel[0]
+	}
 	f := &startFixture{d: dbtest.Open(t), now: time.Now().UTC().Truncate(time.Millisecond)}
 	uid := func() string {
 		id, err := uuid()
@@ -106,8 +111,8 @@ func newStartFixture(t *testing.T) *startFixture {
  VALUES($1,$2,'123456789',$3,$4,$5,'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$6)`, []any{f.person.TenantID, request, strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64), f.person.ID}},
 			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,ledger_generation,capacity_policy,capacity_signals,capacity_reported_at)
  VALUES($1,$2,$3,$4,$5,'daemon-native',$6,$7,$8,$9,$10)`, []any{f.person.TenantID, computer, request, f.agent.ID, f.agent.KeyID, strings.Repeat("c", 64), ledger, policy, signals, f.now}},
-			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision,allowed_model_profile_ids,last_probe_at,last_probe_ok,last_daemon_generation)
- VALUES($1,$2,'own-account','claude','daemon-native',$3,'Own',$4,$6,1,ARRAY[$5::uuid],$6,true,'generation-1')`, []any{f.person.TenantID, account, f.agent.ID, f.person.ID, profile, f.now}},
+			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision,allowed_model_profile_ids,last_probe_at,last_probe_ok,last_daemon_generation,max_parallel_runs)
+ VALUES($1,$2,'own-account','claude','daemon-native',$3,'Own',$4,$6,1,ARRAY[$5::uuid],$6,true,'generation-1',$7)`, []any{f.person.TenantID, account, f.agent.ID, f.person.ID, profile, f.now, maximum}},
 			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at)
  VALUES($1,$2,$3,$4,$5,$6::timestamptz,$6::timestamptz+interval '1 hour')`, []any{f.person.TenantID, account, computer, request, profile, f.now}},
 		} {
@@ -167,6 +172,189 @@ func (f *startFixture) seed(t *testing.T, fn func(pgx.Tx) error) {
 	t.Helper()
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, fn); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Risk: a coordinator's occupied slot alone does not hold its allowance or
+// period budget, so successive claims can exceed a person's configured cap.
+func TestCoordinatorClaimsReserveQuotaBudgets(t *testing.T) {
+	for _, unit := range []string{"window", "runs", "requests", "tokens", "percent"} {
+		t.Run(unit, func(t *testing.T) {
+			f := newStartFixture(t, 8)
+			f.seed(t, func(tx pgx.Tx) error {
+				if unit == "window" {
+					_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+ VALUES($1,$2,$3::timestamptz-interval '1 hour',$3::timestamptz+interval '1 hour','requests',1,'unrestricted')`, f.person.TenantID, f.intent.AccountID, f.now)
+					return err
+				}
+				amount := int64(1)
+				if unit == "tokens" {
+					amount = 100_000
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO account_limit_rules(tenant_id,account_id,amount,unit,period,created_by) VALUES($1,$2,$3,$4,'day',$5)`, f.person.TenantID, f.intent.AccountID, amount, unit, f.person.ID)
+				return err
+			})
+			first := f.begin(t)
+			claim := f.claim(first)
+			registered, err := f.s.Claim(f.daemonCtx(t), f.daemon, claim)
+			if err != nil || registered.RootReservationID == nil {
+				t.Fatalf("first coordinator claim did not reserve: %v", err)
+			}
+			f.intent.RequestID, err = uuid()
+			if err != nil {
+				t.Fatal(err)
+			}
+			second := f.begin(t)
+			firstObservation := f.observer.value
+			secondRef := sha256.Sum256([]byte(f.intent.RequestID))
+			f.observer.value.SessionRefDigest = secondRef[:]
+			var failure *Failure
+			if _, err = f.s.Claim(f.daemonCtx(t), f.daemon, f.claim(second)); !errors.As(err, &failure) || failure.Reason != nativecontract.ReasonQuotaLimited {
+				t.Fatalf("second coordinator claim exceeded %s cap; want quota_limited: %v", unit, err)
+			}
+			f.observer.value = firstObservation
+			retry, err := f.s.Claim(f.daemonCtx(t), f.daemon, claim)
+			if err != nil || retry.RootReservationID == nil || *retry.RootReservationID != *registered.RootReservationID {
+				t.Fatalf("own budget blocked an exact claim retry: %v", err)
+			}
+			f.seed(t, func(tx pgx.Tx) error {
+				var roots, harnesses, runs, claims int
+				if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM native_session_roots),
+ (SELECT count(*) FROM harness_sessions),(SELECT count(*) FROM agent_runs),
+ (SELECT count(*) FROM native_session_intents WHERE claim_digest IS NOT NULL)`).Scan(&roots, &harnesses, &runs, &claims); err != nil {
+					return err
+				}
+				if roots != 1 || harnesses != 1 || runs != 0 || claims != 1 {
+					t.Fatalf("failed claim or replay created budget/registration rows: %d/%d/%d/%d", roots, harnesses, runs, claims)
+				}
+				var held int64
+				if err := tx.QueryRow(t.Context(), `SELECT coalesce(sum(reserved),0)::bigint FROM account_allowance_windows WHERE account_id=$1`, f.intent.AccountID).Scan(&held); err != nil {
+					return err
+				}
+				if held != 1 {
+					t.Fatalf("coordinator budget was missing or counted twice: %d", held)
+				}
+				return nil
+			})
+		})
+	}
+}
+
+// Risk: linking a person must preserve authority over historical pairing and
+// account ownership stamps without accepting a different or inactive person.
+func TestStartUsesActiveCanonicalAccountOwner(t *testing.T) {
+	for _, stamp := range []string{"pairing", "account", "both", "foreign", "inactive"} {
+		t.Run(stamp, func(t *testing.T) {
+			f := newStartFixture(t)
+			linked, err := uuid()
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.seed(t, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name,linked_to) VALUES($1,$2,'person','historical owner',$3)`, f.person.TenantID, linked, f.person.ID); err != nil {
+					return err
+				}
+				if stamp != "account" {
+					if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_requests SET approved_by=$2 WHERE id=(SELECT request_id FROM agent_pairing_computers WHERE id=$1)`, f.intent.ComputerID, linked); err != nil {
+						return err
+					}
+				}
+				if stamp != "pairing" {
+					if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, f.intent.AccountID, linked); err != nil {
+						return err
+					}
+				}
+				if stamp == "foreign" {
+					_, err := tx.Exec(t.Context(), `UPDATE principals SET linked_to=NULL WHERE id=$1`, linked)
+					return err
+				}
+				if stamp == "inactive" {
+					_, err := tx.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, linked)
+					return err
+				}
+				return nil
+			})
+			accepted, err := f.s.Start(f.personCtx(t), f.actor, f.intent)
+			if stamp == "foreign" || stamp == "inactive" {
+				var failure *Failure
+				if !errors.As(err, &failure) || failure.Reason != nativecontract.ReasonWrongPrincipal {
+					t.Fatalf("unowned historical stamp accepted: %v", err)
+				}
+				return
+			}
+			if err != nil || accepted.Session.OwnerPersonID != f.person.ID {
+				t.Fatalf("linked %s owner cannot start own account: %v", stamp, err)
+			}
+			if _, err = f.s.Claim(f.daemonCtx(t), f.daemon, f.claim(accepted)); err != nil {
+				t.Fatalf("linked owner cannot claim existing pairing/account: %v", err)
+			}
+		})
+	}
+}
+
+// Risk: native ownership and viewer data must remain discoverable for DSAR;
+// check classifications against the migrated schema, including new columns.
+func TestNativeSessionDSARInventoryMatchesSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../dsar/inventory.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type entry struct {
+		Table          string            `json:"table"`
+		Classification string            `json:"classification"`
+		Columns        map[string]string `json:"columns"`
+		Locator        struct {
+			Tenant string `json:"tenant_column"`
+			Person string `json:"person_column"`
+		} `json:"locator"`
+	}
+	var inventory struct{ Tables []entry }
+	if err = json.Unmarshal(raw, &inventory); err != nil {
+		t.Fatal(err)
+	}
+	d := dbtest.Open(t)
+	for _, table := range []string{"native_session_intents", "native_session_bindings", "native_session_roots"} {
+		var found *entry
+		for i := range inventory.Tables {
+			if inventory.Tables[i].Table == table {
+				if found != nil {
+					t.Fatalf("duplicate DSAR table %s", table)
+				}
+				found = &inventory.Tables[i]
+			}
+		}
+		if found == nil || found.Classification != "personal" || found.Locator.Tenant != "tenant_id" || found.Locator.Person != "owner_person_id" {
+			t.Fatalf("missing personal DSAR classification/locator for %s: %+v", table, found)
+		}
+		rows, err := d.Admin.Query(t.Context(), `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1`, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for rows.Next() {
+			var column string
+			if err = rows.Scan(&column); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			class := found.Columns[column]
+			if class != "personal" && class != "metadata" {
+				rows.Close()
+				t.Fatalf("unclassified native column %s.%s: %q", table, column, class)
+			}
+			if column == "owner_person_id" || column == "actor_principal_id" || column == "paired_principal_id" || column == "actor_authority" || column == "view" || column == "terminal_viewer_url" || strings.HasSuffix(column, "_at") {
+				if class != "personal" {
+					rows.Close()
+					t.Fatalf("personal native column %s.%s classified as %s", table, column, class)
+				}
+			}
+			count++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil || count == 0 || count != len(found.Columns) {
+			t.Fatalf("DSAR columns differ from %s schema: %d/%d: %v", table, count, len(found.Columns), err)
+		}
 	}
 }
 

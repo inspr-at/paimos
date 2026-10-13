@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -156,7 +157,8 @@ func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent na
 		var principal, daemon string
 		err = tx.QueryRow(ctx, `SELECT c.principal_id::text,c.daemon_id FROM agent_pairing_computers c
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
- WHERE c.id=$1 AND c.state='connected' AND q.state='redeemed' AND q.approved_by=$2`, intent.ComputerID, a.OwnerPersonID).Scan(&principal, &daemon)
+ WHERE c.id=$1 AND c.state='connected' AND q.state='redeemed'
+ AND `+modelprefs.CanonicalPersonSQL("q.approved_by")+`=`+modelprefs.CanonicalPersonSQL("$2")+``, intent.ComputerID, a.OwnerPersonID).Scan(&principal, &daemon)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(403, nativecontract.ReasonWrongPrincipal)
 		}
@@ -165,7 +167,8 @@ func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent na
 		}
 		var own bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
- WHERE a.id=$1 AND a.owner_person_id=$2 AND e.computer_id=$3 AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL AND a.harness=$4)`, intent.AccountID, a.OwnerPersonID, intent.ComputerID, intent.Harness).Scan(&own); err != nil {
+ WHERE a.id=$1 AND `+modelprefs.CanonicalPersonSQL("a.owner_person_id")+`=`+modelprefs.CanonicalPersonSQL("$2")+`
+ AND e.computer_id=$3 AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL AND a.harness=$4)`, intent.AccountID, a.OwnerPersonID, intent.ComputerID, intent.Harness).Scan(&own); err != nil {
 			return err
 		}
 		if !own {

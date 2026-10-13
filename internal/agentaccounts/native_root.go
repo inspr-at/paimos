@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
@@ -21,9 +23,24 @@ import (
 // the original actor, and appends its event only after these helpers finish.
 type NativeAdmission struct {
 	TenantID, ProjectID, OwnerPersonID, PrincipalID string
+	OwnedSessionID                                  string
 	AccountID, ComputerID, Harness, ModelProfileID  string
 	DaemonID, DaemonGeneration, LedgerGeneration    string
 	WorkID, RunID                                   *string
+}
+
+// NativeBudget carries the exact admitted windows and estimates to persistence
+// in the same fenced transaction. It contains no browser-supplied quantities.
+type NativeBudget struct {
+	tenantID, accountID, sessionID string
+	windows                        []Window
+	estimates                      map[string]int64
+	now                            time.Time
+}
+
+type nativeBudgetHold struct {
+	WindowID      string `json:"window_id"`
+	ReservedUnits int64  `json:"reserved_units"`
 }
 
 func nativeDenial(reason nativecontract.Reason) error {
@@ -45,6 +62,18 @@ func NativeRootCountTx(ctx context.Context, tx pgx.Tx, account, computer, except
 // RequireNativeCapacityTx reuses current context, model, daily, readiness,
 // quota, pacing and account gates. It never creates a fake worker run.
 func RequireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, exceptSession string, now time.Time) error {
+	return requireNativeCapacityTx(ctx, tx, in, exceptSession, now, nil)
+}
+
+// AdmitNativeCapacityTx retains the budget for a new coordinator claim. Replay
+// only projects its own saved holds out; it never releases or renews them.
+func AdmitNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, exceptSession string, now time.Time) (NativeBudget, error) {
+	var budget NativeBudget
+	err := requireNativeCapacityTx(ctx, tx, in, exceptSession, now, &budget)
+	return budget, err
+}
+
+func requireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, exceptSession string, now time.Time, budget *NativeBudget) error {
 	// Existing window hydration is bounded before it can allocate/lock rows.
 	for _, bound := range []struct {
 		sql string
@@ -108,7 +137,28 @@ func RequireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission,
 	if !enabled {
 		return nativeDenial(nativecontract.ReasonQualificationMissing)
 	}
-	run := runRow{AgentID: in.PrincipalID, ProfileID: &in.ModelProfileID, Purpose: "native_root"}
+	run := runRow{ID: in.OwnedSessionID, AgentID: in.PrincipalID, ProfileID: &in.ModelProfileID, Purpose: "native_root"}
+	if in.RunID == nil {
+		if !uuidRE.MatchString(in.OwnedSessionID) || exceptSession != "" && exceptSession != in.OwnedSessionID {
+			return nativeDenial(nativecontract.ReasonIdentityMismatch)
+		}
+		if exceptSession != "" {
+			err = tx.QueryRow(ctx, `SELECT account_limit_estimates FROM native_session_roots
+ WHERE owned_session_id=$1 AND account_id=$2 AND run_id IS NULL AND released_at IS NULL`, exceptSession, in.AccountID).Scan(&run.LimitEstimates)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nativeDenial(nativecontract.ReasonOwnershipUnconfirmed)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if len(run.LimitEstimates) == 0 {
+			run.LimitEstimates, err = learnedLimitEstimates(ctx, tx, a.ID, nil)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	if in.RunID != nil {
 		run, err = lockRun(ctx, tx, *in.RunID)
 		if err != nil {
@@ -174,7 +224,7 @@ func RequireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission,
 	if err != nil {
 		return err
 	}
-	_, wait, err := admissionInputs(ctx, tx, a, a.Windows, now, slotCount(a, used, quotaUsed), run, in.RunID != nil, nil, run.ID)
+	windows, wait, err := admissionInputs(ctx, tx, a, a.Windows, now, slotCount(a, used, quotaUsed), run, in.RunID != nil || exceptSession != "", nil, run.ID)
 	if err != nil {
 		return err
 	}
@@ -190,7 +240,25 @@ func RequireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission,
 			return nativeDenial(nativecontract.ReasonQuotaLimited)
 		}
 	}
-	return requireNativeHost(ctx, tx, in, exceptSession, now)
+	if in.RunID == nil {
+		for _, w := range windows {
+			// Recovery permits belong to their existing worker-run journal. A
+			// native root cannot consume them without that qualified adapter.
+			if len(w.recoveryPermits) > 0 {
+				return nativeDenial(nativecontract.ReasonQuotaUnknown)
+			}
+			if _, ok := fits(w, now, windowEstimate(w, run.LimitEstimates)); !ok {
+				return nativeDenial(nativecontract.ReasonQuotaLimited)
+			}
+		}
+	}
+	if err = requireNativeHost(ctx, tx, in, exceptSession, now); err != nil {
+		return err
+	}
+	if budget != nil {
+		*budget = NativeBudget{tenantID: in.TenantID, accountID: in.AccountID, sessionID: in.OwnedSessionID, windows: windows, estimates: run.LimitEstimates, now: now}
+	}
+	return nil
 }
 
 func requireNativeHost(ctx context.Context, tx pgx.Tx, in NativeAdmission, exceptSession string, now time.Time) error {
@@ -228,14 +296,82 @@ func valueOrEmpty(v *string) string {
 
 // ReserveNativeRootTx is called after admission in the same final transaction.
 // The hold survives expiry/outage and is not a renewable launch credential.
-func ReserveNativeRootTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, session, epoch string) (*string, error) {
+func ReserveNativeRootTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, session, epoch string, budget NativeBudget) (*string, error) {
 	if in.RunID != nil {
 		return nil, nil
 	}
+	if len(budget.windows) == 0 || len(budget.windows) > 4096 || budget.now.IsZero() || len(budget.estimates) == 0 || session != in.OwnedSessionID || budget.tenantID != in.TenantID || budget.accountID != in.AccountID || budget.sessionID != session {
+		return nil, nativeDenial(nativecontract.ReasonIdentityMismatch)
+	}
+	// Materialize only the winning root's provisional/fact ledgers, like the
+	// existing worker router, without inventing an agent_run or refresh-run FK.
+	for i := range budget.windows {
+		w := &budget.windows[i]
+		if w.ID != "" {
+			if w.capacityKind == "fact" {
+				if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET used=$2,capacity_read_at=$3 WHERE id=$1`, w.ID, w.Used, w.capacityReadAt); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket)
+ SELECT tenant_id,id,$2,$3,$7,$8,$9,'unrestricted',0,$5,$4,true,$10,$6 FROM agent_accounts WHERE id=$1
+ ON CONFLICT(tenant_id,account_id,capacity_kind,capacity_bucket,ends_at) WHERE capacity_kind IS NOT NULL
+ DO UPDATE SET used=EXCLUDED.used,capacity_read_at=EXCLUDED.capacity_read_at RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket, w.Unit, w.Allowance, w.Used, w.capacitySource).Scan(&w.ID); err != nil {
+			return nil, err
+		}
+	}
+	slices.SortFunc(budget.windows, func(a, b Window) int { return strings.Compare(a.ID, b.ID) })
+	holds := make([]nativeBudgetHold, 0, len(budget.windows))
+	for _, w := range budget.windows {
+		held := windowEstimate(w, budget.estimates)
+		tag, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET reserved=reserved+$2
+ WHERE id=$1 AND used+reserved+$2<=allowance`, w.ID, held)
+		if err != nil {
+			return nil, err
+		}
+		if held < 1 || tag.RowsAffected() != 1 {
+			return nil, nativeDenial(nativecontract.ReasonQuotaLimited)
+		}
+		holds = append(holds, nativeBudgetHold{WindowID: w.ID, ReservedUnits: held})
+		if w.Unit == "percent" {
+			budget.estimates["percent"] = max(budget.estimates["percent"], held)
+		}
+	}
+	holdsRaw, err := json.Marshal(holds)
+	if err != nil {
+		return nil, err
+	}
+	estimatesRaw, err := json.Marshal(budget.estimates)
+	if err != nil {
+		return nil, err
+	}
 	var id string
-	err := tx.QueryRow(ctx, `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,project_id,owner_person_id,account_id,computer_id,runtime_epoch,hold_state,created_at)
- VALUES($1,gen_random_uuid(),$2,$3,$4,$5,$6,$7,'starting',clock_timestamp()) RETURNING id::text`, in.TenantID, session, in.ProjectID, in.OwnerPersonID, in.AccountID, in.ComputerID, epoch).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,project_id,owner_person_id,account_id,computer_id,runtime_epoch,hold_state,created_at,budget_holds,account_limit_estimates)
+ VALUES($1,gen_random_uuid(),$2,$3,$4,$5,$6,$7,'starting',$8,$9,$10) RETURNING id::text`, in.TenantID, session, in.ProjectID, in.OwnerPersonID, in.AccountID, in.ComputerID, epoch, budget.now, holdsRaw, estimatesRaw).Scan(&id)
 	return &id, err
+}
+
+// nativeLimitHeldTx makes native roots visible to the existing worker/router
+// and account projections too. Active roots retain their saved estimate across
+// periods; without native telemetry a confirmed exit retains the overlapping
+// period's estimate. A fresh vendor reading can reconcile an exited percent
+// hold, exactly as for legacy blind runs. Workers never enter this sum.
+func nativeLimitHeldTx(ctx context.Context, tx pgx.Tx, accountID, unit string, start time.Time, exceptSession string, now time.Time) (float64, error) {
+	estimates, err := learnedLimitEstimates(ctx, tx, accountID, nil)
+	if err != nil {
+		return 0, err
+	}
+	var held float64
+	err = tx.QueryRow(ctx, `SELECT coalesce(sum(coalesce((r.account_limit_estimates->>$5)::bigint,$6)),0)::float8
+ FROM native_session_roots r WHERE r.account_id=$1 AND r.run_id IS NULL AND r.owned_session_id::text<>$2
+ AND (r.released_at IS NULL OR
+ ($5='runs' AND r.created_at>=$3 AND r.created_at<=$4) OR
+ ($5<>'runs' AND r.created_at<=$4 AND r.released_at>=$3 AND
+ ($5<>'percent' OR NOT EXISTS(SELECT 1 FROM account_capacity_readings c
+ WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=r.released_at AND c.read_at<=$4))))`, accountID, exceptSession, start, now, unit, estimates[unit]).Scan(&held)
+	return held, err
 }
 
 // SetNativeRootStateTx cannot release occupancy. Only verified no-fork or

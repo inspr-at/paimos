@@ -203,6 +203,10 @@ func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now ti
 // Unstarted cancelled/released runs consume nothing. Existing runs predating
 // the snapshot column use the same conservative estimate as a new admission.
 func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule, windows []Window, start time.Time, exceptRun string, now time.Time) (float64, error) {
+	nativeHeld, err := nativeLimitHeldTx(ctx, tx, accountID, rule.Unit, start, exceptRun, now)
+	if err != nil {
+		return 0, err
+	}
 	if rule.Unit == "percent" {
 		measured, err := percentUsed(ctx, tx, accountID, start, now)
 		if err != nil {
@@ -215,13 +219,13 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
  (r.started_at<=$4 AND COALESCE(r.ended_at,r.started_at)>=$3 AND EXISTS(SELECT 1 FROM account_reservations ar JOIN account_allowance_windows w
  ON w.tenant_id=ar.tenant_id AND w.id=ar.window_id WHERE ar.run_id=r.id AND w.capacity_kind IN ('refresh','blind'))
  AND NOT EXISTS(SELECT 1 FROM account_capacity_readings c WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=COALESCE(r.ended_at,r.started_at) AND c.read_at<=$4)))`, accountID, exceptRun, start, now).Scan(&held)
-		return measured + held, err
+		return measured + held + nativeHeld, err
 	}
 	if rule.Unit == "runs" {
 		var n float64
 		err := tx.QueryRow(ctx, `SELECT count(*)::float8 FROM agent_runs WHERE account_id=$1 AND id::text<>$2 AND purpose='managed'
  AND ((started_at>=$3 AND started_at<=$4) OR status IN ('queued','starting','running','waiting'))`, accountID, exceptRun, start, now).Scan(&n)
-		return n, err
+		return n + nativeHeld, err
 	}
 	estimates, err := learnedLimitEstimates(ctx, tx, accountID, nil)
 	if err != nil {
@@ -237,7 +241,7 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
  ) SELECT COALESCE(sum(period_use+CASE
  WHEN status IN ('queued','starting','running','waiting') THEN greatest(0,estimate-total)
  WHEN COALESCE(ended_at,started_at)>=$3 AND started_at<=$4 AND total=0 THEN estimate ELSE 0 END),0)::float8 FROM usage`, accountID, rule.Unit, start, now, exceptRun, estimates[rule.Unit]).Scan(&n)
-	return n, err
+	return n + nativeHeld, err
 }
 
 // limitWait runs under the account FOR UPDATE lock during reserve/claim, in

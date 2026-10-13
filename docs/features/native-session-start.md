@@ -31,7 +31,12 @@ tenant event log receives content-free metadata last. Claim commits before a
 launcher can open a process. Replayed claims retain their original expiry and
 binding; expired claims never renew by retry.
 
-Coordinator roots use `native_session_roots`, with a null `run_id`. Workers use
+Coordinator roots use `native_session_roots`, with a null `run_id`. Admission
+carries its exact allowance windows and learned per-unit period estimates into
+the final claim transaction. The root stores those budget holds and increments
+the existing allowance ledgers atomically. Existing worker admission and limit
+projections count root estimates too; claim retries project only their own
+holds out without refunding or renewing the saved budget. Workers use
 their account-backed `agent_runs` and never receive a root reservation. All
 unreleased null-run roots count irrespective of display state or heartbeat:
 queued, starting, running, idle, taken and exit_unconfirmed retain occupancy.
@@ -62,8 +67,9 @@ browser and is never sent to or stored by PAIMOS.
 
 ## R0 integration rows (same PR, before merge)
 
-P1b's exclusive write set excludes all shared inventories. R0 must apply these
-rows in this PR; this is a merge prerequisite, not work deferred to I2.
+The original slice reserved shared inventories for R0. Fix rounds 2 and 3
+explicitly require their blocking inventory findings to be fixed in this PR;
+the caller, tier and DSAR entries below are now applied.
 
 - Source ownership: `internal/nativesessions/start/**` and
   `internal/nativesessions/store/**` already match S3's native-session glob.
@@ -87,7 +93,7 @@ rows in this PR; this is a merge prerequisite, not work deferred to I2.
 | --- | --- | --- |
 | `native_session_intents` | `owner_person_id`, `actor_principal_id`, `actor_authority`, `created_at`, `claim_expires_at` | `tenant_id`, `id`, `request_id`, `owned_session_id`, `project_id`, `actor_kind`, `actor_key_id`, `actor_key_ceiling`, `actor_grant_id`, `actor_grant_revision`, `request_digest`, `intent`, `policy`, `launch_config`, `claim_request_id`, `claim_digest` |
 | `native_session_bindings` | `owner_person_id`, `actor_principal_id`, `paired_principal_id`, `view`, `terminal_viewer_url`, `created_at` | `tenant_id`, `id`, `project_id`, `role`, `harness`, `account_id`, `computer_id`, `workspace_id`, `model_profile_id`, `work_id`, `parent_harness_session_id`, `policy_id`, `run_id`, `current_harness_session_id`, `runtime_epoch`, `daemon_id`, `daemon_generation`, `ledger_generation`, `binding_revision` |
-| `native_session_roots` | `owner_person_id`, `created_at`, `released_at` | `tenant_id`, `id`, `owned_session_id`, `project_id`, `account_id`, `computer_id`, `run_id`, `runtime_epoch`, `hold_state` |
+| `native_session_roots` | `owner_person_id`, `created_at`, `released_at` | `tenant_id`, `id`, `owned_session_id`, `project_id`, `account_id`, `computer_id`, `run_id`, `runtime_epoch`, `hold_state`, `budget_holds`, `account_limit_estimates` |
 
 The named risk is retaining the old registration principal or treating a queued
 start as permanent authority. The database test's explicit local-read barrier
@@ -99,8 +105,10 @@ prevention, physical cwd escape and monotonic expiry at the local launch fence.
 Only fake grant/native transports are used; no subscription/model call occurs.
 
 Verification results are recorded in the handoff and ignored progress file.
-Browser testing is not applicable. R0 inventories and authoritative PR CI are
-required before merge; this groundwork is hidden from release notes.
+Browser testing is not applicable. Authoritative PR CI is required before
+merge; this groundwork is hidden from release notes. I1 must reconcile the
+saved root budget holds with verified no-fork/exit evidence before releasing
+allowance ledger quantities; display changes never release them.
 
 ## P1b handoff verification
 

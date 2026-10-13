@@ -1074,6 +1074,96 @@
     {
       "classification": "personal",
       "columns": {
+        "account_id": "metadata",
+        "actor_principal_id": "personal",
+        "binding_revision": "metadata",
+        "computer_id": "metadata",
+        "created_at": "personal",
+        "current_harness_session_id": "metadata",
+        "daemon_generation": "metadata",
+        "daemon_id": "metadata",
+        "harness": "metadata",
+        "id": "metadata",
+        "ledger_generation": "metadata",
+        "model_profile_id": "metadata",
+        "owner_person_id": "personal",
+        "paired_principal_id": "personal",
+        "parent_harness_session_id": "metadata",
+        "policy_id": "metadata",
+        "project_id": "metadata",
+        "role": "metadata",
+        "run_id": "metadata",
+        "runtime_epoch": "metadata",
+        "tenant_id": "metadata",
+        "terminal_viewer_url": "personal",
+        "view": "personal",
+        "work_id": "metadata",
+        "workspace_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_bindings"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "actor_authority": "personal",
+        "actor_grant_id": "metadata",
+        "actor_grant_revision": "metadata",
+        "actor_key_ceiling": "metadata",
+        "actor_key_id": "metadata",
+        "actor_kind": "metadata",
+        "actor_principal_id": "personal",
+        "claim_digest": "metadata",
+        "claim_expires_at": "personal",
+        "claim_request_id": "metadata",
+        "created_at": "personal",
+        "id": "metadata",
+        "intent": "metadata",
+        "launch_config": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "policy": "metadata",
+        "project_id": "metadata",
+        "request_digest": "metadata",
+        "request_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_intents"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "account_id": "metadata",
+        "account_limit_estimates": "metadata",
+        "budget_holds": "metadata",
+        "computer_id": "metadata",
+        "created_at": "personal",
+        "hold_state": "metadata",
+        "id": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "project_id": "metadata",
+        "released_at": "personal",
+        "run_id": "metadata",
+        "runtime_epoch": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_roots"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "daily_points_per_day": "personal"
       },
       "locator": {

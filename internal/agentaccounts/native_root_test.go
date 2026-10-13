@@ -27,8 +27,12 @@ func TestNativeRootHoldsCountUntilVerifiedRelease(t *testing.T) {
 			return err
 		}
 		admit := NativeAdmission{TenantID: tenantID, AccountID: account, ComputerID: computer, ProjectID: "01900000-0000-4000-8000-000000000005", OwnerPersonID: "01900000-0000-4000-8000-000000000006"}
-		root, err := ReserveNativeRootTx(ctx, tx, admit, session, epoch)
-		if err != nil {
+		// This fixture exercises occupancy only; claim behavior tests supply
+		// the real admitted quota budget to ReserveNativeRootTx.
+		var root *string
+		var err error
+		if err := tx.QueryRow(ctx, `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,project_id,owner_person_id,account_id,computer_id,runtime_epoch,hold_state)
+ VALUES($1,gen_random_uuid(),$2,$3,$4,$5,$6,$7,'starting') RETURNING id::text`, tenantID, session, admit.ProjectID, admit.OwnerPersonID, account, computer, epoch).Scan(&root); err != nil {
 			return err
 		}
 		if root == nil {
@@ -48,7 +52,7 @@ func TestNativeRootHoldsCountUntilVerifiedRelease(t *testing.T) {
 		}
 		run := "01900000-0000-4000-8000-000000000007"
 		admit.RunID = &run
-		worker, err := ReserveNativeRootTx(ctx, tx, admit, "01900000-0000-4000-8000-000000000008", epoch)
+		worker, err := ReserveNativeRootTx(ctx, tx, admit, "01900000-0000-4000-8000-000000000008", epoch, NativeBudget{})
 		if err != nil {
 			return err
 		}

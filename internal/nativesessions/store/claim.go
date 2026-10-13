@@ -175,7 +175,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if err = currentDaemon(ctx, tx, daemon, r); err != nil {
 			return err
 		}
-		admit := agentaccounts.NativeAdmission{TenantID: p.TenantID, ProjectID: r.ProjectID, OwnerPersonID: r.OwnerPersonID, PrincipalID: p.ID, AccountID: r.Intent.AccountID, ComputerID: r.Intent.ComputerID, Harness: r.Intent.Harness, ModelProfileID: r.Intent.ModelProfileID, DaemonID: daemon.DaemonID, DaemonGeneration: daemon.DaemonGeneration, LedgerGeneration: daemon.LedgerGeneration, WorkID: r.Intent.WorkID, RunID: grant.RunID}
+		admit := agentaccounts.NativeAdmission{TenantID: p.TenantID, ProjectID: r.ProjectID, OwnerPersonID: r.OwnerPersonID, PrincipalID: p.ID, OwnedSessionID: r.OwnedSessionID, AccountID: r.Intent.AccountID, ComputerID: r.Intent.ComputerID, Harness: r.Intent.Harness, ModelProfileID: r.Intent.ModelProfileID, DaemonID: daemon.DaemonID, DaemonGeneration: daemon.DaemonGeneration, LedgerGeneration: daemon.LedgerGeneration, WorkID: r.Intent.WorkID, RunID: grant.RunID}
 		if len(r.claimDigest) > 0 {
 			if !bytes.Equal(r.claimDigest, digest) {
 				return fail(409, nativecontract.ReasonIdentityMismatch)
@@ -189,7 +189,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 			if !reflect.DeepEqual(r.view.CurrentBinding.RunID, grant.RunID) {
 				return fail(409, nativecontract.ReasonIdentityMismatch)
 			}
-			if err = nativeCapacity(ctx, tx, admit, r.OwnedSessionID, now); err != nil {
+			if _, err = nativeCapacity(ctx, tx, admit, r.OwnedSessionID, now); err != nil {
 				return err
 			}
 			out = claimResult(r, in, *r.claimExpires, now)
@@ -198,7 +198,8 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if r.view.Revision != in.ExpectedRevision || r.view.CurrentBinding != nil {
 			return fail(409, nativecontract.ReasonStaleRevision)
 		}
-		if err = nativeCapacity(ctx, tx, admit, "", now); err != nil {
+		budget, err := nativeCapacity(ctx, tx, admit, "", now)
+		if err != nil {
 			return err
 		}
 		harnessID, err := uuid()
@@ -223,7 +224,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 				return fail(409, nativecontract.ReasonStaleRevision)
 			}
 		}
-		root, err := agentaccounts.ReserveNativeRootTx(ctx, tx, admit, r.OwnedSessionID, epoch)
+		root, err := agentaccounts.ReserveNativeRootTx(ctx, tx, admit, r.OwnedSessionID, epoch, budget)
 		if err != nil {
 			return err
 		}
@@ -298,20 +299,21 @@ func validateObservation(o Observation, d nativecontract.DaemonActor, p PendingS
 	return nil
 }
 
-func nativeCapacity(ctx context.Context, tx pgx.Tx, admit agentaccounts.NativeAdmission, except string, now time.Time) error {
+func nativeCapacity(ctx context.Context, tx pgx.Tx, admit agentaccounts.NativeAdmission, except string, now time.Time) (agentaccounts.NativeBudget, error) {
 	// Occupancy includes sibling projects without exposing private facts.
 	var visibility, system string
 	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
-		return err
+		return agentaccounts.NativeBudget{}, err
 	}
 	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
-		return err
+		return agentaccounts.NativeBudget{}, err
 	}
-	if err := agentaccounts.RequireNativeCapacityTx(ctx, tx, admit, except, now); err != nil {
-		return err
+	budget, err := agentaccounts.AdmitNativeCapacityTx(ctx, tx, admit, except, now)
+	if err != nil {
+		return agentaccounts.NativeBudget{}, err
 	}
-	_, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
-	return err
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
+	return budget, err
 }
 
 func currentDaemon(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, r pendingRecord) error {

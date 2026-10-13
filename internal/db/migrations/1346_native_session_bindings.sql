@@ -72,6 +72,8 @@ CREATE TABLE native_session_roots (
     run_id uuid,
     runtime_epoch uuid,
     hold_state text,
+    budget_holds jsonb,
+    account_limit_estimates jsonb,
     created_at timestamptz,
     released_at timestamptz,
     PRIMARY KEY (tenant_id,id)
