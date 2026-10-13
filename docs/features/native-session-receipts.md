@@ -515,6 +515,51 @@ prerequisites. No behavior change or new regression test is made, so no
 negative control against `028e51418` applies. No origin push, deployment,
 model CLI or review gate is run; the coordinator retains those decisions.
 
+## Fix round 9: CI repair still requires R0 integration
+
+`review-ci622-1010.out` targets `09aa3a42f`. Its complete agentpairing JSONL
+confirms exactly the missing `nativesessions/receipts/repository.go` caller
+in `db.LockTree`. The full failed `go-static` log for job `115189455633`
+identifies exactly the eight unclassified Go tests in the request below.
+The job's other executed checks pass. Both receipt table entries are still
+absent from the DSAR inventory.
+
+PPM / INSPR / workstation-agents and coordinator-recorded builder session
+`a18391c0-c414-4388-8959-4ffca2424ce1` were verified before writes. A fresh
+fetch finds `origin/main` at `f571b7765`; the local merge-tree check exits
+**0**, PR #622 is mergeable, and migration 1347 has no main collision.
+The three registrations remain absent from both this branch and main;
+there is no conflict requiring a merge.
+
+The original brief requires stopping a repair outside P3a's exclusive write
+set. The normative R0 lane exclusively owns
+`internal/agentpairing/shared_fence_test.go`,
+`scripts/ci/go-test-tiers.json` and `internal/dsar/inventory.json`.
+Neither fix9 nor the ticket records an ownership transfer. This round stops
+the code repair at that boundary and preserves every fence call, assertion,
+test name and shared inventory. The exact same-PR request below remains the
+concrete repair for the coordinator's metadata lane.
+
+The initial guarded five-package Go attempt and its retry on `09aa3a42f`
+both refuse with **exit 3** because remote slots and the CI pool are occupied.
+The locked static attempt refuses with **exit 3** under the host guard. With
+the remote host GREEN and no hold, the approved guarded remote static path
+also refuses with **exit 3** for occupied remote slots. No checks execute in
+those attempts and no local fallback is used. The earlier acceptance passes
+remain historical evidence, not fresh round-9 passes. All four hosted web
+unit shards and twelve browser shards pass on `09aa3a42f`; P3a has no feature
+web unit or browser checks.
+
+The offline affected selector exits **0** and requires **FULL CI** for
+migration 1347's unsupported or incomplete SQL classification. Public-name
+and whitespace checks pass after this handoff edit.
+
+**INCOMPLETE:** the fence/tier failures and DSAR classifications need R0
+integration before CI can be green. This documentation-only handoff has no
+behavior fix or new regression test needing a negative control against
+`09aa3a42f`. No origin push, deployment, model CLI or review gate is run;
+the coordinator retains the trusted verdict and release decisions.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
