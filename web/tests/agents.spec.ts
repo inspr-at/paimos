@@ -679,6 +679,9 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     const ticket = ticketFact.getByRole('link', { name: /^PHAROS-11 Connect/ })
     await expect(ticketFact.locator('.key')).toHaveText('PHAROS-11')
     await expect(ticketFact.locator('.faint')).toHaveText('· In progress')
+    // AEON-1240: the fact reads as one sentence; its state never starts a line of its own, at any width.
+    const [factText, factState] = await Promise.all([ticketFact.locator('dd').boundingBox(), ticketFact.locator('.ticket-state').boundingBox()])
+    expect(factState!.x).toBeGreaterThan(factText!.x + 4)
     await expect(ticket).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
     await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
     if (width === 390) expect((await ticket.boundingBox())!.height).toBeGreaterThanOrEqual(44)

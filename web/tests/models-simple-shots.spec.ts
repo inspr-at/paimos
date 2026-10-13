@@ -34,6 +34,8 @@ for (const size of sizes) for (const theme of ['light', 'dark']) {
     await page.locator('[data-pick="all"]').click()
     await page.locator('.mdl-pop [data-older="anthropic"]').click()
     await expect(page.locator('.mdl-pop .opt.is-old')).toHaveCount(3)
+    // AEON-1240: each older version shows its own levels, like the current rows.
+    await expect(page.locator('.mdl-pop .opt.is-old [data-old-levels]')).toHaveCount(3)
     await page.screenshot({ path: testInfo.outputPath(`models-${size.width}-${theme}-many-picker.png`) })
   })
   test(`why at ${size.width} ${theme}`, async ({ page }, testInfo) => {

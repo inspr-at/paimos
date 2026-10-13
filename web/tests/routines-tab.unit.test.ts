@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
 import type { Recurrence } from '../src/lib/recurrences'
-import { RUN_LOOK, STATE_LOOK, checkedRuns, routinesLine, rowNote, runChain, runLine, runState, runTitle, settledWords, stateCounts, triggerShort, usageShort, type RoutineRun, type RunDetail, type RunUsage } from '../src/lib/routineRuns'
+import { RUN_LOOK, STATE_LOOK, checkedRuns, countTip, countWords, routinesLine, rowNote, runChain, runLine, runState, runTitle, settledWords, stateCounts, triggerShort, usageShort, type RoutineRun, type RunDetail, type RunUsage } from '../src/lib/routineRuns'
 
 // Risk (AEON-1192): the logbook makes a run look more finished than it is (a created
 // ticket or a failed run in the Done tint), shows unknown or partial usage as zero or
@@ -125,6 +125,10 @@ describe('routine rows', () => {
     expect(routinesLine([routine()], false, () => 'Mon 12 Oct, 08:00')).toBeNull()
     expect(routinesLine([routine(), waiting, failed], false, () => 'Mon 12 Oct, 08:00')).toBe('1 waits for a person · 1 failed · next Mon 12 Oct, 08:00')
     expect(routinesLine([waiting], true, () => 'Mon 12 Oct, 08:00')).toBe('1+ wait for a person · next Mon 12 Oct, 08:00')
+  })
+  it('never counts "0+": a lower bound only for a found count, "–" with a tip for a zero not known yet (AEON-1240)', () => {
+    expect([countWords(3, true), countWords(0, true), countWords(0, false), countWords(3, false)]).toEqual(['3+', '–', '0', '3'])
+    expect([countTip(0, true), countTip(3, true), countTip(0, false)]).toEqual(['Not all loaded yet', '', ''])
   })
   it('names triggers briefly', () => {
     expect(triggerShort({ kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO,TH', time_of_day: '08:00', timezone: 'Europe/Vienna' })).toBe('Mon, Thu 08:00')
