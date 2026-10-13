@@ -280,6 +280,51 @@ needed. Delivery remains incomplete until R0 registration, completed browser
 evidence, green required checks and the coordinator's review. Repeating a P4b
 fix round cannot repair the R0 manifest or CI workflow ownership boundary.
 
+Fix round 9 inspected both cited jobs and the current-head artifacts in Actions
+run `38363598974`, bound to PR head `1881fd959`. Its tested merge commit
+`325a689b7` has identical quota and C0 sources. `go-static` job `115184061909`
+fails only at strict native collection, naming the four missing ESSENTIAL rows
+above. Refreshed `origin/main` at `f571b7765` still contains none of them;
+source ownership and release checks pass. PR #619 remains mergeable, so no
+conflict-resolution merge is required. The normative plan still reserves
+`scripts/ci/go-test-tiers.json` to R0, with no ownership transfer in fix round 9.
+
+Current artifact `go-test-2-tier-measurements` (`11796073998`) proves all four
+quota tests and the package passed (0.075 s), and C0 passed (1.611 s). Local
+P4b acceptance evidence is:
+
+- PASS: qualified Claude/Codex stream facts, exact binding and separate scopes
+  in the qualification, freshness and sparse-denial cases.
+- PASS: sign-in, binary pin, host/account slots, allowance and measurement stay
+  independent; failed measurement does not invent logout or zero quota.
+- PASS: idle Claude probing remains unsupported, even with stream qualification.
+- PASS: detached existing-ingress projections exclude private fields and retain
+  the exact enrollment binding; production I2 wiring remains a separate slice.
+- PASS: injected-clock freshness and exact foreign-account/revision rejection
+  retain successful identity facts.
+
+`web` job `115192972759` fails because `web-shard (2)` (`115185141712`)
+was cancelled during `Run selected UI cases without retries`. Catalogue,
+setup, all four unit shards and browser shard 1 passed. Shard 2 ran from
+07:41:44 to 08:02:16 UTC; cancellation at 08:01:59 is consistent with the
+workflow's 20-minute job limit. Its completed release group reports 215
+expected cases and zero unexpected results; the next group ends during case
+84 of 100 without a failing assertion. `tier-measurements` (`115193007937`)
+reports incomplete coverage, `missing_case_artifact` and only `web-shard-2`
+missing, with zero failed cases in every tier. Coordinator-owned CI execution
+and budget evidence must be resolved without weakening browser requirements.
+
+Both fix-round-9 guarded Go attempts exited 3 for remote capacity refusal.
+Both guarded static attempts exited 3 at the hold/host-level guard, before
+execution; no local fallback was used. The offline affected planner passed
+against `f571b7765` (130 Go packages, 80 browser specs, 120 unit files), but
+omits quota until R0 registration. No quota behavior, assertion, shared
+inventory or CI workflow changes are made, so no new behavior regression
+against `1881fd959` is required. This handoff remains incomplete: R0 must apply
+the exact four tier rows in this same PR, and the coordinator must complete
+browser/static evidence and its separate review before merge. No push,
+deployment, review gate or model CLI was run by the builder.
+
 Run the named package through the guarded remote Go runner and static checks
 through `ci-static-locked.sh`; run `node scripts/test-tiers/affected.mjs --base
 origin/main`. These clock-driven tests use synthetic pins and events, with no
