@@ -240,3 +240,18 @@ worker status and ignored `web/test-results/AEON-1270-fix6/validation.json`.
 P2d's test plan has no Go package or separate web unit suite. The offline
 affected selector requested FULL because manifest promotions were unavailable;
 the authoritative full CI run and policy-preview verdict remain coordinator-owned.
+
+Fix round 7 preserves the documented `model-name` terminal slot prop explicitly.
+Vue compiles the existing `:model-name` attribute to `modelName`; the slot now
+provides both keys with the same current `fullName` value, retaining existing
+camel-case consumers as well. The named panel views and the standalone view
+share this binding and their existing person/watch/consent fences.
+
+The existing terminal regression keeps its exact session/person/consent/name
+assertion and adds a real slot consumer. It checks both name keys, exact current
+authority objects, profile changes, a missing profile, and standalone rendering.
+All 12 test identities and their tier/shard rows remain unchanged. A test-only
+control over `988cd4a6` is kept outside delivery history. Guarded command results,
+the final tested HEAD and any remaining validation limits are recorded in
+`web/test-results/AEON-1270-fix7/validation.json` and the worker status; a capacity
+refusal is incomplete, never a passing browser or static check.

@@ -192,7 +192,8 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
     <div v-else-if="terminalAtOpen && viewer.kind === 'person'" class="terminal-pane">
       <p v-if="!readable">You cannot read this session.</p>
       <template v-else-if="session.mode === 'terminal' || !viewerAtOpen">
-        <slot v-if="request?.view === 'expert' && session.capabilities.terminal_view && active && !hidden" name="terminal" :session="session" :viewer="viewer" :consent="consent" :model-name="modelName"><p>Live terminal output is unavailable.</p></slot>
+        <!-- Vue camelizes slot attributes; preserve the documented key alongside modelName. -->
+        <slot v-if="request?.view === 'expert' && session.capabilities.terminal_view && active && !hidden" name="terminal" :session="session" :viewer="viewer" :consent="consent" :model-name="modelName" v-bind="{ 'model-name': modelName }"><p>Live terminal output is unavailable.</p></slot>
         <p v-else>Live terminal output requires current watch permission and the owner’s active consent.</p>
       </template>
       <div v-else-if="terminalAtOpen" class="terminal-viewer">

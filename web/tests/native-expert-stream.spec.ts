@@ -46,7 +46,7 @@ async function setup(page: Page, options: { panel?: boolean; terminal?: boolean;
     window.nativeExpert = { state, reads, streams, reviews, transport, nextTick, async mountPane(pane) { const views = await import('/src/lib/nativeExpert/views.ts'); mountedView.value = pane === 'events' ? views.SessionEvents : views.SessionTerminal; }, setHeld(value) { held=value; }, page(value) { pageResult=value; }, emit(index,event) { streams[index].receive(event); }, resolve(index,page) { reads[index].resolve(page); }, setPerson(id,kind='person') { state.viewer.principalId=id; state.viewer.kind=kind; setPreferenceOwner({tenant:{id:state.viewer.tenantId},principal:{id}}); } };
     createApp({setup() { return () => h('main',{id:'app-frame',style:'display:flex;flex-direction:column;min-height:0;flex:1'},[
       h('header',{class:'fixture-head'},[h('h1','Session'),h('p','GPT-6.1 Sol')]),
-      h(mountedView.value,{...state,transport,...${JSON.stringify(options.panel ? {} : { standalone: true })},onReview: approval => reviews.push(approval)}, {terminal: slotProps => { window.nativeExpert.terminalProps = slotProps; return h('div',{class:'terminal-fixture','data-testid':'pty-slot'},[h('p','Read-only · the person at the terminal has control'),h('pre','Native TUI output')]); }}),
+      h(mountedView.value,{...state,transport,...${JSON.stringify(options.panel ? {} : { standalone: true })},onReview: approval => reviews.push(approval)}, {terminal: slotProps => { window.nativeExpert.terminalProps = slotProps; return h('div',{class:'terminal-fixture','data-testid':'pty-slot'},[h('p','Read-only · the person at the terminal has control'),h('p',{'data-testid':'pty-model'},slotProps['model-name']),h('pre','Native TUI output')]); }}),
     ]); } }).mount('#app');
     window.nativeExpert.menuLink = () => liveTerminalLink(state.session,state.viewer);
   </script></body></html>` }))
@@ -62,6 +62,16 @@ const start = async (page: Page, expected = 1) => {
   await expect.poll(() => page.evaluate(() => (window as any).nativeExpert.streams.length)).toBe(expected)
 }
 const switchTo = (page: Page, segment: string) => page.getByRole('radio', { name: segment, exact: true }).click()
+
+// Risk: Vue camelizes slot attributes, but a terminal consumer also needs the
+// documented model-name key, with the current label and exact authority props.
+async function terminalModel(page: Page, name: string) {
+  await expect(page.getByTestId('pty-model')).toHaveText(name)
+  expect(await page.evaluate(() => {
+    const f = (window as any).nativeExpert, props = f.terminalProps
+    return { names: [props['model-name'], props.modelName], current: [props.session === f.state.session, props.viewer === f.state.viewer, props.consent === f.state.consent] }
+  })).toEqual({ names: [name, name], current: [true, true, true] })
+}
 
 // Risk: A3 removes the old name from accessible labels as well as visible copy.
 // Inspect before native envelopes render: their C0 field names remain unchanged.
@@ -527,6 +537,13 @@ test('AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one te
   await act(page, 'f.state.session.mode="terminal"; await f.nextTick();')
   await expect(page.getByTestId('pty-slot')).toBeVisible()
   expect(await page.evaluate(() => { const props = (window as any).nativeExpert.terminalProps; return [props.session.owned_session_id, props.viewer.principalId, props.consent.id, props['model-name']] })).toEqual(['owned-a', 'person-1', 'consent-a', 'GPT-6.1 Sol'])
+  await terminalModel(page, 'GPT-6.1 Sol')
+  await act(page, 'f.state.modelProfile.model="gpt-6.1-astra"; await f.nextTick();')
+  await terminalModel(page, 'GPT-6.1 Astra')
+  await act(page, 'f.state.modelProfile=null; await f.nextTick();')
+  await terminalModel(page, '')
+  await act(page, 'f.state.modelProfile={harness:"codex",model:"gpt-6.1-sol",display_name:"GPT Sol",model_version:"6.1"}; await f.nextTick();')
+  await terminalModel(page, 'GPT-6.1 Sol')
   await act(page, 'f.state.consent.active=false; await f.nextTick();')
   await expect(page.getByTestId('pty-slot')).toHaveCount(0)
   await act(page, 'f.setPerson("agent-2","agent"); f.state.viewer.canReadStructured=true; await f.nextTick();')
@@ -541,6 +558,7 @@ test('AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one te
   await setup(page, { terminal: true, take: true })
   await switchTo(page, 'Terminal')
   await expect(page.getByTestId('pty-slot')).toBeVisible()
+  await terminalModel(page, 'GPT-6.1 Sol')
   await expect(page.getByRole('link', { name: 'Open live terminal', exact: true })).toHaveCount(0)
   expect(await page.evaluate(() => (window as any).nativeExpert.menuLink())).toEqual({ href: session.terminal_viewer_url, label: 'Open live terminal', target: '_blank', rel: 'noopener noreferrer' })
   await act(page, 'f.state.viewer.canWatch = false; await f.nextTick();')
