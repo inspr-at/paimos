@@ -5,6 +5,7 @@ import { mockStateColours, states } from './state-colours-fixtures'
 import { STATE_LABEL } from '../src/lib/agentSignals'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
 import { saveAgentTheme } from './agent-theme-fixtures'
+import { controlStability } from './control-stability'
 
 async function expectStateWordFits(project: Locator) {
   await expect(project.locator('.chip-state')).toBeVisible()
@@ -91,14 +92,16 @@ for (const theme of ['light', 'dark'] as const) {
     }
   })
 
-  test(`AEON-1325 ${theme}: wider fonts keep every state word inside narrow project chips`, async ({ page }) => {
-    await mockStateColours(page, theme)
+  test(`AEON-1325 ${theme}: wider fonts keep every state word inside narrow project chips`, async ({ page }, testInfo) => {
+    const { agents, appearance } = await mockStateColours(page, theme)
+    for (const session of agents.sessions) session.display_label = `Sicherungskopien aller Produktionsserver überprüfen: ${session.display_label}`
+    appearance.saved.values.agents = { ...appearance.saved.values.agents, hover: false }
     await page.goto('/')
     // The hosted Linux font metrics are wider than macOS's. Exercise that risk
     // deterministically with the bundled font, including the activity timestamp.
     await page.evaluate(() => document.documentElement.style.setProperty('--font', '"JetBrains Mono", monospace'))
     await page.evaluate(() => document.fonts.load('500 12px "JetBrains Mono"'))
-    for (const width of [320, 390]) {
+    for (const width of [320, 390, 1024, 1440]) {
       await page.setViewportSize({ width, height: 844 })
       for (const layout of ['Cards', 'List']) {
         await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
@@ -109,6 +112,15 @@ for (const theme of ['light', 'dark'] as const) {
           if (layout === 'Cards') await expect(project.locator('.activity')).toBeVisible()
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        const project = page.locator('[data-project-id="p-sc1-stale"]')
+        await project.hover()
+        const chip = project.locator('.live-chip')
+        const guard = await controlStability(page, { chip, actions: project.getByRole('button', { name: /^Actions for/ }) })
+        const pop = page.getByRole('dialog', { name: `Active agents on ${STATE_LABEL.stale} team` })
+        await guard.check(async () => { await chip.click(); await expect(pop).toBeVisible() })
+        await guard.check(async () => { await page.keyboard.press('Escape'); await expect(pop).toHaveCount(0) })
+        guard.done()
+        await page.screenshot({ path: testInfo.outputPath(`aeon-1325-${theme}-${width}-${layout.toLowerCase()}.png`), fullPage: true })
       }
     }
   })
