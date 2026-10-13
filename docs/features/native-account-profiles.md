@@ -136,3 +136,21 @@ OpenAPI/migration checks. This is a failed CI handoff, not a green result. Only
 the test fixture and this feature document changed in this round; the worktree
 has no shared-metadata edits, origin push, deployment, model invocation or
 review-gate action.
+
+Fix-round 3 (2026-10-13): `go-static` job **115099172008** rejected two
+operator-host references in this document. They now use neutral wording.
+Baseline `6082e94e` fails the existing public-name guard at those two lines;
+the guard passes after commit `c636e6ac4`. No production behavior or test
+assertion changed. Both affected Go packages pass through the guarded remote
+runner. No web unit or browser spec is affected by this documentation change.
+
+Guarded `ci-static-locked.sh --merge-main` returns **exit 1** with **39 checks
+passing and zero optional skips**, including the public-name guard, Go vet,
+test-tier regressions, web shard regressions, web typecheck/lint and contract
+checks. The three failing checks are `go-tiers`, `audit-tests` and
+`audit-coverage`: R0 still must add the S1 `internal/nativeprofiles/**` glob
+and the four **ESSENTIAL** Go test rows specified above. The reported
+`release-check-run` job **115099172009** has the same missing ownership cause.
+A read-only in-memory application of that glob clears all five ownership
+errors. `plan.json` and `plan.md` explicitly reserve both inventories for R0;
+P4a's exclusive write set remains unchanged. This handoff is **not CI green**.
