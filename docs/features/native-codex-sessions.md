@@ -169,15 +169,14 @@ No shared inventory, contract, permission, migration or release-version file was
 changed. No origin push, deployment, live vendor session, model CLI or review
 gate was run.
 
-## CI fix round 3
+## CI fix round 4
 
-The full logs at PR head `db7188be2` confirm two outstanding R0 registrations:
+The full logs at PR head `e81db5761` confirm two outstanding R0 registrations:
 
-- `go-static` job `115104236943` passed the public-name guard and the test-tier
-  toolkit tests, then failed `check go --strict` on the three unclassified
-  Codex tests listed below. The document correction from fix round 2 remains
-  effective; no further public-name change is needed.
-- `release-check-run` job `115104236911` failed
+- `go-static` job `115112079251` failed `check go --strict` on the three
+  unclassified Codex tests listed below. Its full failed-step log contains no
+  provider compilation or behavior failure.
+- `release-check-run` job `115112079249` failed
   `test_current_snapshot_has_no_unassigned_code` and
   `test_delta_cli_and_malformed_input_exit_codes`. Both failures come from
   missing slice ownership for `codec.go`, `launch.go`, `notifications.go`,
@@ -200,28 +199,37 @@ to `tests` in `scripts/ci/go-test-tiers.json`, retaining canonical ordering:
 
 The strict Go-tier check and manifest-based selection must include this
 package. The normative P5a plan explicitly reserves both inventory files for
-R0: builders send exact registration intents and never independently rewrite
-the shared inventories. Fix round 3 preserves that boundary and records no
-ownership transfer. The missing rows must be applied in this PR before merge.
+R0: "Builders send exact row/registration intents; they never independently
+rewrite these shared inventories." P5a owns only
+`internal/nativeproviders/codex/**` and this feature document. Fix round 4
+requires preserving ownership and records no transfer of either registry.
+The required edits therefore remain with R0 in this PR before merge.
 
 At this PR head, all seven Go shards, Go timing, all four web unit shards, all
 twelve browser shards and e2e passed in hosted CI. Those results do not replace
 the missing registrations or establish that the Codex package was selected.
 No provider behavior change is needed for these findings; no behavior, assertion
 or existing test tier was changed. The ownership checker reproduced exactly
-the six unassigned files against immutable `db7188be2`. Adding only the proposed
+the six unassigned files against immutable `e81db5761`. Adding only the proposed
 S2 path in memory made full-tree ownership pass with zero errors; the on-disk
 registry stayed unchanged. The assigned Codex package passed through the
-guarded remote runner with `-count=1` (0.337 s). Web and browser reruns are not
+guarded remote runner with `-count=1` (0.261 s). Web and browser reruns are not
 applicable to this documentation-only handoff.
 
-Guarded static at `db7188be2` exited 1: 39 checks passed and none were skipped.
-Only `go-tiers`, `audit-tests` and `audit-coverage` failed, for exactly the
-missing R0 registrations above. Public names, Go vet, test-tier toolkit tests,
-web typecheck/lint and web-shard checks passed. This is not static-green.
+The fix round 4 `ci-static-locked.sh` attempt at `e81db5761` exited 3 because
+the guarded remote runner had both slots occupied. No heavy local fallback
+was run. This attempt did not execute static checks or the tier/web-shard/audit
+self-checks and is incomplete. The last completed guarded static run, at
+`db7188be2`, exited 1 with 39 checks passed and none skipped; only `go-tiers`,
+`audit-tests` and `audit-coverage` failed for the same R0 registrations.
+The current hosted CI logs independently confirm those blockers.
 
 The non-required `gate/policy-preview` diagnostic reports a missing trusted
 verdict. That decision remains with the coordinator's cross-family gate.
 After applying the two R0 registrations in this PR, rerun guarded static and
-authoritative CI. This round remains incomplete until that work is green.
-The remaining blocker is R0 metadata work; no provider behavior fix was found.
+authoritative CI, including the tier/web-shard/audit self-checks. This round
+remains incomplete until that work is green. The remaining blocker is R0
+metadata work; no provider behavior fix was found, so no new behavior test or
+assertion change is warranted. The PR was mergeable after fetching current
+`origin/main`; no merge was needed. No origin push, deployment, model CLI or
+review gate was run.
