@@ -58,16 +58,28 @@ function outside(event: PointerEvent) {
   if (panel.value?.contains(target) || props.anchor?.contains(target)) return
   emit('close', false)
 }
+// A full-page capture scrolls the page away and back inside one turn. Closing
+// on that intermediate event drops the explainer without restoring focus, so
+// Escape never reaches it. Exact equality also treats a subpixel restore as
+// movement. Dismiss one frame later, and only when the trigger is still more
+// than 0.5px away, the same tolerance control stability uses. A scroll that
+// leaves the trigger displaced still closes without focusing it. Point-anchored
+// context menus have no element to compare, so they still close immediately.
+function anchorShifted() {
+  if (!(props.anchor instanceof HTMLElement) || !placedAnchor) return true
+  const rect = props.anchor.getBoundingClientRect()
+  return Math.abs(rect.top - placedAnchor.top) > .5 || Math.abs(rect.left - placedAnchor.left) > .5 || Math.abs(rect.bottom - placedAnchor.bottom) > .5 || Math.abs(rect.right - placedAnchor.right) > .5
+}
+let settleFrame = 0
 function scrolled(event: Event) {
   if (panel.value?.contains(event.target as Node)) return
-  // Opening can scroll the trigger into view. Its notification may arrive after
-  // placement, even after the next frame; only new anchor movement dismisses it.
-  // Point-anchored context menus still close on every outside scroll.
-  if (props.anchor instanceof HTMLElement && placedAnchor) {
-    const rect = props.anchor.getBoundingClientRect()
-    if (rect.top === placedAnchor.top && rect.left === placedAnchor.left && rect.bottom === placedAnchor.bottom && rect.right === placedAnchor.right) return
-  }
-  emit('close', false)
+  if (!anchorShifted()) return
+  if (!(props.anchor instanceof HTMLElement)) { emit('close', false); return }
+  if (settleFrame) return
+  settleFrame = requestAnimationFrame(() => {
+    settleFrame = 0
+    if (panel.value && anchorShifted()) emit('close', false)
+  })
 }
 // Inside a modal dialog (the release history's ticket panel) the popover moves
 // into it: everything outside the top layer is inert while the modal is open.
@@ -127,6 +139,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   cancelAnimationFrame(scrollFrame)
+  cancelAnimationFrame(settleFrame)
   document.removeEventListener('pointerdown', outside, true)
   document.removeEventListener('scroll', scrolled, true)
   window.removeEventListener('resize', onResize)

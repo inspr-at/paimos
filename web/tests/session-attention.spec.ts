@@ -39,7 +39,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await page.locator('[data-row="s:bk5-worker-0"] .agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-step')).toHaveText('Implementing the assigned change')
-    await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Working')
+    // AEON-1212 moved the state into the unified panel identity line.
+    const state = panel.locator('.pane-title .agent-state-label')
+    await expect(state).toHaveText('Working')
     const inbox = panel.getByRole('region', { name: 'Inbox attention' })
     // AEON-313: shared-inbox obligations stay outside the session thread, in
     // Chat as well as in Now. AEON-977 (2c33f633d) renamed the tab and its panel.
@@ -71,7 +73,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await expect(page.getByTestId('desk-preview-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?item=a:bk5-approval')
     await page.keyboard.press('Escape')
     await page.locator('[data-row="s:bk5-worker-0"] .agent-link').click()
-    await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Awaiting approval')
+    await expect(state).toHaveText('Awaiting approval')
     // The panel reopens on the remembered tab (Chat, above); evidence lives in Overview.
     await panel.getByRole('tab', { name: 'Overview' }).click()
     await expect(panel.locator('.now-step')).toContainText('awaiting a person’s decision')
@@ -83,7 +85,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     // A late approval list must not override the fresh explicit false projection.
     Object.assign(agents.sessions[0]!, { needs_attention: false, attention_reasons: [] })
     await page.goto('/agents/bk5-worker-0')
-    await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Working')
+    await expect(state).toHaveText('Working')
     await expect(panel.locator('.callout')).toHaveCount(0)
     await expect(panel.getByRole('region', { name: 'Inbox attention' })).toHaveCount(0)
   })

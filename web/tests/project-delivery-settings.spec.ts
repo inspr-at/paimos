@@ -9,7 +9,7 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics } from './delivery-numbers-fixtures'
-import { checkProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
+import { checkProjectSettings, captureProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
 import type { MetricSource } from '../src/lib/deliveryNumbers'
 import type { DeliverySettings } from '../src/lib/projectDeliverySettings'
 
@@ -250,12 +250,14 @@ test('AEON-1226: repository states stay put and delivery edits preserve authorit
   expect(world.writes.at(-1)?.id).toBe('p-aeon'); expect(errors).toEqual([])
 })
 
-test('AEON-1226: approved repository reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
-  test.setTimeout(240_000)
-  const results: unknown[] = [], failures: string[] = []
-  for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
+// Keep every state, with a separate context and timeout for each evidence cell.
+for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`AEON-1226: approved repository reference states and check.mjs audit against the build at ${width}px ${theme}`, async ({ browser }, testInfo) => {
+    test.setTimeout(240_000)
+    const results: unknown[] = [], failures: string[] = []
     const context = await browser.newContext({ viewport: { width, height: width > 600 ? 1000 : 860 }, hasTouch: width < 600, reducedMotion: 'reduce', colorScheme: theme })
     const page = await context.newPage(), { world, errors } = await setup(page)
+    const touchSession = width < 600 ? await context.newCDPSession(page) : undefined
     await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: { choice: theme } } }))
     for (const readOnly of [false, true]) for (const state of states) {
       let release!: () => void
@@ -265,17 +267,17 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
       const name = `delivery-${state}${readOnly ? '-readonly' : ''}-${width}-${theme}`
       results.push(...await checkProjectSettings(page, name, width < 600))
       await page.locator('#repository').scrollIntoViewIfNeeded()
-      await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+      await captureProjectSettings(page, { path: testInfo.outputPath(`${name}.png`), fullPage: true }, touchSession)
       if (state === 'loading') { world.pendingLoad = null; release(); await expect(page.locator('.repo-slot')).not.toHaveAttribute('data-state', 'loading') }
     }
     await choose(page, world, 'none')
     await page.getByRole('button', { name: 'Link repository', exact: true }).click()
-    await page.screenshot({ path: testInfo.outputPath(`delivery-linking-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-linking-${width}-${theme}.png`), fullPage: true }, touchSession)
     results.push(...await checkProjectSettings(page, `delivery-linking-${width}-${theme}`, width < 600))
     await choose(page, world, 'noactions'); const how = page.locator('[data-how=actions]')
     const stable = await controlStability(page, { slot: page.locator('.repo-slot'), checks: page.locator('#checks') })
     await stable.check(async () => { await how.click(); await expect(page.getByRole('heading', { name: 'The Actions read permission' })).toBeFocused() })
-    await page.screenshot({ path: testInfo.outputPath(`how-actions-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`how-actions-${width}-${theme}.png`), fullPage: true }, touchSession)
     results.push(...await checkProjectSettings(page, `how-actions-${width}-${theme}`, width < 600))
     await page.keyboard.press('Escape'); await expect(how).toBeFocused(); stable.done()
 
@@ -286,12 +288,10 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     progress.done()
     await expect(page.locator('.phases .now')).toHaveText('Pull requests')
     await expect(page.locator('.phases svg path')).toHaveCount(0)
-    // Chromium's beyond-viewport capture clears touch emulation in the pinned
-    // Playwright runtime (https://github.com/microsoft/playwright/issues/42607).
-    // Keep the complete touch audit before capture; navigation below restores
-    // the context's emulation for the next scenario.
+    // Audit the real progress before capture; the capture helper restores touch
+    // emulation for subsequent interactions as well as the next navigation.
     results.push(...await checkProjectSettings(page, `delivery-reading-progress-${width}-${theme}`, width < 600))
-    await page.screenshot({ path: testInfo.outputPath(`delivery-reading-progress-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-reading-progress-${width}-${theme}.png`), fullPage: true }, touchSession)
 
     world.state = 'none'; world.source = null
     await page.goto('/p/AEON/delivery'); await expect(page.getByRole('link', { name: 'Link repository', exact: true })).toBeVisible()
@@ -307,7 +307,7 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     await refresh.check(async () => { world.state = 'error'; await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await expect(page.getByTestId('delivery-load-error')).toBeVisible() })
     await refresh.check(async () => { world.state = 'none'; await page.getByRole('button', { name: 'Retry', exact: true }).click(); await expect(action).toBeVisible() })
     refresh.done()
-    await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-banner-none-${width}-${theme}.png`), fullPage: true }, touchSession)
 
     // The app remains English; German is test-only length stress data here.
     await action.evaluate(element => {
@@ -316,33 +316,110 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     })
     results.push(await bannerContainsAction(page, `delivery-banner-none-long-de-${width}-${theme}`))
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
-    await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-long-de-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-banner-none-long-de-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.goto('/p/AEON/delivery'); await expect(action).toBeVisible()
     await page.getByRole('link', { name: 'Link repository', exact: true }).click(); await expect(page.locator('#link-form')).toBeVisible()
     world.state = 'appoff'; world.source = source('appoff'); world.metrics = deliveryMetrics().metrics
     await page.goto('/p/AEON/delivery'); await expect(page.locator('.go-src').first()).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath(`delivery-problem-chips-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-problem-chips-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.locator('.go-src').first().click(); await expect(page).toHaveURL('/p/AEON/settings/delivery#repository')
     world.state = 'none'; world.source = null; world.metrics = []
     await page.goto('/p/AEON/AEON-1'); await expect(page.locator('.delivery .settings-link')).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath(`ticket-delivery-none-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`ticket-delivery-none-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.locator('.delivery .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/delivery#repository')
     await page.goto('/'); await page.getByRole('button', { name: /^Actions for AEON / }).click()
     await expect(page.getByRole('menuitem', { name: 'Project settings', exact: true })).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath(`projects-row-menu-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`projects-row-menu-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.getByRole('menuitem', { name: 'Project settings', exact: true }).click(); await expect(page).toHaveURL('/p/AEON/settings')
     world.leadReason = true
     await page.goto('/p/AEON/tickets'); await expect(page.locator('#lead-launch-reason-band .settings-link')).toBeVisible()
     await expect(page.locator('#lead-launch-reason-band [data-launch-reason]')).toHaveText('Automatic launch is not enabled for this workspace yet.')
     await expect(page.locator('#lead-launch-reason-band .settings-link')).toHaveText('Settings Agents')
     await expect(page.locator('#lead-launch-reason-band .settings-link svg')).toHaveCount(2)
-    await page.screenshot({ path: testInfo.outputPath(`lead-launch-reason-${width}-${theme}.png`), fullPage: true })
+    await captureProjectSettings(page, { path: testInfo.outputPath(`lead-launch-reason-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.locator('#lead-launch-reason-band .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/agents#lead')
     failures.push(...errors); await context.close()
-  }
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
-  writeFileSync(testInfo.outputPath('check-result.txt'), JSON.stringify({ head, approvedCheckSHA, results, failures, limitations: ['The approved check.mjs audits a file mock. Its unchanged audit function is adapted to the P1/P3 build selectors; P4–P6 flows remain outside P3.', 'P2 GET metrics/source contains no cursor phase or running total. Progress details are rendered only from an actual backfill response.', 'The GitHub API does not identify individual organisation owners. The fix line names the repository owner, without guessing a person.'] }, null, 2))
-  writeFileSync(testInfo.outputPath('check-result.md'), `AEON-1226 · HEAD ${head}\n\nApproved check.mjs SHA-256: ${approvedCheckSHA}\n\n${results.length} audit checks; ${results.filter(result => !(result as { passed: boolean }).passed).length} failures. Browser errors: ${failures.length}.\n\nProgress details use real backfill responses; the source API has no cursor or running total. The owner line names the GitHub repository owner and does not invent a person.\n\n${JSON.stringify(results, null, 2)}\n`)
-  expect(results.filter(result => !(result as { passed: boolean }).passed)).toEqual([])
-  expect(failures).toEqual([])
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    writeFileSync(testInfo.outputPath('check-result.txt'), JSON.stringify({ head, approvedCheckSHA, results, failures, limitations: ['The approved check.mjs audits a file mock. Its unchanged audit function is adapted to the P1/P3 build selectors; P4–P6 flows remain outside P3.', 'P2 GET metrics/source contains no cursor phase or running total. Progress details are rendered only from an actual backfill response.', 'The GitHub API does not identify individual organisation owners. The fix line names the repository owner, without guessing a person.'] }, null, 2))
+    writeFileSync(testInfo.outputPath('check-result.md'), `AEON-1226 · HEAD ${head}\n\nApproved check.mjs SHA-256: ${approvedCheckSHA}\n\n${results.length} audit checks; ${results.filter(result => !(result as { passed: boolean }).passed).length} failures. Browser errors: ${failures.length}.\n\nProgress details use real backfill responses; the source API has no cursor or running total. The owner line names the GitHub repository owner and does not invent a person.\n\n${JSON.stringify(results, null, 2)}\n`)
+    expect(results.filter(result => !(result as { passed: boolean }).passed)).toEqual([])
+    expect(failures).toEqual([])
+  })
+}
+
+// The scroll listener attaches on the frame after the explainer opens.
+async function frames(page: Page, count = 2) {
+  await page.evaluate(count => new Promise<void>(resolve => {
+    const step = (left: number) => left === 0 ? resolve() : requestAnimationFrame(() => step(left - 1))
+    step(count)
+  }), count)
+}
+// Twenty pixels moves the trigger without folding the phone footer (that latch starts above 24).
+// Chromium coalesces two scrollTop writes in one turn into the restored position, so the
+// displaced scroll is delivered explicitly while the trigger is still moved, then undone
+// before the next frame, the same order a full-page capture uses.
+async function nudgeMain(page: Page, restore: boolean) {
+  await page.evaluate(restore => {
+    const main = document.querySelector('#main')
+    if (!(main instanceof HTMLElement)) throw new Error('#main missing')
+    const top = main.scrollTop
+    const max = main.scrollHeight - main.clientHeight
+    if (max < 20) throw new Error(`#main cannot scroll (${max})`)
+    const next = top + 20 <= max ? top + 20 : top - 20
+    main.scrollTop = next
+    if (Math.abs(main.scrollTop - top) < 1) throw new Error('scrollTop ignored')
+    main.dispatchEvent(new Event('scroll'))
+    if (restore) main.scrollTop = top
+  }, restore)
+}
+
+test('AEON-1326: nr3b-scroll-returns keeps the Actions explainer open so Escape focuses its trigger', async ({ browser }) => {
+  // Risk: a capture that scrolls away and back in one turn dismisses the explainer
+  // without restoring focus, so Escape no longer lands on How this works.
+  test.setTimeout(120_000)
+  const context = await browser.newContext({ viewport: { width: 400, height: 860 }, hasTouch: true, reducedMotion: 'reduce', colorScheme: 'light' })
+  const page = await context.newPage()
+  const { world, errors } = await setup(page)
+  await choose(page, world, 'noactions')
+  const how = page.locator('[data-how=actions]')
+  const heading = page.getByRole('heading', { name: 'The Actions read permission' })
+  await how.click()
+  await expect(heading).toBeFocused()
+  await frames(page)
+  await nudgeMain(page, true)
+  await frames(page)
+  await expect(heading).toBeVisible()
+  await expect(how).toHaveAttribute('aria-expanded', 'true')
+  await page.keyboard.press('Escape')
+  await expect(heading).toHaveCount(0)
+  await expect(how).toBeFocused()
+  await how.click()
+  await expect(heading).toBeFocused()
+  await frames(page)
+  await nudgeMain(page, false)
+  await frames(page)
+  await expect(heading).toHaveCount(0)
+  await expect(how).not.toBeFocused()
+  expect(errors).toEqual([])
+  await context.close()
+})
+
+test('AEON-1326: nr3b-learn-slot stays put when the phone summary title wraps', async ({ browser }) => {
+  // Risk: the empty summary title is one line and the error title wraps, so the first Learn button jumps.
+  test.setTimeout(120_000)
+  const context = await browser.newContext({ viewport: { width: 360, height: 860 }, hasTouch: true, reducedMotion: 'reduce', colorScheme: 'light' })
+  const page = await context.newPage()
+  const { world, errors } = await setup(page)
+  world.state = 'none'; world.source = null
+  await page.goto('/p/AEON/delivery')
+  await expect(page.getByRole('link', { name: 'Link repository', exact: true })).toBeVisible()
+  const stable = await controlStability(page, { firstLearn: page.locator('.s-tile .learn').first() })
+  await stable.check(async () => {
+    world.state = 'error'
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await expect(page.getByTestId('delivery-load-error')).toBeVisible()
+  })
+  stable.done()
+  expect(errors).toEqual([])
+  await context.close()
 })

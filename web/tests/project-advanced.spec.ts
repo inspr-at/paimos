@@ -10,7 +10,7 @@ import { writeFileSync } from 'node:fs'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
-import { checkProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
+import { checkProjectSettings, captureProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
 import { MACHINE_PATHS } from '../src/lib/projectAdvanced'
 import { fillProjectSettingsExplainer, PROJECT_SETTINGS_EXPLAINERS } from '../src/lib/projectSettingsExplainers'
 
@@ -239,26 +239,29 @@ test('AEON-1235: stale project responses and missing authority cannot enable adm
   await expect(agent.getByRole('switch', { name: 'Record shadow admission' })).toBeDisabled(); await agent.close()
 })
 
-test('AEON-1235: approved P4 reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
-  test.setTimeout(240_000)
-  const lines = [`AEON-1235 P4 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit is adapted to the real P4 build and existing application shell. Full P2/P3 repository states are integration dependencies.', 'Design/API difference: Delivered needs release_id and frozen published membership, so maintenance includes a published-release selector. Actions precede growing preview/refusal content to preserve the control-stability rule.', 'Chat-v1 is a deployment opt-in with no readable workspace feature flag. The row describes its real dependency without asserting an invented enabled/disabled value.', 'The mock’s sample PR placeholder is omitted. All rendered records in these screenshots are test fixtures only.']
-  expect(Object.keys(PROJECT_SETTINGS_EXPLAINERS)).toHaveLength(21)
-  for (const [id, explanation] of Object.entries(PROJECT_SETTINGS_EXPLAINERS)) {
-    const parts = [explanation.what, explanation.effect, explanation.who, 'where' in explanation && explanation.where ? explanation.where.label : '']
-    for (const projectKey of ['PHAROS', 'AEON', 'PRJ-26']) {
-      const rendered = parts.map(value => fillProjectSettingsExplainer(value, { projectKey })).join(' ')
-      expect(rendered, `${id}/${projectKey}`).not.toMatch(/<[^>]*number>|\{(?:K|N2?|R|O|C)\}/)
+// Each evidence cell gets fresh state and its own timeout, retaining all flows.
+for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`AEON-1235: approved P4 reference states and check.mjs audit against the build at ${width}px ${theme}`, async ({ browser }, testInfo) => {
+    test.setTimeout(240_000)
+    const lines = [`AEON-1235 P4 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit is adapted to the real P4 build and existing application shell. Full P2/P3 repository states are integration dependencies.', 'Design/API difference: Delivered needs release_id and frozen published membership, so maintenance includes a published-release selector. Actions precede growing preview/refusal content to preserve the control-stability rule.', 'Chat-v1 is a deployment opt-in with no readable workspace feature flag. The row describes its real dependency without asserting an invented enabled/disabled value.', 'The mock’s sample PR placeholder is omitted. All rendered records in these screenshots are test fixtures only.']
+    expect(Object.keys(PROJECT_SETTINGS_EXPLAINERS)).toHaveLength(21)
+    for (const [id, explanation] of Object.entries(PROJECT_SETTINGS_EXPLAINERS)) {
+      const parts = [explanation.what, explanation.effect, explanation.who, 'where' in explanation && explanation.where ? explanation.where.label : '']
+      for (const projectKey of ['PHAROS', 'AEON', 'PRJ-26']) {
+        const rendered = parts.map(value => fillProjectSettingsExplainer(value, { projectKey })).join(' ')
+        expect(rendered, `${id}/${projectKey}`).not.toMatch(/<[^>]*number>|\{(?:K|N2?|R|O|C)\}/)
+      }
+      lines.push(`how-${id}: no unresolved placeholders for PHAROS, AEON or PRJ-26 PASS`)
     }
-    lines.push(`how-${id}: no unresolved placeholders for PHAROS, AEON or PRJ-26 PASS`)
-  }
-  for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {
       const page = await context.newPage(), world = await setup(page)
+      const touchSession = width < 600 ? await context.newCDPSession(page) : undefined
       await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: theme } }))
       async function capture(state: string, fullPage = true) {
         for (const check of await checkProjectSettings(page, `${state}/${width}/${theme}`, width < 600)) { expect(check.passed, check.message).toBe(true); lines.push(`${state}-${width}-${theme}: ${check.message} PASS`) }
-        await page.screenshot({ path: testInfo.outputPath(`${state}-${width}-${theme}.png`), fullPage })
+        await captureProjectSettings(page, { path: testInfo.outputPath(`${state}-${width}-${theme}.png`), fullPage }, touchSession)
+        if (width < 600) expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
       }
       await page.goto('/p/PHAROS/settings/delivery')
       await expect(page.locator('#adv-sum')).toBeVisible(); await capture('advanced-folded')
@@ -302,6 +305,6 @@ test('AEON-1235: approved P4 reference states and check.mjs audit against the bu
       expect(world.errors).toEqual([])
       lines.push(`${width}/${theme}: eight explainers, stable controls, server key-conflict and next-step flow PASS`)
     } finally { await context.close() }
-  }
-  writeFileSync(testInfo.outputPath('check-result.md'), lines.join('\n') + '\n')
-})
+    writeFileSync(testInfo.outputPath('check-result.md'), lines.join('\n') + '\n')
+  })
+}

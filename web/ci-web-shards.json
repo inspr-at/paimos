@@ -582,7 +582,7 @@
         ,
         {"file":"tests/features.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/settings.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":2.921,"median":1.626,"min":1.177},"seconds":32.619,"selectedTests":19},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
+        {"file":"tests/settings.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":2.921,"median":1.626,"min":1.177},"seconds":32.619,"selectedTests":19},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
         ,
         {"file":"tests/status-autopilot.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":7.551,"median":1.728,"min":0.662},"seconds":23.425,"selectedTests":11},"weightSeconds":35.820513,"weightSource":"AEON-696 proportional estimate from status-autopilot-ui-2"}
         ,
@@ -701,7 +701,7 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/needs-attention.spec.ts","listedTests":41,"tierTiming":{"caseSeconds":{"max":69.995,"median":2.738,"min":1.315},"seconds":203.936,"selectedTests":41},"weightSeconds":46.609756,"weightSource":"estimate"}
+        {"file":"tests/needs-attention.spec.ts","listedTests":42,"tierTiming":{"caseSeconds":{"max":69.995,"median":2.738,"min":1.315},"seconds":203.936,"selectedTests":41},"weightSeconds":46.609756,"weightSource":"estimate"}
       ]
     }
     ,
@@ -814,7 +814,7 @@
         ,
         {"file":"tests/agents-phone-rows.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agents-worker-tree.spec.ts","listedTests":10,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agents-worker-tree.spec.ts","listedTests":12,"weightSeconds":80,"weightSource":"nightly-38452339044-first-nine-cases-53.9s-plus-remaining-cases-margin"}
         ,
         {"file":"tests/agents.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":3.636,"median":2.408,"min":1.583},"seconds":25.679,"selectedTests":11},"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
         ,
@@ -874,7 +874,7 @@
         ,
         {"file":"tests/estimates.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/eta-column.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/eta-column.spec.ts","listedTests":14,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/first-impression.spec.ts","listedTests":38,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
         ,
@@ -982,9 +982,9 @@
         ,
         {"file":"tests/profile.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/project-advanced.spec.ts","listedTests":4,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
+        {"file":"tests/project-advanced.spec.ts","listedTests":11,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
         ,
-        {"file":"tests/project-delivery-settings.spec.ts","listedTests":2,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
+        {"file":"tests/project-delivery-settings.spec.ts","listedTests":12,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
         ,
         {"file":"tests/project-groups.spec.ts","listedTests":18,"weightSeconds":39.95122,"weightSource":"unmeasured-test-rate"}
         ,

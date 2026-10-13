@@ -601,6 +601,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .hd-acts { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .act { gap: 6px; min-height: 32px; }
 .danger-ghost { color: var(--danger); }
+.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 6%, transparent); box-shadow: none; }
 .why { display: flex; align-items: center; gap: 7px; margin: 0 16px 6px; font-size: 12px; color: var(--ink-3); }
 .why svg { flex: none; color: var(--teal-ink); }
 .why b { color: var(--ink-2); font-weight: 600; }

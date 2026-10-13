@@ -187,7 +187,7 @@ watch(() => agents.thread(s.value).map(message => message.id).join(), () => reco
 // The session's read marker names only its project messages.
 function queueSessionMark(next: ReadMark) {
   const session = sessionReadMark(next, messages.value)
-  if (!session) return
+  if (!session || (serverEvent !== undefined && session.event <= serverEvent)) return
   boundProject = s.value.project_id
   boundSession = s.value.id
   pending = queueReadMark(pending, session)
@@ -252,7 +252,11 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
   const response = await writeSessionMarker(projectId, sessionId, { last_read_message_id: next.id, last_read_event_id: next.event })
   if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return response.ok && generation === readGeneration
   const remote = markerFromServer(await response.json())
+  if (generation !== readGeneration || s.value.id !== sessionId || me.value !== viewer) return false
   serverEvent = Math.max(serverEvent ?? -1, next.event, remote?.event ?? -1)
+  // An observation during the PUT may queue the same project mark again.
+  // Acknowledgement consumes it; a newer observation still waits for its flush.
+  if (pending && pending.event <= serverEvent) pending = null
   if (remote && s.value.id === sessionId && (!mark.value || remote.event > mark.value.event)) {
     mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
   }
