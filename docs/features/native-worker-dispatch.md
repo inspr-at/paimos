@@ -141,6 +141,9 @@ request a coordinator contract amendment before adding a public enum value.
 3. Connect source-correlated child/task events to `ChildEvent`, and its updater
    to existing harness ancestry. Keep server authorization inside that write.
    No separate provider-hook registration for this owned child.
+   Enqueue observations without blocking the native producer on start completion.
+   For an accepted start without a binding, first read `Worker.Status` for the
+   source's registered generation before forwarding its child observations.
 4. Before provider export, pass the local pinned frame to `ObservePlan`.
    Non-plan frames simply bypass this parser. Add `report_progress` to the
    existing exact runtime's approved tool server. Cancel/close the progress
@@ -264,3 +267,36 @@ sources. No shared-fence caller, table, permission or web manifest row is added.
 Required checks are guarded remote Go for `./internal/nativedispatch/...` and
 `./internal/cli/...`, guarded static `--merge-main`, and strict tier inventory
 checks. Refused/incomplete remote lanes remain incomplete; PR CI is authoritative.
+
+### Builder evidence
+
+At source commit `863e60943`:
+
+- PASS: all `internal/nativedispatch` tests with `-race`, in the one permitted
+  local package fallback after the guarded remote lane refused for load.
+- PASS: `TestNativeWorkerDispatchFrozenEnvelopeAndReceipt` with `-race` through
+  `remote-test.sh` on mbp2606.
+- PASS: guarded `ci-static-locked.sh` / `--merge-main`, exit 0, 42 checks,
+  zero optional skips. This includes strict Go and web tier inventories,
+  source ownership, vet, shard manifests and API/migration checks.
+- PASS: separate guarded `nix develop --offline -c node
+  scripts/test-tiers/cli.mjs check go --strict`.
+- PASS: the initial full targeted remote Go packages (`nativedispatch` and
+  `cli`) at `eff20c089`; dispatcher race tests also passed remotely at
+  `b1578df47`.
+
+The additional full CLI `-race` run at `b1578df47` failed. Its large console
+output was truncated before the failing case could be identified; a captured
+diagnostic repeat was refused for load (exit 3). The final named CLI behavior
+test passed separately, but the broader race failure still needs authoritative
+PR CI diagnosis. No existing test was changed or relaxed. A separate source
+mutation/negative-control run was not performed; wrong-binding, wrong-parent,
+changed-grant and possible-fork rejection fixtures are covered by the named
+behavior tests.
+
+Acceptance is demonstrated at the package boundary: approved leaf dispatch,
+pre-spawn registered ancestry and duplicate coalescing, owned status/inbox/
+controls with conservative occupancy, file-free protocol/tool progress and
+parent attention, and the exact external launcher/rollback proposal. I2 wiring,
+`G_LEAD_TOOLING`, `G_PROVIDER_PINS` and authoritative PR CI remain release
+prerequisites owned by the coordinator/integrator.
