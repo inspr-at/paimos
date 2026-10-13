@@ -4,17 +4,18 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import NativeEventList from './NativeEventList.vue'
-import { nativeSessionBounds as bounds, type NativeApproval, type NativeSessionView, type NativeStreamEvent } from '../../lib/nativeSessionContract'
+import { nativeSessionBounds as bounds, type NativeApproval, type NativeStreamEvent } from '../../lib/nativeSessionContract'
 import { boundedEvent, boundedPage, ExpertBuffer } from '../../lib/nativeExpert/buffer'
-import { bindingKey, expertRequest, liveTerminalLink, type ExpertConsent, type ExpertViewer, type NativeExpertTransport } from '../../lib/nativeExpert/ports'
+import { bindingKey, expertRequest, liveTerminalLink, type SessionViewProps } from '../../lib/nativeExpert/ports'
 import { endText, eventRows, eventTypes, missingEvents, type EventType } from '../../lib/nativeExpert/rows'
-import { fullName, type RegistryProfile } from '../../lib/modelsSimple'
+import { fullName } from '../../lib/modelsSimple'
 import { preferenceOwner, usePreference } from '../../lib/preferences'
 
-const props = withDefaults(defineProps<{
-  session: NativeSessionView; viewer: ExpertViewer; consent: ExpertConsent | null
-  transport: NativeExpertTransport; active: boolean; name: string; host: string; modelProfile?: RegistryProfile | null
-}>(), { modelProfile: null })
+const props = withDefaults(defineProps<SessionViewProps & {
+  pane?: 'events' | 'terminal'
+  /** Only the standalone harness owns an Events / Terminal selector. */
+  standalone?: boolean
+}>(), { modelProfile: null, pane: 'events', standalone: false })
 const emit = defineEmits<{ review: [approval: NativeApproval] }>()
 const modelName = computed(() => props.modelProfile ? fullName(props.modelProfile) : '')
 const request = computed(() => expertRequest(props.session, props.viewer, props.consent))
@@ -25,7 +26,9 @@ const panelKey = computed(() => `${principalKey.value}/${props.session.owned_ses
 const captureKey = computed(() => JSON.stringify([panelKey.value, bindingKey(props.session.current_binding), props.session.generation,
   props.viewer.canRead, props.viewer.canWatch, props.viewer.canReadStructured, request.value?.view, request.value?.consentId,
 ]))
-const segment = ref<'events' | 'terminal'>('events'), terminalAtOpen = ref(false), viewerAtOpen = ref(false)
+const standaloneSegment = ref<'events' | 'terminal'>('events')
+const segment = computed(() => props.standalone ? standaloneSegment.value : props.pane)
+const terminalAtOpen = ref(false), viewerAtOpen = ref(false)
 const openedName = ref(''), openedHost = ref('')
 const hidden = ref(false), following = ref(true), hiddenTypes = ref<EventType[]>([]), typeAnchor = ref<HTMLElement | null>(null)
 const phone = ref(window.innerWidth <= 600)
@@ -142,7 +145,7 @@ async function earlier() {
 }
 
 watch(panelKey, () => {
-  stop(); segment.value = 'events'; following.value = true; typeAnchor.value = null; blocked.value = false
+  stop(); standaloneSegment.value = 'events'; following.value = true; typeAnchor.value = null; blocked.value = false
   hiddenTypes.value = ownPreference.value ? preference.value.value?.hidden?.filter((key): key is EventType => eventTypes.some(type => type.key === key)) ?? [] : []
   viewerAtOpen.value = !!link.value
   terminalAtOpen.value = props.viewer.kind === 'person' && readable.value &&
@@ -154,7 +157,7 @@ watch(captureKey, () => {
   status.value = !props.session.capabilities.events_supported ? 'Live events are not available for this session.' :
     request.value ? 'Stopped watching. Watch live to continue.' : "Live events need watch rights and the owner's consent."
 }, { flush: 'sync' })
-watch(() => props.active, active => { if (!active) { stop(); status.value = 'Stopped watching while Expert is hidden.' } }, { flush: 'sync' })
+watch(() => props.active, active => { if (!active) { stop(); status.value = 'Stopped watching while Events is hidden.' } }, { flush: 'sync' })
 watch(segment, () => { stop(); typeAnchor.value = null; status.value = 'Stopped watching. Watch live to continue.' }, { flush: 'sync' })
 function visibility() {
   hidden.value = document.hidden
@@ -166,11 +169,11 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
 </script>
 
 <template>
-  <section class="native-expert" :aria-label="modelName ? `Expert events · ${modelName}` : 'Expert events'">
-    <div class="expert-bar" role="toolbar" aria-label="Expert view tools">
-      <div v-if="terminalAtOpen && viewer.kind === 'person'" class="seg expert-segments" role="radiogroup" aria-label="Expert view">
-        <button type="button" role="radio" :disabled="!readable" :aria-checked="segment === 'events'" @click="segment = 'events'"><AppIcon name="list" :size="13" />Events</button>
-        <button type="button" role="radio" :disabled="!readable" :aria-checked="segment === 'terminal'" @click="segment = 'terminal'"><AppIcon name="terminal" :size="13" />Terminal</button>
+  <section v-if="segment === 'events' || (terminalAtOpen && viewer.kind === 'person')" class="native-expert" :aria-label="modelName ? `Session ${segment} · ${modelName}` : `Session ${segment}`">
+    <div v-if="standalone || segment === 'events'" class="expert-bar" role="toolbar" :aria-label="segment === 'events' ? 'Event tools' : 'Terminal tools'">
+      <div v-if="standalone && terminalAtOpen && viewer.kind === 'person'" class="seg expert-segments" role="radiogroup" aria-label="Session views">
+        <button type="button" role="radio" :disabled="!readable" :aria-checked="segment === 'events'" @click="standaloneSegment = 'events'"><AppIcon name="list" :size="13" />Events</button>
+        <button type="button" role="radio" :disabled="!readable" :aria-checked="segment === 'terminal'" @click="standaloneSegment = 'terminal'"><AppIcon name="terminal" :size="13" />Terminal</button>
       </div>
       <template v-if="segment === 'events'">
         <div class="event-types" role="group" aria-label="Event types">
@@ -186,7 +189,7 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
       </template>
     </div>
     <NativeEventList v-if="segment === 'events'" :key="captureKey" :rows="rows" :retained="events.length" :live-arrivals="liveArrivals" :evicted="evicted" :notice="notice" :status="visibleStatus" :before="before" :loading="loading" :watching="watching" :can-start="available" :can-inspect="inspectionPermit" :follow="following" @start="start" @stop="stop(); status = 'Stopped watching. Watch live to continue.'" @earlier="earlier" @follow="following = $event" @review="emit('review', $event)" />
-    <div v-else-if="viewer.kind === 'person'" class="terminal-pane">
+    <div v-else-if="terminalAtOpen && viewer.kind === 'person'" class="terminal-pane">
       <p v-if="!readable">You cannot read this session.</p>
       <template v-else-if="session.mode === 'terminal' || !viewerAtOpen">
         <slot v-if="request?.view === 'expert' && session.capabilities.terminal_view && active && !hidden" name="terminal" :session="session" :viewer="viewer" :consent="consent" :model-name="modelName"><p>Live terminal output is unavailable.</p></slot>

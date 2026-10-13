@@ -1,5 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { NativeBinding, NativeEventPage, NativeSessionView, NativeStreamEvent } from '../nativeSessionContract'
+import type { RegistryProfile } from '../modelsSimple'
+
+/** Common input for the independently mounted Events and Terminal views. */
+export interface SessionViewProps {
+  session: NativeSessionView
+  viewer: ExpertViewer
+  consent: ExpertConsent | null
+  transport: NativeExpertTransport
+  active: boolean
+  name: string
+  host: string
+  modelProfile?: RegistryProfile | null
+}
 
 /** Derived by the panel from the current authenticated identity and effective permissions. */
 export interface ExpertViewer {

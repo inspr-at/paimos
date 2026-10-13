@@ -18,7 +18,7 @@ const replay = (items: NativeStreamEvent[] = [], next_before: string | null = nu
  * The component and Vue import share Vite's resolved module (no duplicate Vue runtime).
  * All replay/stream completions are explicit barriers, including callbacks after abort.
  */
-async function setup(page: Page, options: { terminal?: boolean; take?: boolean; agent?: boolean; theme?: string; page?: NativeEventPage; hold?: boolean; session?: NativeSessionView } = {}) {
+async function setup(page: Page, options: { panel?: boolean; terminal?: boolean; take?: boolean; agent?: boolean; theme?: string; page?: NativeEventPage; hold?: boolean; session?: NativeSessionView } = {}) {
   const response = await page.request.get('/src/components/nativeExpert/SessionExpert.vue')
   expect(response.ok()).toBe(true)
   const source = await response.text(), vue = source.match(/from\s*["']([^"']*\/vue\.js[^"']*)["']/)?.[1]
@@ -31,11 +31,11 @@ async function setup(page: Page, options: { terminal?: boolean; take?: boolean; 
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/tests/native-expert-inline.html', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/src/styles/tokens.css"><link rel="stylesheet" href="/src/styles/base.css"><style>body { background:var(--surface); background-image:none; } body::before { display:none; } #app { display:flex; flex-direction:column; width:min(100%,980px); margin:auto; } .fixture-head { flex:none; padding:12px 24px; border-bottom:1px solid var(--line); } .fixture-head h1 { font:600 16px var(--font); } .fixture-head p { font-size:12px; } .terminal-fixture { padding:24px; } .terminal-fixture pre { white-space:pre-wrap; }</style></head><body><div id="app"></div><script type="module">
-    import { createApp, h, reactive, nextTick } from ${JSON.stringify(vue)};
+    import { createApp, h, reactive, shallowRef, nextTick } from ${JSON.stringify(vue)};
     import SessionExpert from '/src/components/nativeExpert/SessionExpert.vue';
     import { liveTerminalLink } from '/src/lib/nativeExpert/ports.ts';
     import { setPreferenceOwner } from '/src/lib/preferences.ts';
-    const state = reactive(${JSON.stringify(state)}), reads = [], streams = [];
+    const state = reactive(${JSON.stringify(state)}), reads = [], streams = [], reviews = [], mountedView = shallowRef(SessionExpert);
     let held = ${JSON.stringify(!!options.hold)}, pageResult = ${JSON.stringify(options.page ?? replay())};
     document.documentElement.dataset.theme = ${JSON.stringify(options.theme ?? 'light')};
     setPreferenceOwner({tenant:{id:state.viewer.tenantId},principal:{id:state.viewer.principalId}});
@@ -43,16 +43,16 @@ async function setup(page: Page, options: { terminal?: boolean; take?: boolean; 
       events(request,before,limit,signal) { return new Promise((resolve,reject) => { reads.push({request,before,limit,signal,resolve,reject}); if (!held) resolve(pageResult); }); },
       stream(request,receive,signal) { return new Promise((resolve,reject) => { streams.push({request,receive,signal,resolve,reject}); signal.addEventListener('abort',() => resolve(),{once:true}); }); }
     };
-    window.nativeExpert = { state, reads, streams, transport, nextTick, setHeld(value) { held=value; }, page(value) { pageResult=value; }, emit(index,event) { streams[index].receive(event); }, resolve(index,page) { reads[index].resolve(page); }, setPerson(id,kind='person') { state.viewer.principalId=id; state.viewer.kind=kind; setPreferenceOwner({tenant:{id:state.viewer.tenantId},principal:{id}}); } };
+    window.nativeExpert = { state, reads, streams, reviews, transport, nextTick, async mountPane(pane) { const views = await import('/src/lib/nativeExpert/views.ts'); mountedView.value = pane === 'events' ? views.SessionEvents : views.SessionTerminal; }, setHeld(value) { held=value; }, page(value) { pageResult=value; }, emit(index,event) { streams[index].receive(event); }, resolve(index,page) { reads[index].resolve(page); }, setPerson(id,kind='person') { state.viewer.principalId=id; state.viewer.kind=kind; setPreferenceOwner({tenant:{id:state.viewer.tenantId},principal:{id}}); } };
     createApp({setup() { return () => h('main',{id:'app-frame',style:'display:flex;flex-direction:column;min-height:0;flex:1'},[
-      h('header',{class:'fixture-head'},[h('h1','Session · Expert'),h('p','GPT-6.1 Sol')]),
-      h(SessionExpert,{...state,transport}, {terminal: () => h('div',{class:'terminal-fixture','data-testid':'pty-slot'},[h('p','Read-only · the person at the terminal has control'),h('pre','Native TUI output')])}),
+      h('header',{class:'fixture-head'},[h('h1','Session'),h('p','GPT-6.1 Sol')]),
+      h(mountedView.value,{...state,transport,...${JSON.stringify(options.panel ? {} : { standalone: true })},onReview: approval => reviews.push(approval)}, {terminal: slotProps => { window.nativeExpert.terminalProps = slotProps; return h('div',{class:'terminal-fixture','data-testid':'pty-slot'},[h('p','Read-only · the person at the terminal has control'),h('pre','Native TUI output')]); }}),
     ]); } }).mount('#app');
     window.nativeExpert.menuLink = () => liveTerminalLink(state.session,state.viewer);
   </script></body></html>` }))
   await page.route('**/api/preferences/**', route => route.fulfill({ json: { value: { hidden: [] } } }))
   await page.goto('/tests/native-expert-inline.html')
-  await expect(page.getByRole('region', { name: 'Expert events · GPT-6.1 Sol' })).toBeVisible()
+  await expect(page.locator('.native-expert')).toBeVisible()
   return errors
 }
 const act = (page: Page, code: string) => page.evaluate(async code => { await new Function(`return (async () => { const f = window.nativeExpert; ${code} })()`)() }, code)
@@ -62,6 +62,16 @@ const start = async (page: Page, expected = 1) => {
   await expect.poll(() => page.evaluate(() => (window as any).nativeExpert.streams.length)).toBe(expected)
 }
 const switchTo = (page: Page, segment: string) => page.getByRole('radio', { name: segment, exact: true }).click()
+
+// Risk: A3 removes the old name from accessible labels as well as visible copy.
+// Inspect before native envelopes render: their C0 field names remain unchanged.
+async function sessionCopy(page: Page) {
+  const copy = await page.locator('.native-expert').evaluate(el => [
+    el.getAttribute('aria-label'), (el as HTMLElement).innerText,
+    ...Array.from(el.querySelectorAll('[aria-label], [title]')).flatMap(node => [node.getAttribute('aria-label'), node.getAttribute('title')]),
+  ].join('\n'))
+  expect(copy, 'session UI copy and accessible names follow A3').not.toMatch(/\bexpert\b/i)
+}
 
 // C0 fixtures only: a new generation has its own runtime binding. The product
 // receives these through exactly the same bounded replay/stream ports as real data.
@@ -208,6 +218,50 @@ async function mixedEvidence(page: Page, theme: string, width: number, shot: (na
   expect(errors).toEqual([])
 }
 
+async function panelEvidence(page: Page, theme: string, width: number, shot: (name: string) => Promise<unknown>) {
+  const errors = await setup(page, { panel: true, theme, session: mixedSession, page: replay([...mixedEvents].reverse(), '10', false, 2) })
+  await act(page, 'await f.mountPane("events"); await f.nextTick();')
+  await expect(page.getByRole('radio')).toHaveCount(0)
+  await sessionCopy(page)
+  await start(page)
+  await expect(page.locator('[data-event-row]')).toHaveCount(15)
+  await expect(page.locator('[data-event-row="event:2:15"] .event-measure')).toHaveText('23 % of context')
+  const row = page.locator('[data-event-row="message:2:mixed-12"]')
+  const guard = await controlStability(page, { row, follow: page.getByRole('switch', { name: 'Follow live' }), watch: page.getByRole('button', { name: 'Stop watching', exact: true }), earlier: page.getByRole('button', { name: 'Load earlier', exact: true }) })
+  await guard.check(() => row.click())
+  await expect(page.getByLabel('C0 event envelope')).toContainText('mixed-12')
+  await shot('panel-events')
+  await guard.check(() => row.click())
+  guard.done()
+  if (width !== 390) await page.locator('#app').evaluate(el => { el.style.width = 'min(100%, 720px)' })
+  const trigger = page.getByRole('button', { name: 'Event types', exact: true })
+  await trigger.click()
+  const group = page.getByRole('dialog', { name: 'Event types', exact: true }), done = group.getByRole('button', { name: 'Done', exact: true })
+  const text = group.getByRole('checkbox', { name: 'Text', exact: true }), tools = group.getByRole('checkbox', { name: 'Tools', exact: true })
+  const menuGuard = await controlStability(page, { text, tools, done, group })
+  await menuGuard.check(() => tools.uncheck())
+  await shot('panel-types')
+  await menuGuard.check(() => tools.check())
+  menuGuard.done()
+  await done.click()
+  await expect(trigger).toBeFocused()
+  if (width !== 390) await page.locator('#app').evaluate(el => { el.style.width = '' })
+  await act(page, 'await f.mountPane("terminal"); await f.nextTick();')
+  await expect(page.getByRole('radio')).toHaveCount(0)
+  await expect(page.getByRole('toolbar')).toHaveCount(0)
+  await sessionCopy(page)
+  const link = page.getByRole('link', { name: 'Open live terminal', exact: true }), hint = page.locator('.terminal-hint')
+  await expect(link).toBeVisible()
+  await expect(link).toHaveAttribute('target', '_blank')
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  if (width === 390) expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  const terminalGuard = await controlStability(page, { link, hint })
+  await shot('panel-terminal')
+  await terminalGuard.check(async () => { await act(page, 'f.state.session.terminal_viewer_url=null; await f.nextTick();'); await expect(link).toBeDisabled() })
+  terminalGuard.done()
+  expect(errors).toEqual([])
+}
+
 // Risk: capability withdrawal must end either authorized stream view, including
 // retained diagnostics and callbacks the transport delivers after abort.
 async function withdrawEvents(page: Page) {
@@ -275,6 +329,7 @@ test('AEON-1270 raw diagnostics stay bound to session, person, consent and tab t
   expect(await page.evaluate(() => (window as any).nativeExpert.streams.length)).toBe(2)
   await start(page, 3)
   await act(page, 'f.state.active = false; await f.nextTick();')
+  await expect(page.locator('.event-tail')).toHaveText('Stopped watching while Events is hidden.')
   await send(page, frame(3, 'assistant.delta', { message_id: 'hidden', text: 'hidden-private' }, nextBinding), 2)
   await expect(page.locator('[data-event-row]')).toHaveCount(0)
   await act(page, 'f.state.active = true; await f.nextTick();')
@@ -296,6 +351,7 @@ test('AEON-1270 raw diagnostics stay bound to session, person, consent and tab t
 
 test('AEON-1270 coalescing keeps native envelopes, inferred correlations, receipts and omitted bodies honest', async ({ page }) => {
   const errors = await setup(page)
+  await sessionCopy(page)
   const quotas = await page.evaluate(async items => {
     const { eventRows } = await import('/src/lib/nativeExpert/rows.ts')
     return eventRows(items, 'codex').map(row => [row.type, row.name, row.text, row.measure, row.wireName])
@@ -419,7 +475,7 @@ test('AEON-1270 earlier pages keep the read row still; stale revisions and 512 K
 
 test('AEON-1270 agents get structured Events only and revocation clears all diagnostic content', async ({ page }) => {
   await setup(page, { agent: true })
-  await expect(page.getByRole('radiogroup', { name: 'Expert view', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('radiogroup')).toHaveCount(0)
   expect(await page.evaluate(() => (window as any).nativeExpert.menuLink())).toBeNull()
   await start(page)
   expect(await page.evaluate(() => (window as any).nativeExpert.streams[0].request.view)).toBe('structured')
@@ -440,6 +496,48 @@ test('AEON-1270 agents get structured Events only and revocation clears all diag
 })
 
 test('AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one terminal and a head-menu descriptor', async ({ page }) => {
+  // Risk: the panel menu must be the only selector; its independently mounted
+  // views still fence retained frames, Review and PTY slots on current authority.
+  const errors = await setup(page, { panel: true })
+  await expect(page.locator('.expert-segments')).toHaveCount(0)
+  await expect(page.getByRole('radio')).toHaveCount(0)
+  await act(page, 'await f.mountPane("events"); await f.nextTick();')
+  await expect(page.getByRole('region', { name: 'Session events · GPT-6.1 Sol', exact: true })).toBeVisible()
+  await expect(page.getByRole('radio')).toHaveCount(0)
+  await sessionCopy(page)
+  await start(page)
+  const approval = { ...approvalFrame(24, 'command').payload, binding }
+  await send(page, frame(1, 'approval', approval))
+  await page.getByRole('button', { name: 'Review', exact: true }).click()
+  expect(await page.evaluate(() => (window as any).nativeExpert.reviews)).toEqual([approval])
+  await act(page, 'await f.mountPane("terminal"); await f.nextTick();')
+  expect(await page.evaluate(() => (window as any).nativeExpert.streams[0].signal.aborted)).toBe(true)
+  await send(page, frame(2, 'assistant.final', { message_id: 'unmounted', input_id: null, inferred: false, text: 'unmounted-private-frame' }))
+  await expect(page.locator('[data-event-row]')).toHaveCount(0)
+  await expect(page.getByText('unmounted-private-frame', { exact: false })).toHaveCount(0)
+  await expect(page.getByRole('radio')).toHaveCount(0)
+  await expect(page.getByRole('toolbar')).toHaveCount(0)
+  await expect(page.getByRole('switch', { name: 'Follow live' })).toHaveCount(0)
+  const link = page.getByRole('link', { name: 'Open live terminal', exact: true })
+  await expect(link).toBeVisible()
+  await sessionCopy(page)
+  const guard = await controlStability(page, { link, hint: page.locator('.terminal-hint') })
+  await guard.check(async () => { await act(page, 'f.state.session.terminal_viewer_url=null; await f.nextTick();'); await expect(link).toBeDisabled() })
+  guard.done()
+  await act(page, 'f.state.session.mode="terminal"; await f.nextTick();')
+  await expect(page.getByTestId('pty-slot')).toBeVisible()
+  expect(await page.evaluate(() => { const props = (window as any).nativeExpert.terminalProps; return [props.session.owned_session_id, props.viewer.principalId, props.consent.id, props['model-name']] })).toEqual(['owned-a', 'person-1', 'consent-a', 'GPT-6.1 Sol'])
+  await act(page, 'f.state.consent.active=false; await f.nextTick();')
+  await expect(page.getByTestId('pty-slot')).toHaveCount(0)
+  await act(page, 'f.setPerson("agent-2","agent"); f.state.viewer.canReadStructured=true; await f.nextTick();')
+  await expect(page.getByTestId('pty-slot')).toHaveCount(0)
+  await expect(link).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Session terminal · GPT-6.1 Sol', exact: true })).toHaveCount(0)
+  await act(page, 'await f.mountPane("events"); await f.nextTick();')
+  await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => (window as any).nativeExpert.streams.length)).toBe(1)
+  expect(errors).toEqual([])
+
   await setup(page, { terminal: true, take: true })
   await switchTo(page, 'Terminal')
   await expect(page.getByTestId('pty-slot')).toBeVisible()
@@ -449,7 +547,7 @@ test('AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one te
   await expect(page.getByTestId('pty-slot')).toHaveCount(0)
   await expect(page.getByText('Live terminal output requires current watch permission and the owner’s active consent.')).toBeVisible()
   await act(page, 'f.setPerson("agent-2","agent"); f.state.viewer.canReadStructured = true; await f.nextTick();')
-  await expect(page.getByRole('radiogroup', { name: 'Expert view', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('radiogroup')).toHaveCount(0)
   await expect(page.getByTestId('pty-slot')).toHaveCount(0)
   expect(await page.evaluate(() => (window as any).nativeExpert.menuLink())).toBeNull()
   await page.reload()
@@ -467,7 +565,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       const errors = await setup(page, { theme })
       const events = page.getByRole('radio', { name: 'Events', exact: true }), terminal = page.getByRole('radio', { name: 'Terminal', exact: true })
       await expect(events).toHaveAttribute('aria-checked', 'true')
-      const guard = await controlStability(page, { events, terminal, toolbar: page.getByRole('toolbar', { name: 'Expert view tools' }), frame: page.getByRole('region', { name: 'Expert events · GPT-6.1 Sol' }) })
+      const guard = await controlStability(page, { events, terminal, toolbar: page.locator('.expert-bar'), frame: page.locator('.native-expert') })
       await guard.check(() => switchTo(page, 'Terminal'))
       const link = page.getByRole('link', { name: 'Open live terminal', exact: true }), hint = page.locator('.terminal-hint')
       await expect(page.locator('.terminal-description')).toHaveText('Koordinator für die vollständige Freigabeprüfung runs in Zellij on Arbeitsrechner-Wien.')
@@ -565,6 +663,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       // scrolling checks without inventing extra rows to force overflow.
       await mixedEvidence(page, theme, width, name => page.screenshot({ path: testInfo.outputPath(`AEON-1270/${name}-${theme}-${width}.png`) }))
       await quotaEvidence(page, theme, width, name => page.screenshot({ path: testInfo.outputPath(`AEON-1270-fix5/${name}-${theme}-${width}.png`) }))
+      await panelEvidence(page, theme, width, name => page.screenshot({ path: testInfo.outputPath(`AEON-1270-fix6/${name}-${theme}-${width}.png`) }))
       expect(errors).toEqual([])
     } finally { await context.close() }
   })

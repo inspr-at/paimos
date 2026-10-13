@@ -1,12 +1,21 @@
-# Native Expert view
+# Native session Events and Terminal
 
-AEON-1270 adds the independent Expert view from the approved AEON-1264 r2
-attachment and A1 live-terminal amendment. I2 owns its mounting in the shared
-session panel and the session-head menu. It is never an automatic opening tab.
+AEON-1270 adds the independent Events and Terminal views from the approved
+AEON-1264 r2 attachment, A1 live-terminal amendment and A3 flat-menu decision.
+I2 owns their mounting in the shared session panel and its single menu. Neither
+view is an automatic opening item.
 
-`SessionExpert` accepts the C0 `NativeSessionView`, current `ExpertViewer`,
+The named `SessionEvents` and `SessionTerminal` exports from
+`web/src/lib/nativeExpert/views.ts` accept the C0 `NativeSessionView`, current `ExpertViewer`,
 existing server-approved `ExpertConsent`, name, host, optional registry model
-profile, active-tab flag and a `NativeExpertTransport`. Model names use
+profile, active-view flag and a `NativeExpertTransport`. They forward the
+`review` event and the existing `terminal` slot, including its current session,
+viewer, consent and model-name props. The shared `SessionExpert` implementation
+defaults to Events with no internal selector; `pane="terminal"` selects the
+Terminal pane. Only the standalone harness passes `standalone`, retaining the
+fixed-at-open Events / Terminal selector. Panel views never render that selector,
+and Terminal has no Events toolbar or empty selector row. The panel owns the
+opening item, menu order and keyboard navigation. Model names use
 `modelsSimple.fullName`; I2 must use that same function for Recent runs.
 
 The transport in `web/src/lib/nativeExpert/ports.ts` is an integration port,
@@ -83,8 +92,9 @@ descriptor, whose label is Open live terminal, with terminal and external-link
 SVGs. The slot is withheld without current person/watch/consent authority.
 
 Source ownership: the two components fall under
-the existing S8 `web/src/components/**` audit coverage; the three library files
+the existing S8 `web/src/components/**` audit coverage; the four library files
 fall under S9 `web/src/**` (excluding components and views).
+The new view-export module also falls under the existing S9 coverage.
 The CI fix-round brief assigns the missing registrations for
 `web/tests/native-expert-stream.spec.ts`: all 12 cases are now registered in
 the web tier manifest, and the browser source manifest assigns the spec once
