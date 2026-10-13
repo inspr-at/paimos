@@ -167,7 +167,7 @@ func TestSlowSubscriberRevocationAndViewIsolation(t *testing.T) {
 	if _, _, _, err := r.Stats(testBinding()); err != nil {
 		t.Fatal("other tenant replaced the current session")
 	}
-	if _, _, _, err := r.Subscribe(context.Background(), testBinding()); err == nil {
+	if _, err := r.Subscribe(context.Background(), testBinding()); err == nil {
 		t.Fatal("FrameSource accepted a caller without authenticated viewer context")
 	}
 	agentAccess := testAccess("expert", false)
