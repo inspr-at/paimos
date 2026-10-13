@@ -5434,6 +5434,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestCompositeBoundariesAcquireNoResourceAfterEvent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestGitHubInstallationAcceptsOpaqueTokens","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubPublishPostsGateReason","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubReadRetainsMissingActionsPermission","tier":"ESSENTIAL"}
@@ -5977,6 +5979,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryTimeToFirstGreenPerCommitAndBranchKeepsNeverGreen","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookAcceptsOpaqueInstallationToken","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookInternalRetry","tier":"ESSENTIAL"}
     ,
@@ -7831,6 +7835,12 @@
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnboundedOrAmbiguousFrames","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnqualifiedLaunch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
