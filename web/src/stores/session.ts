@@ -54,10 +54,12 @@ export const useSession = defineStore('session', () => {
 
   function invalidate() {
     epoch++
+    // Mounted editors capture their local recovery context synchronously,
+    // before clearing the identity invalidates every owner-bound cache.
+    requiresSignIn.value = true
     identity.value = null
     resetAgentTheme()
     resetTheme()
-    requiresSignIn.value = true
     error.value = ''
     dropAttachCode()
     revokePermissions()
