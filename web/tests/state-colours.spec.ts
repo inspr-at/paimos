@@ -1,10 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SC1 / AEON-221. Coordinator: npm test -- state-colours.spec.ts --workers=2.
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator } from '@playwright/test'
 import { mockStateColours, states } from './state-colours-fixtures'
 import { STATE_LABEL } from '../src/lib/agentSignals'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
 import { saveAgentTheme } from './agent-theme-fixtures'
+
+async function expectStateWordFits(project: Locator) {
+  // Sample one layout so a font swap cannot leave the chip and label from different frames.
+  const { bounds, chip, word, fits } = await project.evaluate(el => {
+    const chip = el.querySelector('.live-chip')!, label = el.querySelector('.chip-state')!
+    return { bounds: el.getBoundingClientRect().toJSON(), chip: chip.getBoundingClientRect().toJSON(),
+      word: label.getBoundingClientRect().toJSON(), fits: label.scrollWidth <= label.clientWidth }
+  })
+  expect(word.x).toBeGreaterThanOrEqual(chip.x)
+  expect(word.x + word.width).toBeLessThanOrEqual(chip.x + chip.width)
+  expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
+  expect(fits).toBe(true)
+}
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme}: every state agrees across /agents, detail, cards and list rows`, async ({ page }) => {
@@ -23,7 +36,8 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(row.locator('.provider-mark')).toHaveAttribute('data-provider', 'unknown')
       await row.locator('.agent-link').click()
       const panel = page.getByRole('complementary', { name: 'Session details' })
-      await expect(panel.locator('.head-top .agent-state-label')).toHaveText(STATE_LABEL[state])
+      // AEON-1212 (#592) moved the identity and state into the unified panel's header.
+      await expect(panel.locator('.panel-head .agent-state-label')).toHaveText(STATE_LABEL[state])
       const setup = panel.locator('[aria-labelledby="setup-title"]')
       for (const value of ['integration-model', 'xhigh', 'Test account', '1.2.3']) await expect(setup).toContainText(value)
       const work = panel.locator('[aria-labelledby="work-title"]')
@@ -63,12 +77,29 @@ for (const theme of ['light', 'dark'] as const) {
           const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
           const label = project.locator('.chip-state')
           await expect(label).toHaveText(STATE_LABEL[state])
-          const bounds = (await project.boundingBox())!, chip = (await project.locator('.live-chip').boundingBox())!
-          const word = (await label.boundingBox())!
-          expect(word.x).toBeGreaterThanOrEqual(chip.x)
-          expect(word.x + word.width).toBeLessThanOrEqual(chip.x + chip.width)
-          expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
-          expect(await label.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+          await expectStateWordFits(project)
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      }
+    }
+  })
+
+  test(`AEON-1325 ${theme}: wider fonts keep every state word inside narrow project chips`, async ({ page }) => {
+    await mockStateColours(page, theme)
+    await page.goto('/')
+    // The hosted Linux font metrics are wider than macOS's. Exercise that risk
+    // deterministically with the bundled font, including the activity timestamp.
+    await page.evaluate(() => document.documentElement.style.setProperty('--font', '"JetBrains Mono", monospace'))
+    await page.evaluate(() => document.fonts.ready)
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 })
+      for (const layout of ['Cards', 'List']) {
+        await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
+        for (const state of states.filter(state => state !== 'stopped')) {
+          const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
+          await expect(project.locator('.chip-state')).toHaveText(STATE_LABEL[state])
+          await expectStateWordFits(project)
+          await expect(project.locator('.activity')).toBeVisible()
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       }
@@ -219,7 +250,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     missing.heartbeat_at = null
     await page.goto(`/agents/${missing.id}`)
     const evidence = panel.getByRole('region', { name: 'Session state evidence' })
-    await expect(panel.locator('.head-top .agent-state-label')).toHaveText('No heartbeat')
+    await expect(panel.locator('.panel-head .agent-state-label')).toHaveText('No heartbeat')
     await expect(panel.locator('.now-step')).toHaveText('No heartbeat has been received since this session registered.')
     await expect(evidence).toContainText('does not establish that the worker failed')
     await expect(evidence).toContainText('Registered')

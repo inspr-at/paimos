@@ -1783,7 +1783,8 @@ test('serial tier weights rebalance the twelve browser shards without changing f
   ]) {
     const selected=select(rows,options).tests.filter(row=>row.kind==='browser')
     const weights=tierWeights(manifest,selected)
-    const bins=Array.from({length:12},(_,i)=>shard(selected,i+1,12,weights))
+    const count=['schedule','workflow_dispatch'].includes(options.event)?24:12
+    const bins=Array.from({length:count},(_,i)=>shard(selected,i+1,count,weights))
     assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),options.event)
     if(options.paths?.[0]==='.github/workflows/ci.yml'||options.event==='push') {
       const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0)).sort((a,b)=>a-b)
@@ -1791,6 +1792,37 @@ test('serial tier weights rebalance the twelve browser shards without changing f
       assert.ok(loads[11]<=1.25*(loads[5]+loads[6])/2,`Hosted scheduling estimates: ${loads}`)
     }
   }
+})
+
+test('AEON-1325 nightly shards retain every browser case and require all 24 measurements',()=>{
+  const workflow=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
+  const job=workflow.slice(workflow.indexOf('\n  nightly-web-shard:'),workflow.indexOf('\n  # Preserve the ruleset'))
+  const indices=JSON.parse(/shard: (\[[^\n]+\])/.exec(job)[1])
+  assert.deepEqual(indices,Array.from({length:24},(_,i)=>i+1))
+  assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
+  const rows=load('web').tests
+  const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
+  const weights=tierWeights(JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url))),selected)
+  const bins=indices.map(index=>shard(selected,index,indices.length,weights))
+  assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort())
+  assert.equal(new Set(bins.flat().map(key)).size,selected.length)
+  const owners=new Map()
+  bins.forEach((bin,i)=>bin.forEach(row=>{
+    if(owners.has(row.file))assert.equal(owners.get(row.file),i,'A spec must stay on one shard')
+    owners.set(row.file,i)
+  }))
+  const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0))
+  assert.ok(Math.max(...loads)<20*60,`Nightly case estimates exceed the execution cap: ${loads}`)
+  const jobs=indices.map(index=>({name:`nightly-web-shard (${index})`,status:'completed',conclusion:'success',
+    started_at:'2026-10-13T01:00:00Z',completed_at:'2026-10-13T01:10:00Z'}))
+  const reports=bins.map((bin,i)=>reportCases(bin,bin.map(row=>({key:key(row),status:'passed',started:true})),600,`web-shard-${i+1}`))
+  const complete=aggregate(reports,jobs)
+  assert.equal(complete.coverage,'reported')
+  assert.equal(complete.measured.webRunnerMinutes,240)
+  assert.equal(Object.values(complete.classes).reduce((sum,tier)=>sum+tier.passed,0),selected.length)
+  const missing=aggregate(reports.slice(0,-1),jobs)
+  assert.equal(missing.coverage,'incomplete')
+  assert.deepEqual(missing.missingEvidence,['web-shard-24'])
 })
 
 test('hosted unit and Go weights preserve files/packages and every selected identity',()=>{

@@ -282,11 +282,11 @@ test('commands retain config/project/workers/traces/evidence and honor PW_RETRIE
   for (const value of ['-1', '1.5', 'NaN', '9007199254740992']) assert.throws(() => retryCount({ PW_RETRIES: value }), /PW_RETRIES/)
 })
 
-test('real manifest covers every non-excluded UI spec once for 1, 12 and 256 shards, including nested specs', () => {
+test('real manifest covers every non-excluded UI spec once for 1, 12, 24 and 256 shards, including nested specs', () => {
   const expected = discoverSpecs(), manifest = reconcileManifest(loadManifest(), expected).manifest
   assert.ok(expected.includes('tests/quotes/print-receipt.spec.ts'))
   assert.ok(!expected.includes('e2e/smoke.spec.ts'))
-  for (const count of [1, 12, 256]) {
+  for (const count of [1, 12, 24, 256]) {
     assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count, { all: true }), expected, { all: true }), {
       specs: expected.length - manifest.exclusions.length, shards: count,
       ...(manifest.exclusions.length ? { excluded: manifest.exclusions.length } : {}),
