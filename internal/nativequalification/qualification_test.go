@@ -255,6 +255,11 @@ func TestNativeLeadBackgroundCompactionAndConsumedFinal(t *testing.T) {
 	if err := r.Queue(t.Context(), first); err != nil {
 		t.Fatal(err)
 	}
+	changed := first
+	changed.Mode = "after_turn"
+	if err := r.Queue(t.Context(), changed); !errors.Is(err, ErrEvidence) {
+		t.Fatal("changed input replay accepted", err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, node, c.Spec.Profile.SDK.Path, "qualification-trace")

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -121,7 +122,11 @@ func (r *Recorder) Queue(ctx context.Context, input nativecontract.Input) error 
 	if len(input.Text) == 0 || len(input.Text) > 65536 || !utf8.ValidString(input.Text) || strings.ContainsRune(input.Text, 0) {
 		return ErrBound
 	}
-	h := sha256.Sum256([]byte(input.Text))
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return ErrEvidence
+	}
+	h := sha256.Sum256(payload)
 	digest := hex.EncodeToString(h[:])
 	if previous, found := r.inputs[input.InputID]; found {
 		if previous.digest == digest && previous.request == input.RequestID {

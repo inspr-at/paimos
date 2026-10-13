@@ -61,8 +61,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
 
     const guard = await controlStability(page, { frame: panel, composer, send, chat: panel.getByRole('tab', { name: /Chat/ }) })
     await guard.check(async () => {
-      // Only this consumed input receives the explicit final; a final from
-      // another generation is retained by the fixture but filtered by the UI.
+      // Only this consumed input receives the explicit final. Retaining a
+      // foreign final in the backend makes a wrongly scoped thread read fail.
       consumed = true
       const final = 'Der Übergabebericht ist vollständig. Die Freigabe bleibt bis zur bestätigten Prozessbeendigung gesperrt.'
       data.messages.push({ ...messageTemplate, id: 'lead-final', project: lead.project_id, sender_session_id: lead.id, sender_principal_id: lead.agent_principal_id, recipient_principal_id: me.id, recipient_session_id: undefined, reply_to: input.id, sent_event_id: 1001, body: final, created_at: new Date(now + 1).toISOString() })
@@ -74,6 +74,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     })
     guard.done()
     expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages'))).toHaveLength(1)
+    expect(calls.some(call => call.method === 'GET' && call.path.endsWith('/messages') && call.query.get('session') === lead.id)).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`native-lead-${theme}-${width}.png`) })
   })
