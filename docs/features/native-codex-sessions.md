@@ -497,8 +497,8 @@ this PR and rerun strict native validation and authoritative CI.
 
 Both guarded Go attempts refuse remote capacity, and both guarded static
 attempts exit 3 under host policy (daily workstation at `YELLOW` at the
-observed refusal; no remote hold). Static validation remains incomplete. The one permitted
-quick-package fallback passes with `GOMAXPROCS=2`, `-p 2` and `-count=1`
+observed refusal; no remote hold). Static validation remains incomplete. The
+one permitted quick-package fallback passes with `GOMAXPROCS=2`, `-p 2` and `-count=1`
 (0.273 s), exercising the existing acceptance 1–5 fake transcripts without a
 vendor process. The offline affected planner exits 0: essential/full selection,
 130 Go packages, 120 web unit files and 80 browser specs; Codex is still absent.
@@ -511,3 +511,34 @@ so no new behavior regression test is warranted. The CI blocker remains
 outside this worker's write set; the trusted review verdict remains
 coordinator-owned. No origin push, deployment, live model CLI or review gate
 was run.
+
+## CI fix round 13
+
+At reviewed head `9e2c5e1aa`, [go-static job `115192251071`](https://github.com/inspr-at/paimos/actions/runs/38366276160/job/115192251071)
+fails `Keep operator names out of public source` on this document's line 499.
+The fix replaces the private operator hostname with neutral daily-workstation
+wording. The existing public-name check reproduces that exact failure before
+the fix and exits 0 afterward; all three existing guard regressions pass.
+No provider behavior or test assertion changes, so no new behavior test is
+needed for this documentation correction.
+
+Two guarded Go attempts refuse remote capacity, and two guarded static
+attempts refuse host policy, all with exit 3. No new Go-suite pass or
+static-green result is claimed. Web/browser reruns are not applicable to this
+documentation-only correction. The offline affected planner exits 0 with
+essential/full selection: 130 Go packages, 120 unit files and 81 browser specs;
+the Codex package remains absent until its three tests are registered.
+
+A bounded manifest-only diagnosis reproduces exactly the three missing Codex
+identities on the reviewed head, current HEAD and fetched main. Their proposed
+`ESSENTIAL` rows pass that diagnosis in memory; no shared manifest is written.
+Strict native enumeration remains required after R0 applies those rows.
+P5a's exclusive write set still excludes `scripts/ci/go-test-tiers.json`, so
+R0 must resolve that existing blocker before authoritative CI can be green.
+Fetched main `f571b7765` is already merged, and PR #617 is mergeable.
+
+Only this feature document changes. Acceptance 1–5 provider code and fake
+transcript assertions remain unchanged. The final handoff is incomplete on
+R0 registration and guarded/authoritative validation; the trusted review
+verdict remains coordinator-owned. No origin push, deployment, live vendor
+session, model CLI or review gate was run.
