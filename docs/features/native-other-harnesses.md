@@ -194,3 +194,20 @@ the coordinator's task. No review gate was run. Authoritative PR CI is still
 required before merge; the remote passes above do not waive its failure. No
 origin push, deployment, other model CLI, credential access or out-of-scope
 source edit was performed.
+
+Fix round 5 validation, reviewed commit `aabb44f93`, implementation `23d05d97a`:
+
+- PASS — the public-name guard reproduced the supplied failure in this document
+  on the reviewed commit (exit 1). Neutral remote-host wording returns exit 0;
+  all three existing guard tests pass. No allowlist or assertion changed.
+- PASS — both provider packages passed guarded remote
+  `go test -race -count=1` on the implementation commit.
+- PASS — guarded `ci-static-locked.sh --merge-main` exited 0: all 42 checks
+  passed with no optional skips, including public names, strict Go/web tiers,
+  tier/shard self-tests, ownership, web typecheck and lint.
+
+This round changes only the owned feature document. No behavior fix or new
+regression is claimed; no R0 rows, provider code, web source or tests changed.
+There are no affected web unit tests or browser specs. Authoritative PR CI and
+the cross-family review remain coordinator-owned; no origin push or deployment
+was performed.
