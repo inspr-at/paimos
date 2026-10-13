@@ -402,6 +402,11 @@ func TestProfileDirectoriesRejectAliasesAndUnsafeHomes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// TempDir inherits the process umask; explicitly create the private
+		// fixture that this assertion requires, including under umask 022.
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Fatal(err)
+		}
 		dir, err := inspect(localFilesystem{}, root, true)
 		if err != nil || !dir.Owned || dir.Identity == "" {
 			t.Fatal("private OS directory was not recognized")
