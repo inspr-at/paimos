@@ -176,3 +176,28 @@ The corrected source on `3975f1227` passes all 12 cases in the guarded remote
 Chromium run, with zero residual browser processes. The final worker status
 and ignored `validation.json` pin the exact final HEAD, matching screenshots,
 browser/static results and coordinator-owned Linux/visual/release checks.
+
+Fix round 5 changes only quota scope/state labels from the ap771 Medium.
+The known context reading keeps Tick's “23 % of context” wording; account
+usage uses a plain percentage, and limited/stale states stay explicit in both
+the row and details. The existing coalescing case covers eight context/account
+readings, including known, limited, stale, unknown and unsupported states.
+The six existing viewport/theme cases check the real replay rows, unchanged
+quota envelopes, readable metadata and control stability when opening details.
+No test identity, tier, source inventory or assertion was removed or weakened.
+
+The identical regression spec fails on the test-only detached control
+`6d83c2ce6` over `eca481ff`; only the spec differs from that baseline, and this
+control is absent from delivery history. On `5355738e6`, the guarded Chromium
+suite passes all 12 cases in 12.9 seconds with no residual browser processes;
+guarded static `--merge-main` exits 0 with 42 checks, zero skips, in 127.3 seconds.
+P2d has no affected Go package or separate web unit suite; quota projection
+assertions run through the real module in the browser regression case.
+
+Final-commit evidence is refreshed under
+`web/test-results/AEON-1270-fix5/final/`: `usage` and `usage-detail`, each at
+390/1024/1440 in light/dark, supplement the 54 previously accepted shots.
+The final worker status and ignored `validation.json` pin the evidence HEAD
+and final checks. Linux browser CI, Tick comparison and all review/release
+gates remain coordinator-owned. The existing policy-preview diagnostic
+requires the coordinator's trusted verdict for the new HEAD.
