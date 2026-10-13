@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync, utimesSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync, utimesSync, existsSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { spawnSync, execFileSync } from 'node:child_process'
+import { spawn, spawnSync, execFileSync } from 'node:child_process'
+import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput } from './core.mjs'
@@ -43,6 +44,144 @@ test('nightly failure artifacts bind failed cases and incomplete runners to the 
   }
   assert.deepEqual(await simulate(false), { version: 1, job: 'web-unit', runId: '123', attempt: '2', sha: env.GITHUB_SHA, cases: [key(rows[0])], runnerFailure: false })
   assert.deepEqual(await simulate(true), { version: 1, job: 'web-unit', runId: '123', attempt: '2', sha: env.GITHUB_SHA, cases: [], runnerFailure: true })
+})
+
+// Risk: a later batch's cancellation used to erase completed failures, and an
+// artifact with the right name could make incomplete coverage look reported.
+test('AEON-1313 interrupted shards checkpoint completed failures and keep measurement coverage incomplete', {timeout:20_000}, async t => {
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-1313-evidence-'))
+  const identity={GITHUB_RUN_ID:'1313',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40)}
+  const env={...identity,RUNNER_ENVIRONMENT:'github-hosted',GITHUB_EVENT_NAME:'schedule'}
+  const rows=['a','b','c','d'].map(id=>({kind:'browser',file:`tests/${id}.spec.ts`,name:`case ${id}`,
+    tier:'NIGHTLY',id,project:'chromium',line:10,active:true}))
+  const policy={groups:['a','b','c','d'].map(id=>({id,config:'playwright.ui.config.ts',project:'chromium',
+    flags:[],env:{FIXTURE_GROUP:id},specs:[{file:`tests/${id}.spec.ts`}]}))}
+  const native=(selected,status)=>({errors:[],suites:[{specs:selected.map(row=>({id:row.id,title:row.name,
+    tests:[{projectName:row.project,results:[{status:status(row),duration:100}]}]}))}]})
+  const selection={tests:rows,all:rows,full:true,scope:'catalogue',reason:'fixture'}
+  const job={name:'nightly-web-shard (1)',status:'completed',conclusion:'cancelled',
+    started_at:'2026-10-13T01:00:00Z',completed_at:'2026-10-13T01:01:00Z'}
+  const aggregateOptions={runId:identity.GITHUB_RUN_ID,attempt:identity.GITHUB_RUN_ATTEMPT,sha:identity.GITHUB_SHA}
+  const artifact=name=>JSON.parse(readFileSync(resolve(directory,name),'utf8'))
+  let child
+  t.signal.addEventListener('abort',()=>child?.kill('SIGKILL'),{once:true})
+  try {
+    // The IPC readiness barrier proves the failed first batch was finalized
+    // before the synthetic runner is killed in its second batch. No browser,
+    // elapsed-time threshold, sleep or retry participates in this proof.
+    const script=`
+      import { run } from ${JSON.stringify(new URL('./cli.mjs',import.meta.url).href)};
+      import { writeFileSync } from 'node:fs';
+      import { basename, resolve } from 'node:path';
+      const rows=${JSON.stringify(rows)}, policy=${JSON.stringify(policy)}, env=${JSON.stringify(env)};
+      const native=${native.toString()};
+      process.on('message',()=>{});
+      await run('web',${JSON.stringify(selection)},{env,job:'web-shard-1'},{
+        knownFlaky:{version:1,entries:[]},loadBrowserPolicy:()=>policy,log:()=>{},
+        saveJSON:(path,value)=>writeFileSync(resolve(${JSON.stringify(directory)},basename(path)),JSON.stringify(value)),
+        command:(_bin,args,{env})=>JSON.stringify(native(rows.filter(row=>row.id===env.FIXTURE_GROUP),()=> 'passed')),
+        runPlaywright:async(_args,{env})=>{
+          if(env.FIXTURE_GROUP==='b'){process.send('second-batch-ready');await new Promise(()=>{});}
+          writeFileSync(env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(native([rows[0]],()=> 'failed')));
+          return {code:1};
+        }
+      });`
+    child=spawn(process.execPath,['--input-type=module','-e',script],{stdio:['ignore','ignore','pipe','ipc']})
+    let stderr=''
+    child.stderr.on('data',chunk=>{stderr+=chunk})
+    const exited=once(child,'exit')
+    const ready=await Promise.race([once(child,'message'),exited.then(result=>assert.fail(`Child exited before barrier: ${result}; ${stderr}`))])
+    assert.equal(ready[0],'second-batch-ready')
+    const checkpoint=artifact('web-shard-1-measurement.json')
+    assert.equal(checkpoint.execution.status,'running')
+    assert.equal(checkpoint.execution.activeBatch,'b')
+    assert.equal(checkpoint.execution.completedBatches,1)
+    assert.deepEqual(artifact('web-shard-1-failures.json').cases,[key(rows[0])])
+    child.kill('SIGKILL')
+    assert.equal((await exited)[1],'SIGKILL')
+    assert.deepEqual(artifact('web-shard-1-measurement.json'),checkpoint,'termination must leave a usable checkpoint')
+    assert.deepEqual(checkpoint.notRunCases.map(row=>row.key),rows.slice(1).map(key))
+    assert.ok(checkpoint.notRunCases.every(row=>row.reason==='Execution has not finished'))
+    assert.equal(checkpoint.classes.NIGHTLY.failed,1)
+    assert.equal(checkpoint.classes.NIGHTLY.notRun,3)
+    const killed=aggregate([checkpoint],[job],aggregateOptions)
+    assert.equal(killed.coverage,'incomplete')
+    assert.deepEqual(killed.missingEvidence,[],'saved but incomplete evidence is not a missing artifact')
+    assert.equal(killed.classes.NIGHTLY.failed,1)
+    assert.equal(killed.incompleteEvidence[0].reason,'Execution has not finished')
+
+    // Graceful interruption retains terminal siblings in the current batch,
+    // while the interrupted attempt and all later selections remain notRun.
+    const currentRows=[...rows.slice(0,2),{...rows[2],file:rows[1].file},rows[3]]
+    const artifacts=new Map(),calls=[]
+    const code=await run('web',{...selection,tests:currentRows,all:currentRows},{env,job:'web-shard-1'},{
+      knownFlaky:{version:1,entries:[]},loadBrowserPolicy:()=>policy,log:()=>{},
+      saveJSON:(path,value)=>artifacts.set(path.split('/').at(-1),structuredClone(value)),
+      command:(_bin,_args,{env})=>JSON.stringify(native(currentRows.filter(row=>row.file===`tests/${env.FIXTURE_GROUP}.spec.ts`),()=> 'passed')),
+      runPlaywright:async(_args,{env})=>{
+        const id=env.FIXTURE_GROUP
+        calls.push(id)
+        const checkpoint=artifacts.get('web-shard-1-measurement.json')
+        if(id==='b') assert.equal(checkpoint.classes.NIGHTLY.failed,1)
+        writeFileSync(env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(native(currentRows.filter(row=>row.file===`tests/${id}.spec.ts`),
+          row=>id==='a'?'failed':row.id==='b'?'passed':'interrupted')))
+        return id==='a'?{code:1}:{code:143,metrics:{signal:'SIGTERM'}}
+      },
+    })
+    assert.equal(code,143)
+    assert.deepEqual(calls,['a','b'],'interruption must stop later batches')
+    const report=artifacts.get('web-shard-1-measurement.json')
+    assert.deepEqual([report.runId,report.attempt,report.sha],['1313','2',identity.GITHUB_SHA])
+    assert.equal(report.execution.status,'interrupted')
+    assert.equal(report.execution.signal,'SIGTERM')
+    assert.deepEqual(artifacts.get('web-shard-1-failures.json').cases,[key(rows[0])])
+    assert.deepEqual(report.browserCases.map(row=>row.status),['failed','passed','notRun','notRun'])
+    assert.ok(report.notRunCases.every(row=>row.reason==='Execution interrupted by SIGTERM'))
+    assert.equal(report.webShardTiming.caseSeconds,null,'interrupted samples cannot calibrate complete execution')
+    assert.equal(aggregate([report],[job],aggregateOptions).coverage,'incomplete')
+    const saved=resolve(directory,'evidence'),summary=resolve(directory,'summary.txt')
+    mkdirSync(saved)
+    writeFileSync(resolve(saved,'web-shard-1-measurement.json'),JSON.stringify(report))
+    writeFileSync(resolve(directory,'gh'),`#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:1,jobs:[job]}))})\n`,{mode:0o755})
+    const measured=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),saved],{
+      cwd:directory,encoding:'utf8',timeout:10_000,
+      env:{PATH:directory,...identity,GITHUB_REPOSITORY:'example/aeon',GITHUB_STEP_SUMMARY:summary},
+    })
+    assert.ifError(measured.error)
+    assert.equal(measured.status,1,measured.stderr)
+    const output=JSON.parse(measured.stdout)
+    assert.equal(output.coverage,'incomplete')
+    assert.equal(output.coverageReason,'interrupted or incomplete case evidence')
+    assert.ok(output.measurementCauses.includes('incomplete_case_execution'))
+    assert.equal(output.classes.NIGHTLY.failed,1)
+    assert.match(readFileSync(summary,'utf8'),/Incomplete case evidence: web-shard-1 \(Execution interrupted by SIGTERM\)/)
+    const otherAttempt=aggregate([report],[job],{...aggregateOptions,attempt:'3'})
+    assert.deepEqual(otherAttempt.missingEvidence,['web-shard-1'])
+    assert.deepEqual(otherAttempt.classes,{})
+
+    const green=reportCases(rows,rows.map(row=>({key:key(row),status:'passed',started:true})),1,'web-shard-1')
+    Object.assign(green,{runId:'1313',attempt:'2',sha:identity.GITHUB_SHA,execution:{status:'completed'}})
+    assert.equal(aggregate([green],[{...job,conclusion:'success'}],aggregateOptions).coverage,'reported')
+    for(const status of ['running','interrupted','incomplete']) {
+      assert.equal(aggregate([{...green,execution:{status,reason:'unfinished cleanup'}}],[{...job,conclusion:'success'}],aggregateOptions).coverage,'incomplete')
+    }
+    assert.equal(aggregate([green],[job],aggregateOptions).coverage,'incomplete','Actions cancellation cannot become a completed run')
+    const legacy={...green}
+    delete legacy.execution
+    assert.equal(aggregate([legacy],[job],aggregateOptions).coverage,'incomplete','legacy evidence cannot hide Actions cancellation')
+    assert.throws(()=>aggregate([{...green,execution:{status:'green'}}],[],aggregateOptions),/execution state/)
+    const workflow=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
+    const shardJob=workflow.slice(workflow.indexOf('\n  nightly-web-shard:'),workflow.indexOf('\n  # Preserve the ruleset'))
+    const jobBudget=Number(/^    timeout-minutes: (\d+)$/m.exec(shardJob)[1])
+    const executionBudget=Number(/Run selected UI cases without retries\n        timeout-minutes: (\d+)/.exec(shardJob)[1])
+    const installBudget=Number(/Install Chromium system dependencies\n        timeout-minutes: (\d+)/.exec(shardJob)[1])
+    assert.equal(executionBudget,20,'execution sizing awaits complete repaired-run timings')
+    assert.ok(jobBudget>=installBudget+executionBudget+7,'reserve bounded setup and evidence-upload headroom')
+    assert.match(shardJob,/run web --all --shard/,'NIGHTLY registrations stay selected')
+  } finally {
+    if(child&&child.exitCode===null&&child.signalCode===null) { const exited=once(child,'exit');child.kill('SIGKILL');await exited }
+    rmSync(directory,{recursive:true,force:true})
+  }
 })
 import './slow-owners.test.mjs'
 import './web-batches.test.mjs'
@@ -2336,7 +2475,7 @@ test('AEON-980 web retry uses exact browser registrations and native unit patter
     for(const options of [{reportErrors:true,known},{automaticRetries:true},{missing:true},{interrupted:true,known}]) {
       const result=await simulate(options)
       assert.notEqual(result.code,0)
-      assert.equal(result.calls.length,2,'invalid first-pass evidence cannot trigger retries')
+      assert.equal(result.calls.length,options.interrupted?1:2,'invalid first-pass evidence cannot trigger retries; interruption stops later batches')
       assert.ok(!result.report.flakeLedger.some(entry=>entry.status==='flaky'))
     }
     const cancelled=await simulate({retryInterrupted:true})
