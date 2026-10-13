@@ -127,6 +127,13 @@
     },
     {
       "job": "web-setup",
+      "step": "Prove web build reproducibility",
+      "cwd": ".",
+      "command": "node scripts/check-web-reproducibility.mjs",
+      "reason": "Reuses the installed dependencies for one additional Vite build; outside the static pre-filter."
+    },
+    {
+      "job": "web-setup",
       "step": "Install Playwright browsers",
       "cwd": "web",
       "command": "npx playwright install chromium",

@@ -658,6 +658,18 @@ jobs:
       - name: Build web
         working-directory: web
         run: npm run build
+      - name: Prove web build reproducibility
+        run: node scripts/check-web-reproducibility.mjs
+      - name: Preserve web reproducibility failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-reproducibility
+          path: |
+            tmp/web-reproducibility
+            web/dist
+          retention-days: 1
+          if-no-files-found: ignore
       - name: Cache Playwright browsers
         id: web-browsers
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
