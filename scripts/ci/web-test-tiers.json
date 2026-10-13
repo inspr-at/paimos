@@ -362,6 +362,8 @@
     ,
     "browser:tests/agents-cleanup.spec.ts:Queued folds per person, says what waits, and a run link opens it without changing the preference"
     ,
+    "browser:tests/agents-cleanup.spec.ts:Queued keeps the page section gap below Sessions; folding and emptying move nothing above it"
+    ,
     "browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it"
     ,
     "browser:tests/agents-cleanup.spec.ts:accounts and computers is one chip whose popover states the state; a stored fold changes nothing"
@@ -949,6 +951,18 @@
     "browser:tests/models-situations-shots.spec.ts:at 390 › situations on just me dark"
     ,
     "browser:tests/models-situations-shots.spec.ts:at 390 › situations on just me light"
+    ,
+    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1024"
+    ,
+    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1440"
+    ,
+    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 390"
+    ,
+    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1024"
+    ,
+    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1440"
+    ,
+    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 390"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
@@ -6446,6 +6460,8 @@
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued folds per person, says what waits, and a run link opens it without changing the preference","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued keeps the page section gap below Sessions; folding and emptying move nothing above it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a queued run can be cancelled from /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a section preference that lands after a run link keeps Queued open until the person folds it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10443,6 +10459,30 @@
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 agents get structured Events only and revocation clears all diagnostic content","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 bounded replay, cursor failures and gaps never masquerade as complete history","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 coalescing keeps native envelopes, inferred correlations, receipts and omitted bodies honest","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 earlier pages keep the read row still; stale revisions and 512 KiB overflow stay explicit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 raw diagnostics stay bound to session, person, consent and tab through late replay and stream callbacks","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one terminal and a head-menu descriptor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business shows only while one of its parts is open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
