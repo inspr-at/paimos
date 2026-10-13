@@ -132,7 +132,7 @@ test('AEON-1270 coalescing keeps native envelopes, inferred correlations, receip
   Object.assign(omitted.payload, { event_name: 'unknown_native_frame', omitted: true, frame_json: '', original_bytes: 900 })
   await send(page, omitted)
   await page.locator('[data-event-row]').filter({ hasText: 'unknown_native_frame' }).click()
-  await expect(page.locator('.event-detail')).toContainText('Native body omitted · 900 original bytes.')
+  await expect(page.getByText('Native body omitted · 900 original bytes.', { exact: true })).toBeVisible()
   const unsafe = frame(8)
   Object.assign(unsafe.payload, { frame_json: '{"thinking":"synthetic-private-canary"}' })
   await send(page, unsafe)

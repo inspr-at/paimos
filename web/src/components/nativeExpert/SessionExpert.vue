@@ -19,13 +19,13 @@ const emit = defineEmits<{ review: [approval: NativeApproval] }>()
 const modelName = computed(() => props.modelProfile ? fullName(props.modelProfile) : '')
 const request = computed(() => expertRequest(props.session, props.viewer, props.consent))
 const link = computed(() => liveTerminalLink(props.session, props.viewer))
-const readable = computed(() => props.viewer.canRead && props.viewer.tenantId === props.session.current_binding?.tenant_id)
+const readable = computed(() => props.viewer.canRead && (!props.session.current_binding || props.viewer.tenantId === props.session.current_binding.tenant_id))
 const principalKey = computed(() => `${props.viewer.tenantId}/${props.viewer.principalId}/${props.viewer.kind}`)
 const panelKey = computed(() => `${principalKey.value}/${props.session.owned_session_id}/${props.session.owner_person_id}`)
 const captureKey = computed(() => JSON.stringify([panelKey.value, bindingKey(props.session.current_binding), props.session.generation,
   props.viewer.canRead, props.viewer.canWatch, props.viewer.canReadStructured, request.value?.view, request.value?.consentId,
 ]))
-const segment = ref<'events' | 'terminal'>('events'), terminalAtOpen = ref(false)
+const segment = ref<'events' | 'terminal'>('events'), terminalAtOpen = ref(false), viewerAtOpen = ref(false)
 const openedName = ref(''), openedHost = ref('')
 const hidden = ref(false), following = ref(true), hiddenTypes = ref<EventType[]>([]), typeAnchor = ref<HTMLElement | null>(null)
 const preference = usePreference<{ hidden?: string[] }>('agents:expert.types')
@@ -43,6 +43,10 @@ const notice = ref(''), status = ref('Live events appear after Watch live. Only 
 const watching = ref(false), loading = ref(false), before = ref<string | null>(null), blocked = ref(false)
 const rows = computed(() => eventRows(events.value).filter(row => !hiddenTypes.value.includes(row.type)))
 const available = computed(() => !!request.value && props.active && !hidden.value && segment.value === 'events' && !blocked.value)
+const inspectionPermit = computed(() => {
+  const key = captureKey.value
+  return () => key === captureKey.value && available.value
+})
 let controller: AbortController | null = null, epoch = 0, lastSeq: bigint | null = null
 function publish() { events.value = [...buffer.events]; evicted.value = buffer.evicted }
 function stop(clear = true) {
@@ -56,6 +60,12 @@ function errorText(error: unknown) {
   if (reason === 'feature_disabled' || reason === 'qualification_missing') return 'Live events are not available for this session yet.'
   return 'Live events could not be read. The view is incomplete. Watch live to try again.'
 }
+function revoked(error: unknown) {
+  if (!error || typeof error !== 'object') return false
+  const reason = 'reason' in error ? error.reason : null, status = 'status' in error ? error.status : null
+  return ['permission_revoked', 'grant_expired', 'wrong_principal'].includes(String(reason)) || [401, 403, 404].includes(Number(status))
+}
+function accessLost() { stop(); blocked.value = true; status.value = 'Viewing ended because access or the owner’s consent was revoked.' }
 function receive(event: NativeStreamEvent, current: () => boolean) {
   if (!current()) return
   const bound = request.value
@@ -67,7 +77,7 @@ function receive(event: NativeStreamEvent, current: () => boolean) {
   try { safe = boundedEvent(event, bound) } catch { safe = null }
   if (!safe) { notice.value = 'A frame was omitted because its view, shape or size was not permitted.'; return }
   if (safe.kind === 'end' && safe.payload.reason === 'revoked') {
-    stop(); blocked.value = true; status.value = 'Viewing ended because access or the owner’s consent was revoked.'; return
+    accessLost(); return
   }
   const seq = BigInt(safe.seq)
   if (lastSeq !== null && seq > lastSeq + 1n) notice.value = `${seq - lastSeq - 1n} frames are missing from this live view.`
@@ -102,10 +112,8 @@ async function start() {
     if (current()) { stop(false); status.value = 'The live connection ended. Watch live to reconnect; events may be missing.' }
   } catch (error) {
     if (!current()) return
-    const reason = error && typeof error === 'object' && 'reason' in error ? error.reason : null
-    if (reason === 'permission_revoked' || reason === 'grant_expired' || reason === 'wrong_principal') {
-      stop(); blocked.value = true; status.value = 'Viewing ended because access or the owner’s consent was revoked.'
-    } else { stop(false); notice.value = errorText(error); status.value = 'Live connection unavailable.' }
+    if (revoked(error)) accessLost()
+    else { stop(false); notice.value = errorText(error); status.value = 'Live connection unavailable.' }
   }
 }
 async function earlier() {
@@ -120,13 +128,15 @@ async function earlier() {
     if (accepted === null) { notice.value = 'The earlier page was rejected. Its cursor, generation, binding, ordering or bounds did not match this view.'; return }
     following.value = false; buffer.add(accepted, true); publish(); before.value = page.next_before
     if (page.truncated) notice.value = 'Earlier live frames are unavailable. This replay is incomplete.'
-  } catch (error) { if (current()) notice.value = errorText(error) }
+  } catch (error) { if (current()) { if (revoked(error)) accessLost(); else notice.value = errorText(error) } }
   finally { if (epoch === turn) loading.value = false }
 }
 
 watch(panelKey, () => {
-  stop(); segment.value = 'events'; following.value = true; hiddenTypes.value = []; typeAnchor.value = null; blocked.value = false
-  terminalAtOpen.value = props.viewer.kind === 'person' && props.viewer.canRead && props.viewer.tenantId === props.session.current_binding?.tenant_id &&
+  stop(); segment.value = 'events'; following.value = true; typeAnchor.value = null; blocked.value = false
+  hiddenTypes.value = ownPreference.value ? preference.value.value?.hidden?.filter((key): key is EventType => eventTypes.some(type => type.key === key)) ?? [] : []
+  viewerAtOpen.value = !!link.value
+  terminalAtOpen.value = props.viewer.kind === 'person' && readable.value &&
     (props.session.capabilities.take_supported || props.session.mode === 'terminal' || !!link.value)
   openedName.value = props.name; openedHost.value = props.host
 }, { immediate: true, flush: 'sync' })
@@ -165,16 +175,16 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
         <label class="switch follow"><input type="checkbox" role="switch" aria-label="Follow live" :checked="following" @change="following = ($event.target as HTMLInputElement).checked"><span class="follow-long">Follow live</span><span class="follow-short" aria-hidden="true">Follow</span></label>
       </template>
     </div>
-    <NativeEventList v-if="segment === 'events'" :key="captureKey" :rows="rows" :retained="events.length" :evicted="evicted" :notice="notice" :status="status" :before="before" :loading="loading" :watching="watching" :can-start="available" :follow="following" @start="start" @stop="stop(); status = 'Viewing stopped. The transient buffer was cleared.'" @earlier="earlier" @follow="following = $event" @review="emit('review', $event)" />
+    <NativeEventList v-if="segment === 'events'" :key="captureKey" :rows="rows" :retained="events.length" :evicted="evicted" :notice="notice" :status="status" :before="before" :loading="loading" :watching="watching" :can-start="available" :can-inspect="inspectionPermit" :follow="following" @start="start" @stop="stop(); status = 'Viewing stopped. The transient buffer was cleared.'" @earlier="earlier" @follow="following = $event" @review="emit('review', $event)" />
     <div v-else-if="viewer.kind === 'person'" class="terminal-pane">
       <p v-if="!readable">You cannot read this session.</p>
-      <template v-else-if="session.mode === 'terminal'">
+      <template v-else-if="session.mode === 'terminal' || !viewerAtOpen">
         <slot v-if="request?.view === 'expert' && session.capabilities.terminal_view && active && !hidden" name="terminal" :session="session" :viewer="viewer" :consent="consent" :model-name="modelName"><p>Live terminal output is unavailable.</p></slot>
         <p v-else>Live terminal output requires current watch permission and the owner’s active consent.</p>
       </template>
       <div v-else-if="terminalAtOpen" class="terminal-viewer">
         <p class="terminal-description"><AppIcon name="terminal" :size="20" /><span>{{ openedName }} runs in Zellij on {{ openedHost }}.</span></p>
-        <a class="btn terminal-link" :href="link?.href" target="_blank" rel="noopener noreferrer" :aria-disabled="!link" :tabindex="link ? 0 : -1" @click="!link && $event.preventDefault()"><AppIcon name="terminal" :size="16" />Open live terminal<AppIcon name="external" :size="14" /></a>
+        <a class="btn terminal-link" role="link" :href="link?.href" target="_blank" rel="noopener noreferrer" :aria-disabled="!link" :tabindex="link ? 0 : -1" @click="!link && $event.preventDefault()"><AppIcon name="terminal" :size="16" />Open live terminal<AppIcon name="external" :size="14" /></a>
         <p class="terminal-hint"><span :aria-hidden="!link">Read-only, in a new tab, on the tailnet. The first visit asks for the viewer token.</span><span :aria-hidden="!!link">The live terminal is no longer available.</span></p>
       </div>
     </div>

@@ -56,7 +56,8 @@ export function expertRequest(session: NativeSessionView, viewer: ExpertViewer, 
 
 /** Shared descriptor for I2's existing session-head overflow item (r2 + A1). */
 export function liveTerminalLink(session: NativeSessionView, viewer: ExpertViewer) {
-  if (viewer.kind !== 'person' || !viewer.canRead || !session.current_binding || viewer.tenantId !== session.current_binding.tenant_id) return null
+  const binding = session.current_binding
+  if (viewer.kind !== 'person' || !viewer.canRead || !viewer.principalId || (binding && (viewer.tenantId !== binding.tenant_id || binding.owned_session_id !== session.owned_session_id))) return null
   const value = session.terminal_viewer_url
   if (!value || value.length > 2048) return null
   try {

@@ -7,7 +7,7 @@ import type { NativeApproval } from '../../lib/nativeSessionContract'
 
 const props = defineProps<{
   rows: EventRow[]; retained: number; evicted: number; notice: string; status: string
-  before: string | null; loading: boolean; watching: boolean; canStart: boolean; follow: boolean
+  before: string | null; loading: boolean; watching: boolean; canStart: boolean; canInspect: () => boolean; follow: boolean
 }>()
 const emit = defineEmits<{ earlier: []; start: []; stop: []; follow: [value: boolean]; review: [approval: NativeApproval] }>()
 const scroll = ref<HTMLElement>(), expanded = ref(new Set<string>()), copyResult = ref('')
@@ -16,18 +16,24 @@ const time = (at: string) => { const date = new Date(at); return Number.isNaN(da
 const icon = (row: EventRow) => eventTypes.find(type => type.key === row.type)!.icon
 const raw = (row: EventRow) => JSON.stringify(row.events.length === 1 ? row.events[0] : row.events, null, 2)
 function toggle(row: EventRow) {
+  if (!props.canInspect()) return
   emit('follow', false)
   const next = new Set(expanded.value)
   if (next.has(row.id)) next.delete(row.id); else next.add(row.id)
   expanded.value = next; copyResult.value = ''
 }
 async function copy(row: EventRow) {
+  if (!props.canInspect()) return
   const turn = ++copying, text = raw(row)
   copyResult.value = ''
   try {
     await navigator.clipboard.writeText(text)
-    if (!disposed && turn === copying) copyResult.value = 'Copied'
-  } catch { if (!disposed && turn === copying) copyResult.value = 'Could not copy. Select the JSON below.' }
+    if (!disposed && turn === copying && props.canInspect()) copyResult.value = 'Copied'
+  } catch { if (!disposed && turn === copying && props.canInspect()) copyResult.value = 'Could not copy. Select the JSON below.' }
+}
+function review(row: EventRow) {
+  const event = row.events.at(-1)!
+  if (props.canInspect() && event.kind === 'approval') emit('review', event.payload)
 }
 function scrolled() {
   const el = scroll.value
@@ -78,7 +84,7 @@ onBeforeUnmount(() => { disposed = true; copying++ })
               <span class="event-measure">{{ row.measure }}</span>
               <AppIcon class="event-chevron" name="chevron-right" :size="12" />
             </button>
-            <button v-if="row.events.at(-1)!.kind === 'approval' && (row.events.at(-1)!.payload as NativeApproval).desk_item_id" class="btn sm event-review" type="button" @click="emit('review', row.events.at(-1)!.payload as NativeApproval)">Review</button>
+            <button v-if="row.events.at(-1)!.kind === 'approval' && (row.events.at(-1)!.payload as NativeApproval).desk_item_id" class="btn sm event-review" type="button" @click="review(row)">Review</button>
           </div>
           <div v-if="expanded.has(row.id)" class="event-detail">
             <div class="raw-head">

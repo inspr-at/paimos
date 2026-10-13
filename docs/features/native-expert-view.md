@@ -34,7 +34,7 @@ omitted byte counts and receipt states. Message deltas coalesce by message ID,
 finals replace their text, and tool start/result pairs share a call-ID row.
 Inferred reply correlation stays labelled. Review emits the exact approval
 for the existing Decision Desk; this component never approves a request.
-Copy JSON is a deliberate person action, not automatic persistence.
+Copy JSON is a deliberate authorized reader action, not automatic persistence.
 
 The local tail holds at most 500 frames and 512 KiB. Eviction, missing sequence
 numbers, truncated pages, cursor failures and transport gaps are visible.
