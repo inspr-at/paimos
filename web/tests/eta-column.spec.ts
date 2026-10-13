@@ -62,6 +62,7 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
       return { text: el.textContent, width: el.clientWidth, contentWidth: el.scrollWidth, cellWidth: td.clientWidth }
     })
     expect(label.contentWidth <= label.width, `${key}: ${JSON.stringify(label)}`).toBe(true)
+    console.info(`ETA geometry ${key}: ${JSON.stringify(label)}`)
   }
 
   await header.getByRole('button', { name: 'ETA' }).click()
