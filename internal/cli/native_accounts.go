@@ -18,6 +18,9 @@ import (
 func resolveNativeAccount(ctx context.Context, profiles nativecontract.ProfileResolver, actor nativecontract.Actor,
 	start nativecontract.LocalStart, policy nativecontract.Policy, revision int64) (nativecontract.LocalProfile, error) {
 	var empty nativecontract.LocalProfile
+	if err := ctx.Err(); err != nil {
+		return empty, err
+	}
 	if profiles == nil || start.Intent.Profile != "native" || actor.TenantID == "" || actor.OwnerPersonID == "" ||
 		actor.GrantID != policy.GrantID || actor.GrantRevision != policy.GrantRevision ||
 		!validUUID(start.Intent.AccountID) || start.AccountKey == "" || len(start.AccountKey) > 128 ||
@@ -29,6 +32,9 @@ func resolveNativeAccount(ctx context.Context, profiles nativecontract.ProfileRe
 		AccountID: start.Intent.AccountID, AccountKey: start.AccountKey, WorkspaceID: start.Intent.WorkspaceID,
 		Harness: start.Intent.Harness, Policy: policy, BindingRevision: revision})
 	if err != nil {
+		return empty, err
+	}
+	if err := ctx.Err(); err != nil {
 		return empty, err
 	}
 	if profile.AccountID != start.Intent.AccountID || profile.ProfileBindingRevision != revision ||

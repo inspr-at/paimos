@@ -180,6 +180,11 @@ func (r *Resolver) Resolve(ctx context.Context, q nativecontract.ProfileRequest)
 	if err := ctx.Err(); err != nil {
 		return empty, err
 	}
+	if !validID(q.TenantID) || !validID(q.OwnerPersonID) || !validID(q.AccountID) ||
+		!validText(q.AccountKey, 128) || !validText(q.WorkspaceID, 128) || !validText(q.Harness, 128) ||
+		q.BindingRevision < 0 || q.BindingRevision > maxRevision {
+		return empty, ErrInvalid
+	}
 	a, ok := r.accounts[q.AccountID]
 	if !ok || a.enrollment.AccountKey != q.AccountKey || a.enrollment.Harness != q.Harness ||
 		a.enrollment.TenantID != q.TenantID || a.enrollment.OwnerPersonID != q.OwnerPersonID {
@@ -226,6 +231,9 @@ func (r *Resolver) Resolve(ctx context.Context, q nativecontract.ProfileRequest)
 	}
 	if err := ctx.Err(); err != nil {
 		return empty, err
+	}
+	if !validPolicy(q.Policy, r.now()) {
+		return empty, ErrPolicy
 	}
 	environment := []string{"HOME=" + r.userHome}
 	if !defaultClaude {

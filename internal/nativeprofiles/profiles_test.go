@@ -92,6 +92,9 @@ func profileFixture() (Config, *fakeFilesystem, nativecontract.Policy) {
 			"USER=fixture-user", "LOGNAME=fixture-user", "TMPDIR=/scratch", "PATH=/ambient/bin", "NODE_OPTIONS=fixture-loader",
 			"ANTHROPIC_API_KEY=fixture-api-key", "AEON_AGENT_KEY=fixture-agent-key", "CLAUDE_CODE_USE_BEDROCK=1"},
 	}
+	// The normal default login does not claim independent dedicated-profile
+	// isolation. It still retains its original keychain namespace.
+	c.Accounts[2].Qualification.IndependentLogin = false
 	p := nativecontract.Policy{GrantID: "40000000-0000-4000-8000-000000000001", GrantRevision: 2, ExpiresAt: now.Add(time.Hour),
 		ToolPolicyDigest: strings.Repeat("c", 64), SettingsPolicyDigest: strings.Repeat("d", 64), PermissionPolicy: "supervised",
 		LocalHistory: "vendor_native", Continuation: "manual", MaximumRuntimeSeconds: 300, MaximumTurns: 10, MaximumTokens: 10000}
@@ -295,6 +298,47 @@ func TestProfileResolutionRejectsForeignStaleAndUnqualifiedAccounts(t *testing.T
 	if _, err := r.Resolve(ctx, requestFor(c.Accounts[0], policy)); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancellation was not preserved")
 	}
+	t.Run("policy expires during metadata inspection", func(t *testing.T) {
+		c, files, policy := profileFixture()
+		now := c.Now()
+		c.Now = func() time.Time { return now }
+		r, err := New(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files.ready, files.release = make(chan string, 1), make(chan struct{})
+		t.Cleanup(func() {
+			select {
+			case <-files.release:
+			default:
+				close(files.release)
+			}
+		})
+		result := make(chan error, 1)
+		go func() {
+			p, err := r.Resolve(t.Context(), requestFor(c.Accounts[0], policy))
+			if p.AccountID != "" {
+				result <- errors.New("expired profile became launchable")
+				return
+			}
+			result <- err
+		}()
+		select {
+		case <-files.ready:
+		case <-time.After(5 * time.Second):
+			t.Fatal("expiry barrier hung")
+		}
+		now = policy.ExpiresAt
+		close(files.release)
+		select {
+		case err := <-result:
+			if !errors.Is(err, ErrPolicy) {
+				t.Fatal("policy was not rechecked after inspection")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("expiry resolution hung")
+		}
+	})
 }
 
 func TestProfileDirectoriesRejectAliasesAndUnsafeHomes(t *testing.T) {
