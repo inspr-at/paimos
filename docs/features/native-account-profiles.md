@@ -80,7 +80,7 @@ There are no browser tests or model/subscription calls for this slice.
 R0 must apply these registrations in the same PR before merge (this builder does
 not own the shared metadata files): add `internal/nativeprofiles/**` to audit
 slice **S1 security-core**; the two CLI files are already covered by the existing
-`internal/cli/**` slice. Register all four named Go tests above as **ESSENTIAL**
+**S3 cli-inbox** `internal/cli/**` slice. Register all four named Go tests above as **ESSENTIAL**
 in `scripts/ci/go-test-tiers.json` for `internal/nativeprofiles` (three tests) and
 `internal/cli` (one test). No web shard, route, permission, migration, DSAR or
 shared-fence rows are needed: this slice adds none of those surfaces.
@@ -91,3 +91,14 @@ Required validation is the guarded remote Go run for
 `node scripts/test-tiers/affected.mjs --base origin/main`. A busy/held/incomplete
 exit 3 is an explicit incomplete handoff, never a passing result; PR CI and the
 coordinator's cross-family release gates remain authoritative.
+
+Builder handoff (2026-10-13): the affected-set command exited 0 and selected
+**FULL** (`Go reverse dependencies exceed 300 extra cases (3219)`). Formatting,
+Git whitespace and exclusive-write-set checks passed. The required guarded Go
+run was attempted three times and guarded static twice; all returned **exit 3**
+because the global two remote slots were occupied (2/2). Neither Go execution nor
+static verification completed, and no local fallback or negative-control run was
+performed. R0 must register the source and the four tests in this same PR; then
+the coordinator retries the guarded checks and requires authoritative PR CI.
+G_ACCOUNTS and P4c/I2 integration remain separate coordinator-owned work. No
+origin push, deployment, model CLI or cross-family gate was performed.
