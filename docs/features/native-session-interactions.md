@@ -125,7 +125,8 @@ evidence remains with authoritative PR CI. No foreign process was touched and
 no local browser fallback was used.
 
 R0 additions are exactly five ESSENTIAL Go rows, seven ESSENTIAL browser rows,
-one `stable-controls` spec entry (20 seconds is an unmeasured scheduling estimate),
+one `stable-controls` spec entry (initially estimated at 20 seconds; measured
+merge-round timing is recorded below),
 three DSAR table/column entries, and
 `nativesessions/interaction/store.go` in `agentpairing.Lock`'s caller inventory.
 Existing source ownership globs already cover all new sources. No permission,
@@ -165,3 +166,12 @@ Every test, classification, gate policy and other ticket's row is retained.
 This is scheduling evidence from the approved remote host, not a hosted-runtime
 promise. The unchanged assertion's failure on the merged head provides the
 negative control; no throwaway commit or test relaxation is needed.
+
+The full guarded remote `node scripts/ci-static.mjs --merge-main` rerun at
+`3f8b6265a` exited 0: all 42 checks passed, zero optional checks were skipped,
+and both unchanged web-shard check groups passed. This includes strict
+Go/web tiers, shard inventories, audit ownership, typecheck, lint, migration
+policy and OpenAPI checks. A final fetch confirmed `c90420b30` remains the
+newest `origin/main` and is contained in this branch. This round adds no new
+registry identities or feature behavior. Origin push, deployment and the
+cross-family review remain with the coordinator.
