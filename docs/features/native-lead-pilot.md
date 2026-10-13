@@ -116,12 +116,12 @@ the owning coordinator has recorded the final ownership and rollback evidence.
 
 ## Integration blockers and R0 handoff
 
-- **Z1 port incompatibility (AEON-1293):** the merged P1b `ViewerHosts.Validate` accepts only
-  explicit port 443 and currently rejects the required `:8082/LEAD` with
-  `invalid_input`. The qualification intentionally proves that refusal; it does
-  not substitute a 443 link or weaken the allowlist. The coordinator must route
-  the narrowly scoped port qualification to P1b/I1 before live launch. P1c has
-  no write authority over `internal/nativesessions/store/terminal_viewer.go`.
+- **Z1 viewer port (AEON-1293):** resolved. The default `ViewerHosts` port
+  allowlist is 443 and 8082, beside the existing host allowlist.
+  `TestNativeLeadPersonOnlyViewerAndZ1Compatibility` requires the approved
+  `:8082/LEAD` URL on an allowlisted host. Credential material, an unlisted
+  port, an empty port suffix and a foreign host still fail with `invalid_input`
+  and the error does not echo the URL. The host allowlist is unchanged.
 - **Native metadata/final wiring (I1, AEON-1290):** P1a's bridge currently does not forward task
   or compaction metadata to C0, and `chat_final` does not carry the consumed
   input correlation ID. I1 must map a pinned reader into the C0 observer and
@@ -159,7 +159,7 @@ full package run in the finishing round:
 | Separate native-history approval; existing confined/routine ceilings | The policy and fence tests passed remotely, including missing/refused history consent and routine rejection. No approval is issued by these fixtures. |
 | Exact-conversation self-handover, after-exit proof and rollback | The runbook above records the approved path. The background/compaction test passed remotely with missing-exit and wrong-process refusals. Production one-writer wiring and upgrade freeze remain I1/coordinator work. |
 | Background pinning, compaction references, consumed-input finals and revocation | The background/compaction and revocation-barrier tests passed remotely. The corrected replay/correlation scenario also passed locally at `135d00d70` in this finishing round. Live metadata/final wiring remains AEON-1290. |
-| Z1 person-only terminal projection and required port | `TestNativeLeadPersonOnlyViewerAndZ1Compatibility` passed remotely, proving person-only projection and the current `:8082` refusal. Required port publication remains blocked by AEON-1293. |
+| Z1 person-only terminal projection and required port | The earlier remote run proved person-only projection and the then-current `:8082` refusal. AEON-1293 closes that boundary: the same test now requires the default allowlist to admit the approved `:8082/LEAD` URL and still refuse credential, unlisted-port and foreign-host URLs. |
 
 The finishing-round negative control compiled the preceding text-only replay
 digest from `135d00d70^` through a temporary Go source overlay, against the
@@ -190,8 +190,9 @@ slots were occupied (`2/2`, CI pool `1/4`). Neither check ran to completion;
 both are **incomplete locally, awaiting PR CI**. There was no retry or local
 browser/static fallback. The first-round affected selection was `FULL`.
 At that handoff, authoritative PR CI and the tier/shard rows above were still
-required before merge. AEON-1293 and AEON-1290 remain the documented integration
-dependencies; no live qualification or release gate was run by this worker.
+required before merge. AEON-1293 and AEON-1290 were the documented integration
+dependencies then; AEON-1293's port allowlist has since landed. No live
+qualification or release gate was run by that worker.
 
 ## Fix round 3: CI registration drift
 
