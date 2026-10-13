@@ -35,6 +35,225 @@ type hbCall struct {
 	body   map[string]any
 }
 
+// Risk: an automatic retry grants authority to an unselected session, or
+// replays the ordinary claim after it committed and changes lead admission.
+func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		claims    int
+		claimed   bool
+		refreshed bool
+		note      string
+	}{
+		{name: "confirmed", claims: 1, claimed: true},
+		{name: "unconfirmed", note: "Waiting for a person"},
+		{name: "another session"},
+		{name: "another project", note: "Adoption unverified"},
+		{name: "zero revision", note: "Waiting for a person"},
+		{name: "ordinary start"},
+		{name: "no lead intent"},
+		{name: "paused selection", note: "Session ineligible"},
+		{name: "existing generation"},
+		{name: "worker"},
+		{name: "child coordinator"},
+		{name: "CLI 129 reference mismatch", note: "Reference mismatch"},
+		{name: "legacy native state", claims: 1, claimed: true},
+		{name: "legacy source mismatch", note: "Reference mismatch"},
+		{name: "missing registered reference", note: "Reference mismatch"},
+		{name: "revision race", claims: 2, claimed: true, refreshed: true},
+		{name: "second revision race", claims: 2, refreshed: true, note: "Claim conflicted again"},
+		{name: "cancel during claim", claims: 1, refreshed: true, note: "Waiting for a person"},
+		{name: "reselect during claim", claims: 1, refreshed: true, note: "Lead selection changed"},
+		{name: "eligibility conflict", claims: 1, refreshed: true, note: "Session ineligible"},
+		{name: "proof refused", claims: 1, note: "original account"},
+		{name: "lost claim response", claims: 1, claimed: true},
+		{name: "wrong claim receipt", claims: 1, note: "Claim result unverified"},
+		{name: "paired binding refused", claims: 1, claimed: true},
+		{name: "missing heartbeat identity"},
+		{name: "pending stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			own, other := transcriptSessionID, "88888888-8888-4888-8888-888888888888"
+			lead := harness.Lead{ProjectID: transcriptProjectID, SessionID: &own, Revision: 7, State: "waiting_for_room", Reason: "adoption_pending", ProcessActive: true}
+			o := heartbeatTestOptions(t.TempDir())
+			o.ProjectID, o.Role, o.Management = transcriptProjectID, "coordinator", "managed"
+			o.SourceSession = "11111111-1111-4111-8111-111111111111"
+			ref := heartbeatRegistrationRef(o, "")
+			source := o.SourceSession
+			switch tc.name {
+			case "unconfirmed":
+				lead.Reason = "awaiting_generation"
+			case "ordinary start":
+				lead.SessionID, lead.Reason = nil, "awaiting_generation"
+			case "no lead intent":
+				lead.SessionID, lead.Reason, lead.State, lead.Revision = nil, "", "none", 0
+			case "paused selection":
+				lead.State = "paused"
+			case "another session":
+				lead.SessionID = &other
+			case "another project":
+				lead.ProjectID = other
+			case "zero revision":
+				lead.Revision = 0
+			case "existing generation":
+				lead.Generation, lead.State, lead.Reason = 1, "working", ""
+			case "worker":
+				o.Role = "worker"
+			case "child coordinator":
+				o.Parent = other
+			case "CLI 129 reference mismatch":
+				ref = strings.Repeat("fallback-", 5)
+			case "legacy native state":
+				ref = ""
+			case "legacy source mismatch":
+				ref, source = "", other
+			case "missing registered reference":
+				ref, o.SourceSession = "", ""
+			case "paired binding refused":
+				o.Management = "unmanaged"
+			}
+			hold, err := openHeartbeatHold(o.StateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer hold.release()
+			lease := strings.Repeat("private-fixture-lease-", 3)
+			if err := hold.writeFile("lease.key", []byte(lease+"\n")); err != nil {
+				t.Fatal(err)
+			}
+			if err := hold.writeFile("index.source", []byte(source+"\n")); err != nil {
+				t.Fatal(err)
+			}
+			session := heartbeatSession{id: own, lease: lease, hold: hold, disk: heartbeatDisk{ProjectID: transcriptProjectID, RegisteredRef: ref, ActivityMode: "agent_summary"}}
+			if err := saveHeartbeatSession(&session); err != nil {
+				t.Fatal(err)
+			}
+			var calls []hbCall
+			claims := 0
+			srv := hbServer(t, &calls, func(r *http.Request, body map[string]any, w http.ResponseWriter) bool {
+				path := "/api/projects/" + transcriptProjectID + "/lead"
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == path:
+					_ = json.NewEncoder(w).Encode(lead)
+					return true
+				case r.Method == http.MethodPost && r.URL.Path == path+"/claim":
+					claims++
+					if r.Header.Get("Authorization") != "Bearer "+testKey || r.Header.Get("X-Aeon-Worker-Lease") != lease || body["session_id"] != own || body["expected_revision"] != float64(lead.Revision) || len(body) != 2 {
+						t.Error("claim did not retain its own exact authority, selection and current lead revision")
+					}
+					// Establish ordering through the accepted beat and the saved
+					// intent, rather than a sleep or an elapsed-time assertion.
+					saved, ok, err := loadHeartbeatSession(&hold)
+					if err != nil || !ok || saved.disk.LeadAdoption == nil || len(saved.disk.LeadAdoption.Attempts) != claims || saved.disk.LeadAdoption.Attempts[claims-1].Revision != lead.Revision || saved.disk.LeadAdoption.Attempts[claims-1].Result != "Awaiting claim result" || len(hbWhere(calls, "POST", "/heartbeat")) == 0 {
+						t.Error("claim was sent before its accepted heartbeat and durable attempt")
+					}
+					conflict := tc.name == "second revision race" || claims == 1 && (tc.name == "revision race" || tc.name == "cancel during claim" || tc.name == "reselect during claim" || tc.name == "eligibility conflict")
+					if conflict {
+						if tc.name != "eligibility conflict" {
+							lead.Revision++
+						}
+						if tc.name == "cancel during claim" {
+							lead.SessionID, lead.Reason = nil, "selection_cleared"
+						} else if tc.name == "reselect during claim" {
+							lead.SessionID = &other
+						}
+						w.WriteHeader(http.StatusConflict)
+						_, _ = w.Write([]byte(`{"error":"private upstream conflict"}`))
+						return true
+					}
+					if tc.name == "proof refused" {
+						w.WriteHeader(http.StatusForbidden)
+						_ = json.NewEncoder(w).Encode(map[string]string{"error": "raw_refusal " + ref + " " + lease})
+						return true
+					}
+					result := lead
+					result.Revision++
+					result.Generation, result.State, result.Reason = 1, "working", ""
+					if tc.name == "wrong claim receipt" {
+						result.SessionID = &other
+					} else {
+						lead = result
+					}
+					if tc.name == "lost claim response" {
+						w.WriteHeader(http.StatusBadGateway)
+						_, _ = w.Write([]byte(`{"error":"response lost after commit"}`))
+					} else {
+						_ = json.NewEncoder(w).Encode(result)
+					}
+					return true
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+					if doing, ok := body["doing"].(string); ok && len([]rune(doing)) > 60 {
+						t.Error("adoption reason exceeded the visible activity summary limit")
+						w.WriteHeader(http.StatusBadRequest)
+						return true
+					}
+					response := map[string]any{"id": own, "phase": "working", "agent_activity_mode": "agent_summary"}
+					if tc.name == "missing heartbeat identity" {
+						delete(response, "id")
+					} else if tc.name == "pending stop" {
+						response["pause"] = &harness.Pause{StopRequested: true}
+					}
+					_ = json.NewEncoder(w).Encode(response)
+					return true
+				case r.Method == http.MethodGet && r.URL.Path == harnessPath(transcriptProjectID, own):
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": own, "project_id": transcriptProjectID, "harness": o.Harness, "role": "coordinator"})
+					return true
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, stdout, stderr := heartbeatRuntime(t, srv)
+			for beat := 0; beat < 3; beat++ {
+				err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session)
+				if tc.name == "paired binding refused" {
+					if err == nil || !strings.Contains(err.Error(), "paired reconnect binding was refused") {
+						t.Fatal("optional binding failure was not reported")
+					}
+				} else if err != nil {
+					t.Fatalf("adoption prevented ordinary heartbeat reporting: %v", err)
+				}
+				// Reopen the persisted helper state after every beat. This also
+				// proves attempts survive an optional binding error and restart.
+				loaded, ok, err := loadHeartbeatSession(&hold)
+				if err != nil || !ok {
+					t.Fatal("could not reload helper state")
+				}
+				if tc.name != "worker" && tc.name != "child coordinator" && tc.name != "another session" && tc.name != "existing generation" && tc.name != "missing heartbeat identity" && tc.name != "pending stop" {
+					session = loaded
+				}
+			}
+			if claims != tc.claims {
+				t.Fatalf("claim count %d, want %d", claims, tc.claims)
+			}
+			journal := session.disk.LeadAdoption
+			if tc.claims > 0 && (journal == nil || len(journal.Attempts) != tc.claims || journal.Claimed != tc.claimed || journal.Refreshed != tc.refreshed) {
+				t.Fatal("saved attempt journal did not retain the bounded claim outcome")
+			}
+			if tc.note != "" && (journal == nil || !strings.Contains(journal.Note, tc.note)) {
+				t.Fatal("missing human-readable adoption reason and fix")
+			}
+			if (tc.name == "ordinary start" || tc.name == "no lead intent") && journal != nil {
+				t.Fatal("automatic adoption overwrote activity without an adoption intent")
+			}
+			beats := hbWhere(calls, "POST", "/heartbeat")
+			if len(beats) < 3 || tc.note != "" && !strings.Contains(fmt.Sprint(beats[len(beats)-1].body["activity_note"]), tc.note) {
+				t.Fatal("existing heartbeat status did not show the failure while reporting continued")
+			}
+			public := stdout.String() + stderr.String()
+			for _, beat := range beats {
+				raw, _ := json.Marshal(beat.body)
+				public += string(raw)
+			}
+			if strings.Contains(public, lease) || ref != "" && strings.Contains(public, ref) || strings.Contains(public, "raw_refusal") {
+				t.Fatal("private proof or upstream refusal escaped into heartbeat status")
+			}
+			if session.disk.Closed || session.disk.Terminal {
+				t.Fatal("optional adoption changed the helper's lifetime")
+			}
+		})
+	}
+}
+
 // R10/AEON-1107: an optional list/status 503 must not suppress an owned
 // liveness POST through either exact lookup or an explicit known project ID.
 func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {

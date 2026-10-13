@@ -16,7 +16,38 @@ sessions are not named in it. Ownership and adoption authority remain unchanged.
 **Confirm adoption** creates an owned lead intent if absent, or selects a
 session for the same owner's existing unbound intent. Confirmation preserves
 the current session and its context. The card shows **Adoption confirmed ·
-waiting for session proof** until the session supplies its existing lease:
+waiting for session proof** until the session supplies its existing lease.
+
+An updated `harness run-heartbeat` helper supplies that proof automatically
+after its next accepted heartbeat. It reads the existing project lead status
+with its own agent account and claims only a pending, person-confirmed selection
+of its own session, using the current **lead** revision and its existing lease.
+The helper checks the registered reference with the same derivation as the
+state-aware command below; it never substitutes the random `session.ref`
+fallback for a native registration. Legacy native state must retain its saved
+source binding and match the server's registered harness and root role.
+
+Before sending, it saves a bounded attempt journal in the private heartbeat
+state. A revision conflict refreshes the same selection once; cancellation or
+another selected session closes that retry. Successful claims retain the
+existing `lead.claim_checked` audit. The helper saves the result before optional
+inbox binding and reconciles a lost response from the current lead status.
+Repeated beats and helper recovery do not repeat a consumed claim or run
+ordinary start, resume or succession.
+
+A failed attempt places one human-readable reason and fix in the next
+heartbeat's existing activity note, when agent summaries are enabled. Worker
+progress, usage and liveness reporting continue. Private proof and raw upstream
+errors stay out of that note. A refused or uncertain claim is not retried
+indefinitely: check the lead card and repair the indicated account, permissions
+or private state, then confirm adoption again or use the state-aware command.
+This narrow helper change does not add a server-side failure receipt, inbox
+notice or a separate automatic-claim badge on the lead card.
+
+An already-running older helper needs a coordinator-approved upgrade that
+preserves its registration, lease and owner; replacing the executable on disk
+does not update that process. The one-shot state-aware command works alongside
+the existing helper without restarting it:
 
 ```sh
 aeon harness lead claim --state-dir /path/to/existing-heartbeat-state
