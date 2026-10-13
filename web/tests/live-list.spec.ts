@@ -259,6 +259,8 @@ test('changes by the same person in another tab reach the list; the tab’s own 
     const before = reads.length
     await setStatus(a, 'n-4', 'PHAROS-14', 'In progress')
     await expect(a.locator('#row-n-4 .status-btn')).toHaveAccessibleName(/In progress/)
+    const ownRevision = data.nodes.find(node => node.id === 'n-4')!.updated_at
+    expect(await a.evaluate(async revision => (await import('/src/lib/rowStore.ts' /* @vite-ignore */)).rowStore.isOwn('n-4', revision), ownRevision)).toBe(true)
     const ownEvent = live.eventFor('n-4')
     release()
     expect(await live.delivered(a, ownEvent)).toBe(connection)
