@@ -457,6 +457,64 @@ test requiring a negative control against `546d1b290`. The coordinator owns
 the trusted review verdict and merge/release decisions. No origin push,
 deployment, model CLI or review gate was run.
 
+## Fix round 8: fresh acceptance passes, shared registrations still block
+
+`review-ci622-0933.out` and its full Go JSON artifact target `028e51418`.
+`TestSharedFenceCallerInventory` observes exactly the missing
+`nativesessions/receipts/repository.go` entry in `db.LockTree`. The full
+`go-static` log for job `115176494723` identifies the same eight unclassified
+tests listed below. Both receipt table entries remain absent from the DSAR
+inventory. These are registration repairs, not a reason to remove the access
+fence, rename tests or weaken assertions.
+
+The selected PPM / INSPR account and coordinator-recorded builder session
+`10fc5df1-be37-46c8-b603-a172fcaa7c3a` were verified before writes. A fresh
+fetch finds `origin/main` at `fd8fae22f`, already an ancestor of this branch;
+merge-tree exits **0**, PR #622 is mergeable, and migration 1347 has no main
+collision. No conflict-resolution merge is required.
+
+The ticket and normative plan still assign
+`internal/agentpairing/shared_fence_test.go`,
+`scripts/ci/go-test-tiers.json` and `internal/dsar/inventory.json` exclusively
+to R0. No transfer to P3a is recorded. The original brief says to stop repairs
+outside the exclusive write set. This round therefore changes only this
+in-scope handoff and the ignored progress file. R0 must apply the exact rows
+below on this PR before another final check; redispatching the P3a builder
+without that integration cannot repair the reported failures.
+
+The guarded remote five-package run on `028e51418` freshly passes
+`internal/nativereceipts`, `internal/nativesessions/receipts`, `internal/chat`
+and `internal/dsar`. The agentpairing package reproduces the shared-fence
+inventory failure, so the combined run exits **1** and is **not green**.
+Passing the existing DSAR package tests does not supply the two missing
+classifications.
+
+* **PASS 1:** pre-I/O journal barrier, correlated input evidence and false-exit
+  denial.
+* **PASS 2:** content-free bounded journal/retries, honest queue states and
+  scoped receipt pages.
+* **PASS 3:** approved explicit final outbox and stopped-lease/chat isolation.
+* **PASS 4:** outage/exit/restart retention and current authority, including
+  the access-fence revocation interleaving.
+* **PASS 5:** crash uncertainty prevents reinjection; stable final replay
+  persists one message after acknowledgement loss.
+
+The locked static attempt refuses with **exit 3** because the daily workstation
+is YELLOW. With the remote build host GREEN and no hold, the separately approved
+guarded remote static attempt and its retry both refuse with **exit 3** for
+occupied remote slots or the CI-pool limit. No static checks run in these
+attempts and no local fallback is used. The offline affected selector exits
+**0** and requires
+**FULL CI** for migration 1347's unsupported or incomplete SQL classification.
+All four hosted web unit shards and twelve browser shards pass on the current
+PR head; this non-browser slice has no feature web unit or browser checks.
+Public-name and whitespace checks pass after this documentation edit.
+
+**INCOMPLETE:** the fence/tier failures and DSAR registrations remain R0
+prerequisites. No behavior change or new regression test is made, so no
+negative control against `028e51418` applies. No origin push, deployment,
+model CLI or review gate is run; the coordinator retains those decisions.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
