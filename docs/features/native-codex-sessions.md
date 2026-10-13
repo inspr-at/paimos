@@ -437,3 +437,40 @@ change is warranted. This round changes
 only this feature document; the PR remains blocked on R0 registration and
 authoritative validation. No origin push, deployment, live model CLI or review
 gate was run.
+
+## CI fix round 11
+
+At reviewed head `b219f9254`, [go-static job `115164094249`](https://github.com/inspr-at/paimos/actions/runs/38357583397/job/115164094249)
+again fails strict native Go-tier validation on exactly the three Codex tests
+listed in the fix round 5 registration handoff. Go vet, bootstrap drift and
+tier-selector regressions pass. All seven Go shards, four web unit shards,
+twelve browser shards, release checks and e2e pass; those results do not prove
+that the unregistered Codex package ran. No provider behavior failure is
+reported. Main remains `fd8fae22f`, already merged, and PR #617 is mergeable.
+
+A bounded manifest-only diagnosis at `b219f9254`, HEAD and main reproduces
+exactly those three missing identities. Adding only their proposed `ESSENTIAL`
+rows in memory passes that diagnosis. No shared manifest was written, and
+native collection still needs validation after R0 applies the rows.
+P5a's exclusive write set and R0's sole ownership of
+`scripts/ci/go-test-tiers.json` remain unchanged in fix11. The required fix
+is outside this worker's scope; R0 must register the rows in this PR before
+strict validation and authoritative CI can be green.
+
+Both guarded Go attempts refuse remote load (13 and 19, above the limit of
+12); both guarded static attempts refuse the global 2/2 remote-run slot cap.
+All four exit 3, so static validation remains incomplete. The permitted single
+local package fallback passes with `GOMAXPROCS=2`, `-p 2` and `-count=1`
+(0.437 s), exercising the existing acceptance 1–5 fake transcripts without a
+vendor process. The offline affected planner exits 0 with essential/full
+selection: 130 Go packages, 120 web unit files and 80 browser specs; Codex
+remains absent until registered. Tier-toolkit, web-shard and audit self-checks
+were not rerun separately from refused guarded static. Web/browser reruns
+are not applicable to this source-only slice and documentation-only round.
+
+The separate `gate/policy-preview` job `115163945598` reports no trusted
+verdict for `b219f9254`; the coordinator owns that cross-family gate after
+worker exit. No provider behavior or assertion changed, so no new regression
+test is warranted. This round changes only this feature document and remains
+blocked on R0 registration and authoritative validation. No origin push,
+deployment, live model CLI or review gate was run.
