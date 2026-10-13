@@ -286,8 +286,12 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     progress.done()
     await expect(page.locator('.phases .now')).toHaveText('Pull requests')
     await expect(page.locator('.phases svg path')).toHaveCount(0)
-    await page.screenshot({ path: testInfo.outputPath(`delivery-reading-progress-${width}-${theme}.png`), fullPage: true })
+    // Chromium's beyond-viewport capture clears touch emulation in the pinned
+    // Playwright runtime (https://github.com/microsoft/playwright/issues/42607).
+    // Keep the complete touch audit before capture; navigation below restores
+    // the context's emulation for the next scenario.
     results.push(...await checkProjectSettings(page, `delivery-reading-progress-${width}-${theme}`, width < 600))
+    await page.screenshot({ path: testInfo.outputPath(`delivery-reading-progress-${width}-${theme}.png`), fullPage: true })
 
     world.state = 'none'; world.source = null
     await page.goto('/p/AEON/delivery'); await expect(page.getByRole('link', { name: 'Link repository', exact: true })).toBeVisible()

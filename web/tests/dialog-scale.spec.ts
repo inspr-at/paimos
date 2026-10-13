@@ -228,6 +228,20 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
       }
       await page.setViewportSize({ width, height: 1000 })
     }
+    const conversionDetails = convert.getByRole('region', { name: 'Conversion details' })
+    await expectStableControls({
+      controls: convertControls,
+      scrollAreas: { details: conversionDetails },
+      interactions: [{ name: 'read long conversion details by keyboard', run: async () => {
+        await conversionDetails.locator('.lead').evaluate(element => { element.textContent = Array(30).fill('Die vollständige Änderung und sämtliche zugehörigen Datensätze bleiben in der mandantenbezogenen Historie nachvollziehbar.').join(' ') })
+        await conversionDetails.focus(); await expect(conversionDetails).toBeFocused()
+        await conversionDetails.press('End')
+        await expect.poll(() => conversionDetails.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+        const frame = (await convert.boundingBox())!
+        expect(frame.y + frame.height).toBeLessThanOrEqual((width === 390 ? 844 : 1000) + .5)
+      } }],
+    })
+    await page.screenshot({ path: info.outputPath(`convert-kind-long-${width}-${theme}.png`) })
     await expect(convert.getByRole('button', { name: 'Convert to incident', exact: true })).toBeVisible()
     await convert.getByRole('button', { name: 'Cancel' }).click()
     await details.getByRole('button', { name: /Status: / }).click()

@@ -149,7 +149,7 @@ async function submit() {
         <button type="button" class="btn" @click="close">Cancel</button>
         <button ref="primary" type="button" class="btn on" :disabled="!canSubmit" @click="submit"><span class="btn-label"><span>{{ primaryLabel }}</span><span v-for="label in reservedLabels" :key="label" aria-hidden="true">{{ label }}</span></span></button>
       </div>
-      <div class="convert-scroll">
+      <div class="convert-scroll" role="region" aria-label="Conversion details" tabindex="0">
         <p class="lead">{{ sentence }}</p>
         <p v-if="waiting" class="note">Checking children…</p>
         <ul v-else-if="blockers.length" class="blockers" aria-label="Blocking children">
@@ -169,11 +169,12 @@ async function submit() {
 </template>
 
 <style scoped>
-.convert { display: flex; flex-direction: column; width: min(var(--dialog-m), calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: min(8dvh, 80px) auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
+.convert { --convert-top: min(8dvh, 80px); display: flex; flex-direction: column; width: min(var(--dialog-m), calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - var(--convert-top) - 16px); margin: var(--convert-top) auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
 .convert::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.convert-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 32px); overflow: hidden; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
-.convert-controls { flex: none; padding: 22px 24px 0; }
+.convert-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - var(--convert-top) - 16px); overflow: hidden; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.convert-controls { flex: none; min-height: 0; max-height: min(50dvh, 360px); overflow: auto; padding: 22px 24px 0; }
 .convert-scroll { min-height: 0; overflow: auto; padding: 0 24px 22px; }
+.convert-scroll:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .actions { flex: none; padding: 0 24px; }
 h2 { font-size: 18px; overflow-wrap: anywhere; }
 .lead, .note { margin-top: 8px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
@@ -188,6 +189,7 @@ h2 { font-size: 18px; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .actions .btn { min-width: 0; }
 .actions .btn:disabled { opacity: .45; }
+@media (pointer: coarse), (max-width: 600px) { .choice { min-height: 44px; } }
 /* Phones: a full-height sheet with the actions pinned to the bottom (AEON-730). */
 @media (max-width: 600px) {
   .convert { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; }
