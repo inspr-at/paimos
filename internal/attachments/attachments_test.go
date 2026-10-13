@@ -234,6 +234,57 @@ func TestGzipAttachmentUploadAndIsolatedDownload(t *testing.T) {
 	}
 }
 
+// Risk: an HTML-transforming intermediary must not rewrite attachment bytes
+// after storage has recorded their size and content digest.
+func TestAttachmentContentPreventsIntermediaryTransforms(t *testing.T) {
+	d, p, node := setup(t)
+	store := Store{FilesDir: t.TempDir()}
+	mux := http.NewServeMux()
+	New(d.App, store).Mount(mux)
+	prefix := []byte("<!doctype html><p>contact@example.test</p><!--")
+	body := append(prefix, bytes.Repeat([]byte("x"), 183795-len(prefix)-len("-->"))...)
+	body = append(body, []byte("-->")...)
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{"no-final-newline.html", body},
+		{"final-newline.html", append(bytes.Clone(body), '\n')},
+		{"plain.txt", []byte("contact@example.test\n")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ct, upload := multipartFile(t, tc.name, tc.body)
+			w := request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, upload)
+			var items []Attachment
+			if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &items) != nil || len(items) != 1 {
+				t.Fatalf("upload %d: %s", w.Code, w.Body.String())
+			}
+			a := items[0]
+			w = request(t, mux, p, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("content status %d: %s", w.Code, w.Body.String())
+			}
+			// Model an intermediary's HTML email obfuscation: it preserves
+			// original bytes only when the origin supplies no-transform.
+			transformed := w.Body.Bytes()
+			if strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") && !strings.Contains(w.Header().Get("Cache-Control"), "no-transform") {
+				transformed = bytes.ReplaceAll(transformed, []byte("contact@example.test"), []byte(`<span class="__cf_email__">protected</span>`))
+				transformed = append(transformed, []byte(`<script src="/cdn-cgi/scripts/email-decode.min.js"></script>`)...)
+			}
+			sum := sha256.Sum256(transformed)
+			if !bytes.Equal(transformed, tc.body) || int64(len(transformed)) != a.Size || hex.EncodeToString(sum[:]) != a.SHA256 {
+				t.Fatalf("intermediary changed attachment: got %d bytes, want %d", len(transformed), a.Size)
+			}
+			if w.Header().Get("Content-Length") != strconv.Itoa(len(tc.body)) || w.Header().Get("ETag") != `"`+a.SHA256+`"` || !strings.Contains(w.Header().Get("Cache-Control"), "no-transform") {
+				t.Fatalf("byte integrity headers: %v", w.Header())
+			}
+			if strings.HasSuffix(tc.name, ".html") && w.Header().Get("Cache-Control") != "no-store, private, no-transform" {
+				t.Fatalf("HTML cache privacy changed: %s", w.Header().Get("Cache-Control"))
+			}
+		})
+	}
+}
+
 func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	d, p, node := setup(t)
 	store := Store{FilesDir: t.TempDir(), MaxSize: 1 << 20}

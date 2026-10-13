@@ -4,6 +4,8 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +20,7 @@ import (
 type attachmentView struct {
 	ID          string `json:"id"`
 	NodeID      string `json:"node_id"`
+	SHA256      string `json:"sha256,omitempty"`
 	Name        string `json:"name"`
 	ContentType string `json:"content_type"`
 	Size        int64  `json:"size"`
@@ -100,7 +103,9 @@ func (rt *runtime) cmdAttach() *Command {
 			return nil
 		}},
 		{Name: "get", Short: "Get attachment metadata or bytes", Use: "attach get <id> [--download PATH]", minArgs: 1, maxArgs: 1,
-			addFlags: func(fs *flagSet) { fs.string(&download, "download", 0, "write bytes to path or - for stdout") }, run: func(args []string) error {
+			addFlags: func(fs *flagSet) {
+				fs.string(&download, "download", 0, "write verified bytes to path or - for stdout; output errors may leave partial stdout bytes")
+			}, run: func(args []string) error {
 				if !validUUID(args[0]) {
 					return usagef("attachment id must be an Aeon UUID")
 				}
@@ -153,11 +158,21 @@ func (rt *runtime) findAttachment(id string) (attachmentView, error) {
 	return meta, err
 }
 
-// Verify bytes in a unique private spool before publishing any output. A file
-// destination uses a spool in the same directory so rename is atomic.
+// Verify size and the available metadata SHA-256 in a unique private spool
+// before publishing any output, including stdout. A file destination uses a
+// spool in the same directory so rename is atomic. A stdout write failure can
+// still leave partial output and must return an error.
 func (rt *runtime) downloadAttachment(meta attachmentView, destination string) error {
 	if meta.Size < 0 || meta.Size == math.MaxInt64 {
 		return fmt.Errorf("invalid attachment size")
+	}
+	if meta.SHA256 != "" {
+		if len(meta.SHA256) != hex.EncodedLen(sha256.Size) {
+			return fmt.Errorf("invalid attachment sha256")
+		}
+		if _, err := hex.DecodeString(meta.SHA256); err != nil {
+			return fmt.Errorf("invalid attachment sha256")
+		}
 	}
 	resp, key, err := rt.rawResponse(http.MethodGet, "/api/attachments/"+url.PathEscape(meta.ID)+"/content", nil, "")
 	if err != nil {
@@ -178,12 +193,16 @@ func (rt *runtime) downloadAttachment(meta attachmentView, destination string) e
 	}
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
-	n, err := io.Copy(tmp, io.LimitReader(resp.Body, meta.Size+1))
+	hash := sha256.New()
+	n, err := io.Copy(io.MultiWriter(tmp, hash), io.LimitReader(resp.Body, meta.Size+1))
 	if err != nil {
 		return rt.fail(err, key)
 	}
 	if n != meta.Size {
 		return rt.fail(fmt.Errorf("incomplete attachment download: got %d bytes, expected %d", n, meta.Size), key)
+	}
+	if meta.SHA256 != "" && hex.EncodeToString(hash.Sum(nil)) != meta.SHA256 {
+		return rt.fail(fmt.Errorf("attachment download sha256 mismatch"), key)
 	}
 	if err := tmp.Sync(); err != nil {
 		return err
@@ -192,8 +211,14 @@ func (rt *runtime) downloadAttachment(meta attachmentView, destination string) e
 		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		_, err = io.Copy(rt.stdout, tmp)
-		return err
+		n, err = io.Copy(rt.stdout, tmp)
+		if err != nil {
+			return err
+		}
+		if n != meta.Size {
+			return fmt.Errorf("incomplete attachment stdout write: got %d bytes, expected %d", n, meta.Size)
+		}
+		return nil
 	}
 	if err := tmp.Close(); err != nil {
 		return err
