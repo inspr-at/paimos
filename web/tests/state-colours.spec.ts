@@ -7,12 +7,18 @@ import { indicatorVariants } from '../src/lib/indicatorVariants'
 import { saveAgentTheme } from './agent-theme-fixtures'
 
 async function expectStateWordFits(project: Locator) {
+  await expect(project.locator('.chip-state')).toBeVisible()
   // Sample one layout so a font swap cannot leave the chip and label from different frames.
   const { bounds, chip, word, fits } = await project.evaluate(el => {
     const chip = el.querySelector('.live-chip')!, label = el.querySelector('.chip-state')!
     return { bounds: el.getBoundingClientRect().toJSON(), chip: chip.getBoundingClientRect().toJSON(),
       word: label.getBoundingClientRect().toJSON(), fits: label.scrollWidth <= label.clientWidth }
   })
+  for (const box of [bounds, chip, word]) {
+    expect(box.width).toBeGreaterThan(0)
+    expect(box.height).toBeGreaterThan(0)
+  }
+  expect(chip.x).toBeGreaterThanOrEqual(bounds.x)
   expect(word.x).toBeGreaterThanOrEqual(chip.x)
   expect(word.x + word.width, await project.getAttribute('data-project-id') ?? '').toBeLessThanOrEqual(chip.x + chip.width)
   expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
@@ -91,7 +97,7 @@ for (const theme of ['light', 'dark'] as const) {
     // The hosted Linux font metrics are wider than macOS's. Exercise that risk
     // deterministically with the bundled font, including the activity timestamp.
     await page.evaluate(() => document.documentElement.style.setProperty('--font', '"JetBrains Mono", monospace'))
-    await page.evaluate(() => document.fonts.ready)
+    await page.evaluate(() => document.fonts.load('500 12px "JetBrains Mono"'))
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 844 })
       for (const layout of ['Cards', 'List']) {
