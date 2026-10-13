@@ -704,7 +704,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 /* Reports and live groups grow below the controls without changing the viewport offset. */
 .agents-page { overflow-anchor: none; }
 /* A column, not a grid: a folding card's negative margin can take the gap with it (AEON-505). */
-.main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.main-col { display: flex; flex-direction: column; gap: var(--section-gap); min-width: 0; }
 /* The capacity row (AEON-1209): what may run, left-aligned, scrolling with the page. Its width decides
    how the dial's units open (a container query in the dial). A tight row's plates float over the
    neighbours and may reach into the page's side padding, but never widen the page: the row clips at
