@@ -8,8 +8,8 @@ import { runPlaywright } from '../playwright-safe.mjs'
 import { readdirSync } from 'node:fs'
 
 try {
-  const widths = process.env.AUDIT_WIDTHS?.split(',').map(Number)
-  const themes = process.env.AUDIT_THEMES?.split(',')
+  const widths = process.env.AUDIT_WIDTHS ? process.env.AUDIT_WIDTHS.split(',').map(Number) : undefined
+  const themes = process.env.AUDIT_THEMES ? process.env.AUDIT_THEMES.split(',') : undefined
   const specs = readdirSync('tests').filter(file => {
     const match = /^ui-audit-(light|dark)-(\d+)\.spec\.ts$/.exec(file)
     if (!match && file !== 'ui-audit.spec.ts') return false
