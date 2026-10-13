@@ -201,3 +201,12 @@ test tier, approval or ownership boundary may be weakened to make CI pass.
 After applying the two R0 registrations in this PR, rerun the guarded static
 checks and authoritative CI before merge. The round remains incomplete until
 that coordinator-owned work is green.
+
+At fix commit `5b697715e`, the targeted Codex package passed through the guarded
+remote test runner (0.331 s). The guarded static run exited 1 with 39 checks
+passed and none skipped: `public-names`, Go vet, test-tier toolkit tests, web
+typecheck/lint and web-shard tests passed. Only `go-tiers`, `audit-tests` and
+`audit-coverage` failed, for exactly the missing R0 registrations above. The
+unchanged public-name rule matches the document at `1dc0c91aa` and no longer
+matches the corrected document. No provider behavior or test assertions were
+changed; browser reruns are not applicable to this documentation-only fix.
