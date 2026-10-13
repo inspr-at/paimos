@@ -2238,6 +2238,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestArchiveAccountDisconnectsBindingAndKeepsHistory","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachActivationRefusesOccupiedTicket","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachActivityRequiresActiveApprovalAndHonorsPolicy","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachAdmissionBoundsLiveRequestsAcrossComputersAndWindowRollover","tier":"GATED-FULL"}
@@ -3527,6 +3529,8 @@
     {"kind":"go","package":"internal/auth","name":"TestAgentsPlanRouteScopeIsReadOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAttach","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAuthenticationActivityRenewalKeepsLiveValidity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal","tier":"ESSENTIAL"}
     ,
@@ -6388,6 +6392,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestLostContactWorkerStopReplacesReason","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedBuilderDeliveryAndParallelAuditUseOriginTicket","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestManagedControlFreshnessUsesDatabaseClock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedControlsIdentityReplayPrivacyAndExpiry","tier":"ESSENTIAL"}
@@ -6403,6 +6409,8 @@
     {"kind":"go","package":"internal/harness","name":"TestManagedRulesRespectRequestAndRegisteredCeilings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedSettingsCatalogLifecycleAndFencing","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedTicketBuilderAdmissionSharesBindingsAndQueue","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManualReparentPermissionsAndUndo","tier":"GATED-FULL"}
     ,
@@ -6622,7 +6630,13 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestThrottledHeartbeatAndStateEvidence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketBuilderAdmissionRaceBindingRevivalAndQueue","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketBuiltUnmergedAdmissionUsesLinkedDeliveryAndMerge","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestTicketEtaRetainsWorkingHintWithoutReport","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketParallelBuildRequiresCurrentAuthorityAndAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestTierAlreadyActiveRetainsIdempotencyReceipt","tier":"GATED-FULL"}
     ,
@@ -6840,6 +6854,8 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHealthDatabase","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestLongMutationPreservesEventPositionAfterAuthentication","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadStatementTimeoutReturns503","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyGate","tier":"GATED-FULL"}
@@ -6847,6 +6863,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadyPoolSaturationAndDatabaseFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestRequestBudgetPrecedesAuthenticationAndPreservesHandlerLifetime","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}
     ,

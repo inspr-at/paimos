@@ -34,7 +34,14 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
-        '409': {description: Active run or changed target conflicts}
+        '409':
+          description: 'Active run or changed target conflicts. build_in_flight identifies an active builder or returns already built — ship it for unmerged delivery evidence in the linked repository; no work is created.'
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - {$ref: '#/components/schemas/BuildInFlightError'}
+                  - {$ref: '#/components/schemas/Error'}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
   /queue/next:
     post:

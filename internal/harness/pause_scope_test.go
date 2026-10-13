@@ -15,7 +15,7 @@ func TestLeavingScopeSelectionRetriesAndReplacement(t *testing.T) {
 	f := fixture(t)
 	register := func(host string) (string, string) {
 		t.Helper()
-		body := pauseRegistration(f)
+		body := pauseRegistration(f, "Compare owned parallel worker selections across hosts")
 		body["host"] = host
 		w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
 		expect(t, w, 201)

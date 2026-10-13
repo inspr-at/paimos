@@ -28,6 +28,7 @@ type snapshotNode struct {
 	Revision time.Time `json:"revision"`
 }
 type snapshotItem struct {
+	Reason   string         `json:"reason,omitempty"`
 	NodeID   string         `json:"node_id"`
 	Revision time.Time      `json:"revision"`
 	Outcome  string         `json:"outcome"`
@@ -482,6 +483,18 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 		}
 		if !errors.Is(loadErr, pgx.ErrNoRows) {
 			return nil, loadErr
+		}
+		if err = workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil); err != nil {
+			var conflict *workqueue.BuildConflict
+			if errors.As(err, &conflict) {
+				item.Outcome, item.Reason = "active", "build in flight"
+				if conflict.Reason == "built_unmerged" {
+					item.Reason = "already built — ship it"
+				}
+				s.Partial = true
+				continue
+			}
+			return nil, err
 		}
 		// Shared membership replay above remains idempotent. Every other live
 		// binding (session, child-order run, or running order) uses the canonical

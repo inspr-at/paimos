@@ -31,6 +31,7 @@ func (rt *runtime) harnessRun() *Command {
 			fs.string(&o.Label, "label", 0, "public session label")
 			fs.string(&o.Ticket, "ticket", 0, "ticket key")
 			fs.string(&role, "role", 0, "reviewer, fixer, worker or coordinator")
+			fs.string(&o.ParallelReason, "parallel-reason", 0, "explicit public reason for parallel work; requires person or coordinator authority")
 			fs.string(&o.Parent, "parent-session", 0, "lead session UUID")
 			fs.string(&o.Shape, "work-shape", 0, "ship or scout (reviewer defaults to scout)")
 			fs.string(&o.Model, "model", 0, "public model name")

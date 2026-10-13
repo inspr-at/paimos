@@ -316,7 +316,7 @@ func TestHarnessBindingRevisionAndHierarchy(t *testing.T) {
 	parent := register("vendor-ref-00000000000000003", nil)
 	child := register("vendor-ref-00000000000000004", &parent)
 	bind := func(session string, revision int, parentID *string) *httptest.ResponseRecorder {
-		return f.call(f.person, "PATCH", base+"/"+session+"/binding", map[string]any{"expected_revision": revision, "parent_harness_session_id": parentID, "ticket_node_id": f.ticket, "work_shape": "ship"}, "")
+		return f.call(f.person, "PATCH", base+"/"+session+"/binding", map[string]any{"expected_revision": revision, "parent_harness_session_id": parentID, "ticket_node_id": f.ticket, "work_shape": "ship", "parallel_reason": "Exercise independent hierarchy bindings on the same ticket"}, "")
 	}
 	w := bind(child, 1, &parent)
 	expect(t, w, 200)

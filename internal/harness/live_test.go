@@ -309,6 +309,7 @@ func TestLiveCarriesReportedProgress(t *testing.T) {
 	register := func(pct *int) string {
 		t.Helper()
 		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "studio-mac", "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "progress-generation-" + uid(), "worker_lease": "progress-worker-lease-" + uid(), "ticket_node_id": f.ticket, "work_shape": "ship"}
+		body["parallel_reason"] = "Compare reported and unreported live worker progress"
 		w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
 		expect(t, w, 201)
 		id := decode(t, w)["id"].(string)
@@ -356,6 +357,7 @@ func TestLiveDisplayLabelIsNotThePrincipalName(t *testing.T) {
 		if label != "" {
 			body["display_label"] = label
 		}
+		body["parallel_reason"] = "Compare simultaneous labeled and unlabeled worker projections"
 		w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
 		expect(t, w, 201)
 		id := decode(t, w)["id"].(string)

@@ -334,10 +334,30 @@ func (m *Module) authenticateSession(ctx context.Context, raw []byte) (tenant.Pr
 		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.session_id',$1,true)`, id); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `UPDATE sessions
-			SET last_seen_at = now(), expires_at = now() + interval '30 days'
-			WHERE id = $1 AND expires_at > now()
-			RETURNING tenant_id::text, principal_id::text`, id).Scan(&tenantID, &principalID)
+		var renew bool
+		if err := tx.QueryRow(ctx, `SELECT tenant_id::text, principal_id::text,
+			last_seen_at <= clock_timestamp() - interval '1 minute'
+			OR expires_at <= clock_timestamp() + interval '1 minute'
+			FROM sessions WHERE id = $1 AND expires_at > clock_timestamp()`, id).Scan(&tenantID, &principalID, &renew); err != nil {
+			return err
+		}
+		if !renew {
+			return nil
+		}
+		// Activity and the sliding 30-day lease renew at minute granularity;
+		// validity is always read live above. Renew near expiry even when the
+		// activity timestamp is recent, and never revive an expired session.
+		// A concurrent renewal/authority write owns the row: skip it instead
+		// of queueing parallel requests, and retry on the next request.
+		// One statement timestamp keeps activity and expiry exactly 30 days apart.
+		_, err := tx.Exec(ctx, `UPDATE sessions
+			SET last_seen_at = statement_timestamp(), expires_at = statement_timestamp() + interval '30 days'
+			WHERE id IN (SELECT id FROM sessions
+				WHERE id = $1 AND expires_at > clock_timestamp()
+				AND (last_seen_at <= clock_timestamp() - interval '1 minute'
+					OR expires_at <= clock_timestamp() + interval '1 minute')
+				FOR NO KEY UPDATE SKIP LOCKED)`, id)
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		_ = m.deleteSession(ctx, raw)
@@ -425,30 +445,45 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 		var principalID, gotTenant string
 		var creatorID *string
 		var keyID string
-		var marked, fullAccess bool
+		var marked, fullAccess, renew bool
 		var computer *string
 		var generation int64
 		var scopes pgtype.FlatArray[string]
-		err := tx.QueryRow(ctx, `
-			UPDATE agent_keys k
-			SET last_used_at = now()
-			WHERE k.prefix = $1 AND k.hash = $2
+		// Use the same live credential predicate for lookup and coarse renewal.
+		// No principal, creator, pairing, expiry or scope state is cached.
+		const validKey = `k.prefix = $1 AND k.hash = $2
 			  AND k.revoked_at IS NULL
      AND NOT EXISTS(SELECT 1 FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
       WHERE c.principal_id=k.principal_id AND (c.state='revoked' OR q.state<>'redeemed'))
-			  AND (k.expires_at IS NULL OR k.expires_at > now())
+			  AND (k.expires_at IS NULL OR k.expires_at > clock_timestamp())
 			  AND EXISTS (
 			    SELECT 1 FROM principals p
 			    WHERE p.id = k.principal_id AND p.kind = 'agent' AND p.status='active'
 			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
-			  )
-			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text, k.id::text, k.owner_workstation, k.workstation_computer_id::text, k.workstation_generation, coalesce(k.full_access,false)
-		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID, &keyID, &marked, &computer, &generation, &fullAccess)
+			  )`
+		hash := hashSecret(secret)
+		err := tx.QueryRow(ctx, `SELECT k.principal_id::text, k.tenant_id::text, k.scopes,
+			k.created_by_principal_id::text, k.id::text, k.owner_workstation,
+			k.workstation_computer_id::text, k.workstation_generation, coalesce(k.full_access,false),
+			k.last_used_at IS NULL OR k.last_used_at <= clock_timestamp() - interval '1 minute'
+			FROM agent_keys k WHERE `+validKey,
+			prefix, hash).Scan(&principalID, &gotTenant, &scopes, &creatorID, &keyID, &marked, &computer, &generation, &fullAccess, &renew)
 		if err != nil {
 			return err
 		}
 		if !strings.EqualFold(gotTenant, tenantID) {
 			return pgx.ErrNoRows
+		}
+		if renew {
+			// last_used_at trails activity by at most a minute between renewals.
+			// Busy rows are retried on the next request, without delaying live
+			// authentication. Per-scope usage evidence is recorded separately.
+			if _, err := tx.Exec(ctx, `UPDATE agent_keys SET last_used_at = clock_timestamp()
+				WHERE id IN (SELECT k.id FROM agent_keys k WHERE `+validKey+`
+					AND (k.last_used_at IS NULL OR k.last_used_at <= clock_timestamp() - interval '1 minute')
+					FOR NO KEY UPDATE SKIP LOCKED)`, prefix, hash); err != nil {
+				return err
+			}
 		}
 		p, err = scanPrincipal(tx.QueryRow(ctx, `
 			SELECT id::text, tenant_id::text, kind, name, roles

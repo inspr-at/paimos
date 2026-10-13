@@ -111,6 +111,7 @@ func TestAttachLeaseSessionsRevokeIndependentlyAndExpireOffline(t *testing.T) {
 			second.ConsentDigest = ""
 			second.Sequence = 0
 			second.Snapshot.Process.PID++
+			second.Snapshot.TicketID = siblingWatchTicket(t, f, in.Snapshot.ProjectID)
 			secondView := activateWatch(t, f, key, &second)
 			if *first.SessionID == *secondView.SessionID {
 				t.Fatal("sessions on same principal collided")
