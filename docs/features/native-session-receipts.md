@@ -169,6 +169,42 @@ the DSAR migration inventory guard and shared-fence caller inventory before
 merge. These shared files are outside P3a's exclusive write set; the builder
 did not edit them. No push, deployment, live cutover or model gate was run.
 
+## Fix round 2: incomplete metadata handoff
+
+The supplied CI findings for PR #622 target `a79fb6901`. The full
+`go-test-3-internal-agentpairing.jsonl` artifact confirms that
+`TestSharedFenceCallerInventory` fails because `db.LockTree` observes
+`nativesessions/receipts/repository.go` and the expected inventory omits it.
+`Repository.write` already acquires the canonical tenant and tree fences before
+authority/record work; the missing inventory row requires the R0 change below.
+The other reported failures are the audit's missing ownership for the seven
+`internal/nativereceipts` source files. These are metadata failures; the supplied
+findings identify no behavior change requiring a new regression test.
+
+On 2026-10-13, a fresh fetch confirmed `origin/main` at `828bf8697`, already an
+ancestor of this branch. The central native-package audit registration had not
+merged. Inspection also confirmed that the eight ESSENTIAL tier rows and both
+DSAR entries below remain absent. The P3a exclusive write set and the plan's
+single R0 metadata lane reserve all four affected shared files to R0;
+`worker-common.md` additionally directs LEAD to fix native audit ownership
+centrally. This round preserves that ownership and leaves all existing test
+assertions intact. PPM/INSPR and the coordinator-recorded builder marker
+`29f48451-23a0-4f6c-85b4-44a57a42526a` were verified before the handoff edit.
+
+The guarded `remote-test.sh -count=1` attempt covered the three required P3a
+packages plus `internal/agentpairing` and `internal/dsar`; both the initial run
+and retry refused with **exit 3** because both remote slots were occupied.
+`ci-static-locked.sh` also refused with **exit 3** for the occupied remote slots.
+No tests executed in those attempts, and no heavy local fallback was run.
+Browser/web unit checks do not apply to this non-browser slice. The earlier
+acceptance passes above remain historical evidence, not fresh round-2 passes.
+
+**INCOMPLETE:** both reported CI failures and the missing tier/DSAR registrations
+remain same-PR R0 prerequisites. Apply the exact rows below, merge the central
+audit registration once released to main, and rerun guarded Go/static checks
+before the coordinator's cross-family gate. This documentation handoff does not
+mark CI green or authorize merge/release.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
