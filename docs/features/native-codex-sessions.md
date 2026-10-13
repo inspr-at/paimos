@@ -123,3 +123,48 @@ this PR before final authoritative checks and merge. Run the targeted package
 through `remote-test.sh`, the affected planner against `origin/main`, and the
 guarded static check. A refused/incomplete check is not green and remains an
 explicit coordinator/PR-CI handoff.
+
+## Builder handoff evidence
+
+The final implementation was validated at code commit `918a33bd8`:
+
+- PASS acceptance 1: C0 `Launcher`/`NativeTransport` implementation with injected
+  `launchWire` adaptation ports and no process supervisor.
+- PASS acceptance 2: pinned handshake, start/resume, exact-turn start/steer/
+  interrupt, explicit final, approval and usage mappings; fake single-child
+  launch and resume transcript assertions.
+- PASS acceptance 3: current enrolled account checked before input and final
+  evidence; per-child `CODEX_HOME`, immutable grant/profile/policy, and no
+  credential/OAuth handling.
+- PASS acceptance 4: supervised native policy matches the existing grant and
+  resolved sandbox; routine/confined/bounded-preapproved profiles refuse before
+  possible fork. Live native tool qualification remains `G_PROVIDER_PINS`.
+- PASS acceptance 5: fake transcripts reject stale turns, changed grants,
+  mismatched steering acknowledgements and wrong-account input/final evidence.
+  Removing the account-match fence fails both wrong-account assertions for
+  their intended reasons; exact source was restored with no control commit.
+
+The targeted suite passed through `remote-test.sh` on mbp2606 (0.293 s).
+The permitted small local package fallback also passed with `-race` (1.726 s)
+after remote capacity refusals. The three named tests include barriers, injected
+clock approval expiry, observed-exit failure and C0 payload validation.
+
+`affected.mjs --base origin/main --json` exited 0: essential/full selection,
+128 Go packages, 80 browser specs and 120 web unit files. The new Codex package
+is absent from that manifest-derived selection until R0 applies the three tier
+rows, so the targeted package was run explicitly. This is not evidence that the
+broader selected suites passed. Browser validation is not applicable to P5a.
+
+R0 registrations and authoritative PR CI remain required in this same PR.
+The final `ci-static-locked.sh` run completed with exit 1: 39 checks passed,
+none were skipped, and only the R0-controlled registrations failed. `go-tiers`
+reports the three unclassified tests above; `audit-tests`/`audit-coverage`
+report the six new package source/fixture files without slice ownership.
+Earlier guarded static attempts refused the remote 2/2 slot cap with exit 3.
+The builder cannot fix either registry outside its exclusive write set. Apply
+the S2 ownership glob and the three tier rows, then rerun guarded static and
+authoritative selected-suite CI before merge. This handoff is not static-green.
+
+No shared inventory, contract, permission, migration or release-version file was
+changed. No origin push, deployment, live vendor session, model CLI or review
+gate was run.
