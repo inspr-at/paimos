@@ -239,3 +239,45 @@ metadata work; no provider behavior fix was found, so no new behavior test or
 assertion change is warranted. The PR was mergeable after fetching current
 `origin/main`; no merge was needed. No origin push, deployment, model CLI or
 review gate was run.
+
+## CI fix round 6
+
+The full failed-step logs at reviewed head `4836ccb72` confirm the same two
+metadata causes: the three unclassified Codex tests in `go-static` job
+`115126936584` and the two ownership assertions in `release-check-run` job
+`115126936672`. No provider compilation or behavior failure was reported.
+
+R0's central PR #623 merged as `3507e3319`. Fix round 6 merged that current
+`origin/main` cleanly into this branch as `90446fb2c`, importing its
+`internal/native*/**` S2 ownership glob. The ownership checker reproduces all
+six unassigned Codex files with the reviewed head's configuration and assigns
+all six without errors with the imported configuration. No ownership assertion
+was loosened and the builder did not edit the shared registry.
+
+The guarded remote Codex package run at `90446fb2c` passed with `-count=1`
+(0.342 s). The affected planner against `origin/main` exited 0 and selected
+128 Go packages, 120 web unit files and 80 browser specs. The Codex package
+still has zero registered tier rows and is absent from that selection, so the
+targeted remote run remains necessary. No web or browser source changed;
+their reruns are not applicable to P5a.
+
+The three exact `ESSENTIAL` rows in the fix round 5 handoff remain required in
+`scripts/ci/go-test-tiers.json`. The normative P5a/R0 plan continues to reserve
+that file for the coordinator metadata lane; this fix brief preserves ownership
+and does not transfer it. CI cannot be called green until R0 applies those
+rows in this PR and the strict tier check and authoritative CI pass. No provider
+behavior fix or new behavior test is warranted for these metadata findings.
+
+The guarded `ci-static-locked.sh` run at `90446fb2c` completed remotely with
+exit 1: 41 checks passed and none were skipped. `audit-tests` and
+`audit-coverage` now pass, confirming that both reported ownership failures
+are resolved. The tier-toolkit and web-shard self-checks also pass. The sole
+remaining failure is `go-tiers`, naming exactly the three missing Codex rows
+above; this is an incomplete handoff, not static-green.
+
+Fix round 6 changes only this feature document and imports the coordinator's
+shared ownership fix through the main merge. No provider behavior, assertion,
+test-tier registry, contract, permission, migration or release version was
+edited. No origin push, deployment, live vendor session, model CLI or review
+gate was run. R0's three tier registrations and green authoritative CI remain
+the coordinator's next required work before merge.
