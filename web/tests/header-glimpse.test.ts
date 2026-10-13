@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { glimpseControlSpot, glimpseOverlaps, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady } from '../src/lib/headerGlimpse.ts'
+import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady } from '../src/lib/headerGlimpse.ts'
 
 const on = { enabled: true, reduced: false, wide: true, tickets: 8 }
 
@@ -30,6 +30,37 @@ test('hover controls find room around text, including a long title and a crowded
   assert.ok(spot)
   assert.ok(boxes.every(box => !glimpseOverlaps(spot, box, 10)))
   assert.equal(glimpseControlSpot(250, 100, boxes, { width: 310, height: 34 }), null)
+})
+
+test('hover controls use a fine search before dropping labels when the 8px grid misses the only opening', () => {
+  // The only clear cell is exactly (10, 10). It is one pixel off the coarse
+  // grid, so the labelled size still fits once the search steps by a pixel.
+  const boxes = [
+    { x: 0, y: 0, width: 10, height: 200 },
+    { x: 110, y: 0, width: 290, height: 200 },
+    { x: 0, y: 0, width: 400, height: 10 },
+    { x: 0, y: 40, width: 400, height: 160 },
+  ]
+  const full = { width: 100, height: 30 }
+  assert.equal(glimpseControlSpot(400, 200, boxes, full), null)
+  const placed = glimpsePlaceControls(400, 200, boxes, { full, compact: { width: 40, height: 30 } })
+  assert.deepEqual(placed, { spot: { x: 10, y: 10, width: 100, height: 30 }, compact: false })
+  assert.ok(boxes.every(box => !glimpseOverlaps(placed!.spot, box, 0)))
+})
+
+test('hover controls drop to the compact size when the labelled row cannot fit', () => {
+  // 140px of free header. The labelled row is 180px at every inset and step.
+  const boxes = [
+    { x: 0, y: 0, width: 220, height: 200 },
+    { x: 360, y: 0, width: 40, height: 200 },
+    { x: 0, y: 80, width: 400, height: 120 },
+  ]
+  const full = { width: 180, height: 34 }, compact = { width: 120, height: 34 }
+  assert.equal(glimpseControlSpot(400, 200, boxes, full, 0, 8, 1), null)
+  const placed = glimpsePlaceControls(400, 200, boxes, { full, compact })
+  assert.equal(placed?.compact, true)
+  assert.equal(placed?.spot.width, 120)
+  assert.ok(boxes.every(box => !glimpseOverlaps(placed!.spot, box, 0)))
 })
 
 test('text exclusion masks are bounded SVG images with hard and feathered cutouts', () => {

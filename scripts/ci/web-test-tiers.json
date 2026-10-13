@@ -15388,7 +15388,11 @@
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"a ready graph has eight tickets and at least one link","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/header-glimpse.test.ts","name":"hover controls drop to the compact size when the labelled row cannot fit","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"hover controls find room around text, including a long title and a crowded saved view strip","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/header-glimpse.test.ts","name":"hover controls use a fine search before dropping labels when the 8px grid misses the only opening","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"text exclusion masks are bounded SVG images with hard and feathered cutouts","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
