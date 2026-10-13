@@ -1,0 +1,14 @@
+{
+  "pin": "codex-app-server/0.157.1",
+  "requests": {
+    "initialize": {"clientInfo":{"name":"aeon-agentd","title":"AEON agentd","version":"1"}},
+    "initialized": {},
+    "account/read": {"refreshToken":false},
+    "thread/start": {"cwd":"/workspace","model":"test-model","approvalPolicy":"onRequest","sandbox":"readOnly","ephemeral":false,"config":{"service_tier":"default"}},
+    "thread/resume": {"threadId":"thread-1","cwd":"/workspace","model":"test-model","approvalPolicy":"onRequest","sandbox":"readOnly","config":{"service_tier":"default"}},
+    "turn/start": {"threadId":"thread-1","input":[{"type":"text","text":"first input"}],"model":"test-model","effort":"high","approvalPolicy":"onRequest","sandboxPolicy":{"type":"readOnly"}},
+    "turn/steer": {"threadId":"thread-1","expectedTurnId":"turn-1","input":[{"type":"text","text":"steer input"}]},
+    "turn/interrupt": {"threadId":"thread-1","turnId":"turn-1"}
+  },
+  "thread_result": {"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/workspace","approvalPolicy":"onRequest","sandbox":{"type":"readOnly"}}
+}
