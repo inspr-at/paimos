@@ -193,7 +193,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = workspace(page).getByRole('link', { name: label, exact: true })
     await expect(pill).toBeVisible()
-    await expect(pill).toHaveAttribute('href', `/p/PRJ-17/settings/routines?recurrence=${id}`)
+    // Provenance links retain the compatible settings entry; #583's router
+    // redirects the recurrence query into its canonical Routines section.
+    await expect(pill).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
     await page.screenshot({ path: join(shots, `ticket-${width}-${theme}.png`) })
     const more = workspace(page).getByRole('button', { name: 'More actions', exact: true })
     await expectStableControls({ controls: { 'header actions': more, 'copy key': workspace(page).getByRole('button', { name: 'Copy PHAROS-11', exact: true }), 'recurring pill': pill }, interactions: [{ name: 'focus pill', run: () => pill.focus() }, { name: 'open action menu', run: async () => { await more.click(); await expect(page.getByRole('menuitem', { name: /Repeat/ })).toBeVisible() } }, { name: 'close action menu', run: async () => { await page.keyboard.press('Escape'); await expect(page.getByRole('menuitem', { name: /Repeat/ })).toHaveCount(0) } }] })
@@ -316,7 +318,7 @@ test('moved ticket provenance and source editing use the receipt source project 
   await page.goto('/p/AEON/AEON-99')
   const line = workspace(page).locator('.recurrence-provenance')
   await expect(line).toContainText('#4')
-  await expect(line.getByRole('link', { name: 'Website audit' })).toHaveAttribute('href', `/p/PRJ-17/settings/routines?recurrence=${id}`)
+  await expect(line.getByRole('link', { name: 'Website audit' })).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
   await workspace(page).getByRole('button', { name: 'More actions', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
   const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
