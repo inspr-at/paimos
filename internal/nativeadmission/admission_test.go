@@ -138,7 +138,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 		AccountBindingDigest: strings.Repeat("f", 64),
 		Binding: nativecontract.Binding{TenantID: uid("2"), ProjectID: uid("3"), OwnedSessionID: uid("4"),
 			HarnessSessionID: uid("5"), RuntimeEpoch: uid("6"), DaemonID: "daemon-test", DaemonGeneration: "generation-test", BindingRevision: 1},
-		Profile: nativecontract.ProfileRequest{TenantID: uid("2"), OwnerPersonID: uid("7"), AccountID: uid("8"), AccountKey: "enrolled", WorkspaceID: uid("9"), Harness: "claude", Policy: policy, BindingRevision: 1},
+		Profile: nativecontract.ProfileRequest{TenantID: uid("2"), OwnerPersonID: uid("7"), AccountID: uid("8"), AccountKey: "enrolled", WorkspaceID: "approved-workspace", Harness: "claude", Policy: policy, BindingRevision: 1},
 		Launch:  nativecontract.LaunchConfig{ModelProfileID: uid("10"), Model: "qualified-model", ServiceTier: "default", ToolPolicyDigest: policy.ToolPolicyDigest, SettingsPolicyDigest: policy.SettingsPolicyDigest},
 		Login:   agentsetup.LedgerLogin{Harness: "claude", Identity: agentsetup.LedgerFingerprint(d.Generation, "login/claude", "verified-owner")},
 	}

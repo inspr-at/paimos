@@ -155,7 +155,7 @@ func (g *Gate) ConfirmExit(ctx context.Context, p *Permit, evidence nativecontra
 // The returned group is evidence for that recovery, never authority or a token.
 func (g *Gate) ChangeProfile(ctx context.Context, profile nativecontract.ProfileRequest, login agentsetup.LedgerLogin, change func(context.Context) (confirmed bool, err error)) (string, error) {
 	if change == nil || !uuid(profile.AccountID) || !uuid(profile.TenantID) || !uuid(profile.OwnerPersonID) ||
-		!uuid(profile.WorkspaceID) || profile.BindingRevision < 1 || len(profile.AccountKey) < 1 || len(profile.AccountKey) > 128 ||
+		!opaqueKey(profile.WorkspaceID) || profile.BindingRevision < 1 || !opaqueKey(profile.AccountKey) ||
 		login.Harness != profile.Harness || len(profile.Harness) < 1 || len(profile.Harness) > 32 ||
 		!(login.Identity == "unknown" || hexID(login.Identity, 64)) {
 		return "", denial(nativecontract.ReasonInvalidInput)

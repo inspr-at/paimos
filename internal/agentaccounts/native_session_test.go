@@ -48,6 +48,7 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 			{`INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Owner'),($1,$3,'agent','Paired')`, []any{person.TenantID, person.ID, paired.ID}},
 			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'NATIVE-1',id,'Project' FROM node_kinds WHERE slug='project'`, []any{person.TenantID, in.ProjectID}},
 			{`INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'native-admission','1','claude','anthropic','claude-opus-4-6','high','strong')`, []any{person.TenantID, in.ModelProfileID}},
+			{`INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,enabled) VALUES($1,$2,'withheld-native','1','claude','anthropic','claude-opus-4-6','high','strong',false),($1,$3,'ungranted-native','1','claude','anthropic','claude-sonnet-4-6','high','strong',true)`, []any{person.TenantID, uid(13), uid(14)}},
 		} {
 			if _, err := tx.Exec(seedCtx, q.sql, q.args...); err != nil {
 				return err
@@ -70,7 +71,7 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,ledger_generation,capacity_policy,capacity_signals,capacity_reported_at)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, []any{person.TenantID, in.ComputerID, uid(10), paired.ID, paired.KeyID, in.DaemonID, strings.Repeat("c", 64), in.LedgerGeneration, policyRaw, signals, now}},
 			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision,allowed_model_profile_ids,last_probe_at,last_probe_ok,last_daemon_generation,max_parallel_runs)
- VALUES($1,$2,'enrolled','claude',$3,$4,'Own',$5,$7,1,ARRAY[$6::uuid],$7,true,$8,1)`, []any{person.TenantID, in.AccountID, in.DaemonID, paired.ID, person.ID, in.ModelProfileID, now, in.DaemonGeneration}},
+ VALUES($1,$2,'enrolled','claude',$3,$4,'Own',$5,$7,1,ARRAY[$6::uuid,$9::uuid],$7,true,$8,1),($1,$10,'other','claude',$3,$4,'Other',$5,$7,1,ARRAY[$6::uuid],$7,true,$8,1)`, []any{person.TenantID, in.AccountID, in.DaemonID, paired.ID, person.ID, in.ModelProfileID, now, in.DaemonGeneration, uid(13), uid(15)}},
 			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at)
  VALUES($1,$2,$3,$4,$5,$6::timestamptz,$6::timestamptz+interval '1 hour')`, []any{person.TenantID, in.AccountID, in.ComputerID, uid(10), in.ModelProfileID, now}},
 			{`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,$3::timestamptz-interval '1 hour',$3::timestamptz+interval '1 hour','requests',100,'unrestricted')`, []any{person.TenantID, in.AccountID, now}},
@@ -145,22 +146,11 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 		return err
 	})
 	check("")
-	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(seedCtx, `UPDATE agent_accounts SET allowed_model_profile_ids='{}' WHERE id=$1`, in.AccountID)
-		return err
-	})
-	check(nativecontract.ReasonQualificationMissing)
-	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(seedCtx, `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$2::uuid,$3::uuid] WHERE id=$1`, in.AccountID, in.ModelProfileID, uid(13))
-		if err != nil {
-			return err
-		}
-		// Profiles are immutable. Withheld activation is an inserted disabled
-		// pin, never an UPDATE that bypasses the append-only model boundary.
-		_, err = tx.Exec(seedCtx, `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,enabled) VALUES($1,$2,'withheld-native','1','claude','anthropic','claude-opus-4-6','high','strong',false)`, person.TenantID, uid(13))
-		return err
-	})
+	// Paired account/model bindings are immutable. Exercise both an ungranted
+	// live model and a granted but activation-withheld immutable profile.
 	activeProfile := in.ModelProfileID
+	in.ModelProfileID = uid(14)
+	check(nativecontract.ReasonQualificationMissing)
 	in.ModelProfileID = uid(13)
 	check(nativecontract.ReasonQualificationMissing)
 	in.ModelProfileID = activeProfile
@@ -180,18 +170,24 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 	})
 	check(nativecontract.ReasonAccountFull)
 	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(seedCtx, `UPDATE agent_accounts SET max_parallel_runs=2 WHERE id=$1`, in.AccountID)
-		return err
-	})
-	check(nativecontract.ReasonHostFull)
-	// A fresh daemon generation and route cannot make an idle/taken root free.
-	seed(func(tx pgx.Tx) error {
 		_, err := tx.Exec(seedCtx, `UPDATE native_session_roots SET hold_state='taken' WHERE owned_session_id=$1`, uid(11))
 		return err
 	})
-	check(nativecontract.ReasonHostFull)
+	check(nativecontract.ReasonAccountFull)
 	seed(func(tx pgx.Tx) error {
 		_, err := tx.Exec(seedCtx, `UPDATE native_session_roots SET released_at=$2 WHERE owned_session_id=$1`, uid(11), now)
+		return err
+	})
+	check("")
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(seedCtx, `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,project_id,owner_person_id,account_id,computer_id,runtime_epoch,hold_state) VALUES($1,gen_random_uuid(),$2,$3,$4,$5,$6,$7,'exit_unconfirmed')`, person.TenantID, uid(16), in.ProjectID, person.ID, uid(15), in.ComputerID, uid(17))
+		return err
+	})
+	// Another account has no effect on our account's slot, but its unknown
+	// writer retains the same computer's AEON-1251 host slot.
+	check(nativecontract.ReasonHostFull)
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(seedCtx, `UPDATE native_session_roots SET released_at=$2 WHERE owned_session_id=$1`, uid(16), now)
 		return err
 	})
 	check("")

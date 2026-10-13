@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/nativecontract"
@@ -138,6 +140,10 @@ func uuid(s string) bool {
 	return len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-' && hexID(strings.ReplaceAll(s, "-", ""), 32)
 }
 
+func opaqueKey(s string) bool {
+	return len(s) > 0 && len(s) <= 128 && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
+}
+
 func (g *Gate) validate(r Request) error {
 	// Bound local input before marshaling the C0 schemas.
 	fields := []string{r.Binding.TenantID, r.Binding.ProjectID, r.Binding.OwnedSessionID,
@@ -156,14 +162,13 @@ func (g *Gate) validate(r Request) error {
 			return denial(nativecontract.ReasonInvalidInput)
 		}
 	}
-	for _, id := range []string{r.Profile.TenantID, r.Profile.OwnerPersonID, r.Profile.AccountID, r.Profile.WorkspaceID} {
+	for _, id := range []string{r.Profile.TenantID, r.Profile.OwnerPersonID, r.Profile.AccountID} {
 		if !uuid(id) {
 			return denial(nativecontract.ReasonInvalidInput)
 		}
 	}
 	if r.Binding.TenantID != r.Profile.TenantID || r.Profile.BindingRevision < 1 ||
-		len(r.Profile.AccountKey) < 1 || len(r.Profile.AccountKey) > 128 ||
-		strings.ContainsAny(r.Profile.AccountKey, "\x00\r\n") ||
+		!opaqueKey(r.Profile.AccountKey) || !opaqueKey(r.Profile.WorkspaceID) ||
 		r.Login.Harness != r.Profile.Harness || len(r.Profile.Harness) < 1 || len(r.Profile.Harness) > 32 ||
 		!(r.Login.Identity == "unknown" || hexID(r.Login.Identity, 64)) ||
 		!hexID(r.AccountBindingDigest, 64) ||
