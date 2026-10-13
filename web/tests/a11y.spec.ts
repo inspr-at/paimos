@@ -213,7 +213,9 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
     await page.getByTestId(/^agents-desk-item-a:/).first().click()
     await expect(page.getByRole('dialog', { name: 'Decision Desk memo', exact: true })).toBeVisible()
     await expect(page.getByTestId('desk-paper')).toBeFocused()
-    await expect(page.getByRole('textbox', { name: 'Reason', exact: true })).toBeVisible()
+    const reason = page.getByRole('textbox', { name: 'Reason', exact: true })
+    await reason.focus()
+    await expect(reason).toBeFocused()
   }],
 ]
 

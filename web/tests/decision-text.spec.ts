@@ -66,7 +66,7 @@ async function revealGeometry(control: Locator, neighbors: Locator, coarse: bool
     }
     for (const glyph of el.querySelectorAll('svg')) {
       const style = getComputedStyle(glyph)
-      if (style.visibility === 'hidden') continue
+      if (style.visibility === 'hidden' || glyph.getClientRects().length === 0) continue
       const rect = glyph.getBoundingClientRect()
       if (rect.left < button.left - .5 || rect.right > button.right + .5 || rect.top < button.top - .5 || rect.bottom > button.bottom + .5) overflow.push({ text: 'SVG glyph', parent: glyph.outerHTML, clip: style.clip, clipPath: style.clipPath, button: button.toJSON(), textBox: rect.toJSON() })
     }
