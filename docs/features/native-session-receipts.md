@@ -143,6 +143,32 @@ No browser check applies to this non-browser slice. Exit 3 means incomplete,
 never green. Authoritative PR CI and the coordinator's cross-family review
 remain prerequisites to merge; workers neither push nor run model gates.
 
+Guarded validation of implementation commit `d01501a87` on mbp2606:
+
+* **PASS 1:** pre-write journal barrier, correlated evidence and false-exit denial.
+* **PASS 2:** bounded content-free journal/report retries, receipt pages and RLS.
+* **PASS 3:** approved explicit final outbox and existing chat-isolated helper;
+  stopped legacy final authority and legacy response snapshots stay unchanged.
+* **PASS 4:** outage/exit/restart retention, original grant expiry/revocation and
+  current authorization under an observed access-fence interleaving.
+* **PASS 5:** crash becomes uncertain, one native write, one durable final on ID
+  replay after losing its acknowledgement.
+* Required three-package `remote-test.sh` run: **exit 0**, all packages pass.
+* Migration guard against `v261012211543.0.0`: **exit 0**; migration checker
+  tests: **43/43 pass**. Migration 1347 remains absent from origin/main.
+* Offline affected selector: **exit 0**, **FULL CI required** (R4 unsupported or
+  incomplete SQL selector classification for the new isolated migration).
+* Guarded `ci-static-locked.sh --merge-main`: **exit 1**, **39 checks pass, zero
+  optional skips**. Failures are the eight unclassified Go cases and the seven
+  receipt-package files awaiting R0 source ownership (go-tiers, audit-tests and
+  audit-coverage). Go vet, web type/lint/shard checks, migration checks and
+  OpenAPI properties/parity pass. This is **not green**.
+
+R0 must apply the rows below on the same PR and rerun strict static checks,
+the DSAR migration inventory guard and shared-fence caller inventory before
+merge. These shared files are outside P3a's exclusive write set; the builder
+did not edit them. No push, deployment, live cutover or model gate was run.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
