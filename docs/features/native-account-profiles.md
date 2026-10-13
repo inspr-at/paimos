@@ -515,3 +515,41 @@ remains **not green**. No behavior change requires a new regression test. Only
 this owned handoff document changes; no source, assertion or shared inventory
 is edited. No heavy local fallback, origin push, deployment, model CLI or review
 gate was performed.
+
+Fix-round 14 (2026-10-13): the complete log for CI `go-static` job
+**115201047128** on supplied baseline `ced4cad20` rejects exactly the four
+unclassified tests documented above. All seven Go shards, four web unit shards,
+twelve browser shards, release checks and migration compatibility pass. The
+aggregate Go failure follows static validation; the non-required policy preview
+lacks a trusted review verdict and remains coordinator-owned.
+
+Selected PPM account and coordinator-recorded builder attribution were verified.
+Fetched `origin/main` remains `f571b7765`, already an ancestor of this branch;
+PR #615 is mergeable and the read-only merge-tree check exits 0. Main still
+lacks the four registrations. `plan.json` and `plan.md` reserve the manifest
+exclusively for R0: **the coordinator must add the four ESSENTIAL rows in this
+same PR before CI can pass**. Fix14 transfers no ownership. No source, assertion
+or shared metadata changed, and no behavior fix requires a new regression test.
+
+The baseline's named test declarations were verified from Git objects. The
+existing strict validator rejects exactly those four omissions and passes with
+only the proposed rows added in memory. This diagnostic leaves the manifest
+unchanged and does not replace native collection.
+
+Both affected Go packages pass through the guarded remote runner on `ced4cad20`.
+Acceptance results from those tests are:
+
+- **PASS**: exact enrolled account resolution and immutable child binding.
+- **PASS**: default Claude selection and qualified dedicated child environments.
+- **PASS**: exclusion of credential/settings sharing and credential IO.
+- **PASS**: refusal of foreign, stale or unqualified profiles without rotation.
+- **PASS**: retained credentials, unchanged parent environment and distinct
+  overlapping children established with metadata barriers.
+
+Live account qualification remains **G_ACCOUNTS**. The affected selector exits 0
+and selects **FULL** (3236 reverse-dependency cases); no web unit or browser spec
+is affected by this non-browser slice. Guarded `ci-static-locked.sh --merge-main`
+returns **exit 3** for occupied remote slots and executes no checks. Fresh static
+validation is **incomplete**, and CI remains **not green**. Only this owned
+handoff document changes; no heavy local fallback, origin push, deployment,
+model CLI or review gate was performed.
