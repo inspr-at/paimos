@@ -296,3 +296,46 @@ Git whitespace and write-scope checks. This is **not a green CI handoff**: R0
 must complete the Go manifest registration in this PR before merge. Only this
 owned feature document changed; no origin push, deployment, model call or review
 gate was performed.
+
+Fix-round 8 (2026-10-13): complete logs for baseline `9ff8f1dd` confirm
+that `go-static` job **115138352454** rejects exactly the same four
+**ESSENTIAL** registrations above. All seven Go shards, four web unit shards,
+release checks and migration compatibility pass. `web-shard (11)` job
+**115138731392** also fails the existing keyboard/drag queue test at
+`web/tests/work-queue.spec.ts:145`: after `Alt+ArrowUp`, the **Number 5:
+PHAROS-13** button is present but inactive. Aggregate `web` job
+**115142126165** fails because that shard failed; it reports no additional
+test failure.
+
+The queue component, store and spec match fetched `origin/main` at `3507e3319`;
+this branch changes no web files. PR #615 is mergeable and main is already an
+ancestor, so no conflict merge is required. Both normative plan files still
+reserve `scripts/ci/go-test-tiers.json` for R0 and limit P4a to
+`internal/nativeprofiles/**`, the two native-account CLI files and this document.
+Closing these blockers requires R0 to apply the four rows in this same PR and
+the coordinator to assign the queue-focus failure to its owning UI scope.
+Neither the inventories nor the queue code or assertions were changed.
+
+A source-verified, read-only baseline diagnostic reproduces exactly the four
+strict tier errors and passes after adding only the proposed rows in memory;
+it does not replace native test collection. Both affected Go packages pass
+through the guarded remote runner on `9ff8f1dd`. The affected selector exits 0
+and selects **FULL** (3233 reverse-dependency cases). The existing keyboard/drag
+spec passes once through `remote-spec.sh` with one remote Chromium worker and
+no remaining browser processes. That run uses macOS; the original Linux CI
+focus failure remains unresolved. No P4a web unit test is affected, and the
+passing CI unit shards remain the available unit evidence.
+
+Guarded `ci-static-remote.sh` runs the required merged-main static check and
+returns **exit 1**: **41 checks pass with zero optional skips**. Only `go-tiers`
+fails on the four R0 rows. Audit ownership, test-tier/web-shard self-checks,
+Go vet, web typecheck/lint, contract and migration checks pass. The updated
+document passes public-name, whitespace and exclusive-write-set checks.
+Fake-test acceptance remains
+**PASS** for exact account binding, **PASS** for default/dedicated child
+environments, **PASS** for exclusion of credential/settings sharing, **PASS**
+for refusal without account rotation, and **PASS** for retained credentials,
+unchanged parent environment and distinct overlapping child profiles. Live
+account qualification remains **G_ACCOUNTS**. This round changes only this owned
+feature document; CI is **not green**. No origin push, deployment, model call
+or review gate was performed.
