@@ -41,6 +41,10 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, fmt.Errorf("ping: %w", err)
 	}
+	if err := installBackstops(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	if err := migrate(ctx, pool); err != nil {
 		pool.Close()
 		return nil, err
