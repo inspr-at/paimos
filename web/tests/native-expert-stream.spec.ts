@@ -117,10 +117,13 @@ async function mixedEvidence(page: Page, theme: string, width: number, shot: (na
   await expect(page.locator('[data-event-row="event:2:19"]').locator('..')).toHaveCSS('box-shadow', /inset/)
   await expect(page.getByRole('button', { name: /^Jump to live/ })).toHaveCount(0)
   await shot('mixed')
-  await page.setViewportSize({ width, height: 720 })
-  // ResizeObserver and the following update first finish at the live end. The
-  // explicit scroll notification then establishes the user's scroll barrier.
-  await expect.poll(() => scroll.evaluate(el => el.scrollHeight > el.clientHeight && el.scrollHeight - el.scrollTop - el.clientHeight <= 2)).toBe(true)
+  await page.setViewportSize({ width, height: 600 })
+  // Wait for the resized scroll area, then establish the live-end baseline
+  // through the real scroll handler before testing the upward scroll.
+  await expect.poll(() => scroll.evaluate(el => el.getBoundingClientRect().bottom <= innerHeight && el.scrollHeight > el.clientHeight)).toBe(true)
+  await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')) })
+  await expect(follow).toBeChecked()
+  await expect(tail).toBeInViewport()
   await scroll.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')) })
   await expect(follow).not.toBeChecked()
   await expect(tail).not.toBeInViewport()
