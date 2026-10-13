@@ -60,6 +60,8 @@ func TestDeliveryHistoryActionsRefusalFromGitHub(t *testing.T) {
 			var reads, revoked atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.Method + " " + r.URL.Path {
+				case "GET /app/installations/456":
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": 456, "app_id": 123, "permissions": map[string]string{"actions": "read", "checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read"}})
 				case "POST /app/installations/456/access_tokens":
 					var in struct {
 						Permissions map[string]string `json:"permissions"`
@@ -93,7 +95,7 @@ func TestDeliveryHistoryActionsRefusalFromGitHub(t *testing.T) {
 				return transport.RoundTrip(copy)
 			})
 			reader := AppReader{App: &crossreview.GitHubApp{Config: crossreview.AppConfig{ID: "123", InstallationID: "456", TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Repository: "example/delivery", KeyFile: keyFile}, Client: client}}
-			err = reader.MetricsRead(t.Context(), reader.App.Config.TenantID, func(get func(string, any) error) error {
+			err = reader.MetricsRead(t.Context(), reader.App.Config.TenantID, func(get func(string, any) error, source string) error {
 				return get(tc.path, &map[string]any{})
 			})
 			at := time.Date(2026, 10, 12, 17, 0, 0, 0, time.UTC)
