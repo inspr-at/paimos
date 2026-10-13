@@ -213,19 +213,20 @@ the public-name guard rejects this document's operator-specific host name.
 round's starting HEAD. The validation evidence now names the approved remote
 runner generically; no guard, allowlist or test assertion is changed.
 
-A fresh fetch confirms `origin/main` at `06929d1a4`, already an ancestor of
-this branch; PR #622 is mergeable. The central native-package audit ownership
-change has not merged. The full supplied JSONL and release-check logs confirm
-the missing shared-fence row and all seven unassigned receipt files. Inspection
+A fresh fetch initially confirmed `origin/main` at `06929d1a4`, already an
+ancestor of this branch; PR #622 was mergeable. During verification, central
+R0 audit PR #623 merged as `3507e3319`. This branch then merged that main
+commit cleanly, acquiring R0's `internal/native*/**` registration in S2 and
+resolving the seven unassigned receipt files without a builder ownership edit.
+The supplied JSONL still confirms the missing shared-fence row. Inspection
 also confirms that the eight ESSENTIAL test rows and two DSAR table entries
 below remain absent.
 
 The normative plan assigns these four shared files exclusively to the single
 R0 metadata lane, and the worker rules require the native audit fix centrally.
-This round preserves that ownership. Applying the existing exact registration
-request below remains necessary before CI can be green; public documentation
-cleanup does not resolve those blockers. There is no behavior change requiring
-a new regression test against `bd7b9b6dc`.
+This round preserves that ownership. Applying the remaining exact registration
+request below remains necessary before CI can be green. There is no behavior
+change requiring a new regression test against `bd7b9b6dc`.
 
 ## Exact R0 registration request (same PR, before merge)
 
@@ -233,9 +234,10 @@ R0 exclusively owns the following metadata files. They are deliberately not
 edited by P3a. Apply these rows on this branch before final static/PR checks;
 there is no deferred inventory allowance.
 
-* Source ownership: add `internal/nativereceipts/**` to S2 (`agent-runtime`).
-  Existing S2 `internal/nativesessions/**`, S1 `internal/db/**` and S3
-  `internal/chat/**` already cover the other new source/test/migration files.
+* Source ownership: **resolved** by central R0 PR #623, merged in fix round 3.
+  S2 (`agent-runtime`) now includes `internal/native*/**`, covering all seven
+  receipt files. Existing S2 `internal/nativesessions/**`, S1 `internal/db/**`
+  and S3 `internal/chat/**` cover the other source/test/migration files.
 * Shared fence inventory: add `nativesessions/receipts/repository.go` to
   `db.LockTree` in `internal/agentpairing/shared_fence_test.go`, sorted with the
   existing rows. Entry order is authenticated context -> tenant -> tree ->
