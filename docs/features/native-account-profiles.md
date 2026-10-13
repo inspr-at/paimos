@@ -376,3 +376,43 @@ and all assertions remain unchanged. This round changes only this owned
 feature document. CI remains **not green** pending R0 registration and the
 coordinator's review; no origin push, deployment, model call or review gate
 was performed.
+
+Fix-round 10 (2026-10-13): on baseline `aa5da6511`, CI `go-static` job
+**115154293933** fails only strict native Go tier validation for the same four
+missing **ESSENTIAL** registrations listed above. All seven Go shards, four web
+unit shards, twelve browser shards, release checks and migration compatibility
+pass on that exact baseline. No behavior finding was supplied, and this round
+changes no source or assertion. P4a has no affected web unit/browser test.
+
+The selected PPM account and coordinator-recorded builder marker were verified.
+Fetched `origin/main` at `fd8fae22f` is already included; PR #615 is mergeable and
+the read-only merge-tree check exits 0. Main still lacks the four registrations.
+A source-verified, read-only diagnostic reproduces exactly those omissions and
+passes strict validation with only the four proposed rows added in memory; this
+diagnostic does not replace native collection. The shared manifest is unchanged.
+
+Both normative plan files reserve `scripts/ci/go-test-tiers.json` exclusively
+for R0. Closing this blocker requires R0 to apply the four rows in this same PR;
+P4a cannot make that change under its exclusive write set. CI remains **not
+green**, and another unchanged P4a fix round cannot resolve R0's registration
+step. The affected selector exits 0 and selects **FULL** (3236 reverse-dependency
+cases). Guarded execution results are recorded below. Live qualification remains
+**G_ACCOUNTS**; no origin push, deployment, model CLI or review gate was performed.
+
+Guarded `ci-static-remote.sh` completes the merged-main check on `aa5da6511`
+with **exit 1**, **41 checks passing and zero optional skips**. Only `go-tiers`
+fails, on exactly the four R0 registrations. Audit ownership, test-tier and web
+shard self-checks, Go vet, web typecheck/lint, contract and migration checks pass.
+The document passes public-name, whitespace and exclusive-write-set checks.
+
+All three fresh guarded Go attempts return **exit 3** for occupied remote slots;
+no package execution occurs, and fresh targeted Go validation is **incomplete**.
+The last successful guarded profile/CLI run is the fix-round 9 run on
+`6d6b65b0`; the profile and native-account source/tests are byte-identical to
+that baseline. Its five fake-test acceptance checks remain **PASS**: exact
+account binding, default/dedicated environments, no credential/settings sharing,
+no rotation or unqualified binding, and retained credentials with unchanged
+parent environment and distinct overlapping children. No new regression test
+is needed for this registration-only finding. No heavy local fallback was used.
+Only this owned feature document changes; R0 registration and authoritative CI
+remain required before merge. This worker exits after the local handoff commit.
