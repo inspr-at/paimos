@@ -150,7 +150,9 @@ test('agents 390: a refresh after one 40 px swipe lands without moving the rows 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} 390: the footer folds away over the page; the page's scroller never changes size while scrolling`, async ({ page }, info) => {
     const { cdp } = await openAgents(page, theme)
-    await page.locator('main').evaluate(el => { el.scrollTop = 400 })
+    // Reading mid-page with the footer showing: back up a little after the jump down folded it.
+    await page.clock.runFor(400)
+    await page.locator('main').evaluate(el => { el.scrollTop -= 80 })
     await watchTouch(page, SESSION_ROWS)
     const footer = page.locator('.app-footer')
     await expect(footer).not.toHaveClass(/hidden/)
@@ -167,6 +169,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect([...new Set(heights)], 'the scroller never changes size while scrolling').toEqual([before.height])
     await page.screenshot({ path: info.outputPath(`agents-390-${theme}-footer-folded.png`) })
     // Back up a little: the footer returns over the page, and the page still keeps its size.
+    await page.clock.runFor(400)
     await swipe(cdp, { x: 195, y: 300 }, 80)
     await expect(footer).not.toHaveClass(/hidden/)
     await expect(footer).toBeInViewport()
