@@ -129,3 +129,34 @@ R0 handoff for this same PR:
   `node scripts/test-tiers/affected.mjs --base origin/main`, and guarded
   `ci-static-locked.sh` after the serialized R0 registrations. Any refusal or
   incomplete result remains an explicit handoff; authoritative PR CI must pass.
+
+Builder handoff, 2026-10-13:
+
+- PASS — versioned C0 Host HTTP adapter and authenticated outbound/server relay:
+  peer/grant/controller/binding rejection and bounded acknowledgement tests.
+- PASS — one owned binding across structured, Expert and terminal views, with
+  tenant isolation and agent denial of Expert content; legacy chat is untouched.
+- PASS — RAM/count/byte/idle bounds, ordered replay, expired cursors, gap/end
+  frames and access checks on frames/keepalives; explicit finals use FinalSink,
+  and only authorized retained finals replay through Host.EventsPage.
+- PASS — native envelope allowlists, opaque correlations, credential/reasoning/
+  tool-body removal, duplicate/depth/size/redaction bounds and unknown omissions.
+- PASS — slow-subscriber, API-outage and access-revocation barriers demonstrate
+  bounded memory, visible loss and no queued delivery after revocation.
+- PASS — both targeted Go packages with `-race` on mbp2606 at `4477de1f8`;
+  retention negative control with `-race -v -args -native-negative-control`
+  passed on mbp2606 at `380477742` (the buffer implementation is unchanged).
+- PASS — affected-set selection exited 0. Its initial selection omitted these
+  unregistered packages; R0 must register the nine tests and rerun selection.
+- NOT GREEN — guarded `ci-static-locked.sh` exited 1: go-tiers, audit-tests and
+  audit-coverage fail solely for the R0 registrations listed above. Thirty-nine
+  other checks passed, with zero optional skips. Re-run after R0's same-PR edits.
+- Local generated-bundle checking was unavailable because ignored
+  `api/openapi.yaml` is absent. No authored contract changed; guarded static
+  OpenAPI property/sort checks passed. Browser checks are inapplicable to P2a.
+
+Only the three assigned write-set surfaces were edited. Shared inventories,
+API sources, migrations, versions, live daemons and vendor logins are unchanged.
+No other builder worktree was touched; no production deployment, origin push,
+review gate or model CLI was run. I1/I2 own integration; R0 and authoritative
+PR CI remain required before merge.
