@@ -3,12 +3,17 @@
 package nativestream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +23,10 @@ import (
 )
 
 const fixtureID = "00000000-0000-4000-8000-000000000001"
+
+// Opt-in mutation evidence runs through the same guarded Go runner. Production
+// source/HEAD never changes, and ordinary CI does not recursively compile tests.
+var nativeNegativeControl = flag.Bool("native-negative-control", false, "prove idle replay test rejects the implementation without expiry")
 
 func fixtureBinding() nativecontract.Binding {
 	return nativecontract.Binding{TenantID: fixtureID, ProjectID: fixtureID, OwnedSessionID: fixtureID, HarnessSessionID: fixtureID, RuntimeEpoch: fixtureID, DaemonID: fixtureID, DaemonGeneration: fixtureID, BindingRevision: 1}
@@ -209,6 +218,60 @@ func TestTransientRingReportsLossAndRejectsStaleReplay(t *testing.T) {
 	}
 	_, err = buffer.Position("1:99", 1)
 	requireReason(t, err, nativecontract.ReasonCursorExpired)
+	if *nativeNegativeControl {
+		proveIdleExpiryNegativeControl(t)
+	}
+}
+
+type boundedTestOutput struct{ data bytes.Buffer }
+
+func (b *boundedTestOutput) Write(data []byte) (int, error) {
+	kept := min(len(data), 8192-b.data.Len())
+	if kept > 0 {
+		_, _ = b.data.Write(data[:kept])
+	}
+	return len(data), nil
+}
+
+func proveIdleExpiryNegativeControl(t *testing.T) {
+	t.Helper()
+	source, err := os.ReadFile("buffer.go")
+	if err != nil {
+		t.Fatal("negative control could not read the assigned buffer source")
+	}
+	needle := "\tb.expire()\n\tnext := b.next"
+	if strings.Count(string(source), needle) != 1 {
+		t.Fatal("negative control no longer identifies the pre-publication expiry")
+	}
+	withoutExpiry := strings.Replace(string(source), needle, "\tnext := b.next", 1)
+	dir := t.TempDir()
+	replacement := filepath.Join(dir, "buffer.go")
+	overlayPath := filepath.Join(dir, "overlay.json")
+	if err := os.WriteFile(replacement, []byte(withoutExpiry), 0600); err != nil {
+		t.Fatal("negative control could not write its temporary fixture")
+	}
+	absoluteSource, err := filepath.Abs("buffer.go")
+	if err != nil {
+		t.Fatal("negative control could not resolve its source")
+	}
+	overlay, _ := json.Marshal(map[string]any{"Replace": map[string]string{absoluteSource: replacement}})
+	if err := os.WriteFile(overlayPath, overlay, 0600); err != nil {
+		t.Fatal("negative control could not write its compiler overlay")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	// The nested test receives no opt-in flag, so it cannot recurse. Its named
+	// behavior assertion runs against the changed compiler input, not a mock.
+	cmd := exec.CommandContext(ctx, "go", "test", "-p", "2", "-timeout", "30s", "-overlay", overlayPath, "-run", "^TestTransientRingReportsLossAndRejectsStaleReplay$", ".")
+	output := &boundedTestOutput{}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	err = cmd.Run()
+	var failed *exec.ExitError
+	if !errors.As(err, &failed) || !strings.Contains(output.data.String(), "new publication resurrected expired raw frames") {
+		t.Fatal("negative control did not fail for the claimed expired-content risk")
+	}
+	t.Log("negative control PASS: without expiry, the retained-content assertion fails")
 }
 
 type deadlineRecorder struct {

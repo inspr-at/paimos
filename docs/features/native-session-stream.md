@@ -98,6 +98,12 @@ revocation and outbound/subscriber stalls with barriers; clocks control replay
 expiry and keepalives, while timeouts only detect hangs. No real model account,
 browser, review gate, release or live cutover is involved.
 
+The opt-in `-args -native-negative-control` test flag reruns the retention
+assertion with a temporary Go compiler overlay removing the pre-publication
+expiry. It must fail specifically because expired content was retained. Fixtures
+use `t.TempDir`; the real source and work branch remain valid, with no throwaway
+commit or second worktree.
+
 R0 handoff for this same PR:
 
 - Assign `internal/nativestream/**` to audit slice S2 (`agent-runtime`). Existing
