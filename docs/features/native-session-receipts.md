@@ -303,6 +303,70 @@ change was made; this round has no new regression test requiring a negative
 control against `c68b3becf`. Source/test code and shared inventories remain
 unchanged. No origin push, deployment, model CLI or review gate was run.
 
+## Fix round 5: R0 registration remains the blocking repair
+
+The supplied `review-ci622-0741.out` targets `3dabbddd4`. Its complete
+`go-test-3-internal-agentpairing.jsonl` artifact confirms the same missing
+`nativesessions/receipts/repository.go` entry in
+`TestSharedFenceCallerInventory`. The complete failed `go-static` step,
+job `115143457597`, fails strict Go classification for exactly the eight
+tests in the registration request below. The selector regression step's
+synthetic failure output is fixture evidence, not an additional CI failure.
+
+An initial fetch finds `origin/main` at `bf4aa778f`; during guarded
+verification it advances to `a633f5118` (P1b start intents). The latest main
+and working branch still lack the receipt fence row, eight tier registrations
+and two DSAR classifications. Migration 1347 remains absent from main.
+PR #622 is mergeable at the start, and a fresh local merge-tree check against
+the latest main confirms no conflict requiring a merge. The current
+PPM/INSPR principal and coordinator-recorded P3a builder marker were verified
+before this documentation change. The ticket, P3a exclusive write set and R0
+metadata lane contain no transfer of the three remaining shared files.
+
+The original brief explicitly requires stopping when a repair needs files
+outside P3a's write set. R0 remains the sole authorized owner of
+`internal/agentpairing/shared_fence_test.go`,
+`scripts/ci/go-test-tiers.json` and `internal/dsar/inventory.json`. The
+builder therefore stops the code repair and preserves all lock calls,
+test names, assertions and inventory guards. R0 must apply the exact
+same-PR registrations below before the next fix/gate round.
+
+Hosted CI on `3dabbddd4` passes all four web unit shards and all twelve
+browser shards. No feature browser or web unit test applies to this
+non-browser slice. The failed `gate/policy-preview` remains a coordinator
+verdict prerequisite; this worker does not run that gate. This round changes
+documentation only, so no behavior regression or negative control against
+`3dabbddd4` is introduced.
+
+Fresh guarded `remote-test.sh -count=1` on `3dabbddd4` completed:
+
+* **PASS 1:** pre-write journal barrier and correlated input/exit evidence.
+* **PASS 2:** bounded content-free receipt metadata, retries and scoped pages.
+* **PASS 3:** approved explicit final outbox and isolated native chat storage.
+* **PASS 4:** outage/exit retention and current fenced final authorization.
+* **PASS 5:** crash uncertainty prevents reinjection; final ID replay stores once.
+* Both receipt packages and `internal/chat` pass. `internal/dsar` passes its
+  existing package tests; the two missing table classifications still need R0.
+* **FAIL:** `internal/agentpairing` reproduces the missing receipt caller in
+  `TestSharedFenceCallerInventory`. The five-package command exits **1**.
+* Offline affected selector: **exit 0**, **FULL CI required** for migration
+  1347's unsupported or incomplete SQL classification. Public-name and
+  `git diff --check` checks pass after this documentation edit.
+
+Guarded `ci-static-remote.sh` on committed `3dabbddd4` initially refuses
+with **exit 3** because both remote slots are occupied. After the Go run
+finishes, its retry runs `node scripts/ci-static.mjs --merge-main` and
+exits **1**: **41 checks pass, zero optional skips**. The sole failure is
+`go-tiers`, listing exactly the eight R0 registrations below. Source audit,
+tier/shard regression tests, Go vet, web type/lint, migration and OpenAPI
+checks pass. No heavy local fallback is run.
+
+**INCOMPLETE:** the blocking fence/tier repair and both DSAR classifications
+still require R0's same-PR edit. This round supplies fresh evidence and a
+scoped documentation handoff. Source/test code and shared inventories remain
+unchanged. No origin push, deployment, model CLI or review gate is run by this
+worker.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
