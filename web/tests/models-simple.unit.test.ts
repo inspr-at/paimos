@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { APIError, api } from '../src/lib/api'
 import {
-  buildEntries, buildRows, cantSentence, groupByProvider, movePin, nearestEffort, nextView, orderWithFirst, pinFirst, reasonText, rulesBody, ticketWhy, unpin, untilText,
+  buildEntries, buildRows, cantSentence, fullName, groupByProvider, movePin, nearestEffort, nextView, orderWithFirst, pinFirst, reasonText, rulesBody, ticketWhy, unpin, untilText,
   type RegistryProfile, type SimpleDocument, type SimpleUnavailable, type TailBoard,
 } from '../src/lib/modelsSimple'
 import { getMembers } from '../src/lib/access'
@@ -191,6 +191,30 @@ describe('the picker: provider → line, newest first, older versions folded', (
   })
 })
 
+// AEON-1240. Risk: one model reads under two names ("Opus 5.5" in the picker, "Claude Opus 5.5" in the registry, the
+// tray or an Agents row) because a route, the provider's catalog or a raw id named it; or a name an admin gave is lost.
+describe('one name per model', () => {
+  const opus = (over: Partial<RegistryProfile>): RegistryProfile => ({ id: 'p', harness: 'claude', family: 'anthropic', model: 'claude-opus-5-5', effort: 'high', tier: 'strong', enabled: true, ...over })
+  it('names every route of a version alike, whichever name its route, its provider or its raw id carries', () => {
+    expect([
+      opus({ display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' }),
+      opus({ display_name: 'Claude Opus 5.5', short_name: 'Claude Opus 5.5' }),
+      opus({ display_name: 'claude-opus-5-5', short_name: 'claude-opus-5-5' }),
+      opus({ display_name: 'Claude Opus', model_version: '5.5' }),
+      opus({ harness: 'pi', model: 'anthropic/claude-opus-5-5' }),
+      opus({ harness: 'cursor', model: 'claude-opus-5.5', display_name: 'Cursor claude-opus-5.5', short_name: 'claude-opus-5.5' }),
+    ].map(fullName)).toEqual(Array(6).fill('Opus 5.5'))
+    expect(fullName(opus({ model: 'opus', display_name: 'Claude Opus', short_name: 'Opus' }))).toBe('Opus')
+    expect(fullName({ ...opus({}), harness: 'codex', family: 'openai', model: 'gpt-6.1-sol', display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1' })).toBe('GPT-6.1 Sol')
+    // The version is said once, also when the registry's name already carries it.
+    expect(fullName({ ...opus({}), harness: 'grok', family: 'xai', model: 'grok-4.7', display_name: 'Grok 4.7', short_name: 'Grok 4.7', model_version: '4.7' })).toBe('Grok 4.7')
+  })
+  it('keeps a name the registry was given, and a line added by hand keeps its own', () => {
+    expect(fullName(opus({ display_name: 'Zephyr', short_name: 'Zephyr', model_version: '5.5' }))).toBe('Zephyr 5.5')
+    expect(fullName(opus({ source: 'manual', display_name: 'Claude Opus via proxy', short_name: 'Claude Opus via proxy' }))).toBe('Claude Opus via proxy')
+  })
+})
+
 describe('the can’t-run sentence', () => {
   const entries = buildEntries(registry([OPUS_CURSOR])), now = Date.parse('2026-10-11T22:00:00Z')
   const at = '2026-10-12T04:00:00Z', time = new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
@@ -206,9 +230,9 @@ describe('the can’t-run sentence', () => {
     expect(said({ cause: 'no_account', until: null })).toBe('No Claude account can run Opus 5.5 right now → GPT-6.1 Sol · high runs instead.')
     expect(said({ cause: 'retired', until: null, route: null })).toBe('Opus 5.5 has been retired → GPT-6.1 Sol · high runs instead.')
     expect(said({ cause: 'residency', until: null, runs_instead: null, waits: true, runs_via: null })).toBe('Data residency rules out Opus 5.5 → work waits.')
-    // A reset that has passed is not promised again; an older server without a cause still gets plain words.
+    // A reset that has passed is not promised again; an entry without a cause reads as the server's own fallback, one sentence, never its joined reasons (AEON-1240).
     expect(said({ until: '2026-10-11T21:00:00Z' })).toBe('Claude account is at its daily cap → GPT-6.1 Sol · high runs instead.')
-    expect(said({ cause: undefined, reason: 'column: allowance; default: allowance' })).toBe('The account has no room left until its limit resets → GPT-6.1 Sol · high runs instead.')
+    expect(said({ cause: undefined, until: null, reason: 'column: allowance; default: daily_limit' })).toBe('No Claude account can run Opus 5.5 right now → GPT-6.1 Sol · high runs instead.')
     expect(cantSentence(null, entries, now)).toBeNull()
   })
   it('never says a code, "allowance", a list or the same word twice, and names a reset time once', () => {
