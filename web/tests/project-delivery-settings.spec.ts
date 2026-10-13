@@ -257,6 +257,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     const results: unknown[] = [], failures: string[] = []
     const context = await browser.newContext({ viewport: { width, height: width > 600 ? 1000 : 860 }, hasTouch: width < 600, reducedMotion: 'reduce', colorScheme: theme })
     const page = await context.newPage(), { world, errors } = await setup(page)
+    const touchSession = width < 600 ? await context.newCDPSession(page) : undefined
     await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: { choice: theme } } }))
     for (const readOnly of [false, true]) for (const state of states) {
       let release!: () => void
@@ -266,17 +267,17 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
       const name = `delivery-${state}${readOnly ? '-readonly' : ''}-${width}-${theme}`
       results.push(...await checkProjectSettings(page, name, width < 600))
       await page.locator('#repository').scrollIntoViewIfNeeded()
-      await captureProjectSettings(page, { path: testInfo.outputPath(`${name}.png`), fullPage: true }, width < 600)
+      await captureProjectSettings(page, { path: testInfo.outputPath(`${name}.png`), fullPage: true }, touchSession)
       if (state === 'loading') { world.pendingLoad = null; release(); await expect(page.locator('.repo-slot')).not.toHaveAttribute('data-state', 'loading') }
     }
     await choose(page, world, 'none')
     await page.getByRole('button', { name: 'Link repository', exact: true }).click()
-    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-linking-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-linking-${width}-${theme}.png`), fullPage: true }, touchSession)
     results.push(...await checkProjectSettings(page, `delivery-linking-${width}-${theme}`, width < 600))
     await choose(page, world, 'noactions'); const how = page.locator('[data-how=actions]')
     const stable = await controlStability(page, { slot: page.locator('.repo-slot'), checks: page.locator('#checks') })
     await stable.check(async () => { await how.click(); await expect(page.getByRole('heading', { name: 'The Actions read permission' })).toBeFocused() })
-    await captureProjectSettings(page, { path: testInfo.outputPath(`how-actions-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`how-actions-${width}-${theme}.png`), fullPage: true }, touchSession)
     results.push(...await checkProjectSettings(page, `how-actions-${width}-${theme}`, width < 600))
     await page.keyboard.press('Escape'); await expect(how).toBeFocused(); stable.done()
 
@@ -290,7 +291,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     // Audit the real progress before capture; the capture helper restores touch
     // emulation for subsequent interactions as well as the next navigation.
     results.push(...await checkProjectSettings(page, `delivery-reading-progress-${width}-${theme}`, width < 600))
-    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-reading-progress-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-reading-progress-${width}-${theme}.png`), fullPage: true }, touchSession)
 
     world.state = 'none'; world.source = null
     await page.goto('/p/AEON/delivery'); await expect(page.getByRole('link', { name: 'Link repository', exact: true })).toBeVisible()
@@ -306,7 +307,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     await refresh.check(async () => { world.state = 'error'; await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await expect(page.getByTestId('delivery-load-error')).toBeVisible() })
     await refresh.check(async () => { world.state = 'none'; await page.getByRole('button', { name: 'Retry', exact: true }).click(); await expect(action).toBeVisible() })
     refresh.done()
-    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-banner-none-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-banner-none-${width}-${theme}.png`), fullPage: true }, touchSession)
 
     // The app remains English; German is test-only length stress data here.
     await action.evaluate(element => {
@@ -315,27 +316,27 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     })
     results.push(await bannerContainsAction(page, `delivery-banner-none-long-de-${width}-${theme}`))
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
-    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-banner-none-long-de-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-banner-none-long-de-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.goto('/p/AEON/delivery'); await expect(action).toBeVisible()
     await page.getByRole('link', { name: 'Link repository', exact: true }).click(); await expect(page.locator('#link-form')).toBeVisible()
     world.state = 'appoff'; world.source = source('appoff'); world.metrics = deliveryMetrics().metrics
     await page.goto('/p/AEON/delivery'); await expect(page.locator('.go-src').first()).toBeVisible()
-    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-problem-chips-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`delivery-problem-chips-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.locator('.go-src').first().click(); await expect(page).toHaveURL('/p/AEON/settings/delivery#repository')
     world.state = 'none'; world.source = null; world.metrics = []
     await page.goto('/p/AEON/AEON-1'); await expect(page.locator('.delivery .settings-link')).toBeVisible()
-    await captureProjectSettings(page, { path: testInfo.outputPath(`ticket-delivery-none-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`ticket-delivery-none-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.locator('.delivery .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/delivery#repository')
     await page.goto('/'); await page.getByRole('button', { name: /^Actions for AEON / }).click()
     await expect(page.getByRole('menuitem', { name: 'Project settings', exact: true })).toBeVisible()
-    await captureProjectSettings(page, { path: testInfo.outputPath(`projects-row-menu-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`projects-row-menu-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.getByRole('menuitem', { name: 'Project settings', exact: true }).click(); await expect(page).toHaveURL('/p/AEON/settings')
     world.leadReason = true
     await page.goto('/p/AEON/tickets'); await expect(page.locator('#lead-launch-reason-band .settings-link')).toBeVisible()
     await expect(page.locator('#lead-launch-reason-band [data-launch-reason]')).toHaveText('Automatic launch is not enabled for this workspace yet.')
     await expect(page.locator('#lead-launch-reason-band .settings-link')).toHaveText('Settings Agents')
     await expect(page.locator('#lead-launch-reason-band .settings-link svg')).toHaveCount(2)
-    await captureProjectSettings(page, { path: testInfo.outputPath(`lead-launch-reason-${width}-${theme}.png`), fullPage: true }, width < 600)
+    await captureProjectSettings(page, { path: testInfo.outputPath(`lead-launch-reason-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.locator('#lead-launch-reason-band .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/agents#lead')
     failures.push(...errors); await context.close()
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()

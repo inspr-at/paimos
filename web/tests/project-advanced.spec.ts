@@ -256,10 +256,11 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {
       const page = await context.newPage(), world = await setup(page)
+      const touchSession = width < 600 ? await context.newCDPSession(page) : undefined
       await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: theme } }))
       async function capture(state: string, fullPage = true) {
         for (const check of await checkProjectSettings(page, `${state}/${width}/${theme}`, width < 600)) { expect(check.passed, check.message).toBe(true); lines.push(`${state}-${width}-${theme}: ${check.message} PASS`) }
-        await captureProjectSettings(page, { path: testInfo.outputPath(`${state}-${width}-${theme}.png`), fullPage }, width < 600)
+        await captureProjectSettings(page, { path: testInfo.outputPath(`${state}-${width}-${theme}.png`), fullPage }, touchSession)
         if (width < 600) expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
       }
       await page.goto('/p/PHAROS/settings/delivery')

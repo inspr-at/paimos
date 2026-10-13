@@ -6,14 +6,12 @@
 export const approvedCheckSHA = '5f3e1a708081b52a1915d691ce80f300fa67338e4fc9172d02d2dc9392f35429'
 // Beyond-viewport capture clears Chromium's touch emulation. Restore the
 // context's original mode so later interactions and audits still exercise it.
-export async function captureProjectSettings(page, options, touch) {
+// The caller keeps the CDP session attached until context.close(): detaching it
+// also resets emulation, undoing the restoration.
+export async function captureProjectSettings(page, options, touchSession) {
   try { return await page.screenshot(options) }
   finally {
-    if (touch) {
-      const session = await page.context().newCDPSession(page)
-      try { await session.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 }) }
-      finally { await session.detach() }
-    }
+    if (touchSession) await touchSession.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   }
 }
 export async function checkProjectSettings(page, name, touch) {

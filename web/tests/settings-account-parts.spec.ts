@@ -148,7 +148,7 @@ test('the new-account and Unassigned items lead to where they are decided', asyn
   // AEON-1233 gives the context its own home in project Settings > Agents.
   await expect(page).toHaveURL('/p/PHAROS/settings/agents#project-work-context')
   await expect(page.locator('#project-work-context')).toBeInViewport()
-  await expect(page.getByLabel('Context', { exact: true })).toHaveValue(CTX.hold)
+  await expect(page.getByRole('combobox', { name: 'Context', exact: true })).toHaveValue(CTX.hold)
 })
 
 test('every old link lands in the right part with the same panel open', async ({ page }) => {
