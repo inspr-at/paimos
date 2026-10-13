@@ -889,14 +889,10 @@ const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure) }
 // Every update keeps the first rows on screen where they are (AEON-1279): WebKit has no scroll
 // anchoring, and this page turns Chrome's off, so rows arriving or leaving above would move them.
 // The list scrolls with the page, or in its own pane; the sticky heads cover the top of the view.
-const listScroller = () => props.pane ? table.value : scroller
 useReaderAnchor({
-  scroller: listScroller,
-  rows: () => table.value?.querySelectorAll<HTMLElement>(':scope > [role="row"]:not(.thead)'),
-  top: () => {
-    const heads = [stick.value, table.value?.querySelector<HTMLElement>(':scope > .thead')]
-    return Math.max(listScroller()?.getBoundingClientRect().top ?? 0, ...heads.map(head => head?.getBoundingClientRect().bottom ?? -Infinity))
-  },
+  scroller: () => props.pane ? table.value : scroller,
+  rows: () => table.value?.querySelectorAll<HTMLElement>('[role="row"]:not(.thead)'),
+  top: () => Math.max(...[stick.value, table.value?.querySelector<HTMLElement>(':scope > .thead')].map(head => head?.getBoundingClientRect().bottom ?? -Infinity)),
 })
 onMounted(() => {
   scroller = root.value?.closest('main') ?? null

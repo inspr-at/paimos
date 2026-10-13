@@ -49,7 +49,7 @@ export interface ReaderAnchorOptions {
   scroller: () => HTMLElement | null | undefined
   /** The rows that may anchor, in document order. */
   rows: () => Iterable<HTMLElement> | ArrayLike<HTMLElement> | null | undefined
-  /** Where the visible part starts (below sticky heads); the scroller's top by default. */
+  /** Where the visible part starts below sticky heads; never above the scroller's top. */
   top?: () => number
 }
 export interface ReaderAnchor {
@@ -69,7 +69,7 @@ export function readerAnchor(options: ReaderAnchorOptions): ReaderAnchor {
       marks = []
       const scroller = options.scroller()
       if (!scroller || scroller.scrollTop <= 0) return
-      const edge = options.top?.() ?? scroller.getBoundingClientRect().top
+      const edge = Math.max(scroller.getBoundingClientRect().top, options.top?.() ?? -Infinity)
       for (const el of Array.from(options.rows() ?? [])) {
         const box = el.getBoundingClientRect()
         if (box.height <= 0 || box.bottom <= edge) continue

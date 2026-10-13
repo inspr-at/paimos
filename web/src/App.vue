@@ -257,8 +257,9 @@ main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stab
 @media (max-width: 600px) {
   .app-shell { grid-template-rows: var(--header-h) minmax(0, 1fr); }
   .app-shell.header-folded { grid-template-rows: minmax(0, 1fr); }
-  .app-shell > main, .app-shell > .app-footer { grid-row: -2; grid-column: 1; }
-  .app-shell > .app-footer { align-self: end; }
+  /* The footer component has two roots (the bar and its hover card), so it carries no scope of ours. */
+  .app-shell > main, .app-shell > :deep(.app-footer) { grid-row: -2; grid-column: 1; }
+  .app-shell > :deep(.app-footer) { align-self: end; }
   main { padding-bottom: var(--footer-h); scroll-padding-bottom: var(--footer-h); }
 }
 main:focus-visible { box-shadow: none; }

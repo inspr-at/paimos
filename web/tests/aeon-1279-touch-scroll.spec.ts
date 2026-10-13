@@ -59,7 +59,8 @@ async function watchTouch(page: Page, rows: string, list = '.sessions', scroller
       window.addEventListener(type, event => { log.down = event.touches.length; log.events.push(type) }, { capture: true, passive: true })
     }
     const target = document.querySelector(list)
-    for (const type of ['pointerdown', 'pointercancel', 'pointerleave']) target?.addEventListener(type, event => log.events.push(`${type}:${(event as PointerEvent).pointerType}`))
+    for (const type of ['pointerenter', 'pointerdown', 'pointercancel', 'pointerleave']) target?.addEventListener(type, event => log.events.push(`${type}:${(event as PointerEvent).pointerType}`))
+    target?.addEventListener('focusin', event => log.events.push(`focusin:${(event.target as HTMLElement).className}`))
     const el = document.querySelector<HTMLElement>(scroller)!
     el.addEventListener('scroll', () => log.heights.push(Math.round(el.getBoundingClientRect().height * 100) / 100), { passive: true })
     new MutationObserver(() => { const now = ids(); if (now !== shown && log.down > 0) log.changedWhileDown++; shown = now })
@@ -133,7 +134,9 @@ test('agents 390: a refresh during a touch swipe waits until the swipe settles, 
 
 test('agents 390: a refresh after one 40 px swipe lands without moving the rows on screen; touch shows no hold', async ({ page }, info) => {
   const { data, cdp } = await openAgents(page)
+  await watchTouch(page, SESSION_ROWS)
   await swipe(cdp, { x: 195, y: 600 }, -40)
+  note(info, `events: ${(await touchLog(page)).events.join(' ')}`)
   // A finger is not a pointer that rests on the list: nothing waits behind Show now.
   await expect(page.locator('.sessions [data-held-note] .held-face:not(.off)')).toHaveCount(0)
   arrive(data)
