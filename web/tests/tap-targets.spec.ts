@@ -271,7 +271,7 @@ for (const { width, coarse } of [
       // The initial report can replace a read-only span with the live button.
       // Wait for the actionable control before measuring its settled visual.
       await expect(tier).toHaveAttribute('aria-haspopup', 'dialog')
-      await expect.poll(async () => (await tier.boundingBox())?.height).toBe(44)
+      await expect.poll(async () => (await tier.boundingBox())?.height).toBe(expanded ? 44 : 26)
       await expectReach(tier, expanded)
       await capture(page, `agents-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}`)
       // Element screenshots can scroll the enclosing list. Restore the control

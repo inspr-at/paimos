@@ -106,7 +106,8 @@ for (const regenerated of [false, true]) {
     await expect(detail.locator('.headline')).toHaveCount(0)
     await expect(page.getByText('Historical tag headline')).toHaveCount(0)
     await expect(detail.getByText('Notes written after release')).toHaveCount(0)
-    await expect(detail.locator('.tickets')).toContainText('AEON-75')
+    // AEON-635 / #237 renders ticket links in classified release change blocks.
+    await expect(detail.getByRole('region', { name: 'Release notes' }).getByRole('link', { name: /^AEON-75:/ }).first()).toBeVisible()
     await expect(detail.locator('.notes')).toContainText('Correct and delete time entries in the Hours view')
     await expect(detail.locator('#release-evidence')).toHaveCount(0)
     // No capture: no header and no note lines, only the changes.
@@ -220,8 +221,20 @@ for (const width of [1600, 390]) {
     const detail = page.locator('article.detail')
     const hint = detail.getByRole('region', { name: 'Release notes' }).getByText('Notes written after release', { exact: true })
     await expect(hint).toBeVisible()
-    await hint.scrollIntoViewIfNeeded()
+    // Bind font/layout and the actual scroll container before testing full visibility.
+    await page.evaluate(() => document.fonts.ready)
+    await hint.evaluate(async element => {
+      element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    })
     await expect(hint).toBeInViewport({ ratio: 1 })
+    const painted = await hint.evaluate(element => {
+      const range = document.createRange(); range.selectNodeContents(element)
+      const glyphs = range.getBoundingClientRect()
+      const area = element.closest('.detail-scroll')!.getBoundingClientRect()
+      return { top: glyphs.top - area.top, bottom: area.bottom - glyphs.bottom, left: glyphs.left - area.left, right: area.right - glyphs.right }
+    })
+    for (const [edge, distance] of Object.entries(painted)) expect(distance, `painted note fits ${edge}`).toBeGreaterThanOrEqual(-0.5)
     await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
     const detailStyle = await hint.evaluate(el => {
       const s = getComputedStyle(el)

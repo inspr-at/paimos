@@ -16,7 +16,14 @@ export function liveServer(data: Fixtures, actor = mira) {
   const seen = new Map(data.nodes.map(node => [node.id, structuredClone(node)]))
   const log: { id: number; type: string; data: unknown }[] = []
   let newest = 500
-  const requests: { page: string; after: string | null; resumed: boolean }[] = []
+  const requests: { page: string; connection: string; after: string | null; resumed: boolean; events: number[] }[] = []
+  const answerGates = new Map<string, Promise<void>>()
+  function holdAnswers(name: string) {
+    let release!: () => void
+    const answer = new Promise<void>(resolve => { release = resolve })
+    answerGates.set(name, answer)
+    return () => { if (answerGates.get(name) === answer) answerGates.delete(name); release() }
+  }
   // A held page hears nothing new (a slow connection): its stream resumes where it was.
   const held = new Set<string>()
   const changedFields = (before: MockNode, after: MockNode) => {
@@ -53,11 +60,22 @@ export function liveServer(data: Fixtures, actor = mira) {
     await page.addInitScript(() => {
       const NativeSource = window.EventSource
       let connection = 0
+      const completed: { connection: string; nodes: boolean; events: number[] }[] = []
+      Object.assign(window, { fixtureStreamCompletions: completed })
       class FixtureSource extends NativeSource {
+        private nodes = false
         constructor(url: string | URL, init?: EventSourceInit) {
           const target = new URL(url, location.href)
           if (target.pathname === '/api/events/stream') target.searchParams.set('fixture_connection', String(++connection))
           super(target, init)
+          this.addEventListener('fixture.complete', event => {
+            const data = JSON.parse((event as MessageEvent).data)
+            completed.push({ ...data, nodes: this.nodes })
+          })
+        }
+        override addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) {
+          if (type === 'node.benefits_generated') this.nodes = true
+          super.addEventListener(type, listener, options)
         }
       }
       window.EventSource = FixtureSource
@@ -65,23 +83,38 @@ export function liveServer(data: Fixtures, actor = mira) {
     // Registered after mockWork, so it answers first.
     await page.route('**/api/events/stream**', async route => {
       if (options.first) await options.first
+      await answerGates.get(name)
       const query = new URL(route.request().url()).searchParams
       const connection = query.get('fixture_connection')!
       scan()
       const numeric = query.get('after') !== 'latest' ? Number(query.get('after')) : null
       const resume = cursors.get(connection) ?? numeric
       const after = resume ?? newest
-      requests.push({ page: name, after: query.get('after'), resumed: resume !== null })
+      const events = held.has(name) ? [] : log.filter(event => event.id > after)
+      requests.push({ page: name, connection, after: query.get('after'), resumed: resume !== null, events: events.map(event => event.id) })
       const lines = ['retry: 150', '', ': connected', '', `id: ${after}`, 'event: stream.ready', `data: ${JSON.stringify({ after, resumed: resume !== null })}`, '']
       cursors.set(connection, after)
-      for (const event of held.has(name) ? [] : log.filter(event => event.id > after)) {
+      for (const event of events) {
         lines.push(`id: ${event.id}`, `event: ${event.type}`, `data: ${JSON.stringify(event.data)}`, '')
         cursors.set(connection, event.id)
       }
+      // The marker follows all node callbacks on this exact native SSE subscriber.
+      lines.push('event: fixture.complete', `data: ${JSON.stringify({ connection, events: events.map(event => event.id) })}`, '')
       return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: `${lines.join('\n')}\n` })
     })
   }
-  return { install, requests, hold: (name: string, on = true) => { if (on) held.add(name); else held.delete(name) } }
+  function eventFor(nodeId: string) {
+    scan()
+    const event = log.findLast(event => (event.data as { node_id: string }).node_id === nodeId)
+    if (!event) throw new Error(`No recorded event for ${nodeId}`)
+    return event.id
+  }
+  async function delivered(page: Page, event: number) {
+    const completions = () => page.evaluate(() => (window as unknown as { fixtureStreamCompletions: { connection: string; nodes: boolean; events: number[] }[] }).fixtureStreamCompletions)
+    await expect.poll(async () => (await completions()).some(item => item.nodes && item.events.includes(event))).toBe(true)
+    return (await completions()).find(item => item.nodes && item.events.includes(event))!.connection
+  }
+  return { install, requests, holdAnswers, eventFor, delivered, hold: (name: string, on = true) => { if (on) held.add(name); else held.delete(name) } }
 }
 
 // One signed-in page on url, with the live stream. hold: answers it holds back
@@ -101,7 +134,7 @@ export async function openOne(browser: Browser, url: string, settings: { hold?: 
 type Viewport = { width: number; height: number }
 // Two signed-in browsers on url. viewportB alone keeps the slice 1a call; an
 // options object also sets A's viewport and the fixture options.
-export async function openBoth(browser: Browser, url: string, viewport?: Viewport | { a?: Viewport; b?: Viewport; options?: MockOptions; colorScheme?: 'light' | 'dark'; actor?: string }) {
+export async function openBoth(browser: Browser, url: string, viewport?: Viewport | { a?: Viewport; b?: Viewport; options?: MockOptions; colorScheme?: 'light' | 'dark'; actor?: string; clock?: number }) {
   const settings = viewport && 'width' in viewport ? { b: viewport } : viewport ?? {}
   const viewportB = settings.b, viewportA = 'a' in settings ? settings.a : undefined
   const data = fixtures('options' in settings ? settings.options : {})
@@ -109,7 +142,7 @@ export async function openBoth(browser: Browser, url: string, viewport?: Viewpor
   const scheme = 'colorScheme' in settings && settings.colorScheme ? { colorScheme: settings.colorScheme } : {}
   const contexts: BrowserContext[] = [await browser.newContext({ ...scheme, ...(viewportA ? { viewport: viewportA } : {}) }), await browser.newContext({ ...scheme, ...(viewportB ? { viewport: viewportB } : {}) })]
   const [a, b] = await Promise.all(contexts.map(context => context.newPage()))
-  for (const [page, name] of [[a, 'a'], [b, 'b']] as const) { await mockWork(page, data, { nativeEvents: true }); await live.install(page, name) }
+  for (const [page, name] of [[a, 'a'], [b, 'b']] as const) { if ('clock' in settings && settings.clock !== undefined) await page.clock.install({ time: settings.clock }); await mockWork(page, data, { nativeEvents: true }); await live.install(page, name) }
   const errors = watchErrors(b), errorsA = watchErrors(a)
   await Promise.all([a.goto(url), b.goto(url)])
   // Both listen from here on: their first stream requests have been answered.

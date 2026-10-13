@@ -549,8 +549,11 @@ test('AEON-1212: pinned and last-used tabs belong to the person; queue links for
   await expect(panel(page).locator('.why')).toContainText('Next up')
 })
 
+// AEON-1212 / #592 originally put all five risks under one 30-second budget.
+// Each scenario retains its evidence and control guards with a fresh fixture.
 for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as const) {
-  test(`AEON-1212 fix3: ${width} ${look} G3 results and G6 admission evidence stay honest and the owned worker row stays put`, async ({ page }, info) => {
+  for (const scenario of ['question results', 'owned worker', 'admission states', 'unreadable history', 'unreadable queue'] as const) {
+    test(`AEON-1212 fix3: ${width} ${look} ${scenario} stay honest and controls stay put`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
     const errors = watchErrors(page), world = await setup(page)
@@ -561,10 +564,11 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
       await checkPanel(page, width === 400)
       await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${captureWidth}-${look}.png`) })
     }
+    const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist') }
+    if (scenario === 'question results') {
     await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
     await expect(question(page)).toContainText('Asks you')
     await expect(panel(page).locator('.pt-sub')).toContainText('Opus 5.5 · high')
-    const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist') }
     world.hold()
     try {
       await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
@@ -614,7 +618,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     expect(world.state.calls).toHaveLength(2)
     await shot('g3-no-permission')
 
-    world.state.denied = false
+    } else {
     await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
     const caption = panel(page).locator('.admission-caption')
     const checks = panel(page).locator('[data-check]')
@@ -622,6 +626,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
       await panel(page).locator('#lp-checks').scrollIntoViewIfNeeded()
       await shot(`g6-${state}`)
     }
+    if (scenario === 'owned worker') {
     await expect(caption).toContainText('All passed at the last start')
     await expect(checks).toHaveCount(4)
     await admissionShot('all-passed')
@@ -646,6 +651,13 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     ] })
     await shot('worker-row', width === 1440 ? 1800 : width)
     if (width === 1440) await page.setViewportSize({ width, height: 1000 })
+    if (width === 1440) {
+      await panel(page).getByRole('button', { name: 'Close session details' }).click()
+      await page.locator('.sessions .row[data-row^="s:"] .agent-link').last().click()
+      await expect(tab(page, 'Overview')).toHaveAttribute('aria-selected', 'true')
+      await page.screenshot({ path: info.outputPath(`AEON-1212/pick-last-row-${width}-${look}.png`) })
+    }
+    } else if (scenario === 'admission states') {
     await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
       { name: 'held history', run: async () => {
         world.state.admission = [{ ...makeAdmission(), reason_codes: ['dial_full'] }]
@@ -677,6 +689,17 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await expect(panel(page)).toContainText('The checks run when this lead starts its next worker.')
         await admissionShot('no-start-yet')
       } },
+      { name: 'stale history', run: async () => {
+        world.state.historyUnreadable = false
+        world.state.admission = [{ ...makeAdmission(), recorded_at: '2026-10-04T09:02:00Z' }]
+        await page.reload()
+        await expect(caption).toContainText('may be out of date')
+        await expect(checks).toHaveCount(4)
+        await admissionShot('stale')
+      } },
+    ] })
+    } else if (scenario === 'unreadable history') {
+    await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
       { name: 'unreadable history', run: async () => {
         world.state.historyUnreadable = true
         await page.reload()
@@ -692,6 +715,9 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await expect(failure).toHaveCount(0)
         await expect(caption).toHaveText('No start yet')
       } },
+    ] })
+    } else {
+    await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
       { name: 'unreadable queue retries without moving its controls', run: async () => {
         world.state.queueUnreadable = true
         await page.reload()
@@ -720,23 +746,12 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await expect(failure).toHaveCount(0)
         await expect(panel(page).locator('#next-up .wk')).not.toHaveCount(0)
       } },
-      { name: 'stale history', run: async () => {
-        world.state.historyUnreadable = false
-        world.state.admission = [{ ...makeAdmission(), recorded_at: '2026-10-04T09:02:00Z' }]
-        await page.reload()
-        await expect(caption).toContainText('may be out of date')
-        await expect(checks).toHaveCount(4)
-        await admissionShot('stale')
-      } },
     ] })
-    if (width === 1440) {
-      await panel(page).getByRole('button', { name: 'Close session details' }).click()
-      await page.locator('.sessions .row[data-row^="s:"] .agent-link').last().click()
-      await expect(tab(page, 'Overview')).toHaveAttribute('aria-selected', 'true')
-      await page.screenshot({ path: info.outputPath(`AEON-1212/pick-last-row-${width}-${look}.png`) })
+    }
     }
     expect(errors).toEqual([])
-  })
+    })
+  }
 }
 
 test('AEON-1212 approved check.mjs: the round-7 design passes and supplies the reference screenshots', async ({}, info) => {

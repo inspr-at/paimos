@@ -221,12 +221,31 @@ test('working and lost-heartbeat agents: polls every 20 seconds and says what ch
   await expect.poll(reads).toBe(7)
   await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'unresponsive')
   await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/no heartbeat/)
+  // AEON-514 / #105 and AEON-1018 / #436 recover the stream separately
+  // from the periodic poll. Hold the new handshake to distinguish both reads.
+  const streams = () => page.evaluate(() => (window as unknown as { fixtureQuietStreams: { active(): { id: number; opened: boolean }[] } }).fixtureQuietStreams.active())
+  const oldStreams = await streams()
+  await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { holdOpen(): void } }).fixtureQuietStreams.holdOpen())
   // A hidden tab asks nothing and catches up when shown again.
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await page.clock.runFor(65_000)
   expect(reads()).toBe(7)
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await expect.poll(reads).toBe(8)
+  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/liveAgents.ts' /* @vite-ignore */)).useLiveAgents().updatedAt)).toBe(await page.evaluate(() => Date.now()))
+  const resumed = await streams()
+  expect(resumed).toHaveLength(oldStreams.length)
+  expect(resumed.every(stream => !stream.opened && oldStreams.every(old => old.id !== stream.id))).toBe(true)
+  await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { open(): void } }).fixtureQuietStreams.open())
+  await expect.poll(reads).toBe(9)
+  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/liveAgents.ts' /* @vite-ignore */)).useLiveAgents().dataStale)).toBe(false)
+  // Once the fresh handshake completed, only one periodic poll runs per period.
+  for (const total of [10, 11]) {
+    const previous = await page.evaluate(async () => (await import('/src/stores/liveAgents.ts' /* @vite-ignore */)).useLiveAgents().updatedAt)
+    await page.clock.runFor(20_000)
+    await expect.poll(reads).toBe(total)
+    await expect.poll(() => page.evaluate(async () => (await import('/src/stores/liveAgents.ts' /* @vite-ignore */)).useLiveAgents().updatedAt)).toBeGreaterThan(previous!)
+  }
 })
 
 test('the UI audit lets a chip share its own link only in its slot', async ({ page }) => {

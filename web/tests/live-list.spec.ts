@@ -231,29 +231,55 @@ test('Show leaves the row under an open editor as it was: saving still meets the
 
 test('changes by the same person in another tab reach the list; the tab’s own changes need no read', async ({ browser }) => {
   // Both browsers are the same account: every event names the signed-in person.
-  const { a, b, live, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets', { actor: me.id })
+  const { a, b, data, live, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets', { actor: me.id, clock: Date.now() })
+  let release = live.holdAnswers('a')
   try {
     const reads: string[] = []
     a.on('request', request => { const url = new URL(request.url()); if (url.pathname === '/api/nodes' && url.searchParams.has('ids')) reads.push(url.searchParams.get('ids')!) })
+    // AEON-1239 / #580 gave SSE subscribers independent cursors. Bind the
+    // actual node subscriber and its completed aggregate/list reply, not a count.
+    const listReply = a.waitForResponse(response => { const url = new URL(response.url()); return url.pathname === '/api/nodes' && (url.searchParams.get('ids') ?? '').split(',').includes('n-2') })
     await b.goto('/p/PHAROS/PHAROS-12')
     await panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
     await panel(b).getByLabel('Title', { exact: true }).fill('Add an Oracle Cloud Always Free connector')
     await b.keyboard.press('Enter')
+    await expect(panel(b).getByRole('heading')).toContainText('Always Free')
+    const otherEvent = live.eventFor('n-2')
+    release()
+    const connection = await live.delivered(a, otherEvent)
+    const batch = await a.evaluate(async () => (await import('/src/lib/useLiveList.ts' /* @vite-ignore */)).BATCH_MS)
+    await a.clock.runFor(batch)
+    await (await listReply).finished()
     await expect(a.locator('#row-n-2')).toContainText('Always Free')
     await expect(said(a)).toHaveText('PHAROS-12 was updated elsewhere: title.')
 
-    // A's own status change: its event is already on screen, so nothing is read or said.
+    // Hold the exact event until the own write has reached the visible row.
+    release = live.holdAnswers('a')
     const before = reads.length
     await setStatus(a, 'n-4', 'PHAROS-14', 'In progress')
     await expect(a.locator('#row-n-4 .status-btn')).toHaveAccessibleName(/In progress/)
-    // Two more stream answers to A: the first one after the change carried its event.
-    const streams = live.requests.filter(r => r.page === 'a').length
-    await expect.poll(() => live.requests.filter(r => r.page === 'a').length).toBeGreaterThan(streams + 1)
-    await a.waitForTimeout(500)
-    expect(reads.slice(before)).toEqual([])
+    const ownEvent = live.eventFor('n-4')
+    release()
+    expect(await live.delivered(a, ownEvent)).toBe(connection)
+    await a.clock.runFor(batch)
     await expect(said(a)).toHaveText('PHAROS-12 was updated elsewhere: title.')
+
+    // A later real change/read is a positive completion barrier for that batch.
+    // If the own revision was reread it is now in the request ledger as n-4.
+    release = live.holdAnswers('a')
+    const sentinelReply = a.waitForResponse(response => { const url = new URL(response.url()); return url.pathname === '/api/nodes' && (url.searchParams.get('ids') ?? '').split(',').includes('n-1') })
+    const sentinel = data.nodes.find(node => node.id === 'n-1')!
+    sentinel.title = 'External completion barrier'
+    sentinel.updated_at = new Date(Date.parse(sentinel.updated_at) + 1000).toISOString()
+    const sentinelEvent = live.eventFor('n-1')
+    release()
+    expect(await live.delivered(a, sentinelEvent)).toBe(connection)
+    await a.clock.runFor(batch)
+    await (await sentinelReply).finished()
+    await expect(a.locator('#row-n-1')).toContainText('External completion barrier')
+    expect(reads.slice(before).flatMap(ids => ids.split(','))).not.toContain('n-4')
     expect(errorsA).toEqual([])
-  } finally { await close() }
+  } finally { release(); await close() }
 })
 
 test('Show brings a waiting change into a selected row', async ({ browser }) => {
