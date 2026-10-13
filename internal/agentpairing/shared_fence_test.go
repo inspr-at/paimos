@@ -139,10 +139,11 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../nativesessions/receipts/page.go", "Receipts", "s.write(", "s.authority.ReadTx("},
 		{"../nativesessions/receipts/page.go", "Receipts", "s.authority.ReadTx(", "authz.RequireTx("},
 		{"../nativesessions/receipts/page.go", "Receipts", "authz.RequireTx(", "SELECT receipt FROM native_session_receipts"},
-		{"../nativesessions/receipts/final.go", "Persist", "s.write(", "s.authority.FinalTx("},
-		{"../nativesessions/receipts/final.go", "Persist", "s.authority.FinalTx(", "authz.RequireTx("},
-		{"../nativesessions/receipts/final.go", "Persist", "authz.RequireTx(", "FOR NO KEY UPDATE"},
-		{"../nativesessions/receipts/final.go", "Persist", "FOR NO KEY UPDATE", "s.chat.StoreNativeFinalTx("},
+		// Sink.Persist delegates; Repository.Persist owns the transaction.
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "s.write(", "s.authority.FinalTx("},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "s.authority.FinalTx(", "authz.RequireTx("},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "FOR NO KEY UPDATE", "s.chat.StoreNativeFinalTx("},
 		{"../auth/store.go", "revokeAgentKeyTx", "db.LockTenant(", "lockAgentKey("},
 		{"../rules/module.go", "endpoint", "lockAccess(", "pg_advisory_xact_lock"},
 		{"../rules/learning_draft.go", "PrepareWrite", "lockAccess(", "pg_advisory_xact_lock"},
@@ -230,10 +231,27 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		receiver, name, qualified := strings.Cut(c.fn, ".")
+		if !qualified {
+			name = c.fn
+		}
 		var body string
 		for _, decl := range tree.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if ok && fn.Name.Name == c.fn {
+			if ok && fn.Name.Name == name {
+				if qualified {
+					if fn.Recv == nil || len(fn.Recv.List) != 1 {
+						continue
+					}
+					typ := fn.Recv.List[0].Type
+					if pointer, ok := typ.(*ast.StarExpr); ok {
+						typ = pointer.X
+					}
+					ident, ok := typ.(*ast.Ident)
+					if !ok || ident.Name != receiver {
+						continue
+					}
+				}
 				body = string(raw[int(fn.Pos())-1 : int(fn.End())-1])
 				break
 			}
