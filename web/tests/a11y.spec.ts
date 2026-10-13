@@ -210,7 +210,8 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['agents approve', signedInAdmin, '/agents', async page => {
     await expect(page.locator('.agents-page .row').first()).toBeVisible()
     // AEON-569, merge #458: approvals open the canonical Decision Desk memo.
-    await page.getByTestId(/^agents-desk-item-a:/).first().click()
+    await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk/ }).click()
+    await page.getByTestId(/^desk-row-a:/).first().click()
     await expect(page.getByRole('dialog', { name: 'Decision Desk memo', exact: true })).toBeVisible()
     await expect(page.getByTestId('desk-paper')).toBeFocused()
     const reason = page.getByRole('textbox', { name: 'Reason', exact: true })
@@ -231,9 +232,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
         if (width) await page.setViewportSize({ width, height: 1000 })
         await page.evaluate(() => document.fonts.ready)
         if (name === 'ticket full page') {
-          const feedback = page.locator('.placement-feedback dd')
+          const ticket = page.getByRole('article', { name: 'Ticket details' })
+          const feedback = ticket.locator('.placement-feedback dd:visible')
           await expect(feedback).toContainText('Kind of work is unavailable.')
-          const controls = { feedback, kind: page.getByLabel('Kind of work', { exact: true }), complexity: page.getByLabel('Complexity', { exact: true }) }
+          const controls = { feedback, kind: ticket.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity: ticket.getByRole('combobox', { name: 'Complexity', exact: true }) }
           await expectStableControls({
             controls,
             interactions: [

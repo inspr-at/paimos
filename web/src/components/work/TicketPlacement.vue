@@ -77,7 +77,7 @@ function choose(field: 'area' | 'complexity', event: Event) { void save(field, (
         <button v-if="canEdit && complexity && placementSuggested(item.fields, 'complexity')" type="button" class="confirm" :disabled="busy" @click="save('complexity', complexity)">Confirm</button>
       </dd>
     </div>
-    <div class="prop placement-feedback"><dt class="sr-only">Classification</dt><dd :id="feedbackId" :tabindex="feedback ? 0 : undefined" role="region" aria-label="Classification feedback" aria-live="polite">{{ feedback }}</dd></div>
+    <div class="prop placement-feedback"><dt class="sr-only">Classification</dt><dd :id="feedbackId" :tabindex="feedback ? 0 : undefined" aria-label="Classification feedback" aria-live="polite">{{ feedback }}</dd></div>
   </template>
 </template>
 
