@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,8 +35,8 @@ type ProgressReport struct {
 // ProgressHeartbeat uses existing harness fields. Source timestamps stay local;
 // the server uses its own acceptance clock to evaluate the attention rule.
 type ProgressHeartbeat struct {
-	ProgressPct  *int       `json:"progress_pct,omitempty"`
-	ETAReadyAt   *time.Time `json:"eta_ready_at,omitempty"`
+	ProgressPct  *int       `json:"progress_pct"`
+	ETAReadyAt   *time.Time `json:"eta_ready_at"`
 	ActivityNote *string    `json:"activity_note,omitempty"`
 }
 
@@ -64,6 +65,7 @@ type Progress struct {
 	closed            bool
 	sequence          uint64
 	plan              []planStep
+	planTurnRef       string
 	planAt            time.Time
 	baselineCompleted int
 	derived, explicit *progressSample
@@ -77,7 +79,7 @@ func NewProgress(binding nativecontract.Binding, identity nativecontract.NativeI
 	if err = validate(v, "NativeBinding", binding); err != nil {
 		return nil, err
 	}
-	if lifetime == nil || binding.RunID == nil || identity.RuntimeEpoch != binding.RuntimeEpoch || (identity.Provider != "claude" && identity.Provider != "codex") || identity.Provider == "claude" && identity.NativeSessionRef == "" || identity.Provider == "codex" && identity.NativeThreadRef == "" {
+	if lifetime == nil || binding.RunID == nil || identity.RuntimeEpoch != binding.RuntimeEpoch || !slices.Contains([]string{"claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"}, identity.Provider) || identity.Provider == "claude" && identity.NativeSessionRef == "" || identity.Provider == "codex" && identity.NativeThreadRef == "" {
 		return nil, refusal(nativecontract.ReasonIdentityMismatch)
 	}
 	if len(identity.ProcessIdentityDigest) != 64 || len(identity.NativeSessionRef) > 256 || len(identity.NativeThreadRef) > 256 {
@@ -263,6 +265,8 @@ func (p *Progress) ObservePlan(binding nativecontract.Binding, source nativecont
 			}
 			steps = append(steps, planStep{step.Step, status})
 		}
+	default:
+		return refusal(nativecontract.ReasonUnsupported)
 	}
 	if len(steps) == 0 || len(steps) > 128 {
 		return refusal(nativecontract.ReasonBufferFull)
@@ -277,7 +281,7 @@ func (p *Progress) ObservePlan(binding nativecontract.Binding, source nativecont
 		}
 	}
 	now := p.now()
-	changed := len(p.plan) != len(steps)
+	changed := len(p.plan) != len(steps) || p.identity.Provider == "codex" && p.planTurnRef != source.NativeTurnRef
 	if !changed {
 		for i := range steps {
 			if steps[i].Text != p.plan[i].Text {
@@ -302,6 +306,7 @@ func (p *Progress) ObservePlan(binding nativecontract.Binding, source nativecont
 		}
 	}
 	p.plan, p.derived, p.sequence = steps, sample, sequence
+	p.planTurnRef = source.NativeTurnRef
 	return nil
 }
 

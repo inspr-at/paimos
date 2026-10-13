@@ -89,12 +89,13 @@ The adapter supplies the current source identity and monotonic frame sequence.
 Other bindings, processes, conversations and stale sequences are refused.
 Frames are bounded to 64 KiB, depth 16 and 128 steps. Percent is the completed
 step fraction. ETA uses elapsed time and newly observed completions in the same
-plan; it stays absent until there is evidence for a rate. A changed plan resets
+plan; it stays absent until there is evidence for a rate. A changed plan or a new Codex turn resets
 that baseline. Only a generic step-count note leaves this parser; private plan
 text, explanations, reasoning and tool bodies do not enter the heartbeat.
 
 `Progress.AddTool` registers `report_progress` on the existing session-scoped
-tool server, subject to its approved tool policy. Its strict schema is exactly
+tool server, subject to its approved tool policy. Other qualified C0 providers
+can report explicitly while protocol derivation remains unsupported. Its strict schema is exactly
 `pct` (integer 0–100), `remaining_min` (number 0–524160) and `note` (nonempty
 public text, at most 512 bytes). Missing/unknown/duplicate fields, unsafe text,
 closed lifetimes and expired grants are rejected. Session identity comes from
@@ -103,7 +104,9 @@ the daemon closure, not tool arguments. The agent receives no credential.
 `Progress.Heartbeat` emits existing `progress_pct`, `eta_ready_at` and
 `activity_note` fields. Explicit reports take precedence for ten minutes;
 derived progress is the fallback. ETA stays anchored to the observation time,
-not moved forward by every heartbeat. Stale observations are omitted. The
+not moved forward by every heartbeat. Missing/stale observations send explicit nulls for percent and ETA. This
+clears the existing harness values rather than refreshing an old ETA when
+only percent is reported; preserve those nulls in the heartbeat adapter. The
 tool acknowledges local acceptance only; successful server heartbeat receipt
 confirms persistence. Neither path reads `.agent-status.json` or a transcript
 file. The ignored progress file used by this legacy builder remains a current
@@ -144,7 +147,8 @@ request a coordinator contract amendment before adding a public enum value.
    tracker under the supervisor's ownership transition.
 5. Copy `Progress.Heartbeat` fields into the existing harness heartbeat sent
    with the daemon's private session proof. Persist through the existing
-   authorized transaction. Do not invoke the legacy status-file reader or hand
+   authorized transaction. Preserve explicit null progress/ETA fields so stale values are cleared. Do not
+   invoke the legacy status-file reader or hand
    its worker lease to the agent. Apply the attention selector with server
    timestamps, current generation and parent routing as described above.
 6. Route LEAD prompt/inbox input and interrupt/stop commands through the returned

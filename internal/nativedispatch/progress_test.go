@@ -26,6 +26,21 @@ func planFrame(provider, first, second string) []byte {
 // Risk: protocol plans or agent tool arguments can fabricate target identity,
 // refresh stale estimates, or claim delivery to the server before a heartbeat.
 func TestNativeProgressPlansToolAndHeartbeat(t *testing.T) {
+	// Other qualified C0 providers still get explicit progress; unsupported
+	// protocol derivation must not make the bound reporting tool unavailable.
+	at := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	other := nativecontract.NativeIdentity{Provider: "pi", RuntimeEpoch: testID, ProcessIdentityDigest: strings.Repeat("a", 64)}
+	p, err := NewProgress(testBinding(), other, t.Context(), at.Add(time.Hour), func() time.Time { return at })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Report(testBinding(), []byte(`{"pct":20,"remaining_min":12,"note":"Explicit progress"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if beat := p.Heartbeat(); beat.ProgressPct == nil || *beat.ProgressPct != 20 || beat.ETAReadyAt == nil {
+		t.Fatal("explicit provider progress unavailable", beat)
+	}
+	requireReason(t, p.ObservePlan(testBinding(), other, 1, []byte(`{}`)), nativecontract.ReasonUnsupported)
 	for _, provider := range []string{"claude", "codex"} {
 		t.Run(provider, func(t *testing.T) {
 			now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
@@ -77,6 +92,9 @@ func TestNativeProgressPlansToolAndHeartbeat(t *testing.T) {
 				nextPlan := strings.ReplaceAll(string(planFrame(provider, "completed", "in_progress")), "native-turn", "next-turn")
 				if err = p.ObservePlan(b, next, 3, []byte(nextPlan)); err != nil {
 					t.Fatal("qualified source could not advance turn", err)
+				}
+				if p.Heartbeat().ETAReadyAt != nil {
+					t.Fatal("a new turn inherited the old plan's ETA rate")
 				}
 			}
 			// Exercise the actual MCP schema and transport, not just a direct Go
@@ -136,6 +154,10 @@ func TestNativeProgressPlansToolAndHeartbeat(t *testing.T) {
 			now = now.Add(8 * time.Minute)
 			if beat := p.Heartbeat(); beat.ProgressPct != nil || beat.ETAReadyAt != nil {
 				t.Fatal("stale source was repeatedly reported as fresh", beat)
+			}
+			stale, _ := json.Marshal(p.Heartbeat())
+			if !strings.Contains(string(stale), `"progress_pct":null`) || !strings.Contains(string(stale), `"eta_ready_at":null`) {
+				t.Fatal("stale fields were omitted, leaving an old server ETA fresh", string(stale))
 			}
 			stop()
 			result, err = session.CallTool(t.Context(), &mcp.CallToolParams{Name: "report_progress", Arguments: ProgressReport{100, 0, "Closed runtime"}})
