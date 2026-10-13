@@ -73,16 +73,31 @@ async function openAgents(page: Page) {
   await expect(page.locator('.agents-page .row').first()).toBeVisible({ timeout: 20_000 })
 }
 
-test('a ticket pill on /agents opens the peek and stays on /agents', async ({ page }) => {
+// AEON-1211 puts the ticket key in the session name; the actual ticket link
+// lives in the session panel (ticket-fact since AEON-1240).
+async function openSession(page: Page) {
+  await openAgents(page)
+  const row = page.locator(`[data-row="s:${session(1)}"]`)
+  const link = row.getByRole('link', { name: /Claude Code camy, Working/ })
+  await expect(link).toHaveAttribute('href', `/agents/${session(1)}`)
+  await expect(row.locator('.key-inline')).toHaveText('PHAROS-11 ·')
+  await clickShown(link)
+  await expect(page).toHaveURL(`/agents/${session(1)}`)
+  const details = page.getByRole('complementary', { name: 'Session details' })
+  await expect(details).toBeVisible()
+  const ticket = details.getByRole('link', { name: 'PHAROS-11 Connect Hetzner Cloud for managed provisioning', exact: true })
+  await expect(ticket).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  return ticket
+}
+
+test('a ticket in the agents session panel opens the peek and keeps the session route', async ({ page }) => {
   test.setTimeout(60_000)
   await page.setViewportSize({ width: 1600, height: 1000 })
-  await openAgents(page)
-  const chip = page.locator('.sessions').getByRole('link', { name: 'PHAROS-11' }).first()
-  await expect(chip).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  const chip = await openSession(page)
   await clickShown(chip)
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   await expect(peek(page).getByRole('button', { name: 'Open in project' })).toBeVisible()
-  expect(pathOf(page)).toBe('/agents')
+  expect(pathOf(page)).toBe(`/agents/${session(1)}`)
   expect(new URL(page.url()).searchParams.get('peek')).toBe('PHAROS-11')
   const list = (await page.locator('.sessions').boundingBox())!
   const box = (await peek(page).boundingBox())!
@@ -93,40 +108,37 @@ test('a ticket pill on /agents opens the peek and stays on /agents', async ({ pa
   await expect(page.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
 })
 
-test('cmd-click on an agents ticket keeps the real link', async ({ page }) => {
+test('cmd-click on an agents session ticket keeps the real link', async ({ page }) => {
   test.setTimeout(60_000)
-  await openAgents(page)
-  const chip = page.locator('.sessions').getByRole('link', { name: 'PHAROS-11' }).first()
-  await expect(chip).toBeVisible()
+  const chip = await openSession(page)
   await expect(peek(page)).toHaveCount(0)
-  // One modified click. It opens the ticket in a new tab and leaves the peek closed (AEON-447).
+  // One modified click opens a real ticket tab and leaves the session visible.
   const pending = page.context().waitForEvent('page', { timeout: 15_000 })
   await chip.click({ modifiers: ['ControlOrMeta'], force: true })
   const tab = await pending
   await tab.waitForURL('**/p/PHAROS/PHAROS-11')
   await tab.close()
   await expect(peek(page)).toHaveCount(0)
-  expect(pathOf(page)).toBe('/agents')
+  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
+  expect(pathOf(page)).toBe(`/agents/${session(1)}`)
 })
 
-test('a session-row ticket and a panel ticket peek without covering the session text', async ({ page }) => {
+test('a session-row opens its panel ticket peek without covering the session text', async ({ page }) => {
   test.setTimeout(60_000)
   await page.setViewportSize({ width: 1600, height: 1000 })
-  await openAgents(page)
-  const live = page.locator(`[data-row="s:${session(1)}"]`).getByRole('link', { name: 'PHAROS-11' })
+  const live = await openSession(page)
   await clickShown(live)
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
-  expect(pathOf(page)).toBe('/agents')
+  expect(pathOf(page)).toBe(`/agents/${session(1)}`)
   await page.keyboard.press('Escape')
   await expect(peek(page)).toHaveCount(0)
-  await expect(live).toBeFocused()
+  const details = page.getByRole('complementary', { name: 'Session details' })
+  await expect(details).toBeVisible()
+  await expect(details).toBeFocused()
 
-  await clickShown(page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }))
-  await expect(page).toHaveURL(`/agents/${session(1)}`)
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
-  await clickShown(page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail'))
+  await clickShown(live)
   await expect(peek(page)).toBeVisible()
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
+  await expect(details).toHaveCount(0)
   await expect(peek(page).getByRole('button', { name: 'Back to session' })).toBeVisible()
   expect(pathOf(page)).toBe(`/agents/${session(1)}`)
   const ticket = (await peek(page).boundingBox())!
@@ -134,7 +146,7 @@ test('a session-row ticket and a panel ticket peek without covering the session 
   expect(list.x + list.width).toBeLessThanOrEqual(ticket.x + 2)
   await peek(page).getByRole('button', { name: 'Back to session' }).click()
   await expect(peek(page)).toHaveCount(0)
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
+  await expect(details).toBeVisible()
   expect(pathOf(page)).toBe(`/agents/${session(1)}`)
 })
 
@@ -206,18 +218,17 @@ test('release history still opens its own ticket panel', async ({ page }) => {
   await openInProject(page, panel.getByRole('button', { name: 'Open in project' }), '/p/PHAROS/PHAROS-11')
 })
 
-test('ticket peek screenshots', async ({ page }) => {
+test('ticket peek screenshots', async ({ page }, testInfo) => {
   test.setTimeout(90_000)
-  await openAgents(page)
-  await clickShown(page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }))
-  await clickShown(page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail'))
+  const ticket = await openSession(page)
+  await clickShown(ticket)
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme })
-    for (const width of [1600, 390]) {
+    for (const width of [1600, 1440, 1024, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await expect(peek(page).getByRole('button', { name: 'Open in project' })).toBeVisible()
-      await page.screenshot({ path: `../.agent-shots/ticket-peek-${colorScheme}-${width}.png` })
+      await page.screenshot({ path: testInfo.outputPath(`ticket-peek-${colorScheme}-${width}.png`) })
     }
   }
 })

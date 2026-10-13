@@ -16,7 +16,11 @@ test.setTimeout(60_000)
 // The graph composition was designed for the roomy header; the default is now Compact.
 async function mockHeaderGraph(page: Page, world = ticketGraphWorld()) {
   await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
-  return mockTicketGraph(page, world)
+  const mocked = await mockTicketGraph(page, world)
+  // The header reads Queue independently. A real-server 404 used to insert
+  // Queue unavailable during the geometry/pinned-frame checks (AEON-1261).
+  await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], count: 0, manual_order: false, capacity: { queued_hours: 0, parallel_runs: 1, work_hours: 0, warning: false } } }))
+  return mocked
 }
 
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
@@ -57,9 +61,10 @@ async function expectClearOfText(page: Page) {
   expect(Math.abs(region.y - main.y)).toBeLessThan(2)
   expect(Math.abs(region.y + region.height - toolbar.y)).toBeLessThan(1)
   const controls = (await page.locator('.glimpse-controls').boundingBox())!
+  const spot = await page.locator('.glimpse-col').getAttribute('data-spot')
   for (const box of await protectedBoxes(page)) {
     const overlap = controls.x < box.x + box.width && controls.x + controls.width > box.x && controls.y < box.y + box.height && controls.y + controls.height > box.y
-    expect(overlap, `hover controls stay clear of text and toolbar: ${JSON.stringify({ controls, box, viewport: page.viewportSize() })}`).toBe(false)
+    expect(overlap, `hover controls stay clear of text and toolbar: ${JSON.stringify({ controls, box, spot, viewport: page.viewportSize() })}`).toBe(false)
   }
 }
 

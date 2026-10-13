@@ -59,14 +59,34 @@ export function glimpseOverlaps(a: GlimpseBox, b: GlimpseBox, gap = 0): boolean 
     && a.y < b.y + b.height + gap && a.y + a.height + gap > b.y
 }
 
-export function glimpseControlSpot(width: number, height: number, boxes: GlimpseBox[], control: { width: number; height: number }): GlimpseBox | null {
+export function glimpseControlSpot(width: number, height: number, boxes: GlimpseBox[], control: { width: number; height: number }, gap = 10, inset = 12, step = 8): GlimpseBox | null {
   // Prefer the lower right, then search the rest of the free header. A small
   // dock can have no room: never place the controls over the project's text.
-  for (let y = height - control.height - 12; y >= 8; y -= 8) {
-    for (let x = width - control.width - 12; x >= 8; x -= 8) {
-      const spot = { x, y, ...control }
-      if (!boxes.some(box => glimpseOverlaps(spot, box, 10))) return spot
+  if (control.width <= 0 || control.height <= 0 || width <= 0 || height <= 0 || step <= 0) return null
+  const y0 = height - control.height - inset, x0 = width - control.width - inset
+  for (let y = y0; y >= 8; y -= step) {
+    for (let x = x0; x >= 8; x -= step) {
+      const spot = { x, y, width: control.width, height: control.height }
+      if (!boxes.some(box => glimpseOverlaps(spot, box, gap))) return spot
     }
+  }
+  return null
+}
+
+// The labelled cluster is about 280px. At 1280 the opening beside the project
+// key is narrower than that, and it often misses the 8px grid. An unplaced
+// bar keeps its static origin and covers the key. Try the coarse clear spot,
+// then any non-overlapping pixel, then the icon row, before giving up.
+export function glimpsePlaceControls(width: number, height: number, boxes: GlimpseBox[], sizes: { full: { width: number; height: number }; compact: { width: number; height: number } }): { spot: GlimpseBox; compact: boolean } | null {
+  const passes = [
+    { size: sizes.full, compact: false, gap: 10, inset: 12, step: 8 },
+    { size: sizes.full, compact: false, gap: 0, inset: 8, step: 1 },
+    { size: sizes.compact, compact: true, gap: 10, inset: 12, step: 8 },
+    { size: sizes.compact, compact: true, gap: 0, inset: 8, step: 1 },
+  ]
+  for (const pass of passes) {
+    const spot = glimpseControlSpot(width, height, boxes, pass.size, pass.gap, pass.inset, pass.step)
+    if (spot) return { spot, compact: pass.compact }
   }
   return null
 }

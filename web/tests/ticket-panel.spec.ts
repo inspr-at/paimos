@@ -469,105 +469,102 @@ for (const first of ['lookup', 'list'] as const) {
   })
 }
 
-test('the routed panel keeps usable list space and stable controls', async ({ page }) => {
-  test.setTimeout(120_000)
-  const data = linkedKnowledge()
-  const title = 'Ein Arbeitsknoten: verlässliche Zuordnung und nachvollziehbare Änderungen im gesamten Projekt'
-  data.nodes.find(node => node.id === 'n-1')!.title = title
-  data.nodes.find(node => node.id === 'n-1')!.body += '\n\nFollow PHAROS-14.'
-  data.nodes.find(node => node.id === 'n-4')!.body = 'Continue to PHAROS-12.'
-  await mockWork(page, data)
-  for (const savedWidth of [null, 1000]) {
+// Each of the 24 combinations owns a deadline and native test identity. The
+// aggregate exceeded 120 seconds with Linux fonts/retained traces; no control
+// or navigation assertion changes when the combinations are scheduled apart.
+for (const savedWidth of [null, 1000]) for (const colorScheme of ['light', 'dark'] as const) for (const search of [true, false]) for (const width of [1440, 1024, 390]) {
+  test(`the routed panel keeps usable list space and stable controls: ${savedWidth ? 'wide' : 'default'} ${search ? 'search' : 'plain'} ${colorScheme} ${width}`, async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    const data = linkedKnowledge()
+    const title = 'Ein Arbeitsknoten: verlässliche Zuordnung und nachvollziehbare Änderungen im gesamten Projekt'
+    data.nodes.find(node => node.id === 'n-1')!.title = title
+    data.nodes.find(node => node.id === 'n-1')!.body += '\n\nFollow PHAROS-14.'
+    data.nodes.find(node => node.id === 'n-4')!.body = 'Continue to PHAROS-12.'
     data.preferences.layout = savedWidth ? { panel: savedWidth } : {}
-    for (const colorScheme of ['light', 'dark'] as const) {
-      await page.emulateMedia({ colorScheme })
-      for (const search of [true, false]) {
-        for (const width of [1440, 1024, 390]) {
-          await page.setViewportSize({ width, height: 900 })
-          await page.goto(`/p/PHAROS/PHAROS-11?${search ? 'q=11&' : ''}type=ticket&peek=GUI-18`)
-          const ws = panel(page)
-          await expect(ws).toHaveCount(1)
-          await expect(ws.getByRole('heading', { name: title })).toBeVisible()
-          if (width >= 1024) {
-            const grid = page.getByRole('grid', { name: 'Tickets' })
-            await expect(page.locator('#row-n-1')).toBeVisible()
-            const listBox = (await grid.boundingBox())!
-            const panelBox = (await ws.boundingBox())!
-            expect(listBox.width).toBeGreaterThan(400)
-            expect(listBox.x + listBox.width).toBeLessThanOrEqual(panelBox.x)
+    await mockWork(page, data)
+    await page.emulateMedia({ colorScheme })
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/p/PHAROS/PHAROS-11?${search ? 'q=11&' : ''}type=ticket&peek=GUI-18`)
+    const ws = panel(page)
+    await expect(ws).toHaveCount(1)
+    await expect(ws.getByRole('heading', { name: title })).toBeVisible()
+    if (width >= 1024) {
+      const grid = page.getByRole('grid', { name: 'Tickets' })
+      await expect(page.locator('#row-n-1')).toBeVisible()
+      const listBox = (await grid.boundingBox())!
+      const panelBox = (await ws.boundingBox())!
+      expect(listBox.width).toBeGreaterThan(400)
+      expect(listBox.x + listBox.width).toBeLessThanOrEqual(panelBox.x)
+    }
+    // Measure the rendered buttons, including crumbs that can overflow
+    // their shrinking nav. scrollWidth alone misses overlapping siblings.
+    const expectHeaderFits = async () => {
+      const geometry = await ws.locator('.panel-bar-main').evaluate(el => {
+        const frame = el.getBoundingClientRect()
+        const buttons = [...el.querySelectorAll('button')].map(button => {
+          const rect = button.getBoundingClientRect()
+          return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
+        }).filter(button => button.width > 0 && button.height > 0)
+        return { left: frame.left, right: frame.right, buttons }
+      })
+      expect(geometry.buttons.length).toBeGreaterThan(0)
+      for (const [index, button] of geometry.buttons.entries()) {
+        expect(button.left, `${button.name} inside header`).toBeGreaterThanOrEqual(geometry.left - 0.5)
+        expect(button.right, `${button.name} inside header`).toBeLessThanOrEqual(geometry.right + 0.5)
+        for (const other of geometry.buttons.slice(index + 1)) {
+          if (Math.min(button.bottom, other.bottom) > Math.max(button.top, other.top)) {
+            const overlap = Math.min(button.right, other.right) - Math.max(button.left, other.left)
+            expect(overlap, `${button.name} overlaps ${other.name}`).toBeLessThanOrEqual(0.5)
           }
-          // Measure the rendered buttons, including crumbs that can overflow
-          // their shrinking nav. scrollWidth alone misses overlapping siblings.
-          const expectHeaderFits = async () => {
-            const geometry = await ws.locator('.panel-bar-main').evaluate(el => {
-              const frame = el.getBoundingClientRect()
-              const buttons = [...el.querySelectorAll('button')].map(button => {
-                const rect = button.getBoundingClientRect()
-                return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
-              }).filter(button => button.width > 0 && button.height > 0)
-              return { left: frame.left, right: frame.right, buttons }
-            })
-            expect(geometry.buttons.length).toBeGreaterThan(0)
-            for (const [index, button] of geometry.buttons.entries()) {
-              expect(button.left, `${button.name} inside header`).toBeGreaterThanOrEqual(geometry.left - 0.5)
-              expect(button.right, `${button.name} inside header`).toBeLessThanOrEqual(geometry.right + 0.5)
-              for (const other of geometry.buttons.slice(index + 1)) {
-                if (Math.min(button.bottom, other.bottom) > Math.max(button.top, other.top)) {
-                  const overlap = Math.min(button.right, other.right) - Math.max(button.left, other.left)
-                  expect(overlap, `${button.name} overlaps ${other.name}`).toBeLessThanOrEqual(0.5)
-                }
-              }
-            }
-          }
-          await expectHeaderFits()
-          await expectStableControls({
-            controls: { close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }), more: ws.getByRole('button', { name: 'More actions' }) },
-            scrollAreas: { panel: ws },
-            interactions: [{ name: 'open and close actions', run: async () => {
-              await ws.getByRole('button', { name: 'More actions' }).click()
-              await expect(page.getByRole('menu')).toBeVisible()
-              await expect(page.getByRole('menuitem', { name: 'Open as full page' })).toBeVisible()
-              await expect(page.getByRole('menuitem', { name: 'Open in a new tab' })).toBeVisible()
-              await page.keyboard.press('Escape')
-              await expect(page.getByRole('menu')).toHaveCount(0)
-            } }, { name: 'follow a ticket link', run: async () => {
-              await ws.getByRole('region', { name: 'Description' }).getByRole('link', { name: 'PHAROS-14: Visual acceptance of the version pill', exact: true }).click()
-              await expect(ws.getByRole('button', { name: 'Copy PHAROS-14' })).toBeVisible()
-              await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
-              await expect(ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true })).toBeVisible()
-              await expectHeaderFits()
-              await page.screenshot({ path: `test-results/aeon-687-wrongrec/followed-${savedWidth ? 'wide' : 'default'}-${search ? 'search' : 'plain'}-${colorScheme}-${width}.png` })
-            } }, { name: 'follow another link and return through the trail', run: async () => {
-              // Back is present throughout these series steps; measure it too.
-              await expectStableControls({
-                controls: { back: ws.locator('.back-btn'), close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }), more: ws.getByRole('button', { name: 'More actions' }) },
-                scrollAreas: { panel: ws },
-                interactions: [{ name: 'follow a second ticket link', run: async () => {
-                  await ws.getByRole('region', { name: 'Description' }).getByRole('link', { name: 'PHAROS-12: Add an Oracle Cloud connector', exact: true }).click()
-                  await expect(ws.getByRole('button', { name: 'Copy PHAROS-12' })).toBeVisible()
-                  await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-                  await expect(ws.getByRole('button', { name: 'Back to PHAROS-14', exact: true })).toBeVisible()
-                  await expectHeaderFits()
-                } }, { name: 'Back to the first followed ticket', run: async () => {
-                  await ws.getByRole('button', { name: 'Back to PHAROS-14', exact: true }).click()
-                  await expect(ws.getByRole('button', { name: 'Copy PHAROS-14' })).toBeVisible()
-                  await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
-                  await expect(ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true })).toBeVisible()
-                  await expectHeaderFits()
-                } }],
-              })
-            } }, { name: 'Back to the original routed ticket', run: async () => {
-              await ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true }).click()
-              await expect(ws.getByRole('button', { name: 'Copy PHAROS-11' })).toBeVisible()
-              await expect(ws.getByRole('heading', { name: title })).toBeVisible()
-              await expect(ws.locator('.back-btn')).toHaveCount(0)
-              await expect(page).toHaveURL(`/p/PHAROS/PHAROS-11?${search ? 'q=11&' : ''}type=ticket`)
-              await expectHeaderFits()
-            } }],
-          })
-          await page.screenshot({ path: `test-results/aeon-687-wrongrec/${savedWidth ? 'wide' : 'default'}-${search ? 'search' : 'plain'}-${colorScheme}-${width}.png` })
         }
       }
     }
-  }
-})
+    await expectHeaderFits()
+    await expectStableControls({
+      controls: { close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }), more: ws.getByRole('button', { name: 'More actions' }) },
+      scrollAreas: { panel: ws },
+      interactions: [{ name: 'open and close actions', run: async () => {
+        await ws.getByRole('button', { name: 'More actions' }).click()
+        await expect(page.getByRole('menu')).toBeVisible()
+        await expect(page.getByRole('menuitem', { name: 'Open as full page' })).toBeVisible()
+        await expect(page.getByRole('menuitem', { name: 'Open in a new tab' })).toBeVisible()
+        await page.keyboard.press('Escape')
+        await expect(page.getByRole('menu')).toHaveCount(0)
+      } }, { name: 'follow a ticket link', run: async () => {
+        await ws.getByRole('region', { name: 'Description' }).getByRole('link', { name: 'PHAROS-14: Visual acceptance of the version pill', exact: true }).click()
+        await expect(ws.getByRole('button', { name: 'Copy PHAROS-14' })).toBeVisible()
+        await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+        await expect(ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true })).toBeVisible()
+        await expectHeaderFits()
+        await page.screenshot({ path: testInfo.outputPath('followed.png') })
+      } }, { name: 'follow another link and return through the trail', run: async () => {
+        // Back is present throughout these series steps; measure it too.
+        await expectStableControls({
+          controls: { back: ws.locator('.back-btn'), close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }), more: ws.getByRole('button', { name: 'More actions' }) },
+          scrollAreas: { panel: ws },
+          interactions: [{ name: 'follow a second ticket link', run: async () => {
+            await ws.getByRole('region', { name: 'Description' }).getByRole('link', { name: 'PHAROS-12: Add an Oracle Cloud connector', exact: true }).click()
+            await expect(ws.getByRole('button', { name: 'Copy PHAROS-12' })).toBeVisible()
+            await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+            await expect(ws.getByRole('button', { name: 'Back to PHAROS-14', exact: true })).toBeVisible()
+            await expectHeaderFits()
+          } }, { name: 'Back to the first followed ticket', run: async () => {
+            await ws.getByRole('button', { name: 'Back to PHAROS-14', exact: true }).click()
+            await expect(ws.getByRole('button', { name: 'Copy PHAROS-14' })).toBeVisible()
+            await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+            await expect(ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true })).toBeVisible()
+            await expectHeaderFits()
+          } }],
+        })
+      } }, { name: 'Back to the original routed ticket', run: async () => {
+        await ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true }).click()
+        await expect(ws.getByRole('button', { name: 'Copy PHAROS-11' })).toBeVisible()
+        await expect(ws.getByRole('heading', { name: title })).toBeVisible()
+        await expect(ws.locator('.back-btn')).toHaveCount(0)
+        await expect(page).toHaveURL(`/p/PHAROS/PHAROS-11?${search ? 'q=11&' : ''}type=ticket`)
+        await expectHeaderFits()
+      } }],
+    })
+    await page.screenshot({ path: testInfo.outputPath('routed-panel.png') })
+  })
+}

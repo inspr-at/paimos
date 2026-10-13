@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { projectSection } from './projectNavigation'
-import { GLIMPSE_CLEAR_SELECTOR, glimpseControlSpot, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady } from '../../lib/headerGlimpse'
+import { GLIMPSE_CLEAR_SELECTOR, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady } from '../../lib/headerGlimpse'
 import { filtersFromQuery, filtersToQuery, type ListFilters } from '../../lib/ticketList'
 import { ticketGraphData } from '../../lib/ticketGraphRenderer'
 import type { GraphData, GraphFPS } from '../../lib/graphRenderer'
@@ -26,35 +26,56 @@ const column = ref<HTMLElement>()
 const region = ref({ top: '0px', height: '0px' })
 const mask = ref('none'), measured = ref(false), measuredViewport = ref(0)
 const controls = ref<HTMLElement>(), controlSpot = ref<{ left: string; top: string; width: string; height: string } | null>(null)
+const compact = ref(false), spotLabel = ref('none')
 const shown = ref(0), truncated = ref(false)
 const canvas = ref<{ setPaused: (value: boolean) => void } | null>(null)
 const allowed = computed(() => headerGlimpseAllowed({ enabled: props.enabled, reduced: reduced.value, wide: wide.value, tickets: props.ticketCount }))
-let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, measureFrame = 0
+let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, measureFrame = 0, sizingPaused = false
 
+function controlBox(compactMode: boolean) {
+  const el = controls.value
+  if (!el) return { width: 310, height: 34 }
+  // Read both widths in this turn. The observer is told to ignore the trial
+  // sizes; reconnecting it would schedule a new pass on every measurement.
+  el.classList.toggle('is-compact', compactMode)
+  el.classList.remove('is-parked')
+  return { width: el.offsetWidth || 310, height: el.offsetHeight || 34 }
+}
 function measureRegion() {
   const header = column.value?.closest<HTMLElement>('.project-head')
   const page = header?.closest<HTMLElement>('.project-page')
   if (!header || !page || !column.value) return
-  const box = header.getBoundingClientRect()
-  const padding = parseFloat(getComputedStyle(page).paddingTop) || 0
-  // The marker retains its content position when the toolbar becomes sticky.
-  const boundary = page.querySelector('.stick-mark')?.getBoundingClientRect()
-  const bottom = boundary?.top ?? box.bottom
-  const top = box.top - padding, height = Math.max(0, bottom - top)
-  region.value = { top: `${-padding}px`, height: `${height}px` }
-  const boxes = [...page.querySelectorAll<HTMLElement>(GLIMPSE_CLEAR_SELECTOR)]
-    .filter(el => el.getClientRects().length)
-    .map(el => { const rect = el.getBoundingClientRect(); return { x: rect.left - box.left, y: rect.top - top, width: rect.width, height: rect.height } })
-    .filter(box => box.width > 0 && box.height > 0)
-  mask.value = glimpseTextMask(box.width, height, boxes)
-  const spot = glimpseControlSpot(box.width, height, boxes, { width: controls.value?.offsetWidth ?? 310, height: controls.value?.offsetHeight ?? 34 })
-  controlSpot.value = spot ? { left: `${spot.x}px`, top: `${spot.y}px`, width: `${spot.width}px`, height: `${spot.height}px` } : null
-  measuredViewport.value = window.innerWidth
-  measured.value = true
+  sizingPaused = true
+  try {
+    const box = header.getBoundingClientRect()
+    const padding = parseFloat(getComputedStyle(page).paddingTop) || 0
+    // The marker retains its content position when the toolbar becomes sticky.
+    const boundary = page.querySelector('.stick-mark')?.getBoundingClientRect()
+    const bottom = boundary?.top ?? box.bottom
+    const top = box.top - padding, height = Math.max(0, bottom - top)
+    region.value = { top: `${-padding}px`, height: `${height}px` }
+    const boxes = [...page.querySelectorAll<HTMLElement>(GLIMPSE_CLEAR_SELECTOR)]
+      .filter(el => el.getClientRects().length && !column.value?.contains(el))
+      .map(el => { const rect = el.getBoundingClientRect(); return { x: rect.left - box.left, y: rect.top - top, width: rect.width, height: rect.height } })
+      .filter(item => item.width > 0 && item.height > 0)
+    mask.value = glimpseTextMask(box.width, height, boxes)
+    const placed = glimpsePlaceControls(box.width, height, boxes, { full: controlBox(false), compact: controlBox(true) })
+    compact.value = placed?.compact ?? false
+    controls.value?.classList.toggle('is-compact', compact.value)
+    controls.value?.classList.toggle('is-parked', !placed)
+    controlSpot.value = placed ? { left: `${placed.spot.x}px`, top: `${placed.spot.y}px`, width: `${placed.spot.width}px`, height: `${placed.spot.height}px` } : null
+    spotLabel.value = placed ? `${placed.compact ? 'compact ' : ''}${Math.round(placed.spot.x)},${Math.round(placed.spot.y)},${Math.round(placed.spot.width)},${Math.round(placed.spot.height)}` : 'none'
+    measuredViewport.value = window.innerWidth
+    measured.value = true
+  } finally {
+    sizingPaused = false
+  }
 }
 function scheduleMeasure() {
+  // Trial widths change the bar while a measurement is already reading it.
   // Resize/content changes invalidate both the mask and the hit target until
   // their next shared measurement; stale controls cannot cover new text.
+  if (sizingPaused) return
   measured.value = false
   cancelAnimationFrame(measureFrame)
   measureFrame = requestAnimationFrame(measureRegion)
@@ -66,6 +87,14 @@ function togglePause() { userPaused.value = !userPaused.value; applyMotion() }
 function onWide() { wide.value = wideQuery.matches }
 function onReduced() { reduced.value = reducedQuery.matches }
 function onVisibility() { applyMotion() }
+function attachSizing() {
+  const header = column.value?.closest('header'), page = header?.closest('.project-page')
+  if (!sizing || !header || !page) return
+  for (const el of [header, controls.value, ...page.querySelectorAll(GLIMPSE_CLEAR_SELECTOR)]) {
+    if (!el || (el !== controls.value && column.value?.contains(el))) continue
+    sizing.observe(el)
+  }
+}
 function watchHeader() {
   seeing?.disconnect(); sizing?.disconnect(); changes?.disconnect()
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
@@ -74,10 +103,10 @@ function watchHeader() {
   seeing = new IntersectionObserver(([entry]) => { occluded.value = !entry.isIntersecting; applyMotion() }, { root: root instanceof HTMLElement ? root : null, threshold: 0 })
   seeing.observe(column.value!)
   sizing = new ResizeObserver(scheduleMeasure)
-  for (const el of [header, controls.value, ...page.querySelectorAll(GLIMPSE_CLEAR_SELECTOR)]) if (el) sizing.observe(el)
+  attachSizing()
   changes = new MutationObserver(records => {
     if (records.some(record => !column.value?.contains(record.target))) {
-      for (const el of page.querySelectorAll(GLIMPSE_CLEAR_SELECTOR)) sizing?.observe(el)
+      attachSizing()
       scheduleMeasure()
     }
   })
@@ -131,15 +160,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="paint" ref="column" class="glimpse-col" :style="region" :data-measured="measured" :data-measured-viewport="measuredViewport" data-header-glimpse="on" :data-shown="shown">
+  <div v-if="paint" ref="column" class="glimpse-col" :style="region" :data-measured="measured" :data-measured-viewport="measuredViewport" :data-spot="spotLabel" data-header-glimpse="on" :data-shown="shown">
     <div class="glimpse-canvas" :style="{ '--glimpse-text-mask': mask }" aria-hidden="true">
       <GraphCanvas ref="canvas" glimpse layout-bias="elliptic" :data="data" :fps="fps" canvas-class="header-glimpse-canvas" />
     </div>
     <div v-if="controlSpot" class="glimpse-hit" :style="controlSpot" @click="openGraph" />
-    <div ref="controls" class="glimpse-controls" :style="controlSpot ? { left: controlSpot.left, top: controlSpot.top } : { visibility: 'hidden' }">
+    <div ref="controls" class="glimpse-controls" :class="{ 'is-compact': compact, 'is-parked': !controlSpot }" :style="controlSpot ? { left: controlSpot.left, top: controlSpot.top } : undefined">
       <span class="glimpse-count" :title="truncated ? 'Graph limit reached; some matching tickets are not shown' : 'Tickets in the current context'">{{ shown }}{{ truncated ? '+' : '' }} / {{ ticketCount }}</span>
-      <button type="button" class="btn sm" @click="openGraph"><AppIcon name="graph" :size="13" />Open graph</button>
-      <button type="button" class="btn sm" :aria-pressed="userPaused" :aria-label="userPaused ? 'Resume motion' : 'Pause motion'" @click="togglePause"><AppIcon :name="userPaused ? 'play' : 'pause'" :size="13" />{{ userPaused ? 'Resume' : 'Pause' }}</button>
+      <button type="button" class="btn sm" aria-label="Open graph" @click="openGraph"><AppIcon name="graph" :size="13" /><span class="glimpse-label">Open graph</span></button>
+      <button type="button" class="btn sm" :aria-pressed="userPaused" :aria-label="userPaused ? 'Resume motion' : 'Pause motion'" @click="togglePause"><AppIcon :name="userPaused ? 'play' : 'pause'" :size="13" /><span class="glimpse-label">{{ userPaused ? 'Resume' : 'Pause' }}</span></button>
     </div>
   </div>
   <span v-else data-header-glimpse="off" hidden />
@@ -153,7 +182,7 @@ onBeforeUnmount(() => {
 .glimpse-col[data-measured="false"] { visibility: hidden; }
 .glimpse-canvas {
   position: absolute; inset: 0; opacity: .35; pointer-events: none;
-  mask-image: var(--glimpse-text-mask), linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent);
+  mask-image: var(--glimpse-text-mask), linear-gradient(to right, transparent 8px, #000 4%, #000 96%, transparent calc(100% - 8px)), linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent);
   mask-composite: intersect;
   mask-repeat: no-repeat;
   mask-size: 100% 100%;
@@ -165,6 +194,8 @@ onBeforeUnmount(() => {
   position: absolute; z-index: 3; width: max-content; display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 999px; pointer-events: none; opacity: 0;
   background: var(--surface-raised); box-shadow: var(--shadow);
 }
+.glimpse-controls.is-parked { left: 0; top: 0; width: 0; height: 0; padding: 0; overflow: hidden; visibility: hidden; }
+.glimpse-controls.is-compact .glimpse-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 :global(.project-head:hover .glimpse-controls), .glimpse-col:focus-within .glimpse-controls { opacity: 1; pointer-events: auto; }
 .glimpse-controls .btn { height: 26px; padding: 0 10px; font-size: 12px; }
 .glimpse-count { padding: 0 6px 0 8px; font: 10px var(--mono); color: var(--ink-3); white-space: nowrap; }

@@ -245,7 +245,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
               controls,
               interactions: [
                 { name: 'read long classification feedback', run: async () => {
-                  await feedback.evaluate(element => { element.textContent = 'Kind of work is unavailable. Die Klassifizierung konnte nicht geladen werden; sämtliche vorgeschlagenen Werte bleiben unverändert, bis die Berechtigungen und die Verbindung erneut geprüft wurden.' })
+                  await feedback.evaluate(element => { element.textContent = `Kind of work is unavailable. Die Klassifizierung konnte nicht geladen werden; sämtliche vorgeschlagenen Werte bleiben unverändert, bis die Berechtigungen und die Verbindung erneut geprüft wurden. ${'Klassifizierung'.repeat(8)}` })
                   await feedback.focus(); await expect(feedback).toBeFocused()
                   await feedback.press('End')
                   await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
