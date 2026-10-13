@@ -5,7 +5,7 @@ import type { SessionControl } from '../../lib/agents'
 import { reparentSession, undoRemoval } from '../../lib/agentRows'
 import { movableWorker, moveTarget } from './sessionMove'
 import { useAgents } from '../../stores/agents'
-import { GROUPS, controlBlocked, sessionForest, sessionWorking, type SessionBranch, type SessionGroup } from '../../lib/agentState'
+import { GROUPS, controlBlocked, sessionForest, sessionWorking, stopReasonLabel, type SessionBranch, type SessionGroup } from '../../lib/agentState'
 import { relativeTime } from '../../lib/work'
 import type { Availability, SessionView } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
@@ -451,12 +451,14 @@ function lineTwo(branch: Branch, view: SessionView) {
   return [lead, precise, step].filter(Boolean).join(' · ')
 }
 // A session that ended in the last 10 minutes and keeps its place says so, never its last activity or an
-// estimate (AEON-1240): "Finished 22:20 · moves to Ended at 22:30". Only Done finished; any other
-// end (a cancel, a spent budget, a lost contact) keeps the badge's own word: "Ended 22:20 · …".
+// estimate (AEON-1240): "Finished 22:20 · moves to Ended at 22:30". Only Done finished; any other end
+// names its cause as the panel head does ("Cancelled 22:20 · …", "Budget exhausted", "Lost contact"),
+// or "Stopped" when the reason is withheld, never "Ended 22:20 · moves to Ended".
 function endedLine(view: SessionView) {
   const at = Date.parse(view.session.stopped_at ?? '')
   if (!Number.isFinite(at)) return ''
-  const how = view.status.state === 'done' ? 'Finished' : view.status.label
+  const cause = stopReasonLabel(view.session.stop_reason) || view.status.label
+  const how = view.status.state === 'done' ? 'Finished' : /^ended$/i.test(cause) ? 'Stopped' : cause
   return `${how} ${clockTime(at)} · moves to Ended at ${clockTime(movesAt(view.session))}`
 }
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.

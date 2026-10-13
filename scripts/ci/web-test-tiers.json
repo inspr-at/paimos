@@ -5740,7 +5740,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an ended worker keeps its place among its siblings for 10 minutes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an unfinished session keeps its place and says Ended, not Finished","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an unfinished session keeps its place and names why it ended, never Finished","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

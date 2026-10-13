@@ -71,8 +71,10 @@ function keys(event: KeyboardEvent) {
   else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !query.value) { event.preventDefault(); stepLevel(event.key === 'ArrowRight' ? 1 : -1) }
   else if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); activate(activeItem.value) }
 }
+// An older version's name carries the levels it shows, which its row hides from screen readers (AEON-1240).
+const levels = (entry: ModelEntry) => entry.efforts.length ? `, ${entry.efforts.length > 1 ? 'levels' : 'level'} ${entry.efforts.map(effort => effort.name).join(', ')}` : ''
 const label = (entry: ModelEntry) => entry.replacedBy
-  ? `${entry.name}, older version, replaced by ${entry.replacedBy}. Can’t be picked: its line runs ${entry.replacedBy}.`
+  ? `${entry.name}, older version${levels(entry)}, replaced by ${entry.replacedBy}. Can’t be picked: its line runs ${entry.replacedBy}.`
   : `${entry.name}${entry.efforts.length > 1 ? `, level ${effortOf(entry)}` : ''}${props.cant(entry.line) ? `. ${props.cant(entry.line)}` : ''}`
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
 const routes = (entry: ModelEntry) => entry.routes.map(route => harnessLabel(route.harness)).join(', ')

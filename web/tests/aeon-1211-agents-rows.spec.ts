@@ -306,28 +306,33 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   await expect(done).toHaveCount(0)
 })
 
-// AEON-1240 fix round 2: only Done finished. A cancelled run and a spent budget keep their place
-// the same 10 minutes, but their line says Ended, as their badge does, never Finished.
-test('an unfinished session keeps its place and says Ended, not Finished', async ({ page }) => {
+// AEON-1240 fix round 2: only Done finished. Fix round 3 (Tick): a cancelled run, a spent budget and a
+// lost contact keep their place the same 10 minutes and name why they ended, as the panel head does; a
+// withheld reason reads Stopped. Never Finished, never "Ended … moves to Ended".
+test('an unfinished session keeps its place and names why it ended, never Finished', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const data = await setup(page)
-  const cancelled = '5e000000-0000-4000-8000-000000000041', spent = '5e000000-0000-4000-8000-000000000042'
+  const id = (n: number) => `5e000000-0000-4000-8000-0000000000${n}`
   const base = data.sessions.find(session => session.id === DONE)!
-  data.sessions.push(
-    { ...base, id: cancelled, display_label: 'Cancelled worker', stopped_at: ago(2), heartbeat_at: ago(2.2), stop_reason: 'cancelled', finished: false },
-    { ...base, id: spent, display_label: 'Budget worker', stopped_at: ago(4), heartbeat_at: ago(4.2), stop_reason: 'budget_exhausted', finished: false },
-  )
+  const ends = [
+    { n: 41, label: 'Cancelled worker', minutes: 2, reason: 'cancelled', badge: 'Ended', line: 'Cancelled', end: '58', moves: '08' },
+    { n: 42, label: 'Budget worker', minutes: 4, reason: 'budget_exhausted', badge: 'Ended', line: 'Budget exhausted', end: '56', moves: '06' },
+    { n: 43, label: 'Silent worker', minutes: 5, reason: 'heartbeat_lost', badge: 'Lost contact', line: 'Lost contact', end: '55', moves: '05' },
+    { n: 44, label: 'Withheld worker', minutes: 6, reason: null, badge: 'Ended', line: 'Stopped', end: '54', moves: '04' },
+  ]
+  for (const end of ends) data.sessions.push({ ...base, id: id(end.n), display_label: end.label, stopped_at: ago(end.minutes), heartbeat_at: ago(end.minutes + 0.2), stop_reason: end.reason, finished: false })
   await page.goto('/agents')
-  for (const [id, end, moves] of [[cancelled, '58', '08'], [spent, '56', '06']] as const) {
-    const ended = row(page, id)
+  for (const end of ends) {
+    const ended = row(page, id(end.n))
     await expect(ended).toBeVisible()
-    await expect(ended.locator('.ava')).toHaveAttribute('aria-label', /: Ended$/)
-    await expect(ended.locator('.l2t')).toHaveText(new RegExp(`^Ended \\d{1,2}:${end}( [AP]M)? · moves to Ended at \\d{1,2}:${moves}( [AP]M)?$`))
+    await expect(ended.locator('.ava')).toHaveAttribute('aria-label', new RegExp(`: ${end.badge}$`))
+    await expect(ended.locator('.l2t')).toHaveText(new RegExp(`^${end.line} \\d{1,2}:${end.end}( [AP]M)? · moves to Ended at \\d{1,2}:${end.moves}( [AP]M)?$`))
   }
-  // The Ended group stays folded: both rows sit among the live ones.
+  // The Ended group stays folded: every row sits among the live ones.
   await expect(page.locator('.sessions .ended-head .group-toggle')).toHaveAttribute('aria-expanded', 'false')
   await expect(row(page, DONE).locator('.l2t')).toHaveText(/^Finished \d{1,2}:57( [AP]M)? · /)
+  await expect(page.locator('.sessions .row[data-row] .l2t').filter({ hasText: /^Ended / })).toHaveCount(0)
 })
 
 // AEON-1240 evidence: a finished row that keeps its place, at three widths, light and dark.

@@ -388,6 +388,9 @@ test('many models stay calm: one option per line, older versions fold per provid
   await expect(opus48).toContainText('Claude Code · replaced by Opus 5.5'); await expect(opus48).toHaveAttribute('aria-disabled', 'true')
   // AEON-1240: an older version shows its own levels like the current rows, only to read.
   await expect(opus48.locator('[data-old-levels] .lvc')).toHaveText(['low', 'medium', 'high', 'max'])
+  // Its name carries those levels, so a screen reader hears what the row shows (gate Low, AEON-1240 fix round 3).
+  await expect(opus48).toHaveAttribute('aria-label', 'Opus 4.8, older version, levels low, medium, high, max, replaced by Opus 5.5. Can’t be picked: its line runs Opus 5.5.')
+  await expect(menu.locator('[data-old="anthropic:sonnet@5"]')).toHaveAttribute('aria-label', /^Sonnet 5, older version, level high, replaced by Sonnet 5\.5\. /)
   // A person can still click it: nothing is picked and the menu stays (Playwright needs force for aria-disabled).
   await opus48.click({ force: true }); await expect(menu).toBeVisible(); expect(state.writes).toHaveLength(0)
   await opus48.locator('.lvc[data-eff="max"]').click({ force: true }); await expect(menu).toBeVisible(); expect(state.writes).toHaveLength(0)
