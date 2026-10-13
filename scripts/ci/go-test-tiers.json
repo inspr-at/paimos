@@ -436,6 +436,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestMaintenanceDoesNotRequireInstallerLink","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestNativeUpgradeReportsDeferredFlushAndPilotFreeze","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairAndSetupRejectDeletedWorkingFolder","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairDefaultsConfirmWorkspaceBeforeCreatingState","tier":"GATED-FULL"}
@@ -4716,6 +4718,10 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatAppliedModelRequestFencesHistoricalTranscript","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatBeatLookupHonorsCancellation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatCapacityProjection","tier":"GATED-FULL"}
@@ -7819,6 +7825,28 @@
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainDeadlineKeepsUnconfirmedAttemptFenced","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRejectsIncompleteInventoryAndMismatchedProof","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRequiresCoordinatorPilotApproval","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRetainsBackgroundAndUnconfirmedWriter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnboundedOrAmbiguousFrames","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnqualifiedLaunch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadFencesDeadlinesAndRevocationBarrier","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPersonOnlyViewerAndZ1Compatibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPinnedSDKPolicyBoundary","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
