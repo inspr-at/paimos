@@ -170,11 +170,17 @@ func TestNativeFixturesSurviveUntrustedNodePrefixAndUTCTimezone(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, executable, "-test.v", "-test.run=^(TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit|TestNativeCoordinatorGrantChangesRefuseBeforeInput|TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion|TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts)$")
+	tests := []string{"TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit", "TestNativeCoordinatorGrantChangesRefuseBeforeInput", "TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion", "TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts"}
+	command := exec.CommandContext(ctx, executable, "-test.v", "-test.run=^("+strings.Join(tests, "|")+")$")
 	command.Env = append(os.Environ(), "TZ=UTC", "PATH="+prefix+string(os.PathListSeparator)+os.Getenv("PATH"))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("CI host conditions broke native behavior: %v\n%s", err, output)
+	}
+	for _, name := range tests {
+		if !strings.Contains(string(output), "--- PASS: "+name+" (") {
+			t.Fatal("CI host regression did not execute the expected behavior", name)
+		}
 	}
 }
 
