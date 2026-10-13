@@ -101,7 +101,8 @@ func TestCodexRenewalRuntimeWriteFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Fake discovery never executes this script. The final OS version read
-	// makes just the runtime artifact unwritable at the exact commit boundary.
+	// marks just the runtime artifact nonprivate at the exact commit boundary,
+	// so Store.Write must refuse it through the existing ownership guard.
 	runtimePath := filepath.Join(e.Store.Path(), RuntimeName)
 	quoted := "'" + strings.ReplaceAll(runtimePath, "'", "'\\''") + "'"
 	if err := os.WriteFile(next.Path, []byte("#!/bin/sh\nchmod 0644 "+quoted+"\nprintf '%s\\n' v26.11.1\n"), 0700); err != nil {
