@@ -86,8 +86,15 @@ test('attention row links and both open actions use imported and native canonica
     })
     // Needs attention hides the shared table's hover buttons; its supported
     // new-tab action is Ctrl-click / Cmd-click on the row title.
+    const nativeModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
     for (const modifier of ['Control', 'Meta'] as const) {
-      await guard.check(async () => { await ticket.locator('.attention-title').click({ modifiers: [modifier] }) })
+      await guard.check(async () => {
+        const title = ticket.locator('.attention-title')
+        // macOS consumes Control-click as a native context-menu gesture.
+        // Use a real pointer for this OS and a DOM click for the other OS's key.
+        if (modifier === nativeModifier) await title.click({ modifiers: [modifier] })
+        else await title.dispatchEvent('click', { button: 0, ctrlKey: modifier === 'Control', metaKey: modifier === 'Meta' })
+      })
       await expect(page).toHaveURL(/\/tickets\?view=needs-attention$/)
     }
     expect(await page.evaluate(() => (window as unknown as { attentionOpened: string[] }).attentionOpened)).toEqual([path, path])
