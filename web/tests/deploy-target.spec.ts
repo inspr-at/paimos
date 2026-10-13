@@ -46,15 +46,15 @@ async function openAgents(page: Page) {
       target: { ...namedTarget, hosts: ['app-02'], environment: 'staging' }, target_digest_sha256: otherDigest,
     },
   )
-  await mockAgents(page, data)
+  const calls = await mockAgents(page, data)
   await page.goto('/decision-desk?item=a:a9000000-0000-4000-8000-000000000091')
   await expect(request(page).getByText('app-01 · production', { exact: true })).toBeVisible()
-  return data
+  return { data, calls }
 }
 
 
 test('Needs you names destinations and keeps target-less approvals usable', async ({ page }) => {
-  await openAgents(page)
+  const { data, calls } = await openAgents(page)
   const named = request(page)
   await expect(named.getByRole('region', { name: /Deploy target: app-01/ })).toContainText(namedTarget.change)
   await expect(named.getByText('named by the agent', { exact: true })).toBeVisible()
@@ -65,7 +65,8 @@ test('Needs you names destinations and keeps target-less approvals usable', asyn
   await page.getByTestId('choice-0').click()
   await expect(page.getByRole('textbox', { name: 'Reason', exact: true })).toBeEnabled()
   await page.getByTestId('desk-decide').click()
-  await expect(page.getByTestId('desk-status')).toContainText('Recorded')
+  await expect.poll(() => data.approvals.find(item => item.id.endsWith('92'))?.decision).toBe('approved')
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/decision'))).toMatchObject([{ path: '/api/approvals/a9000000-0000-4000-8000-000000000092/decision', body: { decision: 'approved' } }])
   await page.getByTestId('desk-close').click()
   await expect(page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000092')).toHaveCount(0)
   await page.getByRole('button', { name: /^Decided/ }).click()

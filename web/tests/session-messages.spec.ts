@@ -194,11 +194,13 @@ test('a reload keeps the hook wait for the one send that is still pending', asyn
     await expect(panel.getByRole('textbox', { name: 'Message to review-worker' })).toHaveValue('')
   }
   await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
+  await expect(panel.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
   await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
   await expect(panel.locator('.queue-item[data-status=sent]')).toHaveCount(1)
   await expect(notice).toContainText('At its next step')
   await page.reload()
   await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
+  await expect(panel.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
   await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
   await expect(panel.locator('.queue-item[data-status=sent]')).toHaveCount(1)
   await expect(notice).toContainText('At its next step')
