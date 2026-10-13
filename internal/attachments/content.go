@@ -81,9 +81,11 @@ func (m *Module) content(w http.ResponseWriter, r *http.Request) {
 		disposition = "inline"
 	}
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	// Attachments are addressed by their exact bytes. In particular, HTML must
+	// not be rewritten by intermediary email obfuscation or script injection.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable, no-transform")
 	if isHTML(a.ContentType) {
-		w.Header().Set("Cache-Control", "no-store, private")
+		w.Header().Set("Cache-Control", "no-store, private, no-transform")
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", contentType)

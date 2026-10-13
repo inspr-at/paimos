@@ -2948,6 +2948,18 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestCodexGuardWrapperPinsNodeWithoutBypassingGuard","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexIdentityClosesInputBeforeOwnedCleanup","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexIdentityFailuresExposeOnlyAllowlistedCauses","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexIdentityRetryUsesCandidateNode","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexNodeUpgradeRenewalFences","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexRenewalProbeLifecycle","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexRenewalRuntimeWriteFailure","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestConcurrentStatusDoesNotBlockPairingWriter","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestDarwinClaudeSDKAdminDirectories","tier":"GATED-FULL"}
@@ -3435,6 +3447,8 @@
     {"kind":"go","package":"internal/attachedmsg","name":"TestSwitchDefaultsAndEpochs","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachedmsg","name":"TestVolatileReservationCommitRollbackAndTuple","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachments","name":"TestAttachmentContentPreventsIntermediaryTransforms","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestAttachmentMutationRechecksLiveAuthority","tier":"ESSENTIAL"}
     ,
@@ -4421,6 +4435,8 @@
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceAndHookOutputBoundaries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachmentDownloadIntegrity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachmentDownloadPublishesOnlyVerifiedBytes","tier":"GATED-FULL"}
     ,

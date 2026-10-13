@@ -819,7 +819,7 @@ test('web fixes and labels follow the shared daemon/server vocabulary', async ()
   const table = JSON.parse(readFileSync(new URL('../../internal/agentsetup/testdata/harness_recovery.json', import.meta.url), 'utf8')) as {
     harnesses: string[]; reasons: string[]; fixes: Record<string, Record<string, { kind: string; command: string }>>
   }
-  assert.ok(table.reasons.includes('pin_drifted') && table.reasons.includes('future_reason'))
+  assert.ok(table.reasons.includes('pin_drifted') && table.reasons.includes('interpreter_pin_renewed') && table.reasons.includes('future_reason'))
   for (const harness of table.harnesses) {
     for (const reason of table.reasons) {
       assert.deepEqual(harnessRecovery(harness, reason), table.fixes[harness]?.[reason], `${harness}/${reason}`)
@@ -833,6 +833,47 @@ test('web fixes and labels follow the shared daemon/server vocabulary', async ()
       assert.equal(describeHarnessFix(parsed, harness), table.fixes[harness]?.[reason]?.command ?? '')
       assert.equal(JSON.stringify(parsed).includes('untrusted'), false)
     }
+  }
+  const renewalDetail = 'the interpreter pin was renewed after checking the unchanged launcher, home and approved identity'
+  const renewalHint = 'The interpreter pin was renewed after checking the unchanged launcher, home and approved identity. Waiting for a fresh account check.'
+  const renewed = view({
+    computer_state: 'connected', connectivity: 'online',
+    enrollments: [enrollment({ harness: 'codex' })],
+    harness_statuses: { codex: 'blocked' },
+    harness_details: { codex: { state: 'blocked', reason: 'interpreter_pin_renewed', reason_detail: renewalDetail, fix: { kind: 'login', command: 'untrusted' } } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [renewed] })
+  const pending = (await listPairingComputers())[0]!
+  assert.equal(pending.harness_details?.codex?.reason_detail, renewalDetail)
+  assert.equal(describeHarnessStatus(pending, 'codex'), 'Interpreter pin renewed')
+  assert.equal(describeEnrollmentStatus(pending, { account_id: ACCOUNT, harness: 'codex' }), 'Interpreter pin renewed')
+  assert.equal(describeHarnessStatus({ ...pending, connectivity: 'offline' }, 'codex'), 'Last reported: interpreter pin renewed')
+  assert.equal(describeHarnessHint(pending, 'codex'), renewalHint)
+  assert.equal(describeHarnessFix(pending, 'codex'), '')
+  assert.deepEqual(describeEnrollmentDiagnostic(pending, { account_id: ACCOUNT, harness: 'codex' }), { hint: `Codex: ${renewalHint}`, command: '' })
+  assert.equal(JSON.stringify(pending).includes('untrusted'), false)
+  const sibling = view({
+    ...renewed,
+    enrollments: [enrollment({ harness: 'codex' }), enrollment({ account_id: ACCOUNT_2, harness: 'codex' })],
+    harness_statuses: { codex: 'ready' },
+    harness_details: { codex: { state: 'ready', attention_accounts: [{ account_id: ACCOUNT, reason: 'interpreter_pin_renewed', reason_detail: renewalDetail }] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [sibling] })
+  const mixedRenewal = (await listPairingComputers())[0]!
+  assert.equal(mixedRenewal.harness_details?.codex?.attention_accounts?.[0]?.reason_detail, renewalDetail)
+  assert.equal(describeEnrollmentStatus(mixedRenewal, { account_id: ACCOUNT_2, harness: 'codex' }), 'Ready')
+  assert.equal(describeEnrollmentStatus(mixedRenewal, { account_id: ACCOUNT, harness: 'codex' }), 'Interpreter pin renewed')
+  assert.deepEqual(describeEnrollmentDiagnostic(mixedRenewal, { account_id: ACCOUNT, harness: 'codex' }), { hint: `Codex: ${renewalHint}`, command: '' })
+  assert.equal(describeEnrollmentDiagnostic(mixedRenewal, { account_id: ACCOUNT_2, harness: 'codex' }), null)
+  assert.equal(describeHarnessFix(mixedRenewal, 'codex'), '')
+  // Renewal details cannot overwrite an unsafe pin, readiness or raw diagnostics.
+  for (const [state, reason, reason_detail] of [['blocked', 'pin_unsafe', renewalDetail], ['ready', 'interpreter_pin_renewed', renewalDetail], ['blocked', 'interpreter_pin_renewed', '/private/vendor/profile identity@example.test token=value']]) {
+    globalThis.fetch = async () => jsonResponse({ computers: [view({ ...renewed, harness_statuses: { codex: state }, harness_details: { codex: { state, reason, reason_detail } } })] })
+    const filtered = (await listPairingComputers())[0]!
+    assert.equal(filtered.harness_details?.codex?.reason_detail, undefined)
+    assert.equal(JSON.stringify(filtered).includes(reason_detail!), false)
+    if (state === 'ready') assert.equal(describeHarnessStatus(filtered, 'codex'), 'Ready')
+    if (reason === 'pin_unsafe') assert.equal(describeHarnessFix(filtered, 'codex'), 'aeon-agentd add-harness --harness codex')
   }
   const drifted = view({ computer_state: 'connected', connectivity: 'online', setup_state: 'connected', harness_statuses: { claude: 'blocked', codex: 'ready' }, harness_details: { claude: { state: 'blocked', reason: 'pin_drifted' }, codex: { state: 'ready' } } })
   globalThis.fetch = async () => jsonResponse({ computers: [drifted] })
