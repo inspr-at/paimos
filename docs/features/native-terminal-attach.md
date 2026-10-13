@@ -119,3 +119,46 @@ Go: 3,219 reverse-dependency cases exceed its 300-case threshold. R0 must apply
 the listed source/tier rows in this same PR, then the coordinator must obtain
 authoritative full Go/static CI before merge. Browser checks do not apply to
 this slice. No push, deployment, review gate or live cutover was performed.
+
+## Fix round 2: CI metadata ownership blocker
+
+The CI report for PR #618 at `a54ddd2b` contains metadata failures rather
+than a native attach behaviour finding:
+
+- `go-static` job 115096247775 fails strict collection because all nine tests
+  listed in the integration handoff are absent from
+  `scripts/ci/go-test-tiers.json`. R0 must register them as `ESSENTIAL`.
+- `release-check-run` job 115096247804 fails
+  `test_current_snapshot_has_no_unassigned_code` for all nine tracked files
+  in `internal/nativeattach/`. R0 must add `internal/nativeattach/**` to S2's
+  paths in `scripts/audit/slices.json`. The delta CLI test also fails because
+  `covcheck.py` intentionally requires whole-tree assignment even for an empty
+  `--since HEAD` delta; it has the same root cause.
+
+P2b's normative plan reserves both metadata files exclusively to R0 and
+requires an explicitly assigned metadata integrator. The fix-round brief does
+not transfer that ownership. This builder therefore stops before editing
+those files, as required by the original brief. The exact ownership glob and
+nine test identities above are ready for the coordinator's same-PR integration.
+The CI failures remain open; no behaviour, test assertion, permission, contract,
+version, or other slice's file was changed in this round.
+
+Validation of the unchanged source at `a54ddd2b` through the approved remote
+runner: `./internal/nativeattach/...` passes. The initial combined package run
+exits 1 in `internal/cli`; its failure detail is unavailable in the truncated
+output. An immediate full `./internal/cli/...` rerun with Go JSON diagnostics
+passes (38.111 seconds), without a source or fixture change. This is reported
+as a failed first run followed by a passing rerun, not as a diagnosed fix.
+Browser/web checks do not apply to this non-browser slice. The existing CI
+strict-tier and audit tests already fail at the requested negative-control
+revision, so neither assertion needs to be weakened or replaced.
+
+The guarded `ci-static-locked.sh` run completes with exit 1: `go-tiers`,
+`audit-tests`, and `audit-coverage` reproduce exactly the missing registrations
+above; the other 39 checks pass, with zero optional skips. This includes passing
+test-tier and web-shard self-checks, Go vet, web typecheck/lint, and migration
+checks. Static validation is failed, not incomplete or green. R0 must apply the
+two metadata changes in this PR and rerun the strict checks before merge. The
+non-required `gate/policy-preview` CI failure reports a missing trusted review
+verdict; that verdict remains coordinator-owned. No push, deployment, model
+call, or review gate was performed by this builder.
