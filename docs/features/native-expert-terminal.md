@@ -64,8 +64,9 @@ APC, PM, SOS, device/status queries, window operations and input reporting modes
 Fragmented controls and UTF-8 are handled across chunks. Only render controls
 reach xterm. Cells paint through `textContent`, never HTML or navigable links,
 following [xterm's untrusted-data guidance](https://xtermjs.org/docs/guides/security/).
-Terminal-specific light/dark palette values follow the r5 reference; the frame
-and controls use existing PAIMOS tokens and SVG icons.
+The terminal palette maps ANSI colours to existing semantic theme tokens,
+including custom, explicit and system light/dark themes. The r5 frame and
+controls use existing PAIMOS tokens and SVG icons.
 
 Encoded frame limits are checked before base64 allocation; the exported-frame
 ceiling reserves envelope space. Grid dimensions are bounded at 320 × 100.

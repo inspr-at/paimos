@@ -960,6 +960,8 @@
     ,
     "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 390"
     ,
+    "browser:tests/native-expert-terminal.spec.ts:AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel sizes"
+    ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1440"

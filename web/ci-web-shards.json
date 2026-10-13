@@ -330,7 +330,7 @@
         ,
         {"file":"tests/native-expert-stream.spec.ts","listedTests":12,"weightSeconds":10,"weightSource":"aeon-1270-guarded-serial-wall"}
         ,
-        {"file":"tests/native-expert-terminal.spec.ts","listedTests":4,"weightSeconds":40,"weightSource":"aeon-1289-conservative-new-boundary-estimate"}
+        {"file":"tests/native-expert-terminal.spec.ts","listedTests":4,"weightSeconds":10,"weightSource":"aeon-1289-guarded-serial-wall-5.3s-with-headroom"}
         ,
         {"file":"tests/no-shift-agents.spec.ts","listedTests":29,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimateReason":"AEON-1211: six added cases estimated at the existing median; measured cases retained.","estimatedTests":9,"measuredTests":20,"seconds":234.6792,"selectedTests":29},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
         ,
