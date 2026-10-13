@@ -109,9 +109,8 @@ onMounted(() => { void business.loadPlugins() })
   .head-actions { flex-wrap: wrap; }
 }
 @container biz-head (max-width: 560px) {
-  .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
-  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
-  .biz-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .biz-tabs { flex-wrap: wrap; gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
+  .biz-tab { flex: 1 0 max-content; flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
 }
 @media (max-width: 720px) {
   .biz-page { padding: 14px 12px 20px; }
@@ -120,10 +119,10 @@ onMounted(() => { void business.loadPlugins() })
   .biz-tabs { width: auto; margin-bottom: 14px; }
   .biz-tab { height: 36px; }
 }
-/* Phones: every tab in one row, icon over label; nothing scrolls sideways or is cut. */
+/* Phones: icon over label, with intrinsic label room. Longer labels wrap the
+   tab row rather than clipping a name or scrolling the page sideways. */
 @media (max-width: 600px) {
-  .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
-  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
-  .biz-tab span { max-width: 100%; }
+  .biz-tabs { flex-wrap: wrap; gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
+  .biz-tab { flex: 1 0 max-content; flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
 }
 </style>

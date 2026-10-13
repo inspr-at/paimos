@@ -186,7 +186,9 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await editor.locator('.ed-body').evaluate(el => { el.scrollTop = 0 })
     if (width > 720) {
       const box = await editor.boundingBox()
-      expect(box!.y + box!.height, 'space above app footer').toBeLessThanOrEqual(944)
+      const footer = await page.locator('.app-footer').boundingBox()
+      expect(footer!.width).toBeGreaterThan(0)
+      expect(box!.y + box!.height, 'space above measured app footer').toBeLessThanOrEqual(footer!.y - 8 + .5)
     }
     await page.screenshot({ path: info.outputPath(`outside-hours-${width}-${theme}.png`), fullPage: true })
     await editor.getByRole('button', { name: 'Cancel', exact: true }).click()

@@ -70,6 +70,7 @@ function keys(event: KeyboardEvent) {
       v-model="term" class="field picker-search" role="combobox" aria-autocomplete="list" aria-expanded="true" :aria-controls="listId"
       :aria-activedescendant="count ? `${listId}-${active}` : undefined" :placeholder="placeholder" :aria-label="title" data-autofocus autocomplete="off" spellcheck="false" @keydown="keys"
     />
+    <div class="picker-options">
     <ul :id="listId" class="picker-list" role="listbox" :aria-label="title">
       <li v-for="(option, index) in shown" :key="option.value" class="option-row" role="presentation">
         <button
@@ -84,12 +85,15 @@ function keys(event: KeyboardEvent) {
           <span v-if="option.hint" class="opt-hint">{{ option.hint }}</span>
           <AppIcon v-if="option.value === current" name="check" :size="14" class="tick" />
         </button>
-        <ReadName :text="[option.label, option.note, option.hint].filter(Boolean).join('\n')" />
       </li>
       <li v-if="canCreate" :id="`${listId}-${shown.length}`" role="option" class="picker-option create" :class="{ active: active === shown.length }" :aria-selected="active === shown.length" @pointerenter="active = shown.length" @click="pick(shown.length)">
         <AppIcon name="plus" :size="14" class="opt-icon" /><span v-clip-tip class="opt-label">{{ createLabel!(term.trim()) }}</span>
       </li>
     </ul>
+    <div v-if="shown.length" class="option-reads" role="group" :aria-label="`Read full ${title.toLowerCase()} names`">
+      <div v-for="option in shown" :key="option.value" class="read-row"><ReadName :text="[option.badge, option.label, option.note, option.hint].filter(Boolean).join('\n')" /></div>
+    </div>
+    </div>
     <p v-if="searching && !shown.length" class="none" role="status">Searching…</p>
     <p v-else-if="!count" class="none">{{ search && !term.trim() ? 'Type to search.' : empty }}</p>
   </FloatingPanel>
@@ -99,7 +103,9 @@ function keys(event: KeyboardEvent) {
 .menu-title { padding: 6px 10px 4px; }
 .picker-search { height: 32px; margin: 0 0 6px; font-size: 13px; }
 .picker-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; }
-.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.picker-options { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.option-reads { display: grid; gap: 1px; align-content: start; }
+.option-row, .read-row { display: grid; min-height: 34px; }
 .picker-option { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 34px; padding: 4px 10px; border: 0; background: transparent; text-align: left; border-radius: 8px; color: var(--ink); font-size: 13.5px; cursor: pointer; }
 .picker-option.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .picker-option.disabled { cursor: not-allowed; color: var(--ink-3); }
@@ -114,5 +120,5 @@ function keys(event: KeyboardEvent) {
 .picker-option.active .opt-hint, .picker-option.active .opt-note { color: var(--ink-2); }
 .tick { color: var(--teal); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
-@media (pointer: coarse), (max-width: 720px) { .picker-option { min-height: 44px; } }
+@media (pointer: coarse), (max-width: 720px) { .picker-option, .option-row, .read-row { min-height: 44px; } }
 </style>
