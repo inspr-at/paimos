@@ -120,6 +120,16 @@ func (s *Repository) write(ctx context.Context, p tenant.Principal, fn func(cont
 		if err := db.LockTree(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
+		// InTenant's initial visibility can predate a wait on the access fence.
+		// Refresh it under that fence so revoked project access cannot survive
+		// in an RLS setting even when a separate role still grants harness.read.
+		var creator any
+		if p.KeyCreatorID != "" {
+			creator = p.KeyCreatorID
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+			return err
+		}
 		return fn(ctx, tx)
 	})
 }
@@ -154,6 +164,9 @@ func (s *Repository) Report(ctx context.Context, daemon nativecontract.DaemonAct
 			return err
 		}
 		if err := authz.RequireTx(ctx, tx, tenant.Principal{TenantID: p.TenantID, ID: a.OwnerPersonID, Kind: tenant.Person}, "harness.read", authz.Scope{ProjectID: in.Binding.ProjectID}); err != nil {
+			return err
+		}
+		if err := authz.RequireTx(ctx, tx, tenant.Principal{TenantID: p.TenantID, ID: a.OwnerPersonID, Kind: tenant.Person}, "nodes.read", authz.Scope{ProjectID: in.Binding.ProjectID}); err != nil {
 			return err
 		}
 		var raw []byte
@@ -204,7 +217,10 @@ func (s *Repository) Report(ctx context.Context, daemon nativecontract.DaemonAct
 		out.Receipt = in
 		return err
 	})
-	return out, err
+	if err != nil {
+		return nativecontract.OperationResult{}, err
+	}
+	return out, nil
 }
 
 func sameID(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }

@@ -5,6 +5,7 @@
 package nativereceipts
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -41,6 +42,30 @@ type Intent struct {
 	Reports               []nativecontract.Receipt `json:"reports"`
 	ReportOffset          int                      `json:"report_offset"`
 	ReportAttempts        uint32                   `json:"report_attempts"`
+}
+
+// Decode the reports array separately so its 16-item bound precedes allocation
+// of receipt structs even in a corrupt private snapshot. The outer decoder
+// separately bounds operation count and file bytes.
+func (in *Intent) UnmarshalJSON(raw []byte) error {
+	type metadata Intent
+	var value metadata
+	fields := struct {
+		*metadata
+		Reports json.RawMessage `json:"reports"`
+	}{metadata: &value}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&fields); err != nil {
+		return Fail(nativecontract.ReasonInvalidInput)
+	}
+	reports, err := readArray[nativecontract.Receipt](fields.Reports, 16)
+	if err != nil {
+		return err
+	}
+	value.Reports = reports
+	*in = Intent(value)
+	return nil
 }
 
 func Digest(value any) (string, error) {
