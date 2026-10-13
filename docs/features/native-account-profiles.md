@@ -220,3 +220,41 @@ contract and migration checks. The updated document also passes the public-name
 and Git whitespace guards. CI remains **not green**; R0 must finish the same-PR
 metadata work before the coordinator reruns CI and its release gates. No origin
 push, deployment, model call or review gate was performed.
+
+Fix-round 6 (2026-10-13): complete CI logs for baseline `7dc61d60` confirm
+that `go-static` job **115122536493** rejects exactly the four existing Go
+tests listed above; `release-check-run` job **115122536485** fails its two
+audit assertions solely on the five unassigned profile files. The aggregate
+failures follow those jobs. The non-required policy preview separately lacks
+the coordinator's trusted review verdict; this worker does not run that gate.
+
+A read-only baseline diagnostic reproduces all five ownership errors. Adding
+only the proposed S1 glob in memory clears full-tree ownership and changes the
+delta CLI exit from 1 to 0, including its zero-changed-files case. Each proposed
+**ESSENTIAL** row matches an existing test on the baseline and is absent from
+its manifest. Neither shared inventory was changed. No behavior finding was
+supplied, and source code and test assertions remain unchanged.
+
+Fetched `origin/main` at `06929d1a4` is already an ancestor of the branch, and
+PR #615 is mergeable. Central R0 audit PR **#623** remains open and changes
+only `scripts/audit/slices.json`. Both that file and the Go tier manifest are
+explicitly reserved for R0 by the normative plan. R0 must apply the S1 glob
+and four **ESSENTIAL** rows before this PR can pass CI.
+
+Both affected Go packages pass through the guarded remote runner on
+`7dc61d60`. The affected selector exits 0 and selects **FULL** (3233
+reverse-dependency cases). Web unit and browser tests remain inapplicable to
+this non-browser slice. Fake-test acceptance remains **PASS** for exact account
+binding, **PASS** for default/dedicated child environments, **PASS** for exclusion
+of credential/settings sharing, **PASS** for refusal without account rotation,
+and **PASS** for retained credentials, unchanged parent environment and distinct
+overlapping child profiles. Live account qualification remains G_ACCOUNTS.
+
+Guarded `ci-static-remote.sh` runs the required merged-main static check and
+returns **exit 1**: **39 checks pass with zero optional skips**. Only `go-tiers`,
+`audit-tests` and `audit-coverage` fail, on the same missing R0 registrations.
+The test-tier and web-shard self-checks, Go vet, web typecheck/lint, contract and
+migration checks pass. The updated document passes the public-name and Git
+whitespace guards. This is **not a green CI handoff**: both failing inventories
+are outside P4a's exclusive write set. Only this owned feature document changed;
+no origin push, deployment, model call or review gate was performed.
