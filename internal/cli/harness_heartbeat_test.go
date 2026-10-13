@@ -48,24 +48,24 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 		{name: "confirmed", claims: 1, claimed: true},
 		{name: "unconfirmed", note: "Waiting for a person"},
 		{name: "another session"},
-		{name: "another project", note: "could not be verified"},
+		{name: "another project", note: "Adoption unverified"},
 		{name: "zero revision", note: "Waiting for a person"},
 		{name: "ordinary start", note: "Waiting for a person"},
 		{name: "existing generation"},
 		{name: "worker"},
 		{name: "child coordinator"},
-		{name: "CLI 129 reference mismatch", note: "registered session reference differs"},
+		{name: "CLI 129 reference mismatch", note: "Reference mismatch"},
 		{name: "legacy native state", claims: 1, claimed: true},
-		{name: "legacy source mismatch", note: "registered session reference differs"},
-		{name: "missing registered reference", note: "registered session reference differs"},
+		{name: "legacy source mismatch", note: "Reference mismatch"},
+		{name: "missing registered reference", note: "Reference mismatch"},
 		{name: "revision race", claims: 2, claimed: true, refreshed: true},
-		{name: "second revision race", claims: 2, refreshed: true, note: "revision changed twice"},
+		{name: "second revision race", claims: 2, refreshed: true, note: "Lead changed twice"},
 		{name: "cancel during claim", claims: 1, refreshed: true, note: "Waiting for a person"},
-		{name: "reselect during claim", claims: 1, refreshed: true, note: "lead selection changed"},
-		{name: "eligibility conflict", claims: 1, refreshed: true, note: "session cannot be adopted"},
-		{name: "proof refused", claims: 1, note: "original account and state"},
+		{name: "reselect during claim", claims: 1, refreshed: true, note: "Lead selection changed"},
+		{name: "eligibility conflict", claims: 1, refreshed: true, note: "Session ineligible"},
+		{name: "proof refused", claims: 1, note: "original account"},
 		{name: "lost claim response", claims: 1, claimed: true},
-		{name: "wrong claim receipt", claims: 1, note: "claim result could not be verified"},
+		{name: "wrong claim receipt", claims: 1, note: "Claim result unverified"},
 		{name: "paired binding refused", claims: 1, claimed: true},
 		{name: "missing heartbeat identity"},
 		{name: "pending stop"},
@@ -174,6 +174,11 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 					}
 					return true
 				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+					if doing, ok := body["doing"].(string); ok && len([]rune(doing)) > 60 {
+						t.Error("adoption reason exceeded the visible activity summary limit")
+						w.WriteHeader(http.StatusBadRequest)
+						return true
+					}
 					response := map[string]any{"id": own, "phase": "working", "agent_activity_mode": "agent_summary"}
 					if tc.name == "missing heartbeat identity" {
 						delete(response, "id")

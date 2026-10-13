@@ -1585,17 +1585,17 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 		if lead.SessionID != nil && !strings.EqualFold(*lead.SessionID, session.id) {
 			if session.disk.LeadAdoption != nil {
 				if len(session.disk.LeadAdoption.Attempts) > 0 {
-					note("The lead selection changed. Reload the lead card and confirm this running session again.")
+					note("Lead selection changed; confirm this running session again.")
 				} else {
 					session.disk.LeadAdoption = nil
 					_ = saveHeartbeatSession(session)
 				}
 			}
 		} else if lead.Reason == "owner_revoked" {
-			note("The lead owner's permission was revoked. Restore harness control and run creation, then confirm adoption again.")
+			note("Owner grants revoked; restore grants and confirm again.")
 		} else if lead.Generation == 0 {
 			// Retain the attempt journal until another confirmation replaces it.
-			note("Waiting for a person to confirm the adoption. Confirm this running session on the project lead card.")
+			note("Waiting for a person to confirm adoption; use the lead card.")
 		}
 		return
 	}
@@ -1608,7 +1608,7 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 		session.disk.LeadAdoption = adoption
 	}
 	if !rt.heartbeatLeadReferenceMatches(ctx, o, session) {
-		note("The registered session reference differs. Use the original helper state; never the session.ref fallback.")
+		note("Reference mismatch; use original registered helper state.")
 		return
 	}
 	for attempt := 0; attempt < 2; attempt++ {
@@ -1616,7 +1616,7 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 		// Refuse the write if its intent cannot be retained. This also makes an
 		// interrupted request safe: the next beat reads current selection first.
 		if err := saveHeartbeatSession(session); err != nil {
-			note("Lead adoption could not be saved. Repair the private helper state directory, then confirm adoption again.")
+			note("Adoption state unsaved; repair state and confirm again.")
 			return
 		}
 		var result harness.Lead
@@ -1625,7 +1625,7 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 		if err == nil {
 			if !strings.EqualFold(result.ProjectID, session.disk.ProjectID) || !claimed(result) || result.Revision != lead.Revision+1 || result.Generation != 1 || result.Reason != "" || (result.State != "working" && result.State != "starting") {
 				last.Result = "Claim result could not be verified"
-				note("Lead claim result could not be verified. Check the lead card before using the state-aware claim command.")
+				note("Claim result unverified; check lead card before claiming.")
 				return
 			}
 			last.Result, adoption.Claimed = "Claimed", true
@@ -1638,7 +1638,7 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 			return
 		}
 		adoption.Refreshed = true
-		note("The lead revision changed; retrying once. The same person-confirmed session must still be selected.")
+		note("Lead changed; retrying once with the same confirmed session.")
 		fresh, readErr := read()
 		if readErr != nil {
 			note(heartbeatLeadFailure(readErr))
@@ -1650,11 +1650,11 @@ func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOp
 			return
 		}
 		if !pending(fresh) {
-			note("The lead selection changed. Reload the lead card and confirm this running session again.")
+			note("Lead selection changed; confirm this running session again.")
 			return
 		}
 		if fresh.Revision <= lead.Revision {
-			note("The session cannot be adopted. Check its owner, reporting and pending pause or stop, then confirm again.")
+			note("Session ineligible; check owner, reporting and pause/stop.")
 			return
 		}
 		lead = fresh
@@ -1698,13 +1698,13 @@ func (rt *runtime) heartbeatLeadReferenceMatches(ctx context.Context, o heartbea
 func heartbeatLeadFailure(err error) string {
 	switch heartbeatStatus(err) {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return "Lead proof was refused. Restore the owner's grants and use this helper's original account and state."
+		return "Lead proof refused; restore grants and original account."
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return "Automatic adoption is unavailable. Upgrade the server or use the state-aware claim command."
+		return "Adoption unavailable; upgrade or claim from saved state."
 	case http.StatusConflict:
-		return "The lead revision changed twice. Reload the lead card and confirm this session again."
+		return "Lead changed twice; reload and confirm this session again."
 	default:
-		return "Lead adoption could not be verified. Check the lead card and use the state-aware claim command if still pending."
+		return "Adoption unverified; check lead card and claim from state."
 	}
 }
 
