@@ -103,8 +103,8 @@ func newStartFixture(t *testing.T) *startFixture {
  VALUES($1,$2,'123456789',$3,$4,$5,'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$6)`, []any{f.person.TenantID, request, strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64), f.person.ID}},
 			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,ledger_generation,capacity_policy,capacity_signals,capacity_reported_at)
  VALUES($1,$2,$3,$4,$5,'daemon-native',$6,$7,$8,$9,$10)`, []any{f.person.TenantID, computer, request, f.agent.ID, f.agent.KeyID, strings.Repeat("c", 64), ledger, policy, signals, f.now}},
-			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,allowed_model_profile_ids,last_probe_at,last_probe_ok,last_daemon_generation)
- VALUES($1,$2,'own-account','claude','daemon-native',$3,'Own',$4,ARRAY[$5::uuid],$6,true,'generation-1')`, []any{f.person.TenantID, account, f.agent.ID, f.person.ID, profile, f.now}},
+			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision,allowed_model_profile_ids,last_probe_at,last_probe_ok,last_daemon_generation)
+ VALUES($1,$2,'own-account','claude','daemon-native',$3,'Own',$4,$6,1,ARRAY[$5::uuid],$6,true,'generation-1')`, []any{f.person.TenantID, account, f.agent.ID, f.person.ID, profile, f.now}},
 			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at)
  VALUES($1,$2,$3,$4,$5,$6,$6+interval '1 hour')`, []any{f.person.TenantID, account, computer, request, profile, f.now}},
 		} {
