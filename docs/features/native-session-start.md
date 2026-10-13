@@ -81,6 +81,9 @@ the caller, tier and DSAR entries below are now applied.
   `internal/nativesessions/store:TestStartRegistrationIdempotencyAndPersonViewer`,
   `internal/nativesessions/store:TestTerminalViewerURLStrictAllowlist`,
   `internal/nativesessions/store:TestWorkerStartRequiresLeafAndKeepsExistingRun`,
+  `internal/nativesessions/store:TestCoordinatorClaimsReserveQuotaBudgets`,
+  `internal/nativesessions/store:TestStartUsesActiveCanonicalAccountOwner`,
+  `internal/nativesessions/store:TestNativeSessionDSARInventoryMatchesSchema`,
   `internal/nativesessions/start:TestStartRequiresDurableClaimAndLocalLaunchFence`,
   `internal/agentaccounts:TestNativeRootHoldsCountUntilVerifiedRelease`.
 - DSAR: all three new tables are `personal`, with locator
@@ -180,3 +183,51 @@ guard, and six ESSENTIAL Go test-tier entries.
   zero optional checks are skipped. This includes native Go tier reconciliation,
   test-tier and web-shard policy tests, ownership audit, web typecheck and lint.
   Authoritative PR CI remains required before merge.
+
+## Fix round 3 implementation
+
+All three Medium findings are addressed. Coordinator roots now persist the
+admitted allowance-window quantities and all five learned/default period-unit
+estimates in migration 1346's two nullable JSONB columns. The final claim
+updates allowance ledgers, stores the root-backed budget snapshot and registers
+the harness in one transaction; event append remains last. Legacy account
+limit projections include these null-run roots. Worker reservations stay in
+their existing run ledger. Exact root retries exclude only their own holds and
+retain the saved binding and launch expiry, including at a percent cap.
+
+Start uses the same active canonical-person lookup as claim for historical
+pairing approvers and account owners. Linked stamps can start and claim; foreign
+or deactivated stamps still fail with `wrong_principal`. All three native tables
+now have complete personal table classifications, owner/tenant locators and
+column classifications, checked against the migrated schema.
+
+The third-round fixes require minimal shared-account changes in `admission.go`
+(replay of the root's one-shot window), `engine_admission.go` (projection of its
+saved holds), and `limits.go` (root period totals and percent retry headroom).
+Shared DSAR and test-tier edits are additive; no new source ownership entry is
+needed. No migration was renumbered and no route, permission, contract pin or
+version changed. Production occupancy wiring, native telemetry/settlement and
+live qualification remain with I1 and the coordinator.
+
+- PASS negative control: final regression tests on tests-only detached snapshot
+  `a23cbadb0`, based on reviewed HEAD `374d6c0a`, fail for the exact three reported
+  reasons. Successive claims exceed the allowance window and runs/requests/
+  tokens/percent day caps; linked pairing/account/both owners get
+  `wrong_principal`; the native intent table has no DSAR entry. The assigned
+  branch is restored, with no negative-control commit on it.
+- PASS affected planner: `node scripts/test-tiers/affected.mjs --base origin/main`
+  selects `FULL` because migration 1346 cannot be safely narrowed. Full hosted
+  PR CI remains a coordinator-owned prerequisite. No browser spec applies to
+  this server-only slice.
+- PASS behavior: `TestCoordinatorClaimsReserveQuotaBudgets` rejects a second
+  claim for each configured cap, permits the original exact retry, retains one
+  root/harness/claim with no fake worker run, and checks the durable window and
+  all-unit budget snapshot. `TestStartUsesActiveCanonicalAccountOwner` exercises
+  separate pairing/account/both linked stamps plus foreign/deactivated refusals.
+  `TestNativeSessionDSARInventoryMatchesSchema` checks all migrated columns and
+  required personal classifications and locators. All three are ESSENTIAL.
+- PASS affected Go: guarded remote `-count=1` checks at `93b2f1cb2` passed
+  `./internal/nativesessions/start`, `./internal/agentpairing`, `./internal/dsar`
+  and `./internal/reportercontract`. After the exact percent retry correction,
+  final `./internal/agentaccounts` and `./internal/nativesessions/store` runs at
+  `2e5580254` both pass. No assertion was skipped or weakened.
