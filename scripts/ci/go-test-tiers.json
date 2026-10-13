@@ -140,6 +140,22 @@
     ,
     "internal/markdownsource:TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks"
     ,
+    "internal/nativesessions/stream:TestLiveGapClosesAndBindingReplacementRefusesOldView"
+    ,
+    "internal/nativesessions/stream:TestServerHTTPAuthenticatesViewerAndEmitsGapEnd"
+    ,
+    "internal/nativestream:TestHTTPPublisherBoundsAndBindsAcknowledgement"
+    ,
+    "internal/nativestream:TestLocalHostProtocolRequiresPeerGrantAndExactBinding"
+    ,
+    "internal/nativestream:TestNativeExpertProjectionFiltersAndBounds"
+    ,
+    "internal/nativestream:TestOutboundLossRemainsTransientAndFinalUsesSink"
+    ,
+    "internal/nativestream:TestSSEFencesQueuedContentAndKeepalive"
+    ,
+    "internal/nativestream:TestTransientRingReportsLossAndRejectsStaleReplay"
+    ,
     "internal/nodes:TestHeaderSelectorBounds"
     ,
     "internal/nodes:TestHideStatesAPIBucketsFacetsAndPaging"
@@ -7873,6 +7889,26 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestTerminalViewerURLStrictAllowlist","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestWorkerStartRequiresLeafAndKeepsExistingRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestLiveGapClosesAndBindingReplacementRefusesOldView","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestPublishSnapshotPreservesRegisteredBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestServerHTTPAuthenticatesViewerAndEmitsGapEnd","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestSlowSubscriberRevocationAndViewIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestHTTPPublisherBoundsAndBindsAcknowledgement","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestLocalHostProtocolRequiresPeerGrantAndExactBinding","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestNativeExpertProjectionFiltersAndBounds","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestOutboundLossRemainsTransientAndFinalUsesSink","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestSSEFencesQueuedContentAndKeepalive","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestTransientRingReportsLossAndRejectsStaleReplay","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestAccessWritesDoNotDeadlockNodeMove","tier":"ESSENTIAL"}
     ,
