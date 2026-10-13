@@ -104,7 +104,15 @@ type fakeSocket struct {
 
 func newFakeSocket(t *testing.T) *fakeSocket {
 	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
+	// Unix socket names have a small OS limit. A named t.TempDir includes the
+	// whole test name, which exceeds sun_path on macOS. Keep the generated
+	// temp directory short and portable; never use an absolute fixture path.
+	tmp, err := os.MkdirTemp("", "na-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+	dir, err := filepath.EvalSymlinks(tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
