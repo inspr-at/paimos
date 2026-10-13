@@ -685,7 +685,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       const radius = 55 + Math.sqrt(nodes.length) * 3
       // The backdrop spans the whole header, including the masked text islands.
       // Spread anchors to the content edges instead of the old middle column.
-      const aspect = Math.max(1.4, Math.min(16, graph.width() / Math.max(1, graph.height()) * 1.65))
+      const aspect = Math.max(1.4, Math.min(16, graph.width() / Math.max(1, graph.height()) * 1.75))
       nodes.forEach((n, i) => {
         const index = (i * anchorStride) % nodes.length
         const y = 1 - 2 * (index + .5) / nodes.length, angle = i * Math.PI * (3 - Math.sqrt(5))
@@ -792,16 +792,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         installed = true
         pinWindow().__aeonReleaseGlimpsePin = () => {
           released = true
-          // Warmup can precede font/header sizing. Re-seed the test simulation
-          // at the final viewport before taking the fixed number of ticks;
-          // otherwise the same pin retains forces from an earlier aspect.
-          layoutReady = false
-          for (const node of nodes) {
-            delete node.x; delete node.y; delete node.z
-            delete node.vx; delete node.vy; delete node.vz
-          }
-          graph.graphData({ nodes, links })
-          whenLaidOut(() => { fit(); layoutReady = true; maybeRun() })
+          maybeRun()
         }
       }
       return {
