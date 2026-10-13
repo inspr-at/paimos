@@ -17,8 +17,9 @@ The terminal fills the remaining pane and scrolls internally.
 
 I2 alone adds and pins the maintained `@xterm/headless` dependency and supplies
 `createXtermRenderer(Terminal)` from `web/src/lib/nativeTerminal/renderer.ts`.
-This slice changes no dependency or lock file. The adapter uses xterm's public
-buffer API with `allowProposedApi`; the pinned package must pass I2's real-parser
+This slice changes no dependency or lock file. The adapter uses xterm's
+[public headless buffer API](https://github.com/xtermjs/xterm.js/blob/master/typings/xterm-headless.d.ts)
+with `allowProposedApi`; the pinned package must pass I2's real-parser
 qualification. A missing renderer presents an unavailable state and opens no
 stream. No CDN, alternate parser or unqualified fallback is loaded.
 
@@ -61,7 +62,8 @@ or `onResize`, installs addons, link providers or clipboard handlers, or paints
 a caret. A streaming escape allowlist discards OSC (including 8 and 52), DCS,
 APC, PM, SOS, device/status queries, window operations and input reporting modes.
 Fragmented controls and UTF-8 are handled across chunks. Only render controls
-reach xterm. Cells paint through `textContent`, never HTML or navigable links.
+reach xterm. Cells paint through `textContent`, never HTML or navigable links,
+following [xterm's untrusted-data guidance](https://xtermjs.org/docs/guides/security/).
 Terminal-specific light/dark palette values follow the r5 reference; the frame
 and controls use existing PAIMOS tokens and SVG icons.
 

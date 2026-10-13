@@ -183,7 +183,8 @@ async function start() {
   } catch (error) {
     if (!current()) return
     const reason = error && typeof error === 'object' && 'reason' in error ? error.reason : null
-    if (['permission_revoked', 'grant_expired', 'wrong_principal'].includes(String(reason))) unavailable('Viewing ended because access or the owner’s consent was revoked.')
+    const code = error && typeof error === 'object' && 'status' in error ? Number(error.status) : null
+    if (['permission_revoked', 'grant_expired', 'wrong_principal'].includes(String(reason)) || [401, 403, 404].includes(code ?? 0)) unavailable('Viewing ended because access or the owner’s consent was revoked.')
     else { stop(); notice.value = 'The live connection failed. Terminal output may be missing.'; status.value = 'Watch live to reconnect to a fresh grid.' }
   }
 }
@@ -242,11 +243,11 @@ defineExpose({ stop, start, measureBox, holding })
 </script>
 
 <template>
-  <section v-if="viewer.kind === 'person'" ref="root" class="native-terminal" :class="{ phone }" :style="viewportSpace === null ? undefined : { maxHeight: `${viewportSpace}px` }" aria-label="Live terminal" :data-layout="layout">
+  <section v-if="viewer.kind === 'person'" ref="root" class="native-terminal" :class="{ phone }" :style="viewportSpace === null ? undefined : { maxHeight: `${viewportSpace}px` }" :aria-label="modelName ? `Live terminal · ${modelName}` : 'Live terminal'" :data-layout="layout">
     <Teleport :to="controlTarget || 'body'" :disabled="!controlTarget">
       <div class="terminal-control" :class="{ risk }" data-terminal-control>
         <AppIcon :name="risk ? 'refresh' : session.controller ? holding ? 'hand' : 'eye' : 'terminal'" :size="15" />
-        <span class="control-text" tabindex="0" :title="tooltip" :aria-label="tooltip"><b>{{ heading }}</b><span v-if="detail"> · {{ detail }}</span></span>
+        <span class="control-text" tabindex="0" :title="tooltip" :data-tip="tooltip" :aria-label="tooltip"><b>{{ heading }}</b><span v-if="detail"> · {{ detail }}</span></span>
         <div class="control-tools">
           <button v-if="readable && session.controller && !holding" type="button" class="fit-toggle" aria-label="Fit to window" :aria-pressed="fit" :title="fit ? 'Actual size' : 'Fit to window'" @click="toggleFit"><AppIcon :name="fit ? 'collapse' : 'expand'" :size="15" /></button>
           <button v-if="readable && action" type="button" class="terminal-action btn" :aria-disabled="actionDisabled" :aria-label="action.label" :title="[action.label, action.reason].filter(Boolean).join(' · ')" @click="invokeAction">

@@ -60,7 +60,7 @@ export function createXtermRenderer(Terminal: HeadlessConstructor): TerminalRend
     if (!gridSize(cols, rows)) throw new Error('invalid terminal grid')
     const make = () => new Terminal({ cols, rows, scrollback: 0, allowProposedApi: true, disableStdin: true,
       cursorBlink: false, logLevel: 'off', windowOptions: {} })
-    let terminal = make(), disposed = false, busy = false, writing = 0, queued = 0, consumed = 0
+    let terminal = make(), disposed = false, busy = false, writing = 0, queued = 0, inFlight = 0, consumed = 0
     let timer: unknown, timerActive = false
     const filter = new TerminalEscapeFilter(), queue: Uint8Array[] = []
     function paint() {
@@ -103,7 +103,7 @@ export function createXtermRenderer(Terminal: HeadlessConstructor): TerminalRend
       if (disposed) return
       disposed = true; writing++
       if (timerActive) clock.clearTimeout(timer)
-      timerActive = false; queue.length = 0; queued = 0; consumed = 0; filter.reset()
+      timerActive = false; queue.length = 0; queued = 0; inFlight = 0; consumed = 0; filter.reset()
       terminal.dispose(); element.replaceChildren()
     }
     function fail(reason: string) { dispose(); incomplete(reason, true) }
@@ -112,6 +112,7 @@ export function createXtermRenderer(Terminal: HeadlessConstructor): TerminalRend
       const bytes = queue.shift()
       if (!bytes) return
       queued -= bytes.byteLength
+      inFlight = bytes.byteLength
       if (consumed + bytes.byteLength > bounds.browser_tail_bytes) {
         terminal.dispose(); terminal = make(); consumed = 0; element.replaceChildren()
         incomplete('Earlier terminal output was discarded at the live buffer limit. This view is incomplete.')
@@ -120,7 +121,7 @@ export function createXtermRenderer(Terminal: HeadlessConstructor): TerminalRend
       let safe: string
       try { safe = filter.write(bytes) } catch { fail('A terminal frame had invalid UTF-8. Reconnect for a fresh live view.'); return }
       if (filter.omitted) incomplete('Unsafe terminal controls were omitted. This live view is incomplete.')
-      if (!safe) { drain(); return }
+      if (!safe) { inFlight = 0; drain(); return }
       busy = true
       const turn = ++writing
       timerActive = true
@@ -129,14 +130,14 @@ export function createXtermRenderer(Terminal: HeadlessConstructor): TerminalRend
         terminal.write(safe, () => {
           if (disposed || turn !== writing) return
           if (timerActive) clock.clearTimeout(timer)
-          timerActive = false; busy = false
+          timerActive = false; busy = false; inFlight = 0
           try { paint(); drain() } catch { fail('Terminal rendering stopped. Reconnect for a fresh live view.') }
         })
       } catch { fail('Terminal rendering stopped. Reconnect for a fresh live view.') }
     }
     return {
       append(bytes) {
-        if (disposed || bytes.byteLength > bounds.pty_chunk_bytes || queued + bytes.byteLength > bounds.browser_tail_bytes || queue.length >= bounds.live_replay_frames) {
+        if (disposed || bytes.byteLength > bounds.pty_chunk_bytes || queued + inFlight + bytes.byteLength > bounds.browser_tail_bytes || queue.length + (busy ? 1 : 0) >= bounds.live_replay_frames) {
           if (!disposed) fail('The terminal renderer fell behind. Output was discarded; reconnect for a fresh live view.')
           return false
         }

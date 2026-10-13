@@ -89,7 +89,7 @@ async function setup(page: Page, options: { holder?: boolean; fontsHeld?: boolea
 const act = (page: Page, source: string) => page.evaluate(async source => { await new Function(`return (async()=>{const f=window.nativeTerminal;${source}})()`)() }, source)
 const send = (page: Page, frame: NativeStreamEvent, index = 0) => page.evaluate(({ frame, index }) => (window as any).nativeTerminal.emit(index, frame), { frame, index })
 const grid = (page: Page) => page.getByRole('region', { name: 'Terminal output, read-only', exact: true })
-async function restart(page: Page, count: number) { await act(page, 'await f.restart();'); await expect.poll(() => page.evaluate(() => (window as any).nativeTerminal.streams.length)).toBe(count) }
+async function restart(page: Page, count: number) { await act(page, 'void f.restart();'); await expect.poll(() => page.evaluate(() => (window as any).nativeTerminal.streams.length)).toBe(count) }
 
 test('AEON-1289 untrusted terminal escapes, queries and bounded backpressure have no outbound side effects', async ({ page }) => {
   const errors = await setup(page)
