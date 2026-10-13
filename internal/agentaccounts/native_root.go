@@ -110,7 +110,7 @@ func RequireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission,
 	}
 	run := runRow{AgentID: in.PrincipalID, ProfileID: &in.ModelProfileID, Purpose: "native_root"}
 	if in.RunID != nil {
-		run, err = loadWaitRun(ctx, tx, *in.RunID)
+		run, err = lockRun(ctx, tx, *in.RunID)
 		if err != nil {
 			return err
 		}
@@ -118,11 +118,15 @@ func RequireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission,
 		if err = tx.QueryRow(ctx, `SELECT node_id::text FROM work_orders WHERE node_id=(SELECT work_order_id FROM agent_runs WHERE id=$1)`, *in.RunID).Scan(&work); err != nil {
 			return err
 		}
-		if run.AgentID != in.PrincipalID || run.ProfileID == nil || *run.ProfileID != in.ModelProfileID || run.AccountID == nil || *run.AccountID != in.AccountID || run.Purpose != "managed" || run.Status != "queued" || work == nil || in.WorkID == nil || *work != *in.WorkID {
+		phaseOK := run.Status == "queued" || exceptSession != "" && run.Status == "starting" && run.DaemonID != nil && *run.DaemonID == in.DaemonID && run.Generation != nil && *run.Generation == in.DaemonGeneration
+		if run.AgentID != in.PrincipalID || run.ProfileID == nil || *run.ProfileID != in.ModelProfileID || run.AccountID == nil || *run.AccountID != in.AccountID || run.Purpose != "managed" || run.RoutineLaunchID != nil || !phaseOK || work == nil || in.WorkID == nil || *work != *in.WorkID {
 			return nativeDenial(nativecontract.ReasonIdentityMismatch)
 		}
 		if err = accountuse.RequireRun(ctx, tx, a.ID, run.ID); err != nil {
 			return nativeDenial(nativecontract.ReasonPermissionRevoked)
+		}
+		if err = validateReservedAccount(ctx, tx, run, a.ID); err != nil {
+			return err
 		}
 	}
 	if wait, err := dailyStartAccountTx(ctx, tx, a, now); err != nil {
@@ -170,7 +174,7 @@ func RequireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission,
 	if err != nil {
 		return err
 	}
-	_, wait, err := admission(ctx, tx, a, a.Windows, now, slotCount(a, used, quotaUsed), run, false)
+	_, wait, err := admissionInputs(ctx, tx, a, a.Windows, now, slotCount(a, used, quotaUsed), run, in.RunID != nil, nil, run.ID)
 	if err != nil {
 		return err
 	}

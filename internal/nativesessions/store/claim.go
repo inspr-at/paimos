@@ -171,6 +171,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if err = currentDaemon(ctx, tx, daemon, r); err != nil {
 			return err
 		}
+		admit := agentaccounts.NativeAdmission{TenantID: p.TenantID, ProjectID: r.ProjectID, OwnerPersonID: r.OwnerPersonID, PrincipalID: p.ID, AccountID: r.Intent.AccountID, ComputerID: r.Intent.ComputerID, Harness: r.Intent.Harness, ModelProfileID: r.Intent.ModelProfileID, DaemonID: daemon.DaemonID, DaemonGeneration: daemon.DaemonGeneration, LedgerGeneration: daemon.LedgerGeneration, WorkID: r.Intent.WorkID, RunID: grant.RunID}
 		if len(r.claimDigest) > 0 {
 			if !bytes.Equal(r.claimDigest, digest) {
 				return fail(409, nativecontract.ReasonIdentityMismatch)
@@ -181,26 +182,19 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 			if r.view.CurrentBinding == nil || r.view.Revision != in.ExpectedRevision+1 {
 				return fail(409, nativecontract.ReasonStaleRevision)
 			}
+			if !reflect.DeepEqual(r.view.CurrentBinding.RunID, grant.RunID) {
+				return fail(409, nativecontract.ReasonIdentityMismatch)
+			}
+			if err = nativeCapacity(ctx, tx, admit, r.OwnedSessionID, now); err != nil {
+				return err
+			}
 			out = claimResult(r, in, *r.claimExpires, now)
 			return rootID(ctx, tx, &out)
 		}
 		if r.view.Revision != in.ExpectedRevision || r.view.CurrentBinding != nil {
 			return fail(409, nativecontract.ReasonStaleRevision)
 		}
-		admit := agentaccounts.NativeAdmission{TenantID: p.TenantID, ProjectID: r.ProjectID, OwnerPersonID: r.OwnerPersonID, PrincipalID: p.ID, AccountID: r.Intent.AccountID, ComputerID: r.Intent.ComputerID, Harness: r.Intent.Harness, ModelProfileID: r.Intent.ModelProfileID, DaemonID: daemon.DaemonID, DaemonGeneration: daemon.DaemonGeneration, LedgerGeneration: daemon.LedgerGeneration, WorkID: r.Intent.WorkID, RunID: grant.RunID}
-		// Internal occupancy reads include every tenant project; no additional
-		// permission or private rows are exposed to the actor.
-		var visibility, system string
-		if err = tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
-			return err
-		}
-		if err = agentaccounts.RequireNativeCapacityTx(ctx, tx, admit, "", now); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system); err != nil {
+		if err = nativeCapacity(ctx, tx, admit, "", now); err != nil {
 			return err
 		}
 		harnessID, err := uuid()
@@ -289,14 +283,30 @@ func validateObservation(o Observation, d nativecontract.DaemonActor, p PendingS
 	return nil
 }
 
+func nativeCapacity(ctx context.Context, tx pgx.Tx, admit agentaccounts.NativeAdmission, except string, now time.Time) error {
+	// Occupancy includes sibling projects without exposing private facts.
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return err
+	}
+	if err := agentaccounts.RequireNativeCapacityTx(ctx, tx, admit, except, now); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
+	return err
+}
+
 func currentDaemon(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, r pendingRecord) error {
 	var principal, daemon, generation, ledger string
 	err := tx.QueryRow(ctx, `SELECT c.principal_id::text,c.daemon_id,coalesce(a.last_daemon_generation,''),coalesce(c.ledger_generation,'')
  FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
  JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id
  JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
- WHERE c.id=$1 AND a.id=$2 AND c.state='connected' AND q.state='redeemed' AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL
- FOR NO KEY UPDATE OF c`, d.ComputerID, r.Intent.AccountID).Scan(&principal, &daemon, &generation, &ledger)
+ WHERE c.id=$1 AND a.id=$2 AND c.key_id=$3 AND c.state='connected' AND q.state='redeemed' AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL
+ FOR NO KEY UPDATE OF c`, d.ComputerID, r.Intent.AccountID, rDaemonKey(ctx)).Scan(&principal, &daemon, &generation, &ledger)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fail(403, nativecontract.ReasonPermissionRevoked)
 	}
@@ -311,6 +321,8 @@ func currentDaemon(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor,
 	}
 	return nil
 }
+
+func rDaemonKey(ctx context.Context) string { p, _ := tenant.PrincipalFrom(ctx); return p.KeyID }
 
 func claimResult(r pendingRecord, in nativecontract.Claim, expires, now time.Time) nativecontract.ClaimResult {
 	return nativecontract.ClaimResult{OperationID: r.OperationID, OwnedSessionID: r.OwnedSessionID, Intent: r.Intent, Policy: r.policy, ExpectedBinding: r.view.CurrentBinding, ExpiresAt: expires, ClaimKind: in.ClaimKind, LaunchAuthorized: true, LaunchConfig: r.launch, AuthorizationTTLMS: max(1, expires.Sub(now).Milliseconds())}

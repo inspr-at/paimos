@@ -198,7 +198,17 @@ func TestStartClaimRevocationBarrier(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type LIKE 'native_session.%'`).Scan(&baseline); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+		// Preserve the paired daemon's worker/read/control creator ceiling.
+		// Revoke ONLY the original actor's start authority, so removing its
+		// final RequireTx check really makes this test fail.
+		var role string
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'native_no_start','Native without start') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['nodes.read','harness.read','harness.worker','harness.control'])`, f.person.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.person.ID, role)
 		return err
 	})
 	close(f.observer.release)

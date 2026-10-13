@@ -63,8 +63,8 @@ browser and is never sent to or stored by PAIMOS.
 P1b's exclusive write set excludes all shared inventories. R0 must apply these
 rows in this PR; this is a merge prerequisite, not work deferred to I2.
 
-- Source ownership: add `internal/nativesessions/start/**` and
-  `internal/nativesessions/store/**` to the existing native-session source slice.
+- Source ownership: `internal/nativesessions/start/**` and
+  `internal/nativesessions/store/**` already match S3's native-session glob.
   `internal/agentaccounts/native_root*.go` and migration 1346 already match S1's
   account/db globs. No new route, permission, contract pin or direct
   `db.LockTenant`/`db.LockTree` caller was added; store uses `agentpairing.Lock`.

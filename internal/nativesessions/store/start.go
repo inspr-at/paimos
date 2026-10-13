@@ -32,6 +32,9 @@ func authenticated(ctx context.Context, actor nativecontract.Actor) (tenant.Prin
 	if !workorders.UUID(p.ID) || !workorders.UUID(p.TenantID) {
 		return tenant.Principal{}, fail(403, nativecontract.ReasonWrongPrincipal)
 	}
+	if p.Kind != tenant.Person && p.Kind != tenant.Agent {
+		return tenant.Principal{}, fail(403, nativecontract.ReasonWrongPrincipal)
+	}
 	if p.Kind == tenant.Agent && p.KeyID == "" {
 		return tenant.Principal{}, fail(403, nativecontract.ReasonGrantMissing)
 	}
