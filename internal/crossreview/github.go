@@ -45,7 +45,10 @@ type GitHubApp struct {
 }
 
 var appNumber = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
-var appToken = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,255}$`)
+
+// Provider tokens are opaque and variable-length: never decode, log or cap their
+// length. Mint responses are already bounded to 64 KiB before decoding.
+var appToken = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,}$`)
 var errGitHub = errors.New("GitHub review status could not be confirmed")
 
 // ErrUnavailable identifies transport, permission and partial-read refusals
