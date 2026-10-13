@@ -252,6 +252,7 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
   const response = await writeSessionMarker(projectId, sessionId, { last_read_message_id: next.id, last_read_event_id: next.event })
   if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return response.ok && generation === readGeneration
   const remote = markerFromServer(await response.json())
+  if (generation !== readGeneration || s.value.id !== sessionId || me.value !== viewer) return false
   serverEvent = Math.max(serverEvent ?? -1, next.event, remote?.event ?? -1)
   // An observation during the PUT may queue the same project mark again.
   // Acknowledgement consumes it; a newer observation still waits for its flush.
