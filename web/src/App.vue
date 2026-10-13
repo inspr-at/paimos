@@ -228,7 +228,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
         <RouterView v-else />
       </div>
     </main>
-    <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
+    <!-- A row of the shell; on phones it lies over the page's end. Docked panels and toasts end above it. -->
     <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" />
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
@@ -249,13 +249,19 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 .app-shell { box-sizing: border-box; height: 100%; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
 .app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
 .app-shell.header-folded { grid-template-rows: minmax(0, 1fr) var(--footer-h); }
-@media (max-width: 600px) {
-  .app-shell { transition: --footer-h .22s ease; }
-  .app-shell.footer-hidden { --footer-h: 0px; }
-}
-@media (prefers-reduced-motion: reduce) { .app-shell { transition: none; } }
 /* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways. */
 main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
+/* Phones: the footer lies over the end of the page and slides away while reading down (AEON-1279).
+   The page keeps its size: a scroller that grew under momentum made the scroll run away. Its end
+   keeps the footer's room, so the last row still clears the footer when it shows. */
+@media (max-width: 600px) {
+  .app-shell { grid-template-rows: var(--header-h) minmax(0, 1fr); }
+  .app-shell.header-folded { grid-template-rows: minmax(0, 1fr); }
+  /* The footer component has two roots (the bar and its hover card), so it carries no scope of ours. */
+  .app-shell > main, .app-shell > :deep(.app-footer) { grid-row: -2; grid-column: 1; }
+  .app-shell > :deep(.app-footer) { align-self: end; }
+  main { padding-bottom: var(--footer-h); scroll-padding-bottom: var(--footer-h); }
+}
 main:focus-visible { box-shadow: none; }
 .session-ended { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 28px; background: var(--chip-teal-bg); box-shadow: inset 0 -1px 0 var(--line); font-size: 13px; }
 .page-flow { display: flex; flex-direction: column; min-height: 100%; }

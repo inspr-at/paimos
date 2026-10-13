@@ -31,6 +31,7 @@ import { can } from '../../lib/authz'
 import { queueable } from '../../lib/workQueue'
 import { PLANNING_COLUMNS, planningPresent, planningTip, type PlanningColumn } from '../../lib/planning'
 import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
+import { useReaderAnchor } from '../../lib/readerAnchor'
 
 const NO_WORKERS: LiveAgent[] = []
 
@@ -622,6 +623,14 @@ onMounted(() => {
   document.addEventListener('pointerdown', clearHoldClick, true)
 })
 watch(() => [props.scrollRoot, props.hasMore, props.loadingMore, !!props.outline], observe)
+// A row patched, marked, added or removed above the screen never moves the rows on it (AEON-1279):
+// WebKit has no scroll anchoring. Ticket rows anchor; a group's head sticks, so it never moves.
+// Explicit anchors (a folded group's head) still apply after this.
+useReaderAnchor({
+  scroller: () => props.scrollRoot ?? grid.value?.closest('main'),
+  rows: () => grid.value?.querySelectorAll<HTMLElement>('tbody > tr.ticket-row:not(.ghost)'),
+  top: () => grid.value?.tHead?.getBoundingClientRect().bottom ?? -Infinity,
+})
 onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer); document.removeEventListener('pointerdown', clearHoldClick, true) })
 defineExpose({
   focusGrid, scrollToRow, el: grid,
