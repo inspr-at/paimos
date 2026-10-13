@@ -7848,6 +7848,14 @@
     ,
     {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadFencesDeadlinesAndRevocationBarrier","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPersonOnlyViewerAndZ1Compatibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPinnedSDKPolicyBoundary","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
