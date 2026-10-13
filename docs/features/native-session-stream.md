@@ -148,9 +148,11 @@ Builder handoff, 2026-10-13:
   tool-body removal, duplicate/depth/size/redaction bounds and unknown omissions.
 - PASS — slow-subscriber, API-outage and access-revocation barriers demonstrate
   bounded memory, visible loss and no queued delivery after revocation.
-- PASS — both targeted Go packages with `-race` on the approved remote runner at `4477de1f8`;
+- PASS — both targeted Go packages with `-race` on the approved remote runner
+  at `4477de1f8`;
   retention negative control with `-race -v -args -native-negative-control`
-  passed on the approved remote runner at `380477742` (the buffer implementation is unchanged).
+  passed on the approved remote runner at `380477742` (the buffer implementation
+  is unchanged).
 - PASS — affected-set selection exited 0. Its initial selection omitted these
   unregistered packages; R0 must register the nine tests and rerun selection.
 - NOT GREEN — guarded `ci-static-locked.sh` exited 1: go-tiers, audit-tests and
@@ -193,6 +195,12 @@ Fix round 2, 2026-10-13 (reviewed source `140a6982`, implementation `cb33a0b95`)
   Go tiers require the R0 entries above. The public-name guard additionally
   rejected operator host names in the earlier handoff; those references have
   been replaced with value-free remote-runner descriptions.
+- NOT GREEN — the guarded static rerun at `523afa978` exited 1: 39 checks
+  passed, with zero optional skips; public names now pass. The only failures
+  are `go-tiers`, `audit-tests` and `audit-coverage`, all requiring the R0
+  assignment/test rows already listed. R0 must apply those serialized entries
+  on this branch in the same PR, then rerun affected selection and the guarded
+  static check before the coordinator's review and authoritative PR CI.
 - Browser/web-unit execution is inapplicable to this source-only fix. The C0
   contracts, route inventories, permissions, migrations and versions are
   unchanged. No origin push, deployment, review gate or model CLI was run.
