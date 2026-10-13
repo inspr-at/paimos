@@ -169,14 +169,15 @@ No shared inventory, contract, permission, migration or release-version file was
 changed. No origin push, deployment, live vendor session, model CLI or review
 gate was run.
 
-## CI fix round 2
+## CI fix round 3
 
-The full logs at PR head `1dc0c91aa` identify two independent causes:
+The full logs at PR head `db7188be2` confirm two outstanding R0 registrations:
 
-- `go-static` job `115095331534` failed the public-name check on this document.
-  The operator host name has been replaced with a neutral runner description.
-  The existing public-name guard and its assertions remain unchanged.
-- `release-check-run` job `115095331549` failed
+- `go-static` job `115104236943` passed the public-name guard and the test-tier
+  toolkit tests, then failed `check go --strict` on the three unclassified
+  Codex tests listed below. The document correction from fix round 2 remains
+  effective; no further public-name change is needed.
+- `release-check-run` job `115104236911` failed
   `test_current_snapshot_has_no_unassigned_code` and
   `test_delta_cli_and_malformed_input_exit_codes`. Both failures come from
   missing slice ownership for `codec.go`, `launch.go`, `notifications.go`,
@@ -186,27 +187,41 @@ The full logs at PR head `1dc0c91aa` identify two independent causes:
   be weakened.
 
 R0 must add exactly `internal/nativeproviders/codex/**` to the `paths` array of
-the existing S2 slice in `scripts/audit/slices.json`. It must also classify the
-three tests listed above as `ESSENTIAL` in `scripts/ci/go-test-tiers.json` so
-the strict Go-tier check and manifest-based selection include this package.
-The public-name failure stopped `go-static` before that strict tier check ran.
-Both inventory files remain coordinator-owned under the normative P5a plan;
-this fix round does not transfer them to the builder.
+the existing S2 slice in `scripts/audit/slices.json`, and add these three rows
+to `tests` in `scripts/ci/go-test-tiers.json`, retaining canonical ordering:
+
+```json
+[
+  {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnboundedOrAmbiguousFrames","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnqualifiedLaunch","tier":"ESSENTIAL"},
+  {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
+]
+```
+
+The strict Go-tier check and manifest-based selection must include this
+package. The normative P5a plan explicitly reserves both inventory files for
+R0: builders send exact registration intents and never independently rewrite
+the shared inventories. Fix round 3 preserves that boundary and records no
+ownership transfer. The missing rows must be applied in this PR before merge.
 
 At this PR head, all seven Go shards, Go timing, all four web unit shards, all
 twelve browser shards and e2e passed in hosted CI. Those results do not replace
 the missing registrations or establish that the Codex package was selected.
-No provider behavior change is needed for these findings, and no assertion,
-test tier, approval or ownership boundary may be weakened to make CI pass.
-After applying the two R0 registrations in this PR, rerun the guarded static
-checks and authoritative CI before merge. The round remains incomplete until
-that coordinator-owned work is green.
+No provider behavior change is needed for these findings; no behavior, assertion
+or existing test tier was changed. The ownership checker reproduced exactly
+the six unassigned files against immutable `db7188be2`. Adding only the proposed
+S2 path in memory made full-tree ownership pass with zero errors; the on-disk
+registry stayed unchanged. The assigned Codex package passed through the
+guarded remote runner with `-count=1` (0.337 s). Web and browser reruns are not
+applicable to this documentation-only handoff.
 
-At fix commit `5b697715e`, the targeted Codex package passed through the guarded
-remote test runner (0.331 s). The guarded static run exited 1 with 39 checks
-passed and none skipped: `public-names`, Go vet, test-tier toolkit tests, web
-typecheck/lint and web-shard tests passed. Only `go-tiers`, `audit-tests` and
-`audit-coverage` failed, for exactly the missing R0 registrations above. The
-unchanged public-name rule matches the document at `1dc0c91aa` and no longer
-matches the corrected document. No provider behavior or test assertions were
-changed; browser reruns are not applicable to this documentation-only fix.
+Guarded static at `db7188be2` exited 1: 39 checks passed and none were skipped.
+Only `go-tiers`, `audit-tests` and `audit-coverage` failed, for exactly the
+missing R0 registrations above. Public names, Go vet, test-tier toolkit tests,
+web typecheck/lint and web-shard checks passed. This is not static-green.
+
+The non-required `gate/policy-preview` diagnostic reports a missing trusted
+verdict. That decision remains with the coordinator's cross-family gate.
+After applying the two R0 registrations in this PR, rerun guarded static and
+authoritative CI. This round remains incomplete until that work is green.
+The remaining blocker is R0 metadata work; no provider behavior fix was found.
