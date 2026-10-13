@@ -771,6 +771,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         // Same pose the glimpse camera is created with, so the scripted orbit does not
         // depend on how many real frames ran before the test released the pin.
         if (g3) g3.cameraPosition({ x: 90, y: 150, z: 750 }, { x: 0, y: 0, z: 0 }, 0)
+        fitOnSettle = false
         // The engine also stops on a wall-clock cooldown. A pinned run must stop on tick count alone.
         sim?.cooldownTime(3_600_000)
         sim?.d3ReheatSimulation()
@@ -779,6 +780,11 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         pending = false
         pinned = true
         sim?.cooldownTicks(0)
+        // The fixed camera reset above discards the initial fit. Frame and
+        // paint the final tick positions explicitly instead of relying on an
+        // engine-stop callback that may have already consumed fitOnSettle.
+        fit()
+        sizeGlimpseOrbs(); clearGlimpse(); graph.resumeAnimation(); graph.pauseAnimation()
         host.dataset.glimpsePin = String(frames)
         motion(true)
       }
