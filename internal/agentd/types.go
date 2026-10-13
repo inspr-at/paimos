@@ -291,6 +291,7 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	InputID string // Transient exact native input correlation; never telemetry or a journal payload.
 	// Chat is transient output. It must never enter run telemetry or journals.
 	Chat         *ChatUpdate
 	ModelReports []modelreport.Observation

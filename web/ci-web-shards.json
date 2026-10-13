@@ -264,7 +264,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/work-queue.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":11.202,"median":1.5205,"min":1.024},"seconds":53.363,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
+        {"file":"tests/work-queue.spec.ts","listedTests":30,"tierTiming":{"caseSeconds":{"max":11.202,"median":1.5205,"min":1.024},"seconds":53.363,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
       ]
     }
     ,

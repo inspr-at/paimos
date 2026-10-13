@@ -504,6 +504,10 @@ func (a *ClaudeAdapter) ProbeAccountStatus(ctx context.Context, key string) (Pro
 }
 
 func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStatus {
+	return a.probeClaudeProfile(ctx, key, false)
+}
+
+func (a *ClaudeAdapter) probeClaudeProfile(ctx context.Context, key string, native bool) ProbeStatus {
 	unavailable := func(detail string) ProbeStatus { return ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: detail} }
 	home, err := localHome(a.Homes, key)
 	if err != nil {
@@ -519,7 +523,14 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		}
 		return unavailable(detail)
 	}
-	raw, code, err := probeRun(ctx, a.ClaudePath, claudeEnvironment(home, a.NodePath, a.ClaudePath), "auth", "status", "--json")
+	environment := claudeEnvironment(home, a.NodePath, a.ClaudePath)
+	if native {
+		environment, err = nativeClaudeEnvironment(home, a.NodePath, a.ClaudePath)
+		if err != nil {
+			return unavailable(agentsetup.ProbeCommandFailed)
+		}
+	}
+	raw, code, err := probeRun(ctx, a.ClaudePath, environment, "auth", "status", "--json")
 	if err != nil {
 		return unavailable(agentsetup.ProbeCommandFailed)
 	}
