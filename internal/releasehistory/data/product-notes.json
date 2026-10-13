@@ -6610,6 +6610,23 @@
           "group": "features"
         }
       ]
+    },
+    "261013103112.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 132,
+      "snapshot_sha256": "1cf1c47a944009760b02ae2ff219087227561ff014cf2b8e0592b9be68e1b287",
+      "captured_at": "2026-10-13T10:31:17Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1280",
+          "pill_en": "GitHub events processed again",
+          "pill_de": "GitHub-Ereignisse wieder verarbeitet",
+          "benefit_en": "Incoming GitHub events can again update checks, merges and delivery history.",
+          "benefit_de": "Neu eingehende GitHub-Ereignisse können wieder Prüfungen, Merges und Lieferverlauf aktualisieren.",
+          "group": "fixes"
+        }
+      ]
     }
   }
 }

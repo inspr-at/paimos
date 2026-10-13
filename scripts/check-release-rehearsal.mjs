@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A green PR run is diagnostic. Only an exact-SHA main run authorizes release.
+// A green PR run is diagnostic. Release needs an exact-SHA main rehearsal or
+// a hotfix rehearsal whose commit is already on current main.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const repository = 'inspr-at/paimos';
 export const workflow = '.github/workflows/release-image-check.yml';
+export const isHotfixBranch = branch => typeof branch === 'string' && /^hotfix\/[0-9]{3,}$/.test(branch);
 export const requiredJobs = ['image-dry-run (amd64)', 'image-dry-run (arm64)',
   'agentd-rehearsal (arm64)', 'agentd-rehearsal (amd64)',
   'assets-rehearsal', 'release-rehearsal'];
@@ -19,6 +21,22 @@ export const requiredSteps = name => name.startsWith('image-dry-run')
         'Exact production index, attestation and gh draft invocations', 'Tap dry-run fixtures with writes disabled']
       : ['Require every rehearsal job and record the exact SHA'];
 
+async function requireHotfixOnMain(sha, api) {
+  let main;
+  try { main = await api(`repos/${repository}/git/ref/heads/main`); }
+  catch { throw new Error('Hotfix rehearsal is not on main: current main API read failed'); }
+  if (main?.object?.type !== 'commit' || typeof main?.object?.sha !== 'string' || !/^[a-f0-9]{40}$/.test(main.object.sha)) {
+    throw new Error('Hotfix rehearsal is not on main: current main commit is unavailable');
+  }
+  let comparison;
+  try { comparison = await api(`repos/${repository}/compare/${sha}...${main.object.sha}`); }
+  catch { throw new Error('Hotfix rehearsal is not on main: ancestry API read failed'); }
+  if (!['ahead', 'identical'].includes(comparison?.status) ||
+      comparison?.merge_base_commit?.sha !== sha || comparison?.base_commit?.sha !== sha) {
+    throw new Error('Hotfix rehearsal is not on main: ancestry proof is missing or invalid');
+  }
+}
+
 export async function requireRehearsal(sha, api) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected the full release commit SHA');
   const policy = await api(`repos/${repository}/actions/workflows/release-image-check.yml`);
@@ -29,12 +47,13 @@ export async function requireRehearsal(sha, api) {
   const pages = await api(`repos/${repository}/actions/workflows/${policy.id}/runs?head_sha=${sha}&per_page=100`, true);
   if (!Array.isArray(pages) || pages.some(p => !Array.isArray(p.workflow_runs))) throw new Error('Invalid rehearsal run listing');
   const runs = pages.flatMap(p => p.workflow_runs).filter(r => r.workflow_id === policy.id &&
-    r.head_sha === sha && r.head_branch === 'main' && ['push', 'workflow_dispatch'].includes(r.event) &&
+    r.head_sha === sha && (r.head_branch === 'main' || isHotfixBranch(r.head_branch)) && ['push', 'workflow_dispatch'].includes(r.event) &&
     r.path === workflow && r.repository?.full_name === repository && r.head_repository?.full_name === repository);
   runs.sort((a, b) => b.id - a.id);
   const run = runs[0];
   if (!run || !Number.isSafeInteger(run.id) || run.id < 1 || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1 ||
-      run.status !== 'completed' || run.conclusion !== 'success') throw new Error('No current green main rehearsal for this exact SHA');
+      run.status !== 'completed' || run.conclusion !== 'success') throw new Error(`No current green ${isHotfixBranch(run?.head_branch) ? 'hotfix' : 'main'} rehearsal for this exact SHA`);
+  if (isHotfixBranch(run.head_branch)) await requireHotfixOnMain(sha, api);
   const jobPages = await api(`repos/${repository}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`, true);
   if (!Array.isArray(jobPages) || jobPages.some(p => !Array.isArray(p.jobs))) throw new Error('Invalid rehearsal job listing');
   const jobs = jobPages.flatMap(p => p.jobs);
