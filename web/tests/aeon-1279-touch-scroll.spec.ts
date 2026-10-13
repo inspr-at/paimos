@@ -23,9 +23,16 @@ test.use({ hasTouch: true, isMobile: true, viewport: PHONE })
 // WebKit (iPhone Safari) has no scroll anchoring: turn Chromium's off everywhere.
 const asOnSafari = (page: Page) => page.addStyleTag({ content: '*, *::before, *::after { overflow-anchor: none !important; }' })
 // One touch swipe; dy < 0 scrolls the content up (the finger moves up). No fling: the
-// gesture ends when the finger lifts, so its end is the test's to know.
-async function swipe(cdp: CDPSession, at: { x: number; y: number }, dy: number, speed = 800) {
-  await cdp.send('Input.synthesizeScrollGesture', { x: at.x, y: at.y, xDistance: 0, yDistance: dy, speed, gestureSourceType: 'touch', preventFling: true })
+// Input completion can precede the final compositor scroll on Linux. Wait for the
+// scroller's own scrollend before measuring, never a timed delay after the gesture.
+async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, dy: number, scroller = 'main') {
+  await page.locator(scroller).evaluate(el => {
+    const state = { ended: false }
+    Object.assign(window, { __swipe: state })
+    el.addEventListener('scrollend', () => { state.ended = true }, { once: true })
+  })
+  await cdp.send('Input.synthesizeScrollGesture', { x: at.x, y: at.y, xDistance: 0, yDistance: dy, speed: 800, gestureSourceType: 'touch', preventFling: true })
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __swipe: { ended: boolean } }).__swipe.ended), 'the native scroll has finished').toBe(true)
 }
 // The first row fully on screen below the sticky heads that are stuck, and where it is.
 async function firstOnScreen(page: Page, rows: string, heads: string, scroller = 'main') {
@@ -107,6 +114,7 @@ async function openAgents(page: Page, theme: 'light' | 'dark' = 'light') {
   await asOnSafari(page)
   // Read deep into the list: the Pharos group is well above the screen.
   await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight - el.clientHeight - 900 })
+  await page.clock.runFor(400)
   return { data, cdp: await page.context().newCDPSession(page) }
 }
 
@@ -151,7 +159,7 @@ test('agents 390: a refresh during a touch swipe waits until the swipe settles, 
 test('agents 390: a refresh after one 40 px swipe lands without moving the rows on screen; touch shows no hold', async ({ page }, info) => {
   const { data, cdp } = await openAgents(page)
   await watchTouch(page, SESSION_ROWS)
-  await swipe(cdp, { x: 195, y: 600 }, -40)
+  await swipe(page, cdp, { x: 195, y: 600 }, -40)
   note(info, `events: ${(await touchLog(page)).events.join(' ')}`)
   // A finger is not a pointer that rests on the list: nothing waits behind Show now.
   await expect(page.locator(SHOW_NOW)).toHaveCount(0)
@@ -180,7 +188,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.clock.runFor(400)
     const before = await rectOf(page, 'main')
     await page.screenshot({ path: info.outputPath(`agents-390-${theme}-footer-shown.png`) })
-    await swipe(cdp, { x: 195, y: 600 }, -200)
+    await swipe(page, cdp, { x: 195, y: 600 }, -200)
     await expect(footer).toHaveClass(/hidden/)
     await expect(footer).not.toBeInViewport()
     const folded = await rectOf(page, 'main')
@@ -191,7 +199,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.screenshot({ path: info.outputPath(`agents-390-${theme}-footer-folded.png`) })
     // Back up a little: the footer returns over the page, and the page still keeps its size.
     await page.clock.runFor(400)
-    await swipe(cdp, { x: 195, y: 300 }, 80)
+    await swipe(page, cdp, { x: 195, y: 300 }, 80)
     await expect(footer).not.toHaveClass(/hidden/)
     await expect(footer).toBeInViewport()
     expect(await rectOf(page, 'main')).toEqual(before)
@@ -228,7 +236,7 @@ test('ticket list 390: a swipe never resizes the page; a ticket closed elsewhere
     await phone.locator('main').evaluate(el => { el.scrollTop = 1200 })
     await watchTouch(phone, TICKET_ROWS, '.table-card')
     const before = await rectOf(phone, 'main')
-    await swipe(cdp, { x: 195, y: 600 }, -200)
+    await swipe(phone, cdp, { x: 195, y: 600 }, -200)
     await expect(phone.locator('.app-footer')).toHaveClass(/hidden/)
     const { heights } = await touchLog(phone)
     note(info, `main ${before.height} px; heights seen while scrolling: ${[...new Set(heights)].join(', ')}`)
@@ -279,12 +287,13 @@ test('chat 390: a post that arrives while reading up the thread never moves the 
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const thread = page.locator('.session-panel .thread-scroll')
   await expect(thread.locator('.msg').last()).toBeInViewport()
+  await page.clock.runFor(400)
   await asOnSafari(page)
   const cdp = await page.context().newCDPSession(page)
   const box = (await thread.boundingBox())!
   const bottom = await thread.evaluate(el => el.scrollTop)
   // Read up the thread with a finger.
-  await swipe(cdp, { x: box.x + box.width / 2, y: box.y + 80 }, 300)
+  await swipe(page, cdp, { x: box.x + box.width / 2, y: box.y + 80 }, 300, '.session-panel .thread-scroll')
   await expect.poll(() => thread.evaluate(el => el.scrollTop), 'the native swipe actually leaves the bottom').toBeLessThan(bottom - 160)
   const sheet = await rectOf(page, '.session-panel')
   const mainTop = await page.locator('main').evaluate(el => el.scrollTop)
