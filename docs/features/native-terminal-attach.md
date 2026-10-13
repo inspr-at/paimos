@@ -61,12 +61,13 @@ same node's handler/options for any later additive
 ambiguous positional session alias. P2a supplies the qualified local routes
 and I1 connects the host; fake-socket evidence is not live qualification.
 
-R0 must apply these registrations to this branch in the same PR before final
-CI/merge. Its metadata files are outside P2b's exclusive write set.
+R0 must apply the remaining test registrations to this branch in the same PR
+before final CI/merge. Its metadata files are outside P2b's exclusive write set.
 
-- Source ownership: add `internal/nativeattach/**` to S2 (`agent-runtime`).
-  Both `internal/cli/native_attach.go` and its test already match
-  S3's `internal/cli/**` coverage. Test files use the same package coverage.
+- Source ownership is covered by S2's `internal/native*/**` from central
+  [R0 PR #623](https://github.com/inspr-at/paimos/pull/623), now merged into
+  this branch. Both `internal/cli/native_attach.go` and its test match
+  S3's `internal/cli/**` coverage. No further audit row is required.
 - Go tier `ESSENTIAL`: `internal/nativeattach:TestFakeSocketDetachViewerAndStaleBinding`,
   `internal/nativeattach:TestAttachLeaseUsesElapsedServerBudget`,
   `internal/nativeattach:TestTerminalRestoredOnEveryExit`,
@@ -322,3 +323,46 @@ The separate non-required policy preview reports no trusted `gate/verdict`;
 the coordinator owns that review after builder exit. All R0 metadata and test
 assertions remain unchanged. No push to origin, deployment, model CLI, review
 gate or live cutover was performed.
+
+## Fix round 6: remaining Go tier registrations
+
+The report `review-ci618-0708.out` targets `1775fb4f6`. The complete
+[Go static job 115134826316](https://github.com/inspr-at/paimos/actions/runs/38347961181/job/115134826316)
+rejects exactly the nine unclassified tests listed in the integration handoff.
+Go vet and the tier selector regressions pass. All seven Go test shards, web,
+e2e, migration compatibility and the release check pass on this PR revision.
+The aggregate Go failure follows the failed static job; it is not a separate
+behaviour failure. No assertion or behaviour change is needed.
+
+Latest `origin/main` is `3507e3319`, already included in `1775fb4f6` by the
+coordinator. It contains central R0 PR #623, so the previous audit blocker is
+resolved. PR #618 is `MERGEABLE`; no further conflict merge is required.
+`scripts/ci/go-test-tiers.json` still lacks all nine rows. P2b's normative
+exclusive write set and this fix brief do not transfer R0 ownership.
+
+R0 must apply only the Go tier portion of the fix-round-4 patch above, adding
+the nine cases as `ESSENTIAL`. Its audit portion is already superseded by
+main. The tier-only patch passes `git apply --check` against `1775fb4f6`.
+An in-memory candidate parses, contains exactly nine additional rows and
+preserves every existing row. The unchanged manifest at the required
+negative-control revision `1775fb4f6` lacks all nine registrations, matching
+the exact CI failure. No new regression test is needed for this metadata
+failure, and no R0 file or test assertion was changed.
+
+Both complete affected Go packages pass through `remote-test.sh` at
+`1775fb4f6`: `./internal/nativeattach/... ./internal/cli/...`, exit 0
+(nativeattach 0.368 seconds, CLI 34.861 seconds). The offline affected planner
+also exits 0 and selects FULL Go because 3,233 reverse-dependency cases exceed
+its 300-case limit. That selection is not a full-suite result. This slice has
+no affected web unit tests or browser specs.
+
+Guarded static `--merge-main` exits 1 at `1775fb4f6`: only `go-tiers` fails
+on those exact nine registrations. The other 41 checks pass, with zero skips,
+including audit tests/coverage, Go vet, tier/web-shard self-checks, web
+typecheck/lint and migration checks. Static validation is failed, not green;
+R0 must apply the tier-only patch before final checks and merge. The separate
+PR policy preview still requires the coordinator's trusted review verdict.
+`git diff --check` and the P2b write-set check pass. This round changes only
+this feature handoff and the ignored progress file; implementation, test
+assertions and R0 metadata remain unchanged. No origin push, deployment,
+model CLI, review gate or live cutover was performed.
