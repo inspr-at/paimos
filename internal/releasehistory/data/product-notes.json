@@ -6614,16 +6614,16 @@
     "261013084255.0.0": {
       "release_channel": "stable",
       "release_sequence": 132,
-      "snapshot_sha256": "c8f96cbda1ecb43d1b0afdf96ad0c1f894cfba5a4e851e074a13f6d52bff5a7f",
-      "captured_at": "2026-10-13T08:43:09Z",
+      "snapshot_sha256": "52614271c914efa6e169fe9a205ce89e4909b85944ebb2f0f280247f842b641d",
+      "captured_at": "2026-10-13T08:46:05Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-1280",
           "pill_en": "GitHub events processed again",
           "pill_de": "GitHub-Ereignisse wieder verarbeitet",
-          "benefit_en": "Checks, merges and delivery history from GitHub are recorded again for every event.",
-          "benefit_de": "Prüfungen, Merges und Lieferverlauf aus GitHub werden wieder für jedes Ereignis erfasst.",
+          "benefit_en": "Incoming GitHub events can again update checks, merges and delivery history.",
+          "benefit_de": "Neu eingehende GitHub-Ereignisse können wieder Prüfungen, Merges und Lieferverlauf aktualisieren.",
           "group": "fixes"
         }
       ]
