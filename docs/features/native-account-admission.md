@@ -75,3 +75,19 @@ overlap at `max_parallel=1`, revocation after routing, retained idle/PTY/unknown
 fork holds, immutable profile/account binding, and current server
 identity/context/model/account/host checks. Builders make no subscription/model
 calls. No migration, permission, dependency or public contract change is needed.
+
+Validation of source snapshot `c4cf99282`: both assigned Go package suites
+passed through the guarded remote runner, as did
+`TestSharedFenceCallerInventory`. Strict Go/web manifests passed. Guarded
+`ci-static --merge-main` exited 0 with 42 checks and no skips. A detached
+negative control removing final authority revalidation made the root/worker
+revocation test fail as expected; the delivery branch retains the check.
+
+The only R0 additions are ESSENTIAL rows for
+`TestNativeAdmissionOverlappingRootWorkerAndRevokedRoute`,
+`TestNativeProfileChangeSerializesWithLiveUsers`, and
+`TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity`, plus
+the `agentpairing.Lock` caller `agentaccounts/native_session.go`. The existing
+native-source audit glob covers the package. No push to origin, deployment,
+model CLI or review gate was run by this worker. I1/I2 wiring and `G_ACCOUNTS`
+remain coordinator-owned.
