@@ -294,7 +294,8 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   const done = row(page, DONE)
   await expect(done).toBeVisible()
   await expect(done.locator('.ava')).toHaveAttribute('aria-label', /: Done$/)
-  await expect(done.locator('.l2t')).toContainText(/moves to Ended at \d{1,2}:07/)
+  // AEON-1240: it says when it finished and when it moves, never its last activity or an estimate.
+  await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57( [AP]M)? · moves to Ended at \d{1,2}:07( [AP]M)?$/)
   await expect(done.locator('.c-time')).toHaveText('3 min ago')
   // It sits among the live rows, not in the folded Ended group.
   await expect(page.locator('.sessions .ended-head .group-toggle')).toHaveAttribute('aria-expanded', 'false')
@@ -304,6 +305,49 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   await page.clock.runFor(60_000 + 2_000)
   await expect(done).toHaveCount(0)
 })
+
+// AEON-1240 fix round 2: only Done finished. Fix round 3 (Tick): a cancelled run, a spent budget and a
+// lost contact keep their place the same 10 minutes and name why they ended, as the panel head does; a
+// withheld reason reads Stopped. Never Finished, never "Ended … moves to Ended".
+test('an unfinished session keeps its place and names why it ended, never Finished', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  const id = (n: number) => `5e000000-0000-4000-8000-0000000000${n}`
+  const base = data.sessions.find(session => session.id === DONE)!
+  // Every badge says Ended; line 2 says why.
+  const ends = [
+    { n: 41, label: 'Cancelled worker', minutes: 2, reason: 'cancelled', line: 'Cancelled', end: '58', moves: '08' },
+    { n: 42, label: 'Budget worker', minutes: 4, reason: 'budget_exhausted', line: 'Budget exhausted', end: '56', moves: '06' },
+    { n: 43, label: 'Silent worker', minutes: 5, reason: 'heartbeat_lost', line: 'Lost contact', end: '55', moves: '05' },
+    { n: 44, label: 'Withheld worker', minutes: 6, reason: null, line: 'Stopped', end: '54', moves: '04' },
+  ]
+  for (const end of ends) data.sessions.push({ ...base, id: id(end.n), display_label: end.label, stopped_at: ago(end.minutes), heartbeat_at: ago(end.minutes + 0.2), stop_reason: end.reason, finished: false })
+  await page.goto('/agents')
+  for (const end of ends) {
+    const ended = row(page, id(end.n))
+    await expect(ended).toBeVisible()
+    await expect(ended.locator('.ava')).toHaveAttribute('aria-label', /: Ended$/)
+    await expect(ended.locator('.l2t')).toHaveText(new RegExp(`^${end.line} \\d{1,2}:${end.end}( [AP]M)? · moves to Ended at \\d{1,2}:${end.moves}( [AP]M)?$`))
+  }
+  // The Ended group stays folded: every row sits among the live ones.
+  await expect(page.locator('.sessions .ended-head .group-toggle')).toHaveAttribute('aria-expanded', 'false')
+  await expect(row(page, DONE).locator('.l2t')).toHaveText(/^Finished \d{1,2}:57( [AP]M)? · /)
+  await expect(page.locator('.sessions .row[data-row] .l2t').filter({ hasText: /^Ended / })).toHaveCount(0)
+})
+
+// AEON-1240 evidence: a finished row that keeps its place, at three widths, light and dark.
+for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+  test(`a finished row says when it finished and when it moves at ${width} ${colorScheme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+    await setup(page, colorScheme)
+    await page.goto('/agents')
+    const done = row(page, DONE)
+    await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57( [AP]M)? · moves to Ended at \d{1,2}:07( [AP]M)?$/)
+    await done.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1240-finished-row-${width}-${colorScheme}.png`) })
+  })
+}
 
 test('keyboard focus in a row holds changes like the pointer does', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })

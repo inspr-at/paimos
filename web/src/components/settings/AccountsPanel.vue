@@ -185,3 +185,11 @@ async function toggleUse(r: AgentAccount) {
 </template>
 
 <style scoped src="../../styles/accountsSettings.css"></style>
+<style scoped>
+/* An older rule or a hold keeps the docked panel's full width for its words, so "Set by you · at most 20 % a day"
+   reads on one line, and its Remove or End now sits under them (AEON-1240); each still reserves its tallest state. */
+@container lim (max-width: 600px) {
+  .lim-sec .lim.legacy { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .lim-sec .lim.legacy > .act { justify-self: start; justify-items: start; }
+}
+</style>

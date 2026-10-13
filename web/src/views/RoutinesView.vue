@@ -7,7 +7,7 @@ import { getMembers } from '../lib/access'
 import { can, myWorkspaceRole, onAccessRevalidate, permissionsRevoked } from '../lib/authz'
 import type { After } from '../lib/identityScope'
 import { ROUTINE_STATE_WORDS, reasonWords, recurrenceName, recurrenceZone, routineState, when, type Recurrence, type RecurrenceResult } from '../lib/recurrences'
-import { SCOPE_FILTERS, STATE_FILTERS, STATE_LOOK, countWords, matchesScope, parseScope, parseState, scopeOf, stateCounts, type ScopeFilter } from '../lib/routineRuns'
+import { SCOPE_FILTERS, STATE_FILTERS, STATE_LOOK, countTip, countWords, matchesScope, parseScope, parseState, scopeOf, stateCounts, type ScopeFilter } from '../lib/routineRuns'
 import { toast } from '../lib/toast'
 import { useIdentityScope } from '../lib/useIdentityScope'
 import { usePoller } from '../lib/usePolledData'
@@ -63,7 +63,11 @@ const scoped = computed(() => items.value.filter(item => matchesScope(item, scop
 const counts = computed(() => stateCounts(scoped.value))
 const rows = computed(() => (stateFilter.value ? scoped.value.filter(item => routineState(item) === stateFilter.value) : scoped.value).slice().sort(byName))
 const more = computed(() => !!cursor.value)
-const scopeCount = (scope: ScopeFilter) => countWords(items.value.filter(item => matchesScope(item, scope)).length, more.value)
+const scopeTotal = (scope: ScopeFilter) => items.value.filter(item => matchesScope(item, scope)).length
+const scopeCount = (scope: ScopeFilter) => countWords(scopeTotal(scope), more.value)
+// "–" says a zero is not known yet; its tip and the screen reader say why.
+const scopeTip = (scope: ScopeFilter) => known.value ? countTip(scopeTotal(scope), more.value) : ''
+const stateTip = (state: RoutineState) => known.value ? countTip(counts.value[state], more.value) : ''
 const projectOptions = computed(() => {
   const ids = new Set(items.value.map(item => item.project_id))
   if (projectFilter.value) ids.add(projectFilter.value)
@@ -331,10 +335,10 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
     <p v-if="!person" class="calm-line" role="note"><AppIcon name="info" :size="13" /><span>Routines are listed for people. Agents read them through the API with Manage recurring work.</span></p>
     <template v-else>
       <div class="tools">
-        <div class="seg scope" role="radiogroup" aria-label="Scope"><button v-for="[key, label] in SCOPE_FILTERS" :key="key" type="button" role="radio" :data-scope="key" :aria-checked="scopeFilter === key" @click="setQuery({ scope: key })">{{ label }}<span class="sn">{{ known ? scopeCount(key) : '' }}</span></button></div>
+        <div class="seg scope" role="radiogroup" aria-label="Scope"><button v-for="[key, label] in SCOPE_FILTERS" :key="key" type="button" role="radio" :data-scope="key" :aria-checked="scopeFilter === key" :data-tip="scopeTip(key) || undefined" @click="setQuery({ scope: key })">{{ label }}<span class="sn">{{ known ? scopeCount(key) : '' }}</span><span v-if="scopeTip(key)" class="sr-only">, {{ scopeTip(key).toLowerCase() }}</span></button></div>
         <label class="proj"><span class="sr-only">Project</span><select id="routines-project" class="field" :value="projectFilter" @change="setQuery({ project: ($event.target as HTMLSelectElement).value || undefined })"><option value="">All projects</option><option v-for="option in projectOptions" :key="option.id" :value="option.id">{{ option.key }}</option></select></label>
         <div class="counts" role="group" aria-label="Show routines by state">
-          <button v-for="state in STATE_FILTERS" :key="state" type="button" class="cnt" :class="STATE_LOOK[state].tone" :data-sf="state" :aria-pressed="stateFilter === state" :aria-disabled="!counts[state] && stateFilter !== state ? 'true' : undefined" @click="toggleState(state)"><span v-if="stateIcon(state) === 'live'" class="pulse" aria-hidden="true" /><AppIcon v-else :name="stateIcon(state) as IconName" :size="13" /><b>{{ known ? countWords(counts[state], more) : '·' }}</b><span>{{ ROUTINE_STATE_WORDS[state].toLowerCase() }}</span></button>
+          <button v-for="state in STATE_FILTERS" :key="state" type="button" class="cnt" :class="STATE_LOOK[state].tone" :data-sf="state" :aria-pressed="stateFilter === state" :aria-disabled="!counts[state] && stateFilter !== state ? 'true' : undefined" :data-tip="stateTip(state) || undefined" @click="toggleState(state)"><span v-if="stateIcon(state) === 'live'" class="pulse" aria-hidden="true" /><AppIcon v-else :name="stateIcon(state) as IconName" :size="13" /><b>{{ known ? countWords(counts[state], more) : '·' }}</b><span>{{ ROUTINE_STATE_WORDS[state].toLowerCase() }}</span><span v-if="stateTip(state)" class="sr-only">, {{ stateTip(state).toLowerCase() }}</span></button>
         </div>
       </div>
       <p v-if="revoked" class="calm-line" role="status"><AppIcon name="eye" :size="13" /><span><b>The routine editor closed:</b> your rights for that routine changed. Nothing was saved; your draft was discarded. You can still read it.</span></p>
