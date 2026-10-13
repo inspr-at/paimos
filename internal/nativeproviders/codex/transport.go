@@ -34,6 +34,7 @@ type transport struct {
 	wire         Wire
 	grants       GrantSource
 	clock        n.Clock
+	validator    *n.Validator
 	spec         n.LaunchSpec
 	grant        WorkerGrant
 	identity     n.NativeIdentity
@@ -182,7 +183,7 @@ func (s *transport) Send(ctx context.Context, input n.Input) (n.NativeEvidence, 
 	if !validText(input.Text) || input.RequestID == "" || input.InputID == "" || (input.Mode != "now" && input.Mode != "after_turn") {
 		return n.NativeEvidence{}, ErrProtocol
 	}
-	if validateDTO("NativeInput", input) != nil {
+	if s.validateDTO("NativeInput", input) != nil {
 		return n.NativeEvidence{}, ErrProtocol
 	}
 	if !input.ExpiresAt.After(s.clock.Now()) {
@@ -237,7 +238,7 @@ func (s *transport) Interrupt(ctx context.Context, input n.Interrupt) (n.NativeE
 	defer cancel()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if validateDTO("NativeInterrupt", input) != nil {
+	if s.validateDTO("NativeInterrupt", input) != nil {
 		return n.NativeEvidence{}, ErrProtocol
 	}
 	if !sameBinding(input.ExpectedBinding, s.spec.Binding) {
@@ -270,7 +271,7 @@ func (s *transport) Decide(ctx context.Context, decision n.ApprovalDecision) (n.
 	defer cancel()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if validateDTO("NativeApprovalDecision", decision) != nil {
+	if s.validateDTO("NativeApprovalDecision", decision) != nil {
 		return n.NativeEvidence{}, ErrProtocol
 	}
 	if !sameBinding(decision.ExpectedBinding, s.spec.Binding) {
@@ -414,7 +415,7 @@ func (s *transport) emit(event n.ProviderEvent) error {
 	default:
 		return ErrProtocol
 	}
-	if validateDTO(schema, payload) != nil {
+	if s.validateDTO(schema, payload) != nil {
 		return ErrProtocol
 	}
 	if kind != "" {
@@ -436,12 +437,8 @@ func (s *transport) emit(event n.ProviderEvent) error {
 	}
 }
 
-func validateDTO(schema string, value any) error {
-	v, err := n.NewValidator()
-	if err != nil {
-		return ErrProtocol
-	}
-	return v.ValidateJSON(schema, encode(value))
+func (s *transport) validateDTO(schema string, value any) error {
+	return s.validator.ValidateJSON(schema, encode(value))
 }
 func (s *transport) structured(kind, text, ref, state string) error {
 	f := n.StructuredFrame{Kind: kind}

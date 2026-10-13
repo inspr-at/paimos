@@ -136,11 +136,15 @@ func (l *Launcher) Open(ctx context.Context, spec n.LaunchSpec) (n.NativeTranspo
 	if err != nil {
 		return nil, err
 	}
+	validator, err := n.NewValidator()
+	if err != nil {
+		return nil, ErrProtocol
+	}
 	wire, err := l.Wires.Open(ctx, plan)
 	if err != nil {
 		return nil, ErrUncertain
 	}
-	s := &transport{wire: wire, grants: l.Grants, clock: l.Clock, spec: spec, grant: grant,
+	s := &transport{wire: wire, grants: l.Grants, clock: l.Clock, spec: spec, grant: grant, validator: validator,
 		events: make(chan n.ProviderEvent, 32), readerDone: make(chan struct{}), approvals: make(map[string]pendingApproval)}
 	s.identity = wire.Identity()
 	if s.identity.Provider != "codex" || s.identity.RuntimeEpoch != spec.Binding.RuntimeEpoch ||

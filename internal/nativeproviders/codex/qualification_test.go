@@ -352,6 +352,16 @@ func TestNativeCodexTranscriptQualification(t *testing.T) {
 			t.Fatal("foreign account received input")
 		}
 	})
+	t.Run("current grant is rechecked after identity", func(t *testing.T) {
+		l, spec, w, g, c, _ := fixture(t)
+		s := openFixture(t, l, spec)
+		g.mu.Lock()
+		g.grant.Policy.GrantRevision++
+		g.mu.Unlock()
+		if _, err := s.Send(context.Background(), firstInput(spec, c)); !errors.Is(err, ErrPolicy) || w.count("turn/start") != 0 {
+			t.Fatal("changed current grant reached native input")
+		}
+	})
 	t.Run("explicit completed final with scoped drain authority", func(t *testing.T) {
 		l, spec, w, _, c, _ := fixture(t)
 		s := openFixture(t, l, spec)
@@ -452,6 +462,22 @@ func TestNativeCodexTranscriptQualification(t *testing.T) {
 			t.Fatal("quota lost enrolled account scope")
 		}
 	})
+	t.Run("native approval expires on the injected clock", func(t *testing.T) {
+		l, spec, w, _, c, _ := fixture(t)
+		s := openFixture(t, l, spec)
+		start(t, s, spec, c)
+		w.send(`{"id":42,"method":"item/fileChange/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"edit-1"}}`)
+		e := nextEvent(t, s)
+		if e.Approval == nil {
+			t.Fatal("missing file approval")
+		}
+		c.advance(5 * time.Minute)
+		d := n.ApprovalDecision{RequestID: fixtureID, ExpectedBinding: spec.Binding, ApprovalID: e.Approval.ApprovalID,
+			ExpectedRevision: 1, EffectDigest: e.Approval.EffectDigest, Decision: "allow_once", StepUpAuthorizationID: ptr(fixtureID)}
+		if _, err := s.Decide(context.Background(), d); !errors.Is(err, ErrExpired) || len(w.replies) != 0 {
+			t.Fatal("expired native callback received a response")
+		}
+	})
 	t.Run("commentary chunks tool bodies and failed turns are not finals", func(t *testing.T) {
 		l, spec, w, _, c, _ := fixture(t)
 		s := openFixture(t, l, spec)
@@ -508,6 +534,14 @@ func TestNativeCodexRejectsUnqualifiedLaunch(t *testing.T) {
 		w.badPolicy = true
 		if _, err := l.Open(context.Background(), spec); !errors.Is(err, ErrPolicy) || w.count("turn/start") != 0 {
 			t.Fatal("unexpected resolved policy received input")
+		}
+	})
+	t.Run("failed start cleanup needs observed group exit", func(t *testing.T) {
+		l, spec, w, _, _, _ := fixture(t)
+		w.badPolicy = true
+		w.exit.GroupAbsent = false
+		if _, err := l.Open(context.Background(), spec); !errors.Is(err, ErrUncertain) || w.count("turn/start") != 0 {
+			t.Fatal("unconfirmed failed-start cleanup released writer evidence")
 		}
 	})
 	t.Run("resume never imports historical finals", func(t *testing.T) {

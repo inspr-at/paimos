@@ -110,7 +110,7 @@ The pre-ack notification case uses explicit request/release barriers.
 
 Coordinator-owned same-PR registrations:
 
-- Source ownership: add `internal/nativeproviders/codex/**` to S3 (agent runtime).
+- Source ownership: add `internal/nativeproviders/codex/**` to S2 (agent runtime).
 - Go test tiers: `internal/nativeproviders/codex:TestNativeCodexTranscriptQualification`,
   `internal/nativeproviders/codex:TestNativeCodexRejectsUnqualifiedLaunch` and
   `internal/nativeproviders/codex:TestNativeCodexRejectsUnboundedOrAmbiguousFrames`;
