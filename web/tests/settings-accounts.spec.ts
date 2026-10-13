@@ -240,6 +240,31 @@ test('a row opens its detail: windows with source and freshness, and the last th
   await expect(studio.locator('.window')).toContainText('Read on studio · 3 h ago · offline')
 })
 
+// AEON-1240 (Tick's AEON-1175 note): in the docked panel at 1440 the title wrapped after "a" because Remove shared
+// its row. The words keep the panel's width and read on one line; Remove sits under them, and asking and Keep move
+// neither the words nor the row.
+for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+  test(`an older rule's title reads on one line with Remove under it at ${width} ${colorScheme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
+    await setup(page, { limits: true })
+    await open(page)
+    await show(page, ACCOUNTS.main)
+    const rule = oldRule(page, ACCOUNTS.main), title = rule.locator('[data-say] b')
+    await expect(title).toHaveText('Set by you · at most 20 % a day')
+    const lines = await title.evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size })
+    expect(lines, 'the title is one line').toBe(1)
+    const words = (await rule.locator('[data-say]').boundingBox())!, remove = (await rule.getByRole('button', { name: 'Remove' }).boundingBox())!
+    expect(remove.y, 'Remove sits under the words').toBeGreaterThanOrEqual(words.y + words.height - 0.5)
+    expect(Math.abs(remove.x - words.x), 'Remove starts where the words start').toBeLessThanOrEqual(0.5)
+    // The ask's Remove becomes Keep and Remove in the same slot; the words and the row itself never move.
+    const guard = await controlStability(page, { words: rule.locator('[data-say]'), row: rule })
+    await guard.check(async () => { await rule.getByRole('button', { name: 'Remove' }).click(); await expect(rule.getByRole('button', { name: 'Keep' })).toBeVisible() })
+    await guard.check(async () => { await rule.getByRole('button', { name: 'Keep' }).click(); await expect(rule.getByRole('button', { name: 'Keep' })).toHaveCount(0) })
+    await rule.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1240-set-by-you-${width}-${colorScheme}.png`), fullPage: false })
+  })
+}
+
 test('an older rule shows as Set by you; Remove asks in place and removes it for good', async ({ page }) => {
   const { capacity } = await setup(page, { limits: true })
   await open(page)
