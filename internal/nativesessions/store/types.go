@@ -63,6 +63,7 @@ type Options struct {
 	Observer            Observer
 	Now                 func() time.Time
 	TerminalViewerHosts []string // nil defaults to 100.64.0.0/10 and *.ts.net
+	TerminalViewerPorts []int    // nil defaults to 443 and 8082; omitted URL port means 443
 }
 
 type Store struct {
@@ -82,7 +83,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	hosts, err := NewViewerHosts(opts.TerminalViewerHosts)
+	hosts, err := newViewerHosts(opts.TerminalViewerHosts, opts.TerminalViewerPorts)
 	if err != nil {
 		return nil, err
 	}
