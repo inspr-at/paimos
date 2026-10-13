@@ -381,3 +381,43 @@ remaining blocking metadata change and cancelled CI evidence explicitly. No
 runtime behavior, test assertion, shared inventory, API, migration or version
 was changed; no origin push, deployment, review gate, model CLI, live runtime or
 vendor account action was performed.
+
+Fix round 6, 2026-10-13 (reviewed source `eee2be772`):
+
+- PASS — approved remote `-race -count=1` tests for `internal/httpapi/...`,
+  `internal/nativestream/...` and `internal/nativesessions/stream/...` on the
+  reviewed source. The authenticated C0 transport, binding/view isolation,
+  bounded replay and separate FinalSink, native export filtering, and
+  barrier-established revocation acceptance checks remain passing.
+- CONFIRMED — job `115157764922` fails only strict Go tier validation for the
+  same nine stream tests in the R0 handoff. Downloaded Go artifacts from CI run
+  `38355592739` show all nine passing and no failed cases; they still default
+  to NIGHTLY. No runtime behavior failure or assertion change is indicated.
+- BLOCKED — refreshed `origin/main` is `fd8fae22f`, already an ancestor of
+  this branch, and both manifests still contain zero stream test rows. The
+  normative plan gives `scripts/ci/go-test-tiers.json` exclusively to R0:
+  "Builders send exact row/registration intents; they never independently
+  rewrite these shared inventories." The P2a write set remains the two stream
+  packages and this document. R0 must apply the nine ESSENTIAL rows using the
+  classifier commands above on this same branch before final validation.
+- CONFIRMED — web aggregate `115164323793` fails because browser shard 2 was
+  cancelled during its selected-case step. Its first batch reports 215 passed;
+  its next batch ends with `The operation was canceled`, without a reported
+  assertion failure. All four unit shards and browser shard 1 passed. The
+  measurement aggregate reports `coverage: incomplete`,
+  `missingEvidence: [web-shard-2]` and
+  `measurementCauses: [missing_case_artifact]`. The coordinator must obtain
+  complete CI evidence; this package has no web source, unit-test or browser-spec
+  changes.
+- PASS WITH LIMIT — offline affected selection exits 0 with 130 Go packages,
+  but still omits both stream packages. Re-run after R0 registration; this
+  exit-0 result does not establish stream-test selection.
+- INCOMPLETE — both guarded `ci-static-locked.sh` attempts return exit 3
+  because both remote slots are occupied. No local fallback or guard bypass
+  was used, and the independent CI tier failure remains blocking.
+
+Only this in-scope handoff document changed. No behavior fix was needed, so
+there is no new regression assertion or negative-control mutation against
+`eee2be772`. R0 registration, guarded static validation and complete PR CI
+remain required. No origin push, deployment, review gate, model CLI, live
+runtime or vendor account action was performed.
