@@ -180,7 +180,13 @@ func TestComposerReceiptsAndEscapeLeaveSessionRunning(t *testing.T) {
 	s := f.open(t, true)
 	term := newTerminal()
 	done := runTerminal(t, f, s, term, context.Background(), nil)
-	_ = waitRunReady(t, f, term)
+	id := waitRunReady(t, f, term)
+	turn, state := "active-turn", "running"
+	f.mu.Lock()
+	frames := f.frames[id]
+	f.mu.Unlock()
+	frames <- eventFor(s, "structured", "1", nativecontract.StructuredFrame{Kind: "turn_state", Reference: &turn, State: &state})
+	waitOutput(t, term, "[turn_state]")
 	// All single letters are text inside the composer, including i and q.
 	term.input <- terminalRead{bytes: []byte("aquiet input\x1b[13;9u")}
 	waitOutput(t, term, ": accepted]")
@@ -201,9 +207,11 @@ drainTimers:
 	for await(t, f.clock.registered) != 50*time.Millisecond {
 	}
 	f.clock.advance(50 * time.Millisecond)
-	// Explicit barrier: wait for the redraw after Esc leaves the field, then
-	// send another Esc. Neither Esc can invoke interrupt, even with input text.
+	// Explicit barrier: wait for Esc to leave the field. It must not interrupt
+	// the known active turn. Only the deliberate i action may do so.
 	waitOutput(t, term, "input: ")
+	term.input <- terminalRead{bytes: []byte("i")}
+	waitOutput(t, term, "[interrupt ")
 	term.input <- terminalRead{bytes: []byte{0x1b}}
 	for await(t, f.clock.registered) != 50*time.Millisecond {
 	}
@@ -213,7 +221,7 @@ drainTimers:
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.inputs) != 1 || f.inputs[0].Text != "quiet input" || !f.running || f.detaches != 1 {
+	if len(f.inputs) != 1 || f.inputs[0].Text != "quiet input" || len(f.interrupts) != 1 || f.interrupts[0].ExpectedTurnRef != turn || !f.running || f.detaches != 1 {
 		t.Fatal("composer shortcuts changed input or detach ended the session")
 	}
 }

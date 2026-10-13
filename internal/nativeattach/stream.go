@@ -156,8 +156,12 @@ func (s *Session) observe(event nativecontract.StreamEvent) error {
 			s.capability = ""
 		}
 	case "control.lease_expired", "control.ended_by", "stream.paused":
-		s.authorityLost = true
-		s.capability = ""
+		// These revoke the holder's control, not unrelated read-only viewers.
+		// A later binding change still requires every viewer to attach again.
+		if s.control {
+			s.authorityLost = true
+			s.capability = ""
+		}
 	case "receipt":
 		var receipt nativecontract.Receipt
 		_ = json.Unmarshal(event.Payload, &receipt)

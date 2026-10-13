@@ -91,6 +91,7 @@ type fakeSocket struct {
 	frames                       map[string]chan nativecontract.StreamEvent
 	inputAttempts                int
 	inputs                       []nativecontract.Input
+	interrupts                   []nativecontract.Interrupt
 	lastAttempt                  nativecontract.Input
 	receipts                     []nativecontract.Receipt
 	running                      bool
@@ -298,6 +299,9 @@ func (f *fakeSocket) serve(w http.ResponseWriter, r *http.Request) {
 	case "stop":
 		f.running = false
 	case "interrupt":
+		var in nativecontract.Interrupt
+		_ = json.Unmarshal(packet.Params, &in)
+		f.interrupts = append(f.interrupts, in)
 	default:
 		f.refusal(w, nativecontract.ReasonUnsupported)
 		return
@@ -385,6 +389,24 @@ func TestFakeSocketDetachViewerAndStaleBinding(t *testing.T) {
 		defer f.mu.Unlock()
 		if f.inputAttempts != 1 || !f.lastAttempt.ExpectedBinding.Equal(original) || len(f.inputs) != 0 || !f.running {
 			t.Fatal("old intent was retargeted, retried or ended the writer")
+		}
+	})
+	t.Run("controller expiry preserves read-only viewers", func(t *testing.T) {
+		f := newFakeSocket(t)
+		s := f.open(t, false)
+		if err := s.observe(eventFor(s, "control.lease_expired", "1", nativecontract.LeaseExpired{Generation: s.generation})); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Renew(context.Background()); err != nil {
+			t.Fatalf("another controller's expiry revoked the viewer: %v", err)
+		}
+		if err := s.Detach(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if !f.running || f.inputAttempts != 0 {
+			t.Fatal("viewer renewal altered the writer")
 		}
 	})
 }
