@@ -9,7 +9,7 @@ const description = Array(8).fill('Vor der Freigabe müssen sämtliche Berechtig
 const tail = 'Abschließende Bedingung: keine mandantenübergreifenden Schreibzugriffe.'
 
 async function shot(page: Page, name: string) {
-  await page.screenshot({ path: test.info().outputPath(`${name}.png`) })
+  await page.screenshot({ path: test.info().outputPath(`${name.replace(/[^a-z0-9_-]/gi, '-')}.png`) })
 }
 const scrollKeys = ['Home', 'ArrowDown', 'PageDown', 'Space', 'End', 'ArrowUp', 'PageUp', 'Shift+Space', 'Home', 'ArrowLeft', 'ArrowRight']
 async function nativeScrollKey(area: Locator, key: string) {
@@ -51,6 +51,11 @@ async function revealGeometry(control: Locator, neighbors: Locator, coarse: bool
     let node: Node | null
     while ((node = walker.nextNode())) {
       if (getComputedStyle(node.parentElement!).visibility === 'hidden') continue
+      // AEON-569, merge #458: KeyCap exposes a clipped 1px screen-reader
+      // label. Range geometry includes that unpainted text; exclude it only
+      // when the actual clipping, size and positioning prove it is hidden.
+      const parent = node.parentElement!, style = getComputedStyle(parent), parentBox = parent.getBoundingClientRect()
+      if (style.position === 'absolute' && style.overflow === 'hidden' && style.clipPath === 'inset(50%)' && parentBox.width <= 1 && parentBox.height <= 1) continue
       const range = document.createRange(); range.selectNodeContents(node)
       for (const rect of range.getClientRects()) {
         if (rect.left < button.left - .5 || rect.right > button.right + .5 || rect.top < button.top - .5 || rect.bottom > button.bottom + .5) {
@@ -58,6 +63,12 @@ async function revealGeometry(control: Locator, neighbors: Locator, coarse: bool
           overflow.push({ text: node.textContent, parent: node.parentElement!.outerHTML, clip: style.clip, clipPath: style.clipPath, button: button.toJSON(), textBox: rect.toJSON() })
         }
       }
+    }
+    for (const glyph of el.querySelectorAll('svg')) {
+      const style = getComputedStyle(glyph)
+      if (style.visibility === 'hidden') continue
+      const rect = glyph.getBoundingClientRect()
+      if (rect.left < button.left - .5 || rect.right > button.right + .5 || rect.top < button.top - .5 || rect.bottom > button.bottom + .5) overflow.push({ text: 'SVG glyph', parent: glyph.outerHTML, clip: style.clip, clipPath: style.clipPath, button: button.toJSON(), textBox: rect.toJSON() })
     }
     return overflow
   })

@@ -262,12 +262,12 @@ defineExpose({ open: openForm, openStatus: () => { chipButton.value?.scrollIntoV
           <button type="button" class="btn ghost" @click="closePanel(true)">Cancel<kbd class="keycap">Esc</kbd></button>
           <button type="submit" class="btn primary" :disabled="!ownershipReady || pause.leavingBusy">Wind down<span class="go-by" :class="{ hidden: !!timeError }">· by {{ goTime }}</span><span class="submit-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button>
         </div>
-        <p class="wdf-prev"><b>{{ chosen.length }} agent{{ chosen.length === 1 ? '' : 's' }}</b> {{ wherePhrase }} hand over by <template v-if="timeError">the time you set</template><b v-else>{{ byText }}</b>. New starts remain allowed until enforcement exists.<small>{{ previewLevels }}. Preview from the latest reports; eligibility and timing are checked on confirm.</small></p>
-        <p v-if="labelsError" class="wdf-note" role="status">{{ labelsError }}</p>
         <div class="wd-sep" role="separator" />
         <p class="eyebrow now-head">Right now</p>
         <button type="button" class="wd-item" :aria-disabled="!canPause.length || pause.leavingBusy || undefined" @click="bulk('pause-all')"><AppIcon name="pause" :size="16" /><span class="t">Pause all…</span><span class="d">{{ canPause.length ? 'Each agent saves a handover and pauses at its next safe point.' : 'Nothing outside the wind-down can pause right now.' }}</span></button>
         <button type="button" class="wd-item" :aria-disabled="!canResume.length || pause.leavingBusy || undefined" @click="bulk('resume-all')"><AppIcon name="play" :size="16" /><span class="t">Resume all…</span><span class="d">{{ canResume.length ? `Continue ${canResume.length} paused agent${canResume.length === 1 ? '' : 's'} from their handovers, leads first.` : 'Nothing is paused.' }}</span></button>
+        <p class="wdf-prev"><b>{{ chosen.length }} agent{{ chosen.length === 1 ? '' : 's' }}</b> {{ wherePhrase }} hand over by <template v-if="timeError">the time you set</template><b v-else>{{ byText }}</b>. New starts remain allowed until enforcement exists.<small>{{ previewLevels }}. Preview from the latest reports; eligibility and timing are checked on confirm.</small></p>
+        <p v-if="labelsError" class="wdf-note" role="status">{{ labelsError }}</p>
         <fieldset v-if="where === 'pick'" class="wd-pick"><legend class="sr-only">Agents to wind down</legend><label v-for="s in running" :key="s.id" class="pk"><input type="checkbox" :checked="picked.includes(s.id)" @change="togglePick(s.id)" /><span>{{ name(s) }}</span><small>{{ hostLabel(s.host) }}</small></label></fieldset>
       </form>
       <div v-else class="wds">

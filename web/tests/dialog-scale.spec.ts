@@ -211,17 +211,23 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await check({ name: 'convert-kind', frame: convert, actions: convert.locator('.actions'), size: 'm', body: convert.locator('.convert-scroll'), changes: [pickKind('Incident'), pickKind('Task'), pickKind('Epic')] })
     // Switching the kind relabels the primary action; neither action nor any
     // kind row moves or resizes (AEON-541), on desktop as on phones.
-    await expectStableControls({
-      controls: {
+    const convertControls = {
         cancel: convert.getByRole('button', { name: 'Cancel', exact: true }),
         convert: convert.locator('.actions .btn').nth(1),
         'kind selector': convert.getByRole('radiogroup', { name: 'New kind' }),
         'Epic row': kindChoice('Epic'),
         'Task row': kindChoice('Task'),
         'Incident row': kindChoice('Incident'),
-      },
-      interactions: [pickKind('Incident'), pickKind('Task'), pickKind('Epic'), pickKind('Incident')],
-    })
+    }
+    await expectStableControls({ controls: convertControls, interactions: [pickKind('Incident'), pickKind('Task'), pickKind('Epic'), pickKind('Incident')] })
+    if (width === 2560) {
+      for (const evidenceWidth of [1024, 1440]) {
+        await page.setViewportSize({ width: evidenceWidth, height: 1000 })
+        await expectStableControls({ controls: convertControls, interactions: [pickKind('Task'), pickKind('Incident')] })
+        await page.screenshot({ path: info.outputPath(`convert-kind-${evidenceWidth}-${theme}.png`) })
+      }
+      await page.setViewportSize({ width, height: 1000 })
+    }
     await expect(convert.getByRole('button', { name: 'Convert to incident', exact: true })).toBeVisible()
     await convert.getByRole('button', { name: 'Cancel' }).click()
     await details.getByRole('button', { name: /Status: / }).click()
