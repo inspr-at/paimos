@@ -416,6 +416,47 @@ change is made. No new behavior regression or negative control against
 still owns the trusted review verdict and all merge/release decisions. No
 origin push, deployment, model CLI or review gate is run by this worker.
 
+## Fix round 7: unchanged ownership prevents the CI repair
+
+The full `review-ci622-0904.out` artifact targets `546d1b290`. Its
+`TestSharedFenceCallerInventory` output again identifies the missing
+`nativesessions/receipts/repository.go` entry. The complete `go-static` log
+for job `115167939869` lists exactly the eight unclassified tests below;
+synthetic failure output from the selector's fixtures is not another failing
+package. Both receipt table classifications remain absent as well.
+
+PPM / INSPR / workstation-agents and the coordinator-recorded builder session
+`1e390a5e-5d5f-4840-afd6-b6523a3bfa7a` were verified before this handoff edit.
+A fresh fetch still finds `origin/main` at `fd8fae22f`, already an ancestor of
+this branch. The merge-tree check exits **0** and PR #622 is mergeable, so no
+conflict-resolution merge is needed. Migration 1347 has no main collision.
+All four web unit shards and twelve browser shards pass on the current PR
+head; the P3a test plan has no feature web unit or browser checks.
+
+The normative plan's R0 metadata lane still owns all three repair files:
+`internal/agentpairing/shared_fence_test.go`,
+`scripts/ci/go-test-tiers.json` and `internal/dsar/inventory.json`. Neither
+fix7 nor the ticket transfers that ownership. The original brief requires
+stopping repairs outside P3a's exclusive write set. This round therefore
+preserves the source, fence entry, assertions, test names and shared files.
+The exact same-PR R0 request below remains the required repair; another P3a
+builder fix round cannot apply it without an explicit ownership transfer.
+
+The initial guarded five-package Go attempt and its retry both refused with
+**exit 3** because both remote slots were occupied. The remote static attempt
+and its retry refused for the same reason. No tests ran in those attempts and no
+local fallback was used; the five acceptance passes above remain historical
+evidence, not fresh round-7 passes. The offline affected
+selector exits **0** and still requires **FULL CI** for migration 1347's
+unsupported or incomplete SQL classification. Public-name and whitespace
+checks pass.
+
+**INCOMPLETE:** the blocking inventory and tier failures remain R0-owned;
+this handoff does not mark CI green. There is no behavior fix or new regression
+test requiring a negative control against `546d1b290`. The coordinator owns
+the trusted review verdict and merge/release decisions. No origin push,
+deployment, model CLI or review gate was run.
+
 ## Exact R0 registration request (same PR, before merge)
 
 R0 exclusively owns the following metadata files. They are deliberately not
