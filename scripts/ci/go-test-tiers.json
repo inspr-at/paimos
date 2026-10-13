@@ -836,6 +836,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNamedDenialResetRestoresRealSlots","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootHoldsCountUntilVerifiedRelease","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestOldManualWindowCapsOnTopOfReadings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestOverviewValuesMaskingExplicitScopeAndTenantIsolation","tier":"ESSENTIAL"}
@@ -1710,7 +1712,29 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestMutationSubmoduleDiffCannotExposeSensitiveContent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeAfterExitPinsIdentityAndWaitsForObservedExit","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeBrowserCaptureBrokerBoundsAndReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeChatReceiptsRequireMatchingInputCorrelation","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeControlsPreserveMonotonicAuthorization","reason":"AEON-1261: preserve transport deadlines through transit, skew, queues and authority checks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeCoordinatorGrantChangesRefuseBeforeInput","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeCoordinatorRegistrationUsesManagedRootContract","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeFixturesSurviveUntrustedNodePrefixAndUTCTimezone","reason":"AEON-1261: preserve native fixture security and ownership assertions across CI hosts","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeStartSocketRequiresProtocolAndQualifiedIntent","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeStartupReconcilesPostForkFailuresBeforeRunning","reason":"AEON-1261: reconcile native identity, ledger and relay after post-fork initialization failures","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNewAgentdAgainstServerWithoutRelayKeepsRunsAndLogsOnce","tier":"ESSENTIAL"}
     ,
@@ -4906,6 +4930,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelTicketResolveAndReadOnlyPrefs","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestOnboardCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestOpenNoFollowReadsRegularFileAndRejectsSymlinkParent","tier":"GATED-FULL"}
@@ -7791,6 +7817,22 @@
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestCoordinatorClaimsReserveQuotaBudgets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestStartClaimRevocationBarrier","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestStartRegistrationIdempotencyAndPersonViewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestStartUsesActiveCanonicalAccountOwner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestTerminalViewerURLStrictAllowlist","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestWorkerStartRequiresLeafAndKeepsExistingRun","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestAccessWritesDoNotDeadlockNodeMove","tier":"ESSENTIAL"}
     ,
