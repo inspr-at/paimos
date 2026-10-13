@@ -47,7 +47,8 @@ async function cardFootprints(page: Page) {
     const footStyle = getComputedStyle(foot)
     const minChip = faces + state + (chipStyle ? parseFloat(chipStyle.paddingLeft) + parseFloat(chipStyle.paddingRight) + parseFloat(chipStyle.columnGap) * 2 : 0)
     const footGap = parseFloat(footStyle.columnGap)
-    const canShare = !!chip && minChip + activityBox.width + footGap <= foot.clientWidth + 0.5
+    // One pixel of slack: a flex line wraps when the sum merely touches the content box.
+    const canShare = !!chip && minChip + activityBox.width + footGap <= foot.clientWidth - 1
     return {
       id: el.dataset.projectId ?? '',
       height: linkHeight + footHeight,
@@ -161,7 +162,7 @@ for (const theme of ['light', 'dark'] as const) {
             expect(delta, `${row.id} @ ${width}px: live chip changes the card height (footer ${row.foot} vs ${quiet!.foot})`).toBeLessThanOrEqual(0.5)
             if (width === 1024 || width === 1440) {
               // A long name must not wrap the time when robots, the state word and the time fit.
-              if (row.id === 'p-sc1-working' || row.id === 'p-sc1-idle') expect(row.canShare, `${row.id} @ ${width}px fits beside the time`).toBe(true)
+              if (row.id === 'p-sc1-working' || row.id === 'p-sc1-idle') expect(row.canShare, `${row.id} @ ${width}px fits beside the time (chip min ${row.minChip}, time ${row.activityWidth}, footer ${row.footWidth})`).toBe(true)
               if (row.canShare) {
                 expect(row.chipTop, `${row.id} chip`).not.toBeNull()
                 expect(Math.abs(row.chipTop! - row.activityTop), `${row.id} @ ${width}px: activity shares the live chip's line (chip min ${row.minChip}, time ${row.activityWidth}, footer ${row.footWidth})`).toBeLessThanOrEqual(1)
