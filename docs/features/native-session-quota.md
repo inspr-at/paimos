@@ -140,9 +140,9 @@ review remain required before integration or release.
 
 ## Builder validation (2026-10-13)
 
-- PASS: initial guarded mbp2606 Go run of `./internal/nativequota/...` on
+- PASS: initial guarded remote Go run of `./internal/nativequota/...` on
   `fce23905b`; all four named cases and their subcases passed (0.250 s).
-- PASS: final-source guarded mbp2606 Go run on `05dbc1069`; all four named
+- PASS: final-source guarded remote Go run on `05dbc1069`; all four named
   cases passed, including native turn/cursor changes (0.353 s).
 - PASS: negative control on a temporary branch from that final source, with
   the freshness deadline check disabled. The named clock test failed on its
