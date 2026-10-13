@@ -947,7 +947,7 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 	if err != nil {
 		return nil, err
 	}
-	if !resolved.probeResolved(ctx, r.AccountKey).OK {
+	if !resolved.probeClaudeProfile(ctx, r.AccountKey, native != nil).OK {
 		return nil, errors.New("Claude account probe unavailable")
 	}
 	home, err := localHome(a.Homes, r.AccountKey)

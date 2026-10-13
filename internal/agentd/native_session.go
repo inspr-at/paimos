@@ -381,7 +381,9 @@ func (s *Supervisor) nativeInputAttempt(ctx context.Context, entry *nativeLeadEn
 		}
 		return ErrControlUnconfirmed
 	}
-	if len(entry.record.Native.Attempts) >= 128 {
+	// Exhaustion must still permit one durable close attempt, without evicting
+	// an uncertain input. Input cannot choose this private reserved identity.
+	if len(entry.record.Native.Attempts) >= 128 && (id != "native-stop" || digest != nativeDigest("stop") || len(entry.record.Native.Attempts) > 128) {
 		return ErrControlUnconfirmed
 	}
 	entry.record.Native.Attempts[id] = digest

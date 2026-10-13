@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -160,6 +161,18 @@ func TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts(t *testing.T) 
 	raw, err := s.state.Read("lead-runtime-"+request.RequestID+".json", 32768)
 	if err != nil || strings.Contains(string(raw), input.Message.Body) || !strings.Contains(string(raw), input.Message.ID) {
 		t.Fatal("receipt lost provenance or persisted person content", err)
+	}
+	entry.mu.Lock()
+	for i := 0; len(entry.record.Native.Attempts) < 128; i++ {
+		entry.record.Native.Attempts["capacity-"+strconv.Itoa(i)] = nativeDigest("attempt")
+	}
+	if err := s.writeLead(entry.record, false); err != nil {
+		entry.mu.Unlock()
+		t.Fatal(err)
+	}
+	entry.mu.Unlock()
+	if err := lead.Input(ctx, uidLead("43"), "over budget"); !errors.Is(err, ErrControlUnconfirmed) {
+		t.Fatal("exhausted attempt set accepted another input", err)
 	}
 	if err := lead.Stop(ctx); err != nil {
 		t.Fatal(err)

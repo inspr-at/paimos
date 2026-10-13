@@ -214,14 +214,18 @@ func (p *nativeClaudeLead) nativeControl(ctx context.Context, id, op string) err
 	if err := p.native.check(ctx); err != nil {
 		return err
 	}
-	if err := p.native.BeforeInput(ctx, id, nativeDigest(op)); err != nil {
+	attemptID := id
+	if op == "stop" {
+		attemptID = "native-stop"
+	} // One reserved, session-bound close attempt.
+	if err := p.native.BeforeInput(ctx, attemptID, nativeDigest(op)); err != nil {
 		return err
 	}
 	return p.controlCorrelated(ctx, op, "", id)
 }
 
 func (p *nativeClaudeLead) Input(ctx context.Context, id, text string) error {
-	if !validChatID(id, 128) || len(text) == 0 || len(text) > inboxTextLimit || strings.ContainsRune(text, 0) {
+	if !validChatID(id, 128) || id == "native-stop" || len(text) == 0 || len(text) > inboxTextLimit || strings.ContainsRune(text, 0) {
 		return ErrScope
 	}
 	if err := p.native.check(ctx); err != nil {
@@ -235,6 +239,9 @@ func (p *nativeClaudeLead) Input(ctx context.Context, id, text string) error {
 
 // Stop confirms owned group exit after SDK close, not just the close receipt.
 func (p *nativeClaudeLead) Stop(ctx context.Context) error {
+	if p.ProcessExited() {
+		return p.cleanupResult()
+	}
 	if err := p.Control(ctx, "stop", ""); err != nil {
 		return err
 	}
