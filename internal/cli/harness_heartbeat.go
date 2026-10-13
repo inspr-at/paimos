@@ -1324,6 +1324,16 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			body["doing"], body["doing_at"] = doing, at
 		}
 	}
+	// An adoption failure occupies the existing status space on the next beat.
+	// Respect the person's activity visibility setting and keep ordinary progress.
+	if adoption := session.disk.LeadAdoption; adoption != nil && adoption.Note != "" && !adoption.Claimed {
+		if session.disk.ActivityMode == "" || session.disk.ActivityMode == agentactivity.Summary {
+			body["activity_note"] = adoption.Note
+		}
+		if session.disk.ActivityMode == agentactivity.Summary {
+			body["doing"], body["doing_at"] = adoption.Note, now
+		}
+	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
 		items := make([]map[string]any, 0, len(commits))
@@ -1405,6 +1415,11 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	if dep.stopOwned == nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.Deliver {
 		return errHeartbeatStopRequested
+	}
+	// Only an exact accepted worker heartbeat can supply this generation's proof.
+	// Keep adoption independent of optional paired-daemon binding and usage.
+	if strings.EqualFold(response.ID, session.id) && (response.Pause == nil || !response.Pause.StopRequested) {
+		rt.heartbeatClaimLeadAdoption(ctx, o, session)
 	}
 
 	// The heartbeat's own key remains the only authority for this generation.
@@ -1510,6 +1525,187 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		return fmt.Errorf("heartbeat reported, but paired reconnect binding was refused: %s", hookbinding.Reason(bindingCode))
 	}
 	return nil
+}
+
+// Discovery uses the existing redacted lead read. Only adoption_pending is a
+// person-confirmed selection; start, resume and succession are never automated.
+// The claim remains a separate fenced transaction with this heartbeat's bearer
+// and lease, and the existing writer records lead.claim_checked on commit.
+func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
+	if o.Role != "coordinator" || o.Parent != "" || session.disk.Closed || session.disk.Terminal || session.disk.LeadAdoption != nil && session.disk.LeadAdoption.Claimed {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	path := "/api/projects/" + session.disk.ProjectID + "/lead"
+	read := func() (harness.Lead, error) {
+		var lead harness.Lead
+		err := rt.harnessDoCtx(ctx, http.MethodGet, path, "", nil, &lead)
+		if err == nil && (!strings.EqualFold(lead.ProjectID, session.disk.ProjectID) || lead.Revision < 0 || lead.Generation < 0) {
+			err = errors.New("invalid lead snapshot")
+		}
+		return lead, err
+	}
+	note := func(text string) {
+		if session.disk.LeadAdoption == nil {
+			session.disk.LeadAdoption = &heartbeatLeadAdoption{}
+		}
+		session.disk.LeadAdoption.Note = text
+		if err := saveHeartbeatSession(session); err != nil {
+			fmt.Fprintln(rt.stderr, "heartbeat: lead adoption state could not be saved; repair the private state directory")
+		}
+	}
+	claimed := func(lead harness.Lead) bool {
+		return lead.SessionID != nil && strings.EqualFold(*lead.SessionID, session.id) && lead.Generation > 0
+	}
+	pending := func(lead harness.Lead) bool {
+		return lead.Reason == "adoption_pending" && lead.State == "waiting_for_room" && lead.Revision > 0 && lead.Generation == 0 && lead.ProcessActive && lead.SessionID != nil && strings.EqualFold(*lead.SessionID, session.id)
+	}
+	lead, err := read()
+	if err != nil {
+		note(heartbeatLeadFailure(err))
+		return
+	}
+	if claimed(lead) {
+		// Reconcile a lost response or a helper restart without replaying the
+		// ordinary claim (which would rerun admission and increment revision).
+		if session.disk.LeadAdoption != nil && len(session.disk.LeadAdoption.Attempts) > 0 {
+			session.disk.LeadAdoption.Claimed = true
+			note("")
+		} else if session.disk.LeadAdoption != nil {
+			session.disk.LeadAdoption = nil
+			_ = saveHeartbeatSession(session)
+		}
+		return
+	}
+	if !pending(lead) {
+		if session.disk.LeadAdoption != nil {
+			session.disk.LeadAdoption.Ended = true
+		}
+		if lead.SessionID != nil && !strings.EqualFold(*lead.SessionID, session.id) {
+			if session.disk.LeadAdoption != nil {
+				if len(session.disk.LeadAdoption.Attempts) > 0 {
+					note("The lead selection changed. Reload the lead card and confirm this running session again.")
+				} else {
+					session.disk.LeadAdoption = nil
+					_ = saveHeartbeatSession(session)
+				}
+			}
+		} else if lead.Reason == "owner_revoked" {
+			note("The lead owner's permission was revoked. Restore harness control and run creation, then confirm adoption again.")
+		} else if lead.Generation == 0 {
+			// Retain the attempt journal until another confirmation replaces it.
+			note("Waiting for a person to confirm the adoption. Confirm this running session on the project lead card.")
+		}
+		return
+	}
+	adoption := session.disk.LeadAdoption
+	if adoption != nil && !adoption.Ended && len(adoption.Attempts) > 0 && (adoption.Revision == lead.Revision || adoption.Refreshed) {
+		return
+	}
+	if adoption == nil || adoption.Ended || adoption.Revision != lead.Revision {
+		adoption = &heartbeatLeadAdoption{Revision: lead.Revision}
+		session.disk.LeadAdoption = adoption
+	}
+	if !rt.heartbeatLeadReferenceMatches(ctx, o, session) {
+		note("The registered session reference differs. Use the original helper state; never the session.ref fallback.")
+		return
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		adoption.Attempts = append(adoption.Attempts, heartbeatLeadAttempt{Revision: lead.Revision, At: time.Now().UTC(), Result: "Awaiting claim result"})
+		// Refuse the write if its intent cannot be retained. This also makes an
+		// interrupted request safe: the next beat reads current selection first.
+		if err := saveHeartbeatSession(session); err != nil {
+			note("Lead adoption could not be saved. Repair the private helper state directory, then confirm adoption again.")
+			return
+		}
+		var result harness.Lead
+		err = rt.harnessDoCtx(ctx, http.MethodPost, path+"/claim", session.lease, map[string]any{"expected_revision": lead.Revision, "session_id": session.id}, &result)
+		last := &adoption.Attempts[len(adoption.Attempts)-1]
+		if err == nil {
+			if !strings.EqualFold(result.ProjectID, session.disk.ProjectID) || !claimed(result) || result.Revision != lead.Revision+1 || result.Generation != 1 || result.Reason != "" || (result.State != "working" && result.State != "starting") {
+				last.Result = "Claim result could not be verified"
+				note("Lead claim result could not be verified. Check the lead card before using the state-aware claim command.")
+				return
+			}
+			last.Result, adoption.Claimed = "Claimed", true
+			note("")
+			return
+		}
+		last.Result = heartbeatLeadFailure(err)
+		if heartbeatStatus(err) != http.StatusConflict || adoption.Refreshed {
+			note(last.Result)
+			return
+		}
+		adoption.Refreshed = true
+		note("The lead revision changed; retrying once. The same person-confirmed session must still be selected.")
+		fresh, readErr := read()
+		if readErr != nil {
+			note(heartbeatLeadFailure(readErr))
+			return
+		}
+		if claimed(fresh) {
+			adoption.Claimed = true
+			note("")
+			return
+		}
+		if !pending(fresh) {
+			note("The lead selection changed. Reload the lead card and confirm this running session again.")
+			return
+		}
+		if fresh.Revision <= lead.Revision {
+			note("The session cannot be adopted. Check its owner, reporting and pending pause or stop, then confirm again.")
+			return
+		}
+		lead = fresh
+	}
+}
+
+// Use the same derivation as AEON-1140. Never substitute session.ref for a
+// missing registered reference, even when the heartbeat's UUID is known.
+func (rt *runtime) heartbeatLeadReferenceMatches(ctx context.Context, o heartbeatOptions, session *heartbeatSession) bool {
+	ref := session.disk.RegisteredRef
+	if o.SourceSession == "" {
+		return len(ref) >= 16 && len(ref) <= 4096 && !strings.ContainsAny(ref, "\r\n")
+	}
+	if !validUUID(o.SourceSession) {
+		return false
+	}
+	derived := heartbeatRegistrationRef(o, "")
+	if ref != "" {
+		return ref == derived
+	}
+	// Legacy native state has the original source binding, but no RegisteredRef.
+	// Verify server metadata before deriving; a changed invocation is not proof.
+	raw, err := session.hold.readFile("index.source", 256)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(string(raw)), o.SourceSession) {
+		return false
+	}
+	var registered struct {
+		ID        string  `json:"id"`
+		ProjectID string  `json:"project_id"`
+		Harness   string  `json:"harness"`
+		Role      string  `json:"role"`
+		ParentID  *string `json:"parent_harness_session_id"`
+	}
+	if rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(session.disk.ProjectID, session.id), "", nil, &registered) != nil {
+		return false
+	}
+	return strings.EqualFold(registered.ID, session.id) && strings.EqualFold(registered.ProjectID, session.disk.ProjectID) && registered.Role == "coordinator" && registered.ParentID == nil && registered.Harness == o.Harness
+}
+
+// Deliberately ignore upstream bodies, which can echo private proof or codes.
+func heartbeatLeadFailure(err error) string {
+	switch heartbeatStatus(err) {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "Lead proof was refused. Restore the owner's grants and use this helper's original account and state."
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return "Automatic adoption is unavailable. Upgrade the server or use the state-aware claim command."
+	case http.StatusConflict:
+		return "The lead revision changed twice. Reload the lead card and confirm this session again."
+	default:
+		return "Lead adoption could not be verified. Check the lead card and use the state-aware claim command if still pending."
+	}
 }
 
 func proveOwnerAtStart(pid int, dep heartbeatDeps) (ownerStamp, error) {

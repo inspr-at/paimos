@@ -5,11 +5,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,8 +28,106 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
 	"golang.org/x/sys/unix"
 )
+
+// Risk: mock receipts can hide repeated ordinary claims, another dispatch key,
+// or missing person confirmation. Exercise the real auth, heartbeat and lead
+// transactions and inspect their committed generation and audit together.
+func TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration(t *testing.T) {
+	isolate(t)
+	t.Setenv("HOME", t.TempDir())
+	opened := dbtest.Open(t)
+	if err := db.EnsureTenant(t.Context(), opened.App, "aeon", "Aeon"); err != nil {
+		t.Fatal(err)
+	}
+	base := renameServer(t, opened, "aeon", true)
+	agent := mintAgent(t, base, "automatic-lead")
+	seedProject(t, base, agent.Token)
+	t.Setenv("AEON_URL", base)
+	t.Setenv("AEON_API_KEY", agent.Token)
+	var stdout, stderr bytes.Buffer
+	rt := &runtime{stdin: strings.NewReader(""), stdout: &stdout, stderr: &stderr, program: "aeon"}
+	o := heartbeatTestOptions(t.TempDir())
+	o.Agent, o.Role, o.SourceSession = "automatic-lead", "coordinator", "11111111-1111-4111-8111-111111111111"
+	o.HarnessVersion = "fixture"
+	project, err := rt.harnessProject(o.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.ProjectID = project
+	session, created, err := rt.openHeartbeatSession(t.Context(), o, heartbeatDeps{alive: func(int) bool { return true }})
+	if err != nil || !created {
+		t.Fatal("could not register the fixture coordinator")
+	}
+	defer session.hold.release()
+	if err := saveHeartbeatSession(&session); err != nil {
+		t.Fatal(err)
+	}
+	beat := func() {
+		t.Helper()
+		// An optional inbox refusal must not starve the committed own-session
+		// claim, close the helper, or overwrite its saved receipt.
+		err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session)
+		if err == nil || !strings.Contains(err.Error(), "paired reconnect binding was refused") {
+			t.Fatalf("fixture did not exercise the optional inbox refusal: %v", err)
+		}
+	}
+	beat()
+	if session.disk.LeadAdoption == nil || len(session.disk.LeadAdoption.Attempts) != 0 {
+		t.Fatal("unconfirmed coordinator attempted an automatic claim")
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := &http.Client{Jar: jar}
+	if status, _ := doJSON(t, person, http.MethodPost, base+"/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, nil); status != http.StatusOK {
+		t.Fatalf("fixture person login returned %d", status)
+	}
+	body, _ := json.Marshal(map[string]any{"expected_revision": 0, "session_id": session.id})
+	status, raw := doJSON(t, person, http.MethodPost, base+"/api/projects/"+project+"/lead/adopt", string(body), nil)
+	if status != http.StatusOK {
+		t.Fatalf("fixture person confirmation returned %d", status)
+	}
+	var confirmed harness.Lead
+	if json.Unmarshal(raw, &confirmed) != nil || confirmed.Reason != "adoption_pending" || confirmed.Generation != 0 || confirmed.SessionID == nil || *confirmed.SessionID != session.id {
+		t.Fatal("person confirmation did not select the exact unclaimed session")
+	}
+	beat()
+	loaded, ok, err := loadHeartbeatSession(&session.hold)
+	if err != nil || !ok || loaded.disk.LeadAdoption == nil || !loaded.disk.LeadAdoption.Claimed || len(loaded.disk.LeadAdoption.Attempts) != 1 {
+		t.Fatal("successful automatic claim was not retained before the optional binding refusal")
+	}
+	session = loaded
+	beat()
+	beat()
+	err = db.InTenant(dbtest.Seed(t.Context()), opened.App, agent.TenantID, func(tx pgx.Tx) error {
+		var generation, revision, generations, claims int64
+		var exactSession, exactKey, unchangedOwner, stillRunning, noProofLeak bool
+		if err := tx.QueryRow(t.Context(), `SELECT l.generation,l.revision,l.session_id=$2::uuid,
+ l.dispatch_key_id=(SELECT id FROM agent_keys WHERE principal_id=$3::uuid),
+ s.owner_principal_id=(SELECT created_by_principal_id FROM agent_keys WHERE principal_id=$3::uuid),
+ s.agent_principal_id=$3::uuid AND s.parent_id IS NULL AND s.stopped_at IS NULL,
+ (SELECT count(*) FROM project_lead_generations WHERE project_id=$1),
+ (SELECT count(*) FROM events WHERE node_id=$1 AND type='lead.claim_checked'),
+ NOT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND (strpos(coalesce("before"::text,'')||coalesce("after"::text,''),$4)>0 OR strpos(coalesce("before"::text,'')||coalesce("after"::text,''),$5)>0))
+ FROM project_leads l JOIN harness_sessions s ON s.id=l.session_id WHERE l.project_id=$1`, project, session.id, agent.PrincipalID, session.disk.RegisteredRef, session.lease).Scan(&generation, &revision, &exactSession, &exactKey, &unchangedOwner, &stillRunning, &generations, &claims, &noProofLeak); err != nil {
+			return err
+		}
+		if generation != 1 || revision != confirmed.Revision+1 || generations != 1 || claims != 1 || !exactSession || !exactKey || !unchangedOwner || !stillRunning || !noProofLeak {
+			t.Error("automatic adoption did not commit exactly one owned generation, dispatch key and redacted claim audit")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.disk.Closed || session.disk.Terminal || strings.Contains(stderr.String(), session.lease) || strings.Contains(stderr.String(), session.disk.RegisteredRef) {
+		t.Fatal("automatic adoption changed lifetime or exposed private proof")
+	}
+}
 
 func TestOwnerStampMatchesStartAndRejectsReuse(t *testing.T) {
 	stamp, err := readOwnerStamp(os.Getpid())
