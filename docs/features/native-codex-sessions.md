@@ -144,7 +144,7 @@ The final implementation was validated at code commit `918a33bd8`:
   Removing the account-match fence fails both wrong-account assertions for
   their intended reasons; exact source was restored with no control commit.
 
-The targeted suite passed through `remote-test.sh` on mbp2606 (0.293 s).
+The targeted suite passed through the guarded remote test runner (0.293 s).
 The permitted small local package fallback also passed with `-race` (1.726 s)
 after remote capacity refusals. The three named tests include barriers, injected
 clock approval expiry, observed-exit failure and C0 payload validation.
@@ -168,3 +168,36 @@ authoritative selected-suite CI before merge. This handoff is not static-green.
 No shared inventory, contract, permission, migration or release-version file was
 changed. No origin push, deployment, live vendor session, model CLI or review
 gate was run.
+
+## CI fix round 2
+
+The full logs at PR head `1dc0c91aa` identify two independent causes:
+
+- `go-static` job `115095331534` failed the public-name check on this document.
+  The operator host name has been replaced with a neutral runner description.
+  The existing public-name guard and its assertions remain unchanged.
+- `release-check-run` job `115095331549` failed
+  `test_current_snapshot_has_no_unassigned_code` and
+  `test_delta_cli_and_malformed_input_exit_codes`. Both failures come from
+  missing slice ownership for `codec.go`, `launch.go`, `notifications.go`,
+  `qualification_test.go`, `testdata/app-server.json` and `transport.go` under
+  `internal/nativeproviders/codex/`. Even the empty `--since HEAD` delta rejects
+  an invalid ownership map before it reports the delta; its assertion must not
+  be weakened.
+
+R0 must add exactly `internal/nativeproviders/codex/**` to the `paths` array of
+the existing S2 slice in `scripts/audit/slices.json`. It must also classify the
+three tests listed above as `ESSENTIAL` in `scripts/ci/go-test-tiers.json` so
+the strict Go-tier check and manifest-based selection include this package.
+The public-name failure stopped `go-static` before that strict tier check ran.
+Both inventory files remain coordinator-owned under the normative P5a plan;
+this fix round does not transfer them to the builder.
+
+At this PR head, all seven Go shards, Go timing, all four web unit shards, all
+twelve browser shards and e2e passed in hosted CI. Those results do not replace
+the missing registrations or establish that the Codex package was selected.
+No provider behavior change is needed for these findings, and no assertion,
+test tier, approval or ownership boundary may be weakened to make CI pass.
+After applying the two R0 registrations in this PR, rerun the guarded static
+checks and authoritative CI before merge. The round remains incomplete until
+that coordinator-owned work is green.
