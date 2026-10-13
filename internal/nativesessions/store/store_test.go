@@ -120,7 +120,7 @@ func newStartFixture(t *testing.T) *startFixture {
 			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 		}
 		scheduleRaw, _ := json.Marshal(schedule)
-		if _, e := tx.Exec(seed, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3::uuid,$4)`, f.person.TenantID, f.person.ID, account, scheduleRaw); e != nil {
+		if _, e := tx.Exec(seed, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$4,$5)`, f.person.TenantID, f.person.ID, account, account, scheduleRaw); e != nil {
 			return e
 		}
 		return tx.QueryRow(seed, `SELECT revision FROM nodes WHERE id=$1`, f.project).Scan(&f.intent.ExpectedProjectRevision)
