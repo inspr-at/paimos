@@ -156,6 +156,12 @@
     ,
     "internal/nativeattach:TestTerminalRestoredOnEveryExit"
     ,
+    "internal/nativequota:TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts"
+    ,
+    "internal/nativequota:TestQuotaRejectsUnqualifiedAndMalformedFrames"
+    ,
+    "internal/nativequota:TestSparseQuotaDenialPreservesConsumptionAndScope"
+    ,
     "internal/nativesessions/stream:TestLiveGapClosesAndBindingReplacementRefusesOldView"
     ,
     "internal/nativesessions/stream:TestServerHTTPAuthenticatesViewerAndEmitsGapEnd"
@@ -7941,6 +7947,14 @@
     {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPersonOnlyViewerAndZ1Compatibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPinnedSDKPolicyBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestQuotaRejectsUnqualifiedAndMalformedFrames","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestSparseQuotaDenialPreservesConsumptionAndScope","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestStreamQuotaFreshnessAndAccountIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata","tier":"ESSENTIAL"}
     ,
