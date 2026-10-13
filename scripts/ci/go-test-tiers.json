@@ -5400,6 +5400,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubStatusExactHeadAndNarrowAuthority","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestHistoryInstallationUsesOnlyGrantedReadPermissions","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestLegacyDaemonCannotSeeOrClaimAReview","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestLegacyMislabelCannotRecordEvidenceOrKeepGreen","tier":"GATED-FULL"}
@@ -5731,6 +5733,20 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryAlertsEpisodesIsolationAndSettings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryBackfillSkipsConfirmedAbsentPreflight","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryActionsReplacesOnlyItsStoredSuite","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryPersistsPacingAndUsesActionsAfterGrant","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryReadsRecentNightsOnOldDefaultHead","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryResumesAndReportsHonestMetrics","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistorySharedWorkflowIgnoresProjectLabels","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksSuiteRejectsMixedIdentityAndBoundedLists","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksWorkflowIdentityWithholdsAmbiguityAndCachesBlobs","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryCompleteJobMapServesEveryProject","tier":"ESSENTIAL"}
     ,

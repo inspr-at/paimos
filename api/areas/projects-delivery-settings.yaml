@@ -41,7 +41,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: backfillProjectDeliveryMetrics
-      description: 'Requires delivery.manage. Runs one bounded history step and schedules server continuation, including after leaving the page or a server restart. Steps store facts idempotently and read at most about 40 GitHub pages. retry_at defers unfinished reads; GitHub failures persist last_read_error and retry automatically (missing permissions every 30 minutes). restart begins a new history window of 1 to 90 days, default 30. A concurrent step or source change returns 409; an unreadable GitHub step returns 502.'
+      description: 'Requires delivery.manage. Runs one bounded history step and schedules server continuation, including after leaving the page or a server restart. Uses Actions only when granted, otherwise checks and contents read. Steps store facts idempotently and read at most 40 GitHub pages; checks continuation is paced at one step per minute. retry_at defers unfinished reads; GitHub failures persist last_read_error and retry automatically (missing permissions every 30 minutes). restart begins a new history window of 1 to 90 days, default 30. A concurrent step or source change returns 409; an unreadable GitHub step returns 502.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfillInput'}}}}
       responses:
