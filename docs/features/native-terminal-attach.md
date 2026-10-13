@@ -574,3 +574,38 @@ merge is required. The separate non-required policy preview reports no trusted
 write-set check and `git diff --check` pass. Only this scoped handoff and the
 ignored progress file changed; no R0 file, implementation or assertion changed.
 No origin push, deployment, model CLI, review gate or live cutover was performed.
+
+## Fix round 11: R0 action remains necessary
+
+`review-ci618-1002.out` targets `1261caa4c`. The complete
+[Go static job 115183816230](https://github.com/inspr-at/paimos/actions/runs/38363586644/job/115183816230)
+fails only strict native collection on the same nine missing Go tier rows.
+Go vet, rules bootstrap drift and tier selector regressions pass. All seven
+Go shards, four web unit shards, twelve browser shards, release checks, E2E
+and migration compatibility pass. The Go aggregate follows the static failure.
+
+The P2b brief says "Write ONLY inside your exclusive_write_set" and requires
+stopping before an outside edit. Both normative plan artifacts still reserve
+`scripts/ci/go-test-tiers.json` to R0's coordinator or explicitly assigned
+metadata integrator; fix11 preserves that ownership. **R0 must apply the
+tier-only patch in fix round 9 above to this PR before final validation.**
+Another P2b source fix round cannot perform this metadata edit under the same
+ownership constraints. CI remains failed; no behaviour fix or assertion change
+is indicated.
+
+The patch passes `git apply --check` and its nine `ESSENTIAL` identities match
+the source tests. Bounded production-validator checks reject the unchanged
+manifest at `1261caa4`, HEAD and fetched `origin/main` (`f571b7765`) for exactly
+those nine rows. Applying the patch in memory passes strict validation while
+preserving all existing rows, their order and other metadata. These checks
+do not replace native collection and do not write the R0 manifest.
+
+Both approved remote Go attempts exit 3 for occupied remote slots. The first
+locked static attempt also exits 3 for occupied slots; the second exits 3 under
+the hold/host-level guard. None ran, so current remote Go/static validation is
+incomplete. No local fallback bypassed the guards. The affected planner exits
+0 and selects FULL Go because 3,236 reverse-dependency cases exceed its 300-case
+bound. This slice has no affected web or browser source/tests. PR #618 remains
+`MERGEABLE`, so no conflict merge is required. The write-set and diff checks
+pass. Only this scoped handoff and the ignored progress file changed; no origin
+push, deployment, model CLI, review gate or live cutover was performed.
