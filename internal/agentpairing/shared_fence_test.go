@@ -17,7 +17,7 @@ import (
 // This explicit caller inventory makes newly connected entry paths reviewable.
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 var sharedFenceCallers = map[string][]string{
-	"db.LockTree":               {"accountuse/module.go", "authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/reviews_api.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "modelregistry/refresh.go", "operatoractor/actor.go", "stepup/server/store.go", "workorders/common.go"},
+	"db.LockTree":               {"accountuse/module.go", "authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/reviews_api.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "modelregistry/refresh.go", "nativesessions/receipts/repository.go", "operatoractor/actor.go", "stepup/server/store.go", "workorders/common.go"},
 	"db.LockTenant":             {"accountuse/module.go", "accountuse/policy.go", "auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/flow_store.go", "delivery/metrics_api.go", "delivery/metrics_worker.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/webhook_receipts.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/proposals.go", "routineexec/recovery.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
 	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
@@ -127,6 +127,23 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../nativesessions/store/claim.go", "Claim", "agentaccounts.ReserveNativeRootTx(", "appendEvent("},
 		{"../nativesessions/store/read.go", "read", "agentpairing.Lock(", "authz.RequireTx("},
 		{"../nativesessions/store/read.go", "read", "authz.RequireTx(", "SELECT b.view"},
+		// Receipt projection and final drain (AEON-1271) enter tenant/tree
+		// before refreshing visibility and invoking current authority. Receipt
+		// events follow row writes; final storage follows authority and row locks.
+		{"../nativesessions/receipts/repository.go", "write", "db.LockTree(", "SELECT aeon_enter_principal("},
+		{"../nativesessions/receipts/repository.go", "write", "SELECT aeon_enter_principal(", "return fn(ctx, tx)"},
+		{"../nativesessions/receipts/repository.go", "Report", "s.write(", "s.authority.ReceiptTx("},
+		{"../nativesessions/receipts/repository.go", "Report", "s.authority.ReceiptTx(", "authz.RequireTx("},
+		{"../nativesessions/receipts/repository.go", "Report", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../nativesessions/receipts/repository.go", "Report", "INSERT INTO native_session_receipts", "events.Append("},
+		{"../nativesessions/receipts/page.go", "Receipts", "s.write(", "s.authority.ReadTx("},
+		{"../nativesessions/receipts/page.go", "Receipts", "s.authority.ReadTx(", "authz.RequireTx("},
+		{"../nativesessions/receipts/page.go", "Receipts", "authz.RequireTx(", "SELECT receipt FROM native_session_receipts"},
+		// Sink.Persist delegates; Repository.Persist owns the transaction.
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "s.write(", "s.authority.FinalTx("},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "s.authority.FinalTx(", "authz.RequireTx("},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "FOR NO KEY UPDATE", "s.chat.StoreNativeFinalTx("},
 		{"../auth/store.go", "revokeAgentKeyTx", "db.LockTenant(", "lockAgentKey("},
 		{"../rules/module.go", "endpoint", "lockAccess(", "pg_advisory_xact_lock"},
 		{"../rules/learning_draft.go", "PrepareWrite", "lockAccess(", "pg_advisory_xact_lock"},
@@ -214,10 +231,27 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		receiver, name, qualified := strings.Cut(c.fn, ".")
+		if !qualified {
+			name = c.fn
+		}
 		var body string
 		for _, decl := range tree.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if ok && fn.Name.Name == c.fn {
+			if ok && fn.Name.Name == name {
+				if qualified {
+					if fn.Recv == nil || len(fn.Recv.List) != 1 {
+						continue
+					}
+					typ := fn.Recv.List[0].Type
+					if pointer, ok := typ.(*ast.StarExpr); ok {
+						typ = pointer.X
+					}
+					ident, ok := typ.(*ast.Ident)
+					if !ok || ident.Name != receiver {
+						continue
+					}
+				}
 				body = string(raw[int(fn.Pos())-1 : int(fn.End())-1])
 				break
 			}
