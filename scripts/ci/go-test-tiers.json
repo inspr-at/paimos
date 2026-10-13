@@ -140,6 +140,12 @@
     ,
     "internal/markdownsource:TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks"
     ,
+    "internal/nativequota:TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts"
+    ,
+    "internal/nativequota:TestQuotaRejectsUnqualifiedAndMalformedFrames"
+    ,
+    "internal/nativequota:TestSparseQuotaDenialPreservesConsumptionAndScope"
+    ,
     "internal/nodes:TestHeaderSelectorBounds"
     ,
     "internal/nodes:TestHideStatesAPIBucketsFacetsAndPaging"
@@ -7815,6 +7821,14 @@
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestQuotaRejectsUnqualifiedAndMalformedFrames","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestSparseQuotaDenialPreservesConsumptionAndScope","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativequota","name":"TestStreamQuotaFreshnessAndAccountIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
