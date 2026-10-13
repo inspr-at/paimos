@@ -171,7 +171,8 @@ test('preview lists controlled agents first and disables the rest with a plain r
     ],
   })
   await page.goto('/settings/agent-rules')
-  await page.getByRole('button', { name: 'Preview' }).click()
+  // AEON-1214 / #564 added the global Desk Preview; open this section's preview.
+  await page.getByRole('region', { name: 'Agent rules', exact: true }).getByRole('button', { name: 'Preview', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'What agents receive' })
   await dialog.getByRole('button', { name: 'Change' }).click()
   const named = dialog.getByRole('combobox', { name: 'Named agent' })
@@ -201,7 +202,7 @@ test('preview lists controlled agents first and disables the rest with a plain r
 test('preview explains the session file for this project, you and the builder role', async ({ page }) => {
   const rules = await setup(page)
   await page.goto('/settings/agent-rules')
-  await page.getByRole('button', { name: 'Preview' }).click()
+  await page.getByRole('region', { name: 'Agent rules', exact: true }).getByRole('button', { name: 'Preview', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'What agents receive' })
   await expect(dialog.getByRole('table', { name: 'Explanation and exact rule' })).toContainText('Never print the environment.')
   await expect(dialog).toContainText('Aeon · Markus Barta · Builder')

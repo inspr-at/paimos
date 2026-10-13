@@ -92,6 +92,12 @@
     ,
     "internal/cli:TestMeReportsOwnerWorkstation"
     ,
+    "internal/cli:TestNativeAttachCommandPreservesAttachmentMeaning"
+    ,
+    "internal/cli:TestNativeAttachCommandValidation"
+    ,
+    "internal/cli:TestNativeAttachRejectsMismatchedProjection"
+    ,
     "internal/cli:TestOwnerWorkstationKeyCommands"
     ,
     "internal/cli:TestPersonAPIErrorPreservesStatusAndRedactsSession"
@@ -139,6 +145,32 @@
     "internal/knowledge:TestLearningDraftTenantBeforeAdvisory"
     ,
     "internal/markdownsource:TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks"
+    ,
+    "internal/nativeattach:TestAttachLeaseUsesElapsedServerBudget"
+    ,
+    "internal/nativeattach:TestComposerPreservesShortcutsAndBoundsTerminalData"
+    ,
+    "internal/nativeattach:TestComposerReceiptsAndEscapeLeaveSessionRunning"
+    ,
+    "internal/nativeattach:TestStreamRejectsSuccessorBeforeRendering"
+    ,
+    "internal/nativeattach:TestTerminalRestoredOnEveryExit"
+    ,
+    "internal/nativesessions/stream:TestLiveGapClosesAndBindingReplacementRefusesOldView"
+    ,
+    "internal/nativesessions/stream:TestServerHTTPAuthenticatesViewerAndEmitsGapEnd"
+    ,
+    "internal/nativestream:TestHTTPPublisherBoundsAndBindsAcknowledgement"
+    ,
+    "internal/nativestream:TestLocalHostProtocolRequiresPeerGrantAndExactBinding"
+    ,
+    "internal/nativestream:TestNativeExpertProjectionFiltersAndBounds"
+    ,
+    "internal/nativestream:TestOutboundLossRemainsTransientAndFinalUsesSink"
+    ,
+    "internal/nativestream:TestSSEFencesQueuedContentAndKeepalive"
+    ,
+    "internal/nativestream:TestTransientRingReportsLossAndRejectsStaleReplay"
     ,
     "internal/nodes:TestHeaderSelectorBounds"
     ,
@@ -435,6 +467,8 @@
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestLocalStatusPreservesHarnessDetails","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestMaintenanceDoesNotRequireInstallerLink","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestNativeUpgradeReportsDeferredFlushAndPilotFreeze","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairAndSetupRejectDeletedWorkingFolder","tier":"GATED-FULL"}
     ,
@@ -4316,6 +4350,8 @@
     ,
     {"kind":"go","package":"internal/chat","name":"TestNativeContextSurvivesRegistrationGenerations","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/chat","name":"TestNativeFinalStorageKeepsStoppedLeaseAndChatIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/chat","name":"TestNativeStoreComponentBoundAndVisibilityRestore","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/chat","name":"TestNativeStoreDatabaseGuardDeniesBypass","tier":"GATED-FULL"}
@@ -4716,6 +4752,10 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatAppliedModelRequestFencesHistoricalTranscript","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatBeatLookupHonorsCancellation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatCapacityProjection","tier":"GATED-FULL"}
@@ -4929,6 +4969,12 @@
     {"kind":"go","package":"internal/cli","name":"TestModelResolveRejectsAmbiguousAndUnknownAuthorFamilies","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelTicketResolveAndReadOnlyPrefs","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandPreservesAttachmentMeaning","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandValidation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
@@ -7816,9 +7862,31 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkingEvidenceCannotUseAnotherModelsUsage","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestAttachLeaseUsesElapsedServerBudget","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestComposerPreservesShortcutsAndBoundsTerminalData","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestComposerReceiptsAndEscapeLeaveSessionRunning","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestFakeSocketDetachViewerAndStaleBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestStreamRejectsSuccessorBeforeRendering","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestStreamResumesRotationWithoutLosingControl","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestTerminalRestoredOnEveryExit","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractRejectsUnsafeWire","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainDeadlineKeepsUnconfirmedAttemptFenced","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRejectsIncompleteInventoryAndMismatchedProof","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRequiresCoordinatorPilotApproval","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRetainsBackgroundAndUnconfirmedWriter","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexRejectsUnboundedOrAmbiguousFrames","tier":"ESSENTIAL"}
     ,
@@ -7826,7 +7894,29 @@
     ,
     {"kind":"go","package":"internal/nativeproviders/codex","name":"TestNativeCodexTranscriptQualification","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadFencesDeadlinesAndRevocationBarrier","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPersonOnlyViewerAndZ1Compatibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadPinnedSDKPolicyBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestFinalOutboxSurvivesOutageExitAndLostAck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestPrivateStoreBoundsAndRejectsSymlinkOrSharedState","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestReceiptEvidenceRejectsWrongInputAndFalseExit","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestFinalDrainReplayAfterExitPersistsOnceAndRechecksAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestFinalDrainRevocationWinsBeforeFinalWrite","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
     ,
@@ -7843,6 +7933,26 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestTerminalViewerURLStrictAllowlist","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestWorkerStartRequiresLeafAndKeepsExistingRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestLiveGapClosesAndBindingReplacementRefusesOldView","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestPublishSnapshotPreservesRegisteredBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestServerHTTPAuthenticatesViewerAndEmitsGapEnd","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestSlowSubscriberRevocationAndViewIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestHTTPPublisherBoundsAndBindsAcknowledgement","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestLocalHostProtocolRequiresPeerGrantAndExactBinding","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestNativeExpertProjectionFiltersAndBounds","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestOutboundLossRemainsTransientAndFinalUsesSink","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestSSEFencesQueuedContentAndKeepalive","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativestream","name":"TestTransientRingReportsLossAndRejectsStaleReplay","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestAccessWritesDoNotDeadlockNodeMove","tier":"ESSENTIAL"}
     ,

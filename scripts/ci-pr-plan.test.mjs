@@ -423,8 +423,9 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)?.[1];
         assert.ok(expression, id);
         const rows = evaluate(expression, context);
-        const wanted = event === 'pull_request' && id !== 'go-test' && lane === 'spec-only' ? 1 : id !== 'web-unit' &&
-          event === 'pull_request' && mode === 'essential' ? 2 : fullRows;
+        const wanted = event === 'pull_request' && id !== 'go-test' && lane === 'spec-only' ? 1
+          : id === 'web-shard' && event === 'pull_request' && mode === 'essential' ? 4
+          : id !== 'web-unit' && event === 'pull_request' && mode === 'essential' ? 2 : fullRows;
         assert.equal(rows.length, wanted, `${label}/${id} matrix`);
         if (flag === 'on' && mode === 'full') assert.equal(rows.length, fullRows, `${label}/${id} full matrix`);
       }
@@ -476,7 +477,8 @@ test('merge-group workflow retains full matrices, job gates and execution proofs
       }
       for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', 12]]) {
         const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)[1];
-        const wanted = event === 'pull_request' && mode === 'essential' && id !== 'web-unit' ? 2 : fullRows;
+        const wanted = event === 'pull_request' && mode === 'essential' && id === 'web-shard' ? 4
+          : event === 'pull_request' && mode === 'essential' && id !== 'web-unit' ? 2 : fullRows;
         assert.equal(evaluate(expression, context).length, wanted, `${label}/${id} matrix`);
         const proof = job.split('      - name: Confirm full tier execution\n')[1].split(/\n      - /)[0];
         assert.match(proof, /run: node scripts\/test-tiers\/check-full\.mjs/);

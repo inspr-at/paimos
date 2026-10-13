@@ -259,10 +259,10 @@ for (const { width, coarse } of [
         const box = (await more.boundingBox())!
         expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44)
         await more.click()
-        await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible()
+        await expect(page.getByRole('menu', { name: /Actions for/ })).toBeVisible()
         await page.keyboard.press('Escape')
       }
-      // P3 moves the same tier control into details in every form; retain its reach and stability checks there.
+      // AEON-1213 / #591 moves tier changes into a 44px details trigger in every form.
       await session.locator('.agent-link').click()
       const panel = page.getByRole('complementary', { name: 'Session details' })
       await panel.getByRole('tab', { name: 'Overview' }).click()
@@ -271,14 +271,14 @@ for (const { width, coarse } of [
       // The initial report can replace a read-only span with the live button.
       // Wait for the actionable control before measuring its settled visual.
       await expect(tier).toHaveAttribute('aria-haspopup', 'dialog')
-      await expect.poll(async () => (await tier.boundingBox())?.height).toBe(26)
+      await expect.poll(async () => (await tier.boundingBox())?.height).toBe(expanded ? 44 : 26)
       await expectReach(tier, expanded)
       await capture(page, `agents-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}`)
       // Element screenshots can scroll the enclosing list. Restore the control
       // to the viewport before the guard records its coordinate-click baseline.
       await tier.scrollIntoViewIfNeeded()
       const picker = page.getByRole('dialog', { name: 'Change tier', exact: true })
-      await expectStableControls({ controls: { tier, panel, session, title: panel.locator('.head-top .name') }, interactions: [
+      await expectStableControls({ controls: { tier, panel, session, title: panel.getByRole('heading', { level: 2 }) }, interactions: [
         { name: 'tier picker at hit-area edge', run: async () => { await edgeClick(page, tier, expanded, phone); await expect(picker).toBeVisible() } },
         { name: 'dismiss tier picker', run: async () => { await picker.getByRole('button', { name: /Cancel/ }).click(); await expect(picker).toHaveCount(0) } },
       ] })

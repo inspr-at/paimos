@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { once } from 'node:events'
 import { select, validate, key } from '../../scripts/test-tiers/core.mjs'
 import { command, flattenBrowser, root } from '../../scripts/test-tiers/collect.mjs'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
@@ -417,9 +418,10 @@ test('report merger retains errors, failures, suites and timing from every group
   assert.equal(report.stats.duration, 30)
 })
 
-test('wrapper JSON output aggregates every group and cannot reuse a stale green report', async () => {
+test('wrapper JSON output aggregates every group and cannot reuse a stale green report', {timeout:20_000}, async t => {
   const reportDirectory = resolve(webRoot, 'test-results', 'ci-web-unit-reports')
-  const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PLAYWRIGHT_JSON_OUTPUT_FILE: 'test-results/ci-web-unit-reports/test-aggregate.json' }
+  const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PLAYWRIGHT_JSON_OUTPUT_FILE: 'test-results/ci-web-unit-reports/test-aggregate.json',
+    GITHUB_RUN_ID: '1313', GITHUB_RUN_ATTEMPT: '2', GITHUB_SHA: 'a'.repeat(40) }
   const manifest = effective()
   const shard = balanceShards(manifest, 12).find(candidate => planCommands(manifest, candidate, env).length > 1)
   assert.ok(shard, 'fixture must span several groups')
@@ -453,7 +455,49 @@ test('wrapper JSON output aggregates every group and cannot reuse a stale green 
   assert.match(missing.errors[0].message, /Missing or invalid/)
   writeFileSync(path, JSON.stringify(report))
   assert.equal(await main([selection], { env, run: async () => ({ code: 143 }), reportDirectory, out: () => {} }), 143)
-  assert.equal(readFileSync(path, 'utf8'), '', 'interruption retained an old green aggregate')
+  const interrupted = JSON.parse(readFileSync(path, 'utf8'))
+  assert.equal(interrupted.suites.length, 0, 'interruption retained an old aggregate')
+  assert.equal(interrupted.execution.status, 'interrupted')
+  assert.match(interrupted.execution.reason, /SIGTERM/)
+  assert.deepEqual(interrupted.notRunGroups.map(group => group.group), expectedCommands.slice(1).map(command => command.group))
+
+  // A readiness barrier in the later synthetic child proves the completed
+  // failure was checkpointed before termination. No browser is launched.
+  let calls = 0, child
+  t.signal.addEventListener('abort', () => child?.kill('SIGKILL'), { once: true })
+  try {
+    assert.equal(await main([selection], { env, reportDirectory, out: () => {}, run: async (args, options) => {
+      calls++
+      if (calls === 1) {
+        writeFileSync(options.env.PLAYWRIGHT_JSON_OUTPUT_FILE, JSON.stringify({ suites: [{ file: 'completed-failure.spec.ts' }],
+          errors: [{ message: 'completed failure' }], stats: { unexpected: 1, expected: 0 } }))
+        return { code: 1 }
+      }
+      child = spawn(process.execPath, ['-e', "process.on('message',()=>{});process.send('ready')"], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
+      const exited = once(child, 'exit')
+      const ready = await Promise.race([once(child, 'message'), exited.then(result => assert.fail(`Child exited before barrier: ${result}`))])
+      assert.equal(ready[0], 'ready')
+      const checkpoint = JSON.parse(readFileSync(path, 'utf8'))
+      assert.equal(checkpoint.execution.status, 'running')
+      assert.equal(checkpoint.execution.completedGroups, 1)
+      assert.equal(checkpoint.stats.unexpected, 1)
+      assert.equal(checkpoint.suites[0].file, 'completed-failure.spec.ts')
+      child.kill('SIGTERM')
+      assert.equal((await exited)[1], 'SIGTERM')
+      return { code: 143, metrics: { signal: 'SIGTERM' } }
+    } }), 143)
+    assert.equal(calls, 2, 'an interrupted group must stop later groups')
+    const saved = JSON.parse(readFileSync(path, 'utf8'))
+    assert.equal(saved.suites[0].file, 'completed-failure.spec.ts')
+    assert.equal(saved.stats.unexpected, 1)
+    assert.equal(saved.execution.status, 'interrupted')
+    assert.deepEqual([saved.runId, saved.attempt, saved.sha], ['1313', '2', env.GITHUB_SHA])
+    assert.ok(saved.errors.some(error => error.message === 'completed failure'))
+    assert.ok(saved.errors.some(error => /interrupted by SIGTERM/.test(error.message)))
+    assert.deepEqual(saved.notRunGroups.map(group => group.group), expectedCommands.slice(2).map(command => command.group))
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited }
+  }
 })
 
 test('a flake retry selects exactly one test in its original group and fails closed otherwise', async () => {
