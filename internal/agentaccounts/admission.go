@@ -119,8 +119,17 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 	var own *Window
 	for _, w := range all {
 		if synthetic(w) {
-			if claiming && w.capacityRefreshRun != nil && *w.capacityRefreshRun == run.ID && now.Before(w.EndsAt) && !w.capacityRetired {
+			owns := w.capacityRefreshRun != nil && *w.capacityRefreshRun == run.ID ||
+				run.Purpose == "native_root" && w.capacityBucket == "unknown:"+run.ID
+			if claiming && owns && now.Before(w.EndsAt) && !w.capacityRetired {
 				copy := w
+				if run.Purpose == "native_root" {
+					projection := []Window{copy}
+					if err := excludeWindowReservations(ctx, tx, projection, exceptReservations, a.QuotaPoolFingerprint != ""); err != nil {
+						return nil, nil, err
+					}
+					copy = projection[0]
+				}
 				own = &copy
 			}
 			continue
