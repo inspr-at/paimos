@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, collectNativeGo, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
@@ -109,6 +109,34 @@ export function browserList(rows,all) {
   return descriptions
 }
 
+function saveEvidence(path, value) {
+  const temporary = `${path}.${process.pid}.tmp`
+  saveJSON(temporary, value)
+  renameSync(temporary, path)
+}
+
+const interruptedSignal = result => result.signal ?? result.metrics?.signal ??
+  ({129:'SIGHUP',130:'SIGINT',143:'SIGTERM'}[result.code])
+
+// Playwright can emit completed siblings alongside an interrupted attempt.
+// Leave that attempt unaccounted for, while retaining strict result validation
+// (including unexpected registrations, unknown statuses and automatic retries).
+function terminalBrowserReport(report) {
+  let interrupted = false
+  const visit = suites => (suites ?? []).map(suite => ({...suite,
+    specs: (suite.specs ?? []).map(spec => ({...spec, tests: (spec.tests ?? []).map(test => {
+      if (test.results?.length === 1 && test.results[0].status === 'interrupted') {
+        interrupted = true
+        return {...test, results: []}
+      }
+      return test
+    })})),
+    suites: visit(suite.suites),
+  }))
+  const suites = visit(report.suites)
+  return {report: {...report, suites}, interrupted}
+}
+
 function execute(bin,args,path,{cwd=root,env=process.env}={}) {
   mkdirSync(resolve(path,'..'),{recursive:true})
   const result=spawnSync(bin,args,{cwd,env,encoding:'utf8',timeout:30*60*1000,maxBuffer:64*1024*1024})
@@ -155,7 +183,7 @@ export async function run(kind,selection,options={},dependencies={}) {
 
 async function runCases(kind,selection,{unit=false,job='local',env=process.env}={},
   {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
-    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log,
+    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveEvidence,log=console.log,
     now=()=>performance.now(),goRunner}={}) {
   const begin=now(),batches=[],ledger=[],coverageReports=[],browserLaunches=[]
   const runner=kind==='web'&&!unit?browserRunnerIdentity(env):undefined
@@ -166,7 +194,50 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
     throw new Error(`Known-flaky case cannot be ESSENTIAL: ${key(row)} (${quarantines.get(key(row))})`)
   mkdirSync(evidence,{recursive:true})
 
+  let activeBatch, interruption, finalized = false
+  const persist = (outcomes, code, runnerFailure, execution) => {
+    const runSeconds=(now()-begin)/1000
+    const report=reportCases(selection.tests,outcomes,runSeconds,job)
+    Object.assign(report,{runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,sha:env.GITHUB_SHA,
+      execution:{...execution,completedBatches:batches.filter(batch=>!batch.runnerFailure).length,...(activeBatch?{activeBatch}:{})},runnerFailure})
+    const terminal=new Map(outcomes.map(outcome=>[outcome.key,outcome]))
+    report.notRunCases=selection.tests.filter(row=>!(row.kind==='go'&&!row.active)&&!terminal.has(key(row)))
+      .map(row=>({key:key(row),reason:execution.reason??'No terminal native result was reported'}))
+    if(runner) {
+      report.runner_class=runner.class
+      report.runner=runner
+      const collectSeconds=selection.timing?.collectSeconds??null,planSeconds=selection.timing?.planSeconds??null
+      const caseSeconds=execution.status!=='completed'||browserLaunches.some(launch=>launch.caseSeconds===null)?null:
+        browserLaunches.reduce((sum,launch)=>sum+launch.caseSeconds,0)
+      report.webShardTiming={collectSeconds,planSeconds,runSeconds,caseSeconds,
+        nonCaseSeconds:collectSeconds===null||planSeconds===null||caseSeconds===null?null:Math.max(0,collectSeconds+planSeconds+runSeconds-caseSeconds),
+        launches:browserLaunches,note:'Monotonic wall seconds; non-case time is collection + planning + execution minus summed native case durations (including explicit retries).'}
+      report.browserCases=selection.tests.filter(row=>row.kind==='browser').map(row=>({key:key(row),file:row.file,config:row.config,project:row.project,
+        status:terminal.get(key(row))?.status??'notRun',
+        ...(!terminal.has(key(row))?{reason:execution.reason??'No terminal native result was reported'}:{})}))
+    }
+    Object.assign(report,{full:selection.full,reason:selection.reason,scope:selection.scope??'changed-area',
+      deferredBrowserCases:selection.deferredBrowserCases??0,flakeLedger:ledger,exitCode:code})
+    if(goRunner) report.goPhases=goRunner.measurements
+    if(execution.status!=='completed'||Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1
+    save(resolve(evidence,`${job}-failures.json`), {
+      version:1,job,runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,sha:env.GITHUB_SHA,
+      cases:outcomes.filter(outcome=>outcome.status==='failed').map(outcome=>outcome.key),runnerFailure,
+      ...(runner?{execution:report.execution,notRunCases:report.notRunCases}:{})})
+    save(resolve(evidence,`${job}-measurement.json`),report)
+    return report
+  }
+  // Uploaded checkpoints must flag the unfinished runner even when a hard
+  // kill prevents the finalizer from observing a signal or writing again.
+  const checkpoint = error => runner?persist(batches.flatMap(batch=>batch.outcomes),
+    interruption?.code??1,true,
+    {status:interruption?'interrupted':error?'incomplete':'running',
+      reason:interruption?.reason??error?.message?.slice(0,4096)??'Execution has not finished',
+      ...(interruption?.signal?{signal:interruption.signal}:{})}):undefined
+
   const finish=(owner,rows,result,outcomes,failures,reportError=false)=>{
+    const signal=interruptedSignal(result)
+    if(signal) interruption={signal,code:result.code||1,reason:`Execution interrupted by ${signal}`}
     const expected=new Set(rows.map(key)),seen=new Set()
     let runnerFailure=reportError||!!(result.error||result.signal||result.metrics?.signal)||![0,1].includes(result.code)
     for(const outcome of outcomes) {
@@ -224,162 +295,161 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
     }
     return finish(owner,rows,result,outcomes,failures,reportError)
   }
-  const owners=new Map()
-  for(const row of selection.tests.filter(row=>row.active!==false&&row.kind!=='browser')) {
-    const owner=row.kind==='go'?row.package:row.file
-    if(!owners.has(owner)) owners.set(owner,[])
-    owners.get(owner).push(row)
-  }
-  for(const [owner,rows] of owners) {
-    const stem=resolve(evidence,`${job}-${owner.replaceAll('/','-')}`)
-    if(kind==='go') {
-      // Native enumeration proves the AST/current-platform inventory is exact.
-      const listed=goRunner.prepare(owner,stem)
-        .split('\n').filter(name=>/^(?:Test|Fuzz)\w+$/.test(name)).sort()
-      const wanted=selection.all.filter(row=>row.package===owner&&row.active).map(row=>row.name).sort()
-      if(JSON.stringify(listed)!==JSON.stringify(wanted)) throw new Error(`Native Go inventory mismatch: ${owner}`)
+  try {
+    checkpoint()
+    const owners=new Map()
+    for(const row of selection.tests.filter(row=>row.active!==false&&row.kind!=='browser')) {
+      const owner=row.kind==='go'?row.package:row.file
+      if(!owners.has(owner)) owners.set(owner,[])
+      owners.get(owner).push(row)
     }
-    const batch=executeOwner(owner,rows,stem)
-    batch.retry=failed=>executeOwner(owner,failed,`${stem}-retry`)
-    batches.push(batch)
-  }
-  if(kind==='web'&&!unit) {
-    // OPS-257 still owns configs/env. Compatible groups share one supervised
-    // launch and server; incompatible policies retain separate launches.
-    const policy=browserPolicy()
-    for(const group of browserBatches(selection.tests,policy)) {
-      const rows=group.rows
-      const executeBrowser=async(rows,retry=false)=>{
-        const stem=resolve(evidence,`${job}-${group.id}${retry?'-retry':''}`),listPath=`${stem}.txt`,reportPath=`${stem}.json`
-        saveJSON(reportPath,{})
-        // A retry always identifies individual cases, even if all cases in a
-        // spec failed. Native collection checks line/title/project identity.
-        const descriptions=retry?rows.map(row=>`[${row.project}] › ${row.file.replace(/^tests\//,'')}:${row.line} › ${row.name}`):browserList(rows,selection.all)
-        writeFileSync(listPath,descriptions.join('\n')+'\n')
-        const groupEnv=Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',env.RUNNER_TEMP??evidence)]))
-        const browserEnv={...env,...groupEnv,PW_RETRIES:'0'}
-        const observeCoverage=selection.scope==='catalogue'&&!retry&&env.GITHUB_WORKFLOW==='Nightly full'
-        const coverageDirectory=resolve(evidence,`browser-coverage-${job}-${group.id}-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`)
-        if(observeCoverage) {
-          const casesPath=resolve(evidence,`browser-coverage-${job}-${group.id}-cases.json`)
-          saveJSON(casesPath,rows)
-          Object.assign(browserEnv,{AEON_BROWSER_IMPACT_CASES:casesPath,AEON_BROWSER_IMPACT_DIRECTORY:coverageDirectory,
-            NODE_OPTIONS:`${env.NODE_OPTIONS??''} --import=${new URL('./browser-coverage-hook.mjs',import.meta.url).href}`})
-        }
-        const args=['--config',group.config,...group.flags,...(group.project?['--project',group.project]:[]),'--test-list',listPath,'--workers=1','--retries=0','--forbid-only']
-        const listBegin=now()
-        const collected=JSON.parse(nativeCommand(process.execPath,['node_modules/@playwright/test/cli.js','test',...args,'--list','--reporter=json'],{cwd:web,env:browserEnv}))
-        const listSeconds=(now()-listBegin)/1000
-        if(collected.errors?.length) throw new Error(`Browser collection failed: ${group.id}`)
-        const actual=collected.suites.flatMap(function walk(suite) { return [...(suite.specs??[]).flatMap(spec=>(spec.tests??[]).map(test=>`${spec.id}:${test.projectName??''}`)),...(suite.suites??[]).flatMap(walk)] }).sort()
-        if(JSON.stringify(actual)!==JSON.stringify(rows.map(row=>`${row.id}:${row.project}`).sort())) throw new Error(`Browser selection mismatch: ${group.id}`)
-        const runBegin=now()
-        const result=await browserRunner([...args,
-          '--reporter=line,json','--output',`test-results/test-tiers/${job}/${group.id}${retry?'-retry':''}`],{cwd:web,env:{...browserEnv,PLAYWRIGHT_JSON_OUTPUT_FILE:reportPath}})
-        const runSeconds=(now()-runBegin)/1000
-        if(observeCoverage) {
-          const summary=coverageSummary(coverageDirectory,rows,{tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT})
-          coverageReports.push(summary)
-        }
-        let outcomes=[],reportError=false,caseSeconds=null
-        try {
-          const report=JSON.parse(readFileSync(reportPath,'utf8'))
-          reportError=!!report.errors?.length
-          outcomes=browserOutcomes(report,rows)
-          caseSeconds=browserCaseSeconds(report)
-        } catch(error) { console.error(JSON.stringify(error.message));reportError=true }
-        browserLaunches.push({groups:group.groups,retry,listSeconds,runSeconds,caseSeconds,
-          nonCaseSeconds:caseSeconds===null?null:Math.max(0,runSeconds-caseSeconds)})
-        const failures=outcomes.filter(outcome=>outcome.status==='failed').map(outcome=>{
-          const row=rows.find(row=>key(row)===outcome.key)
-          return {kind:'browser',owner:row.file,name:row.name,output:'See supervised Playwright output and JSON evidence.'}
-        })
-        return finish(group.id,rows,{output:'',stderr:'',...result},outcomes,failures,reportError)
+    for(const [owner,rows] of owners) {
+      activeBatch=owner
+      checkpoint()
+      const stem=resolve(evidence,`${job}-${owner.replaceAll('/','-')}`)
+      if(kind==='go') {
+        // Native enumeration proves the AST/current-platform inventory is exact.
+        const listed=goRunner.prepare(owner,stem)
+          .split('\n').filter(name=>/^(?:Test|Fuzz)\w+$/.test(name)).sort()
+        const wanted=selection.all.filter(row=>row.package===owner&&row.active).map(row=>row.name).sort()
+        if(JSON.stringify(listed)!==JSON.stringify(wanted)) throw new Error(`Native Go inventory mismatch: ${owner}`)
       }
-      const batch=await executeBrowser(rows)
-      batch.retry=failed=>executeBrowser(failed,true)
+      const batch=executeOwner(owner,rows,stem)
+      batch.retry=failed=>executeOwner(owner,failed,`${stem}-retry`)
       batches.push(batch)
-      if([129,130,143].includes(batch.result.code)) break
+      activeBatch=undefined
+      checkpoint()
+      if(interruption) break
     }
-  }
+    if(kind==='web'&&!unit&&!interruption) {
+      // OPS-257 still owns configs/env. Compatible groups share one supervised
+      // launch and server; incompatible policies retain separate launches.
+      const policy=browserPolicy()
+      for(const group of browserBatches(selection.tests,policy)) {
+        const rows=group.rows
+        const executeBrowser=async(rows,retry=false)=>{
+          activeBatch=`${group.id}${retry?'-retry':''}`
+          checkpoint()
+          const stem=resolve(evidence,`${job}-${group.id}${retry?'-retry':''}`),listPath=`${stem}.txt`,reportPath=`${stem}.json`
+          saveJSON(reportPath,{})
+          // A retry always identifies individual cases, even if all cases in a
+          // spec failed. Native collection checks line/title/project identity.
+          const descriptions=retry?rows.map(row=>`[${row.project}] › ${row.file.replace(/^tests\//,'')}:${row.line} › ${row.name}`):browserList(rows,selection.all)
+          writeFileSync(listPath,descriptions.join('\n')+'\n')
+          const groupEnv=Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',env.RUNNER_TEMP??evidence)]))
+          const browserEnv={...env,...groupEnv,PW_RETRIES:'0'}
+          const observeCoverage=selection.scope==='catalogue'&&!retry&&env.GITHUB_WORKFLOW==='Nightly full'
+          const coverageDirectory=resolve(evidence,`browser-coverage-${job}-${group.id}-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`)
+          if(observeCoverage) {
+            const casesPath=resolve(evidence,`browser-coverage-${job}-${group.id}-cases.json`)
+            saveJSON(casesPath,rows)
+            Object.assign(browserEnv,{AEON_BROWSER_IMPACT_CASES:casesPath,AEON_BROWSER_IMPACT_DIRECTORY:coverageDirectory,
+              NODE_OPTIONS:`${env.NODE_OPTIONS??''} --import=${new URL('./browser-coverage-hook.mjs',import.meta.url).href}`})
+          }
+          const args=['--config',group.config,...group.flags,...(group.project?['--project',group.project]:[]),'--test-list',listPath,'--workers=1','--retries=0','--forbid-only']
+          const listBegin=now()
+          const collected=JSON.parse(nativeCommand(process.execPath,['node_modules/@playwright/test/cli.js','test',...args,'--list','--reporter=json'],{cwd:web,env:browserEnv}))
+          const listSeconds=(now()-listBegin)/1000
+          if(collected.errors?.length) throw new Error(`Browser collection failed: ${group.id}`)
+          const actual=collected.suites.flatMap(function walk(suite) { return [...(suite.specs??[]).flatMap(spec=>(spec.tests??[]).map(test=>`${spec.id}:${test.projectName??''}`)),...(suite.suites??[]).flatMap(walk)] }).sort()
+          if(JSON.stringify(actual)!==JSON.stringify(rows.map(row=>`${row.id}:${row.project}`).sort())) throw new Error(`Browser selection mismatch: ${group.id}`)
+          const runBegin=now()
+          const result=await browserRunner([...args,
+            '--reporter=line,json','--output',`test-results/test-tiers/${job}/${group.id}${retry?'-retry':''}`],{cwd:web,env:{...browserEnv,PLAYWRIGHT_JSON_OUTPUT_FILE:reportPath}})
+          const runSeconds=(now()-runBegin)/1000
+          if(observeCoverage) {
+            const summary=coverageSummary(coverageDirectory,rows,{tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT})
+            coverageReports.push(summary)
+          }
+          let outcomes=[],reportError=false,caseSeconds=null
+          try {
+            const report=JSON.parse(readFileSync(reportPath,'utf8'))
+            reportError=!!report.errors?.length
+            const terminal=terminalBrowserReport(report)
+            if(terminal.interrupted) interruption??={code:result.code||1,reason:'Playwright reported an interrupted attempt'}
+            outcomes=browserOutcomes(terminal.report,rows)
+            caseSeconds=terminal.interrupted?null:browserCaseSeconds(report)
+          } catch(error) { console.error(JSON.stringify(error.message));reportError=true }
+          browserLaunches.push({groups:group.groups,retry,listSeconds,runSeconds,caseSeconds,
+            nonCaseSeconds:caseSeconds===null?null:Math.max(0,runSeconds-caseSeconds)})
+          const failures=outcomes.filter(outcome=>outcome.status==='failed').map(outcome=>{
+            const row=rows.find(row=>key(row)===outcome.key)
+            return {kind:'browser',owner:row.file,name:row.name,output:'See supervised Playwright output and JSON evidence.'}
+          })
+          return finish(group.id,rows,{output:'',stderr:'',...result},outcomes,failures,reportError)
+        }
+        const batch=await executeBrowser(rows)
+        batch.retry=failed=>executeBrowser(failed,true)
+        batches.push(batch)
+        activeBatch=undefined
+        checkpoint()
+        if(interruption) break
+      }
+    }
 
-  // Count first-pass failures across the whole job, before any retry. Subtests
-  // belong to their top-level Go case; quarantine does not shrink the cap.
-  const failedCount=batches.reduce((sum,batch)=>sum+batch.outcomes.filter(outcome=>outcome.status==='failed').length,0)
-  let retryAllowed=mergeGroup&&failedCount>0&&failedCount<=3&&!batches.some(batch=>batch.result.signal||batch.result.metrics?.signal||[129,130,143].includes(batch.result.code))
-  const outcomes=[]
-  let code=0
-  let runnerFailure=false
-  for(const batch of batches) {
-    const final=new Map(batch.outcomes.map(outcome=>[outcome.key,outcome]))
-    const failed=batch.rows.filter(row=>final.get(key(row))?.status==='failed')
-    let retry
-    if(retryAllowed&&failed.length&&!batch.runnerFailure) {
-      retry=await batch.retry(failed)
-      if(retry.result.signal||retry.result.metrics?.signal||[129,130,143].includes(retry.result.code)) retryAllowed=false
-      for(const outcome of retry.outcomes) {
-        // Only a completed, clean retry that passed proves a flake. A skipped
-        // or absent retry never converts the original failure into success.
-        if(!retry.runnerFailure&&outcome.status==='passed') {
-          final.set(outcome.key,{...outcome,flaky:true})
-          ledger.push({key:outcome.key,status:'flaky',runId:env.GITHUB_RUN_ID,sha:env.GITHUB_SHA,
-            attempt:env.GITHUB_RUN_ATTEMPT,testAttempt:2})
+    // Count first-pass failures across the whole job, before any retry. Subtests
+    // belong to their top-level Go case; quarantine does not shrink the cap.
+    const failedCount=batches.reduce((sum,batch)=>sum+batch.outcomes.filter(outcome=>outcome.status==='failed').length,0)
+    let retryAllowed=mergeGroup&&failedCount>0&&failedCount<=3&&!interruption
+    const outcomes=[]
+    let code=0
+    let runnerFailure=false
+    for(const batch of batches) {
+      const final=new Map(batch.outcomes.map(outcome=>[outcome.key,outcome]))
+      const failed=batch.rows.filter(row=>final.get(key(row))?.status==='failed')
+      let retry
+      if(retryAllowed&&failed.length&&!batch.runnerFailure) {
+        retry=await batch.retry(failed)
+        if(interruption) retryAllowed=false
+        activeBatch=undefined
+        for(const outcome of retry.outcomes) {
+          // Only a completed, clean retry that passed proves a flake. A skipped
+          // or absent retry never converts the original failure into success.
+          if(!retry.runnerFailure&&outcome.status==='passed') {
+            final.set(outcome.key,{...outcome,flaky:true})
+            ledger.push({key:outcome.key,status:'flaky',runId:env.GITHUB_RUN_ID,sha:env.GITHUB_SHA,
+              attempt:env.GITHUB_RUN_ATTEMPT,testAttempt:2})
+          }
         }
       }
-    }
-    if(batch.runnerFailure||retry?.runnerFailure) {
-      runnerFailure=true
-      code ||= batch.result.code||retry?.result.code||1
-    }
-    for(const row of failed) {
-      const id=key(row),outcome=final.get(id)
-      if(mergeGroup&&outcome.status==='failed'&&quarantines.has(id)) {
-        final.set(id,{...outcome,status:'quarantined'})
-        ledger.push({key:id,status:'quarantined',owner:quarantines.get(id),runId:env.GITHUB_RUN_ID,
-          sha:env.GITHUB_SHA,attempt:env.GITHUB_RUN_ATTEMPT,testAttempt:retry?2:1})
+      if(batch.runnerFailure||retry?.runnerFailure) {
+        runnerFailure=true
+        code ||= batch.result.code||retry?.result.code||1
       }
+      for(const row of failed) {
+        const id=key(row),outcome=final.get(id)
+        if(mergeGroup&&outcome.status==='failed'&&quarantines.has(id)) {
+          final.set(id,{...outcome,status:'quarantined'})
+          ledger.push({key:id,status:'quarantined',owner:quarantines.get(id),runId:env.GITHUB_RUN_ID,
+            sha:env.GITHUB_SHA,attempt:env.GITHUB_RUN_ATTEMPT,testAttempt:retry?2:1})
+        }
+      }
+      if(!mergeGroup) code ||= batch.result.code
+      outcomes.push(...final.values())
     }
-    if(!mergeGroup) code ||= batch.result.code
-    outcomes.push(...final.values())
+    printFlakeWarnings(ledger,{log})
+    if(kind==='web'&&!unit&&selection.scope==='catalogue'&&env.GITHUB_WORKFLOW==='Nightly full') {
+      save(resolve(evidence,`browser-impact-${job}.json`),{version:1,tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,
+        complete:!interruption&&!runnerFailure&&coverageReports.length>0&&coverageReports.every(row=>row.complete)&&
+          outcomes.length===selection.tests.filter(row=>row.kind==='browser'&&row.active!==false).length,
+        cases:coverageReports.flatMap(row=>row.cases)})
+    }
+    const report=persist(outcomes,interruption?.code??code,runnerFailure,{status:interruption?'interrupted':runnerFailure?'incomplete':'completed',
+      ...(interruption?{reason:interruption.reason,...(interruption.signal?{signal:interruption.signal}:{})}:
+        runnerFailure?{reason:'Native execution or result validation did not finish cleanly'}:{})})
+    finalized=true
+    log(JSON.stringify(report))
+    if(env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,`\nTest tier measurement (${job}):\n\n\`\`\`json\n${JSON.stringify(report,null,2)}\n\`\`\`\n`,{flag:'a'})
+    return report.exitCode
+  } catch(error) {
+    if(error.signal) interruption={signal:error.signal,code:({SIGINT:130,SIGTERM:143,SIGHUP:129}[error.signal])??1,
+      reason:`Execution interrupted by ${error.signal}`}
+    checkpoint(error)
+    finalized=true
+    throw error
+  } finally {
+    if(!finalized) checkpoint()
   }
-  printFlakeWarnings(ledger,{log})
-  if(kind==='web'&&!unit&&selection.scope==='catalogue'&&env.GITHUB_WORKFLOW==='Nightly full') {
-    save(resolve(evidence,`browser-impact-${job}.json`),{version:1,tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,
-      complete:coverageReports.length>0&&coverageReports.every(row=>row.complete),cases:coverageReports.flatMap(row=>row.cases)})
-  }
-  const runSeconds=(now()-begin)/1000
-  const report=reportCases(selection.tests,outcomes,runSeconds,job)
-  report.runId=env.GITHUB_RUN_ID
-  report.attempt=env.GITHUB_RUN_ATTEMPT
-  report.sha=env.GITHUB_SHA
-  if(runner) {
-    report.runner_class=runner.class
-    report.runner=runner
-    const collectSeconds=selection.timing?.collectSeconds??null,planSeconds=selection.timing?.planSeconds??null
-    const caseSeconds=browserLaunches.some(launch=>launch.caseSeconds===null)?null:browserLaunches.reduce((sum,launch)=>sum+launch.caseSeconds,0)
-    report.webShardTiming={collectSeconds,planSeconds,runSeconds,caseSeconds,
-      nonCaseSeconds:collectSeconds===null||planSeconds===null||caseSeconds===null?null:Math.max(0,collectSeconds+planSeconds+runSeconds-caseSeconds),
-      launches:browserLaunches,note:'Monotonic wall seconds; non-case time is collection + planning + execution minus summed native case durations (including explicit retries).'}
-    report.browserCases=selection.tests.filter(row=>row.kind==='browser').map(row=>({key:key(row),file:row.file,config:row.config,project:row.project,
-      status:outcomes.find(outcome=>outcome.key===key(row))?.status??'notRun'}))
-  }
-  report.full=selection.full
-  report.reason=selection.reason
-  report.scope=selection.scope??'changed-area'
-  report.deferredBrowserCases=selection.deferredBrowserCases??0
-  report.flakeLedger=ledger
-  if(goRunner) report.goPhases=goRunner.measurements
-  report.exitCode=code
-  if(Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1
-  save(resolve(evidence,`${job}-failures.json`), {
-    version: 1, job, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha: env.GITHUB_SHA,
-    cases: outcomes.filter(outcome => outcome.status === 'failed').map(outcome => outcome.key),
-    runnerFailure,
-  })
-  save(resolve(evidence,`${job}-measurement.json`),report)
-  log(JSON.stringify(report))
-  if(env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,`\nTest tier measurement (${job}):\n\n\`\`\`json\n${JSON.stringify(report,null,2)}\n\`\`\`\n`,{flag:'a'})
-  return report.exitCode
 }
 
 export function classifyArgs(flags) {
@@ -470,6 +540,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try { process.exitCode=await main(process.argv.slice(2)) }
   catch(error) {
     console.error(error.message)
-    process.exitCode=process.argv[2]==='manifests'&&process.argv[3]==='merge-driver'?3:1
+    process.exitCode=process.argv[2]==='manifests'&&process.argv[3]==='merge-driver'?3:
+      ({SIGINT:130,SIGTERM:143,SIGHUP:129}[error.signal])??1
   }
 }
