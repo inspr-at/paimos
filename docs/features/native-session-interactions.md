@@ -221,3 +221,34 @@ fetch confirmed `b199dc53c` is still the newest main and is included in this
 branch. The final commit records validation only. Origin push, deployment,
 review gates and model CLI calls were not performed; the coordinator owns
 the remaining review and release controls.
+
+Merge-main refresh (2026-10-13, PR #634): normal merge `003b934f1`
+incorporates main `f5b2d6ab5`. The DSAR conflict is resolved as the exact
+union of 90 tables, retaining the branch's controller, interaction and viewer
+entries alongside main's final and receipt entries. Every classification and
+locator from both parents is preserved; all five tables match migrations
+1347/1348 column for column. The automatically merged files retain their source
+parents, and the tier manifests contain the exact three-way union without
+duplicates. The shared fence inventory retains both callers. No migration
+number collides, and this round adds no new feature behavior or registry rows.
+
+Main advanced during validation. Normal merge `d7ecc72fe` incorporates
+`154a4a30f`; all 17 incoming accessibility files match main exactly and all
+15 branch files remain unchanged. The Go, migration and interaction browser
+trees are unchanged from the passing remote runs.
+
+Guarded remote validation passed all six affected Go packages (`dsar`,
+`agentpairing`, `nativeinteraction`, `nativesessions/interaction`,
+`nativereceipts` and `nativesessions/receipts`), plus
+`TestNativeSessionDSARInventoryMatchesSchema`. The same approved remote runner
+passed all 43 migration-policy tests and the migration guard against published
+`v261013103112.0.0`, with 350 unique numbers. All seven interaction browser
+cases passed with one worker and zero remaining owned browser processes.
+The six light/dark screenshots remain untracked in `web/test-results/remote/`,
+named `AEON-1304-requests-<390|1024|1440>-<light|dark>.png`.
+
+Both full guarded remote `node scripts/ci-static.mjs --merge-main` runs exited
+0: 42 checks passed and zero optional checks skipped, including the final run
+on `d7ecc72fe`. A final fetch confirmed `154a4a30f` remains the newest main and
+is included in this branch. The final commit records validation only. No
+origin push, deployment, review gate or model CLI call was performed.
