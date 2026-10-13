@@ -219,6 +219,9 @@ test('Queued keeps the page section gap below Sessions; folding and emptying mov
   await open(page)
   const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
   const toggle = queue.locator('.fs-head > .fs-tog')
+  // Both cards mount once the agents store has loaded; measure only after that.
+  await expect(page.getByRole('region', { name: 'Sessions' })).toBeVisible()
+  await expect(queue).toBeVisible()
   // Offsets inside the list pane, so page scrolling cannot change them; the expected gap is the
   // page's own section gap, read from the capacity column.
   const geometry = () => page.evaluate(() => {
