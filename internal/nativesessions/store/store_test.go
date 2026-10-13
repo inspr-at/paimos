@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type fixedAuthority struct{ authorization Authorization }
@@ -123,7 +124,7 @@ func newStartFixture(t *testing.T) *startFixture {
 		if _, e := tx.Exec(seed, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$4,$5)`, f.person.TenantID, f.person.ID, account, account, scheduleRaw); e != nil {
 			return e
 		}
-		return tx.QueryRow(seed, `SELECT revision FROM nodes WHERE id=$1`, f.project).Scan(&f.intent.ExpectedProjectRevision)
+		return tx.QueryRow(seed, `SELECT coalesce((SELECT revision FROM project_leads WHERE project_id=$1),0)`, f.project).Scan(&f.intent.ExpectedProjectRevision)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -294,5 +295,72 @@ func TestStartRegistrationIdempotencyAndPersonViewer(t *testing.T) {
 			t.Fatalf("duplicate/fake rows: %d/%d/%d/%d", roots, intents, harnesses, runs)
 		}
 		return nil
+	})
+}
+
+func TestWorkerStartRequiresLeafAndKeepsExistingRun(t *testing.T) {
+	f := newStartFixture(t)
+	parentWork, _ := uuid()
+	leaf, _ := uuid()
+	parentHarness, _ := uuid()
+	run, _ := uuid()
+	ref, lease := sha256.Sum256([]byte("coordinator parent ref")), sha256.Sum256([]byte("coordinator parent lease"))
+	f.seed(t, func(tx pgx.Tx) error {
+		for _, q := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-2',id,'Parent work',$3 FROM node_kinds WHERE slug='work'`, []any{f.person.TenantID, parentWork, f.project}},
+			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-3',id,'Leaf work',$3 FROM node_kinds WHERE slug='work'`, []any{f.person.TenantID, leaf, parentWork}},
+			{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'ready')`, []any{f.person.TenantID, leaf, f.person.ID}},
+			{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,model_profile_id,account_id) VALUES($1,$2,$3,$4,$5,$6)`, []any{f.person.TenantID, run, leaf, f.agent.ID, f.intent.ModelProfileID, f.intent.AccountID}},
+			{`INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,owner_principal_id)
+ VALUES($1,$2,$3,$4,'claude','local','unmanaged','coordinator',$5,$6,$7)`, []any{f.person.TenantID, parentHarness, f.project, f.agent.ID, ref[:], lease[:], f.person.ID}},
+		} {
+			if _, err := tx.Exec(t.Context(), q.sql, q.args...); err != nil {
+				return err
+			}
+		}
+		return tx.QueryRow(t.Context(), `SELECT coalesce((SELECT revision FROM project_leads WHERE project_id=$1),0)`, f.project).Scan(&f.intent.ExpectedProjectRevision)
+	})
+	authority := f.s.authority.(fixedAuthority)
+	authority.authorization.RunID = &run
+	f.s.authority = authority
+	f.intent.Role = "worker"
+	f.intent.WorkID = &parentWork
+	f.intent.ParentHarnessSessionID = &parentHarness
+	var failure *Failure
+	if _, err := f.s.Start(f.personCtx(t), f.actor, f.intent); !errors.As(err, &failure) || failure.Reason != nativecontract.ReasonInvalidInput {
+		t.Fatalf("parent work was not refused as non-leaf: %v", err)
+	}
+	f.intent.WorkID = &leaf
+	accepted := f.begin(t)
+	f.seed(t, func(tx pgx.Tx) error {
+		var gotRun string
+		var count, roots int
+		if err := tx.QueryRow(t.Context(), `SELECT run_id::text FROM native_session_bindings WHERE id=$1`, accepted.Session.OwnedSessionID).Scan(&gotRun); err != nil {
+			return err
+		}
+		if gotRun != run {
+			t.Fatal("worker run was not pinned at intent creation")
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM agent_runs),(SELECT count(*) FROM native_session_roots)`).Scan(&count, &roots); err != nil {
+			return err
+		}
+		if count != 1 || roots != 0 {
+			t.Fatal("worker acquired a second reservation")
+		}
+		// A savepoint isolates the deliberate trigger refusal; preserve the
+		// actual accepted fixture and require the exact immutable-binding error.
+		sub, err := tx.Begin(t.Context())
+		if err != nil {
+			return err
+		}
+		_, err = sub.Exec(t.Context(), `UPDATE native_session_bindings SET workspace_id='foreign' WHERE id=$1`, accepted.Session.OwnedSessionID)
+		var pg *pgconn.PgError
+		if !errors.As(err, &pg) || pg.Code != "23514" || pg.Message != "native session binding is immutable" {
+			t.Fatalf("binding rewrite did not hit immutable fence: %v", err)
+		}
+		return sub.Rollback(t.Context())
 	})
 }

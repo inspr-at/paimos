@@ -18,6 +18,8 @@ Role/project/work/account/computer/workspace/model/policy and actor snapshots
 are immutable. Coordinator starts require the owning person and a current
 person-invoked project grant. Workers require a current leaf and coordinator
 parent plus an existing leaf run reservation. Resume is supplied by P3/I1.
+`expected_project_revision` uses the existing project-lead projection revision,
+with zero before a lead intent exists; native binding revision stays separate.
 
 The daemon observes its private local ledger before the final transaction.
 Claim then takes tenant/tree/pairing fences, rechecks the current daemon and
@@ -72,6 +74,7 @@ rows in this PR; this is a merge prerequisite, not work deferred to I2.
   `internal/nativesessions/store:TestStartClaimRevocationBarrier`,
   `internal/nativesessions/store:TestStartRegistrationIdempotencyAndPersonViewer`,
   `internal/nativesessions/store:TestTerminalViewerURLStrictAllowlist`,
+  `internal/nativesessions/store:TestWorkerStartRequiresLeafAndKeepsExistingRun`,
   `internal/nativesessions/start:TestStartRequiresDurableClaimAndLocalLaunchFence`,
   `internal/agentaccounts:TestNativeRootHoldsCountUntilVerifiedRelease`.
 - DSAR: all three new tables are `personal`, with locator

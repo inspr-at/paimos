@@ -220,7 +220,9 @@ func startBounds(in nativecontract.StartIntent) bool {
 func targetStart(ctx context.Context, tx pgx.Tx, project string, intent nativecontract.StartIntent, checkRevision bool) error {
 	var rev int64
 	var archived bool
-	err := tx.QueryRow(ctx, `SELECT n.revision,n.deleted_at IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='project'`, project).Scan(&rev, &archived)
+	// C0's project revision is the existing lead projection coordinate (zero
+	// before a lead intent exists), never a fabricated node timestamp/version.
+	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT l.revision FROM project_leads l WHERE l.project_id=n.id),0),n.deleted_at IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='project'`, project).Scan(&rev, &archived)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fail(404, nativecontract.ReasonInvalidInput)
 	}
