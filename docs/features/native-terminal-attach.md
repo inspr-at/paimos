@@ -162,3 +162,43 @@ two metadata changes in this PR and rerun the strict checks before merge. The
 non-required `gate/policy-preview` CI failure reports a missing trusted review
 verdict; that verdict remains coordinator-owned. No push, deployment, model
 call, or review gate was performed by this builder.
+
+## Fix round 3: R0 integration still required
+
+The new CI report `review-ci618-0500.out` reviews `dc50cb3c`; direct inspection
+of that revision's job logs confirms the same two unresolved metadata changes:
+
+- [Go static job 115102655677](https://github.com/inspr-at/paimos/actions/runs/38337981184/job/115102655677)
+  fails strict tier collection on exactly the nine P2b test identities listed
+  above. The test-tier self-check itself reports zero failures. R0 must add
+  those nine `ESSENTIAL` rows to `scripts/ci/go-test-tiers.json`.
+- [Release check job 115102655792](https://github.com/inspr-at/paimos/actions/runs/38337981184/job/115102655792)
+  fails both existing audit assertions on the nine tracked files under
+  `internal/nativeattach/`. R0 must append only `internal/nativeattach/**` to
+  S2's `paths` in `scripts/audit/slices.json`. CLI ownership is already covered.
+
+These assertions already fail at the required negative-control revision
+`dc50cb3c`. There is no new behaviour finding or behaviour change in this round;
+the existing assertions remain intact. All seven Go test shards, four web unit
+shards, twelve web browser shards, migration compatibility and E2E checks are
+green in that CI run. This does not make strict static or release checks green,
+and the unregistered P2b tests still need explicit remote validation.
+
+The current ticket and normative plan still reserve both metadata files to R0;
+fix round 3 contains no ownership transfer. The original brief requires
+"Write ONLY inside your exclusive_write_set" and "Never touch another slice's
+files." The coordinator must apply the exact two metadata changes above to
+this branch in the same PR, then obtain green strict static/release checks.
+No metadata or source file outside P2b's write set was changed. PR #618 reports
+`MERGEABLE`, so the conditional main-merge instruction does not apply.
+
+This round's first combined remote Go run and guarded static check both refused
+with exit 3 because both remote slots were occupied. The combined Go retry also
+refused with exit 3, this time for load (13 above the limit of 12). The permitted
+single-package local fallback then passed: `GOMAXPROCS=2 go test -p 2
+./internal/nativeattach/...` exits 0 (0.540 seconds). Full CLI and guarded static
+validation remain incomplete; no full local fallback was run. `git diff
+--check` passes. Web/browser checks have no affected P2b cases. The separate
+non-required policy preview still reports a missing trusted review verdict;
+the coordinator owns that gate after builder exit. No push, deployment, model
+CLI, review gate or live cutover was performed.
