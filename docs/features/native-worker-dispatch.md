@@ -275,7 +275,7 @@ At source commit `863e60943`:
 - PASS: all `internal/nativedispatch` tests with `-race`, in the one permitted
   local package fallback after the guarded remote lane refused for load.
 - PASS: `TestNativeWorkerDispatchFrozenEnvelopeAndReceipt` with `-race` through
-  `remote-test.sh` on mbp2606.
+  `remote-test.sh` on the approved test host.
 - PASS: guarded `ci-static-locked.sh` / `--merge-main`, exit 0, 42 checks,
   zero optional skips. This includes strict Go and web tier inventories,
   source ownership, vet, shard manifests and API/migration checks.
