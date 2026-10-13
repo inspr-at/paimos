@@ -45,6 +45,10 @@ input to 64 KiB. Expiry, current identity and policy are rechecked after waiting
 Malformed responses, unknown stop reasons and ambiguous writes hold further
 inputs instead of opening another turn. Cancel writes are serialized against
 prompt writes and turn transitions so an old interrupt cannot cancel a successor.
+An interrupt reports `applied` only when the matching prompt response confirms
+`stopReason: cancelled`. If normal `end_turn` completion wins after the cancel
+write, the input still gets `turn_completed` and the interrupt refuses with
+`input_outcome_unconfirmed`. A completed turn cannot accept another interrupt.
 The [ACP prompt lifecycle](https://agentclientprotocol.com/protocol/v1/prompt-turn)
 defines the streamed updates and correlated prompt completion used here.
 

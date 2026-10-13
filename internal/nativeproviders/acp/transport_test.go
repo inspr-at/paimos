@@ -424,6 +424,61 @@ func TestACPInterruptMatchesCurrentTurn(t *testing.T) {
 	}
 }
 
+// Risk: a cancel write racing normal prompt completion must not claim that the
+// native agent cancelled the turn. The cancel barrier proves the write came
+// before the end_turn response; only native cancelled evidence proves success.
+func TestACPInterruptRequiresNativeCancellation(t *testing.T) {
+	for _, harness := range []string{"cursor", "gemini", "opencode"} {
+		t.Run(harness, func(t *testing.T) {
+			q, spec, w, clock := fixture(t, harness)
+			now := func() time.Time { return time.Unix(0, clock.Load()) }
+			l := Launcher{Qualification: q, Now: now, OpenWire: func(context.Context, nc.LaunchSpec, []string) (Wire, error) { return w, nil }}
+			transport, err := l.Open(context.Background(), spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.start, w.cancel = make(chan struct{}, 1), make(chan struct{})
+			w.release = w.cancel
+			type sendResult struct {
+				evidence nc.NativeEvidence
+				err      error
+			}
+			finished := make(chan sendResult, 1)
+			go func() {
+				evidence, err := transport.Send(context.Background(), input(spec, "now", now().Add(time.Minute)))
+				finished <- sendResult{evidence, err}
+			}()
+			wait(t, w.start)
+			interrupt := nc.Interrupt{RequestID: testID, ExpectedBinding: spec.Binding, ExpectedTurnRef: transport.Identity().NativeTurnRef, ExpiresAt: now().Add(time.Minute)}
+			evidence, err := transport.Interrupt(context.Background(), interrupt)
+			wait(t, w.cancel) // Normal completion is released only by a cancel write.
+			reason(t, err, nc.ReasonInputOutcomeUnconfirmed)
+			if evidence.Stage != "" {
+				t.Fatal("normal completion produced an interrupt receipt", evidence)
+			}
+			select {
+			case result := <-finished:
+				if result.err != nil || result.evidence.Stage != "turn_completed" || result.evidence.TurnRef != interrupt.ExpectedTurnRef || result.evidence.InputID != testID || result.evidence.RequestID != testID {
+					t.Fatal("normal prompt completion was lost", result.evidence, result.err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("prompt completion did not arrive")
+			}
+			if transport.Identity().NativeTurnRef != "" {
+				t.Fatal("finished turn remains active")
+			}
+			_, err = transport.Interrupt(context.Background(), interrupt)
+			reason(t, err, nc.ReasonIdentityMismatch)
+			// An unconfirmed cancellation does not poison a normally completed
+			// transport or prevent the next authorized prompt.
+			next, err := transport.Send(context.Background(), input(spec, "now", now().Add(time.Minute)))
+			if err != nil || next.Stage != "turn_completed" || next.TurnRef == interrupt.ExpectedTurnRef {
+				t.Fatal("successor prompt did not complete", next, err)
+			}
+		})
+	}
+}
+
 func TestACPQueuedInputWaitsForNativeCompletion(t *testing.T) {
 	q, spec, w, clock := fixture(t, "cursor")
 	now := func() time.Time { return time.Unix(0, clock.Load()) }

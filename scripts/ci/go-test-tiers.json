@@ -7824,6 +7824,8 @@
     ,
     {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPInterruptMatchesCurrentTurn","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPInterruptRequiresNativeCancellation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPProtocolFailuresHoldOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeproviders/acp","name":"TestACPQualificationMatrix","tier":"ESSENTIAL"}

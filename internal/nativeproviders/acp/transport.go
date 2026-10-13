@@ -27,6 +27,7 @@ type turn struct {
 	ref        string
 	done       chan struct{}
 	cancelling bool
+	stopReason string
 }
 
 type Transport struct {
@@ -258,7 +259,6 @@ func (p *Transport) Send(ctx context.Context, input nc.Input) (nc.NativeEvidence
 	// otherwise an interrupt could cancel idle just before the prompt starts.
 	var written sync.Once
 	releaseWrite := func() { written.Do(p.controlMu.Unlock) }
-	defer func() { p.mu.Lock(); p.active = nil; close(t.done); p.mu.Unlock() }()
 	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.session, "prompt": []map[string]string{{"type": "text", "text": input.Text}}}})
 	deadline := p.base.StartedAt.Add(time.Duration(p.spec.Policy.MaximumRuntimeSeconds) * time.Second)
 	if p.spec.Policy.ExpiresAt.Before(deadline) {
@@ -285,27 +285,34 @@ func (p *Transport) Send(ctx context.Context, input nc.Input) (nc.NativeEvidence
 	defer p.controlMu.Unlock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if err != nil {
+	var evidence nc.NativeEvidence
+	switch {
+	case err != nil:
 		p.failure = Refuse(nc.ReasonInputOutcomeUnconfirmed)
-		return nc.NativeEvidence{}, p.failure
-	}
-	if p.failure != nil {
-		return nc.NativeEvidence{}, p.failure
-	}
-	if p.closing {
-		return nc.NativeEvidence{}, Refuse(nc.ReasonOwnershipUnconfirmed)
-	}
-	if result.StopReason != "end_turn" && !(t.cancelling && result.StopReason == "cancelled") {
+		err = p.failure
+	case p.failure != nil:
+		err = p.failure
+	case p.closing:
+		err = Refuse(nc.ReasonOwnershipUnconfirmed)
+	case result.StopReason != "end_turn" && !(t.cancelling && result.StopReason == "cancelled"):
 		p.failure = Refuse(nc.ReasonInputOutcomeUnconfirmed)
-		return nc.NativeEvidence{}, p.failure
+		err = p.failure
+	default:
+		t.stopReason = result.StopReason
+		p.emitLocked(&nc.StructuredFrame{Kind: "turn_state", State: str("idle")})
+		err = p.failure
+		if err == nil {
+			// Native prompt completion proves this request was consumed. Chunk
+			// text is NEVER assembled into a FinalPublish, even on end_turn.
+			evidence = nc.NativeEvidence{Stage: "turn_completed", InputID: input.InputID, RequestID: input.RequestID, TurnRef: t.ref, SourceSequence: p.sequence, ObservedAt: p.now()}
+		}
 	}
-	p.emitLocked(&nc.StructuredFrame{Kind: "turn_state", State: str("idle")})
-	if p.failure != nil {
-		return nc.NativeEvidence{}, p.failure
-	}
-	// Native prompt completion proves this request was consumed. Chunk text is
-	// NEVER assembled into a FinalPublish, even on a clean end_turn.
-	return nc.NativeEvidence{Stage: "turn_completed", InputID: input.InputID, RequestID: input.RequestID, TurnRef: t.ref, SourceSequence: p.sequence, ObservedAt: p.now()}, nil
+	// Retire the turn before releasing either fence, so an interrupt cannot
+	// match a completed turn in the cleanup window or mistake end_turn for
+	// cancellation. Waiters observe the native stop reason under the same mu.
+	p.active = nil
+	close(t.done)
+	return evidence, err
 }
 
 func (p *Transport) Interrupt(ctx context.Context, input nc.Interrupt) (nc.NativeEvidence, error) {
@@ -365,6 +372,9 @@ func (p *Transport) Interrupt(ctx context.Context, input nc.Interrupt) (nc.Nativ
 	}
 	if p.closing {
 		return nc.NativeEvidence{}, Refuse(nc.ReasonOwnershipUnconfirmed)
+	}
+	if t.stopReason != "cancelled" {
+		return nc.NativeEvidence{}, Refuse(nc.ReasonInputOutcomeUnconfirmed)
 	}
 	return nc.NativeEvidence{Stage: "applied", RequestID: input.RequestID, TurnRef: t.ref, SourceSequence: p.sequence, ObservedAt: p.now()}, nil
 }
