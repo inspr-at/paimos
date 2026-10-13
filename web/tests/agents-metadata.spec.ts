@@ -80,7 +80,8 @@ test('an open panel refreshes metadata history after a heartbeat without an acti
   await expect(panel.getByRole('heading', { name: 'release worker', exact: true })).toBeVisible()
   await expect(changes).toContainText('Model gpt-6-sol to gpt-6-astra')
   await expect(changes).toContainText('Effort xhigh to high')
-  await expect(panel.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Model$/ }) })).toContainText('gpt-6-astra')
+  // AEON-1240 / #612 renders registry display names, while history retains raw values.
+  await expect(panel.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Model$/ }) })).toContainText('GPT-6 Astra · high')
   expect(detail.requests).toBe(2)
   // An unchanged list poll must not add one detail request per clock tick/row.
   await page.clock.runFor(20_100)

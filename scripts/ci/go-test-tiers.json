@@ -92,6 +92,12 @@
     ,
     "internal/cli:TestMeReportsOwnerWorkstation"
     ,
+    "internal/cli:TestNativeAttachCommandPreservesAttachmentMeaning"
+    ,
+    "internal/cli:TestNativeAttachCommandValidation"
+    ,
+    "internal/cli:TestNativeAttachRejectsMismatchedProjection"
+    ,
     "internal/cli:TestOwnerWorkstationKeyCommands"
     ,
     "internal/cli:TestPersonAPIErrorPreservesStatusAndRedactsSession"
@@ -139,6 +145,16 @@
     "internal/knowledge:TestLearningDraftTenantBeforeAdvisory"
     ,
     "internal/markdownsource:TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks"
+    ,
+    "internal/nativeattach:TestAttachLeaseUsesElapsedServerBudget"
+    ,
+    "internal/nativeattach:TestComposerPreservesShortcutsAndBoundsTerminalData"
+    ,
+    "internal/nativeattach:TestComposerReceiptsAndEscapeLeaveSessionRunning"
+    ,
+    "internal/nativeattach:TestStreamRejectsSuccessorBeforeRendering"
+    ,
+    "internal/nativeattach:TestTerminalRestoredOnEveryExit"
     ,
     "internal/nativequota:TestQuotaIngressKeepsPrivateFieldsOutAndCopiesFacts"
     ,
@@ -4960,6 +4976,12 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelTicketResolveAndReadOnlyPrefs","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandPreservesAttachmentMeaning","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandValidation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestOnboardCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -7845,6 +7867,20 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkLatestPinAndAutomaticResidencyReselection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkingEvidenceCannotUseAnotherModelsUsage","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestAttachLeaseUsesElapsedServerBudget","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestComposerPreservesShortcutsAndBoundsTerminalData","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestComposerReceiptsAndEscapeLeaveSessionRunning","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestFakeSocketDetachViewerAndStaleBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestStreamRejectsSuccessorBeforeRendering","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestStreamResumesRotationWithoutLosingControl","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestTerminalRestoredOnEveryExit","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nativecontract","name":"TestNativeContractAreaParity","tier":"ESSENTIAL"}
     ,

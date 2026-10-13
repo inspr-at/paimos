@@ -4,6 +4,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { expectStableControls } from './helpers/stable'
 
 const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -57,7 +58,12 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
     const cell = row(page, key).locator('td.c-eta')
     const value = (await cell.locator('.eta-cell').boundingBox())!
     expect(Math.abs(value.x + value.width - (headerBox.x + headerBox.width - 6))).toBeLessThan(3)
-    expect(await cell.evaluate(td => { const el = td.querySelector('.when > .shown') as HTMLElement; return el.scrollWidth <= el.clientWidth })).toBe(true)
+    const label = await cell.evaluate(td => {
+      const el = td.querySelector('.when > .shown') as HTMLElement
+      return { text: el.textContent, width: el.clientWidth, contentWidth: el.scrollWidth, cellWidth: td.clientWidth }
+    })
+    expect(label.contentWidth <= label.width, `${key}: ${JSON.stringify(label)}`).toBe(true)
+    console.info(`ETA geometry ${key}: ${JSON.stringify(label)}`)
   }
 
   await header.getByRole('button', { name: 'ETA' }).click()
@@ -69,6 +75,20 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
   await expect(row(page, 'PHAROS-11').locator('.c-updated')).toBeHidden()
   await expect(row(page, 'PHAROS-14').locator('.c-updated')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) {
+      const label = row(page, key).locator('.eta-cell .shown')
+      await expect(label).toBeVisible()
+      expect(await label.evaluate(element => element.scrollWidth <= element.clientWidth), `${width} ${theme} ${key}: complete ETA`).toBe(true)
+    }
+    await expectStableControls({
+      controls: { estimate: fresh, row: row(page, 'PHAROS-11'), key: row(page, 'PHAROS-11').locator('.key') },
+      interactions: [{ name: 'read the estimate tooltip', run: async () => { await fresh.hover(); await expect(page.locator('.tooltip')).toContainText('Estimated by Ada') } }],
+    })
+    await page.screenshot({ path: test.info().outputPath(`eta-${width}-${theme}.png`) })
+  }
 })
 
 test('with both forms chosen, the clock time shows on hover', async ({ page }) => {

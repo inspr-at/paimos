@@ -66,7 +66,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
     } as typeof template
   })
   data.messages.splice(0, data.messages.length, ...messages)
-  await page.addInitScript(() => localStorage.setItem('aeon.session-tab', 'messages'))
+  // AEON-1212 / #592 remembers tabs per person; receipt tests explicitly open Chat.
   await mockAgents(page, data)
   const asked: string[][] = []
   await page.route('**/api/inbox/message-status?*', route => {
@@ -96,12 +96,12 @@ for (const theme of ['light', 'dark'] as const) {
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true)
       await shot(page, `list-${width}-${theme}`)
       for (const [session, words, tip] of [[worker, 'Listening', /^Pulled its inbox/], [never, 'Not listening · never pulled', /Has not pulled its inbox yet/]] as const) {
-        await page.goto(`/agents/${session.id}`)
+        await page.goto(`/agents/${session.id}?tab=messages`)
         await panelOf(page).getByRole('tab', { name: 'Overview' }).click()
         await expect(panelOf(page).locator('.now-listen')).toContainText(words)
         await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', tip)
       }
-      await page.goto(`/agents/${quiet.id}`)
+      await page.goto(`/agents/${quiet.id}?tab=messages`)
       await panelOf(page).getByRole('tab', { name: 'Overview' }).click()
       await expect(panelOf(page).locator('.now-listen')).toContainText('Not listening · last pulled 12m ago')
       await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', /^Last pulled its inbox 12m ago through a turn hook\./)
@@ -114,7 +114,7 @@ for (const theme of ['light', 'dark'] as const) {
     test(`${theme} ${width}: own posts read Sent, Delivered, Read or Not delivered, live`, async ({ page }) => {
       const { worker, statuses, messages, asked } = await setup(page, theme)
       await page.setViewportSize({ width, height: width > 600 ? 1000 : 844 })
-      await page.goto(`/agents/${worker.id}`)
+      await page.goto(`/agents/${worker.id}?tab=messages`)
       const panel = panelOf(page)
       const mine = panel.locator('.msg.mine')
       const queued = panel.locator('.queue-item')
