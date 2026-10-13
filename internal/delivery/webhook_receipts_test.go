@@ -4,11 +4,19 @@ package delivery
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -133,6 +141,141 @@ func receiptEffects(t *testing.T, f *fixture) []int {
 			(SELECT count(*) FROM events WHERE type='delivery.bypass_merge')`).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6], &out[7], &out[8])
 	})
 	return out
+}
+
+func TestDeliveryWebhookAcceptsOpaqueInstallationToken(t *testing.T) {
+	// Risk: a valid newly minted GitHub token is refused locally, losing every
+	// network-dependent webhook while logging no upstream HTTP status.
+	// All signing material and tokens are synthetic; the transport has no network.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal("could not generate ephemeral fixture signing material")
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "fixture-signing.pem")
+	if err = os.WriteFile(file, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal("could not write ephemeral fixture signing material")
+	}
+	for _, event := range []string{"pull_request", "check_run", "check_suite", "merge_group"} {
+		t.Run(event, func(t *testing.T) {
+			f := newFixture(t)
+			fixtureName := "pull_request.closed"
+			if event == "merge_group" {
+				fixtureName = "merge_group.checks_requested"
+			}
+			raw, err := os.ReadFile("testdata/" + fixtureName + ".json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Fatal(err)
+			}
+			head, base, group := strings.Repeat("b", 40), strings.Repeat("a", 40), strings.Repeat("c", 40)
+			if event == "pull_request" {
+				body["action"] = "opened"
+				pull := body["pull_request"].(map[string]any)
+				pull["state"], pull["merged"] = "open", false
+			} else if event == "check_run" || event == "check_suite" {
+				body["action"] = "completed"
+				body[event] = map[string]any{"head_sha": head, "pull_requests": []any{map[string]any{"number": 7}}, "name": "go-test", "status": "completed", "conclusion": "success"}
+			}
+			raw = receiptBody(t, f, body)
+			pullRaw, err := os.ReadFile("testdata/pull_request.closed.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pullFixture map[string]any
+			if err := json.Unmarshal(pullRaw, &pullFixture); err != nil {
+				t.Fatal(err)
+			}
+			pull := pullFixture["pull_request"].(map[string]any)
+			pull["state"], pull["merged"] = "open", false
+			// A realistic large PR document exceeds the default 64 KiB while
+			// staying within the REST reader's existing 4 MiB bound.
+			pull["body"] = strings.Repeat("synthetic PR detail ", 5000)
+			mintedToken := "ghs_" + strings.Repeat("a", 36)
+			minted, revoked, reads := 0, 0, 0
+			f.m.config.KeyFile = file
+			app := &crossreview.GitHubApp{Config: f.m.config, Client: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+				var response any
+				status := http.StatusOK
+				if r.URL.Path != "/app/installations/456/access_tokens" && r.Header.Get("Authorization") != "Bearer "+mintedToken {
+					t.Fatal("reader did not forward the opaque minted token")
+				}
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/app/installations/456/access_tokens":
+					var request struct {
+						Permissions  map[string]string `json:"permissions"`
+						Repositories []string          `json:"repositories"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Fatal("invalid fake mint request")
+					}
+					wantPermissions := map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
+					if !reflect.DeepEqual(request.Permissions, wantPermissions) || !reflect.DeepEqual(request.Repositories, []string{"delivery"}) {
+						t.Fatal("mint changed the existing repository/permission scope")
+					}
+					minted++
+					status = http.StatusCreated
+					response = map[string]any{"token": mintedToken, "permissions": request.Permissions, "repository_selection": "selected", "repositories": []any{map[string]string{"full_name": f.m.config.Repository}}}
+				case r.Method == http.MethodDelete && r.URL.Path == "/installation/token":
+					revoked++
+					status, response = http.StatusNoContent, nil
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/example/delivery/pulls/7":
+					reads++
+					response = pull
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/example/delivery/pulls":
+					reads++
+					response = []any{pull}
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/"):
+					reads++
+					response = map[string]any{"ref": body["merge_group"].(map[string]any)["head_ref"], "object": map[string]string{"type": "commit", "sha": group}}
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/compare/"):
+					reads++
+					response = map[string]any{"total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
+					reads++
+					response = map[string]any{"total_count": 0, "check_runs": []any{}}
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/statuses"):
+					reads++
+					response = []any{}
+				case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+					reads++
+					response = map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"number": 7, "headRefOid": head, "mergeQueueEntry": map[string]any{"id": "fixture-entry", "headCommit": map[string]string{"oid": group}}}}}}
+				default:
+					t.Fatal("unexpected fake GitHub operation")
+				}
+				encoded, err := json.Marshal(response)
+				if err != nil {
+					t.Fatal("invalid fake GitHub response")
+				}
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(encoded)), Request: r}, nil
+			})}}
+			f.m.github = AppReader{App: app}
+			if w := receiptSend(f, event, "legacy-token-control", raw); w.Code != http.StatusNoContent || minted != 1 || revoked != 1 || reads == 0 {
+				t.Fatalf("legacy control failed: HTTP=%d minted=%d revoked=%d reads=%d", w.Code, minted, revoked, reads)
+			}
+			// Synthetic opaque token shaped like the documented ~520-character
+			// stateless format. Its contents have no authority and are never decoded.
+			mintedToken = "ghs_123_" + strings.Repeat("a", 120) + "." + strings.Repeat("b", 120) + "." + strings.Repeat("c", 270)
+			previousReads := reads
+			w := receiptSend(f, event, "stateless-token", raw)
+			attempts, _, finished, checkpoints, step, class := receiptState(t, f, "stateless-token")
+			if w.Code != http.StatusNoContent {
+				if w.Code != http.StatusBadGateway || attempts != 1 || finished != nil || len(checkpoints) != 0 || step == nil || *step != "projection" || class == nil || *class != "github_unavailable" || minted != 2 || revoked != 1 || reads != previousReads {
+					t.Fatal("failed for a different reason than local post-mint token rejection")
+				}
+				t.Fatalf("valid %d-character token refused after HTTP 201 mint: webhook HTTP 502, projection/github_unavailable, zero downstream reads, no token revocation", len(mintedToken))
+			}
+			if attempts != 1 || finished == nil || len(checkpoints) != len(webhookSteps) || checkpoints["projection"] != webhookRecorded || step != nil || class != nil || minted != 2 || revoked != 2 || reads <= previousReads {
+				t.Fatal("stateless token did not finish the same authenticated event and revoke its scoped read token")
+			}
+		})
+	}
 }
 
 func TestDeliveryWebhookTerminalNoOps(t *testing.T) {
