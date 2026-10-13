@@ -51,8 +51,9 @@ defines the streamed updates and correlated prompt completion used here.
 Pi `prompt` command IDs prove only `write_acknowledged`. The native `steer` and
 `followUp` streaming behaviors keep their own semantics; there is no inferred
 link from the next assistant output to a particular input. C0's existing
-`ChatSupported` check blocks the public composer. `Send` remains available to
-the already-authorized worker-launch/control port. Abort/clear-queue and resume
+`Input`/`ChatSupported` pair stays false and `Send` refuses the public composer.
+The optional local `NextStep` method retains bounded worker-control steering
+without claiming C0 chat delivery. Abort/clear-queue and resume
 remain unavailable without the separate held-queue reconciliation. The
 [official Pi RPC documentation](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md)
 distinguishes command acknowledgements from session events; the release gate
@@ -84,7 +85,8 @@ before its events; it is a serialization barrier, never delivery evidence.
 The codec passes defensive copies of the resolved profile. No credentials are
 read or copied and no arbitrary SDK/runtime configuration is accepted.
 `Open` requires a null `InitialInput`: I2 obtains the handle and starts consuming
-`Events()` before sending the authorized initial task through `Send`. A populated
+`Events()` before sending the authorized task through ACP `Send` or Pi's local
+`NextStep`. A populated
 initial input is refused before fork, avoiding a blocked open or unseen stream.
 
 Close is graceful only. Success requires the original process digest, observed

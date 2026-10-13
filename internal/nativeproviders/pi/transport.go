@@ -71,6 +71,7 @@ func (l *Launcher) Open(ctx context.Context, spec nc.LaunchSpec) (nc.NativeTrans
 		return p, p.failure
 	}
 	if err = acp.ValidateIdentity(p.base, "pi", spec); err != nil {
+		p.failure = err
 		return p, err
 	}
 	wire.Observe(p.observe)
@@ -140,10 +141,15 @@ func (p *Transport) state(ctx context.Context) error {
 	return nil
 }
 
-// Send is for the bounded worker-launch/control port. C0 public NativeInput
-// validation rejects this provider because ChatSupported is false. A successful
-// return proves only the matching native prompt command acknowledgement.
+// The frozen C0 contract pairs Input with ChatSupported; neither is qualified.
 func (p *Transport) Send(ctx context.Context, input nc.Input) (nc.NativeEvidence, error) {
+	return nc.NativeEvidence{}, acp.Refuse(nc.ReasonUnsupported)
+}
+
+// NextStep is an optional local worker-control extension, not the C0 chat port.
+// Success proves only a native command acknowledgement. I2 must retain current
+// bounded worker authority; it cannot expose this as correlated NativeInput.
+func (p *Transport) NextStep(ctx context.Context, input nc.Input) (nc.NativeEvidence, error) {
 	if err := acp.ValidateInput(p.spec.Binding, input, p.now()); err != nil {
 		return nc.NativeEvidence{}, err
 	}
@@ -245,13 +251,9 @@ func (p *Transport) exit(e nc.ExitEvidence, err error) (nc.ExitEvidence, error) 
 func text(value string) *string { return &value }
 func (p *Transport) observe(raw json.RawMessage) {
 	var frame struct {
-		Type    string `json:"type"`
-		Message struct {
-			Role     string `json:"role"`
-			Provider string `json:"provider"`
-			Model    string `json:"model"`
-		} `json:"message"`
-		Delta struct {
+		Type    string          `json:"type"`
+		Message json.RawMessage `json:"message"`
+		Delta   struct {
 			Type  string `json:"type"`
 			Delta string `json:"delta"`
 		} `json:"assistantMessageEvent"`
@@ -273,9 +275,17 @@ func (p *Transport) observe(raw json.RawMessage) {
 	case "agent_end":
 		out = &nc.StructuredFrame{Kind: "turn_state", State: text("idle")}
 	case "message_update":
+		var message struct {
+			Role     string `json:"role"`
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		}
+		if acp.Decode(frame.Message, &message) != nil {
+			return
+		}
 		// Partial events often omit provider/model. The owner verifies the
 		// exact native connection and effective state; reject explicit drift.
-		if frame.Message.Role != "assistant" || frame.Message.Provider != "" && frame.Message.Provider != p.provider || frame.Message.Model != "" && frame.Message.Model != p.model {
+		if message.Role != "assistant" || message.Provider != "" && message.Provider != p.provider || message.Model != "" && message.Model != p.model {
 			return
 		}
 		if frame.Delta.Type == "text_delta" && acp.ValidText(frame.Delta.Delta) {

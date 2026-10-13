@@ -21,11 +21,11 @@ func Matrix(q acp.Qualification) acp.MatrixRow {
 	}
 	row.LivePersistence, row.GracefulExit = true, true
 	row.BusyInput, row.FinalCorrelation = "next_step", "uncorrelated"
-	row.Capabilities.Input, row.Capabilities.Stop, row.Capabilities.EventsSupported = true, true, true
+	row.Capabilities.Stop, row.Capabilities.EventsSupported = true, true
 	row.Capabilities.Steer = "next_step"
 	// Native RPC response ids correlate commands, but streamed message/agent
 	// events do not reference the input. The public composer must stay closed.
-	row.Capabilities.ChatSupported, row.Capabilities.CorrelatedReceipts = false, false
+	row.Capabilities.Input, row.Capabilities.ChatSupported, row.Capabilities.CorrelatedReceipts = false, false, false
 	return row
 }
 

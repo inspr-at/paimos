@@ -84,6 +84,7 @@ func (l *Launcher) Open(ctx context.Context, spec nc.LaunchSpec) (nc.NativeTrans
 	// Return a non-nil transport on a post-fork failure: the owner must retain
 	// occupancy until Close/Wait proves exit. Never lose a possible child handle.
 	if err = ValidateIdentity(p.base, q.Harness, spec); err != nil {
+		p.failure = err
 		return p, err
 	}
 	wire.Observe(p.observe)
@@ -324,6 +325,14 @@ func (p *Transport) Interrupt(ctx context.Context, input nc.Interrupt) (nc.Nativ
 		return nc.NativeEvidence{}, err
 	}
 	p.controlMu.Lock()
+	if err := CheckWire(ctx, p.wire, p.spec, p.base, p.now()); err != nil {
+		p.controlMu.Unlock()
+		return nc.NativeEvidence{}, err
+	}
+	if !p.now().Before(input.ExpiresAt) {
+		p.controlMu.Unlock()
+		return nc.NativeEvidence{}, Refuse(nc.ReasonGrantExpired)
+	}
 	p.mu.Lock()
 	t := p.active
 	if p.closing || p.failure != nil || t == nil || t.ref != input.ExpectedTurnRef {

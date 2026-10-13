@@ -185,12 +185,15 @@ func ValidateSpec(q Qualification, spec nc.LaunchSpec, now time.Time, protocol s
 	if !ValidID(spec.Profile.AccountID, 128) || spec.Profile.ProfileBindingRevision < 0 || spec.Lifetime == nil {
 		return Refuse(nc.ReasonIdentityMismatch)
 	}
+	if spec.Lifetime.Err() != nil {
+		return Refuse(nc.ReasonOwnershipUnconfirmed)
+	}
 	for _, path := range []string{spec.Cwd, spec.Profile.WorkspaceRoot, spec.Profile.AccountHome, spec.Profile.UserHome} {
 		if len(path) > 4096 || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\x00\r\n") {
 			return Refuse(nc.ReasonInvalidInput)
 		}
 	}
-	if !within(spec.Profile.WorkspaceRoot, spec.Cwd) || within(spec.Profile.WorkspaceRoot, spec.Profile.AccountHome) || within(spec.Profile.AccountHome, spec.Profile.WorkspaceRoot) {
+	if !within(spec.Profile.WorkspaceRoot, spec.Cwd) || within(spec.Profile.WorkspaceRoot, spec.Profile.AccountHome) || within(spec.Profile.AccountHome, spec.Profile.WorkspaceRoot) || within(spec.Profile.WorkspaceRoot, q.Binary.Path) {
 		return Refuse(nc.ReasonIdentityMismatch)
 	}
 	if len(spec.Profile.Environment) > 32 {
@@ -301,7 +304,7 @@ func ValidateIdentity(identity nc.NativeIdentity, harness string, spec nc.Launch
 }
 
 func ConfirmExit(identity nc.NativeIdentity, exit nc.ExitEvidence, err error) (nc.ExitEvidence, error) {
-	if err != nil || exit.ProcessIdentityDigest != identity.ProcessIdentityDigest || !exit.RootExited || !exit.GroupAbsent ||
+	if err != nil || !validHash(identity.ProcessIdentityDigest) || identity.StartedAt.IsZero() || identity.PID <= 0 || exit.ProcessIdentityDigest != identity.ProcessIdentityDigest || !exit.RootExited || !exit.GroupAbsent ||
 		exit.ObservedAt.IsZero() || exit.ObservedAt.Before(identity.StartedAt) {
 		return exit, Refuse(nc.ReasonOwnershipUnconfirmed)
 	}

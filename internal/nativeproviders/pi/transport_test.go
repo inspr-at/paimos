@@ -111,7 +111,7 @@ func TestPiQualificationMatrix(t *testing.T) {
 	if !row.LivePersistence || row.Resume || row.Approvals || row.ForceExit || row.Confined || !row.GracefulExit || row.BusyInput != "next_step" || row.FinalCorrelation != "uncorrelated" || row.Quota != "unsupported" {
 		t.Fatal("dishonest matrix", row)
 	}
-	if !caps.Input || caps.Steer != "next_step" || !caps.Stop || !caps.EventsSupported || caps.ChatSupported || caps.CorrelatedReceipts || caps.Interrupt || caps.InterruptSupported || caps.Resume || caps.Take || caps.TakeSupported || caps.TerminalView || caps.Expert || caps.Approvals || caps.Questions {
+	if caps.Input || caps.Steer != "next_step" || !caps.Stop || !caps.EventsSupported || caps.ChatSupported || caps.CorrelatedReceipts || caps.Interrupt || caps.InterruptSupported || caps.Resume || caps.Take || caps.TakeSupported || caps.TerminalView || caps.Expert || caps.Approvals || caps.Questions {
 		t.Fatal("capability drift", caps)
 	}
 	if err := acp.ValidateDTO("NativeCapabilities", caps); err != nil {
@@ -134,8 +134,10 @@ func TestPiQualificationMatrix(t *testing.T) {
 			t.Fatal("native safety flag missing", flag)
 		}
 	}
+	_, err = transport.Send(context.Background(), input(spec, "now", now))
+	reason(t, err, nc.ReasonUnsupported)
 	for _, mode := range []string{"now", "after_turn"} {
-		e, err := transport.Send(context.Background(), input(spec, mode, now))
+		e, err := transport.(*Transport).NextStep(context.Background(), input(spec, mode, now))
 		if err != nil || e.Stage != "write_acknowledged" || e.TurnRef != "" {
 			t.Fatal("false delivery evidence", e, err)
 		}
@@ -247,7 +249,7 @@ func TestPiRefusesUnprovedNativeActions(t *testing.T) {
 			case "extension question":
 				w.interaction = true
 			}
-			_, err = transport.Send(context.Background(), input(spec, "now", now))
+			_, err = transport.(*Transport).NextStep(context.Background(), input(spec, "now", now))
 			reason(t, err, want)
 			if scenario == "extension question" {
 				for _, r := range w.requests {
