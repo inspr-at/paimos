@@ -181,7 +181,7 @@ test('on phones the places are round buttons and nothing in the header is cut', 
       // Visually hidden text (a 1px box for screen readers) is not clipped content.
       if (r.width <= 1 || r.height <= 1 || getComputedStyle(el).display === 'none') return false
       return r.left < -0.5 || r.right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1
-    }).map(el => el.className || el.tagName)), { message: path }).toEqual([])
+    }).map(el => ({ tag: el.tagName, class: el.className, text: el.textContent, width: el.clientWidth, contentWidth: el.scrollWidth, html: el.outerHTML }))), { message: path }).toEqual([])
   }
 })
 

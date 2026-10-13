@@ -57,7 +57,11 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
     const cell = row(page, key).locator('td.c-eta')
     const value = (await cell.locator('.eta-cell').boundingBox())!
     expect(Math.abs(value.x + value.width - (headerBox.x + headerBox.width - 6))).toBeLessThan(3)
-    expect(await cell.evaluate(td => { const el = td.querySelector('.when > .shown') as HTMLElement; return el.scrollWidth <= el.clientWidth })).toBe(true)
+    const label = await cell.evaluate(td => {
+      const el = td.querySelector('.when > .shown') as HTMLElement
+      return { text: el.textContent, width: el.clientWidth, contentWidth: el.scrollWidth, cellWidth: td.clientWidth }
+    })
+    expect(label.contentWidth <= label.width, `${key}: ${JSON.stringify(label)}`).toBe(true)
   }
 
   await header.getByRole('button', { name: 'ETA' }).click()

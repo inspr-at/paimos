@@ -44,20 +44,24 @@ async function revealGeometry(control: Locator, neighbors: Locator, coarse: bool
     expect(overlapX > 0 && overlapY > 0, 'reveal target must not overlap neighboring actions or rows').toBe(false)
   }
   // Check visible glyph bounds, including wrapped translations.
-  const fits = await control.evaluate(async el => {
+  const overflow = await control.evaluate(async el => {
     await document.fonts.ready
     const button = el.getBoundingClientRect(), walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    const overflow: { text: string | null; parent: string; clip: string; clipPath: string; button: DOMRect; textBox: DOMRect }[] = []
     let node: Node | null
     while ((node = walker.nextNode())) {
       if (getComputedStyle(node.parentElement!).visibility === 'hidden') continue
       const range = document.createRange(); range.selectNodeContents(node)
       for (const rect of range.getClientRects()) {
-        if (rect.left < button.left - .5 || rect.right > button.right + .5 || rect.top < button.top - .5 || rect.bottom > button.bottom + .5) return false
+        if (rect.left < button.left - .5 || rect.right > button.right + .5 || rect.top < button.top - .5 || rect.bottom > button.bottom + .5) {
+          const style = getComputedStyle(node.parentElement!)
+          overflow.push({ text: node.textContent, parent: node.parentElement!.outerHTML, clip: style.clip, clipPath: style.clipPath, button: button.toJSON(), textBox: rect.toJSON() })
+        }
       }
     }
-    return true
+    return overflow
   })
-  expect(fits, 'visible reveal labels fit without clipping or overflowing').toBe(true)
+  expect(overflow, 'visible reveal labels fit without clipping or overflowing').toEqual([])
 }
 for (const device of [{ width: 390, coarse: true }, { width: 1024, coarse: true }, { width: 1440, coarse: false }]) for (const theme of ['light', 'dark'] as const) {
   test.describe(`reveal sizing ${device.width} ${device.coarse ? 'coarse' : 'fine'} ${theme}`, () => {
