@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/nativecontract"
@@ -175,7 +176,25 @@ func TestControllerEpochFencesConcurrentAttach(t *testing.T) {
 	if err != nil || current.ExpiresInMS != 30000 {
 		t.Fatalf("renew: %v", err)
 	}
+	check := func(bound nativecontract.Binding) error {
+		return db.InTenant(f.ctx(t, f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+			if err := agentpairing.Lock(f.ctx(t, f.person), tx); err != nil {
+				return err
+			}
+			return f.s.CheckControlTx(f.ctx(t, f.person), tx, f.person, bound, current.Controller.Epoch, current.ViewerID, *current.ControlCapability)
+		})
+	}
+	if err = check(f.binding); err != nil {
+		t.Fatal("final control claim: ", err)
+	}
+	f.authority.revoked.Store(true)
+	expectFailure(t, check(f.binding), 403, nativecontract.ReasonPermissionRevoked)
+	f.authority.revoked.Store(false)
+	wrongBinding := f.binding
+	wrongBinding.RuntimeEpoch = "20000000-0000-4000-8000-000000000001"
+	expectFailure(t, check(wrongBinding), 409, nativecontract.ReasonWrongGeneration)
 	f.now = f.now.Add(LeaseTTL)
+	expectFailure(t, check(f.binding), 410, nativecontract.ReasonControllerExpired)
 	_, err = f.s.Renew(f.ctx(t, f.person), actor(f.person), renew, *a.out.ControlCapability)
 	expectFailure(t, err, 410, nativecontract.ReasonControllerExpired)
 	fresh, err := f.s.Attach(f.ctx(t, f.other), actor(f.other), second)
