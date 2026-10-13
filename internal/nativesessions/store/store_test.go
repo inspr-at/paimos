@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -207,7 +208,17 @@ func TestStartClaimRevocationBarrier(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'native_no_start','Native without start') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['nodes.read','harness.read','harness.worker','harness.control'])`, f.person.TenantID, role); err != nil {
+		permissions, ok := authz.BuiltinPermissions("admin")
+		if !ok {
+			t.Fatal("admin role missing")
+		}
+		kept := make([]string, 0, len(permissions))
+		for _, permission := range permissions {
+			if permission != "run.create" {
+				kept = append(kept, permission)
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.person.TenantID, role, kept); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.person.ID, role)
