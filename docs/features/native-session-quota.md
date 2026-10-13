@@ -142,6 +142,15 @@ review remain required before integration or release.
 
 - PASS: initial guarded mbp2606 Go run of `./internal/nativequota/...` on
   `fce23905b`; all four named cases and their subcases passed (0.250 s).
+- PASS: final-source guarded mbp2606 Go run on `05dbc1069`; all four named
+  cases passed, including native turn/cursor changes (0.353 s).
+- PASS: negative control on a temporary branch from that final source, with
+  the freshness deadline check disabled. The named clock test failed on its
+  exact stale-reading assertion for both Claude and Codex (exit 1). After
+  guarded remote refusal for load 18 > 12, this was one permitted local
+  `GOMAXPROCS=2 go test -p 2` package run. The delivery branch was restored and
+  both worker-created temporary refs removed; no mutant commit is in delivery
+  history.
 - PASS: affected planner against refreshed `origin/main`, exit 0,
   `mode=essential`, `layout=full`; selected 128 Go packages, 80 browser specs and
   120 web unit files from the current manifests. `nativequota` awaits R0 rows.
