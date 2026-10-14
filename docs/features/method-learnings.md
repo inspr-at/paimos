@@ -26,7 +26,7 @@ People may undo it. Accept and draft remain person-only; older person dismiss
 requests without a reason remain valid.
 
 At the next server startup, each instance clears pre-release open sources
-without any recommendation. Migration 1627 records a fixed cutoff for existing
+without any recommendation. Migration 1350 records a fixed cutoff for existing
 tenants; startup records one for new tenants. Cleanup runs under each tenant's
 System principal, in bounded batches and separate item transactions, logs counts
 per project, and writes the normal undoable dismissal event with the reason:
