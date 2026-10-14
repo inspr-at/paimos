@@ -558,6 +558,21 @@ func TestPreparedLessonProjectionVisibilityAndDecision(t *testing.T) {
 	if restored := f.page(t, f.person, 1, nil); len(restored.Items) != 1 || restored.Items[0].ID != item.ID {
 		t.Fatalf("lesson identity moved: %+v", restored)
 	}
+	held := f.ask(t, f.project, "parked", []string{f.ticket})
+	firstPage := f.page(t, f.person, 1, nil)
+	if !firstPage.HasMore || firstPage.Items[0].ID != held.ID || firstPage.Counts.Open != 2 || firstPage.Counts.Lessons[f.project] != 1 {
+		t.Fatalf("lesson total depends on loaded page: %+v", firstPage)
+	}
+	after, err := decodeCursor(firstPage.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextPage := f.page(t, f.person, 1, after)
+	if len(nextPage.Items) != 1 || nextPage.Items[0].ID != item.ID || nextPage.Counts.Lessons[f.project] != 1 {
+		t.Fatalf("lesson lost on continuation: %+v", nextPage)
+	}
+	f.decide(t, held, "Continue.")
+
 	call("POST", "/api/knowledge/learnings/"+source+"/dismiss", map[string]any{})
 	if settled := f.page(t, f.person, 1, nil); settled.Counts.Open != 0 {
 		t.Fatalf("dismissed lesson stayed open: %+v", settled)

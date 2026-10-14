@@ -154,6 +154,8 @@ export async function readDeskProjection(limit = 100, cursor?: string, signal?: 
     ![page.counts.open, page.counts.held, page.counts.chores].every(n => Number.isSafeInteger(n) && n >= 0) || typeof page.has_more !== 'boolean') {
     throw new Error('Decision Desk returned an invalid projection. Try again.')
   }
+  const lessons = page.counts.lessons
+  if (lessons !== undefined && (lessons === null || typeof lessons !== 'object' || Array.isArray(lessons) || Object.keys(lessons).length > 1000 || !Object.values(lessons).every(count => Number.isSafeInteger(count) && count >= 0))) throw new Error('Decision Desk returned invalid lesson totals.')
   return page
 }
 
