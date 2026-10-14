@@ -809,7 +809,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .desk-btn.ghost.slot { visibility: hidden; }
 @media (hover: hover) { .desk-btn.ghost:hover:not(:disabled) { background: var(--btn-bg-hover); box-shadow: var(--shadow-btn-hover); } }
 .desk-btn :deep(.keycap) { margin-left: 2px; }
-.desk-btn.primary { min-width: 212px; background: var(--brass); color: var(--brass-ink); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 8px 18px -10px rgba(0, 0, 0, .7); }
+.desk-btn.primary { min-width: 212px; background: var(--brass), var(--brass-solid); color: var(--brass-ink); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 8px 18px -10px rgba(0, 0, 0, .7); }
 .desk-btn.primary :deep(.keycap) { background: rgba(255, 255, 255, .35); box-shadow: inset 0 0 0 1px rgba(42, 28, 4, .25); color: var(--brass-ink); }
 @media (hover: hover) { .desk-btn.primary:hover:not([aria-disabled="true"]) { filter: brightness(1.05); } }
 /* Decide while it can't decide yet: muted, but it still answers a click with its reason. */
@@ -854,7 +854,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .memo-headtext { display: grid; gap: 10px; min-width: 0; align-content: start; }
 /* Where the stamp lands: a fixed slot at the top right; the stamp only ever moves by transform. */
 .stamp-slot { display: grid; place-items: center; min-height: 92px; }
-.stamp-big { --t: var(--ok); grid-area: 1 / 1; display: inline-flex; align-items: center; padding: 11px 16px; border: 2.5px solid var(--t); border-radius: 6px; background: color-mix(in srgb, var(--t) 7%, var(--paper)); box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 4.5px color-mix(in srgb, var(--t) 80%, transparent); color: var(--t); font: 800 17px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; white-space: nowrap; transform: rotate(-8deg); }
+.stamp-big { --t: var(--ok); grid-area: 1 / 1; display: inline-flex; align-items: center; padding: 11px 16px; border: 2.5px solid var(--t); border-radius: 6px; background: color-mix(in srgb, var(--t) 7%, var(--paper)); box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 4.5px color-mix(in srgb, var(--t) 80%, transparent); color: color-mix(in srgb, var(--t) 80%, var(--ink)); font: 800 17px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; white-space: nowrap; transform: rotate(-8deg); }
 .stamp-big.empty { --t: var(--ink-3); border-style: dashed; border-color: color-mix(in srgb, var(--ink-3) 70%, transparent); background: transparent; box-shadow: none; font-size: 12px; font-weight: 600; letter-spacing: .14em; }
 .stamp-big.landed { background: color-mix(in srgb, var(--t) 14%, var(--paper)); }
 @media (prefers-reduced-motion: no-preference) {
@@ -964,7 +964,7 @@ a.res-key:hover { text-decoration: underline; }
 /* Stamps: what the answer becomes. The chosen one is inked; its line below never changes size. */
 .stamps { display: grid; gap: 10px; }
 .stamp-row { display: flex; flex-wrap: wrap; gap: 10px 12px; }
-.stamp { --t: var(--ink-2); position: relative; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border: 1.5px solid var(--t); border-radius: 5px; background: transparent; box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 3px color-mix(in srgb, var(--t) 60%, transparent); color: var(--t); font: 700 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
+.stamp { --t: var(--ink-2); position: relative; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border: 1.5px solid var(--t); border-radius: 5px; background: transparent; box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 3px color-mix(in srgb, var(--t) 60%, transparent); color: color-mix(in srgb, var(--t) 80%, var(--ink)); font: 700 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
 @media (prefers-reduced-motion: no-preference) { .stamp { transition: color .2s ease, border-color .2s ease, background-color .2s ease, box-shadow .2s ease, opacity .2s ease; } }
 .stamp[aria-checked="false"] { --t: var(--ink-3); }
 @media (hover: hover) { .stamp:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { --t: var(--ink-2); } }
