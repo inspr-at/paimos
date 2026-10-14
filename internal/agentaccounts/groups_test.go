@@ -135,7 +135,9 @@ func TestNativeRootsFenceWorkerAliasAndProjectOwnClaim(t *testing.T) {
 			return nil
 		})
 		status, raw := call(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, "daemon-b", []Account{alias}, map[string]int64{"requests": 1}))
-		if status != 409 || !strings.Contains(string(raw), "capacity") {
+		// The route's existing public refusal is deliberately generic. The
+		// preceding WaitForRun assertion proves the precise capacity cause.
+		if status != 409 || strings.TrimSpace(string(raw)) != `{"error":"no eligible account"}` {
 			t.Fatalf("%s: wrong worker refusal %d %s", state, status, raw)
 		}
 		status, raw = call(t, mod, &admin, "", "POST", "/api/agent-accounts/"+first.ID+"/archive", "")
