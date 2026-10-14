@@ -127,7 +127,7 @@ func newPairedStartFixture(t *testing.T) (*startFixture, pairedGrantAuthority) {
  capacity_signals=(SELECT capacity_signals FROM agent_pairing_computers WHERE daemon_id='daemon-native'),capacity_reported_at=$3 WHERE id=$1`, f.intent.ComputerID, f.daemon.LedgerGeneration, f.now); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=true,last_daemon_generation=$3,linked_at=$2 WHERE id=$1`, f.intent.AccountID, f.now, f.daemon.DaemonGeneration); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=true,last_daemon_generation=$3,linked_at=$2,owner_person_id=$4,link_revision=1 WHERE id=$1`, f.intent.AccountID, f.now, f.daemon.DaemonGeneration, f.person.ID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `DELETE FROM account_capacity_schedules WHERE account_id=$1`, f.intent.AccountID); err != nil {
