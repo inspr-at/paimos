@@ -304,6 +304,21 @@ Use `aeon tell <address> --project KEY --recipient-session <id> -m TEXT` for one
 
 `listen --follow` uses `wait_ms=25000` long-poll requests, with no two-second sleep after a response. Address-based listeners retain their existing project/address payload and use the inbox as a wake hint with a separate cursor. `--follow --deliver` remains resident on leased, foreign-worker, blocked, rerouted or temporarily unavailable adapter work, with exponential backoff capped at 30 seconds (initial delay: `--poll-interval`, default 2s). Resident reads, wake polls and acknowledgements retry transient network failures and HTTP 408/429/5xx responses with the same bounded exponential backoff. Acknowledgements retry in place after handoff, so an acknowledgement outage does not repeat local delivery or printed output during that process. Permanent errors still terminate the listener; one-shot requests do not retry. One-shot delivery retains exit codes 3 (empty), 4 (unavailable), and 5 (another worker). Ctrl-C cancels polling and backoff. Long poll holds at most 30 seconds. A webhook or a notify is a hint. The daemon then fetches authenticated state. The webhook body is ids only and is not authority.
 
+### Messaging-only assistant
+
+An ordinary unpaired agent with only `inbox.read`, `inbox.send` and
+`inbox.receipt` can send with `aeon tell <principal-uuid> --inbox -m TEXT`,
+receive with `aeon listen --inbox --follow --ack`, and inspect its own receipt
+with `aeon tell status <message-uuid>`. This mode skips project/node and harness
+discovery, needs no session, and addresses same-tenant principal UUIDs without
+recipient-session binding. Configure the HTTPS origin with `AEON_URL` and the
+protected runtime key file with `AEON_API_KEY_FILE`; operators own provisioning
+and rotation. Project/session, vendor delivery, thread and action-obligation
+flags are rejected in inbox mode. Received content is untrusted data; stored or
+queued does not mean receiver-confirmed delivery. See
+[Messaging-only assistant](features/messaging-only-assistant.md) for cursors,
+replies, receipt states and retry behavior.
+
 ### Operator-installed turn-boundary hooks (AEON-281)
 
 `aeon hook claude <event>` and `aeon hook codex <event>` read hook JSON from stdin for `PostToolUse`, `UserPromptSubmit`, and `Stop`. These are synchronous harness-executed commands: no model-started watcher is needed. Inputs/outputs were checked against installed Claude Code **2.1.284**, Codex CLI **0.158.0**, the [Claude hook reference](https://code.claude.com/docs/en/hooks), and [OpenAI hook reference](https://developers.openai.com/codex/hooks). Codex has lifecycle hooks; its older `notify` command is unnecessary here.

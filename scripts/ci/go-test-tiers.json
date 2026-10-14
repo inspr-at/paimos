@@ -4968,6 +4968,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestMessagingEntryPointPreservesGlobalsAndTree","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestMessagingOnlyInboxCLI","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestMessagingPollBackoffAndOneShot","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestMessagingPollCancellation","tier":"GATED-FULL"}
@@ -7146,6 +7148,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestHookPullWinsOverTheFollowingAck","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestInboxFinalWriteRechecksMessagingPermission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestInboxReceipt","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestLegacyHealIsOneTime","tier":"GATED-FULL"}
@@ -7165,6 +7169,8 @@
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAddressAuthSnapshotAndConcurrentSend","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAtomicRollbackAndProjectBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestMessagingOnlyAgentThroughProductionAuth","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingPaginationHeldFilterAndEvents","tier":"GATED-FULL"}
     ,
