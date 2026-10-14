@@ -16,11 +16,11 @@ import (
 
 func TestTaggerWritesSystemEvent(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-36", "work", "Keep the other fields", &f.project)
+	ticket := addNode(t, f, "DONE-36", "work", "Incident: Keep the other fields", &f.project)
 	setFields(t, f, ticket, map[string]any{"priority": "low", "tags": []any{"ops"}})
 	closeAged(t, f, ticket, "done", "1 hour")
-	open := addNode(t, f, "OPEN-36", "work", "Incident on an open ticket", &f.project)
-	addComment(t, f, open, "The incident stayed on the open ticket.")
+	open := addNode(t, f, "OPEN-36", "work", "Open ticket", &f.project)
+	addComment(t, f, open, "#process-learning The incident stayed on the open ticket.")
 
 	n, err := TagOnce(t.Context(), f.db.App)
 	if err != nil || n != 2 {
@@ -101,72 +101,48 @@ func jsonField(t *testing.T, raw []byte, key string) []byte {
 
 func TestTaggerWithoutOutcomeTable(t *testing.T) {
 	f := setup(t)
-	recent := addNode(t, f, "DONE-1", "work", "Rotate the tokens", &f.project)
+	recent := addNode(t, f, "DONE-1", "work", "Incident: Rotate the tokens", &f.project)
 	closeAged(t, f, recent, "done", "1 hour")
-	stale := addNode(t, f, "DONE-2", "work", "Too old to nominate", &f.project)
+	stale := addNode(t, f, "DONE-2", "work", "Incident: Too old", &f.project)
 	closeAged(t, f, stale, "done", "48 hours")
-	open := addNode(t, f, "OPEN-1", "work", "Still open", &f.project)
-	task := addNode(t, f, "TASK-9", "task", "Closed task", &f.project)
-	closeAged(t, f, task, "done", "1 hour")
-
-	verdict := addComment(t, f, recent, "VERDICT pass. The rotation held.")
-	lower := addComment(t, f, recent, "the verdict was informal")
+	routine := addNode(t, f, "DONE-3", "work", "Routine delivery", &f.project)
+	closeAged(t, f, routine, "done", "1 hour")
+	verdict := addComment(t, f, recent, "VERDICT changes round 3. Routine gate status.")
 	incident := addComment(t, f, recent, "The incident stopped the deploy.")
-	side := addComment(t, f, recent, "An incidental remark about naming.")
-	tagged := addComment(t, f, recent, "#process-learning The incident was already tagged.")
+	tagged := addComment(t, f, recent, "#process-learning Check the rollback before deploying.")
 	hideOutcomeTable(t, f)
-
 	n, err := TagOnce(t.Context(), f.db.App)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || n != 2 {
+		t.Fatalf("nominated %d %v", n, err)
 	}
-	if n != 3 {
-		t.Fatalf("nominated %d", n)
+	if origin, excerpt, ok := nominationOfKey(t, f, nodeLearningID(recent)); !ok || origin != "closed_ticket" || excerpt != "Incident: Rotate the tokens" {
+		t.Fatalf("recent %s %s %v", origin, excerpt, ok)
 	}
-	if origin, excerpt, ok := nominationOfKey(t, f, nodeLearningID(recent)); !ok || origin != "closed_ticket" || excerpt != "Rotate the tokens" || !nodeTagged(t, f, recent) {
-		t.Fatalf("recent %q %q %v tagged %v", origin, excerpt, ok, nodeTagged(t, f, recent))
-	}
-	for _, id := range []string{stale, open, task} {
+	for _, id := range []string{stale, routine} {
 		if nodeTagged(t, f, id) {
 			t.Fatalf("tagged %s", id)
 		}
-		if _, _, ok := nominationOfKey(t, f, nodeLearningID(id)); ok {
-			t.Fatalf("nominated %s", id)
-		}
 	}
-	if origin, _, ok := nominationOfKey(t, f, commentLearningID(recent, verdict)); !ok || origin != "review_verdict" {
-		t.Fatalf("verdict comment %q %v", origin, ok)
-	}
-	for _, id := range []string{lower, side, tagged} {
+	for _, id := range []string{verdict, incident} {
 		if _, _, ok := nominationOfKey(t, f, commentLearningID(recent, id)); ok {
-			t.Fatalf("nominated comment %s", id)
+			t.Fatalf("nominated noise comment %s", id)
 		}
 	}
-	if decisionCount(t, f) != 0 {
-		t.Fatal("tagger wrote a decision")
+	if _, _, ok := nominationOfKey(t, f, commentLearningID(recent, tagged)); !ok {
+		t.Fatal("explicit comment missing")
 	}
-	if !verdictsNull(t, f) {
-		t.Fatal("missing outcome table advanced verdicts_until")
+	if decisionCount(t, f) != 0 || !verdictsNull(t, f) {
+		t.Fatal("tagger decided a learning or advanced absent verdict source")
 	}
 	again, err := TagOnce(t.Context(), f.db.App)
 	if err != nil || again != 0 {
 		t.Fatalf("second pass %d %v", again, err)
 	}
-	page := listLearningsHTTP(t, f, f.a, f.project)
-	incidentID := commentLearningID(recent, incident)
-	if !hasLearning(page.Items, incidentID) {
-		t.Fatal("incident comment missing from the inbox")
-	}
-	w := call(t, f, f.a, "POST", "/api/knowledge/learnings/"+incidentID+"/dismiss", map[string]any{})
-	expect(t, w, 200)
-	if decisionOf(t, f, incidentID) != "dismissed" {
-		t.Fatalf("dismiss %q", decisionOf(t, f, incidentID))
-	}
 }
 
 func TestTaggerSingleRunner(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-3", "work", "Wait for the lock", &f.project)
+	ticket := addNode(t, f, "DONE-3", "work", "Incident: Wait for the lock", &f.project)
 	closeAged(t, f, ticket, "done", "1 hour")
 	conn, err := f.db.App.Acquire(t.Context())
 	if err != nil {
@@ -198,8 +174,8 @@ func TestTaggerBatchCursor(t *testing.T) {
 	previous := taggerBatch
 	taggerBatch = 1
 	t.Cleanup(func() { taggerBatch = previous })
-	older := addNode(t, f, "DONE-4", "work", "Older closed ticket", &f.project)
-	newer := addNode(t, f, "DONE-5", "work", "Newer closed ticket", &f.project)
+	older := addNode(t, f, "DONE-4", "work", "Incident: Older closed ticket", &f.project)
+	newer := addNode(t, f, "DONE-5", "work", "Incident: Newer closed ticket", &f.project)
 	closeAged(t, f, older, "done", "2 hours")
 	closeAged(t, f, newer, "done", "1 hour")
 	n, err := TagOnce(t.Context(), f.db.App)
@@ -215,9 +191,9 @@ func TestTaggerBatchCursor(t *testing.T) {
 func TestTaggerOutcomeVerdicts(t *testing.T) {
 	f := setup(t)
 	ticket := addNode(t, f, "REV-1", "work", "Review the rotation", &f.project)
-	insertOutcome(t, f, f.project, ticket, `{"verdict":"pass","summary":"The rotation held"}`, "")
-	verdict := addComment(t, f, ticket, "VERDICT pass in the thread.")
-	incident := addComment(t, f, ticket, "The incident page is the source.")
+	insertOutcome(t, f, f.project, ticket, `{"verdict":"changes","round":3,"summary":"The rotation held"}`, "")
+	verdict := addComment(t, f, ticket, "VERDICT changes round 3 in the thread.")
+	incident := addComment(t, f, ticket, "#process-learning The incident page is the source.")
 	n, err := TagOnce(t.Context(), f.db.App)
 	if err != nil {
 		t.Fatal(err)

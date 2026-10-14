@@ -284,6 +284,12 @@
     ,
     "browser:tests/aeon-1279-touch-scroll.spec.ts:ticket list 390: a swipe never resizes the page; a ticket closed elsewhere leaves without moving the rows on screen"
     ,
+    "browser:tests/aeon-1285-agent-rows.spec.ts:dark 1440: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
+    ,
+    "browser:tests/aeon-1285-agent-rows.spec.ts:dark 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
+    ,
+    "browser:tests/aeon-1285-agent-rows.spec.ts:light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -5985,6 +5991,16 @@
     {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"light 390: the footer folds away over the page; the page's scroller never changes size while scrolling","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"ticket list 390: a swipe never resizes the page; a ticket closed elsewhere leaves without moving the rows on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"a failure retried while the page is open keeps its place, names the retry, then moves to Ended","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"dark 1440: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"dark 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"light 1440: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14628,6 +14644,10 @@
     ,
     {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/access-module-split.test.ts","name":"Access loads one tab at a time, and agent sheets load when opened","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/access-module-split.test.ts","name":"test-mode Vite closes each module response; dev mode and the HMR upgrade keep their connection","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/access.test.ts","name":"Full access includes mixed workspace/project role scopes without promoting workspace-only project permissions","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"Ticket worker includes activity history only within creator, role and registry ceilings","tier":"GATED-FULL"}
@@ -14922,7 +14942,7 @@
     ,
     {"kind":"node","file":"tests/agent-signals.test.ts","name":"explicit fresh false beats fallback evidence; only a new heartbeat clears age warnings","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/agent-signals.test.ts","name":"failure detail preserves the exact stop reason and bound run outcome","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/agent-signals.test.ts","name":"failure detail says how the session failed in words, never the reported text, and keeps the bound run outcome","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-signals.test.ts","name":"failures and blocked/error stops lead requests, throttling and terminal phase","tier":"GATED-FULL"}
     ,
@@ -14936,11 +14956,15 @@
     ,
     {"kind":"node","file":"tests/agent-signals.test.ts","name":"shared principal attention never blocks working siblings or changes person-action labels","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/agent-signals.test.ts","name":"stop reasons read as words with what to do; an unknown one reads Stopped","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-signals.test.ts","name":"throttling has a distinct state and requests use a clock even when work continues","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-signals.test.ts","name":"viewer preferences validate palette, dimming and ordered integer thresholds","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-signals.test.ts","name":"warning boundaries are inclusive at three and ten minutes, not at two","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/agentState.test.ts","name":"a failed attempt with a newer attempt in its run family reads Ended and names the retry","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"a finished session sits with the ended ones; one that only went quiet at 100% keeps its heartbeat state (AEON-437)","tier":"GATED-FULL"}
     ,
@@ -15421,6 +15445,8 @@
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"mandatory labels clamp to the viewport edge","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"only a point inside the canvas can be picked","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/graph-renderer.test.ts","name":"porcelain glimpse orbs stay above the header shot threshold","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"smart labels try alternative positions and reject a fully occupied screen","tier":"GATED-FULL"}
     ,
@@ -17157,6 +17183,8 @@
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision null unavailable","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"turns an account_matrix projection row into a settings link-out without a source warning","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"preselects Once for an unavailable suggestion and disables Decide with the reason","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}
     ,

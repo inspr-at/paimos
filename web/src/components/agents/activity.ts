@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { SessionView } from '../../stores/agents'
 import type { CurrentAgentActivity } from '../../lib/agentRows'
-import { STATE_LABEL } from '../../lib/agentSignals.ts'
+import { STATE_LABEL, stopReasonSentence } from '../../lib/agentSignals.ts'
 import { cleanActivityNote, safeActivityText } from '../../lib/activityPrivacy.ts'
 
 export interface ActivityEntry { note: string; at: string }
@@ -14,7 +14,8 @@ export function currentStep(view: SessionView, workers = 0, now = Date.now()) {
   const note = currentActivity(view, now) || (mode === undefined || mode === 'agent_summary' ? cleanActivityNote(activityOf(view).activity_note) : '')
   if (note) return note
   if (view.status.state === 'done') return 'All work reported'
-  if (view.status.group === 'stopped') return view.status.label === STATE_LABEL.stopped ? 'Session ended' : view.status.label
+  // How it ended in words, never the reported code (AEON-1285).
+  if (view.status.group === 'stopped') return view.status.label === STATE_LABEL.stopped ? stopReasonSentence(view.session.stop_reason) || 'Session ended' : view.status.label
   if (view.status.group === 'idle') return view.status.state === 'stale' ? 'Waiting for a heartbeat' : 'Waiting for work'
   if (view.status.state === 'throttled') return view.session.vendor_limited ? view.status.label : 'Paused by pacing or allowance'
   if (view.status.state === 'problem') return 'The service reported a problem without a visible reason.'

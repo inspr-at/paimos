@@ -16,8 +16,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -25,7 +27,7 @@ import (
 // A recommendation is accept (a lesson line and a target entry) or dismiss
 // (a reason). It is stored once per learning, replaced in place, recorded as
 // knowledge.learning_recommended, and never applies anything: a person
-// applies it through the accept and dismiss routes, which stay person-only.
+// applies it through accept or draft. Agents may dismiss noise with a reason.
 const (
 	evLearningRecommended = "knowledge.learning_recommended"
 	maxLessonRunes        = 240
@@ -42,6 +44,11 @@ type Recommendation struct {
 	Decision       string    `json:"decision"`
 	KnowledgeID    string    `json:"knowledge_id,omitempty"`
 	KnowledgeTitle string    `json:"knowledge_title,omitempty"`
+	SourceSummary  string    `json:"source_summary,omitempty"`
+	Line           string    `json:"line,omitempty"`
+	RuleLayerID    string    `json:"rule_layer_id,omitempty"`
+	RuleText       string    `json:"rule_text,omitempty"`
+	Prepared       bool      `json:"prepared"`
 	Lesson         string    `json:"lesson,omitempty"`
 	Reason         string    `json:"reason,omitempty"`
 	By             *Person   `json:"by"`
@@ -53,22 +60,27 @@ type Recommendation struct {
 
 // recommendationAudit is the learning_recommended after-image.
 type recommendationAudit struct {
-	SourceKey   string `json:"source_key"`
-	ProjectID   string `json:"project_id"`
-	NodeID      string `json:"node_id"`
-	CommentID   string `json:"comment_id,omitempty"`
-	Decision    string `json:"decision"`
-	KnowledgeID string `json:"knowledge_id,omitempty"`
-	Lesson      string `json:"lesson,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	Text        string `json:"text"`
+	SourceKey     string `json:"source_key"`
+	ProjectID     string `json:"project_id"`
+	NodeID        string `json:"node_id"`
+	CommentID     string `json:"comment_id,omitempty"`
+	Decision      string `json:"decision"`
+	KnowledgeID   string `json:"knowledge_id,omitempty"`
+	Lesson        string `json:"lesson,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	Text          string `json:"text"`
+	SourceSummary string `json:"source_summary,omitempty"`
+	Line          string `json:"line,omitempty"`
+	RuleLayerID   string `json:"rule_layer_id,omitempty"`
 }
 
 type recommendationInput struct {
-	Decision    string
-	KnowledgeID string
-	Lesson      string
-	Reason      string
+	Decision      string
+	KnowledgeID   string
+	Lesson        string
+	Reason        string
+	SourceSummary string
+	RuleLayerID   string
 }
 
 // ---------- Text bounds ----------
@@ -156,7 +168,7 @@ func parseRecommendation(raw map[string]json.RawMessage) (recommendationInput, e
 	var in recommendationInput
 	for key := range raw {
 		switch key {
-		case "decision", "knowledge_id", "lesson", "reason":
+		case "decision", "knowledge_id", "lesson", "reason", "source_summary", "rule_layer_id":
 		default:
 			return in, fail(http.StatusBadRequest, "invalid_request", "unknown field "+key)
 		}
@@ -172,6 +184,23 @@ func parseRecommendation(raw map[string]json.RawMessage) (recommendationInput, e
 	}
 	if in.Reason, err = plainReason(reason); err != nil {
 		return in, err
+	}
+	summary, _, err := stringField(raw, "source_summary")
+	if err != nil {
+		return in, err
+	}
+	if in.SourceSummary, err = plainReason(summary); err != nil {
+		return in, fail(http.StatusBadRequest, "invalid_request", "source_summary is longer than 500 characters")
+	}
+	layer, hasLayer, err := stringField(raw, "rule_layer_id")
+	if err != nil {
+		return in, err
+	}
+	if hasLayer {
+		if in.Decision != "accept" || !validUUID(layer) {
+			return in, fail(http.StatusBadRequest, "invalid_request", "rule_layer_id requires an accept recommendation and a UUID")
+		}
+		in.RuleLayerID = strings.ToLower(layer)
 	}
 	switch in.Decision {
 	case "accept":
@@ -317,15 +346,25 @@ func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publ
 			return err
 		}
 		var ranges []SensitiveRange
+		ranges = append(ranges, sensitiveRanges("text", item.Text)...)
 		ranges = append(ranges, sensitiveRanges("lesson", in.Lesson)...)
 		ranges = append(ranges, sensitiveRanges("reason", in.Reason)...)
+		ranges = append(ranges, sensitiveRanges("source_summary", in.SourceSummary)...)
 		if len(ranges) > 0 {
 			return sensitiveLearning(ranges)
 		}
 		title := ""
 		if in.Decision == "accept" {
-			if title, err = recommendTarget(ctx, tx, p.TenantID, in.KnowledgeID, item.projectID); err != nil {
-				return err
+			if in.RuleLayerID != "" {
+				if in.Lesson == "" {
+					return fail(http.StatusBadRequest, "invalid_request", "lesson is required for a rule draft")
+				}
+				title, err = rules.LockLearningTarget(ctx, tx, p, in.RuleLayerID, in.KnowledgeID, item.projectID)
+			} else {
+				title, err = recommendTarget(ctx, tx, p.TenantID, in.KnowledgeID, item.projectID)
+			}
+			if err != nil {
+				return asKnowledgeRule(err)
 			}
 		}
 		// Lock order: tenant and tree (the fence), the learning's advisory
@@ -333,7 +372,7 @@ func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publ
 		// recommendation references (key-share, so foreign keys find them
 		// held), then the recommendation row, and the event counter last.
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM nodes WHERE tenant_id=$1 AND id = ANY($2::uuid[]) ORDER BY id FOR KEY SHARE`,
-			p.TenantID, nonEmpty(item.projectID, in.KnowledgeID)); err != nil {
+			p.TenantID, nonEmpty(item.projectID, in.KnowledgeID, in.RuleLayerID)); err != nil {
 			return err
 		}
 		var byName string
@@ -342,14 +381,22 @@ func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publ
 		}
 		var before json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT json_build_object('decision', decision, 'knowledge_id', knowledge_id, 'lesson', lesson,
-		    'reason', reason, 'text', learning_text, 'recommended_by', recommended_by, 'event_id', event_id)
+		    'reason', reason, 'source_summary', source_summary, 'changelog_line', changelog_line, 'rule_layer_id', rule_layer_id, 'text', learning_text, 'recommended_by', recommended_by, 'event_id', event_id)
 		  FROM method_learning_recommendations WHERE tenant_id=$1 AND source_key=$2 FOR UPDATE`, p.TenantID, publicID).Scan(&before)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		var date string
+		if err := tx.QueryRow(ctx, `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD')`).Scan(&date); err != nil {
+			return err
+		}
+		line := ""
+		if in.Decision == "accept" && in.RuleLayerID == "" && in.Lesson != "" {
+			line = learningLine(date, in.Lesson, item.Key, item.Href)
+		}
 		change := events.Change{NodeID: &item.NodeID, Type: evLearningRecommended, After: recommendationAudit{
 			SourceKey: publicID, ProjectID: item.projectID, NodeID: item.NodeID, CommentID: item.CommentID,
-			Decision: in.Decision, KnowledgeID: in.KnowledgeID, Lesson: in.Lesson, Reason: in.Reason, Text: item.Text,
+			Decision: in.Decision, KnowledgeID: in.KnowledgeID, Lesson: in.Lesson, Reason: in.Reason, Text: item.Text, SourceSummary: in.SourceSummary, Line: line, RuleLayerID: in.RuleLayerID,
 		}}
 		if before != nil {
 			change.Before = before
@@ -359,19 +406,24 @@ func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publ
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO method_learning_recommendations
-		    (tenant_id, source_key, project_id, decision, knowledge_id, lesson, reason, learning_text, recommended_by, event_id, recommended_at)
-		  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		    (tenant_id, source_key, project_id, decision, knowledge_id, lesson, reason, learning_text, recommended_by, event_id, recommended_at, source_summary, changelog_line, rule_layer_id)
+		  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		  ON CONFLICT (tenant_id, source_key) DO UPDATE SET
 		    project_id=EXCLUDED.project_id, decision=EXCLUDED.decision, knowledge_id=EXCLUDED.knowledge_id,
 		    lesson=EXCLUDED.lesson, reason=EXCLUDED.reason, learning_text=EXCLUDED.learning_text,
-		    recommended_by=EXCLUDED.recommended_by, recommended_at=EXCLUDED.recommended_at, event_id=EXCLUDED.event_id`,
+		    recommended_by=EXCLUDED.recommended_by, recommended_at=EXCLUDED.recommended_at, event_id=EXCLUDED.event_id,
+            source_summary=EXCLUDED.source_summary, changelog_line=EXCLUDED.changelog_line, rule_layer_id=EXCLUDED.rule_layer_id`,
 			p.TenantID, publicID, item.projectID, in.Decision, nullable(in.KnowledgeID), nullable(in.Lesson), nullable(in.Reason),
-			item.Text, p.ID, ev.ID, ev.At); err != nil {
+			item.Text, p.ID, ev.ID, ev.At, nullable(in.SourceSummary), nullable(line), nullable(in.RuleLayerID)); err != nil {
 			return err
 		}
 		out = Recommendation{
 			Decision: in.Decision, KnowledgeID: in.KnowledgeID, KnowledgeTitle: title, Lesson: in.Lesson, Reason: in.Reason,
 			By: &Person{ID: p.ID, Name: byName}, At: ev.At, EventID: ev.ID,
+			SourceSummary: in.SourceSummary, Line: line, RuleLayerID: in.RuleLayerID, Prepared: in.Decision == "accept" && in.Lesson != "" && in.SourceSummary != "",
+		}
+		if out.RuleLayerID != "" {
+			out.RuleText = out.Lesson
 		}
 		return nil
 	})
@@ -420,12 +472,12 @@ func attachRecommendations(ctx context.Context, tx pgx.Tx, tenantID, projectID s
 	}
 	rows, err := tx.Query(ctx, `SELECT r.source_key, r.decision, coalesce(r.knowledge_id::text, ''), coalesce(r.lesson, ''),
 	    coalesce(r.reason, ''), r.learning_text, r.recommended_at, r.event_id, who.id::text, who.name,
-	    coalesce(n.title, ''), (n.id IS NOT NULL AND n.deleted_at IS NULL AND proj.id IS NOT DISTINCT FROM $3::uuid)
+	    coalesce(r.source_summary,''), coalesce(r.changelog_line,''), coalesce(r.rule_layer_id::text,''), coalesce(n.title, ''), (n.id IS NOT NULL AND n.deleted_at IS NULL AND proj.id IS NOT DISTINCT FROM $3::uuid)
 	  FROM method_learning_recommendations r
 	  JOIN principals who ON who.tenant_id=r.tenant_id AND who.id=r.recommended_by
 	  LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.knowledge_id
 	  `+nearestProject+`
-	  WHERE r.tenant_id=$1 AND r.source_key = ANY($2::text[])`, tenantID, keys, projectID)
+	  WHERE r.tenant_id=$1 AND r.project_id=$3::uuid AND r.source_key = ANY($2::text[])`, tenantID, keys, projectID)
 	if err != nil {
 		return err
 	}
@@ -435,7 +487,7 @@ func attachRecommendations(ctx context.Context, tx pgx.Tx, tenantID, projectID s
 		var live bool
 		var rec Recommendation
 		if err := rows.Scan(&key, &rec.Decision, &rec.KnowledgeID, &rec.Lesson, &rec.Reason, &text, &rec.At, &rec.EventID,
-			&byID, &byName, &rec.KnowledgeTitle, &live); err != nil {
+			&byID, &byName, &rec.SourceSummary, &rec.Line, &rec.RuleLayerID, &rec.KnowledgeTitle, &live); err != nil {
 			return err
 		}
 		at, ok := index[key]
@@ -450,7 +502,48 @@ func attachRecommendations(ctx context.Context, tx pgx.Tx, tenantID, projectID s
 		}
 		items[at].Recommendation = &rec
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	for i := range items {
+		rec := items[i].Recommendation
+		if rec == nil {
+			continue
+		}
+		if rec.RuleLayerID != "" {
+			rec.RuleText = rec.Lesson
+			rec.TargetMissing = true
+			if p, ok := tenant.PrincipalFrom(ctx); ok {
+				title, err := rules.LearningTarget(ctx, tx, p, rec.RuleLayerID, rec.KnowledgeID, projectID)
+				if err == nil {
+					rec.KnowledgeTitle, rec.TargetMissing = title, false
+				} else {
+					var re *rules.Error
+					if !errors.As(err, &re) && !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, authz.ErrForbidden) {
+						return err
+					}
+				}
+			}
+		}
+		rec.Prepared = rec.Decision == "accept" && rec.Lesson != "" && rec.SourceSummary != "" && !rec.Stale && !rec.TargetMissing && (rec.Line != "" || rec.RuleLayerID != "")
+	}
+	return nil
+}
+
+// Filter before source scan limits so a large unprepared window cannot hide
+// older prepared lessons. Live source and target checks follow the scan.
+type preparedListKey struct{}
+
+func preparedClause(ctx context.Context, sourceKey string) string {
+	if ctx.Value(preparedListKey{}) != true {
+		return ""
+	}
+	return ` AND EXISTS (SELECT 1 FROM method_learning_recommendations ready
+      WHERE ready.tenant_id=n.tenant_id AND ready.project_id=$2::uuid AND ready.source_key=` + sourceKey + `
+      AND ready.decision='accept' AND btrim(coalesce(ready.lesson,''))<>''
+      AND btrim(coalesce(ready.source_summary,''))<>''
+      AND (btrim(coalesce(ready.changelog_line,''))<>'' OR ready.rule_layer_id IS NOT NULL)) `
 }
 
 func nonEmpty(values ...string) []string {

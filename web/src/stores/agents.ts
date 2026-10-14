@@ -10,7 +10,7 @@ import {
 } from '../lib/agents'
 import { cancelRun, getSession, listAllSessions, listRuns, type AgentRunRow, type HarnessSessionRow } from '../lib/agentRows'
 import { openRow, type Wire } from '../lib/wire'
-import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
+import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, retriedBy, retriedStatus, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
 import { managedControlSession } from '../lib/managedControl'
@@ -95,6 +95,8 @@ export interface NodeRef { id: string; key: string; title: string }
 export interface SessionView {
   session: HarnessSession; status: SessionStatus; name: string; harness: string; account: string; model: string
   run?: AgentRun; projectKey: string; projectTitle: string; ticket: (NodeRef & { href: string }) | null
+  /** The attempt that retried this failed one (AEON-1285); its details link there. */
+  retry?: { id: string; name: string }
 }
 export type HeldRequest = ProjectMessage & { projectId: string }
 
@@ -418,7 +420,17 @@ export const useAgents = defineStore('agents', () => {
       ticket: node && routeKey ? { id: node.id, key: node.key, title: node.title, href: `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(node.key)}` } : null,
     }
   }
-  const views = computed(() => sessions.value.filter(s => !s.archived_at).map(viewOf))
+  // A failed attempt that was retried ends in favour of its retry (AEON-1285): it reads Ended, names
+  // the retry and moves to Ended like any ended row; its own history stays in its details.
+  function withRetries(list: SessionView[], among: SessionView[] = list): SessionView[] {
+    const retries = retriedBy(among)
+    if (!retries.size) return list
+    return list.map(view => {
+      const retry = retries.get(view.session.id)
+      return retry ? { ...view, status: retriedStatus(view.session, retry.name), retry: { id: retry.session.id, name: retry.name } } : view
+    })
+  }
+  const views = computed(() => withRetries(sessions.value.filter(s => !s.archived_at).map(viewOf)))
   const removedViews = computed(() => sessions.value.filter(s => s.archived_at).map(viewOf))
   // History (AEON-291): the list reads only sessions that ended in the last 24
   // hours. Every ended or removed generation is read on demand, newest first.
@@ -471,7 +483,8 @@ export const useAgents = defineStore('agents', () => {
     const byId = new Map(historySessions.value.map(item => [item.id, item]))
     for (const item of sessions.value) if (item.stopped_at || item.archived_at || byId.has(item.id)) byId.set(item.id, item)
     const ended = (item: HarnessSession) => Date.parse(item.archived_at ?? item.stopped_at ?? item.created_at)
-    return [...byId.values()].filter(item => item.stopped_at || item.archived_at).sort((a, b) => ended(b) - ended(a)).map(viewOf)
+    const history = [...byId.values()].filter(item => item.stopped_at || item.archived_at).sort((a, b) => ended(b) - ended(a)).map(viewOf)
+    return withRetries(history, [...history, ...views.value])
   })
   const grouped = computed(() => {
     const out: Record<SessionStatus['group'], SessionView[]> = { pausing: [], paused: [], problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }

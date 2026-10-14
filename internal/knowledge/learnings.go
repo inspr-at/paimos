@@ -40,7 +40,7 @@ var (
 	incidentWord         = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_-])incident([^A-Za-z0-9_-]|$)`)
 	atxHeading           = regexp.MustCompile(`^(#{1,6})[ \t]+(.+?)\s*$`)
 	changelogWord        = regexp.MustCompile(`(?i)changelog`)
-	issueKinds           = map[string]bool{"work": true, "ticket": true, "task": true, "epic": true}
+	issueKinds           = map[string]bool{"work": true, "ticket": true, "task": true, "epic": true, "incident": true}
 )
 
 // Learning is one open method learning on the Knowledge tab.
@@ -181,7 +181,7 @@ func requirePerson(p tenant.Principal) error {
 	if p.Kind == tenant.Person {
 		return nil
 	}
-	return fail(http.StatusForbidden, "person_required", "only a person can accept or dismiss a method learning")
+	return fail(http.StatusForbidden, "person_required", "only a person can accept or draft a method learning")
 }
 
 // ---------- Changelog text ----------
@@ -407,11 +407,23 @@ func (m *module) handleListLearnings(w http.ResponseWriter, r *http.Request) {
 	var page LearningPage
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		page, err = listLearningPage(r.Context(), tx, p.TenantID, project, cursor)
+		page, err = listLearningPageFor(r.Context(), tx, p.TenantID, project, cursor, p.Kind != tenant.Agent)
 		if err != nil {
 			return err
 		}
-		return attachRecommendations(r.Context(), tx, p.TenantID, project, page.Items)
+		if err := attachRecommendations(r.Context(), tx, p.TenantID, project, page.Items); err != nil {
+			return err
+		}
+		if p.Kind != tenant.Agent {
+			kept := page.Items[:0]
+			for _, item := range page.Items {
+				if item.Recommendation != nil && item.Recommendation.Prepared {
+					kept = append(kept, item)
+				}
+			}
+			page.Items = kept
+		}
+		return nil
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -464,10 +476,6 @@ func (m *module) handleAcceptLearning(w http.ResponseWriter, r *http.Request) {
 func (m *module) handleDismissLearning(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
-		return
-	}
-	if err := requirePerson(p); err != nil {
-		writeErr(w, err)
 		return
 	}
 	nodeID, commentID, comment, err := parseLearningID(r.PathValue("learningId"))
@@ -569,6 +577,11 @@ func listLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (
 // (its horizon), so no learning from another source beyond it is listed
 // ahead of them.
 func listLearningPage(ctx context.Context, tx pgx.Tx, tenantID, projectID string, cursor *learningCursor) (LearningPage, error) {
+	return listLearningPageFor(ctx, tx, tenantID, projectID, cursor, false)
+}
+
+func listLearningPageFor(ctx context.Context, tx pgx.Tx, tenantID, projectID string, cursor *learningCursor, preparedOnly bool) (LearningPage, error) {
+	ctx = context.WithValue(ctx, preparedListKey{}, preparedOnly)
 	page := LearningPage{Items: []Learning{}}
 	var projectKey string
 	err := tx.QueryRow(ctx, `SELECT n.key FROM nodes n
@@ -580,15 +593,11 @@ func listLearningPage(ctx context.Context, tx pgx.Tx, tenantID, projectID string
 	if err != nil {
 		return page, err
 	}
-	decided, err := decidedKeys(ctx, tx, tenantID)
+	tickets, ticketsEnd, err := listTaggedIssues(ctx, tx, tenantID, projectID, projectKey, cursor)
 	if err != nil {
 		return page, err
 	}
-	tickets, ticketsEnd, err := listTaggedIssues(ctx, tx, tenantID, projectID, projectKey, decided, cursor)
-	if err != nil {
-		return page, err
-	}
-	comments, commentsEnd, err := listTaggedComments(ctx, tx, tenantID, projectID, projectKey, decided, cursor)
+	comments, commentsEnd, err := listTaggedComments(ctx, tx, tenantID, projectID, projectKey, cursor)
 	if err != nil {
 		return page, err
 	}
@@ -642,23 +651,6 @@ func AnalysisLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID strin
 	return out, err
 }
 
-func decidedKeys(ctx context.Context, tx pgx.Tx, tenantID string) (map[string]bool, error) {
-	rows, err := tx.Query(ctx, `SELECT source_key FROM method_learning_decisions WHERE tenant_id=$1`, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		out[key] = true
-	}
-	return out, rows.Err()
-}
-
 // scanEnd is the key of a scan's last row when the scan filled its limit:
 // rows after it were not read. nil when the scan reached its end.
 func scanEnd(rows int, last learningCursor) *learningCursor {
@@ -676,7 +668,7 @@ func cursorArgs(c *learningCursor) (*time.Time, string) {
 	return &c.At, c.ID
 }
 
-func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool, cursor *learningCursor) ([]Learning, *learningCursor, error) {
+func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, cursor *learningCursor) ([]Learning, *learningCursor, error) {
 	before, beforeID := cursorArgs(cursor)
 	rows, err := tx.Query(ctx, projectTree+`
 	  SELECT n.id::text, n.key, n.title, n.updated_at, n.fields, k.slug, coalesce(n.fields->>'slug','')
@@ -685,10 +677,10 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 	  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 	  `+nearestProject+`
 	  WHERE n.tenant_id=$1 AND n.deleted_at IS NULL
-	    AND k.slug IN ('work','ticket','task','epic')
+	    AND k.slug IN ('work','ticket','task','epic','incident')
 	    AND proj.id=$2::uuid
 	    AND n.fields::text ILIKE '%process-learning%'
-	    AND `+undecidedNode+`
+	    AND `+undecidedNode+preparedClause(ctx, "'n-'||n.id::text")+`
 	    AND ($3::timestamptz IS NULL OR n.updated_at < $3
 	         OR (n.updated_at = $3 AND ('n-'||n.id::text) COLLATE "C" < $4::text COLLATE "C"))
 	  ORDER BY n.updated_at DESC, ('n-'||n.id::text) COLLATE "C" DESC
@@ -709,11 +701,11 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 		}
 		item.ID = nodeLearningID(item.NodeID)
 		scanned, last = scanned+1, learningCursor{At: item.At, ID: item.ID}
-		if decided[item.ID] || !issueKinds[kind] || !hasLearningTag(fields) {
+		if !issueKinds[kind] || !hasLearningTag(fields) {
 			continue
 		}
 		item.Text = oneLine(item.Title, false)
-		if item.Text == "" {
+		if item.Text == "" || looksSensitive(item.Title) {
 			continue
 		}
 		item.Source = "ticket"
@@ -724,7 +716,7 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 	return out, scanEnd(scanned, last), rows.Err()
 }
 
-func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool, cursor *learningCursor) ([]Learning, *learningCursor, error) {
+func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, cursor *learningCursor) ([]Learning, *learningCursor, error) {
 	before, beforeID := cursorArgs(cursor)
 	rows, err := tx.Query(ctx, projectTree+`
 	  SELECT c.id::text, c.at, n.id::text, n.key, n.title, k.slug, coalesce(n.fields->>'slug',''),
@@ -748,7 +740,7 @@ func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, pro
 	    AND `+owningProject+`=$2::uuid
 	    AND coalesce(latest.after->>'deleted','false')<>'true'
 	    AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown','') ILIKE '%process-learning%'
-	    AND `+undecidedComment+`
+	    AND `+undecidedComment+preparedClause(ctx, "'c-'||n.id::text||'-'||c.id::text")+`
 	    AND ($3::timestamptz IS NULL OR c.at < $3
 	         OR (c.at = $3 AND ('c-'||n.id::text||'-'||c.id::text) COLLATE "C" < $4::text COLLATE "C"))
 	  ORDER BY c.at DESC, ('c-'||n.id::text||'-'||c.id::text) COLLATE "C" DESC
@@ -769,7 +761,7 @@ func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, pro
 		text, ok := commentLearningText(body)
 		item.ID = commentLearningID(item.NodeID, item.CommentID)
 		scanned, last = scanned+1, learningCursor{At: item.At, ID: item.ID}
-		if !ok || decided[item.ID] {
+		if !ok || looksSensitive(body) {
 			continue
 		}
 		item.Source = "comment"
@@ -797,6 +789,9 @@ func sortLearnings(items []Learning) {
 
 func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, in acceptInput, expected *time.Time) (LearningDecision, error) {
 	var out LearningDecision
+	if err := requirePerson(p); err != nil {
+		return out, err
+	}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := fenceLearningWrite(ctx, tx, p, nodeID); err != nil {
 			return err
@@ -814,8 +809,24 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 		if !reviewedMatches(in.Reviewed, item.Text) {
 			return changedLearning()
 		}
-		if in.Lesson != "" {
+		originalText := item.Text
+		var preparedLine, preparedLesson, preparedText string
+		err = tx.QueryRow(ctx, `SELECT coalesce(changelog_line,''), coalesce(lesson,''), learning_text
+          FROM method_learning_recommendations WHERE tenant_id=$1 AND source_key=$2
+          AND knowledge_id=$3::uuid AND rule_layer_id IS NULL`, p.TenantID, publicID, in.KnowledgeID).Scan(&preparedLine, &preparedLesson, &preparedText)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if in.Lesson == "" && preparedLesson != "" {
+			if preparedText != originalText {
+				return changedLearning()
+			}
+			item.Text = preparedLesson
+		} else if in.Lesson != "" {
 			item.Text = in.Lesson
+		}
+		if preparedText != originalText || preparedLesson != item.Text {
+			preparedLine = ""
 		}
 		confirmed, err := sensitiveCheck(sensitiveRanges("text", item.Text), in.Confirm)
 		if err != nil {
@@ -840,6 +851,9 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 			return err
 		}
 		line := learningLine(date, item.Text, item.Key, item.Href)
+		if preparedLine != "" {
+			line = preparedLine
+		}
 		body, heading := appendChangelog(current.Body, line)
 		updated, err := scanSnap(tx.QueryRow(ctx, `UPDATE nodes SET body=$3, updated_at=`+bumpUpdated+`
 		  WHERE tenant_id=$1 AND id=$2::uuid RETURNING `+nodeReturning, p.TenantID, current.ID, body))
@@ -866,6 +880,9 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 
 func (m *module) dismissLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, reason string, reviewed *string) (LearningDecision, error) {
 	var out LearningDecision
+	if p.Kind == tenant.Agent && strings.TrimSpace(reason) == "" {
+		return out, fail(http.StatusBadRequest, "invalid_request", "reason is required for an agent dismissal")
+	}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := fenceLearningWrite(ctx, tx, p, nodeID); err != nil {
 			return err
@@ -886,16 +903,10 @@ func (m *module) dismissLearning(ctx context.Context, p tenant.Principal, public
 		if looksSensitive(reason) {
 			return sensitiveLearning(sensitiveRanges("reason", reason))
 		}
-		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &item.NodeID, Type: evLearningDismissed, After: learningAudit{
-			SourceKey: publicID, Source: item.Source, NodeID: item.NodeID, CommentID: item.CommentID, ProjectID: item.projectID, Text: item.Text, Reason: reason,
-		}})
+		out, err = recordDismissal(ctx, tx, p, item, reason, false)
 		if err != nil {
 			return err
 		}
-		if err := insertDecision(ctx, tx, p, item.projectID, publicID, "dismissed", nil, nil, nil, ev.ID, nil, nil, nil); err != nil {
-			return err
-		}
-		out = LearningDecision{ID: publicID, Decision: "dismissed", EventID: ev.ID}
 		return nil
 	})
 	return out, err
@@ -970,6 +981,9 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 			}
 			return Learning{}, closedLearning()
 		}
+		if nom != nil && looksSensitive(body) {
+			return Learning{}, closedLearning()
+		}
 		text, tagged := commentLearningText(body)
 		if nom != nil {
 			nomText, ok, err := nominationText(ctx, tx, tenantID, *nom, item.Title, kind, rootProject, &body)
@@ -1019,6 +1033,7 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 }
 
 type nomination struct {
+	Signal     string
 	Origin     string
 	Excerpt    string
 	SourceHash string
@@ -1029,11 +1044,11 @@ type nomination struct {
 	At         time.Time
 }
 
-const nominationColumns = `origin, excerpt, source_hash, coalesce(comment_id::text, ''), node_id::text, project_id::text, outcome_id, nominated_at`
+const nominationColumns = `coalesce(signal, ''), origin, excerpt, source_hash, coalesce(comment_id::text, ''), node_id::text, project_id::text, outcome_id, nominated_at`
 
 func scanNomination(row pgx.Row, extra ...any) (nomination, error) {
 	var nom nomination
-	dest := append([]any{&nom.Origin, &nom.Excerpt, &nom.SourceHash, &nom.CommentID, &nom.NodeID, &nom.ProjectID, &nom.OutcomeID, &nom.At}, extra...)
+	dest := append([]any{&nom.Signal, &nom.Origin, &nom.Excerpt, &nom.SourceHash, &nom.CommentID, &nom.NodeID, &nom.ProjectID, &nom.OutcomeID, &nom.At}, extra...)
 	return nom, row.Scan(dest...)
 }
 
@@ -1084,7 +1099,7 @@ func nominationText(ctx context.Context, tx pgx.Tx, tenantID string, nom nominat
 			return "", false, nil
 		}
 	case nom.Origin == "incident_comment":
-		if body == nil || !incidentWord.MatchString(*body) {
+		if body == nil || (nom.Signal == "explicit_comment" && !processLearningToken.MatchString(*body)) || (nom.Signal != "explicit_comment" && !incidentWord.MatchString(*body)) {
 			return "", false, nil
 		}
 		excerpt, material = oneLine(*body, false), *body
@@ -1128,14 +1143,14 @@ func outcomePayload(ctx context.Context, tx pgx.Tx, tenantID, outcomeID string) 
 func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, cursor *learningCursor) ([]Learning, *learningCursor, error) {
 	before, beforeID := cursorArgs(cursor)
 	// nominationColumns, qualified: nodes and events share their names.
-	rows, err := tx.Query(ctx, `SELECT m.origin, m.excerpt, m.source_hash, coalesce(m.comment_id::text, ''), m.node_id::text,
+	rows, err := tx.Query(ctx, `SELECT coalesce(m.signal, ''), m.origin, m.excerpt, m.source_hash, coalesce(m.comment_id::text, ''), m.node_id::text,
 		  m.project_id::text, m.outcome_id, m.nominated_at, m.source_key, x.at
 		FROM method_learning_nominations m
 		JOIN nodes n ON n.tenant_id=m.tenant_id AND n.id=m.node_id AND n.deleted_at IS NULL
 		LEFT JOIN events c ON c.tenant_id=m.tenant_id AND c.id=m.comment_id AND c.node_id=m.node_id AND c.type='comment.created'
 		CROSS JOIN LATERAL (SELECT CASE WHEN m.comment_id IS NULL THEN n.updated_at ELSE c.at END AS at) x
 		WHERE m.tenant_id=$1 AND m.project_id=$2::uuid
-		  AND x.at IS NOT NULL
+		  AND x.at IS NOT NULL `+preparedClause(ctx, "m.source_key")+`
 		  AND NOT EXISTS (
 		    SELECT 1 FROM method_learning_decisions d
 		    WHERE d.tenant_id=m.tenant_id AND d.source_key=m.source_key)

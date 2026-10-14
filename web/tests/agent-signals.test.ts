@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_AGENT_STATE, LOST_CONTACT, STATE_LABEL, attentionReasonText, assessAgentState, deriveAgentState, normalizeAgentState, problemReason, type StateEvidence } from '../src/lib/agentSignals.ts'
+import { DEFAULT_AGENT_STATE, LOST_CONTACT, STATE_LABEL, attentionReasonText, assessAgentState, deriveAgentState, normalizeAgentState, problemReason, stopReasonLabel, stopReasonSentence, type StateEvidence } from '../src/lib/agentSignals.ts'
 import { liveState, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { sessionStatus } from '../src/lib/agentState.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
@@ -104,11 +104,48 @@ test('explicit fresh false beats fallback evidence; only a new heartbeat clears 
   assert.equal(deriveAgentState({ ...facts, heartbeat_at: ago(-20_000) }, now + 20_000), 'working')
 })
 
-test('failure detail preserves the exact stop reason and bound run outcome', () => {
+test('failure detail says how the session failed in words, never the reported text, and keeps the bound run outcome', () => {
   const status = assessAgentState(evidence({ has_problem: true, stop_reason: 'worker crashed: exit 2', run_status: 'ownership_lost' }), now)
   assert.equal(status.state, 'problem')
-  assert.deepEqual(status.reasons.map(reason => reason.detail), ['Reported stop reason: worker crashed: exit 2', 'The bound run reported ownership lost.'])
+  assert.deepEqual(status.reasons.map(reason => reason.detail), ['The session reported a failure · Retry or check the ticket', 'Another session took over this run'])
+  assert.match(status.reasons[1]!.next, /Reported status: ownership_lost\./)
   assert.ok(status.reasons.every(reason => reason.next.length > 0))
+  const rendered = (assessment: ReturnType<typeof assessAgentState>) => [assessment.label, ...assessment.reasons.flatMap(reason => [reason.detail, reason.next])].join('\n')
+  for (const [run_status, sentence] of [
+    ['failed', 'The run failed · Retry or check the ticket'],
+    ['ownership_lost', 'Another session took over this run'],
+    ['blocked', 'The run is blocked · see the ticket'],
+  ] as const) {
+    const problem = assessAgentState(evidence({ run_status }), now)
+    assert.equal(problem.reasons[0]!.detail, sentence)
+    assert.match(problem.reasons[0]!.next, new RegExp(`Reported status: ${run_status}\\.`))
+    assert.doesNotMatch(rendered(problem), /bound run/)
+  }
+  const waiting = assessAgentState(evidence({ run_status: 'waiting' }), now)
+  assert.equal(waiting.reasons[0]!.detail, 'Waiting on its run')
+  assert.match(waiting.reasons[0]!.next, /Reported status: waiting\./)
+  assert.doesNotMatch(rendered(waiting), /bound run/)
+  const runWaiting = attentionReasonText({ kind: 'run_waiting', scope: 'run', actor: 'unknown', count: 1, blocking: true, location: 'session' })
+  assert.equal(runWaiting.detail, 'The run reports waiting; who must act is not specified.')
+  assert.doesNotMatch(`${runWaiting.detail}\n${runWaiting.next}`, /bound run/)
+})
+
+// AEON-1285: a stopped or failed row reads a label and a short sentence; a raw code never reaches the page.
+test('stop reasons read as words with what to do; an unknown one reads Stopped', () => {
+  const failed = assessAgentState(evidence({ phase: 'stopped', stopped_at: ago(60_000), stop_reason: 'process_failed' }), now)
+  assert.equal(failed.state, 'problem')
+  assert.equal(failed.reasons[0]!.detail, 'The worker process failed · Retry or check the ticket')
+  for (const [reason, label] of [['process_failed', 'Process failed'], ['heartbeat_lost', 'Lost contact'], ['cancelled', 'Cancelled'], ['budget_exhausted', 'Budget exhausted'], ['user requested', 'Stopped on request'], ['some_new_code', 'Stopped'], ['error: exit status 1', 'Stopped'], [null, '']] as const) {
+    assert.equal(stopReasonLabel(reason), label, String(reason))
+  }
+  // Nothing the reporter wrote is echoed: codes and free text alike.
+  for (const reason of ['process_failed', 'some_new_code', 'worker crashed: exit 2', 'harness_crashed', 'watch daemon restarted; process exit unconfirmed']) {
+    const words = `${stopReasonLabel(reason)} ${stopReasonSentence(reason)}`
+    assert.doesNotMatch(words, /[a-z]+_[a-z]+|exit 2|;/, reason)
+    assert.ok(stopReasonSentence(reason).length > 0, reason)
+  }
+  assert.equal(stopReasonSentence('some_new_code'), 'The session stopped')
+  assert.equal(stopReasonSentence(''), '')
 })
 
 test('shared principal attention never blocks working siblings or changes person-action labels', () => {

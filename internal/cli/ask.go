@@ -92,6 +92,27 @@ func (rt *runtime) cmdAsk() *Command {
 			return rt.printQuestion(q)
 		}}
 }
+
+// adjustKeep mirrors questions.availability for the mapping the asker supplies.
+// Doctrine needs an authorized source, rule and exact base mapping. Requirement
+// needs a linked ticket. Person permissions stay on the decision. An unusable
+// suggestion is asked as once, with a warning, so the desk is not stuck.
+func adjustKeep(in *questions.Input) string {
+	switch in.SuggestedOutcome {
+	case "doctrine":
+		if in.Doctrine == nil {
+			in.SuggestedOutcome = "once"
+			return "Suggested: Doctrine · not available for this question; asking with Once. Doctrine needs an authorized source, rule and exact base mapping."
+		}
+	case "requirement":
+		if strings.TrimSpace(in.TicketID) == "" {
+			in.SuggestedOutcome = "once"
+			return "Suggested: Requirement · not available for this question; asking with Once. Requirement needs a linked editable ticket."
+		}
+	}
+	return ""
+}
+
 func parseQuestionOption(raw string, n int) (questions.Option, error) {
 	var o questions.Option
 	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
@@ -152,6 +173,11 @@ func (rt *runtime) sendQuestion(ctx context.Context, project, ticket string, in 
 	}
 	if err := in.Validate(); err != nil {
 		return out, usagef("%s", err.Error())
+	}
+	// availability refuses these stamps when the asker did not supply the
+	// mapping. Once stays decidable; person permissions are still checked later.
+	if warning := adjustKeep(&in); warning != "" {
+		fmt.Fprintln(rt.stderr, "warning:", warning)
 	}
 	body, err := json.Marshal(in)
 	if err != nil {

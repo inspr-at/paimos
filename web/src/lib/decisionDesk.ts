@@ -33,7 +33,18 @@ export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always
 export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval', account_matrix: 'Account matrix' }
 export function draftFor(item: DeskItem): DeskDraft {
   const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim' || item.kind === 'stepup'
-  return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: item.outcome, dirty: false }
+  return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: initialOutcome(item), dirty: false }
+}
+/** A recorded answer stays. An unavailable suggestion never starts selected; Once does. */
+export function initialOutcome(item: DeskItem): DeskOutcome {
+  if (item.decided || !outcomeUnavailable(item, item.outcome)) return item.outcome
+  return 'once'
+}
+/** Quiet hint when the asker's stamp cannot be selected. Empty when that stamp is usable. */
+export function suggestedUnavailableNote(item: DeskItem): string {
+  if (item.decided || (item.kind !== 'question' && item.kind !== 'handover')) return ''
+  if (!outcomeUnavailable(item, item.outcome) || item.outcome === 'once') return ''
+  return `Suggested: ${outcomeLabels[item.outcome]} · not available for this question`
 }
 export function answerFor(item: DeskItem, draft: DeskDraft): string {
   const choice = item.choices.find(option => option.id === draft.optionId)
