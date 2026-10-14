@@ -207,13 +207,20 @@ func EntryTicketTx(ctx context.Context, tx pgx.Tx, id string) (EntryTicket, erro
 func EntryStatusTx(ctx context.Context, tx pgx.Tx, kindID, state string) (string, error) {
 	var category string
 	err := tx.QueryRow(ctx, `SELECT aeon_work_status_category($2,field_schema) FROM node_kinds WHERE id=$1`, kindID, state).Scan(&category)
+	if err != nil {
+		return "", err
+	}
+	// Parent rollup keeps QA inside in progress. Entry checks use the QA gate.
+	if EntryState(state) == "qa" {
+		return "qa", nil
+	}
 	if category == "delivered" || category == "accepted" {
 		category = "done"
 	}
 	if EntryProgress(category) {
 		category = "in_progress"
 	}
-	return category, err
+	return category, nil
 }
 
 func entryLabels(fields map[string]any) []string {
