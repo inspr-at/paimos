@@ -212,6 +212,9 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
+		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{ProjectID: project}); err != nil {
+			return errForbidden
+		}
 		recipientCheck, err := resolveAddress(ctx, tx, project, in.To)
 		if err != nil {
 			return err
@@ -225,11 +228,6 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		}
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
-		}
-		if in.ReplyTo != nil && in.SenderSessionID != nil {
-			if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{ProjectID: project}); err != nil {
-				return errForbidden
-			}
 		}
 		// Serialize this projection's writes before taking row locks. events.Append
 		// also takes a per-tenant counter lock; a consistent order avoids inverse
