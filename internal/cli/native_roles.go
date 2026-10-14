@@ -23,6 +23,15 @@ func (rt *runtime) nativeRoleRecipe() *Command {
 				return rt.printJSON(r)
 			}
 			fmt.Fprintf(rt.stdout, "%s: separate native cutover approval required\nWorkspace: %s\nAccount: %s\nTools: %s\nPairing: %s\nTerminal: %s\n", r.Role, r.Workspace, r.Account, r.Tools, r.Pairing, r.TerminalViewer)
+			for _, grant := range r.RequiredGrants {
+				fmt.Fprintf(rt.stdout, "Required grant: %s\n", grant)
+			}
+			for _, evidence := range r.RequiredEvidence {
+				fmt.Fprintf(rt.stdout, "Required evidence: %s\n", evidence)
+			}
+			for _, attach := range r.RemoteAttach {
+				fmt.Fprintf(rt.stdout, "Remote attach: %s\n", attach)
+			}
 			for _, step := range r.Cutover {
 				fmt.Fprintf(rt.stdout, "Cutover: %s\n", step)
 			}

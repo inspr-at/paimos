@@ -206,3 +206,20 @@ reasons, frozen request pointers, predecessor exit and revocation barriers,
 receipt/capability matching, production boundaries and unrelated-session
 preservation. Actual-host qualification, live cutover, external tooling,
 operator execution and all review/release gates remain unperformed by design.
+
+One targeted remote attempt on the corrected commit `8e9667e50`, selecting
+`^TestNativeRole` in both assigned Go packages, was also refused with exit **3**
+for the same occupied slots. No further remote retries are made in this round.
+The new CLI behavior test and broader assigned-package run remain **incomplete,
+awaiting authoritative PR CI**, as does guarded `ci-static --merge-main`.
+The static lane's tier/shard/audit checks were not bypassed. Browser behavior
+tests are not applicable to this slice. No push to origin, deploy, model CLI,
+cross-family review, live vendor call or operator cutover was performed.
+
+Final-source strict Go registration and canonical manifest checks both exited
+**0** again after the pointer/privacy fix and complete text recipe output.
+Native collection still reports 5149 cases with all three own tests ESSENTIAL;
+this verifies registration and compilation, not execution of the CLI behavior.
+The final write-set scan contains only the six assigned source/doc files and
+the three allowed R0 rows in `scripts/ci/go-test-tiers.json`. The ignored worker
+progress file records 100% builder completion with the CI/integration limits.

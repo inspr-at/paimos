@@ -46,7 +46,8 @@ func TestNativeRoleRecipesRequireSeparateAuthority(t *testing.T) {
 			t.Fatal("unknown role acquired recipe authority", role, err)
 		}
 	}
-	if err := command.run([]string{"OPS"}); err != nil || !strings.Contains(out.String(), "Only an authorized operator") || !strings.Contains(out.String(), "Rollback:") {
+	if err := command.run([]string{"OPS"}); err != nil || !strings.Contains(out.String(), "Only an authorized operator") || !strings.Contains(out.String(), "Rollback:") ||
+		!strings.Contains(out.String(), "Required grant: principal/owner") || !strings.Contains(out.String(), "Required evidence: G_ROLES") || !strings.Contains(out.String(), "Remote attach: approved SSH invoking aeon session attach") {
 		t.Fatal("text recipe omitted the operator/rollback boundary", err)
 	}
 }
