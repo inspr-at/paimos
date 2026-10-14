@@ -11,7 +11,10 @@ export * from '@playwright/test'
 
 export const test = base.extend({
   aeonBrowserCoverage: [async ({ browser }, use, testInfo) => {
-    const capture = captureBrowser(browser)
+    const checkout = fileURLToPath(new URL('../../', import.meta.url))
+    const bundleSources = process.env.AEON_BROWSER_BUNDLE_SOURCES
+      ? JSON.parse(boundedText(checkout, process.env.AEON_BROWSER_BUNDLE_SOURCES) ?? 'null') : undefined
+    const capture = captureBrowser(browser, { bundleSources })
     try { await use() } finally {
       const observation = await capture.finish()
       const expected = JSON.parse(boundedText(fileURLToPath(new URL('../../', import.meta.url)), process.env.AEON_BROWSER_IMPACT_CASES) ?? '[]')

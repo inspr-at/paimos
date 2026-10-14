@@ -903,6 +903,17 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 					t.Fatal("missing PR identity capture")
 				}
 				j["steps"] = steps[:len(steps)-1]
+				// AEON-1333: CI_IMPACT=off skips the base classifier before a stale
+				// base script can narrow the lane. Prove that guard, then restore
+				// the accepted condition so every other byte stays pinned.
+				classify := reuseStep(t, j, "Classify local PR diff")
+				const impactGuard = `if [ "${CI_IMPACT:-}" != off ] && [ "$GITHUB_EVENT_NAME" = pull_request ] &&`
+				const acceptedGuard = `if [ "$GITHUB_EVENT_NAME" = pull_request ] &&`
+				run, _ := classify["run"].(string)
+				if strings.Count(run, impactGuard) != 1 {
+					t.Fatal("CI_IMPACT=off must skip the base classifier and retain full validation")
+				}
+				classify["run"] = strings.Replace(run, impactGuard, acceptedGuard, 1)
 			}
 			if id == "go-static" || id == "go-timing" {
 				for _, v := range reuseSteps(j) {
