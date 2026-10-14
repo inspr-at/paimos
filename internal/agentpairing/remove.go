@@ -15,7 +15,7 @@ import (
 // remove archives a revoked or never-confirmed computer (AEON-402). It leaves
 // the computers list with its account bindings; the rows, runs and audit
 // events stay. A never-confirmed computer is revoked first, in the same step.
-// Unsettled runs keep the computer in the list until their accounting is known.
+// Unsettled runs and unreleased native roots retain the computer and accounts.
 func (m *Module) remove(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	var out View
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
@@ -121,8 +121,8 @@ func requireNativeRootsReleased(ctx context.Context, tx pgx.Tx, computer, accoun
 
 // DisconnectAccount ends a paired account binding before a person removes the
 // account (AEON-402): queued runs are cancelled and the enrollment is revoked.
-// It refuses while a run is starting, running or waiting on the account, so
-// accounting stays known. An unpaired account, or a revoked one, is a no-op.
+// Active/uncertain runs and every unreleased native root retain ownership.
+// An unpaired account is a no-op; a revoked binding still checks native holds.
 func DisconnectAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, account string) error {
 	var computer, state string
 	err := tx.QueryRow(ctx, `SELECT computer_id::text,state FROM agent_pairing_enrollments WHERE account_id=$1`, account).Scan(&computer, &state)
@@ -146,6 +146,6 @@ func DisconnectAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accou
 	if state == "revoked" {
 		return nil
 	}
-	// With no active run, a drain ends at once: finalizeDrain revokes it.
+	// With no active run or native hold, finalizeDrain can revoke the binding.
 	return disconnectTx(ctx, tx, p, computer, disconnectInput{Mode: "drain", AccountID: account})
 }
