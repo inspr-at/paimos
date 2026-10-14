@@ -2,10 +2,11 @@
 import { test, expect } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import { hostname, platform, arch } from 'node:os'
+import { execFileSync } from 'node:child_process'
 
 const actions = ['list', 'outline', 'graph', 'return-list', 'filter', 'sort', 'search', 'hide-closed', 'open-ticket', 'close-ticket', 'decision-desk', 'agents', 'header-hover', 'scroll']
 const listReady = `!!document.querySelector('table.tickets[aria-busy="false"] tr.ticket-row:not(.ghost)')`
-const graphReady = `!!document.querySelector('.ticket-graph-canvas[data-ready="true"]')`
+const graphReady = `!!document.querySelector('.ticket-graph-canvas[data-ready="true"]') && !document.querySelector('.tg-state, .graph-error')`
 const ticketReady = `!!document.querySelector('.ticket-ws .inline-title') && !document.querySelector('.ws-skeleton')`
 
 function instrumentation() {
@@ -71,12 +72,17 @@ async function prepare(page, project, action) {
   }
   await idle(page)
 }
-async function act(page, project, action, measure = true) {
+async function act(page, project, action, measure = true, cache = 'cold') {
   const armClick = async (locator, predicate) => {
     if (measure) await nativeClick(locator, predicate)
     else { await locator.click(); await page.waitForFunction(predicate) }
   }
   if (action === 'list') {
+    if (measure && cache === 'warm') {
+      await armClick(page.locator(`a[href^="/p/${project}"]`).first(), listReady)
+      await page.waitForFunction(() => window.__baseline.usable !== null)
+      return
+    }
     // Document first paint is measured from the Navigation Timing origin.
     await page.addInitScript(({ listReady }) => {
       addEventListener('DOMContentLoaded', () => {
@@ -164,6 +170,10 @@ for (const project of ['AIT', 'AEON']) for (const cache of ['cold', 'warm']) for
         // Reload prerequisites in the same context: HTTP/V8 caches are warm;
         // this deliberately does not claim a retained Pinia list cache.
         if (action !== 'list') await prepare(page, project, action)
+        else {
+          await page.locator('a[href="/"]').first().click()
+          await expect(page.locator(`a[href^="/p/${project}"]`).first()).toBeVisible()
+        }
       }
       const requests = new Map()
       cdp.on('Network.requestWillBeSent', event => {
@@ -184,7 +194,7 @@ for (const project of ['AIT', 'AEON']) for (const cache of ['cold', 'warm']) for
         if (request) Object.assign(request, { failed: event.errorText })
       })
       await cdp.send('Tracing.start', { categories: 'devtools.timeline,v8,blink.user_timing,disabled-by-default-v8.cpu_profiler', transferMode: 'ReturnAsStream' })
-      await act(page, project, action)
+      await act(page, project, action, true, cache)
       const metrics = await page.evaluate(() => {
         const m = window.__baseline
         m.tasks.push(...window.__baselineObserver.takeRecords().map(entry => ({ start: entry.startTime, duration: entry.duration })))
@@ -201,7 +211,7 @@ for (const project of ['AIT', 'AEON']) for (const cache of ['cold', 'warm']) for
         delete request.start; delete request.end
       }
       const budget = action === 'list' ? (cache === 'cold' ? 1000 : 300) : 100
-      const row = { project, cache, action, sample: 1, host: hostname(), platform: platform(), arch: arch(), chromium: browser.version(),
+      const row = { project, cache, action, sample: 1, source_sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), host: hostname(), platform: platform(), arch: arch(), chromium: browser.version(),
         ...metrics, budget_ms: budget, pass: metrics.usable_ms <= budget && metrics.long_tasks.length === 0,
         request_count: waterfall.length, network: waterfall }
       await writeFile(testInfo.outputPath('metrics.json.md'), JSON.stringify(row, null, 2))
