@@ -213,6 +213,11 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			return err
 		}
 		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{ProjectID: project}); err != nil {
+			// Unbound reply parents and resend sources retain their existing
+			// indistinguishable not-found response, including held replies.
+			if in.ResendOf != nil || (in.ReplyTo != nil && in.SenderSessionID == nil) {
+				return errNotFound
+			}
 			return errForbidden
 		}
 		recipientCheck, err := resolveAddress(ctx, tx, project, in.To)
