@@ -620,7 +620,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   // AEON-1331 adds lesson decisions after the prior baseline. Preserve that
   // baseline and charge only this slice's independently bounded spec budget.
   const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
-  assert.ok(deskLessons && deskLessons.listedTests === 22, 'Lesson decision regressions must remain in the gate')
+  assert.ok(deskLessons && deskLessons.listedTests === 23, 'Lesson decision regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
   const priorGate = {
     ...real,

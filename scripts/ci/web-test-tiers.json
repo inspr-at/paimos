@@ -7912,6 +7912,8 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo has no accessibility violations","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson scope names its filter and Show all restores other waiting items","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

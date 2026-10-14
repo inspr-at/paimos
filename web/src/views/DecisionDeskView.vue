@@ -51,7 +51,55 @@ const linkError = ref(''), revoked = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
 let followed = ''
 const fresh = computed(() => arrivals(items.value, roundBaseline.value))
-const visible = computed(() => items.value.filter(item => (!route.query.kind || item.kind === route.query.kind) && (!route.query.project || item.projectId === route.query.project) && item.decided === (filter.value === 'decided') && (!outcomeFilter.value || item.outcome === outcomeFilter.value)))
+const projectNames = ref(new Map<string, string>())
+function queryPresent(value: unknown) {
+  return Array.isArray(value) ? value.some(part => typeof part === 'string' && part.length > 0) : typeof value === 'string' && value.length > 0
+}
+// The Knowledge link arrives as ?kind=lesson&project=…. That filter used to be
+// invisible, so an empty lesson list claimed the whole desk was clear.
+function inScope(item: DeskItem) {
+  return (!route.query.kind || item.kind === route.query.kind) && (!route.query.project || item.projectId === route.query.project)
+}
+const scopeKind = computed(() => typeof route.query.kind === 'string' ? route.query.kind : '')
+const scopeProject = computed(() => typeof route.query.project === 'string' ? route.query.project : '')
+const scopeActive = computed(() => queryPresent(route.query.kind) || queryPresent(route.query.project))
+const scopeProjectName = computed(() => {
+  const id = scopeProject.value
+  if (!id) return ''
+  return projectNames.value.get(id) || items.value.find(item => item.projectId === id && item.projectName && item.projectName !== 'Project name unavailable')?.projectName || ''
+})
+const scopePlace = computed(() => scopeProjectName.value || (scopeProject.value ? 'this project' : ''))
+const scopeCopy = computed(() => {
+  const place = scopePlace.value
+  if (scopeKind.value === 'lesson' && place) return `Showing lessons in ${place}.`
+  if (scopeKind.value === 'lesson') return 'Showing lessons.'
+  if (place && !scopeKind.value) return `Showing items in ${place}.`
+  if (place) return `Showing this view in ${place}.`
+  return 'Showing a narrowed desk.'
+})
+const emptyCopy = computed(() => {
+  if (warnings.value.length) return 'The available sources have no matching items.'
+  if (filter.value === 'decided') return 'No recorded decisions in this view.'
+  const place = scopePlace.value
+  if (scopeActive.value && scopeKind.value === 'lesson') return place ? `No lessons wait in ${place}.` : 'No lessons are waiting.'
+  if (scopeActive.value && place) return `Nothing is waiting in ${place}.`
+  if (scopeActive.value) return 'Nothing in this view is waiting.'
+  return 'Nothing is waiting in the available sources.'
+})
+const showAllTo = computed(() => {
+  const query = { ...route.query }
+  delete query.kind
+  delete query.project
+  return { path: '/decision-desk', query }
+})
+// A scoped Open count matches the list. The header keeps the whole-desk total.
+const openCountLabel = computed(() => {
+  if (!scopeActive.value) return desk.count ?? '?'
+  if (state.value !== 'ready' || desk.count === null) return '?'
+  return items.value.filter(item => !item.decided && inScope(item)).length
+})
+const decidedCountLabel = computed(() => items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
+const visible = computed(() => items.value.filter(item => inScope(item) && item.decided === (filter.value === 'decided') && (!outcomeFilter.value || item.outcome === outcomeFilter.value)))
 // Link-out rows are decided on their settings page, so they never join a memo round.
 const reviewable = computed(() => visible.value.filter(item => !item.linkOut))
 const person = computed(() => session.identity?.principal.kind === 'person')
@@ -107,6 +155,7 @@ function applyRead(result: DeskRead) {
   result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
+  projectNames.value = result.projectNames
   nextKeyTrims.value = result.nextKeyTrims
   pages.value = { open: result.questionPositions.open?.pages ?? pages.value.open, answered: result.questionPositions.answered?.pages ?? pages.value.answered }
   // Memo content stays frozen; changed or vanished records require a deliberate reopen.
@@ -255,6 +304,7 @@ function resetDesk() {
   generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
   followed = ''; linkError.value = ''; revoked.value = new Set()
   sources = emptySources(); adapters = makeAdapters(); filter.value = route.query.view === 'decided' ? 'decided' : 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
+  projectNames.value = new Map()
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
@@ -279,10 +329,11 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
 <template>
   <main class="decision-desk" aria-labelledby="desk-title">
     <header class="desk-head"><div><p class="eyebrow">{{ session.identity?.tenant.name }}</p><h1 id="desk-title">Decision Desk</h1><p class="intro">One topic at a time. The work can wait while the answer takes shape.</p></div><div class="desk-links"><RouterLink to="/agents">Agents</RouterLink><button type="button" :disabled="loading" @click="refresh">Refresh</button></div></header>
-    <div class="desk-summary"><div class="view-tabs" role="group" aria-label="Desk view"><button type="button" :aria-pressed="filter === 'open'" @click="filter = 'open'">Open <span>{{ desk.count ?? '?' }}</span></button><button type="button" :aria-pressed="filter === 'decided'" @click="filter = 'decided'">Decided <span>{{ items.filter(item => item.decided).length }}</span></button></div><label class="outcome-filter" :class="{ hidden: filter !== 'decided' }">Stamp <select v-model="outcomeFilter" :disabled="filter !== 'decided'" aria-label="Filter decided by stamp"><option value="">All</option><option v-for="(label, outcome) in outcomeLabels" :key="outcome" :value="outcome">{{ label }}</option></select></label><button type="button" class="review-button" :disabled="!reviewable.length || loading" @click="begin()">One at a time</button></div>
+    <div class="desk-summary"><div class="view-tabs" role="group" aria-label="Desk view"><button type="button" :aria-pressed="filter === 'open'" @click="filter = 'open'">Open <span>{{ openCountLabel }}</span></button><button type="button" :aria-pressed="filter === 'decided'" @click="filter = 'decided'">Decided <span>{{ decidedCountLabel }}</span></button></div><label class="outcome-filter" :class="{ hidden: filter !== 'decided' }">Stamp <select v-model="outcomeFilter" :disabled="filter !== 'decided'" aria-label="Filter decided by stamp"><option value="">All</option><option v-for="(label, outcome) in outcomeLabels" :key="outcome" :value="outcome">{{ label }}</option></select></label><button type="button" class="review-button" :disabled="!reviewable.length || loading" @click="begin()">One at a time</button></div>
+    <p v-if="scopeActive" class="scope-line" data-testid="desk-scope">{{ scopeCopy }} <RouterLink :to="showAllTo">Show all</RouterLink></p>
     <nav v-if="nextKeyTrims[trimState] || trimCursors[trimState]" class="trim-pages" aria-label="Key trim pages"><button type="button" :disabled="loading || !trimCursors[trimState]" @click="pageKeyTrims(true)">First key trims</button><button type="button" :disabled="loading || !nextKeyTrims[trimState]" @click="pageKeyTrims()">Next key trims</button><span>Up to 100 key trims per page</span></nav>
     <p v-if="state === 'loading'" role="status">Reading the desk…</p>
-    <p v-if="state === 'ready' && !visible.length">{{ warnings.length ? 'The available sources have no matching items.' : filter === 'decided' ? 'No recorded decisions in this view.' : 'Nothing is waiting in the available sources.' }}</p>
+    <p v-if="state === 'ready' && !visible.length">{{ emptyCopy }}</p>
     <ol class="desk-list" aria-label="Desk items"><li v-for="item in visible" :key="item.id"><component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="desk-row" :data-testid="`desk-row-${item.id}`" @click="item.linkOut || begin(item.id)"><span class="row-kind">{{ kindLabels[item.kind] }}</span><span class="row-topic"><strong :data-tip="item.title">{{ item.title }}</strong><small :data-tip="`${item.projectName} · ${item.decided ? item.answer : item.meanwhile}`"><span class="row-project" :style="{ '--pc': projectColor(deskProject(item)) }" data-testid="desk-row-project"><i aria-hidden="true" />{{ item.projectName }}</span> · {{ item.decided ? item.answer : item.meanwhile }}</small></span><span class="row-state">{{ item.decided ? outcomeLabels[item.outcome] : item.linkOut ? 'In Settings' : item.held ? 'Holding work' : 'Waiting' }}</span></component></li></ol>
     <p v-if="more[filter === 'open' ? 'open' : 'answered']" class="incomplete">More questions are available. <button v-if="pages[filter === 'open' ? 'open' : 'answered'] < MAX_QUESTION_PAGES" type="button" :disabled="loading" @click="loadMore">Load 100 more</button><span v-else>The view is limited to 1,000 questions per state.</span></p>
     <div v-if="warnings.length || linkError" class="source-warnings" role="status"><button type="button" :disabled="loading" @click="refresh">Retry</button><p v-if="linkError">{{ linkError }}</p><p v-for="warning in warnings" :key="warning">{{ warning }}</p></div>
@@ -296,6 +347,7 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
 
 <style scoped>
 .trim-pages { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; font-size: 12px; color: var(--ink-3); }.trim-pages button { height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--ink); }
+.scope-line { display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; min-height: 44px; margin: 0; font-size: 12px; color: var(--ink-3); }.scope-line a { color: var(--teal-ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }.scope-line a:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .decision-desk { width: min(1120px, 100%); margin: 0 auto; padding: 30px 32px; color: var(--ink); }.desk-head { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 28px; }.eyebrow { font-size: 11px; color: var(--ink-3); margin: 0 0 7px; }h1 { font-size: 30px; font-weight: 550; margin: 0; letter-spacing: -.02em; }.intro { font-size: 13px; color: var(--ink-3); margin-top: 10px; }.desk-links { display: flex; align-items: flex-start; gap: 20px; padding-top: 10px; }.desk-links a, .chore-line a { color: var(--teal-ink); text-decoration: none; font-size: 12px; }button { cursor: pointer; }button:disabled { cursor: default; opacity: .5; }.desk-links button { min-inline-size: 7ch; border: 0; color: var(--ink-2); background: transparent; font-size: 12px; padding: 0; }.desk-summary { display: flex; align-items: center; gap: 18px; border-bottom: 1px solid var(--line-2); padding-bottom: 14px; }.view-tabs { display: flex; gap: 20px; }.view-tabs button { border: 0; background: transparent; color: var(--ink-3); font-size: 13px; font-weight: 600; padding: 8px 0; }.view-tabs button[aria-pressed=true] { color: var(--ink); }.view-tabs span { display: inline-block; min-inline-size: 3ch; font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }.review-button { margin-left: auto; border: 1px solid var(--line-2); border-radius: 8px; background: var(--glass); padding: 10px 16px; color: var(--teal-ink); font-size: 12px; font-weight: 600; }.outcome-filter.hidden { visibility: hidden; }.outcome-filter { font-size: 12px; display: flex; gap: 8px; align-items: center; }.outcome-filter select { color: var(--ink); background: var(--surface); border: 1px solid var(--line); height: 32px; max-width: 130px; }.desk-list { margin: 0; padding: 0; list-style: none; }.desk-row { width: 100%; display: grid; grid-template-columns: 120px minmax(0,1fr) 100px; align-items: center; gap: 22px; padding: 20px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: var(--ink); }.desk-row:hover { background: var(--row-hover); }a.desk-row { text-decoration: none; }a.desk-row:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }.row-kind { font-size: 11px; color: var(--ink-3); }.row-topic { min-width: 0; }.row-topic strong { display: block; font-size: 14px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: normal; overflow-wrap: anywhere; }.row-topic small { display: block; font-size: 12px; color: var(--ink-3); margin-top: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.row-state { font-size: 11px; text-align: right; color: var(--ink-3); }.row-project { color: var(--pc); font-weight: 650; }.row-project i { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: var(--pc); vertical-align: 1px; }.readiness, .chore-line, .incomplete { margin-top: 24px; font-size: 12px; color: var(--ink-3); }.incomplete button { border: 0; background: transparent; color: var(--primary-ink); font-size: inherit; }.source-warnings { font-size: 12px; color: var(--warn-ink); padding: 10px 0; }.source-warnings button { border: 1px solid var(--line); background: var(--glass); color: var(--ink); padding: 8px 14px; border-radius: 6px; }.source-warnings p { margin: 5px 0; }.arrival-line { font-size: 12px; color: var(--teal-ink); }button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 @media (max-width: 720px) { .decision-desk { padding: 22px 18px; }.desk-head { gap: 12px; }.desk-links { gap: 12px; }h1 { font-size: 25px; }.intro { max-width: 24ch; }.desk-summary { flex-wrap: wrap; gap: 12px; }.desk-row { grid-template-columns: minmax(0,1fr) 78px; gap: 10px; padding: 16px 0; }.row-kind { grid-column: 1 / -1; }.row-state { grid-column: 2; grid-row: 2; }.row-topic { grid-row: 2; }.review-button { padding: 10px; }.outcome-filter { order: 3; } }
 </style>

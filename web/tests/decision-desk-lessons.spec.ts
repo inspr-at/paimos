@@ -152,3 +152,69 @@ test('AEON-1331 lesson memo has no accessibility violations', async ({ page }) =
   await mockLessons(page); await openLesson(page)
   expect((await new AxeBuilder({ page }).include('.desk-dialog').analyze()).violations).toEqual([])
 })
+// Fails on 57da9c59: the desk filtered ?kind=lesson&project= without saying so,
+// and an empty lesson list claimed nothing was waiting while other items were.
+test('AEON-1331 lesson scope names its filter and Show all restores other waiting items', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { state } = await mockLessons(page)
+  await page.route('**/api/decision-desk/projection*', route => {
+    const lessons = state.decided ? [] : [{ id, kind: 'lesson' as const, project_id: 'p-aeon', revision: state.revision, title: sentence, created_at: '2026-10-14T08:30:00Z', held: false, can_decide: true, href: `/decision-desk?item=l:${id}`, source: `/api/knowledge/learnings/${nativeId}` }]
+    const approval = { id: 'approval-1', kind: 'approval' as const, project_id: 'p-aeon', revision: 1, title: 'Approval · nodes.read', created_at: '2026-10-02T08:01:00Z', expires_at: new Date(Date.now() + 3_600_000).toISOString(), held: true, can_decide: true, href: '/decision-desk?item=a:approval-1', source: '/api/approvals/approval-1' }
+    const rows = [...lessons, approval]
+    return route.fulfill({ json: { items: rows, counts: { open: rows.length, held: 1, chores: 0, lessons: { 'p-aeon': lessons.length } }, has_more: false, as_of: '2026-10-14T10:00:00Z' } })
+  })
+  await page.goto('/decision-desk?kind=lesson&project=p-aeon')
+  const scope = page.getByTestId('desk-scope')
+  await expect(scope).toContainText('Showing lessons in Paimos Aeon.')
+  const showAll = scope.getByRole('link', { name: 'Show all' })
+  await expect(showAll).toHaveAttribute('href', '/decision-desk')
+  expect((await showAll.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible()
+  await expect(page.getByTestId('desk-row-a:approval-1')).toHaveCount(0)
+  await expect(page.getByText('Nothing is waiting in the available sources.')).toHaveCount(0)
+  await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 1' })).toBeVisible()
+  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 2 open', exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('scope-filtered.png') })
+  const guard = await controlStability(page, {
+    open: page.locator('.view-tabs').getByRole('button', { name: /^Open / }),
+    decided: page.locator('.view-tabs').getByRole('button', { name: /^Decided / }),
+    review: page.getByRole('button', { name: 'One at a time' }),
+    refresh: page.getByRole('button', { name: 'Refresh' }),
+  })
+  await guard.check(async () => {
+    await showAll.click()
+    await expect(page).not.toHaveURL(/[?&](?:kind|project)=/)
+    await expect(page.getByTestId('desk-scope')).toHaveCount(0)
+    await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible()
+    await expect(page.getByTestId('desk-row-a:approval-1')).toBeVisible()
+    await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 2' })).toBeVisible()
+  })
+  guard.done()
+  await page.screenshot({ path: testInfo.outputPath('scope-restored.png') })
+  state.decided = true
+  await page.setViewportSize({ width: 390, height: 800 })
+  await page.goto('/decision-desk?kind=lesson&project=p-aeon')
+  // The desk keeps its loaded rows across a query change. Reload so the
+  // projection that no longer includes the lesson is what the empty state reads.
+  await page.reload()
+  await expect(page.getByTestId('desk-scope')).toContainText('Showing lessons in Paimos Aeon.')
+  await expect(page.getByText('No lessons wait in Paimos Aeon.')).toBeVisible()
+  await expect(page.getByText('Nothing is waiting in the available sources.')).toHaveCount(0)
+  await expect(page.getByTestId('desk-row-a:approval-1')).toHaveCount(0)
+  await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 0' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('scope-empty-390.png') })
+  const phone = await controlStability(page, {
+    open: page.locator('.view-tabs').getByRole('button', { name: /^Open / }),
+    decided: page.locator('.view-tabs').getByRole('button', { name: /^Decided / }),
+    review: page.getByRole('button', { name: 'One at a time' }),
+    refresh: page.getByRole('button', { name: 'Refresh' }),
+  })
+  await phone.check(async () => {
+    await page.getByRole('link', { name: 'Show all' }).click()
+    await expect(page.getByTestId('desk-scope')).toHaveCount(0)
+    await expect(page.getByTestId('desk-row-a:approval-1')).toBeVisible()
+    await expect(page.getByText('No lessons wait in Paimos Aeon.')).toHaveCount(0)
+    await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 1' })).toBeVisible()
+  })
+  phone.done()
+})
