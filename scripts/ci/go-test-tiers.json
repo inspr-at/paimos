@@ -7990,6 +7990,8 @@
     ,
     {"kind":"go","package":"internal/nativerecovery","name":"TestRecoveryJournalBoundsAndLocalAuthorityRefusal","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestRecoveryJournalReclaimsOnlyObsoleteCompletedSessions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativerecovery","name":"TestResumeRequiresCurrentProofPolicyHistoryAndExpiresCallbacks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
