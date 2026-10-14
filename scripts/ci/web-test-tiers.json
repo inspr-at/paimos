@@ -15438,6 +15438,8 @@
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"only a point inside the canvas can be picked","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/graph-renderer.test.ts","name":"porcelain glimpse orbs stay above the header shot threshold","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"smart labels try alternative positions and reject a fully occupied screen","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"the height fit ignores distant satellites without mutating the layout","tier":"GATED-FULL"}
