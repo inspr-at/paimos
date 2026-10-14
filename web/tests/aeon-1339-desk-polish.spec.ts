@@ -16,7 +16,7 @@ async function oneQuestion(page: Page, theme?: 'light' | 'dark') {
   return world
 }
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`the memo matches the approved sheet and closes after the last decision ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const world = await oneQuestion(page, theme)
@@ -79,9 +79,9 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 
-test('Decide is never a silent no-op: it says why beside the button and moves focus to what is missing', async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) test(`Decide is never a silent no-op: it says why beside the button and moves focus to what is missing ${theme}`, async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const world = await mockDecisionDesk(page)
+  const world = await mockDecisionDesk(page, { theme })
   world.questions[0]!.suggested_outcome = 'doctrine'; world.questions[0]!.suggestion_reason = 'agent_suggestion'
   await page.goto('/decision-desk')
   await page.getByTestId('desk-row-a:approval-1').click()
@@ -93,6 +93,7 @@ test('Decide is never a silent no-op: it says why beside the button and moves fo
   await expect(page.getByTestId('desk-status')).toHaveText('Choose Approve or Deny first.')
   await expect(page.getByTestId('choice-0')).toBeFocused()
   expect(world.calls).toHaveLength(0)
+  await page.screenshot({ path: testInfo.outputPath(`decide-why-${theme}.png`) })
   await page.keyboard.press('j')
   // The agent suggested Doctrine, which is unavailable: Once starts selected, with a quiet note, and decides in one press.
   await expect(heading(page)).toHaveText('Which migration should carry the index?')
@@ -100,9 +101,55 @@ test('Decide is never a silent no-op: it says why beside the button and moves fo
   await expect(page.getByTestId('stamp-doctrine')).toHaveAttribute('aria-disabled', 'true')
   await expect(page.getByTestId('desk-suggest-off')).toHaveText('Suggested: Doctrine · not available for this question')
   await expect(page.getByTestId('desk-suggest-off')).toHaveAttribute('data-tip', /didn’t name the rule/)
+  await page.screenshot({ path: testInfo.outputPath(`suggest-off-${theme}.png`) })
   await decide.click()
   await expect.poll(() => world.calls.filter(call => call.path.endsWith('/decision')).length).toBe(1)
   expect(world.calls.at(-1)!.body).toMatchObject({ outcome: 'once', option_id: 'partial' })
+  // The decided state: the landed stamp, the delivery line in the meanwhile slot, Change and Next.
+  await expect(heading(page)).toHaveText('Should the successor continue the review?')
+  await page.keyboard.press('k')
+  await expect(page.getByTestId('desk-stamp')).toHaveAttribute('aria-label', 'Stamped Once')
+  await expect(page.getByTestId('desk-line')).toContainText(/Decided .* sends to .* in .* s/)
+  await expect(page.getByTestId('desk-skip')).toHaveAccessibleName(/^Change/)
+  await expect(page.getByTestId('desk-decide')).toHaveAccessibleName(/^Next/)
+  await expect(page.getByTestId('choice-0')).toBeDisabled()
+  await page.screenshot({ path: testInfo.outputPath(`decided-${theme}.png`) })
+})
+
+// The Agents panel and the header preview use the Desk row anatomy: a kind mark, the project with the
+// folder icon, and links that bring the person back after the last decision.
+for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) test(`panel and preview rows name the kind and project, and link back ${width} ${theme}`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width, height: 1000 })
+  await mockDecisionDesk(page, { theme })
+  await page.goto('/tests/desk-panel-harness.html')
+  const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
+  await expect(panel.getByTestId('agents-desk-item-q:question-1')).toHaveAttribute('href', '/decision-desk?from=agents&item=q:question-1')
+  await expect(panel.locator('.mark.k-question').first()).toBeVisible()
+  await expect(panel.locator('.row-project i, .project-dot')).toHaveCount(0)
+  await panel.screenshot({ path: testInfo.outputPath(`panel-${width}-${theme}.png`) })
+  await page.goto('/agents')
+  await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
+  const row = page.getByTestId('desk-preview-item-q:question-1')
+  await expect(row).toHaveAttribute('href', '/decision-desk?from=preview&item=q:question-1')
+  await expect(row.locator('.dp-ic.k-question')).toBeVisible()
+  await expect(row.locator('.dp-project')).toHaveText('Paimos Aeon')
+  await page.screenshot({ path: testInfo.outputPath(`preview-${width}-${theme}.png`) })
+})
+
+test('after the last decision of a round opened from the preview, the Desk returns to the page below it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const world = await oneQuestion(page)
+  await page.goto('/agents')
+  await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
+  await page.getByTestId('desk-preview-item-q:question-1').click()
+  await expect(page).toHaveURL('/decision-desk?from=preview&item=q:question-1')
+  await expect(heading(page)).toHaveText('Which migration should carry the index?')
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-all-decided')).toBeVisible()
+  await expect(page).toHaveURL('/agents', { timeout: 5000 })
+  await expect(page.locator('[data-place="desk"] .place-main')).toBeFocused()
+  expect(world.calls.filter(call => call.path.endsWith('/decision'))).toHaveLength(1)
+  await expect(page.getByText(/^Decided\. It goes to .+ in a few seconds\.$/)).toBeVisible()
 })
 
 // The sheet outline: tab, shoulder and sheet are one path; the hairline keeps one weight (±0.25 px)
