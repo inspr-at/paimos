@@ -25,12 +25,12 @@ const text = (key: string) => typeof props.fields[key] === 'string' ? (props.fie
 const filled = computed(() => languages.filter(language => text(`pill_${language.key}`) || text(`benefit_${language.key}`)))
 const guidance = computed(() => {
   if (props.editing) return props.done
-    ? `${completedGapOnOpen ? 'This completed ticket has incomplete benefit fields. ' : ''}Each non-empty pill needs 2–4 words to save. Completing it again needs both languages and benefits.`
-    : 'Each non-empty pill needs 2–4 words to save. Before Done, both languages and benefits are required.'
+    ? `${completedGapOnOpen ? 'This completed ticket has incomplete benefit fields. ' : ''}Each non-empty pill needs 2–4 words to save. The project’s entry checks determine what is needed before Done.`
+    : 'Each non-empty pill needs 2–4 words to save. The project’s entry checks determine what is needed before Done.'
   if (props.parent || !issues.value.length) return ''
   return props.done
-    ? 'This completed ticket has incomplete benefit fields. Completing it again needs both languages.'
-    : 'Before Done: a 2–4 word pill and a plain benefit, in both languages.'
+    ? 'This completed ticket has incomplete benefit fields. The project’s entry checks determine what is needed before Done.'
+    : 'Release text: a 2–4 word pill and a plain benefit, in both languages.'
 })
 const raw = (key: string) => typeof props.fields[key] === 'string' ? props.fields[key] as string : ''
 const countLabel = (value: string) => { const n = pillWords(value); return n ? `${n} ${n === 1 ? 'word' : 'words'} of 2–4` : '2–4 words' }
@@ -47,7 +47,7 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
     <template v-if="editing">
       <div class="release-controls">
         <label v-if="!parent" class="release-control" data-tip="Content work uses the automatic acceptance delay after Done, unless there is an objection or human check. Omitted from release notes."><input type="checkbox" :checked="fields.no_release_needed === true" :disabled="disabled" @change="emit('change', 'no_release_needed', ($event.target as HTMLInputElement).checked)" />No release needed</label>
-        <label class="release-control" data-tip="Hidden tickets still need both languages."><input type="checkbox" :checked="fields.hide_from_release_notes === true" :disabled="disabled" @change="emit('change', 'hide_from_release_notes', ($event.target as HTMLInputElement).checked)" />Hide from release notes</label>
+        <label class="release-control" data-tip="Hidden tickets are exempt from the release-text entry check."><input type="checkbox" :checked="fields.hide_from_release_notes === true" :disabled="disabled" @change="emit('change', 'hide_from_release_notes', ($event.target as HTMLInputElement).checked)" />Hide from release notes</label>
       </div>
       <p v-if="notice" :id="`${uid}-notice`" class="guidance" role="status">{{ notice }}</p>
       <p v-else-if="guidance" class="guidance" role="status">{{ guidance }}</p>

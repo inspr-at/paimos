@@ -1,7 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { APIError, getNode, updateNode, type ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { conditionWords, entryFailure, entryLabel, entryStatus, tickEntryCheck, useEntryChecks, type EntryCheck, type EntryFailure, type EntryRecord } from '../../lib/entryChecks'
@@ -15,9 +14,10 @@ import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from './KeyCap.vue'
 import FloatingPanel from './FloatingPanel.vue'
+import TicketBenefits from './TicketBenefits.vue'
 const props = withDefaults(defineProps<{ row: ListItem; projectId: string; anchor: HTMLElement; mode?: 'queue' | 'entry' | 'status' | 'record'; toStatus?: string; entryRecord?: EntryRecord; refusal?: EntryFailure }>(), { mode: 'queue', toStatus: 'in_progress' })
 const emit = defineEmits<{ close: [restore: boolean]; queued: [entry: QueueWireEntry]; changed: [] }>()
-const queue = useWorkQueue(), session = useSession(), router = useRouter()
+const queue = useWorkQueue(), session = useSession()
 const current = ref(props.row), checks = useEntryChecks(() => current.value)
 const block = computed(() => props.mode === 'record' ? props.entryRecord : checks.data.value?.blocks.find(b => b.to_status === entryStatus(props.toStatus)))
 const rows = computed(() => {
@@ -30,6 +30,7 @@ const canEdit = computed(() => can('nodes.write', props.projectId))
 const person = computed(() => session.identity?.principal.kind === 'person')
 const readonly = computed(() => props.mode === 'record')
 const busy = ref(false), error = ref(''), fixing = ref<EntryCheck | null>(null), text = ref(''), reason = ref(''), anyway = ref(props.mode === 'status'), reasonField = ref<HTMLTextAreaElement>()
+const releaseFields = ref<Record<string, unknown>>({ ...props.row.fields })
 const originId = props.row.id, originActor = session.identity?.principal.id, originTenant = session.identity?.tenant.id
 const alive = () => props.row.id === originId && session.identity?.principal.id === originActor && session.identity?.tenant.id === originTenant
 let disposed = false
@@ -41,7 +42,7 @@ const sourcePath = computed(() => checks.data.value?.definition?.source === 'pro
 const lede = computed(() => readonly.value ? 'A record of the checks evaluated on entry.' : `Checks to enter ${statusMeta(props.toStatus).label}. Agents move it only when every check passes.`)
 const latest = computed(() => checks.data.value?.latest_refusal)
 const currentRecord = computed(() => checks.data.value?.entries.find(e => e.to_status === entryStatus(current.value.state)))
-const editLabel = (check: EntryCheck) => check.id === 'estimate_set' ? 'Suggest estimate' : check.id === 'acceptance_present' ? 'Write criteria' : check.id === 'blocker_named' ? 'Name it' : check.id === 'release_copy_set' || check.id === 'pills_benefits_set' ? 'Edit release text' : null
+const editLabel = (check: EntryCheck) => check.id === 'estimate_set' ? 'Suggest estimate' : check.id === 'acceptance_present' ? 'Write criteria' : check.id === 'blocker_named' ? 'Name it' : check.id === 'release_copy_set' || check.id === 'pills_benefits_set' ? 'Write it' : null
 function historyLabel(check: EntryCheck) {
   if (readonly.value) return check.passed ? 'Passed on entry' : `Overridden on entry · ${checks.data.value?.blocks.flatMap(b => b.checks).find(c => c.id === check.id)?.passed ? 'passes now' : 'still missing'}`
   if (check.passed && check.checked_by) return `Checked by ${check.checked_by.name}${check.checked_at ? ` · ${absoluteTime(check.checked_at)}` : ''}`
@@ -66,9 +67,7 @@ async function run(action: () => Promise<void>) {
 async function fix(check: EntryCheck) {
   if (!canEdit.value || readonly.value) return
   if (check.id === 'release_copy_set' || check.id === 'pills_benefits_set') {
-    emit('close', false)
-    await router.push({ path: `/p/${encodeURIComponent(props.row.project?.key ?? props.projectId)}/tickets`, query: { ticket: props.row.key, edit: 'benefit' } })
-    return
+    releaseFields.value = { ...current.value.fields }; fixing.value = check; return
   }
   if (check.id !== 'estimate_set') {
     fixing.value = check
@@ -78,7 +77,12 @@ async function fix(check: EntryCheck) {
   await run(async () => { const advice = await queueReadiness(originId); if (!alive()) return; await applyQueueEstimate(originId, advice.suggested_estimate_hours); await refresh() })
 }
 async function saveFix() {
-  if (!text.value.trim() || !fixing.value || !canEdit.value) return
+  if (!fixing.value || !canEdit.value) return
+  if (fixing.value.id === 'release_copy_set' || fixing.value.id === 'pills_benefits_set') {
+    const revision = current.value.updated_at, fields = { ...releaseFields.value }
+    await run(async () => { await updateNode(originId, { fields }, { ifUnmodifiedSince: revision }); await refresh(); if (alive()) fixing.value = null }); return
+  }
+  if (!text.value.trim()) return
   const key = fixing.value.id === 'acceptance_present' ? 'acceptance_criteria' : 'blocker', revision = current.value.updated_at, value = text.value.trim(), fields = { ...current.value.fields, [key]: value }
   await run(async () => { await updateNode(originId, { fields }, { ifUnmodifiedSince: revision }); await refresh(); if (alive()) fixing.value = null })
 }
@@ -134,7 +138,7 @@ function keys(event: KeyboardEvent) {
           <RouterLink v-if="checks.data.value?.definition" :to="sourcePath" class="nr-source">{{ source }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
           <div v-if="!readonly" class="nr-actions"><button v-if="person && canEdit && block?.total" type="button" class="link-btn" :aria-expanded="anyway" @click="openReason">Move to {{ statusMeta(toStatus).label }} anyway…</button><span v-else-if="!person && failed.length" class="nr-agent"><AppIcon name="lock" :size="12" />Agents move it only when every check passes.</span><button v-if="mode === 'queue'" type="button" class="btn sm primary queue-submit" :disabled="busy || checks.loading.value || !block || failed.length > 0 || !can('run.create', projectId)" @click="add"><AppIcon name="queue-add" :size="13" />Queue</button></div>
         </div>
-        <form v-if="fixing && !readonly" class="nr-form" @submit.prevent="saveFix"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="fixing = null">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || !text.trim()">Save <KeyCap k="mod" /><KeyCap k="enter" /></button></div><label :for="`entry-fix-${row.id}`">{{ fixing.id === 'acceptance_present' ? 'Acceptance criteria' : 'Name the blocker' }}</label><textarea :id="`entry-fix-${row.id}`" v-model="text" class="field" rows="3" :disabled="busy" /></form>
+        <form v-if="fixing && !readonly" class="nr-form" @submit.prevent="saveFix"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="fixing = null">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || (!text.trim() && fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set')">Save <KeyCap k="mod" /><KeyCap k="enter" /></button></div><TicketBenefits v-if="fixing.id === 'release_copy_set' || fixing.id === 'pills_benefits_set'" :fields="releaseFields" editing :disabled="busy" @change="(key, value) => releaseFields[key] = value" /><label v-else :for="`entry-fix-${row.id}`">{{ fixing.id === 'acceptance_present' ? 'Acceptance criteria' : 'Name the blocker' }}</label><textarea v-if="fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set'" :id="`entry-fix-${row.id}`" v-model="text" class="field" rows="3" :disabled="busy" /></form>
         <form v-if="anyway && person && canEdit && !readonly" class="nr-form" @submit.prevent="move"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="anyway = false">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || !reason.trim() || checks.loading.value">Move to {{ statusMeta(toStatus).label }} <KeyCap k="mod" /><KeyCap k="enter" /></button></div><label :for="`entry-reason-${row.id}`">Why move it now?</label><textarea :id="`entry-reason-${row.id}`" ref="reasonField" v-model="reason" class="field" rows="3" maxlength="500" :disabled="busy" /><p class="nr-hint">Required. It’s logged in {{ row.key }}’s activity with the missing checks: {{ failed.map(c => c.label).join(', ') }}.</p></form>
         <p v-if="error" role="alert" class="error">{{ error }}</p>
       </div>

@@ -148,14 +148,14 @@ func (m *Module) handleEntryTick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Checked  bool      `json:"checked"`
+		Checked  *bool     `json:"checked"`
 		Revision time.Time `json:"expected_revision"`
 	}
 	body, ok := readBody(w, r)
 	if !ok {
 		return
 	}
-	if err := decodeJSON(body, &in); err != nil || in.Revision.IsZero() {
+	if err := decodeJSON(body, &in); err != nil || in.Revision.IsZero() || in.Checked == nil {
 		writeError(w, 400, "checked and expected_revision are required")
 		return
 	}
@@ -202,7 +202,7 @@ func (m *Module) handleEntryTick(w http.ResponseWriter, r *http.Request) {
 		if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
 			return err
 		}
-		if item.Passed == in.Checked {
+		if item.Passed == *in.Checked {
 			return nil
 		}
 		var at time.Time
@@ -215,18 +215,18 @@ func (m *Module) handleEntryTick(w http.ResponseWriter, r *http.Request) {
 			for j := range out.Blocks[i].Checks {
 				row := &out.Blocks[i].Checks[j]
 				if row.ID == check {
-					if in.Checked {
+					if *in.Checked {
 						out.Blocks[i].Passed++
 					} else {
 						out.Blocks[i].Passed--
 					}
-					row.Passed = in.Checked
+					row.Passed = *in.Checked
 					row.CheckedBy = &workqueue.EntryPerson{ID: p.ID, Name: p.Name}
 					row.CheckedAt = &at
 				}
 			}
 		}
-		mark := map[string]any{"check_id": check, "checked": in.Checked, "definition_id": out.Definition.ID, "definition_revision": out.Definition.Revision, "by": workqueue.EntryPerson{ID: p.ID, Name: p.Name}, "at": at}
+		mark := map[string]any{"check_id": check, "checked": *in.Checked, "definition_id": out.Definition.ID, "definition_revision": out.Definition.Revision, "by": workqueue.EntryPerson{ID: p.ID, Name: p.Name}, "at": at}
 		return m.record(ctx, tx, p.ID, &id, "entry_check.ticked", nil, mark)
 	})
 	if err != nil {
@@ -375,7 +375,11 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 func entryFailedLabels(f *workqueue.EntryFailure) string {
 	labels := []string{}
 	for _, check := range f.Failed {
-		labels = append(labels, check.Label)
+		label := check.Label
+		if check.Reason != "" {
+			label += ": " + check.Reason
+		}
+		labels = append(labels, label)
 	}
 	return "Missing entry checks: " + strings.Join(labels, ", ")
 }

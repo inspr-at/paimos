@@ -114,6 +114,10 @@ func ValidateEntryRules(checks map[string][]EntryRule) error {
 	if checks == nil || len(checks) > 3 {
 		return workorders.Fail(400, "checks must contain Ready, QA or Done blocks")
 	}
+	encoded, err := json.Marshal(checks)
+	if err != nil || len(encoded) > 65536 {
+		return workorders.Fail(400, "definition checks exceed 64 KiB")
+	}
 	seen := map[string]bool{}
 	for state, rules := range checks {
 		if !slices.Contains([]string{"in_progress", "qa", "done"}, state) || len(rules) > 32 {
