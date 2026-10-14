@@ -8972,6 +8972,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestCatchUpReplicaRaceRestartAndPause","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestConsentCandidatesStayLinearUnderPlanCachedOnSmallTables","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestDatabaseClockPreviewAndForegroundClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestDefinitionEditsPreserveDueCursorAndPausedManualRun","tier":"GATED-FULL"}
