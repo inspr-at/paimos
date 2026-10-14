@@ -289,7 +289,7 @@ func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
 					}
 				}
 			}
-			if tc.legacy {
+			if tc.legacy && tc.hidden == nil {
 				// Old persisted JSON has neither copy fields nor the new flag.
 				f.tx(func(tx pgx.Tx) error {
 					_, err := tx.Exec(t.Context(), `UPDATE recurrences SET template=template-'hide_from_release_notes' WHERE id=$1`, r.ID)
