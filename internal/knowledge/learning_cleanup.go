@@ -249,7 +249,10 @@ func cleanupLegacyItem(ctx context.Context, pool *pgxpool.Pool, p tenant.Princip
 		if !eligible {
 			return nil
 		}
-		if err := authz.RequireTx(ctx, tx, p, "knowledge.write", authz.Scope{ProjectID: item.projectID}); err != nil {
+		// System has no user role binding. This internal job checks its exact
+		// active service identity under the tenant/tree access fence. HTTP
+		// dismissals continue to use fenceLearningWrite and RequireTx.
+		if err := requireCleanupActor(ctx, tx, p); err != nil {
 			return err
 		}
 		if _, err := recordDismissal(ctx, tx, p, item, legacyDismissReason); err != nil {
@@ -278,4 +281,16 @@ func logLegacyCounts(ctx context.Context, pool *pgxpool.Pool, tenantID string) e
 		}
 		return rows.Err()
 	})
+}
+
+func requireCleanupActor(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if p.Kind != tenant.Agent || p.Name != "System" {
+		return authz.ErrForbidden
+	}
+	var id string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND id=$2::uuid AND kind='agent' AND name='System' AND status='active' AND roles=ARRAY['system']::text[] FOR KEY SHARE`, p.TenantID, p.ID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return authz.ErrForbidden
+	}
+	return err
 }
