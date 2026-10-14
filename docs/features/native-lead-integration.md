@@ -85,8 +85,53 @@ no 48-hour live-soak or enablement evidence is claimed.
 
 ## Verification
 
-The named tests and exact final command results are recorded below after guarded
-validation completes. Exit 3 remains incomplete, and PR CI is authoritative.
+PASS: guarded `ci-static-locked.sh` (underlying remote
+`node scripts/ci-static.mjs --merge-main`) exits 0: 42 checks passed, zero optional
+checks skipped, including strict `go-tiers`, test-tier manifests, source ownership,
+shared inventories, migration and reporter/OpenAPI checks. Earlier host-guard
+refusals (exit 3) and the old feature document's public-name failure are not
+counted as green; the updated document passed the rerun.
+
+PASS A1/A4 constructor boundary:
+`TestQualifiedNativeRoutesBindCallerAndTargetBeforeDispatch` and
+`TestDisabledNativeRoutesAuthenticateWithoutStarting` passed in the remote
+`./internal/nativesessions/...` suite. Accepted start stays HTTP 202; malformed,
+oversized, unauthenticated and cross-target writes do not reach mutation storage.
+This proves the HTTP seam, not full Host/Launcher/receipt composition.
+
+PASS A3 counters and ownership:
+`TestNativeRootsFenceWorkerAliasAndProjectOwnClaim`,
+`TestNativeRootFencesLegacyHostAdmission`,
+`TestNativeRootHoldsCountUntilVerifiedRelease` and
+`TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity` passed on
+the remote committed HEAD with `./internal/agentaccounts -run TestNative
+-count=1 -v` (exit 0). The alias test verifies the exact capacity wait and legacy
+public route refusal, native archive protection, own-root exclusion, sibling
+occupancy, worker sidecar exclusion and reopening only after release.
+
+PASS A3 claim/replay dependency:
+`TestCoordinatorClaimsReserveQuotaBudgets` and
+`TestStartRegistrationIdempotencyAndPersonViewer` passed in the remote
+`./internal/nativesessions/store` suite, including exact own-hold claim replay.
+
+PASS compatibility/dependency suites: remote `./internal/agentd/...`,
+`./internal/harness/...`, `./internal/agentpairing/...`,
+`./internal/reportercontract/` and `./internal/nativesessions/...` passed.
+The broad account run initially failed the new fixture (quota identity, public
+refusal expectation, then retained alias fields); these were corrected, and the
+named native account rerun above is green. No pre-existing test was loosened or
+skipped. The broad all-account command was not repeated after that final fixture
+correction; authoritative PR CI remains required.
+
+PASS: `node scripts/test-tiers/affected.mjs --base origin/main` exits 0 and
+conservatively selects FULL because the Go manifest changed. This is selection
+evidence, not an executed full suite. `git diff --check` exits 0.
+
+NOT RUN: full I1 combined fake-native smoke and negative control, because the
+full runtime composition is incomplete. No browser check is applicable. No
+push to origin, deployment, review gate, real model call, daemon restart or live
+pilot was performed. The approved remote runner's temporary test refs are not
+origin pushes. Progress remains below 100 with the pairing files named BLOCKED.
 
 R0 additions are exactly these ESSENTIAL rows in `scripts/ci/go-test-tiers.json`:
 
