@@ -16,6 +16,7 @@ import { accountsNeeds, settingsFooter, settingsNeeds } from '../lib/footerProvi
 import { isAccountsPart, needsPart, PART_LABEL } from '../lib/accountsNeeds'
 import { useFooterSummary } from '../lib/footerSummary'
 import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
+import { arrivalPage, arrive } from '../lib/arrival'
 
 // Load only the selected section, so its bundle cannot hold up navigation.
 const BusinessSection = defineAsyncComponent(() => import('../components/settings/BusinessSection.vue'))
@@ -129,19 +130,22 @@ watch(current, async () => {
 }, { flush: 'post' })
 watch(sections, () => closePicker())
 onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('resize', resize) })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true; accountsNeeds.value = null })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); letGo(); disposed = true; accountsNeeds.value = null })
 let disposed = false
 
-// A deep link scrolls to its target once the section has rendered it.
+// A deep link scrolls to its target once the section has rendered it, and holds
+// it there while data that arrives later grows the content above (AEON-1365).
 let arrival: ReturnType<typeof setTimeout> | undefined
+let letGo = () => {}
 watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
+  letGo()
   if (!hash) return
   for (let tries = 0; tries < 20; tries++) {
     await nextTick()
     if (disposed || current.value !== section || route.hash !== hash) return
     const target = document.getElementById(decodeURIComponent(hash.slice(1)))
     if (target) {
-      target.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+      letGo = arrive(arrivalPage(target, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'))
       // A target that takes focus (tabindex) gets it, unless the person is already in a
       // control: the next Tab then continues inside it ("Rule in Policies", AEON-1165).
       const active = document.activeElement
