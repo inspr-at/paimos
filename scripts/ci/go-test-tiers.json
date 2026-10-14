@@ -4998,6 +4998,12 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeTakeCommandPreservesLegacyCommands","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeTakeCommandValidation","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeTakeRejectsForeignProjectionBeforeSocket","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestNativeWorkerDispatchFrozenEnvelopeAndReceipt","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestOnboardCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -7979,6 +7985,50 @@
     {"kind":"go","package":"internal/nativeproviders/pi","name":"TestPiQualificationMatrix","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeproviders/pi","name":"TestPiRefusesUnprovedNativeActions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestNativeTakeClientAcknowledgementAndHandBack","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestNativeTakeClientRebindsAndDetachNeverReturns","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestNativeTakeClientRequiresActualFreshSuccessor","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYInputRejectsStaleControlAndUncertainRetry","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYResizeBounds","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYResizeFailureDoesNotReportNewSize","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYResizeOnlyOnChangeAndReconnect","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYResizePhoneKeyboardAndPausedInput","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYResizeStormDebounceAndTerminalRestore","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYResizeTwoHolderTabsAndViewers","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixOwnershipResizeAndExit","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixPasteDrainsOutputWhileInputIsBlocked","reason":"AEON-1288 FIX2: blocked PTY paste drains child output and acknowledges all 8 KiB","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverClientLossAndExpiredLeaseDoNotRestart","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverFailedRebindKeepsPossibleFork","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverLaunchIdentityMustMatchConversationAndFreshProof","reason":"AEON-1288: retain possible forks with wrong conversation/provider or reused process proof","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverLeaseExpiryDuringQualificationPreventsFork","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverRechecksAuthorityAfterExit","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverRejectsSuccessorIdentityOrProofReuse","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverRequiresIndependentTUIFence","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverUnknownExitRetainsOccupancy","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverUsesCurrentAuthorityRevision","reason":"AEON-1288: actions compare against the current server revision inside the write fence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverWaitsForBothOwnedExits","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}
     ,
