@@ -121,7 +121,7 @@ func TestLearningRuleDraft(t *testing.T) {
 			t.Fatalf("details %q missing %q", learningRule.Details, part)
 		}
 	}
-	if hasLearning(listLearningsHTTP(t, f, f.b, f.project).Items, noteID) {
+	if hasLearning(listLearningCandidates(t, f, f.b, f.project).Items, noteID) {
 		t.Fatal("drafted learning stayed in the inbox")
 	}
 
@@ -136,7 +136,7 @@ func TestLearningRuleDraft(t *testing.T) {
 	if reopened.PublishedVersion != "" {
 		t.Fatal("undo published")
 	}
-	if !hasLearning(listLearningsHTTP(t, f, f.b, f.project).Items, noteID) {
+	if !hasLearning(listLearningCandidates(t, f, f.b, f.project).Items, noteID) {
 		t.Fatal("undo did not reopen the learning")
 	}
 
@@ -154,7 +154,7 @@ func TestLearningRuleDraft(t *testing.T) {
 	if decisionOf(t, f, noteID) != "drafted" {
 		t.Fatalf("edited undo cleared %q", decisionOf(t, f, noteID))
 	}
-	if hasLearning(listLearningsHTTP(t, f, f.b, f.project).Items, noteID) {
+	if hasLearning(listLearningCandidates(t, f, f.b, f.project).Items, noteID) {
 		t.Fatal("failed undo reopened the learning")
 	}
 

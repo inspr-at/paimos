@@ -47,10 +47,11 @@
 //     appends one dated line to the chosen entry's changelog section (the last
 //     heading whose text contains "changelog", or a new Changelog section),
 //     links the source, and appends knowledge.learning_accepted. Dismiss
-//     (POST .../dismiss) is person-only and appends knowledge.learning_dismissed.
+//     (POST .../dismiss) permits agents with a nonblank reason and appends
+//     knowledge.learning_dismissed with the real actor; people may undo it.
 //     Draft (POST .../draft) is person-only: it appends one rule to a chosen
 //     rule draft and records knowledge.learning_drafted. It does not publish.
-//     Agents may tag candidates; they cannot accept, dismiss, draft or undo.
+//     Agents may nominate and dismiss noise; they cannot accept, draft or undo.
 //     They may prepare the decision (AEON-788): PUT .../recommendation stores
 //     one current recommendation per learning (accept with a target entry and
 //     an optional lesson line, or dismiss with a reason) and appends
@@ -58,8 +59,12 @@
 //     on each item, marked stale when the learning's text changed since; a
 //     person applies it through accept (optional lesson) and dismiss
 //     (optional reason). The list holds 50; next_cursor continues it.
-//     A daily tagger nominates closed tickets, review verdicts and incident
-//     comments. It never accepts them. Merging the process-learning tag into
+//     People see only current prepared lessons with a source summary, target
+//     and exact changelog line or rule text; agents see unprepared candidates.
+//     A daily tagger nominates incident and reopened tickets, changes verdicts
+//     at the configured round cap, and explicit process-learning comments.
+//     Startup cleanup dismisses pre-release unprepared sources per tenant,
+//     under System, with normal undoable events and durable progress. It never accepts them. Merging the process-learning tag into
 //     a ticket appends node.updated under that tenant's System principal, in
 //     the same transaction as the tag. paimos serve starts it.
 //   - Principals with a viewer or read-only role cannot write (403).

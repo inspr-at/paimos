@@ -70,10 +70,10 @@ func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 	host := addNode(t, f, "INC-1", "work", "Incident host", &f.project)
 	leakyTicket := addNode(t, f, "DONE-7", "work", "Rotate "+fakeAWSKey()+" before Friday", &f.project)
 	closeAged(t, f, leakyTicket, "done", "1 hour")
-	leakyIncident := addComment(t, f, host, "The incident: someone pasted "+fakeGitHubToken()+" in chat")
-	leakyVerdict := addComment(t, f, host, "VERDICT fail. Found password=Winter2026! in the fixture")
-	cleanIncident := addComment(t, f, host, "The incident: rotate the keys weekly")
-	cleanVerdict := addComment(t, f, host, "VERDICT pass. The rotation held")
+	leakyIncident := addComment(t, f, host, "#process-learning The incident: someone pasted "+fakeGitHubToken()+" in chat")
+	leakyVerdict := addComment(t, f, host, "#process-learning VERDICT fail. Found password=Winter2026! in the fixture")
+	cleanIncident := addComment(t, f, host, "#process-learning The incident: rotate the keys weekly")
+	cleanVerdict := addComment(t, f, host, "#process-learning VERDICT pass. The rotation held")
 	// VERDICT comments are nominated only without outcome events (AEON-286).
 	hideOutcomeTable(t, f)
 
@@ -97,7 +97,7 @@ func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 	// The comment is edited after it was nominated: the inbox shows the new
 	// text, never the stored excerpt.
 	verdictID := commentLearningID(host, cleanVerdict)
-	reviseComment(t, f, host, cleanVerdict, "VERDICT pass. The rotation held after the second try", false)
+	reviseComment(t, f, host, cleanVerdict, "#process-learning VERDICT pass. The rotation held after the second try", false)
 	if got := learningText(t, f, verdictID); got != "VERDICT pass. The rotation held after the second try" {
 		t.Fatalf("edited verdict text %q", got)
 	}
@@ -112,8 +112,8 @@ func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 	}
 	// A source edited to hold a credential disappears, and cannot be accepted.
 	incidentID := commentLearningID(host, cleanIncident)
-	reviseComment(t, f, host, cleanIncident, "The incident: the key is "+fakeGitHubToken(), false)
-	if hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, incidentID) {
+	reviseComment(t, f, host, cleanIncident, "#process-learning The incident: the key is "+fakeGitHubToken(), false)
+	if hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, incidentID) {
 		t.Fatal("a source that now holds a key is still listed")
 	}
 	book := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "incidents", "title": "Incidents", "body": "Notes\n"})
@@ -134,7 +134,7 @@ func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 func TestTaggerVerdictSourceChanged(t *testing.T) {
 	f := setup(t)
 	ticket := addNode(t, f, "REV-2", "work", "Review the backups", &f.project)
-	outcome := insertOutcome(t, f, f.project, ticket, `{"verdict":"pass","summary":"Backups restore in minutes"}`, "")
+	outcome := insertOutcome(t, f, f.project, ticket, `{"verdict":"changes","round":3,"summary":"Backups restore in minutes"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
 	}
@@ -149,17 +149,17 @@ func TestTaggerVerdictSourceChanged(t *testing.T) {
 	if got := learningText(t, f, nodeLearningID(ticket)); got != "Backups restore in minutes" {
 		t.Fatalf("verdict %q", got)
 	}
-	rewriteOutcome(t, f, `UPDATE outcome_events SET payload='{"verdict":"pass","summary":"Backups restore in seconds"}' WHERE id::text=$1`, outcome)
+	rewriteOutcome(t, f, `UPDATE outcome_events SET payload='{"verdict":"changes","round":3,"summary":"Backups restore in seconds"}' WHERE id::text=$1`, outcome)
 	if got := learningText(t, f, nodeLearningID(ticket)); got != "Backups restore in seconds" {
 		t.Fatalf("edited verdict %q", got)
 	}
-	rewriteOutcome(t, f, `UPDATE outcome_events SET payload=jsonb_build_object('verdict','pass','summary','token='||$2::text) WHERE id::text=$1`, outcome, fakeGitHubToken())
+	rewriteOutcome(t, f, `UPDATE outcome_events SET payload=jsonb_build_object('verdict','changes','round',3,'summary','token='||$2::text) WHERE id::text=$1`, outcome, fakeGitHubToken())
 	if got := learningText(t, f, nodeLearningID(ticket)); strings.Contains(got, "Backups") || strings.Contains(got, "token=") {
 		t.Fatalf("verdict now holding a key served %q", got)
 	}
 
 	leaky := addNode(t, f, "REV-3", "work", "Review the vault", &f.project)
-	insertOutcome(t, f, f.project, leaky, `{"verdict":"fail","summary":"the header was Bearer `+strings.Repeat("Zm9vYmFy", 3)+`"}`, "")
+	insertOutcome(t, f, f.project, leaky, `{"verdict":"changes","round":3,"summary":"the header was Bearer `+strings.Repeat("Zm9vYmFy", 3)+`"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestTaggerVerdictSourceChanged(t *testing.T) {
 // is written, not as they were when the tagger scanned.
 func TestTaggerKeepsConcurrentFieldEdits(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-8", "work", "Keep the priority", &f.project)
+	ticket := addNode(t, f, "DONE-8", "work", "Incident: Keep the priority", &f.project)
 	setFields(t, f, ticket, map[string]any{"priority": "low", "tags": []any{"ops"}})
 	closeAged(t, f, ticket, "done", "1 hour")
 	var edited time.Time
@@ -217,7 +217,7 @@ func TestTaggerKeepsConcurrentFieldEdits(t *testing.T) {
 func TestTaggerVerdictStaysInItsProject(t *testing.T) {
 	f := setup(t)
 	ticket := addNode(t, f, "REV-4", "work", "Review the migration", &f.project)
-	insertOutcome(t, f, f.project, ticket, `{"verdict":"fail","summary":"Project A internal verdict text"}`, "")
+	insertOutcome(t, f, f.project, ticket, `{"verdict":"changes","round":3,"summary":"Project A internal verdict text"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
 	}
@@ -226,20 +226,20 @@ func TestTaggerVerdictStaysInItsProject(t *testing.T) {
 	onlyB := projectPerson(t, f, "Ben B")
 	bindProjectRole(t, f, onlyB.ID, "admin", f.other)
 	id := nodeLearningID(ticket)
-	if got := itemText(listLearningsHTTP(t, f, onlyA, f.project).Items, id); got != "Project A internal verdict text" {
+	if got := itemText(listLearningCandidates(t, f, onlyA, f.project).Items, id); got != "Project A internal verdict text" {
 		t.Fatalf("A before the move %q", got)
 	}
 
 	moveNode(t, f, ticket, f.other)
-	for _, item := range listLearningsHTTP(t, f, onlyB, f.other).Items {
+	for _, item := range listLearningCandidates(t, f, onlyB, f.other).Items {
 		if strings.Contains(item.Text, "Project A internal") {
 			t.Fatalf("B-only viewer saw A's verdict: %+v", item)
 		}
 	}
-	if got := itemText(listLearningsHTTP(t, f, f.a, f.other).Items, id); got != "Review the migration" {
+	if got := itemText(listLearningCandidates(t, f, f.a, f.other).Items, id); got != "Review the migration" {
 		t.Fatalf("B inbox shows %q, want the ticket's own title", got)
 	}
-	if hasLearning(listLearningsHTTP(t, f, onlyA, f.project).Items, id) {
+	if hasLearning(listLearningCandidates(t, f, onlyA, f.project).Items, id) {
 		t.Fatal("A-only viewer still sees a ticket that moved away")
 	}
 	entry := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "glint-notes", "title": "Glint notes", "body": "Notes\n", "project_id": f.other})
@@ -252,7 +252,7 @@ func TestTaggerVerdictStaysInItsProject(t *testing.T) {
 
 	// A verdict recorded in A for a ticket already in B is not nominated.
 	late := addNode(t, f, "REV-5", "work", "Already moved", &f.other)
-	insertOutcome(t, f, f.project, late, `{"verdict":"pass","summary":"Late A verdict"}`, "")
+	insertOutcome(t, f, f.project, late, `{"verdict":"changes","round":3,"summary":"Late A verdict"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
 	}
@@ -274,17 +274,17 @@ func TestTaggerCursorSameTimestamp(t *testing.T) {
 	host := addNode(t, f, "HOST-1", "work", "Comment host", &f.project)
 	var closed, reviewed, comments []string
 	for i := range 5 {
-		c := addNode(t, f, "SAME-"+strconv.Itoa(i+1), "work", "Closed together "+strconv.Itoa(i), &f.project)
+		c := addNode(t, f, "SAME-"+strconv.Itoa(i+1), "work", "Incident: Closed together "+strconv.Itoa(i), &f.project)
 		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET state='done', updated_at=$3 WHERE tenant_id=$1 AND id=$2::uuid`, f.a.TenantID, c, at); err != nil {
 			t.Fatal(err)
 		}
 		closed = append(closed, c)
 		r := addNode(t, f, "VER-"+strconv.Itoa(i+1), "work", "Reviewed together "+strconv.Itoa(i), &f.project)
-		insertOutcome(t, f, f.project, r, `{"verdict":"pass","summary":"Held `+strconv.Itoa(i)+`"}`, at.Format(time.RFC3339Nano))
+		insertOutcome(t, f, f.project, r, `{"verdict":"changes","round":3,"summary":"Held `+strconv.Itoa(i)+`"}`, at.Format(time.RFC3339Nano))
 		reviewed = append(reviewed, r)
 		var id int64
 		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after, at)
-			VALUES ($1, $2::uuid, $3::uuid, 'comment.created', jsonb_build_object('body_markdown', 'The incident number '||$4::text), $5)
+			VALUES ($1, $2::uuid, $3::uuid, 'comment.created', jsonb_build_object('body_markdown', '#process-learning The incident number '||$4::text), $5)
 			RETURNING id`, f.a.TenantID, f.a.ID, host, strconv.Itoa(i), at).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
@@ -355,7 +355,7 @@ func TestOpenNominationSurvivesDecidedWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := listLearningsHTTP(t, f, f.a, f.project)
+	page := listLearningCandidates(t, f, f.a, f.project)
 	if len(page.Items) != 1 || page.Items[0].Key != "OLDN-1" || page.Items[0].Text != "The older nomination is still open" || page.Truncated {
 		t.Fatalf("page %+v truncated %v", page.Items, page.Truncated)
 	}
@@ -397,7 +397,7 @@ func TestLearningDraftProjectOnlyUndo(t *testing.T) {
 	if _, ok := ruleByIdentity(rulesGet(t, h, f.a, set.ID).Rules, "learn.n."+note); ok {
 		t.Fatal("undo left the rule")
 	}
-	if !hasLearning(listLearningsHTTP(t, f, lead, f.project).Items, noteID) {
+	if !hasLearning(listLearningCandidates(t, f, lead, f.project).Items, noteID) {
 		t.Fatal("undo did not reopen the learning")
 	}
 }
@@ -445,7 +445,7 @@ func moveNode(t *testing.T, f fixture, id, parent string) {
 
 func learningText(t *testing.T, f fixture, id string) string {
 	t.Helper()
-	return itemText(listLearningsHTTP(t, f, f.a, f.project).Items, id)
+	return itemText(listLearningCandidates(t, f, f.a, f.project).Items, id)
 }
 
 func itemText(items []Learning, id string) string {

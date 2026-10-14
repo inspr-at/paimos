@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -43,7 +44,7 @@ func scopedAgent(t *testing.T, f fixture, name string) tenant.Principal {
 
 func learningByID(t *testing.T, f fixture, p tenant.Principal, id string) Learning {
 	t.Helper()
-	for _, item := range listLearningsHTTP(t, f, p, f.project).Items {
+	for _, item := range listLearningCandidates(t, f, p, f.project).Items {
 		if item.ID == id {
 			return item
 		}
@@ -59,8 +60,8 @@ func entryBody(t *testing.T, f fixture, id string) string {
 	return decode[Entry](t, w).Body
 }
 
-// An agent prepares both decisions; it can neither accept nor dismiss, so the
-// learnings stay open and the entry unchanged. Viewers cannot recommend.
+// An agent prepares decisions and cannot accept. A dismissal without a reason
+// fails, so these candidates and their recommendations stay open. Viewers cannot recommend.
 func TestRecommendationAgentsCannotApply(t *testing.T) {
 	f := setup(t)
 	book := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "flywheel", "title": "Flywheel", "body": "Notes\n"})
@@ -84,7 +85,6 @@ func TestRecommendationAgentsCannotApply(t *testing.T) {
 		body any
 	}{
 		{"/api/knowledge/learnings/" + ticketID + "/accept", map[string]any{"knowledge_id": book.ID, "lesson": rec.Lesson}},
-		{"/api/knowledge/learnings/" + noteID + "/dismiss", map[string]any{"reason": "Already in the runbook."}},
 	} {
 		w = call(t, f, agent, "POST", action.path, action.body)
 		expect(t, w, 403)
@@ -164,7 +164,7 @@ func TestApplyRecommendationIsPersonOnly(t *testing.T) {
 	if code(t, w) != "already_decided" {
 		t.Fatalf("late recommendation %s", w.Body.String())
 	}
-	if hasLearning(listLearningsHTTP(t, f, f.b, f.project).Items, ticketID) {
+	if hasLearning(listLearningCandidates(t, f, f.b, f.project).Items, ticketID) {
 		t.Fatal("applied learning still listed")
 	}
 	// Older clients dismiss with an empty body and still succeed.
@@ -176,6 +176,7 @@ func TestApplyRecommendationIsPersonOnly(t *testing.T) {
 // following next_cursor reaches every one exactly once, newest first.
 func TestLearningsContinuePastFifty(t *testing.T) {
 	f := setup(t)
+	agent := scopedAgent(t, f, "Paging scout")
 	const total = learningScanLimit + 40
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		// Pairs share one updated_at, so the cursor must break ties by id.
@@ -201,7 +202,7 @@ func TestLearningsContinuePastFifty(t *testing.T) {
 		if cursor != "" {
 			path += "&cursor=" + url.QueryEscape(cursor)
 		}
-		w := call(t, f, f.a, "GET", path, nil)
+		w := call(t, f, agent, "GET", path, nil)
 		expect(t, w, 200)
 		page := decode[LearningPage](t, w)
 		if page.Truncated != (page.NextCursor != "") || (page.Truncated && len(page.Items) != learningListLimit) {
@@ -234,6 +235,9 @@ func TestLearningsContinuePastFifty(t *testing.T) {
 // and that no learning is listed twice.
 func pageThrough(t *testing.T, f fixture, p tenant.Principal, project string, maxPages int) map[string]Learning {
 	t.Helper()
+	if p.Kind != tenant.Agent {
+		p = scopedAgent(t, f, "Paging scout")
+	}
 	seen := map[string]Learning{}
 	var previous *Learning
 	cursor := ""
@@ -325,6 +329,7 @@ func TestNominationsContinuePastScan(t *testing.T) {
 // learnings that scan has not read yet, and the cursor moves past the rows.
 func TestLearningsPageEndsAtAFullScan(t *testing.T) {
 	f := setup(t)
+	agent := scopedAgent(t, f, "Horizon scout")
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		// Mentioned, not tagged: read by the ticket scan, then dropped.
 		if _, err := tx.Exec(t.Context(), `
@@ -352,14 +357,14 @@ func TestLearningsPageEndsAtAFullScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := call(t, f, f.a, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
+	w := call(t, f, agent, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
 	expect(t, w, 200)
 	first := decode[LearningPage](t, w)
 	if len(first.Items) != 0 || !first.Truncated || first.NextCursor == "" {
 		t.Fatalf("first page %+v: a learning past the full scan was listed, or the page claimed to be complete", first)
 	}
 	var keys []string
-	for _, item := range pageThrough(t, f, f.a, f.project, 4) {
+	for _, item := range pageThrough(t, f, agent, f.project, 4) {
 		keys = append(keys, item.Key)
 	}
 	slices.Sort(keys)
@@ -527,6 +532,11 @@ func TestLearningWritesAuthorizeCurrentProject(t *testing.T) {
 // Every sensitive range field the server sends is in the contract's enum:
 // lesson and reason (recommend, dismiss) as well as text (accept).
 func TestSensitiveRangeFieldsMatchContract(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
+		t.Fatalf("generate contract: %v %s", err, output)
+	}
 	raw, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -557,6 +567,7 @@ func TestSensitiveRangeFieldsMatchContract(t *testing.T) {
 	}{
 		{"PUT", recommendPath(ticketID), map[string]any{"decision": "accept", "knowledge_id": book.ID, "lesson": "Use " + secret}},
 		{"PUT", recommendPath(ticketID), map[string]any{"decision": "dismiss", "reason": "Has " + secret}},
+		{"PUT", recommendPath(ticketID), map[string]any{"decision": "accept", "knowledge_id": book.ID, "lesson": "Validate rollback.", "source_summary": "Has " + secret}},
 		{"POST", "/api/knowledge/learnings/" + ticketID + "/dismiss", map[string]any{"reason": "Has " + secret}},
 		{"POST", "/api/knowledge/learnings/" + ticketID + "/accept", map[string]any{"knowledge_id": book.ID, "lesson": "Use " + secret}},
 	} {
