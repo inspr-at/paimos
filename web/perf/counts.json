@@ -1,0 +1,344 @@
+{
+  "captured_at": "2026-10-14T15:47:02.568532+00:00",
+  "source": "ppm; active kind=work; visible comments and incident relations",
+  "projects": [
+    {
+      "key": "AIT",
+      "work_items": 168,
+      "visible_comments": 1295,
+      "incident_relations": 112,
+      "comment_histogram": {
+        "0": 15,
+        "1": 8,
+        "2": 28,
+        "3": 16,
+        "4": 8,
+        "5": 12,
+        "6": 15,
+        "7": 8,
+        "8": 8,
+        "9": 8,
+        "10": 3,
+        "11": 3,
+        "12": 6,
+        "13": 5,
+        "14": 1,
+        "15": 4,
+        "16": 5,
+        "17": 1,
+        "18": 1,
+        "19": 1,
+        "20": 1,
+        "21": 1,
+        "22": 2,
+        "23": 1,
+        "27": 1,
+        "30": 2,
+        "34": 1,
+        "39": 1,
+        "61": 1,
+        "72": 1
+      },
+      "shapes": [
+        {
+          "depth": 1,
+          "children": 0,
+          "leaf": true,
+          "count": 35
+        },
+        {
+          "depth": 1,
+          "children": 47,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 84,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 2,
+          "children": 0,
+          "leaf": true,
+          "count": 131
+        }
+      ]
+    },
+    {
+      "key": "AEON",
+      "work_items": 1353,
+      "visible_comments": 11359,
+      "incident_relations": 134,
+      "comment_histogram": {
+        "0": 161,
+        "1": 56,
+        "2": 177,
+        "3": 137,
+        "4": 104,
+        "5": 77,
+        "6": 80,
+        "7": 54,
+        "8": 47,
+        "9": 55,
+        "10": 48,
+        "11": 32,
+        "12": 32,
+        "13": 28,
+        "14": 25,
+        "15": 36,
+        "16": 32,
+        "17": 22,
+        "18": 13,
+        "19": 15,
+        "20": 18,
+        "21": 8,
+        "22": 9,
+        "23": 6,
+        "24": 7,
+        "25": 8,
+        "26": 5,
+        "27": 3,
+        "28": 4,
+        "29": 5,
+        "30": 7,
+        "31": 3,
+        "32": 4,
+        "33": 3,
+        "35": 2,
+        "36": 2,
+        "37": 4,
+        "38": 1,
+        "39": 1,
+        "40": 1,
+        "41": 2,
+        "43": 1,
+        "44": 1,
+        "45": 1,
+        "46": 1,
+        "47": 1,
+        "54": 1,
+        "56": 1,
+        "58": 1,
+        "61": 1,
+        "62": 1,
+        "66": 1,
+        "67": 1,
+        "70": 1,
+        "75": 1,
+        "77": 1,
+        "101": 1,
+        "105": 1,
+        "156": 1,
+        "181": 1
+      },
+      "shapes": [
+        {
+          "depth": 1,
+          "children": 0,
+          "leaf": true,
+          "count": 592
+        },
+        {
+          "depth": 1,
+          "children": 1,
+          "leaf": false,
+          "count": 9
+        },
+        {
+          "depth": 1,
+          "children": 2,
+          "leaf": false,
+          "count": 6
+        },
+        {
+          "depth": 1,
+          "children": 3,
+          "leaf": false,
+          "count": 3
+        },
+        {
+          "depth": 1,
+          "children": 4,
+          "leaf": false,
+          "count": 4
+        },
+        {
+          "depth": 1,
+          "children": 5,
+          "leaf": false,
+          "count": 7
+        },
+        {
+          "depth": 1,
+          "children": 6,
+          "leaf": false,
+          "count": 3
+        },
+        {
+          "depth": 1,
+          "children": 7,
+          "leaf": false,
+          "count": 4
+        },
+        {
+          "depth": 1,
+          "children": 8,
+          "leaf": false,
+          "count": 5
+        },
+        {
+          "depth": 1,
+          "children": 9,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 10,
+          "leaf": false,
+          "count": 3
+        },
+        {
+          "depth": 1,
+          "children": 11,
+          "leaf": false,
+          "count": 2
+        },
+        {
+          "depth": 1,
+          "children": 12,
+          "leaf": false,
+          "count": 2
+        },
+        {
+          "depth": 1,
+          "children": 14,
+          "leaf": false,
+          "count": 2
+        },
+        {
+          "depth": 1,
+          "children": 15,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 16,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 17,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 18,
+          "leaf": false,
+          "count": 3
+        },
+        {
+          "depth": 1,
+          "children": 21,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 23,
+          "leaf": false,
+          "count": 2
+        },
+        {
+          "depth": 1,
+          "children": 28,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 29,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 30,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 32,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 35,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 1,
+          "children": 42,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 2,
+          "children": 0,
+          "leaf": true,
+          "count": 634
+        },
+        {
+          "depth": 2,
+          "children": 1,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 2,
+          "children": 2,
+          "leaf": false,
+          "count": 6
+        },
+        {
+          "depth": 2,
+          "children": 3,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 2,
+          "children": 4,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 2,
+          "children": 7,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 2,
+          "children": 23,
+          "leaf": false,
+          "count": 1
+        },
+        {
+          "depth": 3,
+          "children": 0,
+          "leaf": true,
+          "count": 50
+        }
+      ]
+    }
+  ]
+}

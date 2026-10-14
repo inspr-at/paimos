@@ -14818,6 +14818,14 @@
     ,
     {"kind":"node","file":"tests/add-account.test.ts","name":"sign-in reuses known commands and invents none","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 graph cells reject every canvas that is not 3d","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 graph harness uses SwiftShader and allows motion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 harness files keep the measurement contract wired","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 time budget decides pass and long tasks fail only search and scroll","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/aeon-635.test.ts","name":"Other follows the displayed groups when an untold feature or fix is shown as maintenance (AEON-635)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/aeon-635.test.ts","name":"a named ticket claims all its commits and does not make the release match Other (AEON-635)","tier":"GATED-FULL"}
