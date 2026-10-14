@@ -745,6 +745,10 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <p v-if="noteField && !decidedView" class="ps"><label class="ps-label" for="desk-note">{{ noteField.label }}</label><span class="field-row"><input id="desk-note" v-model="draft.reason" data-field="reason" class="ul-field" :aria-label="noteField.aria" :maxlength="item.kind === 'lesson' ? 500 : 2000" :disabled="!editable" :placeholder="noteField.placeholder" enterkeyhint="done" autocomplete="off" @input="touch" @focus="editing = 'reason'" @blur="editing === 'reason' && (editing = '')" /><span class="field-hint" aria-hidden="true"><KeyCap k="enter" /> done</span></span></p>
                 <p v-else-if="noteField && draft.reason" class="ps"><span class="ps-label">{{ noteField.label }}</span><span class="c-answer">{{ draft.reason }}</span></p>
                 <p v-if="item.fromRecord && !item.decided" class="m-note">{{ item.fromRecord }}</p>
+                <template v-if="item.lesson && item.decided">
+                  <p v-if="item.delivery" class="m-note">{{ item.delivery }}</p>
+                  <p class="m-note">Undo restores this lesson before deciding again.</p>
+                </template>
               </section>
               <aside class="margin context-column" aria-label="Background">
                 <section v-if="item.lesson" class="m-sec" aria-label="Lesson details" data-testid="desk-lesson-details">
@@ -755,8 +759,6 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   <pre class="diff"><ins class="ln"><span class="sg" aria-hidden="true">+</span><span class="tx" data-testid="lesson-line">{{ item.lesson.learning.recommendation?.rule_text || item.lesson.learning.recommendation?.line }}</span></ins></pre>
                   <h3 class="eyebrow">What Dismiss does</h3><p>Nothing is written.</p>
                   <h3 class="eyebrow">Where the answer goes</h3><p>{{ item.destination }}</p>
-                  <p v-if="item.delivery">{{ item.delivery }}</p>
-                  <p v-if="item.decided">Undo restores this lesson before deciding again.</p>
                 </section>
                 <template v-if="item.approval">
                   <section class="m-sec"><h3 class="eyebrow">Why</h3><p>{{ item.approval.rationale || 'No reason supplied by the agent.' }}</p></section>
@@ -802,7 +804,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   </div>
                 </section>
                 <section v-if="context.attachments.length" class="m-sec"><h3 class="eyebrow">Attachments · {{ context.attachments.length }}</h3><div class="thumbs"><button v-for="(attachment, at) in context.attachments" :key="attachment.id" type="button" class="thumb" :aria-label="`Open ${attachment.caption || attachment.name}`" @click="showAttachment(at)"><span class="thumb-img"><img v-if="hasThumbnail(attachment) && !brokenThumbs.has(attachment.id)" :src="contentUrl(attachment.id, 'thumb')" alt="" @error="brokenThumbs.add(attachment.id)" /><span v-else class="thumb-kind">{{ fileKind(attachment) }}</span></span><span class="thumb-name" :data-tip="attachment.caption || attachment.name">{{ attachment.caption || attachment.name }}</span></button></div></section>
-                <p v-if="item.source && !item.approval && (!!item.rule || (!item.ticketId && !item.ticketKey))" class="m-sec"><a v-if="item.source.startsWith('/api/')" class="src-link" :href="item.source" target="_blank" rel="noopener noreferrer">Source <AppIcon name="external" :size="12" /></a><RouterLink v-else class="src-link" :to="item.source">Source <AppIcon name="external" :size="12" /></RouterLink></p>
+                <p v-if="item.source && !item.lesson && !item.approval && (!!item.rule || (!item.ticketId && !item.ticketKey))" class="m-sec"><a v-if="item.source.startsWith('/api/')" class="src-link" :href="item.source" target="_blank" rel="noopener noreferrer">Source <AppIcon name="external" :size="12" /></a><RouterLink v-else class="src-link" :to="item.source">Source <AppIcon name="external" :size="12" /></RouterLink></p>
               </aside>
             </div>
           </template>
