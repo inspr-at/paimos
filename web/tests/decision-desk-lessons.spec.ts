@@ -80,7 +80,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await row.click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
     await expect(page.getByTestId('lesson-line')).toHaveText(line)
     await expect(page.getByRole('link', { name: 'From Recovery failed during release' })).toHaveAttribute('href', '/p/AEON/AEON-1')
-    await expect(page.getByTestId('desk-lesson-details')).toContainText('Adds this line to Ship an Aeon release › Changelog')
+    await expect(page.getByTestId('desk-lesson-details')).toContainText('Adds this line to Ship an Aeon release · Changelog')
     await expect(page.getByTestId('lesson-outdated')).toHaveText('The entry changed since this was prepared. Accept writes against the current version.')
     await page.screenshot({ path: testInfo.outputPath('outdated.png') })
     const guard = await controlStability(page, {
@@ -106,7 +106,8 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: testInfo.outputPath('pending.png') })
     await page.getByTestId('desk-close').click(); state.crowded = true; await page.goto('/p/AEON/knowledge')
     await expect(page.getByRole('heading', { name: 'Method learnings' })).toHaveCount(0)
-    const link = page.getByRole('link', { name: '1 lessons wait on the Decision Desk ›' })
+    const link = page.getByRole('link', { name: '1 lessons wait on the Decision Desk', exact: true })
+    await expect(link.locator('svg')).toHaveCount(1)
     await expect(link).toHaveAttribute('href', '/decision-desk?kind=lesson&project=p-aeon')
     const search = page.getByRole('searchbox', { name: 'Search knowledge in Paimos Aeon' })
     const guard = await controlStability(page, { search, newEntry: page.getByRole('button', { name: 'New knowledge entry' }) })

@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { answerFor, deskProject, draftFor, fieldTarget, kindLabels, projectColor, projectSwitch, type DeskProject, macPlatform, outcomeLabels, outcomeUnavailable, roundCounts, submitModifier, suggestedUnavailableNote, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
-import { deliveryTime, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
+import { deliveryTime, lessonChangelogLabel, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
 import { RISK_LABEL, riskFor, scopeLabel } from '../../lib/agentState'
 import { contentUrl, fileKind, hasThumbnail } from '../../lib/attachments'
 import AttachmentLightbox from '../work/AttachmentLightbox.vue'
@@ -418,7 +418,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', sizeTab); live = fa
                 <h3>Why</h3><p v-if="item.lesson.learning.title && item.lesson.learning.href"><RouterLink v-clip-tip class="lesson-source" :to="item.lesson.learning.href">From {{ item.lesson.learning.title }}</RouterLink></p>
                 <p>{{ item.lesson.learning.recommendation?.source_summary }}</p>
                 <p v-if="item.lesson.outdated" data-testid="lesson-outdated">The entry changed since this was prepared. Accept writes against the current version.</p>
-                <h3>What Accept writes</h3><p> Adds this line to {{ item.lesson.learning.recommendation?.rule_layer_id ? `rule draft ${item.lesson.learning.recommendation.knowledge_title}` : `${item.lesson.learning.recommendation?.knowledge_title} › Changelog` }}</p>
+                <h3>What Accept writes</h3><p> Adds this line to {{ item.lesson.learning.recommendation?.rule_layer_id ? `rule draft ${item.lesson.learning.recommendation.knowledge_title}` : lessonChangelogLabel(item.lesson.learning.recommendation?.knowledge_title) }}</p>
                 <pre class="rule-diff" data-testid="lesson-line"><ins>{{ item.lesson.learning.recommendation?.rule_text || item.lesson.learning.recommendation?.line }}</ins></pre>
                 <h3>What Dismiss does</h3><p>Nothing is written.</p>
               </section>

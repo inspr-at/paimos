@@ -125,6 +125,10 @@ export function ruleItem(rule: DoctrineInboxItem): DeskItem {
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
   ]), rule: { ...rule }, prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
+/** The entry and its Changelog. The house separator is a word divider; a text chevron is an icon. */
+export function lessonChangelogLabel(title: string | undefined): string {
+  return `${title} · Changelog`
+}
 /** A lesson keeps the exact native recommendation frozen for the round. */
 export function lessonItem(row: DeskProjectionItem, learning: MethodLearning, projectName: string, outdated = false): DeskItem {
   const rec = learning.recommendation!
@@ -132,7 +136,7 @@ export function lessonItem(row: DeskProjectionItem, learning: MethodLearning, pr
     { id: 'accept', title: 'Accept', description: rec.rule_layer_id ? 'Add the prepared line to the rule draft.' : 'Add the prepared line to the changelog.', answer: 'Accepted' },
     { id: 'dismiss', title: 'Dismiss', description: 'Nothing is written.', answer: 'Dismissed' },
   ]), projectId: row.project_id!, projectName, revision: rec.event_id, createdAt: row.created_at, held: false,
-    source: row.source, destination: rec.rule_layer_id ? `Rule draft ${rec.knowledge_title}` : `${rec.knowledge_title} › Changelog`,
+    source: row.source, destination: rec.rule_layer_id ? `Rule draft ${rec.knowledge_title}` : lessonChangelogLabel(rec.knowledge_title),
     lesson: { learning: { ...learning, recommendation: { ...rec } }, outdated }, suggestion: 'Accept or Dismiss the prepared lesson.' }
 }
 async function readLessons(rows: readonly DeskProjectionItem[], name: (id: string) => string) {
