@@ -204,6 +204,10 @@ func TestMessagingOnlyAgentThroughProductionAuth(t *testing.T) {
 	if status != 401 {
 		t.Fatalf("expired key authenticated: %d", status)
 	}
+	// Isolate revocation from expiry so the next refusal has only one cause.
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET expires_at=clock_timestamp()+interval '7 days' WHERE id=$1`, keyID); err != nil {
+		t.Fatal(err)
+	}
 	if err := auth.OperatorRevokeAgentKey(t.Context(), w.db.App, w.sender.TenantID, keyID); err != nil {
 		t.Fatal(err)
 	}
