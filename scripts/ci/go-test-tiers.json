@@ -4968,6 +4968,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestMessagingEntryPointPreservesGlobalsAndTree","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestMessagingOnlyInboxCLI","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestMessagingPollBackoffAndOneShot","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestMessagingPollCancellation","tier":"GATED-FULL"}
@@ -4991,6 +4993,8 @@
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandValidation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeRoleRecipesRequireSeparateAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
@@ -7144,6 +7148,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestHookPullWinsOverTheFollowingAck","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestInboxFinalWriteRechecksMessagingPermission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestInboxReceipt","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestLegacyHealIsOneTime","tier":"GATED-FULL"}
@@ -7163,6 +7169,8 @@
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAddressAuthSnapshotAndConcurrentSend","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAtomicRollbackAndProjectBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestMessagingOnlyAgentThroughProductionAuth","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingPaginationHeldFilterAndEvents","tier":"GATED-FULL"}
     ,
@@ -7993,6 +8001,10 @@
     {"kind":"go","package":"internal/nativerecovery","name":"TestRecoveryJournalReclaimsOnlyObsoleteCompletedSessions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativerecovery","name":"TestResumeRequiresCurrentProofPolicyHistoryAndExpiresCallbacks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeroles","name":"TestNativeRoleResumeExitAndReceiptEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeroles","name":"TestNativeRoleSwitchFencesAndSingleWriter","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
