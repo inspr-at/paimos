@@ -201,6 +201,16 @@ func requireNativeActorTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, no
 	if err := authz.RequireTx(ctx, tx, original, "harness.control", authz.Scope{ProjectID: in.ProjectID}); err != nil {
 		return nativeDenial(nativecontract.ReasonPermissionRevoked)
 	}
+	if intent.Role == "coordinator" {
+		var owner string
+		if err := tx.QueryRow(ctx, `SELECT `+modelprefs.CanonicalPersonSQL("id")+`::text FROM principals
+ WHERE id=$1 AND kind='person' AND status='active'`, original.ID).Scan(&owner); err != nil {
+			return nativeDenial(nativecontract.ReasonWrongPrincipal)
+		}
+		if owner != in.OwnerPersonID {
+			return nativeDenial(nativecontract.ReasonWrongPrincipal)
+		}
+	}
 	if !now.Before(policy.ExpiresAt) {
 		return nativeDenial(nativecontract.ReasonGrantExpired)
 	}

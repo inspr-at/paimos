@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -20,7 +21,9 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/nativeadmission"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativeintegration"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -183,7 +186,26 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 			if err := check(); err != nil {
 				t.Fatalf("real paired key failed exact-root runtime validation: %v", err)
 			}
+			root := nativeintegration.RootAuthority{Pool: f.d.App, Grants: authority, Now: func() time.Time { return f.now }}
+			runtimeRequest := nativeadmission.Request{Binding: *claimed.ExpectedBinding, AccountBindingDigest: binding.Digest(),
+				Profile: nativecontract.ProfileRequest{TenantID: f.person.TenantID, OwnerPersonID: f.person.ID,
+					AccountID: f.intent.AccountID, AccountKey: binding.AccountKey, Harness: f.intent.Harness,
+					WorkspaceID: f.intent.WorkspaceID, BindingRevision: claimed.ExpectedBinding.BindingRevision, Policy: claimed.Policy}, Launch: claimed.LaunchConfig}
+			if err := root.Revalidate(f.daemonCtx(t), runtimeRequest); err != nil {
+				t.Fatalf("native admission port failed exact-root runtime validation: %v", err)
+			}
 			if change == "none" {
+				stale := runtimeRequest
+				stale.Binding.RuntimeEpoch = "30000000-0000-4000-8000-000000000001"
+				var refusal *nativecontract.ValidationError
+				if err := root.Revalidate(f.daemonCtx(t), stale); !errors.As(err, &refusal) || refusal.Reason != nativecontract.ReasonWrongGeneration {
+					t.Fatalf("native admission accepted another runtime epoch: %v", err)
+				}
+				stale = runtimeRequest
+				stale.AccountBindingDigest = strings.Repeat("0", 64)
+				if err := root.Revalidate(f.daemonCtx(t), stale); !errors.As(err, &refusal) || refusal.Reason != nativecontract.ReasonIdentityMismatch {
+					t.Fatalf("native admission accepted another account enrollment: %v", err)
+				}
 				// Check an actual control handler with this authenticated runtime.
 				mux := http.NewServeMux()
 				harness.New(f.d.App).Mount(mux)
@@ -194,6 +216,19 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 					t.Fatalf("ordinary runtime reached harness control: %d %s", w.Code, w.Body.String())
 				}
 				return
+			}
+			var claimDone chan error
+			if change != "different_key" {
+				f.observer.entered, f.observer.release = make(chan struct{}), make(chan struct{})
+				claimDone = make(chan error, 1)
+				go func() { _, err := f.s.Claim(f.daemonCtx(t), f.daemon, f.claim(accepted)); claimDone <- err }()
+				select {
+				case <-f.observer.entered:
+				case err := <-claimDone:
+					t.Fatalf("claim refused before the observation barrier: %v", err)
+				case <-t.Context().Done():
+					t.Fatal("claim did not reach the observation barrier")
+				}
 			}
 			f.seed(t, func(tx pgx.Tx) error {
 				ctx := dbtest.Seed(t.Context())
@@ -246,9 +281,20 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 				}
 				t.Fatalf("%s did not refuse with permission_revoked: %v", change, err)
 			}
-			_, err = f.s.Claim(f.daemonCtx(t), f.daemon, f.claim(accepted))
+			if claimDone != nil {
+				close(f.observer.release)
+				select {
+				case err = <-claimDone:
+				case <-t.Context().Done():
+					t.Fatal("claim did not leave the observation barrier")
+				}
+				f.observer.entered = nil
+			} else {
+				_, err = f.s.Claim(f.daemonCtx(t), f.daemon, f.claim(accepted))
+			}
 			assertRefusal(err)
 			assertRefusal(check())
+			assertRefusal(root.Revalidate(f.daemonCtx(t), runtimeRequest))
 		})
 	}
 }
