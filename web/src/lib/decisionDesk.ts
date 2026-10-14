@@ -4,10 +4,11 @@ import type { KeyTrimProposal } from './keyTrim'
 import type { Approval } from './agents'
 import type { DoctrineInboxItem } from './doctrine'
 import { sha256FirstByte } from './avatar.ts'
+import type { MethodLearning } from './knowledge'
 import type { StepupRequest } from './stepup'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
-export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix'
+export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson'
 // Outside the server option-ID alphabet, so an agent option cannot collide.
 export const CUSTOM_ANSWER = '@custom'
 export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean; unavailable?: string }
@@ -34,7 +35,7 @@ export interface DeskItem {
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
   outcomes?: DeskOutcomeAvailability[]; doctrine?: DeskDoctrineTarget; outcomeEffects?: DeskOutcomeEffect[]
-  unavailable?: string; prUrl?: string; source?: string; linkOut?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest
+  unavailable?: string; prUrl?: string; source?: string; linkOut?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest; lesson?: { learning: MethodLearning; outdated: boolean }; undoEvent?: number
 }
 /** The asking agent as the memo names it: its session's name, harness mark and model. */
 export interface DeskWho { name: string; harness?: string; model?: string }
@@ -44,7 +45,7 @@ export interface DeskTicket { key: string; title: string }
 export interface DeskClose { afterLast: boolean; last?: DeskItem; skipped?: boolean }
 export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
 export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
-export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval', account_matrix: 'Account matrix' }
+export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval', account_matrix: 'Account matrix', lesson: 'Lesson to adopt' }
 export function draftFor(item: DeskItem): DeskDraft {
   const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim' || item.kind === 'stepup'
   return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: initialOutcome(item), dirty: false }
@@ -156,16 +157,16 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'routine_consent'; project_id?: string
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent'; project_id?: string
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
-  items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number }
+  items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number; lessons?: Record<string, number> }
   has_more: boolean; next_cursor?: string; as_of: string
 }
 
 export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
-  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c' }[item.kind]
+  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c', lesson: 'l' }[item.kind]
   return `${prefix}:${item.id}`
 }
 // Link-out rows are decided on their own settings page, never in the memo.
@@ -176,7 +177,7 @@ export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): st
 }
 // Compatibility links are data, never a selector or a destination to execute.
 export function deskLinkItem(value: unknown): string {
-  return typeof value === 'string' && /^[qamrtks]:[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/.test(value) ? value : ''
+  return typeof value === 'string' && /^[qamrtksl]:[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/.test(value) ? value : ''
 }
 
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {
@@ -205,6 +206,8 @@ export async function readDeskProjection(limit = 100, cursor?: string, signal?: 
     ![page.counts.open, page.counts.held, page.counts.chores].every(n => Number.isSafeInteger(n) && n >= 0) || typeof page.has_more !== 'boolean') {
     throw new Error('Decision Desk returned an invalid projection. Try again.')
   }
+  const lessons = page.counts.lessons
+  if (lessons !== undefined && (lessons === null || typeof lessons !== 'object' || Array.isArray(lessons) || Object.keys(lessons).length > 1000 || !Object.values(lessons).every(count => Number.isSafeInteger(count) && count >= 0))) throw new Error('Decision Desk returned invalid lesson totals.')
   return page
 }
 

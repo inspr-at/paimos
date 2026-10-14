@@ -27,8 +27,11 @@ function seed(): WorkKind[] {
   ] as const
   return entries.map((entry, position) => ({ id: `00000000-0000-4000-8000-${String(position + 1).padStart(12, '0')}`, slug: entry[0], label: entry[1], hint: entry[2], examples: [...entry[3]], labels: [...entry[4]], ticket_count: entry[5], position, ...(entry[0] === 'other' || entry[0] === 'security' ? { system: entry[0] } : {}) }))
 }
-async function open(page: Page, options: { member?: boolean; agent?: boolean; fail?: boolean; width?: number; theme?: string; pagination?: boolean; hash?: string } = {}) {
-  const data = { kinds: seed(), limits: { small_hours: 2, fix_rounds: 3, revision: 7, set_by: null, set_at: null }, writes: [] as { path: string; method: string; body: unknown }[], fail: options.fail ?? false, manage: !options.member, reads: 0 }
+async function open(page: Page, options: { member?: boolean; agent?: boolean; fail?: boolean; width?: number; theme?: string; pagination?: boolean; hash?: string; hold?: boolean } = {}) {
+  // hold: the kinds stay unread until the test calls release(), like a slow first read.
+  let release = () => {}
+  const held = options.hold ? new Promise<void>(resolve => { release = resolve }) : Promise.resolve()
+  const data = { kinds: seed(), limits: { small_hours: 2, fix_rounds: 3, revision: 7, set_by: null, set_at: null }, writes: [] as { path: string; method: string; body: unknown }[], fail: options.fail ?? false, manage: !options.member, reads: 0, release: () => release() }
   await page.setViewportSize({ width: options.width ?? 1440, height: 1000 })
   await mockWork(page, fixtures())
   const settings = settingsData(); settings.profile.locale = 'en-GB'; await mockSettings(page, settings)
@@ -41,6 +44,7 @@ async function open(page: Page, options: { member?: boolean; agent?: boolean; fa
     const req = route.request(), url = new URL(req.url()), path = url.pathname, method = req.method()
     if (method === 'GET') {
       data.reads++
+      await held
       const middle = Math.ceil(data.kinds.length / 2), second = !!url.searchParams.get('cursor')
       return route.fulfill({ json: { items: options.pagination ? data.kinds.slice(second ? middle : 0, second ? undefined : middle) : data.kinds, next_cursor: options.pagination && !second ? data.kinds[middle - 1]!.id : null } })
     }
@@ -72,7 +76,7 @@ async function open(page: Page, options: { member?: boolean; agent?: boolean; fa
     return route.fulfill({ json: data.limits })
   })
   await page.goto(`/settings/kinds${options.hash ?? ''}`)
-  await expect(row(page)).toContainText('UI design')
+  if (!options.hold) await expect(row(page)).toContainText('UI design')
   await expect(advanced(page)).toBeVisible()
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, options.theme ?? 'light')
   return data
@@ -320,6 +324,19 @@ test('the situations link on Models still lands on the limits, opening the fold'
   await expect(advanced(page)).toHaveAttribute('aria-expanded', 'true')
   await expect(page.getByRole('heading', { name: 'Situation limits' })).toBeInViewport()
   await page.reload(); await expect(advanced(page)).toHaveAttribute('aria-expanded', 'true')
+})
+
+// Risk: kinds read after the arrival scroll grow the list above and push the limits off-screen (AEON-1365, nightly).
+test('the situations link stays on the limits when the kinds arrive after the scroll', async ({ page }) => {
+  const data = await open(page, { hash: '#k-sits', hold: true })
+  const heading = page.getByRole('heading', { name: 'Situation limits' })
+  // The ring marks the arrival scroll; only after it do the kinds come in, above the limits.
+  await expect(heading).toHaveClass(/arrived/)
+  await expect(page.locator('ol.kinds > li[data-kind]')).toHaveCount(0)
+  data.release()
+  await expect(row(page, 'other')).toContainText('Everything else')
+  await expect(page.getByRole('table').getByRole('row')).toHaveCount(8)
+  await expect(heading).toBeInViewport()
 })
 
 // Risk: a failed limit write shows the new number as if it had been saved.

@@ -57,7 +57,7 @@ const groups = computed(() => {
   ].filter(group => group.items.length)
 })
 // AEON-1339: the Desk row anatomy, compact: a kind mark per row, the title, the project with the Projects folder icon.
-const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat' }
+const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat', lesson: 'book' }
 const now = computed(() => Date.parse(desk.projection?.as_of ?? '') || Date.now())
 // The Desk returns here after the last decision of a round opened from this panel.
 const itemLink = (item: DeskProjectionItem) => deskLinkOut(item) || { path: '/decision-desk', query: { from: 'agents', item: deskItemID(item) } }

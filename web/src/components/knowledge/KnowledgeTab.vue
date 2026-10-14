@@ -13,7 +13,7 @@ import { useFooterSummary } from '../../lib/footerSummary'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import KnowledgeCreateDialog from './KnowledgeCreateDialog.vue'
-import MethodLearnings from './MethodLearnings.vue'
+import { useDecisionDesk } from '../../stores/decisionDesk'
 
 // The project's Knowledge tab: every entry grouped by kind (runbooks first), with
 // a kind rail, search that also reads the bodies, status and sort, and keys for
@@ -29,6 +29,8 @@ const props = defineProps<{
   openEntry?: { type: KnowledgeType; slug: string } | null
 }>()
 const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>]; accepted: [entry: KnowledgeEntry]; reverted: [] }>()
+const desk = useDecisionDesk()
+const waitingLessons = computed(() => props.person ? desk.projection?.counts.lessons?.[props.project.id] ?? (desk.projection?.has_more ? 0 : desk.projection?.items.filter(item => item.kind === 'lesson' && item.project_id === props.project.id).length ?? 0) : 0)
 const router = useRouter()
 const route = useRoute()
 const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))
@@ -60,7 +62,6 @@ async function setMode(graph: boolean) {
 }
 // The page keeps the display (?mode=graph) and the docked entry (?entry=) while filters change.
 function updateFilters(patch: Partial<KnowledgeFilters>) { emit('update', patch) }
-function accepted(entry: KnowledgeEntry) { props.state.upsert(entry); emit('accepted', entry) }
 
 const input = ref<HTMLInputElement>()
 const draft = ref(props.filters.q)
@@ -192,7 +193,6 @@ function keydown(event: KeyboardEvent) {
   }
 }
 function focusSearch() { input.value?.focus(); input.value?.select() }
-function holdFocus() { input.value?.focus({ preventScroll: true }) }
 function openCreate(type?: KnowledgeType) { createDialog.value?.open(type ?? (props.filters.type || undefined)) }
 async function created(entry: KnowledgeEntry) {
   props.state.upsert(entry)
@@ -263,7 +263,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
   </Teleport>
 
   <div class="k-frame">
-  <MethodLearnings :project="project" :entries="state.items.value" :can-write="canWrite" :person="person" :now="now" @accepted="accepted" @reverted="emit('reverted')" @emptied="holdFocus" />
+  <p v-if="waitingLessons" class="lesson-link"><RouterLink :to="{ path: '/decision-desk', query: { kind: 'lesson', project: project.id } }">{{ waitingLessons }} lessons wait on the Decision Desk<AppIcon name="chevron-right" :size="12" class="lesson-go" /></RouterLink></p>
   <div class="k-layout">
     <nav class="k-rail" aria-label="Kinds of knowledge">
       <div class="k-kinds">
@@ -394,6 +394,8 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 </template>
 
 <style scoped>
+.lesson-link { margin: 0 0 18px; font-size: 12px; }.lesson-link a { color: var(--ink-3); text-decoration: none; }.lesson-link a:hover { color: var(--teal-ink); }
+.lesson-go { margin-left: 3px; vertical-align: middle; }
 .k-mode-sep { flex-shrink: 0; width: 1px; height: 22px; margin: 0 2px; background: var(--line-2); }
 .k-mode { flex-shrink: 0; }
 .k-mode button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; }

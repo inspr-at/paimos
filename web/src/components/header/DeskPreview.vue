@@ -21,10 +21,10 @@ const desk = useDecisionDesk(), projects = useProjects(), session = useSession()
 const ROWS = 12
 const KIND: Record<DeskProjectionItem['kind'], string> = {
   question: 'Question', approval: 'Approval', action_request: 'Action request', doctrine: 'Rule change', tier_request: 'Tier request',
-  key_trim: 'Key trim', stepup: 'Step-up', account_matrix: 'Account matrix', routine_consent: 'Routine consent',
+  key_trim: 'Key trim', stepup: 'Step-up', account_matrix: 'Account matrix', routine_consent: 'Routine consent', lesson: 'Lesson to adopt',
 }
 // AEON-1339: each row's kind mark, as on the Desk; held questions and approvals are amber.
-const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat' }
+const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat', lesson: 'book' }
 const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
 const root = ref<HTMLElement>()
 // A dialog: keyboard focus moves to its first row (or the Desk link) as it opens.

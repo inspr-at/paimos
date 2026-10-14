@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { answerFor, CUSTOM_ANSWER, deskProject, draftFor, fieldTarget, kindLabels, projectSwitch, type DeskClose, type DeskProject, type DeskTicket, type DeskWho, macPlatform, outcomeLabels, outcomeUnavailable, stampDescription, stampWhy, submitModifier, suggestedUnavailableNote, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
-import { deliveryTime, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
+import { deliveryTime, lessonChangelogLabel, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
 import { RISK_LABEL, riskFor, scopeLabel } from '../../lib/agentState'
 import { contentUrl, fileKind, hasThumbnail } from '../../lib/attachments'
 import AttachmentLightbox from '../work/AttachmentLightbox.vue'
@@ -20,6 +20,7 @@ const props = defineProps<{
   decide: (item: DeskItem, draft: DeskDraft, requestId: string, signal?: AbortSignal) => Promise<DeskItem>
   canRevoke?: (item: DeskItem) => boolean; revoke?: (item: DeskItem) => Promise<DeskItem>
   editRule?: (item: DeskItem) => Promise<void>
+  undo?: (item: DeskItem) => Promise<DeskItem>
   // The signal aborts when the memo closes; late step-up responses start nothing.
   stepupMethod?: string
   /** Names the asking agent (session name, harness, model); undefined while unknown. */
@@ -120,11 +121,11 @@ const ghost = computed<'skip' | 'decline' | 'change' | ''>(() => {
   const current = item.value
   if (finished.value || !current) return ''
   if (nativePending.value) return 'decline'
-  if (decidedView.value) return question.value ? 'change' : ''
+  if (decidedView.value) return question.value ? 'change' : current.kind === 'lesson' ? 'skip' : ''
   return 'skip'
 })
-// One reserved slot beside Skip for the native Revoke / Edit actions, only in rounds that can use it.
-const nativeSlot = computed(() => (!!props.revoke && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'approval')) || (!!props.editRule && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'rule')))
+// One reserved slot beside Skip for native actions, only in rounds that can use it.
+const nativeSlot = computed(() => (!!props.revoke && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'approval')) || (!!props.editRule && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'rule')) || (!!props.undo && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'lesson')))
 const announcement = ref('')
 const trimRequests = new Map<string, string>()
 const plainText = (value: unknown) => typeof value === 'string' ? value : ''
@@ -171,7 +172,7 @@ const revokedHere = ref(new Set<string>())
 // What the agent does meanwhile (rev 11's line, from the live meanwhile).
 const meanLine = computed<MemoLine | undefined>(() => {
   const row = item.value
-  if (!row || decidedView.value) return undefined
+  if (!row || decidedView.value || row.kind === 'lesson') return undefined
   const text = row.meanwhile && !['carries on', 'parked', 'paused', 'stopped', 'Waiting for a person.'].includes(row.meanwhile) ? row.meanwhile : ''
   if (row.kind === 'approval') return { tone: 'park', icon: 'clock' as IconName, bold: `${cap(askerName.value)} waits for this.`, text: [row.expiresAt ? expiresIn(row.expiresAt) : '', row.approval ? `${RISK_LABEL[riskFor(row.approval)]}.` : ''].filter(Boolean).join(' · ') }
   if (row.kind === 'action') return { tone: 'stop', icon: 'stop' as IconName, bold: `${cap(askerName.value)} waits for this.`, text: '' }
@@ -210,6 +211,7 @@ const fieldPlaceholder = (row: DeskItem) => row.kind === 'action' ? 'Your reply;
 const noteField = computed(() => {
   const row = item.value
   if (!row || nativePending.value || row.kind === 'stepup' || row.kind === 'key_trim') return undefined
+  if (row.kind === 'lesson') return { label: 'Why not? (optional)', aria: 'Why not? (optional)', placeholder: 'Why not? (optional)' }
   if (row.kind === 'approval') return { label: 'Reason', aria: 'Reason', placeholder: `${askerName.value} sees it (optional)` }
   if (row.kind === 'rule') return { label: 'Reason', aria: 'Reason', placeholder: `Needed for Not now; ${askerName.value} sees it` }
   if (row.kind === 'action' || row.kind === 'tier') return { label: 'P.S.', aria: 'P.S. for the agent', placeholder: 'A note for the agent (optional)' }
@@ -328,7 +330,7 @@ async function focusField(name: string) {
   field?.focus(); field?.setSelectionRange(field.value.length, field.value.length)
 }
 function finishEditing() {
-  const label = editing.value === 'answer' ? (item.value?.kind === 'action' ? 'reply' : 'answer') : item.value?.kind === 'approval' || item.value?.kind === 'rule' ? 'reason' : 'note'
+  const label = editing.value === 'answer' ? (item.value?.kind === 'action' ? 'reply' : 'answer') : item.value?.kind === 'lesson' || item.value?.kind === 'approval' || item.value?.kind === 'rule' ? 'reason' : 'note'
   editing.value = ''; setStatus(`Your ${label} is set. Enter decides.`)
   memo.value?.focus({ preventScroll: true })
 }
@@ -454,6 +456,8 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     await nextTick()
     if (live) {
       busy.value = false
+      // Lessons keep their native Undo on the memo until the person moves on.
+      if (current.kind === 'lesson') { focusDecision(); return }
       advance(capturedId, notice); await nextTick(); if (!finished.value) focusDecision()
     }
   } catch (cause) {
@@ -515,6 +519,19 @@ async function revokeGrant() {
   } catch (cause) {
     if (live && item.value?.id === id) setStatus(cause instanceof Error ? cause.message : 'Revocation was not confirmed.')
   } finally { if (live) busy.value = false }
+}
+async function undoLesson() {
+  const current = item.value
+  if (!current?.undoEvent || current.kind !== 'lesson' || !props.undo || busy.value || blocked.value) return
+  const id = current.id, revision = current.revision, event = current.undoEvent
+  busy.value = true; setStatus('Undoing the decision…')
+  try {
+    const restored = await props.undo({ ...current })
+    if (!live || item.value?.id !== id || item.value.revision !== revision || item.value.undoEvent !== event) return
+    drafts.value[id] = draftFor(restored); emit('recorded', restored)
+    await nextTick(); setStatus('Undone.')
+  } catch (cause) { if (live && item.value?.id === id) setStatus(cause instanceof Error ? cause.message : 'Undo did not work.') }
+  finally { if (live) busy.value = false }
 }
 function openPager() { if (busy.value || finished.value) return; pager.value = !pager.value; jumpIndex.value = index.value; if (pager.value) void nextTick(() => dialog.value?.querySelector<HTMLElement>('[role="listbox"]')?.focus()) }
 function pickJump(at: number) { if (busy.value) return; pager.value = false; status.value = ''; jumpTo(at); void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
@@ -630,6 +647,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
           <span v-if="nativeSlot" class="native-action">
             <button v-if="revoke" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'approval' && item.decided && item.optionId === 'approved' ? 'visible' : 'hidden' }" :disabled="busy || !item || !canRevoke?.(item)" data-testid="desk-revoke" @click="revokeGrant">Revoke</button>
             <button v-if="editRule" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'rule' && !item.decided ? 'visible' : 'hidden' }" :disabled="blocked || !editable" data-testid="desk-edit-rule" @click="editRuleProposal">Edit</button>
+            <button v-if="undo" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'lesson' && item.decided && item.undoEvent ? 'visible' : 'hidden' }" :disabled="busy || blocked" data-testid="desk-undo" @click="undoLesson">Undo</button>
           </span>
           <button type="button" class="desk-btn ghost" :class="{ slot: !ghost }" :aria-hidden="!ghost || undefined" :tabindex="ghost ? undefined : -1" :disabled="busy || !ghost || (ghost === 'decline' && ((item?.kind === 'key_trim' && !trimDeclinable) || (stepupPending && blocked)))" :aria-keyshortcuts="ghost === 'skip' ? 'S' : ghost === 'change' ? 'C' : undefined" data-testid="desk-skip" @click="declineOrSkip"><span class="btn-face"><span class="face"><span class="lbl">{{ ghost === 'decline' ? 'Decline' : ghost === 'change' ? 'Change' : 'Skip' }}</span><KeyCap v-if="ghost === 'skip'" k="S" /><KeyCap v-else-if="ghost === 'change'" k="C" /></span><span class="face-size" data-reserve="decline" aria-hidden="true"></span><span class="face-size" data-reserve="change" aria-hidden="true"></span><span class="face-size" data-reserve="skip" aria-hidden="true"></span></span></button>
           <button ref="decideButton" class="desk-btn primary" type="button" :aria-disabled="primaryBlocked || undefined" :aria-describedby="topStatus ? 'desk-status' : undefined" aria-keyshortcuts="Enter" data-testid="desk-decide" @click="submit()">
@@ -662,7 +680,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
           </div>
           <template v-else-if="item && draft">
             <header class="memo-head memo-heading">
-              <div class="stamp-slot" aria-live="polite">
+              <div class="stamp-slot" :style="{ visibility: item.lesson ? 'hidden' : undefined }" aria-live="polite">
                 <span class="stamp-big" :class="[`t-${impression?.tone ?? 'ink'}`, { empty: !impression, landed: decidedView && !!impression, slam }]" :aria-label="impression ? (decidedView ? `Stamped ${impression.word}` : `Will be stamped ${impression.word}`) : 'Not decided yet'" data-testid="desk-stamp">{{ impression?.word ?? 'Not decided' }}</span>
               </div>
               <div class="memo-headtext">
@@ -721,11 +739,21 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   </div>
                   <p class="stamp-desc" data-testid="desk-stamp-desc">{{ stampDescription(item, draft.outcome) }}<template v-if="suggestedNote && !decidedView"> <span class="sug-off" tabindex="0" :data-tip="stampWhy(item, item.suggested ?? item.outcome)" data-testid="desk-suggest-off">{{ suggestedNote }}</span></template></p>
                 </div>
-                <p v-if="noteField && !decidedView" class="ps"><label class="ps-label" for="desk-note">{{ noteField.label }}</label><span class="field-row"><input id="desk-note" v-model="draft.reason" data-field="reason" class="ul-field" :aria-label="noteField.aria" maxlength="2000" :disabled="!editable" :placeholder="noteField.placeholder" enterkeyhint="done" autocomplete="off" @input="touch" @focus="editing = 'reason'" @blur="editing === 'reason' && (editing = '')" /><span class="field-hint" aria-hidden="true"><KeyCap k="enter" /> done</span></span></p>
+                <p v-if="noteField && !decidedView" class="ps"><label class="ps-label" for="desk-note">{{ noteField.label }}</label><span class="field-row"><input id="desk-note" v-model="draft.reason" data-field="reason" class="ul-field" :aria-label="noteField.aria" :maxlength="item.kind === 'lesson' ? 500 : 2000" :disabled="!editable" :placeholder="noteField.placeholder" enterkeyhint="done" autocomplete="off" @input="touch" @focus="editing = 'reason'" @blur="editing === 'reason' && (editing = '')" /><span class="field-hint" aria-hidden="true"><KeyCap k="enter" /> done</span></span></p>
                 <p v-else-if="noteField && draft.reason" class="ps"><span class="ps-label">{{ noteField.label }}</span><span class="c-answer">{{ draft.reason }}</span></p>
                 <p v-if="item.fromRecord && !item.decided" class="m-note">{{ item.fromRecord }}</p>
               </section>
               <aside class="margin context-column" aria-label="Background">
+                <section v-if="item.lesson" class="m-sec" aria-label="Lesson details" data-testid="desk-lesson-details">
+                  <h3 class="eyebrow">Why</h3><p v-if="item.lesson.learning.title && item.lesson.learning.href"><RouterLink v-clip-tip class="src-link" :to="item.lesson.learning.href">From {{ item.lesson.learning.title }}</RouterLink></p>
+                  <p>{{ item.lesson.learning.recommendation?.source_summary }}</p>
+                  <p v-if="item.lesson.outdated" data-testid="lesson-outdated">The entry changed since this was prepared. Accept writes against the current version.</p>
+                  <h3 class="eyebrow">What Accept writes</h3><p> Adds this line to {{ item.lesson.learning.recommendation?.rule_layer_id ? `rule draft ${item.lesson.learning.recommendation.knowledge_title}` : lessonChangelogLabel(item.lesson.learning.recommendation?.knowledge_title) }}</p>
+                  <pre class="diff"><ins class="ln"><span class="sg" aria-hidden="true">+</span><span class="tx" data-testid="lesson-line">{{ item.lesson.learning.recommendation?.rule_text || item.lesson.learning.recommendation?.line }}</span></ins></pre>
+                  <h3 class="eyebrow">What Dismiss does</h3><p>Nothing is written.</p>
+                  <h3 class="eyebrow">Where the answer goes</h3><p>{{ item.destination }}</p>
+                  <p v-if="item.decided">Undo restores this lesson before deciding again.</p>
+                </section>
                 <template v-if="item.approval">
                   <section class="m-sec"><h3 class="eyebrow">Why</h3><p>{{ item.approval.rationale || 'No reason supplied by the agent.' }}</p></section>
                   <section class="m-sec" aria-label="Permission request"><h3 class="eyebrow">What it runs</h3><p class="mono-line">{{ scopeLabel(item.approval.scope) }}</p><p>{{ item.approval.resource_kind === 'tenant' ? 'The whole workspace' : `${item.approval.resource_kind === 'node' ? 'Ticket' : 'Run'} ${item.approval.resource_id || 'not named'}` }}</p><p>{{ RISK_LABEL[riskFor(item.approval)] }}</p><p>Asked by {{ askerName }} · expires <time :datetime="item.approval.expires_at">{{ deliveryTime(item.approval.expires_at) }}</time></p><TargetSummary :approval="item.approval" /></section>
@@ -739,7 +767,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   <section v-if="item.findings" class="m-sec"><h3 class="eyebrow">What it changes</h3><p class="pre">{{ item.findings }}</p></section>
                   <section class="m-sec"><h3 class="eyebrow">Afterwards</h3><p>{{ item.destination }}</p></section>
                 </template>
-                <template v-else>
+                <template v-else-if="!item.lesson">
                   <section v-if="item.kind === 'action' && item.context && item.context.length > 280" class="m-sec"><h3 class="eyebrow">The request</h3><MarkdownBody class="md" :body="item.context" /></section>
                   <section v-else-if="item.kind !== 'action' && item.context" class="m-sec"><h3 class="eyebrow">{{ item.kind === 'tier' ? 'Why' : 'Background' }}</h3><MarkdownBody class="md" :body="item.context" /></section>
                   <section v-if="item.findings && item.kind !== 'action'" class="m-sec"><h3 class="eyebrow">What the agent found</h3><MarkdownBody class="md" :body="item.findings" /></section>

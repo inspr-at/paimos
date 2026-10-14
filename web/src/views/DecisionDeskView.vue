@@ -11,7 +11,7 @@ import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import { agentName, harnessLabel, RISK_LABEL, riskFor } from '../lib/agentState'
 import { lookupNodes } from '../lib/api'
-import { toast } from '../lib/toast'
+import { captureToastOwner, toast } from '../lib/toast'
 import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readQuestion, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
 import { phoneCapability } from '../lib/deskPhoneApproval'
 import { settledElsewhere } from '../lib/stepup'
@@ -22,6 +22,7 @@ import type { KeyTrimCursors } from '../lib/keyTrim'
 import { useDecisionDesk } from '../stores/decisionDesk'
 import { revokeApproval } from '../lib/agents'
 import { getRun } from '../lib/agentRows'
+import { undoKnowledge } from '../lib/knowledge'
 import { doctrineInbox, inboxChanged } from '../lib/doctrineInbox'
 
 const session = useSession()
@@ -56,7 +57,55 @@ const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: Doctrin
 let followed = ''
 const changeId = ref('')
 const fresh = computed(() => arrivals(items.value, roundBaseline.value))
-const visible = computed(() => items.value.filter(item => item.decided === (filter.value === 'decided') && (filter.value === 'open' || !outcomeFilter.value
+const projectNames = ref(new Map<string, string>())
+function queryPresent(value: unknown) {
+  return Array.isArray(value) ? value.some(part => typeof part === 'string' && part.length > 0) : typeof value === 'string' && value.length > 0
+}
+// The Knowledge link arrives as ?kind=lesson&project=…. That filter used to be
+// invisible, so an empty lesson list claimed the whole desk was clear.
+function inScope(item: DeskItem) {
+  return (!route.query.kind || item.kind === route.query.kind) && (!route.query.project || item.projectId === route.query.project)
+}
+const scopeKind = computed(() => typeof route.query.kind === 'string' ? route.query.kind : '')
+const scopeProject = computed(() => typeof route.query.project === 'string' ? route.query.project : '')
+const scopeActive = computed(() => queryPresent(route.query.kind) || queryPresent(route.query.project))
+const scopeProjectName = computed(() => {
+  const id = scopeProject.value
+  if (!id) return ''
+  return projectNames.value.get(id) || items.value.find(item => item.projectId === id && item.projectName && item.projectName !== 'Project name unavailable')?.projectName || ''
+})
+const scopePlace = computed(() => scopeProjectName.value || (scopeProject.value ? 'this project' : ''))
+const scopeCopy = computed(() => {
+  const place = scopePlace.value
+  if (scopeKind.value === 'lesson' && place) return `Showing lessons in ${place}.`
+  if (scopeKind.value === 'lesson') return 'Showing lessons.'
+  if (place && !scopeKind.value) return `Showing items in ${place}.`
+  if (place) return `Showing this view in ${place}.`
+  return 'Showing a narrowed desk.'
+})
+const emptyCopy = computed(() => {
+  if (warnings.value.length) return 'The available sources have no matching items.'
+  if (filter.value === 'decided') return 'No recorded decisions in this view.'
+  const place = scopePlace.value
+  if (scopeActive.value && scopeKind.value === 'lesson') return place ? `No lessons wait in ${place}.` : 'No lessons are waiting.'
+  if (scopeActive.value && place) return `Nothing is waiting in ${place}.`
+  if (scopeActive.value) return 'Nothing in this view is waiting.'
+  return 'Nothing is waiting in the available sources.'
+})
+const showAllTo = computed(() => {
+  const query = { ...route.query }
+  delete query.kind
+  delete query.project
+  return { path: '/decision-desk', query }
+})
+// A scoped Open count matches the list. The header keeps the whole-desk total.
+const openCountLabel = computed(() => {
+  if (!scopeActive.value) return desk.count ?? '?'
+  if (state.value !== 'ready' || desk.count === null) return '?'
+  return items.value.filter(item => !item.decided && inScope(item)).length
+})
+const decidedCountLabel = computed(() => items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
+const visible = computed(() => items.value.filter(item => inScope(item) && item.decided === (filter.value === 'decided') && (filter.value === 'open' || !outcomeFilter.value
   || (outcomeFilter.value === 'approvals' ? item.kind === 'approval' : (item.kind === 'question' || item.kind === 'handover') && item.outcome === outcomeFilter.value))))
 // Link-out rows are decided on their settings page, so they never join a memo round.
 const reviewable = computed(() => visible.value.filter(item => !item.linkOut))
@@ -64,8 +113,7 @@ const person = computed(() => session.identity?.principal.kind === 'person')
 // AEON-1339: the list in rev 11's two groups; what holds something up comes first.
 const heldRows = computed(() => visible.value.filter(item => item.held || item.kind === 'approval'))
 const readyRows = computed(() => visible.value.filter(item => !(item.held || item.kind === 'approval')))
-const decidedCount = computed(() => items.value.filter(item => item.decided).length)
-const openRound = computed(() => items.value.filter(item => !item.decided && !item.linkOut))
+const openRound = computed(() => items.value.filter(item => inScope(item) && !item.decided && !item.linkOut))
 // The ticket each open item is about: one bounded lookup of up to 100 ticket ids per read.
 const tickets = ref(new Map<string, DeskTicket>())
 let ticketTurn = 0
@@ -94,7 +142,7 @@ function who(item: DeskItem): DeskWho | undefined {
   const address = asker.principalId ? agents.addressOf(asker.principalId) : ''
   return address ? { name: address.split(':')[1] || address } : undefined
 }
-const KIND_ICON: Record<DeskItem['kind'], IconName> = { question: 'help', handover: 'help', approval: 'clock', action: 'send', rule: 'book', tier: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users' }
+const KIND_ICON: Record<DeskItem['kind'], IconName> = { question: 'help', handover: 'help', approval: 'clock', action: 'send', rule: 'book', tier: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', lesson: 'book' }
 const OUTCOME: Record<DeskOutcome, { icon: IconName; tone: string }> = { once: { icon: 'message', tone: 'ok' }, always: { icon: 'pin', tone: 'teal' }, requirement: { icon: 'req', tone: 'gold' }, doctrine: { icon: 'book', tone: 'bad' } }
 function outcomeOf(item: DeskItem): { icon: IconName; word: string; tone: string } {
   if (item.kind === 'question' || item.kind === 'handover') return { ...OUTCOME[item.outcome], word: outcomeLabels[item.outcome] }
@@ -231,8 +279,11 @@ async function refresh() {
   finally { if (alive && turn === generation) { state.value = 'ready'; loading.value = false } }
 }
 function applyRead(result: DeskRead) {
+  const present = new Set(result.items.map(item => item.id))
+  result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
+  projectNames.value = result.projectNames
   nextKeyTrims.value = result.nextKeyTrims
   pages.value = { open: result.questionPositions.open?.pages ?? pages.value.open, answered: result.questionPositions.answered?.pages ?? pages.value.answered }
   // Memo content stays frozen; changed or vanished records require a deliberate reopen.
@@ -334,7 +385,41 @@ async function decide(item: DeskItem, draft: DeskDraft, requestId: string, signa
   if (elsewhere) { recorded(result); throw new Error(elsewhere) }
   return result
 }
+const undoingLessons = new Set<number>()
+async function undoLesson(item: DeskItem): Promise<DeskItem> {
+  const identity = owner.value, id = item.id, revision = item.revision, eventId = item.undoEvent
+  const latest = items.value.find(row => row.id === id)
+  if (!eventId || undoingLessons.has(eventId) || !alive || !session.authenticationCurrent() || latest?.revision !== revision || latest.undoEvent !== eventId || !allowed(latest)) throw new Error('This lesson decision is no longer available to undo.')
+  undoingLessons.add(eventId)
+  try {
+    await undoKnowledge(eventId)
+    const current = items.value.find(row => row.id === id)
+    if (!alive || identity !== owner.value || current?.revision !== revision || current.undoEvent !== eventId) throw new Error('The source changed while undoing. Reopen the Desk to confirm the result.')
+    return { ...current, decided: false, optionId: undefined, answer: undefined, reason: undefined, delivery: undefined, undoEvent: undefined }
+  } finally { undoingLessons.delete(eventId) }
+}
+let pendingLessonToast: DeskItem | undefined
+function showLessonToast(item: DeskItem) {
+  const current = captureToastOwner()
+  toast(item.delivery ?? 'Lesson decision recorded.', { timeout: 8000, action: { label: 'Undo', run: () => {
+    if (!current()) return
+    void undoLesson(item).then(restored => { if (current()) recorded(restored) })
+      .catch(cause => { if (current()) toast(cause instanceof Error ? cause.message : 'Undo did not work.', { tone: 'error' }) })
+  } } })
+}
+// The memo already offers Undo in its pinned native action slot. Its toast
+// appears on closing, where it cannot cover the phone's decision controls.
+watch(opened, open => {
+  if (!open && pendingLessonToast) { const item = pendingLessonToast; pendingLessonToast = undefined; showLessonToast(item) }
+})
 function recorded(item: DeskItem) {
+  if (item.kind === 'lesson') {
+    if (!item.decided && pendingLessonToast?.id === item.id) pendingLessonToast = undefined
+    if (item.decided && item.undoEvent && item.undoEvent !== items.value.find(row => row.id === item.id)?.undoEvent) {
+      if (opened.value) pendingLessonToast = item
+      else showLessonToast(item)
+    }
+  }
   if (item.kind === 'rule' && item.decided && !items.value.find(row => row.id === item.id)?.decided) inboxChanged(doctrineInbox.pending - 1, item.id.slice(2))
   items.value = items.value.map(row => row.id === item.id ? item : row)
   if (currentRead) currentRead = { ...currentRead, items: items.value }
@@ -342,11 +427,13 @@ function recorded(item: DeskItem) {
   void desk.refresh()
 }
 function resetDesk() {
+  pendingLessonToast = undefined
   capabilityGeneration++
   ruleEdit.value = undefined
   generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
   followed = ''; linkError.value = ''; revoked.value = new Set(); tickets.value = new Map(); ticketTurn++; rowForm.value = undefined; changeId.value = ''
   sources = emptySources(); adapters = makeAdapters(); filter.value = route.query.view === 'decided' ? 'decided' : 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
+  projectNames.value = new Map()
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
@@ -403,22 +490,23 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
     <header class="dp-head">
       <div><h1 id="desk-title" tabindex="-1">Decision Desk</h1><p class="head-note">Agents keep working unless something is held up.</p></div>
       <!-- The slot stays on both tabs, so the tabs below never move (AEON-541); it starts the open round. -->
-      <button type="button" class="btn" :style="{ visibility: openRound.length ? 'visible' : 'hidden' }" :disabled="!openRound.length" :aria-hidden="!openRound.length || undefined" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" />Answer one by one</button>
+      <button type="button" class="btn" :style="{ visibility: openRound.length || scopeActive ? 'visible' : 'hidden' }" :disabled="!openRound.length" :aria-hidden="!openRound.length && !scopeActive || undefined" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" />Answer one by one</button>
     </header>
     <div class="dp-bar">
       <div class="seg view-tabs" role="radiogroup" aria-label="Show">
-        <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ desk.count ?? '?' }}</span></button>
-        <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCount }}</span></button>
+        <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
+        <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
       </div>
       <div v-if="filter === 'decided'" class="seg dec-filter" role="radiogroup" aria-label="Stamp">
         <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
       </div>
     </div>
+    <p v-if="scopeActive" class="scope-line" data-testid="desk-scope">{{ scopeCopy }} <RouterLink :to="showAllTo">Show all</RouterLink></p>
     <nav v-if="nextKeyTrims[trimState] || trimCursors[trimState]" class="trim-pages" aria-label="Key trim pages"><button type="button" class="btn sm ghost" :disabled="loading || !trimCursors[trimState]" @click="pageKeyTrims(true)">First key trims</button><button type="button" class="btn sm ghost" :disabled="loading || !nextKeyTrims[trimState]" @click="pageKeyTrims()">Next key trims</button><span>Up to 100 key trims per page</span></nav>
     <section class="queue glass-card list-only" :class="{ clear: filter !== 'open' || !visible.length }" :aria-label="filter === 'open' ? 'Open' : 'Decided'" :aria-busy="loading" data-testid="desk-list">
       <p v-if="state === 'loading'" class="empty-line" role="status"><AppIcon name="clock" :size="16" /><span>Reading the desk…</span></p>
       <template v-else-if="filter === 'open'">
-        <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon :name="sourceLines.some(line => line.retry) ? 'alert' : 'check'" :size="16" /><span>{{ sourceLines.some(line => line.retry) ? 'Nothing to show from the sources that answered' : 'Nothing waits for you' }}</span></p>
+        <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon :name="sourceLines.some(line => line.retry) ? 'alert' : 'check'" :size="16" /><span>{{ scopeActive ? emptyCopy : sourceLines.some(line => line.retry) ? 'Nothing to show from the sources that answered' : 'Nothing waits for you' }}</span></p>
         <div v-for="group in [{ key: 'held', label: 'Waiting on you', note: 'something is held up until you answer', rows: heldRows }, { key: 'ready', label: 'When you’re ready', note: 'the agents carry on meanwhile', rows: readyRows }].filter(group => group.rows.length)" :key="group.key" class="q-group" :class="group.key">
           <p class="q-group-label">{{ group.label }}<span class="n">{{ group.rows.length }}</span><span class="group-note">{{ group.note }}</span></p>
           <ul class="items desk-list" :aria-label="group.label">
@@ -426,7 +514,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
               <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" @click="item.linkOut || begin(item.id)" />
               <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="16" /></span>
               <div class="body">
-                <p class="line1"><strong class="what">{{ item.title }}</strong><span class="meta"><time v-if="item.expiresAt" class="expiry" :class="{ soon: soon(item.expiresAt) }" :datetime="item.expiresAt">{{ expiry(item.expiresAt) }}</time><time v-else-if="item.createdAt" class="expiry" :datetime="item.createdAt">{{ ago(item.createdAt) }}</time><span v-if="item.approval" class="risk" :class="{ high: riskFor(item.approval) === 'high' }">{{ RISK_LABEL[riskFor(item.approval)] }}</span></span></p>
+                <p class="line1"><strong class="what"><span v-if="item.kind === 'lesson'">Lesson to adopt · </span>{{ item.title }}</strong><span class="meta"><time v-if="item.expiresAt" class="expiry" :class="{ soon: soon(item.expiresAt) }" :datetime="item.expiresAt">{{ expiry(item.expiresAt) }}</time><time v-else-if="item.createdAt" class="expiry" :datetime="item.createdAt">{{ ago(item.createdAt) }}</time><span v-if="item.approval" class="risk" :class="{ high: riskFor(item.approval) === 'high' }">{{ RISK_LABEL[riskFor(item.approval)] }}</span></span></p>
                 <p class="line2"><span v-if="who(item)" class="who" :data-tip="who(item)?.model || undefined"><HarnessMark v-if="who(item)?.harness" :harness="who(item)!.harness!" :size="14" /><span>{{ who(item)!.name }}</span></span><span class="phrase"><span v-if="item.kind === 'rule'" class="asks">proposes a rule change for</span><template v-else-if="item.kind === 'action'"><span class="asks">to</span><span class="to">you</span><span class="asks">on</span></template><span v-else-if="who(item)" class="asks">on</span><span class="proj-quiet" data-testid="desk-row-project"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span class="res-key">{{ ticketOf(item)!.key }}</span><span v-if="ticketOf(item)!.title" class="res-title" :data-tip="ticketOf(item)!.title">{{ ticketOf(item)!.title }}</span></template></span></p>
                 <p v-if="item.approval?.resource_kind" class="target">{{ item.approval.resource_kind === 'tenant' ? 'The whole workspace' : `${item.approval.resource_kind === 'node' ? 'Ticket' : 'Run'} ${item.approval.resource_id || 'not named'}` }}</p>
                 <p v-if="item.kind !== 'question' && item.kind !== 'handover' && item.context" class="why" :class="{ 'body-text': item.kind === 'action' }">{{ item.context }}</p>
@@ -467,13 +555,14 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
       </div>
     </section>
     <p v-if="opened && fresh.length" class="arrival-line" role="status">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
-    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :who="who" :ticket="ticketOf" :change="changeId || undefined" @recorded="recorded" @close="closed" />
+    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" :who="who" :ticket="ticketOf" :change="changeId || undefined" @recorded="recorded" @close="closed" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
   </main>
 </template>
 
 <style scoped>
 /* AEON-1339: the Desk page as the approved rev 11 artifact draws it. */
+.scope-line { display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; min-height: 44px; margin: 0; font-size: 12px; color: var(--ink-3); }.scope-line a { color: var(--teal-ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }.scope-line a:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .desk-page { width: 100%; max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }
 .dp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 18px; }
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }

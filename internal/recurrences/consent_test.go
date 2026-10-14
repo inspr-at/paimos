@@ -366,3 +366,96 @@ func TestRoutineConsentRechecksOwnerBehindAccessFence(t *testing.T) {
 		return err
 	})
 }
+
+// planWork sums the rows every EXPLAIN ANALYZE node produced or discarded,
+// across all loops, including RLS sub-plans.
+type planWork struct {
+	Rows        float64    `json:"Actual Rows"`
+	Loops       float64    `json:"Actual Loops"`
+	Filtered    float64    `json:"Rows Removed by Filter"`
+	JoinFilters float64    `json:"Rows Removed by Join Filter"`
+	Plans       []planWork `json:"Plans"`
+}
+
+func (p planWork) total() float64 {
+	sum := (p.Rows + p.Filtered + p.JoinFilters) * p.Loops
+	for _, child := range p.Plans {
+		sum += child.total()
+	}
+	return sum
+}
+
+// Risk: a pooled connection keeps the candidate plan it cached while the owner
+// had one routine. After bulk growth without ANALYZE that plan must not
+// rescan every owned definition for each recurrence; the quadratic scan
+// pushed the Desk projection past its statement timeout (AEON-1331 CI). Rows
+// touched by the cached plan bound the work instead of a timing threshold.
+func TestConsentCandidatesStayLinearUnderPlanCachedOnSmallTables(t *testing.T) {
+	f, in, _, _ := consentFixture(t)
+	r := f.create(in)
+	const candidates = 1001
+	ctx := t.Context()
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('plan_cache_mode','force_generic_plan',true)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `PREPARE consent_candidates_plan(uuid) AS `+consentCandidatesSQL); err != nil {
+			return err
+		}
+		simple := pgx.QueryExecModeSimpleProtocol
+		execute := `EXECUTE consent_candidates_plan('` + f.p.ID + `')`
+		var first []string
+		rows, err := tx.Query(ctx, execute, simple)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			first = append(first, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(first) != 1 || first[0] != r.ID {
+			t.Fatalf("small-table plan read %v, want only %s", first, r.ID)
+		}
+		// Same write order as create: the definition precedes its marked
+		// recurrence, and the FK is deferred until commit.
+		if _, err := tx.Exec(ctx, `INSERT INTO recurrence_definitions(tenant_id,recurrence_id,scope_type,scope_project_id,owner_principal_id,output_project_id,output_parent_id,assignment)
+ SELECT d.tenant_id,format('00000000-0000-4000-8000-%s',lpad(i::text,12,'0'))::uuid,d.scope_type,d.scope_project_id,d.owner_principal_id,d.output_project_id,d.output_parent_id,d.assignment
+ FROM recurrence_definitions d CROSS JOIN generate_series(1,$2::int) i WHERE d.recurrence_id=$1`, r.ID, candidates); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO recurrences(tenant_id,id,project_id,parent_id,template,trigger,next_at,created_by_principal_id,definition_scope)
+ SELECT tenant_id,format('00000000-0000-4000-8000-%s',lpad(i::text,12,'0'))::uuid,project_id,parent_id,template,trigger,next_at,created_by_principal_id,definition_scope
+ FROM recurrences CROSS JOIN generate_series(1,$2::int) i WHERE id=$1`, r.ID, candidates); err != nil {
+			return err
+		}
+		var raw []byte
+		if err := tx.QueryRow(ctx, `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) `+execute, simple).Scan(&raw); err != nil {
+			return err
+		}
+		var plan []struct {
+			Plan planWork `json:"Plan"`
+		}
+		if err := json.Unmarshal(raw, &plan); err != nil {
+			return err
+		}
+		if len(plan) != 1 || plan[0].Plan.Rows != candidates {
+			t.Fatalf("cached plan did not read the grown candidate set: %s", raw)
+		}
+		// Each candidate costs a constant number of index probes (definition,
+		// recurrence, its RLS scope check, project); rescanning owned
+		// definitions per recurrence costs about candidates² rows.
+		if work := plan[0].Plan.total(); work > 30*candidates {
+			t.Fatalf("cached plan touched %.0f rows for %d candidates: %s", work, candidates, raw)
+		}
+		_, err = tx.Exec(ctx, `DEALLOCATE consent_candidates_plan`)
+		return err
+	})
+}
