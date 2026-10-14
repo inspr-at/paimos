@@ -21,6 +21,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Expose the closed native reason to transport error mapping while retaining
+// Failure's precise HTTP status (including indistinguishable read 404s).
+func (e *Failure) Unwrap() error {
+	return &nativecontract.ValidationError{Reason: e.Reason, Path: "$"}
+}
+
 type pendingRecord struct {
 	PendingStart
 	actor                   actorRecord

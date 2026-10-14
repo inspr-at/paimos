@@ -26,14 +26,29 @@ type fakeStore struct {
 	starts    int
 	mutations int
 	result    *nativecontract.OperationResult
+	failure   error
 }
 
 func (s *fakeStore) Start(context.Context, nativecontract.Actor, nativecontract.StartIntent) (nativecontract.OperationResult, error) {
 	s.starts++
+	if s.failure != nil {
+		return nativecontract.OperationResult{}, s.failure
+	}
 	if s.result != nil {
 		return *s.result, nil
 	}
 	return nativecontract.OperationResult{}, errors.New("native start must be unreachable")
+}
+
+type storeFailure struct {
+	status int
+	reason nativecontract.Reason
+}
+
+func (e storeFailure) Error() string   { return string(e.reason) }
+func (e storeFailure) HTTPStatus() int { return e.status }
+func (e storeFailure) Unwrap() error {
+	return &nativecontract.ValidationError{Reason: e.reason, Path: "$"}
 }
 
 func (s *fakeStore) Mutate(context.Context, nativecontract.Actor, nativecontract.Command) (nativecontract.OperationResult, error) {
@@ -114,6 +129,15 @@ func TestQualifiedNativeRoutesBindCallerAndTargetBeforeDispatch(t *testing.T) {
 	if store.starts != 1 {
 		t.Fatal("qualified C0 constructor did not dispatch to start storage")
 	}
+	for _, denied := range []storeFailure{
+		{http.StatusForbidden, nativecontract.ReasonPermissionRevoked},
+		{http.StatusNotFound, nativecontract.ReasonInvalidInput},
+		{http.StatusConflict, nativecontract.ReasonWrongGeneration},
+	} {
+		store.failure = denied
+		post("/api/projects/"+project+"/native-sessions", start, true, denied.status, string(denied.reason))
+	}
+	store.failure = nil
 	binding := nativecontract.Binding{TenantID: tenantID, ProjectID: project, OwnedSessionID: sessionID, HarnessSessionID: requestID, RuntimeEpoch: requestID, DaemonID: "fixture", DaemonGeneration: "generation-1", BindingRevision: 2}
 	input := nativecontract.Input{RequestID: requestID, ExpectedBinding: binding, InputID: requestID, Mode: "now", Text: "person input", ExpiresAt: time.Date(2026, 10, 14, 1, 0, 0, 0, time.UTC)}
 	path := "/api/projects/" + project + "/native-sessions/" + sessionID + "/input"

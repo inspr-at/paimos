@@ -395,6 +395,12 @@ func nativeError(w http.ResponseWriter, err error) {
 	} else if errors.Is(err, context.DeadlineExceeded) {
 		status = http.StatusRequestTimeout
 	}
+	// A store refusal carries both an allowlisted reason and its deliberate
+	// status. Preserve both; schema-based defaults must not replace a read 404
+	// or hide a current actor revocation behind native_failure.
+	if errors.As(err, &failure) {
+		status = failure.HTTPStatus()
+	}
 	writeReason(w, status, reason)
 }
 
