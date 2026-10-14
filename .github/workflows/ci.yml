@@ -54,12 +54,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_TREE_REUSE: ${{ vars.CI_TREE_REUSE }}
           CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
-        run: |
-          if [ "${CI_IMPACT:-}" = off ]; then
-            printf 'reuse=none\nrun=\n' >> "$GITHUB_OUTPUT"
-          else
-            node scripts/ci-tree-reuse.mjs
-          fi
+        run: node scripts/ci-tree-reuse.mjs
 
   # Preserve main-scoped cache writes when the tests reuse a queue result.
   cache-prime:

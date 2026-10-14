@@ -1439,7 +1439,10 @@ test('lean tier-plan skips setup, deep checkout and non-premerge checkout work',
 test('workflow merge-group planner writes only full outputs without executing candidate code; PR output is unchanged',()=>{
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
   const planner=ci.slice(ci.indexOf('\n  tier-plan:'),ci.indexOf('\n  runner-route:'))
-  const run=planner.split('        run: |\n')[1].replace(/^          /gm,'')
+  // The scheduling block ends at the next step. Shadow publication is a separate
+  // step and must not be executed as part of this planner script.
+  const run=planner.split('        run: |\n')[1].split('\n      - ')[0].replace(/^          /gm,'')
+  assert.doesNotMatch(run,/impact-plan| - name:/)
   const directory=mkdtempSync(resolve(tmpdir(),'aeon-workflow-tier-plan-'))
   mkdirSync(resolve(directory,'scripts/test-tiers'),{recursive:true})
   writeFileSync(resolve(directory,'scripts/test-tiers/diff.mjs'),`
