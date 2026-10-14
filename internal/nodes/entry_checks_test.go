@@ -4,15 +4,89 @@ package nodes
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: an existing or new tenant loses its completion and queue guards when
+// no definition has been saved. Exercise both HTTP writes on an unconfigured
+// tenant, then prove that deliberate empty definitions still replace defaults.
+func TestEntryChecksDefaultWithoutDefinition(t *testing.T) {
+	p := newPrincipal(t, "entry-defaults")
+	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Unconfigured project"}`, kindBySlug(t, p, "project").ID))
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Unfinished work","fields":{"acceptance_criteria":"Tests pass"}}`, kindBySlug(t, p, "work").ID, project.ID))
+	agent := estimateAgent(t, p)
+	var definitions int
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE k.slug='definition'`).Scan(&definitions)
+	}); err != nil || definitions != 0 {
+		t.Fatalf("fixture has a saved definition: %d, %v", definitions, err)
+	}
+	t.Run("agent-done", func(t *testing.T) {
+		code, raw := call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"done"}`)
+		var refusal struct {
+			Error string `json:"error"`
+			workqueue.EntryFailure
+		}
+		if json.Unmarshal(raw, &refusal) != nil || code != 409 || refusal.Error != "entry_checks_failed" || refusal.ToStatus != "done" || refusal.OverrideAllowed || len(refusal.Failed) != 1 || refusal.Failed[0].ID != "release_copy_set" {
+			t.Fatalf("default Done guard lost: %d %s", code, raw)
+		}
+		if now := currentWorkTest(t, p, n.ID); now.State != n.State || !now.UpdatedAt.Equal(n.UpdatedAt) {
+			t.Fatal("refusal changed the ticket", now)
+		}
+	})
+	t.Run("queue-ready", func(t *testing.T) {
+		// Use separate work so a broken Done guard cannot turn this refusal
+		// into a status failure and conceal the missing estimate guard.
+		n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Unestimated queue work","fields":{"acceptance_criteria":"Tests pass"}}`, kindBySlug(t, p, "work").ID, project.ID))
+		code, raw := callAs(t, agentruns.New(appPool), &p, "POST", "/api/queue", fmt.Sprintf(`{"node_id":%q}`, n.ID))
+		var refusal struct {
+			Code      string              `json:"code"`
+			Readiness workqueue.Readiness `json:"readiness"`
+		}
+		if json.Unmarshal(raw, &refusal) != nil || code != 422 || refusal.Code != "queue_not_ready" || !refusal.Readiness.Queueable || refusal.Readiness.Ready || !slices.Equal(refusal.Readiness.Missing, []string{"estimate"}) {
+			t.Fatalf("default Ready guard lost: %d %s", code, raw)
+		}
+		var runs int
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE queue_node_id=$1`, n.ID).Scan(&runs)
+		}); err != nil || runs != 0 {
+			t.Fatalf("refused queue write persisted a run: %d, %v", runs, err)
+		}
+	})
+	code, raw := call(t, &p, "GET", "/api/nodes/"+n.ID+"/entry-checks", "")
+	checks := decode[workqueue.EntryChecks](t, code, raw, 200)
+	if checks.Definition == nil || checks.Definition.Source != "workspace" || len(checks.Blocks) != 3 || checks.Blocks[0].Total != 2 || checks.Blocks[0].Passed != 1 || checks.Blocks[1].Total != 0 || checks.Blocks[2].Total != 1 || checks.Blocks[2].Passed != 0 {
+		t.Fatalf("missing built-in workspace checks: %s", raw)
+	}
+	for _, tc := range []struct {
+		path   string
+		source string
+	}{
+		{"/api/settings/definitions", "workspace"},
+		{"/api/projects/" + project.ID + "/definitions", "project"},
+	} {
+		code, raw = call(t, &p, "PUT", tc.path, `{"expected_revision":null,"checks":{}}`)
+		d := decode[workqueue.EntryDefinition](t, code, raw, 200)
+		code, raw = call(t, &p, "GET", "/api/nodes/"+n.ID+"/entry-checks", "")
+		checks = decode[workqueue.EntryChecks](t, code, raw, 200)
+		if checks.Definition == nil || checks.Definition.ID != d.ID || checks.Definition.Source != tc.source || checks.Blocks[0].Total != 0 || checks.Blocks[2].Total != 0 {
+			t.Fatalf("explicit empty definition did not replace defaults: %s", raw)
+		}
+	}
+	code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"done"}`)
+	if got := decode[nodeJSON](t, code, raw, 200); got.State != "done" {
+		t.Fatal("explicit empty project definition blocked Done", got)
+	}
+}
 
 // Risks: false Done, agent bypass, lost audit, and a manual tick by the wrong
 // person. All assertions use the HTTP write boundary and persisted history.

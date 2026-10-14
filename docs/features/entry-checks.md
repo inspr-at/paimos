@@ -3,7 +3,12 @@
 AEON-1315 implements one set of entry checks for Ready (before In progress),
 QA and Done. A definition is a `definition` node at workspace scope or directly
 under a project. A project copy replaces the whole workspace default, including
-an empty copy. Without a definition there are no entry checks. The catalog checks
+an empty copy. Until either scope has a saved definition, a built-in workspace
+default requires an estimate, acceptance criteria and a named blocker (for
+blocked tickets) before In progress, and release text before Done. This preserves
+the existing completion and queue guards for existing and new tenants. A saved
+empty workspace or project definition deliberately allows free movement.
+The catalog checks
 estimates, acceptance criteria, an approved attached design for UI work, a named
 blocker, another build in flight, CI against latest observed main, independent
 review, visual approval, release copy, merge and release facts. Conditions can
@@ -27,6 +32,10 @@ creation). `copied_from_revision` pins the workspace revision and an ordinary
 `cites` relation records the copy source. Events retain previous definitions for
 the later settings editor. Generic node writes cannot change definition nodes.
 No new tables, dependencies or permissions are introduced.
+
+The built-in default uses the all-zero UUID and a stable policy revision in
+responses and entry records; it is not a stored node. Saving the first definition
+still uses `expected_revision: null`. Loading never writes a definition node.
 
 Manual items use `manual:<slug>`, a label and optionally `owner_id`. A named
 person with current project access is preferred; otherwise the person assignee
@@ -53,6 +62,8 @@ checks offer the existing estimate, criteria, blocker and release-text fixes;
 status refusals open its reason form. Completed tickets show their entry record
 in a read-only panel. Status menu counts show the current entry record and later
 statuses. Project and workspace settings editors are delivered by P2 and P3.
+Loading alone does not insert a row when no definition is known. Revision
+refreshes retain a known definition's row, avoiding transient layout shifts.
 
 The status menu opens the checklist from its current ticket revision before
 changing a row with failing checks. Release-text fixes and the ticket editor

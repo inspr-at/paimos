@@ -8124,6 +8124,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestDeleteAnswersTheRevisionOfItsEvent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestEntryChecksDefaultWithoutDefinition","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestEntryChecksEnforcementOverrideAndOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestEstimateComplexityBucketsAndHints","tier":"GATED-FULL"}

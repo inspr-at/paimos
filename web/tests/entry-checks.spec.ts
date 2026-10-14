@@ -4,6 +4,56 @@ import type { EntryBlock, EntryCheck, EntryChecks, EntryRecord } from '../src/li
 import { fixtures, me, mockWork } from './work-fixtures'
 import { controlStability } from './control-stability'
 
+// Risk: a loading-only row briefly displaces the ticket below its properties,
+// both on first open and after a save. Response barriers and a DOM observer
+// retain transient insertions that a settled-state assertion would miss.
+test('AEON-1315 entry row stays absent without a definition during reads and saves', async ({ page }) => {
+  const data = fixtures(), node = data.nodes.find(n => n.id === 'n-4')!
+  await mockWork(page, data)
+  await page.addInitScript(() => {
+    const observed = { slots: 0 }
+    Object.assign(window, { entryRowObserved: observed })
+    new MutationObserver(records => {
+      for (const record of records) for (const added of record.addedNodes) {
+        if (added instanceof Element && (added.matches('[data-entry-slot]') || added.querySelector('[data-entry-slot]'))) observed.slots++
+      }
+    }).observe(document, { childList: true, subtree: true })
+  })
+  const pending: (() => void)[] = []
+  await page.route(`**/api/nodes/${node.id}/entry-checks`, async route => {
+    const revision = node.updated_at
+    await new Promise<void>(resolve => pending.push(resolve))
+    await route.fulfill({ json: { node_id: node.id, revision, definition: null, blocks: [], entries: [], latest_refusal: null } })
+  })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  await page.locator('tr.ticket-row').filter({ hasText: 'PHAROS-14' }).locator('.title-text').click()
+  const workspace = page.getByRole('complementary', { name: 'Ticket details' }), slot = workspace.locator('[data-entry-slot]')
+  await expect.poll(() => pending.length).toBe(1)
+  await expect(slot).toHaveCount(0)
+  const stable = await controlStability(page, { details: workspace.locator('.meta').first() })
+  await stable.check(async () => {
+    const response = page.waitForResponse(`**/api/nodes/${node.id}/entry-checks`)
+    pending[0]()
+    await response
+    await expect(slot).toHaveCount(0)
+  })
+  await workspace.getByRole('button', { name: 'Add estimate', exact: true }).click()
+  await workspace.getByRole('textbox', { name: 'Estimate in agent hours' }).fill('2h')
+  const before = node.updated_at
+  await workspace.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => pending.length).toBe(2)
+  expect(node.updated_at).not.toBe(before)
+  await expect(slot).toHaveCount(0)
+  await stable.check(async () => {
+    const response = page.waitForResponse(`**/api/nodes/${node.id}/entry-checks`)
+    pending[1]()
+    await response
+    await expect(slot).toHaveCount(0)
+  })
+  stable.done()
+  expect(await page.evaluate(() => (window as unknown as { entryRowObserved: { slots: number } }).entryRowObserved.slots)).toBe(0)
+})
+
 // Risks: moving controls, status refusal disappearing behind a toast, stale
 // ticket writes, and a manual check looking actionable to an agent.
 test('AEON-1315 entry checklist preserves controls and refuses or audits status moves', async ({ page }, testInfo) => {

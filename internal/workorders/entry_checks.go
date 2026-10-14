@@ -144,6 +144,8 @@ func ValidateEntryRules(checks map[string][]EntryRule) error {
 
 // Definitions are ordinary nodes at exactly two scopes. The project copy is
 // selected even when empty; malformed/duplicate definitions fail closed.
+// Inheriting reads use the built-in workspace policy until a definition is
+// saved. Non-inheriting reads return only saved nodes for revision-checked writes.
 func EntryDefinitionTx(ctx context.Context, tx pgx.Tx, project *string, inherit bool) (*EntryDefinition, error) {
 	load := func(scope *string) (*EntryDefinition, error) {
 		rows, err := tx.Query(ctx, `SELECT n.id::text,n.updated_at,n.fields FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='definition' AND n.deleted_at IS NULL AND n.parent_id IS NOT DISTINCT FROM $1::uuid ORDER BY n.id LIMIT 2`, scope)
@@ -183,10 +185,27 @@ func EntryDefinitionTx(ctx context.Context, tx pgx.Tx, project *string, inherit 
 		return out, rows.Err()
 	}
 	d, err := load(project)
-	if err != nil || d != nil || project == nil || !inherit {
+	if err != nil || d != nil || !inherit {
 		return d, err
 	}
-	return load(nil)
+	if project != nil {
+		d, err = load(nil)
+		if err != nil || d != nil {
+			return d, err
+		}
+	}
+	// A stable synthetic identity/revision makes entry audit records identify
+	// this policy without writing a node during reads or weakening existing
+	// tenants' guards at rollout. Explicit empty definitions opt out as usual.
+	return &EntryDefinition{
+		ID:       "00000000-0000-0000-0000-000000000000",
+		Revision: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC),
+		Source:   "workspace",
+		Checks: map[string][]EntryRule{
+			"in_progress": {{ID: "estimate_set"}, {ID: "acceptance_present"}, {ID: "blocker_named"}},
+			"done":        {{ID: "release_copy_set"}},
+		},
+	}, nil
 }
 
 type EntryTicket struct {
