@@ -1,84 +1,99 @@
-# Native LEAD integration: I1 ownership handoff (AEON-1290)
+# Native LEAD integration: Round 2 handoff (AEON-1290)
 
-This slice is **incomplete**. No runtime, route, account, daemon, CLI or vendor
-configuration changed. Native public routes and native runtime callbacks remain
-disabled. This document records the ownership blocker encountered before source
-implementation; it does not describe a delivered pilot.
+I1 remains **incomplete and blocked**. Round 2 implements native root occupancy
+in the assigned legacy admission paths and the qualified C0 HTTP constructor.
+Production still mounts `NewDisabled`; paired agentd has no native-session
+callbacks configured. No live LEAD handover, vendor call or daemon restart was
+performed. This is not an enabled pilot or live-soak result.
 
-The full brief at
-`/Users/markus/.aeon/lead/aeon/briefs/aeon-1290-i1-pilotwire.md` requires:
-"Write ONLY inside your exclusive_write_set. If you need a file outside it,
-STOP and say so in your summary. Never touch another slice's files."
-The normative `plan.json` I1 write set does not include the files below. The R0
-grant permits metadata rows for this slice's additions, not these source edits.
+## Implemented
 
-## Required ownership clarification
+The account and shared-quota counters now add native roots only where
+`run_id IS NULL AND released_at IS NULL`. The existing AEON-1251 worker
+predicates, including conservative `exit_unconfirmed` holds, remain intact.
+Queued, starting, running, idle, taken and uncertain roots retain their slots
+without depending on a heartbeat, daemon generation or viewer attachment.
+Selection, readiness, routing and other callers of those counters inherit the
+same accounting. Pairing host capacity, engine admission and routine admission
+also include all unreleased roots on their computer.
 
-| Outside-scope file | Concrete dependency |
+Native admission uses separate worker-run and owned-session exclusions. A claim
+retry projects out exactly its own root; siblings remain counted once and
+worker sidecars contribute no extra slot. Account archive checks native holds
+before `DisconnectAccount` could revoke enrollment or final-report authority.
+
+`nativesessions.New(Services)` now requires qualified Store, FrameSource and
+FinalSink services and dispatches the authored C0 routes. It preserves the
+disabled constructor, native error/contract headers, authentication and person
+boundaries, bounds bodies before decoding, rejects mismatched route/body tenant
+or target identifiers, and distinguishes accepted work from launched/delivered
+work. Public egress re-applies the person projection, including native-context
+and mutation responses. Qualified P2a relay/viewer authorities can supply the
+existing stream and live-page HTTP handlers, with their frame and keepalive
+fences. No public route, schema, permission or contract version changed.
+
+The HTTP module stays independent of concrete account/inbox/start storage to
+avoid an auth → native module → start store → accounts → inbox test import
+cycle. Its `RouteProject(ctx)` is a selector for the integrating Store adapter,
+which must pass it through `store.WithProject`; it grants no authority.
+Private daemon routes require a `DaemonRequests` implementation to resolve
+current paired identity and private proof. Missing qualified extensions refuse
+the operation; body generation identifiers never substitute for pairing proof.
+
+## Remaining ownership and integration blockers
+
+The Round 2 grant covers `agentaccounts/groups.go`, `native_root.go` and
+`nativesessions/module.go` plus their tests. It does not cover these additional
+pairing lifecycle files:
+
+| File | Blocker before live pilot |
 | --- | --- |
-| `internal/agentaccounts/groups.go` | `quotaOccupancyExcept` counts only account-backed `agent_runs`. `slotCount` selects that shared-quota count whenever an account has a quota fingerprint. Existing selection, readiness and routing callers therefore ignore native roots even if the per-account count in the in-scope `store.go` is changed. Acceptance 3 requires native root holds in every existing admission path, including aliases that share quota. |
-| `internal/agentaccounts/native_root.go` | `requireNativeCapacityTx` calls the existing per-account and quota counters, then independently adds unreleased null-run native roots to both maps. Expanding the shared counters without adapting this caller would double-count roots, including the current claim on replay, and defeat its `exceptSession` projection. |
-| `internal/nativesessions/module.go` | The frozen C0 `New(Services)` integration constructor always returns `feature_disabled`, and `Module` has no service fields. `cmd/aeon/serve.go` mounts `NewDisabled`. Wiring qualified services through this existing public module requires implementing its reserved constructor and authorized handlers. This file is reserved outside I1's listed write set. |
+| `internal/agentpairing/lifecycle.go` | `finalizeDrain` revokes an enrollment when no active or uncertain worker run exists. It does not check unreleased native roots, so a live/idle native root can lose the paired key needed for reconciliation or final delivery. |
+| `internal/agentpairing/remove.go` | Computer removal's unsettled-work check and `DisconnectAccount` consider worker runs only. They can archive/revoke a native root's account/computer. The in-scope account archive guard protects that entry point, not every pairing entry point. |
 
-The coordinator must assign these changes explicitly or supply an approved
-alternative integration seam before implementation resumes. No duplicate public
-module, partial admission workaround or ownership transfer is inferred here.
+These paths need an explicit ownership grant or a coordinator-owned prerequisite
+fix and behavior tests. They were inspected read-only and not changed. The
+original brief requires stopping at an additional write-set boundary; the
+Round 2 grant does not transfer these files.
 
-The counter repair must retain the exact AEON-1251 account-backed worker
-predicate and conservative `exit_unconfirmed` worker holds. Native occupancy
-must count only `run_id IS NULL AND released_at IS NULL`, without filtering by
-heartbeat, daemon generation, idle state or viewer attachment. The native
-capacity caller must exclude exactly its own root on claim replay and count
-siblings once. A shared-quota alias test must verify both existing worker
-admission and native claim/retry; simply testing the account's own count is
-insufficient.
+Full I1 composition is also still outstanding. The start store requires
+transactional native actor/tool/settings/history authority and a trusted local
+ledger/proof observer. The receipt repository requires current receipt/exit
+evidence and original final-drain/retention authority. Those packages currently
+provide interfaces and test implementations. I1 must supply production adapters,
+map the owning supervisor to C0 Host/Launcher, compose durable commands,
+receipts/finals and attach, and re-use exact root context. Neither existing
+project lead intent nor automatic routine qualification may be treated as a
+native grant. No permissive authority callback or fake worker run was added.
 
 ## Acceptance handoff
 
 | Item | Result |
 | --- | --- |
-| A1: C0 Host/Launcher, start Store, relay, durable receipt/final sink and attach wiring | INCOMPLETE. No composition or fake-native integration smoke was implemented after discovery of the ownership blocker. |
-| A2: person-invoked path separate from automatic LeadRuntime | INCOMPLETE. Existing disabled callbacks were preserved; no new path was installed. |
-| A3: native roots in all legacy account/host admission paths; exact root context | BLOCKED by the counter ownership above. No partial counter changes or fake worker run were introduced. |
-| A4: account default, confined adapter and legacy CLI compatibility; strict inventories | INCOMPLETE. Existing source was preserved. No source, test, route, permission, migration, DSAR, fence or tier rows were added. |
-| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | NOT RUN. `internal/nativeintegration` has not been created, so the planned integration package and smoke do not exist. |
-| A6: concrete disabled pilot for coordinator self-handover | INCOMPLETE. No live LEAD switch, daemon restart or vendor process was attempted. |
+| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | PARTIAL. Qualified HTTP dispatch and P2a stream mount seam implemented. Production Store/Host/Launcher composition and combined fake-native smoke remain outstanding. |
+| A2: person-invoked native path separate from automatic LeadRuntime | INCOMPLETE. Existing automatic and native runtime callbacks remain disabled; no person-invoked production composition installed. |
+| A3: native roots in legacy account/host admission; exact root context | PARTIAL. Listed account/shared-quota/pairing/engine/routine admission counts and own-root replay exclusion implemented. Pairing lifecycle safety is blocked above; exact root runtime context wiring remains outstanding. |
+| A4: default account, confined adapter and legacy CLI compatibility; inventories | PARTIAL. No account-home, adapter or CLI behavior changed. Three own behavior tests classified ESSENTIAL via the canonical R0 writer; no new route, permission, table or source ownership row. |
+| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | NOT IMPLEMENTED. No combined I1 smoke exists; individual dependency tests do not prove this integration. |
+| A6: concrete disabled pilot for coordinator self-handover | INCOMPLETE. Default-off production behavior preserved; pilot bootstrap and live self-handover are not claimed. |
 
-Z1 remains an integration requirement: the validated, person-only registration
-`terminal_viewer_url` must reach the existing "Open live terminal" link when
-I1/I2 are wired. No browser or terminal-viewer code changed in this handoff.
-`G_TERMS`, `G_LEAD_GRANT` and `G_P1_LIVE` remain coordinator/person decisions;
-no review, enablement or 48-hour live-soak evidence is claimed.
+Z1's validated person-only `terminal_viewer_url` remains in the C0 projection
+and is stripped on agent egress. Publishing the pilot URL and connecting the
+live LEAD path to the existing terminal link still require full I1/I2 wiring.
+`G_TERMS`, `G_LEAD_GRANT` and `G_P1_LIVE` remain coordinator/person gates;
+no 48-hour live-soak or enablement evidence is claimed.
 
 ## Verification
 
-PASS: PPM instance `ppm`, tenant INSPR and principal `workstation-agents` were
-verified. The ticket contains the coordinator-recorded builder marker for
-`aeon-1290-i1-pilotwire`, session `cfd43c1e-4ff5-46ef-a9f3-be1c9974fc89`.
-The worker doctrine, both normative references, common rules, I1 JSON/Markdown
-specification and C0 amendments were read before the ignored progress file and
-this explicitly assigned documentation path were written.
+The named tests and exact final command results are recorded below after guarded
+validation completes. Exit 3 remains incomplete, and PR CI is authoritative.
 
-PASS: read-only inspection identified the named counters, shared-quota callers,
-native caller's additional root sum and disabled C0 constructor. No credentials,
-foreign worktree, release version or source file were changed.
+R0 additions are exactly these ESSENTIAL rows in `scripts/ci/go-test-tiers.json`:
 
-PASS: `node scripts/test-tiers/affected.mjs --base origin/main` exits 0. After
-the handoff commit, its JSON projection reports mode `essential`, layout
-`static`, reason `essential plus changed area and reverse dependencies`.
-This is a selection result, not an executed test-suite pass.
+- `internal/agentaccounts/TestNativeRootsFenceWorkerAliasAndProjectOwnClaim`
+- `internal/agentaccounts/TestNativeRootFencesLegacyHostAdmission`
+- `internal/nativesessions/TestQualifiedNativeRoutesBindCallerAndTargetBeforeDispatch`
 
-PASS: `git diff --check` and the staged whitespace check exit 0. The committed
-file set contains only this assigned documentation path; the ignored progress
-file records that the worker handoff is closed but implementation is incomplete.
-
-INCOMPLETE: `/Users/markus/.aeon/lead/aeon/ci-static-locked.sh` exits 3 because
-both remote run slots on mbp2606 are occupied (`2/2`; CI pool `0/4`). The static
-checks did not execute. No local fallback or copied runner was used. Any resumed
-implementation still requires guarded checks and authoritative green PR CI.
-
-NOT RUN: the planned implementation Go suite and negative control. No Go code
-or tests changed, and the required integration package/smoke does not exist.
-Browser checks are not applicable to I1. No origin push, deployment, model CLI,
-review gate, live pilot or ticket-status change was performed. Acceptance and
-release remain incomplete; this local commit is an ownership handoff only.
+No source ownership, shared-fence, route, DSAR, permission, migration, web-tier
+or shard rows were added because this round introduces none of those entries.
+Shared counter/module/tier edits are limited to the explicit grant and own tests.
