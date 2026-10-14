@@ -125,8 +125,8 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: testInfo.outputPath('knowledge-without-lessons.png') })
   })
 }
-// Tick at 33f0a013 read "1 lessons wait on the Decision Desk" and saw its chevron
-// wrap alone onto a second line in the narrow Knowledge column.
+// Tick at 33f0a013 read "1 lessons wait on the Decision Desk" with its chevron alone on a
+// second line: base.css renders every SVG as a block. Fails on e27c019ac at every width.
 async function lessonLine(link: Locator) {
   return link.evaluate(el => {
     const icon = el.querySelector('svg')!, word = document.createRange(); word.selectNodeContents(icon.previousSibling!)

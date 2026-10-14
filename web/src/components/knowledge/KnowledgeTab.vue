@@ -395,9 +395,10 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 
 <style scoped>
 .lesson-link { margin: 0 0 18px; font-size: 12px; }.lesson-link a { color: var(--ink-3); text-decoration: none; }.lesson-link a:hover { color: var(--teal-ink); }
-/* The chevron travels with the last word: a narrow column wraps "Desk ›" together, never the chevron alone. */
+/* The chevron sits in the line (base.css makes every SVG a block) and travels with the last word:
+   a narrow column wraps "Desk ›" together, never the chevron alone. */
 .lesson-tail { white-space: nowrap; }
-.lesson-go { margin-left: 3px; vertical-align: middle; }
+.lesson-go { display: inline-block; margin-left: 3px; vertical-align: middle; }
 .k-mode-sep { flex-shrink: 0; width: 1px; height: 22px; margin: 0 2px; background: var(--line-2); }
 .k-mode { flex-shrink: 0; }
 .k-mode button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; }
