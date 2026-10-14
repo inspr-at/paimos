@@ -17,9 +17,11 @@ import (
 
 // Module serves /api/kinds, /api/nodes and atomic /api/tags mutations.
 type Module struct {
-	pool    *pgxpool.Pool
-	events  Writer
-	figures figuresCache
+	pool   *pgxpool.Pool
+	events Writer
+	// Pointer so a lifecycle Module copy shares one lock. A value field
+	// embeds sync.Mutex; copying it forks the lock around the same map.
+	figures *figuresCache
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -34,7 +36,7 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 	if events == nil {
 		events = SQLWriter{}
 	}
-	return &Module{pool: pool, events: events}
+	return &Module{pool: pool, events: events, figures: &figuresCache{}}
 }
 
 // Mount registers kind and node routes. Paths are the full /api paths the
