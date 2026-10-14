@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSession } from '../../stores/session'
 import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyExpiry, keyHint, adoptAgentKey, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
@@ -15,13 +15,17 @@ import { useAccess } from '../../stores/access'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
 import RowMenu from '../business/RowMenu.vue'
-import KeysTable from './KeysTable.vue'
-import NewKeySheet from './NewKeySheet.vue'
-import NewAgentSheet from './NewAgentSheet.vue'
-import EditKeyScopesSheet from './EditKeyScopesSheet.vue'
-import RolePicker from './RolePicker.vue'
 import StatusChip from './StatusChip.vue'
 import { problem, undoing } from './accessText'
+
+// The list paints without the key table, the role dialog, or the sheets. Those
+// chunks start when the row actually opens them, so the agents route does not
+// compete with every other Access tab for Chromium's six HTTP/1.1 connections.
+const KeysTable = defineAsyncComponent(() => import('./KeysTable.vue'))
+const NewKeySheet = defineAsyncComponent(() => import('./NewKeySheet.vue'))
+const NewAgentSheet = defineAsyncComponent(() => import('./NewAgentSheet.vue'))
+const EditKeyScopesSheet = defineAsyncComponent(() => import('./EditKeyScopesSheet.vue'))
+const RolePicker = defineAsyncComponent(() => import('./RolePicker.vue'))
 
 // Agents: each with its role (what its keys can do at most) and its keys.
 // Service principals run inside Aeon itself; they are shown as internal and are

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { computed, nextTick, onMounted, ref, watch, type Component } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, permissionsRevoked } from '../../lib/authz'
 import { safeReturnPath } from '../../lib/signInReturn'
@@ -13,14 +13,19 @@ import { accessFooter } from '../../lib/footerProviders'
 import { useFooterSummary } from '../../lib/footerSummary'
 import AppIcon from '../AppIcon.vue'
 import BizIcon, { type BizIconName } from '../business/BizIcon.vue'
-import AgentsTab from './AgentsTab.vue'
-import AuditTab from './AuditTab.vue'
-import InviteSheet, { type InvitePrefill } from './InviteSheet.vue'
-import InvitesTab from './InvitesTab.vue'
-import PeopleTab from './PeopleTab.vue'
-import PersonSheet from './PersonSheet.vue'
-import ProjectsTab from './ProjectsTab.vue'
-import RolesTab from './RolesTab.vue'
+import type { InvitePrefill } from './InviteSheet.vue'
+
+// One tab (and a sheet only when it opens). A static import of every tab made
+// the section chunk wait on a wide HTTP/1.1 burst; under Playwright's route
+// interception that burst finished after the 5s panel wait (AEON-1343).
+const PeopleTab = defineAsyncComponent(() => import('./PeopleTab.vue'))
+const InvitesTab = defineAsyncComponent(() => import('./InvitesTab.vue'))
+const RolesTab = defineAsyncComponent(() => import('./RolesTab.vue'))
+const ProjectsTab = defineAsyncComponent(() => import('./ProjectsTab.vue'))
+const AgentsTab = defineAsyncComponent(() => import('./AgentsTab.vue'))
+const AuditTab = defineAsyncComponent(() => import('./AuditTab.vue'))
+const PersonSheet = defineAsyncComponent(() => import('./PersonSheet.vue'))
+const InviteSheet = defineAsyncComponent(() => import('./InviteSheet.vue'))
 
 // Settings -> Access: who works here and what they may do. People, invites,
 // roles, project access, agents and the access log, each a tab you see when you
