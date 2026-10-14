@@ -135,6 +135,22 @@ func sameLearningRule(got, want Rule) bool {
 // the caller's surrounding project visibility. Actual drafting checks write
 // permission again through AppendLearningRule.
 func LearningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string) (string, error) {
+	return learningTarget(ctx, tx, p, layerID, setID, projectID, false)
+}
+
+// LockLearningTarget retains FK-compatible reference locks in the outer
+// mutation transaction, before its event counter is acquired.
+func LockLearningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string) (string, error) {
+	return learningTarget(ctx, tx, p, layerID, setID, projectID, true)
+}
+
+func learningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string, lock bool) (string, error) {
+	var prior []string
+	if lock {
+		if err := tx.QueryRow(ctx, `SELECT ARRAY[coalesce(current_setting('aeon.rules_access',true),''),coalesce(current_setting('aeon.rules_owner',true),''),coalesce(current_setting('aeon.rules_agent',true),''),coalesce(current_setting('aeon.rules_projects',true),''),coalesce(current_setting('aeon.visible_projects',true),'')]`).Scan(&prior); err != nil {
+			return "", err
+		}
+	}
 	sp, err := tx.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -160,6 +176,17 @@ func LearningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID,
 	}
 	if err := permission(ctx, sp, p, f.Scope, "rules.read"); err != nil {
 		return "", err
+	}
+	if lock {
+		if _, err := sp.Exec(ctx, `SELECT id FROM nodes WHERE tenant_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR KEY SHARE`, p.TenantID, []string{layerID, setID}); err != nil {
+			return "", err
+		}
+		if _, err := sp.Exec(ctx, `SELECT set_config('aeon.rules_access',$1,true),set_config('aeon.rules_owner',$2,true),set_config('aeon.rules_agent',$3,true),set_config('aeon.rules_projects',$4,true),set_config('aeon.visible_projects',$5,true)`, prior[0], prior[1], prior[2], prior[3], prior[4]); err != nil {
+			return "", err
+		}
+		if err := sp.Commit(ctx); err != nil {
+			return "", err
+		}
 	}
 	return f.Name, nil
 }

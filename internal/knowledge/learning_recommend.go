@@ -358,7 +358,7 @@ func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publ
 				if in.Lesson == "" {
 					return fail(http.StatusBadRequest, "invalid_request", "lesson is required for a rule draft")
 				}
-				title, err = rules.LearningTarget(ctx, tx, p, in.RuleLayerID, in.KnowledgeID, item.projectID)
+				title, err = rules.LockLearningTarget(ctx, tx, p, in.RuleLayerID, in.KnowledgeID, item.projectID)
 			} else {
 				title, err = recommendTarget(ctx, tx, p.TenantID, in.KnowledgeID, item.projectID)
 			}

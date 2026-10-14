@@ -831,8 +831,23 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 			return changedLearning()
 		}
 		originalText := item.Text
-		if in.Lesson != "" {
+		var preparedLine, preparedLesson, preparedText string
+		err = tx.QueryRow(ctx, `SELECT coalesce(changelog_line,''), coalesce(lesson,''), learning_text
+          FROM method_learning_recommendations WHERE tenant_id=$1 AND source_key=$2
+          AND knowledge_id=$3::uuid AND rule_layer_id IS NULL`, p.TenantID, publicID, in.KnowledgeID).Scan(&preparedLine, &preparedLesson, &preparedText)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if in.Lesson == "" && preparedLesson != "" {
+			if preparedText != originalText {
+				return changedLearning()
+			}
+			item.Text = preparedLesson
+		} else if in.Lesson != "" {
 			item.Text = in.Lesson
+		}
+		if preparedText != originalText || preparedLesson != item.Text {
+			preparedLine = ""
 		}
 		confirmed, err := sensitiveCheck(sensitiveRanges("text", item.Text), in.Confirm)
 		if err != nil {
@@ -857,12 +872,6 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 			return err
 		}
 		line := learningLine(date, item.Text, item.Key, item.Href)
-		var preparedLine string
-		err = tx.QueryRow(ctx, `SELECT coalesce(changelog_line,'') FROM method_learning_recommendations
-          WHERE tenant_id=$1 AND source_key=$2 AND knowledge_id=$3::uuid AND lesson=$4 AND learning_text=$5 AND rule_layer_id IS NULL`, p.TenantID, publicID, in.KnowledgeID, item.Text, originalText).Scan(&preparedLine)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
 		if preparedLine != "" {
 			line = preparedLine
 		}

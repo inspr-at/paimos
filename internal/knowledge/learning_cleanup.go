@@ -238,6 +238,17 @@ func cleanupLegacyItem(ctx context.Context, pool *pgxpool.Pool, p tenant.Princip
 		if err != nil {
 			return err
 		}
+		var cutoff time.Time
+		if err := tx.QueryRow(ctx, `SELECT cutoff FROM method_learning_legacy_cleanup WHERE tenant_id=$1`, p.TenantID).Scan(&cutoff); err != nil {
+			return err
+		}
+		var eligible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+legacySources+`) old WHERE source_key=$3)`, p.TenantID, cutoff, key).Scan(&eligible); err != nil {
+			return err
+		}
+		if !eligible {
+			return nil
+		}
 		if err := authz.RequireTx(ctx, tx, p, "knowledge.write", authz.Scope{ProjectID: item.projectID}); err != nil {
 			return err
 		}

@@ -22,6 +22,13 @@ func TestLearningSignalSelection(t *testing.T) {
 	f := setup(t)
 	ordinary := addNode(t, f, "SIG-1", "work", "Routine delivery", &f.project)
 	closeAged(t, f, ordinary, "done", "1 hour")
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'incident','Incident','INC','ticket')`, f.a.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	kind := addNode(t, f, "INC-1", "incident", "Recovery failure", &f.project)
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO model_situation_limits(tenant_id,fix_rounds) VALUES($1,4) ON CONFLICT(tenant_id) DO UPDATE SET fix_rounds=4`, f.a.TenantID); err != nil {
+		t.Fatal(err)
+	}
 	title := addNode(t, f, "SIG-2", "work", "INCIDENT: rollback failed", &f.project)
 	tag := addNode(t, f, "SIG-3", "work", "Database recovery", &f.project)
 	setFields(t, f, tag, map[string]any{"tags": []any{map[string]any{"name": "incident"}}})
@@ -36,8 +43,8 @@ func TestLearningSignalSelection(t *testing.T) {
 	early := addNode(t, f, "SIG-5", "work", "Early gate", &f.project)
 	capped := addNode(t, f, "SIG-6", "work", "Capped gate", &f.project)
 	clean := addNode(t, f, "SIG-7", "work", "Clean gate", &f.project)
-	insertOutcome(t, f, f.project, early, `{"verdict":"changes","round":2,"summary":"First correction"}`, "")
-	insertOutcome(t, f, f.project, capped, `{"verdict":"changes","round":3,"summary":"Repeated blocker"}`, "")
+	insertOutcome(t, f, f.project, early, `{"verdict":"changes","round":3,"summary":"First correction"}`, "")
+	insertOutcome(t, f, f.project, capped, `{"verdict":"changes","round":4,"summary":"Repeated blocker"}`, "")
 	insertOutcome(t, f, f.project, clean, `{"verdict":"ok","round":3,"summary":"Ready"}`, "")
 	explicit := addComment(t, f, ordinary, "#process-learning Check rollback before releasing.")
 	bare := addComment(t, f, ordinary, "The incident was resolved; VERDICT changes round 3.")
@@ -53,10 +60,10 @@ func TestLearningSignalSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, err := TagOnce(t.Context(), f.db.App)
-	if err != nil || n != 6 {
+	if err != nil || n != 7 {
 		t.Fatalf("signals=%d err=%v", n, err)
 	}
-	for _, id := range []string{title, tag, reopened, capped} {
+	for _, id := range []string{kind, title, tag, reopened, capped} {
 		if _, _, ok := nominationOfKey(t, f, nodeLearningID(id)); !ok {
 			t.Fatalf("missing signal %s", id)
 		}
@@ -132,7 +139,7 @@ func TestUnpreparedLearningsHiddenFromPeople(t *testing.T) {
 	body["lesson"] = "Rehearse recovery before the next rollout."
 	expect(t, call(t, f, agent, "PUT", recommendPath(nodeLearningID(f.ticket)), body), 200)
 	rec = *learningHTTPPage(t, f, f.a).Items[0].Recommendation
-	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(f.ticket)+"/accept", map[string]any{"knowledge_id": book.ID, "lesson": rec.Lesson, "learning_text": "Changed incident"})
+	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(f.ticket)+"/accept", map[string]any{"knowledge_id": book.ID, "learning_text": "Changed incident"})
 	expect(t, w, 200)
 	if got := decode[LearningDecision](t, w); got.Line != rec.Line || !strings.Contains(entryBody(t, f, book.ID), rec.Line) {
 		t.Fatalf("accept differs from prepared line: %+v", got)
@@ -229,8 +236,14 @@ func TestLegacyCleanupIdempotentPreservesPrepared(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	const extra = legacyCleanupBatch + 1
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,fields,updated_at)
+      SELECT $1,'BATCH-'||g,k.id,'Legacy batch '||g,$2::uuid,'{"tags":["process-learning"]}'::jsonb,timestamptz '2000-01-01'
+      FROM generate_series(1,$3) g JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='work'`, f.a.TenantID, f.project, extra); err != nil {
+		t.Fatal(err)
+	}
 	n, err := CleanupLegacyLearnings(t.Context(), f.db.App)
-	if err != nil || n != 5 {
+	if err != nil || n != 5+extra {
 		t.Fatalf("cleanup=%d err=%v", n, err)
 	}
 	for _, key := range []string{nodeLearningID(nominated), nodeLearningID(tagged), commentLearningID(f.project, projectComment), commentLearningID(f.ticket, ticketComment)} {
