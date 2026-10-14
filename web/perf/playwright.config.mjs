@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { defineConfig } from '@playwright/test'
 import { browserPolicy, headlessChromium } from '../playwright.policy.ts'
 
-const port = 6000 + parseInt(createHash('sha256').update(process.cwd()).digest('hex').slice(0, 4), 16) % 500
+const port = 18000 + parseInt(createHash('sha256').update(process.cwd()).digest('hex').slice(0, 4), 16) % 500
 export default defineConfig({
   ...browserPolicy(process.env, 1), globalSetup: '../../scripts/playwright-global-setup.mjs', testDir: '.', testMatch: '**/baseline.spec.mjs',
   timeout: 120000, retries: 0, fullyParallel: false,

@@ -7,7 +7,7 @@ import { fixtureSQL } from './fixtures.mjs'
 
 if (!/mbp2606/i.test(hostname())) throw Error('This baseline server runs only on mbp2606 through LEAD remote-spec.sh')
 const port = Number(process.argv[2])
-if (!Number.isInteger(port) || port < 6000 || port > 7000) throw Error('Invalid isolated port')
+if (!Number.isInteger(port) || port < 18000 || port > 19000) throw Error('Invalid isolated port')
 const artifacts = resolve('test-results', 'perf1355-server')
 mkdirSync(artifacts, { recursive: true })
 const psql = join(homedir(), 'ci.noindex/pg18v/bin/psql')
