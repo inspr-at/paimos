@@ -115,7 +115,7 @@ for (const theme of ['light', 'dark'] as const) test(`Decide is never a silent n
   await expect(heading(page)).toHaveText('Should the successor continue the review?')
   await page.keyboard.press('k')
   await expect(page.getByTestId('desk-stamp')).toHaveAttribute('aria-label', 'Stamped Once')
-  await expect(page.getByTestId('desk-line')).toContainText(/Decided .* sends to .* in .* s/)
+  await expect(page.getByTestId('desk-line')).toContainText(/^Decided .+sends to the agent in \d+ s.*Undo$/)
   await expect(page.getByTestId('desk-skip')).toHaveAccessibleName(/^Change/)
   await expect(page.getByTestId('desk-decide')).toHaveAccessibleName(/^Next/)
   await expect(page.getByTestId('choice-0')).toBeDisabled()

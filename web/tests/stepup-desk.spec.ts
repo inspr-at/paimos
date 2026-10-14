@@ -161,7 +161,7 @@ for (const theme of ['light', 'dark'] as const) {
         // AEON-1339: hairlines on the memo's paper, and the brass primary of the approved artifact.
         hairline: [css('[data-testid="stepup-before"] dl > div', 'border-bottom-color'), probe('border-bottom-color', 'var(--paper-line)')],
         changed: [css('[data-testid="stepup-after"] .changed', 'background-color'), probe('background-color', 'var(--row-hover)')],
-        primary: [css('[data-testid="desk-decide"]', 'background-image'), probe('background-image', 'var(--brass)')],
+        primary: [css('[data-testid="desk-decide"]', 'background-image').replace(/, none$/, ''), probe('background-image', 'var(--brass)')],
         primaryFill: [css('[data-testid="desk-decide"]', 'background-color'), probe('background-color', 'var(--brass-solid)')],
         type: [css('[data-testid="stepup-after"] dd', 'font-family'), css('.context-column p', 'font-family')],
       }
