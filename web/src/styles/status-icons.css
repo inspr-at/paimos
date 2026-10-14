@@ -1,0 +1,61 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* AEON-1362 (design r4b §5–§7): the status icons' motion parts and their bar form (lib/statusMotion.ts has the API).
+   Only transform, opacity and stroke-dashoffset animate, so nothing here can shift layout. */
+
+/* In progress: a ring (::after) over a circular clip (i) whose 45° stripe layer (i::before) slides one stripe period
+   every 1.8 s: transform only, on the compositor. The period is a fixed 3.677 px along x at every size (1.1 px on,
+   1.5 px off across the stripes), so the keyframes stay plain pixels. StatusIcon sets the box, size and colour inline. */
+.status-icon.st-ip::after { content: ''; position: absolute; inset: calc(1em / 14); border: calc(1.8em / 14) solid currentColor; border-radius: 50%; }
+.status-icon.st-ip > i { position: absolute; inset: calc(3.3em / 14); border-radius: 50%; overflow: hidden; }
+.status-icon.st-ip > i::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -3.677px; right: 0;
+  background: repeating-linear-gradient(135deg, currentColor 0 1.1px, transparent 1.1px 2.6px);
+  will-change: transform; animation: ip-slide 1.8s linear infinite;
+}
+@keyframes ip-slide { from { transform: translateX(0); } to { transform: translateX(3.677px); } }
+
+/* One-off parts that scale or turn do so about their own centre; New's dot (its gap) turns about the icon's centre. */
+.status-icon :is(.disc, .pulse, .dots, .dashes, .sq) { transform-box: fill-box; transform-origin: center; }
+.status-icon.st-new .dot { transform-box: view-box; transform-origin: 7px 7px; }
+
+/* The bar form: one fill per status, read from its icon (§5.1). statusFill(state) returns `f-<pattern> fc-<status>`.
+   Fills that draw pseudo-elements need a positioned box; consumers may position it themselves (zero specificity). */
+:where(.f-diag, .f-cancel) { position: relative; }
+.f-ring { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.f-tint { background: color-mix(in srgb, currentColor 20%, transparent); box-shadow: inset 0 0 0 1.5px currentColor; }
+/* In progress: 45° stripes (2 px on, 2.5 px off across them = 6.364 px along x) in a clipped shape under a 1.5 px ring. */
+.f-diag { background: transparent; overflow: hidden; }
+.f-diag::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -6.364px; right: 0;
+  background: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 4.5px);
+  will-change: transform; animation: diag-slide 1.8s linear infinite paused;
+}
+.f-diag::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1.5px currentColor; pointer-events: none; }
+@keyframes diag-slide { from { transform: translateX(0); } to { transform: translateX(6.364px); } }
+/* A live segment always slides; others slide while the pointer is over their container. Swatches never slide. */
+.f-diag.f-live::before, .f-slide-hover:hover .f-diag::before { animation-play-state: running; }
+/* Too short for its pattern: the stripes fall back to the ring. */
+.f-diag.f-short::before { display: none; }
+.f-solid, .f-deep { background: currentColor; }
+.f-dotted { background: transparent; border: 1.5px dotted currentColor; }
+.f-dashed { background: transparent; border: 1.5px dashed currentColor; }
+.f-halo { background: color-mix(in srgb, var(--st-qa-fill) 70%, transparent); box-shadow: inset 0 0 0 1.5px currentColor, 0 0 5px 1px color-mix(in srgb, var(--st-qa-ring) 45%, transparent); }
+/* Cancelled: a grey tint with one centred slash, so it never reads as the in-progress stripes. */
+.f-cancel { background: color-mix(in srgb, currentColor 14%, transparent); box-shadow: inset 0 0 0 1px currentColor; overflow: hidden; }
+.f-cancel::after { content: ''; position: absolute; left: 50%; top: 50%; width: 1.5px; height: 20px; background: currentColor; transform: translate(-50%, -50%) rotate(45deg); }
+.f-square { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; border-radius: 1px; }
+/* Fill colours: at least 3:1 against the surface and the track, so New and QA use their inks rather than the icon colours. */
+.fc-new { color: var(--gold-ink); }
+.fc-open, .fc-progress { color: var(--st-progress); }
+.fc-backlog, .fc-cancelled, .fc-archived, .fc-other { color: var(--ink-3); }
+.fc-blocked { color: var(--st-blocked); }
+.fc-qa { color: var(--st-qa-ring); }
+.fc-done, .fc-delivered { color: var(--st-ok); }
+.fc-accepted { color: var(--st-ok-deep); }
+
+/* Paused off-screen (useOffscreenPause) and in hidden tabs (useStatusMotion). */
+.status-icon.st-ip.offscreen > i::before, .tab-hidden .status-icon.st-ip > i::before,
+.f-diag.offscreen::before, .tab-hidden .f-diag::before { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .status-icon.st-ip > i::before, .f-diag::before { animation: none; }
+}
