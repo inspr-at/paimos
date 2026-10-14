@@ -402,3 +402,6 @@ func (Absence) MarshalJSON() ([]byte, error) {
 func (Successor) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("native successor is local authority")
 }
+func (History) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("native history mapping is local authority")
+}

@@ -434,23 +434,28 @@ func TestCrashForkWindowsNeverDuplicateOrReleaseUncertainWriter(t *testing.T) {
 func TestResumeRequiresCurrentProofPolicyHistoryAndExpiresCallbacks(t *testing.T) {
 	cases := []struct {
 		name string
-		edit func(*Successor)
+		edit func(*recoveryFixture, *Successor)
 		want nativecontract.Reason
 	}{
-		{"old runtime", func(s *Successor) { s.Launch.Binding.RuntimeEpoch = "old" }, nativecontract.ReasonInvalidInput},
-		{"old harness", func(s *Successor) { s.Launch.Binding.HarnessSessionID = "old" }, nativecontract.ReasonInvalidInput},
-		{"missing proof", func(s *Successor) { s.RuntimeProofDigest = "" }, nativecontract.ReasonGrantMissing},
-		{"final drain", func(s *Successor) { s.ClaimKind, s.LaunchAuthorized = "final_drain", false }, nativecontract.ReasonGrantMissing},
-		{"different account", func(s *Successor) { s.History.AccountID = uuid.NewString() }, nativecontract.ReasonQualificationMissing},
-		{"saved native ref only", func(s *Successor) { s.History.MappingDigest = "" }, nativecontract.ReasonQualificationMissing},
-		{"history disabled", func(s *Successor) { s.Launch.Policy.LocalHistory = "disabled" }, nativecontract.ReasonQualificationMissing},
-		{"policy widened", func(s *Successor) { s.Launch.Policy.PermissionPolicy = "bounded_preapproved" }, nativecontract.ReasonIdentityMismatch},
-		{"implicit old input", func(s *Successor) { s.Launch.InitialInput = &nativecontract.Input{} }, nativecontract.ReasonQualificationMissing},
+		{"old runtime", func(f *recoveryFixture, s *Successor) { s.Launch.Binding.RuntimeEpoch = f.oldBinding.RuntimeEpoch }, nativecontract.ReasonWrongGeneration},
+		{"old harness", func(f *recoveryFixture, s *Successor) {
+			s.Launch.Binding.HarnessSessionID = f.oldBinding.HarnessSessionID
+		}, nativecontract.ReasonWrongGeneration},
+		{"missing proof", func(_ *recoveryFixture, s *Successor) { s.RuntimeProofDigest = "" }, nativecontract.ReasonGrantMissing},
+		{"final drain", func(_ *recoveryFixture, s *Successor) { s.ClaimKind, s.LaunchAuthorized = "final_drain", false }, nativecontract.ReasonGrantMissing},
+		{"different account", func(_ *recoveryFixture, s *Successor) { s.History.AccountID = uuid.NewString() }, nativecontract.ReasonQualificationMissing},
+		{"saved native ref only", func(_ *recoveryFixture, s *Successor) { s.History.MappingDigest = "" }, nativecontract.ReasonQualificationMissing},
+		{"history disabled", func(_ *recoveryFixture, s *Successor) { s.Launch.Policy.LocalHistory = "disabled" }, nativecontract.ReasonQualificationMissing},
+		{"policy widened", func(_ *recoveryFixture, s *Successor) { s.Launch.Policy.PermissionPolicy = "bounded_preapproved" }, nativecontract.ReasonIdentityMismatch},
+		{"implicit old input", func(_ *recoveryFixture, s *Successor) { s.Launch.InitialInput = &nativecontract.Input{} }, nativecontract.ReasonQualificationMissing},
+		{"old tool proof", func(f *recoveryFixture, s *Successor) {
+			s.Launch.Tools = nativecontract.ToolCapability{Binding: f.oldBinding, Token: []byte("fixture-tool-proof"), ExpiresAt: f.now.Add(time.Hour)}
+		}, nativecontract.ReasonGrantExpired},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, true)
-			f.prepareEdit = tc.edit
+			f.prepareEdit = func(s *Successor) { tc.edit(f, s) }
 			_, err := f.coordinator.Resume(t.Context(), f.actor, f.intent("person_continue"))
 			reason(t, err, tc.want)
 			if f.spawns != 0 || f.approvalLive || f.controllerLive {
@@ -548,7 +553,7 @@ func TestBoundedContinuationUsesOriginalWindowAtMostOnce(t *testing.T) {
 // authorization objects leak through a JSON projection. No content is retained.
 func TestRecoveryJournalBoundsAndLocalAuthorityRefusal(t *testing.T) {
 	f := newFixture(t, false)
-	for _, value := range []any{f.snapshot, Absence{}, Successor{}} {
+	for _, value := range []any{f.snapshot, Absence{}, Successor{}, f.snapshot.History} {
 		if _, err := json.Marshal(value); err == nil {
 			t.Fatal("local recovery authority was serialized")
 		}
@@ -560,5 +565,23 @@ func TestRecoveryJournalBoundsAndLocalAuthorityRefusal(t *testing.T) {
 	reason(t, err, nativecontract.ReasonOwnershipUnconfirmed)
 	if f.spawns != 0 || f.held(t) != 1 {
 		t.Fatal("corrupt recovery metadata changed occupancy")
+	}
+	j := decisionJournal{Version: 1, TenantID: f.oldBinding.TenantID, SessionID: f.oldBinding.OwnedSessionID, Attempts: []attempt{}}
+	next := cloneBinding(f.oldBinding)
+	next.RuntimeEpoch, next.HarnessSessionID, next.BindingRevision = uuid.NewString(), uuid.NewString(), 2
+	for i := 0; i <= MaxAttempts; i++ {
+		j.Attempts = append(j.Attempts, attempt{RequestID: uuid.NewString(), Digest: strings.Repeat("a", 64), Previous: f.oldBinding, Next: next})
+	}
+	raw, err := json.Marshal(j)
+	if err != nil || len(raw) > journalBytes {
+		t.Fatalf("oversized-array fixture must fit the byte bound: %v, %d", err, len(raw))
+	}
+	if err = f.state.Write(journalName(j.SessionID), raw, false); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.coordinator.Resume(t.Context(), f.actor, f.intent("person_continue"))
+	reason(t, err, nativecontract.ReasonBufferFull)
+	if f.spawns != 0 || f.held(t) != 1 {
+		t.Fatal("overfull recovery metadata changed occupancy")
 	}
 }

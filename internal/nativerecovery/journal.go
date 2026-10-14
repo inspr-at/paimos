@@ -58,13 +58,13 @@ func (c *Coordinator) read(b nativecontract.Binding) (decisionJournal, error) {
 		Version   int             `json:"version"`
 		TenantID  string          `json:"tenant_id"`
 		SessionID string          `json:"owned_session_id"`
-		AutoUsed  bool            `json:"auto_used"`
+		AutoUsed  *bool           `json:"auto_used"`
 		Attempts  json.RawMessage `json:"attempts"`
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if d.Decode(&header) != nil || d.Decode(new(any)) != io.EOF || header.Version != 1 ||
-		header.TenantID != b.TenantID || header.SessionID != b.OwnedSessionID {
+		header.TenantID != b.TenantID || header.SessionID != b.OwnedSessionID || header.AutoUsed == nil {
 		return out, fail(nativecontract.ReasonOwnershipUnconfirmed)
 	}
 	d = json.NewDecoder(bytes.NewReader(header.Attempts))
@@ -92,7 +92,7 @@ func (c *Coordinator) read(b nativecontract.Binding) (decisionJournal, error) {
 	if token, err := d.Token(); err != nil || token != json.Delim(']') || d.Decode(new(any)) != io.EOF {
 		return out, fail(nativecontract.ReasonOwnershipUnconfirmed)
 	}
-	out.AutoUsed = header.AutoUsed
+	out.AutoUsed = *header.AutoUsed
 	return out, nil
 }
 

@@ -199,6 +199,12 @@ func (c *Coordinator) validateSuccessor(s Snapshot, a nativecontract.Actor, in n
 	if launch.Policy.GrantID != in.PolicyID || !c.cfg.Now().Before(launch.Policy.ExpiresAt) {
 		return fail(nativecontract.ReasonGrantExpired)
 	}
+	if len(launch.Tools.URL) > 4096 || len(launch.Tools.Token) > 16384 {
+		return fail(nativecontract.ReasonInvalidInput)
+	}
+	if len(launch.Tools.Token) > 0 && (!launch.Tools.Binding.Equal(b) || !c.cfg.Now().Before(launch.Tools.ExpiresAt)) {
+		return fail(nativecontract.ReasonGrantExpired)
+	}
 	if launch.Policy.ToolPolicyDigest != s.Policy.ToolPolicyDigest || launch.Policy.SettingsPolicyDigest != s.Policy.SettingsPolicyDigest ||
 		launch.Policy.PermissionPolicy != s.Policy.PermissionPolicy || launch.Options.ToolPolicyDigest != launch.Policy.ToolPolicyDigest ||
 		launch.Options.SettingsPolicyDigest != launch.Policy.SettingsPolicyDigest {
@@ -275,5 +281,6 @@ func (c *Coordinator) effects(b nativecontract.Binding) (Effects, error) {
 func (*Snapshot) UnmarshalJSON([]byte) error  { return fail(nativecontract.ReasonUnsupported) }
 func (*Absence) UnmarshalJSON([]byte) error   { return fail(nativecontract.ReasonUnsupported) }
 func (*Successor) UnmarshalJSON([]byte) error { return fail(nativecontract.ReasonUnsupported) }
+func (*History) UnmarshalJSON([]byte) error   { return fail(nativecontract.ReasonUnsupported) }
 
 var _ json.Marshaler = Snapshot{}
