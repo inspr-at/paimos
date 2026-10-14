@@ -415,7 +415,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', sizeTab); live = fa
             <aside class="context-column" aria-label="Background and destination">
               <section v-if="titleClipped" data-testid="desk-full-title"><h3>Question in full</h3><p>{{ item.title }}</p></section>
               <section v-if="item.lesson" aria-label="Lesson details" data-testid="desk-lesson-details">
-                <h3>Why</h3><p v-if="item.lesson.learning.title && item.lesson.learning.href"><RouterLink :to="item.lesson.learning.href">From {{ item.lesson.learning.title }}</RouterLink></p>
+                <h3>Why</h3><p v-if="item.lesson.learning.title && item.lesson.learning.href"><RouterLink v-clip-tip class="lesson-source" :to="item.lesson.learning.href">From {{ item.lesson.learning.title }}</RouterLink></p>
                 <p>{{ item.lesson.learning.recommendation?.source_summary }}</p>
                 <p v-if="item.lesson.outdated" data-testid="lesson-outdated">The entry changed since this was prepared. Accept writes against the current version.</p>
                 <h3>What Accept writes</h3><p> Adds this line to {{ item.lesson.learning.recommendation?.rule_layer_id ? `rule draft ${item.lesson.learning.recommendation.knowledge_title}` : `${item.lesson.learning.recommendation?.knowledge_title} › Changelog` }}</p>
@@ -499,6 +499,7 @@ a.project-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .key-trim-evidence p { font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .scope-list { overflow-wrap: anywhere; font-family: var(--font-mono, monospace); }
 .native-action { display: grid; }.native-action button { grid-area: 1 / 1; }
+.context-column .lesson-source { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rule-diff { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 var(--mono); }.rule-diff ins { background: var(--row-selected); }
 .action-buttons button { height: 42px; border: 0; padding: 0 14px; background: transparent; color: var(--ink-2); border-radius: 8px; font-size: 13px; white-space: nowrap; }
 .action-buttons .desk-primary { display: flex; align-items: center; justify-content: center; background: var(--primary); color: var(--primary-on); font-weight: 600; }

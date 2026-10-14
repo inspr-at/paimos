@@ -137,6 +137,7 @@ export function lessonItem(row: DeskProjectionItem, learning: MethodLearning, pr
 }
 async function readLessons(rows: readonly DeskProjectionItem[], name: (id: string) => string) {
   const items: DeskItem[] = [], warnings: string[] = []
+  const targets = new Map<string, Promise<{ id: string; updated_at: string }>>()
   const pending = rows.filter(row => row.kind === 'lesson')
   const projects = [...new Set(pending.map(row => row.project_id).filter((id): id is string => !!id))]
   if (pending.length > 1000) throw new Error('Lesson coverage exceeds 1,000 records.')
@@ -159,7 +160,9 @@ async function readLessons(rows: readonly DeskProjectionItem[], name: (id: strin
         if (!learning || !rec?.prepared || rec.event_id !== row.revision || rec.lesson !== row.title) continue
         // The timestamp is read from the native target; do not guess a stale
         // target from the source-learning stale flag.
-        const target = rec.rule_layer_id ? await getNode(rec.knowledge_id!) : await getKnowledge(rec.knowledge_id!)
+        const targetId = rec.knowledge_id!
+        if (!targets.has(targetId)) targets.set(targetId, rec.rule_layer_id ? getNode(targetId) : getKnowledge(targetId))
+        const target = await targets.get(targetId)!
         if (target.id !== rec.knowledge_id) throw new Error('Lesson target identity changed.')
         confirmed.push(lessonItem(row, learning, name(project), Date.parse(target.updated_at) > Date.parse(rec.at)))
       }

@@ -12,21 +12,28 @@ const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const nativeId = `n-${id}`
 const sentence = 'Rehearse recovery before releasing.'
 const line = '- 2026-10-14 · Rehearse recovery before releasing. ([AEON-1](/p/AEON/AEON-1))'
-async function mockLessons(page: Page, options: { theme?: 'light' | 'dark'; outdated?: boolean; rule?: boolean; noSource?: boolean; empty?: boolean } = {}) {
+async function mockLessons(page: Page, options: { theme?: 'light' | 'dark'; outdated?: boolean; rule?: boolean; noSource?: boolean; empty?: boolean; long?: boolean } = {}) {
   const state = { decided: false, revision: 700, fail: false, undoFail: false, calls: [] as { path: string; body: Record<string, unknown>; match?: string }[] }
+  const lessonSentence = options.long ? 'Vor jeder Freigabe wird der vollständige Wiederherstellungsablauf mit den aktuellen Berechtigungen und den dokumentierten Prüfschritten überprüft.' : sentence
   const learning: MethodLearning = {
     id: nativeId, source: 'ticket', node_id: id, key: 'AEON-1', title: options.noSource ? '' : 'Recovery failed during release',
     text: 'The recovery check was missing.', href: options.noSource ? '' : '/p/AEON/AEON-1', author: null, at: '2026-10-14T08:00:00Z',
-    recommendation: { decision: 'accept', lesson: sentence, knowledge_id: options.rule ? 'rule-set' : 'k-aeon-deploy', knowledge_title: options.rule ? 'Recovery rules' : 'Ship an Aeon release',
+    recommendation: { decision: 'accept', lesson: lessonSentence, knowledge_id: options.rule ? 'rule-set' : 'k-aeon-deploy', knowledge_title: options.rule ? 'Recovery rules' : 'Ship an Aeon release',
       source_summary: 'The incident exposed an untested recovery path.', line: options.rule ? undefined : line,
       rule_layer_id: options.rule ? 'rule-layer' : undefined, rule_text: options.rule ? sentence : undefined,
       by: { id: 'scout', name: 'Scout' }, at: '2026-10-14T08:30:00Z', event_id: 700, prepared: true, stale: false, target_missing: false },
   }
-  const row = () => ({ id, kind: 'lesson' as const, project_id: 'p-aeon', revision: state.revision, title: sentence, created_at: learning.recommendation!.at,
+  const row = () => ({ id, kind: 'lesson' as const, project_id: 'p-aeon', revision: state.revision, title: lessonSentence, created_at: learning.recommendation!.at,
     held: false, can_decide: true, href: `/decision-desk?item=l:${id}`, source: `/api/knowledge/learnings/${nativeId}` })
   await mockDecisionDesk(page, { theme: options.theme })
   const world = knowledgeWorld(), calls = await mockKnowledge(page, world)
   const target = world.entries.find(entry => entry.id === 'k-aeon-deploy')!
+  if (options.long) {
+    target.title = 'Freigabe und Wiederherstellung mit dokumentierten Berechtigungsprüfungen für alle beteiligten Arbeitsbereiche'
+    learning.title = 'Die Wiederherstellung schlug wegen einer fehlenden Berechtigungsprüfung während der Freigabe fehl'
+    learning.recommendation!.knowledge_title = target.title
+    learning.recommendation!.line = `- 2026-10-14 · ${lessonSentence} ([AEON-1](/p/AEON/AEON-1))`
+  }
   target.updated_at = options.outdated ? '2026-10-14T09:00:00Z' : '2026-10-13T08:00:00Z'
   await page.route('**/api/decision-desk/projection*', route => route.fulfill({ json: {
     items: state.decided || options.empty ? [] : [row()], counts: { open: state.decided || options.empty ? 0 : 1, held: 0, chores: 0 }, has_more: false, as_of: '2026-10-14T10:00:00Z',
@@ -88,7 +95,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: testInfo.outputPath('accepted-with-undo.png') }); guard.done()
   })
   test(`AEON-1331 pending lesson and Knowledge link at ${width} ${theme}`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 1000 }); await mockLessons(page, { theme })
+    await page.setViewportSize({ width, height: 1000 }); await mockLessons(page, { theme, long: true })
     await openLesson(page); await expect(page.getByTestId('lesson-outdated')).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath('pending.png') })
     await page.getByTestId('desk-close').click(); await page.goto('/p/AEON/knowledge')
