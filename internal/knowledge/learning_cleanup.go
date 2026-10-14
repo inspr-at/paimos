@@ -152,7 +152,7 @@ func cleanupLegacyTenant(ctx context.Context, pool *pgxpool.Pool, tenantID strin
    WHERE source_key COLLATE "C">coalesce((SELECT after_key FROM method_learning_legacy_cleanup WHERE tenant_id=$1),'') COLLATE "C"
    AND NOT EXISTS (SELECT 1 FROM method_learning_decisions d WHERE d.tenant_id=$1 AND d.source_key=old.source_key)
    AND NOT EXISTS (SELECT 1 FROM method_learning_recommendations r WHERE r.tenant_id=$1 AND r.source_key=old.source_key)
-   ORDER BY source_key COLLATE "C" LIMIT 100`, tenantID, cutoff)
+   ORDER BY source_key COLLATE "C" LIMIT $3`, tenantID, cutoff, legacyCleanupBatch)
 			if err != nil {
 				return err
 			}

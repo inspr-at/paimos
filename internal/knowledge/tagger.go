@@ -288,7 +288,7 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, cursor ta
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','incident')
-		  AND (k.slug='incident' OR n.title ~* '(^|[^A-Za-z0-9_-])incident([^A-Za-z0-9_-]|$)'
+		  AND (k.slug='incident' OR n.title ~* '^\s*incident([^A-Za-z0-9_-]|$)'
           OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) tag
             WHERE lower(btrim(CASE WHEN jsonb_typeof(tag)='string' THEN tag #>> '{}' ELSE coalesce(tag->>'name','') END))='incident')
           OR EXISTS (SELECT 1 FROM events e WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type='node.updated'
