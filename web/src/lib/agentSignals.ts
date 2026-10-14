@@ -3,6 +3,7 @@
 // Evidence stays separate from presentation; viewer thresholds never mutate it.
 export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'done' | 'stopped' | 'pausing' | 'paused'
 import { normalizeAgentPalette, type AgentPalette } from './agentPalettes.ts'
+import { LOST_CONTACT, problemReason, stopReasonSentence } from './stopReasons.ts'
 export type { AgentPalette }
 export interface AgentStatePreference {
   palette: AgentPalette; dimInactive: boolean; inactiveOpacity: number
@@ -45,10 +46,10 @@ export function attentionReasonText(reason: AttentionReason): StateReason {
     held_action: `${count} held action request${count === 1 ? '' : 's'} awaiting a person’s resolution.`,
     reply: `${count} outstanding repl${count === 1 ? 'y' : 'ies'}; waiting for ${actor}.`,
     reply_due: `${count} requested repl${count === 1 ? 'y' : 'ies'} assigned to this session; this agent is expected to reply.`,
-    run_waiting: 'The bound run reports waiting; who must act is not specified.',
+    run_waiting: 'The run reports waiting; who must act is not specified.',
     session_yielded: 'This session yielded; who must act is not specified.',
   }
-  const locations = { approvals: 'Review permission requests in Decision Desk.', messages: 'Review the shared principal inbox in Messages below.', session: 'Check the bound run and session activity below.' }
+  const locations = { approvals: 'Review permission requests in Decision Desk.', messages: 'Review the shared principal inbox in Messages below.', session: 'Check the run and session activity below.' }
   return { code: `${reason.scope}-${reason.kind}-${reason.actor}`, detail: `${reason.scope === 'shared' ? 'Shared inbox · ' : ''}${details[reason.kind]}`, next: `${reason.scope === 'shared' ? 'No session ownership is recorded. ' : ''}${!reason.blocking && reason.scope !== 'shared' ? 'This does not block ongoing work. ' : ''}${locations[reason.location]}` }
 }
 export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' | 'eta_stale'>) {
@@ -69,14 +70,8 @@ export interface StateEvidence {
   eta_stale?: boolean
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
 }
-// Stop reasons are free text. Match error words, not arbitrary nonempty reasons:
-// "user requested", "completed", "stopped", "cancelled" are normal stops.
-// heartbeat_lost is the server closing a silent session ("Lost contact"): the
-// session ended; losing reports is not evidence that it failed (AEON-291).
-export const LOST_CONTACT = 'heartbeat_lost'
-export function problemReason(reason?: string | null) {
-  return !!reason && reason !== LOST_CONTACT && /\b(error|errored|failed|failure|blocked|crash(?:ed)?|ownership lost|heartbeat lost|timeout|timed out)\b/i.test(reason.replace(/[_-]+/g, ' '))
-}
+// How a session ended lives in stopReasons.ts: what counts as a failure, and its words (AEON-1285).
+export { LOST_CONTACT, problemReason, stopReasonLabel, stopReasonSentence } from './stopReasons.ts'
 // AEON-437: Done is positive evidence: the worker reported all of its work AND its
 // launcher recorded a clean exit. The server derives `finished` from exactly that
 // (aeon_session_finished) and puts it in every session, live and event payload, so
@@ -113,8 +108,11 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     return result('pausing', [{ code: 'stop-requested', detail: 'A stop was requested; the worker has not confirmed it yet.', next: 'Wait for the worker’s stop report. A request does not prove process exit.' }], 'Stop requested')
   }
   const problems: StateReason[] = []
-  if (problemReason(evidence.stop_reason)) problems.push({ code: 'stop', detail: `Reported stop reason: ${evidence.stop_reason}`, next: 'Check the session activity and its bound ticket before starting a replacement.' })
-  if (!evidence.vendor_limited && ['failed', 'ownership_lost', 'blocked'].includes(evidence.run_status ?? '')) problems.push({ code: 'run', detail: `The bound run reported ${evidence.run_status!.replace(/_/g, ' ')}.`, next: 'Check the current run and its history for the failure context.' })
+  if (problemReason(evidence.stop_reason)) problems.push({ code: 'stop', detail: stopReasonSentence(evidence.stop_reason), next: 'Check the session activity and its bound ticket before starting a replacement.' })
+  // Plain words on the row. The status code stays in the details (AEON-1285).
+  const runSentence: Record<string, string> = { failed: 'The run failed · Retry or check the ticket', ownership_lost: 'Another session took over this run', blocked: 'The run is blocked · see the ticket' }
+  const runStatus = evidence.run_status ?? ''
+  if (!evidence.vendor_limited && runSentence[runStatus]) problems.push({ code: 'run', detail: runSentence[runStatus], next: `Check the current run and its history for the failure context. Reported status: ${runStatus}.` })
   if (evidence.has_problem ?? (problems.length > 0)) {
     if (!problems.length) problems.push({ code: 'reported', detail: 'The service reported a problem without a visible reason.', next: 'Refresh this session and check its run history or ask the session owner for the missing reason.' })
     return result('problem', problems)
@@ -139,10 +137,11 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
   if (working && heartbeat.age >= preferences.redMinutes * 60_000) return result('unresponsive', [heartbeatReason])
   if (evidence.pause && ['requested', 'planned'].includes(evidence.pause.state) && evidence.pause.deliver !== false && !evidence.pause.stop_requested) return result('pausing')
   if ((evidence.needs_attention ?? (needs || evidence.run_status === 'waiting')) || evidence.phase === 'yielded' || evidence.eta_stale) {
-    const detail = evidence.phase === 'yielded' ? 'The session yielded and is waiting to continue.' : evidence.run_status === 'waiting' ? 'The bound run is waiting.' : evidence.eta_stale ? 'The estimate was not refreshed within two reporting intervals.' : 'An approval, held action or requested reply is outstanding.'
+    const waitingOnRun = evidence.run_status === 'waiting'
+    const detail = evidence.phase === 'yielded' ? 'The session yielded and is waiting to continue.' : waitingOnRun ? 'Waiting on its run' : evidence.eta_stale ? 'The estimate was not refreshed within two reporting intervals.' : 'An approval, held action or requested reply is outstanding.'
     const reasons = evidence.attention_reasons?.filter(r => r.scope !== 'shared' && r.blocking).sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval')).map(attentionReasonText) ?? []
     if (evidence.eta_stale) reasons.push({ code: 'eta-stale', detail: 'The estimate was not refreshed within two reporting intervals.', next: 'Refresh the estimate from the session working this ticket.' })
-    return result('waiting', reasons.length ? reasons : [{ code: 'attention', detail, next: 'Review the session activity and bound run; who must act is not specified.' }], waitingLabel(evidence))
+    return result('waiting', reasons.length ? reasons : [{ code: 'attention', detail, next: `Review the session activity and the run; who must act is not specified.${waitingOnRun ? ' Reported status: waiting.' : ''}` }], waitingLabel(evidence))
   }
   if (evidence.activity === 'throttled') return result('throttled', [{ code: 'throttled', detail: 'The session reports throttled activity.', next: 'Check its account allowance and pacing before resuming work.' }])
   if (working && (!heartbeat.hasHeartbeat || heartbeat.age >= preferences.yellowMinutes * 60_000)) return result('awaiting', [heartbeatReason], heartbeat.hasHeartbeat ? 'Heartbeat overdue' : 'Awaiting heartbeat')

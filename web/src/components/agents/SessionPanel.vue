@@ -407,7 +407,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
             <RouterLink v-if="view.projectKey" class="project-link" :to="`/p/${encodeURIComponent(view.projectKey)}`">{{ view.projectTitle || view.projectKey }}</RouterLink>
             <span v-else class="muted">Workspace</span>
           </dd></div>
-          <div class="fact"><dt>Runs on</dt><dd><SessionHost :key="`${auth.identity?.principal.id}:${view.session.host}`" class="host-fact" :host="view.session.host" :label="hostLabel" :editable="hostPerson" @renamed="hostLabel = $event" /><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? `owned by ${brand.short_name}` : 'runs on its own' }}</span></dd></div>
+          <div class="fact"><dt>Runs on</dt><dd><SessionHost :key="`${auth.identity?.principal.id}:${view.session.host}`" class="host-fact" :host="view.session.host" :label="hostLabel" :editable="hostPerson" @renamed="hostLabel = $event" /><span class="muted">{{ isLead ? 'lead session' : view.session.role === 'coordinator' ? 'coordinator' : 'worker' }} · {{ view.session.management_mode === 'managed' ? `owned by ${brand.short_name}` : 'runs on its own' }}</span></dd></div>
           <div v-if="modelLine" class="fact"><dt>Model</dt><dd class="mono">{{ modelLine }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
           <div v-if="reported?.account_label || view.account" class="fact"><dt>Account</dt><dd>{{ reported?.account_label || view.account }}</dd></div>
           <div class="fact"><dt>Harness</dt><dd>{{ setupLine }}</dd></div>

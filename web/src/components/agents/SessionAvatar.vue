@@ -8,10 +8,11 @@ import { computed } from 'vue'
 import LiveBot from '../projects/LiveBot.vue'
 import { STATE_LABEL } from '../../lib/agentSignals'
 import { useAgents, type SessionView } from '../../stores/agents'
-const props = withDefaults(defineProps<{ view: SessionView; size?: number; lead?: boolean; tip?: string }>(), { size: 30, tip: '' })
+// `lead` paces the bot as one that coordinates others; `projectLead` names the project's claimed lead (AEON-1285).
+const props = withDefaults(defineProps<{ view: SessionView; size?: number; lead?: boolean; projectLead?: boolean; tip?: string }>(), { size: 30, tip: '' })
 const agents = useAgents()
 const word = computed(() => STATE_LABEL[props.view.status.state])
-const label = computed(() => `${props.lead ? 'Lead ' : ''}${props.view.name}: ${word.value}`)
+const label = computed(() => `${props.projectLead ? 'Lead ' : ''}${props.view.name}: ${word.value}`)
 // The precise word ("Awaiting approval", "Lost contact") follows the state when it says more.
 const tooltip = computed(() => [word.value, props.view.status.label !== word.value ? props.view.status.label : '', props.tip].filter(Boolean).join(' · '))
 </script>

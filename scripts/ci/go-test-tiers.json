@@ -4554,6 +4554,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeCoordinatorRegistersChildrenEndToEnd","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeLoginLabelNamesOnlyASubscriptionLogin","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookCancellation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookEndToEnd","tier":"ESSENTIAL"}
@@ -4766,6 +4768,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessVersionProbeIsBoundedAndOptional","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatAccountProbeIsPacedAndFallsBack","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatAppServerModelRequiresThreadBinding","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatAppliedEffortSurvivesModelOnlyObservationAndRestart","tier":"GATED-FULL"}
@@ -4821,6 +4825,8 @@
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRejectedStatusEstimatesRetryWithoutBlockingLiveness","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatReportsOnlyAppliedRequests","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatReportsTheLiveAccount","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRequestCompletionOrderAndPersistence","tier":"GATED-FULL"}
     ,

@@ -4,7 +4,7 @@
 // No API, router, knowledge/ticket schema or session dependency belongs here.
 import type { ForceGraph3DInstance } from '3d-force-graph'
 import type ForceGraph2D from 'force-graph'
-import type { Group, MeshPhysicalMaterial, PerspectiveCamera, SphereGeometry } from 'three'
+import type { Group, Material, PerspectiveCamera, SphereGeometry } from 'three'
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { graphOrbitPace, graphOrbitSeconds } from './graphOrbitState.ts'
 
@@ -73,6 +73,40 @@ export function cloudStride(count: number): number {
   while (count > 1 && gcd(stride, count) !== 1) stride++
   return stride
 }
+// Header shots count a pixel when any channel moves by more than this.
+export const GLIMPSE_SHOT_DELTA = 2
+// Unlit status colour. An antialiased edge still clears GLIMPSE_SHOT_DELTA on
+// porcelain through the light canvas opacity of 0.35. Lit glass blows the same
+// orbs toward white, and the 1280 light shot then stops at 0.743 of the header.
+export const GLIMPSE_ORB_OPACITY = 0.92
+
+export function parseCssColor(value: string): [number, number, number] | null {
+  const text = value.trim()
+  const hex = /^#([\da-f]{6})$/i.exec(text)
+  if (hex) {
+    const n = Number.parseInt(hex[1], 16)
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(text)
+  if (!rgb) return null
+  const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+  return channels.every(channel => Number.isFinite(channel)) ? channels as [number, number, number] : null
+}
+
+export function glimpseOrbFinish(background: string): { unlit: boolean; opacity: number } {
+  const ground = parseCssColor(background)
+  const lum = ground ? 0.2126 * ground[0] + 0.7152 * ground[1] + 0.0722 * ground[2] : 0
+  // Porcelain washes a lit glass orb into the ground. A dark header keeps it.
+  return lum >= 160 ? { unlit: true, opacity: GLIMPSE_ORB_OPACITY } : { unlit: false, opacity: 0.86 }
+}
+
+export function glimpseOrbDelta(color: string, background: string, canvasOpacity: number, coverage = 1): number {
+  const node = parseCssColor(color), ground = parseCssColor(background)
+  if (!node || !ground || !(coverage > 0)) return 0
+  const alpha = GLIMPSE_ORB_OPACITY * canvasOpacity * coverage
+  return Math.max(...node.map((channel, i) => Math.abs(channel - ground[i]) * alpha))
+}
+
 // A link is drawn only when both complete orbs fit inside the padded view.
 export function glimpsePointInside(x: number, y: number, radius: number, width: number, height: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y) && x - radius >= 8 && y - radius >= 8 && x + radius <= width - 8 && y + radius <= height - 8
@@ -134,7 +168,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   void import('./graphMotion.ts').then(mod => mod.ensureGraphMotion())
   let three: typeof import('three') | undefined, g3: Graph3D | undefined, g2: Graph2D | undefined
   let geometry: SphereGeometry | undefined
-  const materials = new Map<string, MeshPhysicalMaterial>()
+  const materials = new Map<string, Material>()
   const objects = new Map<string, Group>()
   let nodes: LayoutNode[] = [], links: LayoutEdge[] = [], labelOrder: LayoutNode[] = []
   let palette = graphPalette(nodes), disposed = false, paused = options.reduced
@@ -365,12 +399,15 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     options.motionState?.(phase)
   }
   function material(n: LayoutNode, shell: boolean) {
-    const key = `${shell ? 'shell' : color(n)}:${alpha(n)}`
+    const finish = glimpse ? glimpseOrbFinish(palette.background) : { unlit: false, opacity: 0.86 }
+    const key = `${finish.unlit ? 'flat:' : ''}${shell ? 'shell' : color(n)}:${alpha(n)}`
     if (!materials.has(key)) {
-      const m = new three!.MeshPhysicalMaterial({ color: shell ? '#ffffff' : color(n), roughness: shell ? .08 : .28, metalness: 0,
-        clearcoat: 1, clearcoatRoughness: .06, transparent: true, opacity: alpha(n) * (shell ? .38 : .86), depthWrite: !shell,
-        emissive: shell ? '#ffffff' : color(n), emissiveIntensity: shell ? .08 : .09 })
-      if (shell) {
+      const m = finish.unlit
+        ? new three!.MeshBasicMaterial({ color: color(n), transparent: true, opacity: shell ? 0 : alpha(n) * finish.opacity, depthWrite: !shell })
+        : new three!.MeshPhysicalMaterial({ color: shell ? '#ffffff' : color(n), roughness: shell ? .08 : .28, metalness: 0,
+          clearcoat: 1, clearcoatRoughness: .06, transparent: true, opacity: alpha(n) * (shell ? .38 : .86), depthWrite: !shell,
+          emissive: shell ? '#ffffff' : color(n), emissiveIntensity: shell ? .08 : .09 })
+      if (!finish.unlit && shell) {
         // Fresnel transparency avoids transmission's extra full-scene render pass.
         m.onBeforeCompile = shader => { shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', 'diffuseColor.a *= 0.12 + 0.88 * pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.0);\n#include <opaque_fragment>') }
         m.customProgramCacheKey = () => 'graph-glass-fresnel-v1'
@@ -384,7 +421,8 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     for (const n of nodes) {
       const group = objects.get(n.id); if (!group) continue
       ;(group.children[0] as import('three').Mesh).material = material(n, false)
-      ;(group.children[1] as import('three').Mesh).material = material(n, true)
+      const shell = group.children[1] as import('three').Mesh | undefined
+      if (shell) shell.material = material(n, true)
     }
   }
   function draw2D(n: LayoutNode, ctx: CanvasRenderingContext2D, scale: number, picking?: string) {
@@ -392,6 +430,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     ctx.globalAlpha = picking ? 1 : alpha(n)
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2)
     if (picking) { ctx.fillStyle = picking; ctx.fill(); return }
+    if (glimpse && glimpseOrbFinish(palette.background).unlit) {
+      ctx.globalAlpha = alpha(n) * GLIMPSE_ORB_OPACITY
+      ctx.fillStyle = color(n); ctx.fill()
+      ctx.globalAlpha = 1
+      return
+    }
     const shell = ctx.createRadialGradient(x, y, r * .84, x, y, r)
     shell.addColorStop(0, '#ffffff08'); shell.addColorStop(.65, '#ffffff18'); shell.addColorStop(1, palette.dark ? '#ffffff60' : '#b9c8cc80')
     ctx.fillStyle = shell; ctx.fill()
@@ -605,9 +649,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       g3.lights([new three.AmbientLight('#ffffff', 1.25), key, rim])
       g3.showNavInfo(false).backgroundColor(sceneColor()).nodeThreeObject(n => {
         const group = new three!.Group(), radius = graphRadius(n)
-        const core = new three!.Mesh(geometry, material(n, false)); core.scale.setScalar(radius * .88)
-        const shell = new three!.Mesh(geometry, material(n, true)); shell.scale.setScalar(radius)
-        group.add(core, shell); objects.set(n.id, group)
+        const unlit = glimpse && glimpseOrbFinish(palette.background).unlit
+        const core = new three!.Mesh(geometry, material(n, false)); core.scale.setScalar(radius * (unlit ? 1 : .88))
+        group.add(core)
+        // White glass disappears on porcelain and hides the outer orbs from the header shot.
+        if (!unlit) { const shell = new three!.Mesh(geometry, material(n, true)); shell.scale.setScalar(radius); group.add(shell) }
+        objects.set(n.id, group)
         return group
       }).linkOpacity(1).linkWidth(l => glimpse ? 0 : l.width ?? .55)
       const controls = g3.controls() as OrbitControls

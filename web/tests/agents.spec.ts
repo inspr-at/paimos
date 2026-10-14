@@ -99,7 +99,8 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   const lead = row(page, camy)
   await expect(lead.getByRole('link', { name: /Claude Code camy, Working/ })).toBeVisible()
   await expect(lead.locator('.result')).toHaveAttribute('title', /camy$/)
-  await expect(lead).toContainText('Lead')
+  // A coordinator without the project's lead claim heads its group but says no Lead (AEON-1285).
+  await expect(lead.locator('.role')).toHaveCount(0)
   await expect(lead.locator('.key-inline')).toHaveText('PHAROS-11 ·')
   // AEON-1211: the state lives in the avatar (its badge, name and tooltip); a precise word opens line 2.
   await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
@@ -301,7 +302,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
-  await expect(details).toContainText('lead session · owned by AEON')
+  await expect(details).toContainText('coordinator · owned by AEON')
   const ticketFact = details.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Ticket$/ }) })
   await expect(ticketFact.locator('.key')).toHaveText('PHAROS-11')
   await expect(ticketFact.getByRole('link', { name: /PHAROS-11 Connect/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')

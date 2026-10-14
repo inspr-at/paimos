@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   agentName, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
-  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens,
+  pendingApprovals, retriedBy, retriedStatus, riskFor, riskOf, runDuration, runFamily, scopeLabel, sessionStatus, sessionForest, tokens,
 } from '../src/lib/agentState.ts'
 import type { AgentRun, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
@@ -222,4 +222,36 @@ test('a finished session sits with the ended ones; one that only went quiet at 1
   assert.deepEqual([quiet.state, quiet.group, quiet.tone], ['unresponsive', 'unresponsive', 'attention'])
   const buckets = groupSessions([session({ id: 'a', phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 100, finished: true }), session({ id: 'b', phase: 'stopped', stopped_at: ago(3), stop_reason: 'stopped', progress_pct: 100 })], now, () => false)
   assert.deepEqual(buckets.stopped.map(entry => [entry.session.id, entry.status.state]), [['a', 'done'], ['b', 'stopped']])
+})
+
+// AEON-1285: a failed attempt retried in its run family (same ticket, owner and role; the label
+// but for its round) ends in favour of the retry. The real case: AEON-1280's gate r2 failed at start, r3 runs.
+test('a failed attempt with a newer attempt in its run family reads Ended and names the retry', () => {
+  for (const [a, b] of [['aeon1280-switch-script-gate-r2', 'aeon1280-switch-script-gate-r3'], ['build-fix4', 'build-fix5'], ['scout-2', 'scout-3'], ['review', 'review-r2']]) assert.equal(runFamily(a), runFamily(b), `${a} / ${b}`)
+  assert.notEqual(runFamily('aeon1280-switch-script-gate-r2'), runFamily('aeon1280-switch-script-check-r3'))
+  const failed = (fields: Partial<HarnessSession>) => session({ phase: 'stopped', stopped_at: ago(40), stop_reason: 'process_failed', created_at: ago(41), owner_principal_id: 'person', ...fields })
+  const view = (s: HarnessSession) => ({ session: s, status: sessionStatus(s, now), name: s.display_label ?? s.id })
+  const r2 = failed({ id: 'r2', display_label: 'aeon1280-switch-script-gate-r2' })
+  const r3 = session({ id: 'r3', display_label: 'aeon1280-switch-script-gate-r3', created_at: ago(30), owner_principal_id: 'person' })
+  const others = [
+    failed({ id: 'other-ticket', display_label: 'aeon1280-switch-script-gate-r1', ticket_node_id: 'n2' }),
+    failed({ id: 'other-owner', display_label: 'aeon1280-switch-script-gate-r1', owner_principal_id: 'someone-else' }),
+    failed({ id: 'other-role', display_label: 'aeon1280-switch-script-gate-r1', role: 'coordinator' }),
+    failed({ id: 'other-family', display_label: 'aeon1280-switch-script-check-r1' }),
+  ]
+  const views = [view(r3), ...others.map(view), view(r2), view(r2)]
+  assert.equal(views.find(v => v.session.id === 'r2')!.status.state, 'problem')
+  const retries = retriedBy(views)
+  // Only r2 folds, into r3; its duplicate copy changes nothing, and a different ticket, owner, role or family never folds.
+  assert.deepEqual([...retries].map(([id, retry]) => [id, retry.session.id]), [['r2', 'r3']])
+  const status = retriedStatus(r2, 'aeon1280-switch-script-gate-r3')
+  assert.deepEqual([status.state, status.group, status.label], ['stopped', 'stopped', 'Ended'])
+  assert.equal(status.reasons![0]!.detail, 'Retried as aeon1280-switch-script-gate-r3 · Process failed')
+  // The newest attempt failing too leaves it as the one problem; a live older attempt is never folded.
+  const r3failed = failed({ id: 'r3', display_label: 'aeon1280-switch-script-gate-r3', created_at: ago(30) })
+  assert.deepEqual([...retriedBy([view(r2), view(r3failed)]).keys()], ['r2'])
+  const live = session({ id: 'live', display_label: 'aeon1280-switch-script-gate-r2', created_at: ago(41), owner_principal_id: 'person' })
+  assert.equal(retriedBy([view(live), view(r3)]).size, 0)
+  // Without a ticket or a label there is no family to retry in.
+  assert.equal(retriedBy([view(failed({ id: 'x', display_label: 'gate-r2', ticket_node_id: null })), view(session({ id: 'y', display_label: 'gate-r3', ticket_node_id: null, created_at: ago(30), owner_principal_id: 'person' }))]).size, 0)
 })
