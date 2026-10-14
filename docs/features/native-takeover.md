@@ -86,6 +86,11 @@ loss and no-holder periods keep the last size. PTY input is bounded to 8 KiB and
 sequence-fenced; uncertain writes are never replayed, including a reconnect with
 the same lease epoch. Local window storms are debounced for 150 ms.
 
+The PTY reader drains output independently while input waits for buffer space.
+Writes remain serialized, and every resumed write rechecks closure, binding and
+lease expiry. Frame dimensions use a separate short lock; resize and owned exit
+observation can proceed while a paste waits.
+
 Frames are bounded, transient local owner data with backpressure, not transcript
 storage or browser publication authority. I2/P2a must separately qualify owner
 watch consent, screen export and per-frame/keepalive access before advertising
@@ -128,3 +133,7 @@ Acceptance coverage is registered as ESSENTIAL in the same change:
 - Client loss retains one writer without implicit return:
   `TestTakeoverClientLossAndExpiredLeaseDoNotRestart` and
   `TestNativeTakeClientRebindsAndDetachNeverReturns`.
+- A full PTY input buffer does not block draining the child's output:
+  `TestPTYUnixPasteDrainsOutputWhileInputIsBlocked` verifies an acknowledged
+  8 KiB paste, exact child input/output and confirmed owned exit. A raw-mode
+  barrier fills input before the child emits 128 KiB and then reads stdin.

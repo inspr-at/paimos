@@ -196,6 +196,8 @@ func within(root, path string) bool {
 
 type execPTY struct {
 	mu                         sync.Mutex
+	writeMu                    sync.Mutex
+	sizeMu                     sync.RWMutex
 	master                     *os.File
 	masterFD                   int
 	binding                    nativecontract.Binding
@@ -240,6 +242,10 @@ func (r *execPTY) Write(ctx context.Context, in nativecontract.PTYInput) (native
 		return nativecontract.NativeEvidence{}, refuse(nativecontract.ReasonInvalidInput)
 	}
 	defer clear(data)
+	// Keep each input contiguous while allowing reads, resize and exit
+	// observation to proceed whenever this writer waits for input space.
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err = r.check(ctx, in.ExpectedBinding, in.ExpiresAt); err != nil {
@@ -257,7 +263,12 @@ func (r *execPTY) Write(ctx context.Context, in nativecontract.PTYInput) (native
 			continue
 		}
 		if writeErr == unix.EAGAIN {
-			if err = poll(ctx, r.masterFD, unix.POLLOUT); err == nil {
+			r.mu.Unlock()
+			err = poll(ctx, r.masterFD, unix.POLLOUT, in.ExpiresAt)
+			r.mu.Lock()
+			if err == nil {
+				// Recheck closure, binding and expiry under the state lock
+				// before another write; the descriptor may have been closed.
 				continue
 			}
 			return nativecontract.NativeEvidence{}, err
@@ -280,17 +291,22 @@ func (r *execPTY) Resize(ctx context.Context, in nativecontract.Resize) (nativec
 	if err := unix.IoctlSetWinsize(r.masterFD, unix.TIOCSWINSZ, &unix.Winsize{Col: uint16(in.Cols), Row: uint16(in.Rows)}); err != nil {
 		return nativecontract.NativeEvidence{}, refuse(nativecontract.ReasonNativeFailure)
 	}
+	r.sizeMu.Lock()
 	r.cols, r.rows = int(in.Cols), int(in.Rows)
+	r.sizeMu.Unlock()
 	return nativecontract.NativeEvidence{Stage: "applied", RequestID: in.RequestID, ObservedAt: time.Now()}, nil
 }
 
-func poll(ctx context.Context, fd int, events int16) error {
+func poll(ctx context.Context, fd int, events int16, expires time.Time) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if !time.Now().Before(expires) {
+			return refuse(nativecontract.ReasonControllerExpired)
+		}
 		fds := []unix.PollFd{{Fd: int32(fd), Events: events}}
-		n, err := unix.Poll(fds, 50) // bounds cancellation only; tests use barriers
+		n, err := unix.Poll(fds, 50) // bounds cancellation/expiry checks; tests use barriers
 		if err == unix.EINTR {
 			continue
 		}
@@ -320,10 +336,12 @@ func (r *execPTY) readFrames() {
 			return
 		default:
 		}
-		r.mu.Lock()
+		// observe closes the master only after readerDone, so reads need no
+		// state lock and can drain output even while an input write is blocked.
 		n, err := unix.Read(r.masterFD, buffer)
+		r.sizeMu.RLock()
 		cols, rows := r.cols, r.rows
-		r.mu.Unlock()
+		r.sizeMu.RUnlock()
 		if n > 0 {
 			r.sequence++
 			frame := nativecontract.TerminalFrame{TerminalEpoch: r.binding.RuntimeEpoch, Sequence: strconv.FormatUint(r.sequence, 10), DataBase64: base64.StdEncoding.EncodeToString(buffer[:n]), Rows: int64(rows), Cols: int64(cols), Reset: r.sequence == 1}

@@ -7982,6 +7982,8 @@
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixOwnershipResizeAndExit","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixPasteDrainsOutputWhileInputIsBlocked","reason":"AEON-1288 FIX2: blocked PTY paste drains child output and acknowledges all 8 KiB","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverClientLossAndExpiredLeaseDoNotRestart","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverFailedRebindKeepsPossibleFork","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
