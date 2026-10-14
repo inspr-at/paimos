@@ -36,3 +36,9 @@ behavior. Node/project lookups, settings, key management, runs, other senders'
 receipts and other recipients' acknowledgements remain denied. Send and ack
 recheck current messaging permission under the final transaction's access fence
 and retain the existing audit events.
+
+Regression coverage uses production authentication over HTTPS with an ordinary
+three-scope key, barrier-based permission revocation between admission and write,
+and CLI fixtures that refuse every discovery endpoint. It also covers
+project-only harness messaging, private reply refusal responses, output failure
+before acknowledgement, cancellation, receipt failure, expiry and revocation.
