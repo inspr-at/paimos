@@ -144,7 +144,8 @@ for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
   })
 }
 
-for (const theme of ['light', 'dark']) {
+// 4× pixels, so the mid-animation frames saved for the visual check show the icon's detail.
+test.describe(() => { test.use({ deviceScaleFactor: 4 }); for (const theme of ['light', 'dark']) {
   test(`AEON-1362 every one-off in the status menu (${theme}): timings, marks only, base never blanks, ends static, keyboard`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     await instrument(page)
@@ -167,19 +168,27 @@ for (const theme of ['light', 'dark']) {
       const calls = await oneOffsSince(page, count)
       expectOneOff(calls, status)
       if (status === 'progress') continue
-      // Rewind the one-off to its first frame: the base shape is whole there; then finish it: the icon is static again.
+      // Rewind the one-off to its first frame: the base shape is whole there. Hold it at 40 % for the visual check, then
+      // finish it: the icon is static again.
       const [selector, plain] = BASE[status]
-      const frames = await items.nth(index).locator('svg.status-icon').evaluate((icon, base) => {
-        const animations = icon.getAnimations({ subtree: true })
+      const icon = items.nth(index).locator('svg.status-icon')
+      const start = await icon.evaluate((svg, base) => {
+        const animations = svg.getAnimations({ subtree: true })
         for (const animation of animations) { animation.pause(); animation.currentTime = 0 }
-        const style = getComputedStyle(icon.querySelector(base)!)
+        const style = getComputedStyle(svg.querySelector(base)!)
         const matrix = new DOMMatrixReadOnly(style.transform === 'none' ? undefined : style.transform)
         const first = { opacity: style.opacity, dashOffset: style.strokeDashoffset, dashArray: style.strokeDasharray, scale: Math.hypot(matrix.a, matrix.b) }
-        for (const animation of animations) animation.finish()
-        const marks = [...icon.querySelectorAll('.tick, .tick2, .slash')].map(mark => getComputedStyle(mark).strokeDashoffset)
-        const hidden = [...icon.querySelectorAll('.pulse, .glint')].map(part => getComputedStyle(part).opacity)
-        return { animations: animations.length, first, after: icon.getAnimations({ subtree: true }).length, marks, hidden }
+        const end = Math.max(...animations.map(animation => Number(animation.effect!.getComputedTiming().endTime)))
+        for (const animation of animations) animation.currentTime = end * .4
+        return { animations: animations.length, first }
       }, selector)
+      await items.nth(index).screenshot({ path: testInfo.outputPath(`one-off-${status}-40pct-${theme}.png`) })
+      const frames = { ...start, ...await icon.evaluate(svg => {
+        for (const animation of svg.getAnimations({ subtree: true })) animation.finish()
+        const marks = [...svg.querySelectorAll('.tick, .tick2, .slash')].map(mark => getComputedStyle(mark).strokeDashoffset)
+        const hidden = [...svg.querySelectorAll('.pulse, .glint')].map(part => getComputedStyle(part).opacity)
+        return { after: svg.getAnimations({ subtree: true }).length, marks, hidden }
+      }) }
       expect(frames.animations, status).toBe(ONE_OFF[status].length)
       expect(frames.first.opacity, `${status} base opacity`).toBe('1')
       expect(frames.first.dashOffset, `${status} base dash offset`).toBe('0px')
@@ -209,7 +218,7 @@ for (const theme of ['light', 'dark']) {
     await page.screenshot({ path: testInfo.outputPath(`status-icons-menu-${theme}.png`) })
     expect(errors).toEqual([])
   })
-}
+} })
 
 test('AEON-1362 reduced motion: nothing slides and no one-off plays', async ({ page }, testInfo) => {
   await instrument(page)
