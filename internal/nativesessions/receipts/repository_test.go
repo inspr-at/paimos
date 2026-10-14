@@ -8,24 +8,32 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/nativeattach"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativeintegration"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
+	"github.com/inspr-at/paimos/internal/nativestream"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 type testAuthority struct {
 	intent     nativereceipts.Intent
+	intents    map[string]nativereceipts.Intent
 	final      FinalAuthority
 	owner      string
 	generation string
@@ -39,7 +47,15 @@ func (a *testAuthority) ReceiptTx(_ context.Context, _ pgx.Tx, daemon nativecont
 	if daemon.DaemonGeneration != a.generation {
 		return ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonWrongGeneration)
 	}
-	return ReceiptAuthority{Intent: a.intent, OwnerPersonID: a.owner}, nil
+	intent := a.intent
+	if a.intents != nil {
+		var found bool
+		intent, found = a.intents[r.OperationID]
+		if !found {
+			return ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonGrantMissing)
+		}
+	}
+	return ReceiptAuthority{Intent: intent, OwnerPersonID: a.owner}, nil
 }
 func (a *testAuthority) ReadTx(_ context.Context, _ pgx.Tx, actor nativecontract.Actor, b nativecontract.Binding) error {
 	if actor.PrincipalID != a.owner || !b.Equal(a.final.CurrentBinding) {
@@ -327,4 +343,287 @@ func TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Risk: the native wiring loses acknowledged input/final correlation, uses
+// broad daemon chat scopes, or frees the root on viewer detach/uncertain exit.
+// The fake transport supplies explicit native evidence; real P3 journal,
+// fenced server receipts, chat storage, C0 local adapter and attach client run.
+func TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach(t *testing.T) {
+	f := newFixture(t)
+	f.authority.intents = map[string]nativereceipts.Intent{}
+	journal, err := nativereceipts.Open(filepath.Join(t.TempDir(), "receipts"), func() time.Time { return f.now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	provider := &pilotTransport{identity: nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: "exact-conversation", RuntimeEpoch: f.binding.RuntimeEpoch, ProcessIdentityDigest: strings.Repeat("c", 64), PID: 1234, StartedAt: f.now}, running: true, now: f.now}
+	writer := &pilotWriter{f: f}
+	releases := 0
+	delivery, err := nativeintegration.NewDelivery(nativeintegration.DeliveryOptions{Binding: f.binding, Journal: journal, Transport: provider, Authority: writer, Reports: pilotReports{f}, Finals: Sink{Repository: f.repo, Daemon: f.actor}, Now: func() time.Time { return f.now },
+		Retention: func(ctx context.Context, in nativecontract.FinalPublish) (nativecontract.FinalDrainGrant, nativereceipts.RetentionApproval, error) {
+			if f.authority.revoked {
+				return nativecontract.FinalDrainGrant{}, nativereceipts.RetentionApproval{}, nativereceipts.Fail(nativecontract.ReasonPermissionRevoked)
+			}
+			return f.authority.final.Grant, nativereceipts.RetentionApproval{OwnerPersonID: f.owner.ID, Approved: true, Until: f.authority.final.Grant.ExpiresAt}, nil
+		}, Release: func(ctx context.Context, b nativecontract.Binding, exit nativecontract.ExitEvidence) error {
+			var state string
+			if err := f.d.Admin.QueryRow(ctx, `SELECT receipt->>'state' FROM native_session_receipts WHERE tenant_id=$1 AND receipt->>'operation'='stop'`, f.agent.TenantID).Scan(&state); err != nil {
+				return err
+			}
+			if state != "exit_confirmed" || !b.Equal(f.binding) || !exit.RootExited || !exit.GroupAbsent || exit.ProcessIdentityDigest != provider.identity.ProcessIdentityDigest {
+				return nativereceipts.Fail(nativecontract.ReasonOwnershipUnconfirmed)
+			}
+			releases++
+			return nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &pilotHost{f: f, delivery: delivery, provider: provider}
+	view := host.snapshot()
+	projector, err := nativestream.NewProjector(nativestream.ExportPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := nativestream.NewLocalAdapter(host, pilotLocalAuthority{f: f, view: view}, projector, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	adapter.Mount(mux)
+	root, err := os.MkdirTemp("", "pilot-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(root, "socket")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(socket, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(socket+".token", []byte(strings.Repeat("x", 32)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: mux}
+	go func() { _ = server.Serve(listener) }()
+	defer server.Close()
+	session, err := nativeattach.Open(t.Context(), socket, nativeattach.Options{Snapshot: view, Control: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := session.Submit(t.Context(), "person input retained only in the native transport", "now")
+	if err != nil || receipt.State != "write_acknowledged" || receipt.InputID == nil {
+		t.Fatalf("native input %+v %v", receipt, err)
+	}
+	operation := receipt.OperationID
+	f.final.InputID = *receipt.InputID
+	f.final.TurnRef = provider.turn
+	if _, err = delivery.Final(f.ctx(t), operation, f.final); err == nil {
+		t.Fatal("final persisted without exact native completion")
+	}
+	for _, stage := range []string{"turn_started", "turn_completed"} {
+		provider.sequence++
+		evidence := nativecontract.NativeEvidence{Stage: stage, InputID: *receipt.InputID, RequestID: receipt.RequestID, TurnRef: provider.turn, SourceSequence: provider.sequence, ObservedAt: f.now}
+		if stage == "turn_completed" {
+			wrong := evidence
+			wrong.InputID = uuid.NewString()
+			_, err = delivery.Observe(f.ctx(t), operation, provider.identity, wrong)
+			reason(t, err, nativecontract.ReasonIdentityMismatch)
+		}
+		if _, err = delivery.Observe(f.ctx(t), operation, provider.identity, evidence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	final, err := delivery.Final(f.ctx(t), operation, f.final)
+	if err != nil || final.State != "persisted" || final.MessageID == nil {
+		t.Fatalf("explicit final %+v %v", final, err)
+	}
+	var sender, owner, text string
+	if err = f.d.Admin.QueryRow(t.Context(), `SELECT sender_principal_id::text,recipient_principal_id::text,body FROM inbox_messages WHERE id=$1`, *final.MessageID).Scan(&sender, &owner, &text); err != nil {
+		t.Fatal(err)
+	}
+	if sender != f.agent.ID || owner != f.owner.ID || text != f.final.Text {
+		t.Fatal("final attribution or retained answer changed")
+	}
+	page, err := session.Receipts(t.Context(), "")
+	if err != nil || len(page.Items) != 1 || page.Items[0].State != "turn_completed" {
+		t.Fatalf("exact C0 receipt GET %+v %v", page, err)
+	}
+	if err = session.Detach(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !provider.running || provider.closed != 0 || releases != 0 || host.detached != 1 {
+		t.Fatal("detach stopped the writer or released occupancy")
+	}
+	// Start one more exact turn, then interrupt it deliberately. A completed
+	// first turn cannot serve as the interrupt target of this second turn.
+	input := nativecontract.Input{RequestID: uuid.NewString(), InputID: uuid.NewString(), ExpectedBinding: f.binding, Mode: "now", Text: "second exact turn", ExpiresAt: f.now.Add(time.Hour)}
+	op := uuid.NewString()
+	host.register(op, input)
+	second, err := delivery.Send(f.ctx(t), f.owner.ID, op, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.sequence++
+	_, err = delivery.Observe(f.ctx(t), op, provider.identity, nativecontract.NativeEvidence{Stage: "turn_started", RequestID: input.RequestID, InputID: input.InputID, TurnRef: provider.turn, SourceSequence: provider.sequence, ObservedAt: f.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupt := nativecontract.Interrupt{RequestID: uuid.NewString(), ExpectedBinding: f.binding, ExpectedTurnRef: provider.turn, ExpiresAt: input.ExpiresAt}
+	interruptOp := uuid.NewString()
+	host.registerControl(interruptOp, interrupt.RequestID, "interrupt", interrupt, interrupt.ExpiresAt)
+	applied, err := delivery.Interrupt(f.ctx(t), f.owner.ID, interruptOp, interrupt)
+	if err != nil || applied.State != "applied" || provider.interrupts != 1 || second.InputID == nil {
+		t.Fatalf("exact turn interrupt %+v %v", applied, err)
+	}
+	stop := nativecontract.Stop{RequestID: uuid.NewString(), ExpectedBinding: f.binding, Kind: "graceful", ExpectedProcessIdentityDigest: provider.identity.ProcessIdentityDigest, ExpiresAt: input.ExpiresAt}
+	stopOp := uuid.NewString()
+	host.registerControl(stopOp, stop.RequestID, "stop", stop, stop.ExpiresAt)
+	provider.sequence++
+	_, err = delivery.Close(f.ctx(t), f.owner.ID, stopOp, stop, provider.sequence)
+	if err == nil || releases != 0 || provider.closed != 1 {
+		t.Fatalf("unconfirmed group exit released occupancy: %v", err)
+	}
+	provider.groupAbsent = true
+	exit, _ := provider.Wait(f.ctx(t))
+	confirmed, err := delivery.ConfirmExit(f.ctx(t), stopOp, provider.sequence, exit)
+	if err != nil || confirmed.State != "exit_confirmed" || releases != 1 || provider.closed != 1 {
+		t.Fatalf("confirmed exit %+v %v", confirmed, err)
+	}
+}
+
+type pilotTransport struct {
+	identity             nativecontract.NativeIdentity
+	now                  time.Time
+	sequence             uint64
+	turn                 string
+	running, groupAbsent bool
+	closed, interrupts   int
+}
+
+func (p *pilotTransport) Identity() nativecontract.NativeIdentity { return p.identity }
+func (p *pilotTransport) Capabilities() nativecontract.Capabilities {
+	return nativecontract.Capabilities{Input: true, ChatSupported: true, Interrupt: true, InterruptSupported: true, Stop: true, EventsSupported: true, CorrelatedReceipts: true, Steer: "native", Quota: "unsupported", QualificationDigest: strings.Repeat("a", 64)}
+}
+func (p *pilotTransport) Events() <-chan nativecontract.ProviderEvent { return nil }
+func (p *pilotTransport) Send(_ context.Context, in nativecontract.Input) (nativecontract.NativeEvidence, error) {
+	p.sequence++
+	p.turn = "provider-turn-" + in.InputID
+	return nativecontract.NativeEvidence{Stage: "write_acknowledged", RequestID: in.RequestID, InputID: in.InputID, SourceSequence: p.sequence, ObservedAt: p.now}, nil
+}
+func (p *pilotTransport) Interrupt(_ context.Context, in nativecontract.Interrupt) (nativecontract.NativeEvidence, error) {
+	if in.ExpectedTurnRef != p.turn {
+		return nativecontract.NativeEvidence{}, nativereceipts.Fail(nativecontract.ReasonIdentityMismatch)
+	}
+	p.interrupts++
+	p.sequence++
+	return nativecontract.NativeEvidence{Stage: "applied", RequestID: in.RequestID, SourceSequence: p.sequence, ObservedAt: p.now}, nil
+}
+func (p *pilotTransport) Decide(context.Context, nativecontract.ApprovalDecision) (nativecontract.NativeEvidence, error) {
+	return nativecontract.NativeEvidence{}, nativereceipts.Fail(nativecontract.ReasonUnsupported)
+}
+func (p *pilotTransport) Close(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	p.closed++
+	p.running = false
+	return p.Wait(ctx)
+}
+func (p *pilotTransport) Wait(context.Context) (nativecontract.ExitEvidence, error) {
+	return nativecontract.ExitEvidence{RootExited: !p.running, GroupAbsent: p.groupAbsent, ProcessIdentityDigest: p.identity.ProcessIdentityDigest, ObservedAt: p.now}, nil
+}
+
+type pilotWriter struct{ f *fixture }
+
+func (w *pilotWriter) RequireWrite(ctx context.Context, b nativecontract.Binding, in nativereceipts.Intent) error {
+	if !b.Equal(w.f.binding) || in.ActorID != w.f.owner.ID {
+		return nativereceipts.Fail(nativecontract.ReasonWrongPrincipal)
+	}
+	return db.InTenant(ctx, w.f.d.App, w.f.agent.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTree(ctx, tx, w.f.agent.TenantID); err != nil {
+			return err
+		}
+		for _, permission := range []string{"harness.control", "chat.send", "chat.receive"} {
+			if err := authz.RequireTx(ctx, tx, w.f.owner, permission, authz.Scope{ProjectID: b.ProjectID}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+type pilotReports struct{ f *fixture }
+
+func (p pilotReports) Report(ctx context.Context, r nativecontract.Receipt) (nativecontract.Receipt, error) {
+	result, err := p.f.repo.Report(tenant.WithPrincipal(ctx, p.f.agent), p.f.actor, r)
+	return result.Receipt, err
+}
+
+type pilotHost struct {
+	nativecontract.Host
+	f          *fixture
+	delivery   *nativeintegration.Delivery
+	provider   *pilotTransport
+	controller *nativecontract.ControllerView
+	detached   int
+}
+
+func (h *pilotHost) snapshot() nativecontract.SessionView {
+	return nativecontract.SessionView{OwnedSessionID: h.f.binding.OwnedSessionID, CurrentBinding: &h.f.binding, OwnerPersonID: h.f.owner.ID, Role: "coordinator", Profile: "native", Harness: "claude", State: "running", Mode: "structured", Capabilities: h.provider.Capabilities(), Revision: 1, Generation: 1, ConversationRef: "exact-conversation", Controller: h.controller}
+}
+func (h *pilotHost) Attach(_ context.Context, in nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
+	h.controller = &nativecontract.ControllerView{ControllerID: uuid.NewString(), ActorID: h.f.owner.ID, ClientID: in.ClientID, Epoch: uuid.NewString(), ExpiresAt: time.Now().Add(30 * time.Second)}
+	proof := "fixture-derived-control"
+	return nativecontract.AttachResult{Binding: h.f.binding, Snapshot: h.snapshot(), ViewerID: uuid.NewString(), Mode: in.Mode, Controller: h.controller, ControlCapability: &proof, ExpiresInMS: 30000, StreamPath: "/v1/native-sessions/" + h.f.binding.OwnedSessionID + "/stream"}, nil
+}
+func (h *pilotHost) register(op string, in nativecontract.Input) {
+	digest, _ := nativereceipts.Digest(in)
+	id := in.InputID
+	h.f.authority.intents[op] = nativereceipts.Intent{Receipt: nativecontract.Receipt{RequestID: in.RequestID, OperationID: op, Binding: &h.f.binding, Operation: "input", State: "accepted", InputID: &id, SourceSequence: "0", UpdatedAt: h.f.now}, ActorID: h.f.owner.ID, PayloadSHA256: digest, ExpiresAt: in.ExpiresAt}
+}
+func (h *pilotHost) registerControl(op, request, kind string, value any, expires time.Time) {
+	digest, _ := nativereceipts.Digest(value)
+	h.f.authority.intents[op] = nativereceipts.Intent{Receipt: nativecontract.Receipt{RequestID: request, OperationID: op, Binding: &h.f.binding, Operation: kind, State: "accepted", SourceSequence: "0", UpdatedAt: h.f.now}, ActorID: h.f.owner.ID, PayloadSHA256: digest, ExpiresAt: expires}
+}
+func (h *pilotHost) Input(ctx context.Context, in nativecontract.Input) (nativecontract.OperationResult, error) {
+	op := uuid.NewString()
+	h.register(op, in)
+	r, err := h.delivery.Send(tenant.WithPrincipal(ctx, h.f.agent), h.f.owner.ID, op, in)
+	return nativecontract.OperationResult{Receipt: r}, err
+}
+func (h *pilotHost) Detach(_ context.Context, in nativecontract.Detach) (nativecontract.OperationResult, error) {
+	h.detached++
+	h.controller = nil
+	return nativecontract.OperationResult{Receipt: nativecontract.Receipt{RequestID: in.RequestID, OperationID: uuid.NewString(), Binding: &h.f.binding, Operation: "detach", State: "applied", SourceSequence: "0", UpdatedAt: h.f.now}}, nil
+}
+func (h *pilotHost) Receipts(ctx context.Context, b nativecontract.Binding, q nativecontract.PageQuery) (nativecontract.ReceiptPage, error) {
+	a := nativecontract.Actor{TenantID: h.f.owner.TenantID, PrincipalID: h.f.owner.ID, PrincipalKind: "person"}
+	return h.f.repo.Receipts(tenant.WithPrincipal(ctx, h.f.owner), a, b, q)
+}
+
+type pilotLocalAuthority struct {
+	f    *fixture
+	view nativecontract.SessionView
+}
+
+func (a pilotLocalAuthority) Authenticate(r *http.Request) (nativecontract.Actor, error) {
+	if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("x", 32) {
+		return nativecontract.Actor{}, nativereceipts.Fail(nativecontract.ReasonGrantMissing)
+	}
+	return nativecontract.Actor{TenantID: a.f.owner.TenantID, PrincipalID: a.f.owner.ID, PrincipalKind: "person"}, nil
+}
+func (a pilotLocalAuthority) WithAccess(ctx context.Context, actor nativecontract.Actor, in nativestream.LocalRequest, deliver func(nativecontract.ValidationContext) error) error {
+	if actor.PrincipalID != a.f.owner.ID || in.ExpectedBinding != nil && !in.ExpectedBinding.Equal(a.f.binding) {
+		return nativestream.Refuse(nativecontract.ReasonWrongGeneration)
+	}
+	return deliver(nativecontract.ValidationContext{Binding: &a.f.binding, Generation: 1, PrincipalKind: "person", Capabilities: &a.view.Capabilities, Mode: "structured", State: "running", View: in.View})
 }

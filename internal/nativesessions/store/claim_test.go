@@ -219,12 +219,11 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 					t.Fatalf("native admission accepted another account enrollment: %v", err)
 				}
 				// Check an actual control handler with this authenticated runtime.
-				boundary, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{7}, 32), PublicURL: "https://native.test"}, f.d.App)
-				if err != nil {
-					t.Fatal(err)
-				}
-				api := &httpapi.Server{Pool: f.d.App, Modules: []httpapi.Module{boundary, harness.New(f.d.App)}, Middleware: []func(http.Handler) http.Handler{boundary.Middleware}}
-				server := httptest.NewServer(api.Handler())
+				mux := http.NewServeMux()
+				harness.New(f.d.App).Mount(mux)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), f.agent)))
+				}))
 				t.Cleanup(server.Close)
 				var prefix string
 				if err := f.d.Admin.QueryRow(t.Context(), `SELECT prefix FROM agent_keys WHERE id=$1`, f.agent.KeyID).Scan(&prefix); err != nil {
@@ -248,6 +247,53 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 					response.StatusCode != http.StatusForbidden || denial.Error != "key scope required: harness.control" {
 					t.Fatalf("ordinary control route did not refuse its exact key ceiling: HTTP %d %s (%v)", response.StatusCode, raw, err)
 				}
+				// Separately authenticate that EXACT issued bearer through the real
+				// middleware. Its pairing ceiling refuses this root-only control
+				// route before the handler's independently tested key-scope check.
+				boundary, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{7}, 32), PublicURL: "https://native.test"}, f.d.App)
+				if err != nil {
+					t.Fatal(err)
+				}
+				api := &httpapi.Server{Pool: f.d.App, Modules: []httpapi.Module{boundary, harness.New(f.d.App)}, Middleware: []func(http.Handler) http.Handler{boundary.Middleware}}
+				authenticated := httptest.NewServer(api.Handler())
+				t.Cleanup(authenticated.Close)
+				for _, path := range []string{"/api/me", r.URL.Path} {
+					method := http.MethodGet
+					if path != "/api/me" {
+						method = http.MethodPost
+					}
+					request, err := http.NewRequestWithContext(t.Context(), method, authenticated.URL+path, strings.NewReader(`{}`))
+					if err != nil {
+						t.Fatal(err)
+					}
+					request.Header.Set("Authorization", r.Header.Get("Authorization"))
+					response, err := authenticated.Client().Do(request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					data, err := io.ReadAll(io.LimitReader(response.Body, 16385))
+					response.Body.Close()
+					if err != nil || len(data) > 16384 {
+						t.Fatal("authentication response bound", err)
+					}
+					if path == "/api/me" {
+						var me struct {
+							Principal tenant.Principal `json:"principal"`
+						}
+						if response.StatusCode != http.StatusOK || json.Unmarshal(data, &me) != nil || me.Principal.ID != f.agent.ID || me.Principal.Kind != tenant.Agent {
+							t.Fatalf("issued bearer did not authenticate its actual daemon: HTTP %d %s", response.StatusCode, data)
+						}
+					} else {
+						var refused struct {
+							Code  string `json:"code"`
+							Error string `json:"error"`
+						}
+						if response.StatusCode != http.StatusForbidden || json.Unmarshal(data, &refused) != nil || refused.Code != "forbidden" || refused.Error != "outside this computer's runtime authority" {
+							t.Fatalf("issued bearer escaped the pairing control ceiling: HTTP %d %s", response.StatusCode, data)
+						}
+					}
+				}
+
 				return
 			}
 			var claimDone chan error
