@@ -97,6 +97,12 @@ Acceptance evidence:
    private store. Native input is written once, old callbacks expire, final-ID
    replay persists once, and unresolved process occupancy remains held.
 
+`TestRecoveryJournalBoundsAndLocalAuthorityRefusal` additionally rejects corrupt
+and overfull decision arrays before adoption and refuses JSON export of local
+history, snapshot, absence and successor authority. These seven named tests are
+the exact ESSENTIAL rows added to `scripts/ci/go-test-tiers.json` under the R0
+grant; no existing row was changed or removed.
+
 All tests use fake native transport and injected clocks, never real vendor/model
 calls. The source belongs to the existing S2 `internal/native*/**` audit glob.
 Only this slice's Go test rows are added to R0's canonical ESSENTIAL manifest;
@@ -115,3 +121,21 @@ Browser validation is not applicable. A guarded-lane refusal (exit 3) is an
 explicit incomplete handoff to authoritative PR CI, never a passing check.
 Only the coordinator runs cross-family review, pushes, merges, deploys or enables
 live recovery. No rollout or account/profile change is authorized by this slice.
+
+Builder verification on the completed source:
+
+- **PASS 1–5:** all seven tests in the permitted single small local package
+  (`GOMAXPROCS=2`, `go test -p 2 -count=1 ./internal/nativerecovery`) exit 0.
+- **PASS:** offline strict Go inventory (5,153 native cases) and offline strict
+  web inventory exit 0, through the machine-wide guarded local slot. Web deps
+  were absent and installed once from the unchanged lockfile; no browser ran.
+- **PASS negative control:** a temporary scratch branch removed only restart
+  consumption enforcement. The bounded-continuation test failed specifically
+  because a forbidden second continuation returned success instead of
+  `grant_missing`. Source was restored and the scratch branch removed; no
+  throwaway commit remains.
+- **INCOMPLETE:** the prescribed guarded remote package run and
+  `ci-static-locked.sh` both refused with exit 3 for occupied mbp2606 slots.
+  Neither is reported green or retried in a loop. Authoritative PR CI must
+  complete the remote/static validation before merge. I2 production wiring and
+  coordinator review/release decisions remain outside this slice.
