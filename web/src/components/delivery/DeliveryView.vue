@@ -33,6 +33,10 @@ import { projectSettingsPath } from '../../lib/projectSettings'
 import { repositoryState } from '../../lib/projectDeliverySettings'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
+// The project page hands over a new object on every render. Everything here follows the id and
+// key, never that object, so an unchanged project neither re-derives nor reads again (AEON-1352).
+const projectId = computed(() => props.project.id)
+const routeKey = computed(() => props.project.routeKey)
 const route = useRoute()
 const router = useRouter()
 const profile = useProfile()
@@ -82,7 +86,7 @@ const setLevel = (level: Level) => choose({ level })
 // ---------- Flow: ?mode=live|replay|compare and ?run=, read while Flow is shown ----------
 const flowMode = computed<FlowMode>(() => FLOW_MODES.includes(route.query.mode as FlowMode) ? route.query.mode as FlowMode : 'live')
 const flowRun = computed(() => typeof route.query.run === 'string' && route.query.run ? route.query.run : null)
-const flow = useDeliveryFlow({ projectId: () => props.project.id, mode: () => flowMode.value, run: () => flowRun.value, active: () => view.value === 'flow', lang: () => lang.value })
+const flow = useDeliveryFlow({ projectId: () => projectId.value, mode: () => flowMode.value, run: () => flowRun.value, active: () => view.value === 'flow', lang: () => lang.value })
 function setFlowMode(mode: FlowMode) {
   if (mode === flowMode.value) return
   const { mode: _mode, run: _run, ...query } = route.query
@@ -99,12 +103,12 @@ const status = ref<'loading' | 'ready' | 'error'>('loading')
 let reading: AbortController | null = null
 let generation = 0
 async function load() {
-  const turn = ++generation, projectId = props.project.id
+  const turn = ++generation, asked = projectId.value
   reading?.abort()
   const controller = reading = new AbortController()
   try {
-    const answer = await readDeliveryMetrics(projectId, controller.signal)
-    if (turn !== generation || projectId !== props.project.id) return
+    const answer = await readDeliveryMetrics(asked, controller.signal)
+    if (turn !== generation || asked !== projectId.value) return
     data.value = answer
     status.value = 'ready'
   } catch {
@@ -117,18 +121,18 @@ function retry() { status.value = 'loading'; void load() }
 const poller = usePoller(load, 60_000, { invalidate: () => { generation++; reading?.abort() } })
 onMounted(() => { void profile.load(); poller.start(true) })
 onBeforeUnmount(() => { poller.stop(); reading?.abort() })
-watch(() => props.project.id, () => { data.value = null; status.value = 'loading'; poller.restart() })
+watch(projectId, () => { data.value = null; status.value = 'loading'; poller.restart() })
 
 const state = computed<'loading' | 'error' | 'ready'>(() => status.value === 'ready' && !prefsReady.value ? 'loading' : status.value)
 const numbers = computed(() => data.value ? numbersOf(data.value, prefs.value.window, lang.value) : null)
 // Placeholders keep every tile and chart in its slot while loading or after a failed read.
-const empty = computed(() => numbersOf({ project_id: props.project.id, generated_at: '', source: null, metrics: [] }, prefs.value.window, lang.value))
+const empty = computed(() => numbersOf({ project_id: projectId.value, generated_at: '', source: null, metrics: [] }, prefs.value.window, lang.value))
 const tiles = computed(() => state.value === 'ready' && numbers.value ? numbers.value.tiles : empty.value.tiles)
 const charts = computed(() => state.value === 'ready' && numbers.value ? numbers.value.charts : empty.value.charts)
 const source = computed(() => data.value?.source ?? null)
 const noData = computed(() => state.value === 'ready' && !!data.value && !hasAnyData(data.value))
-const canManage = computed(() => can('delivery.manage', props.project.id))
-const repositoryLink = computed(() => ({ path: projectSettingsPath(props.project.routeKey, 'delivery'), hash: '#repository', ...(!source.value && canManage.value ? { query: { link: '1' } } : {}) }))
+const canManage = computed(() => can('delivery.manage', projectId.value))
+const repositoryLink = computed(() => ({ path: projectSettingsPath(routeKey.value, 'delivery'), hash: '#repository', ...(!source.value && canManage.value ? { query: { link: '1' } } : {}) }))
 const settingsLabel = computed(() => !source.value ? canManage.value ? lang.value === 'de' ? 'Repository verknüpfen' : 'Link repository' : lang.value === 'de' ? 'Zuständigkeit anzeigen' : 'See who' : lang.value === 'de' ? 'Repository & Lieferung' : 'Repository & delivery')
 const updated = computed(() => {
   if (view.value === 'flow') {
