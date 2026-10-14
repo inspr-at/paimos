@@ -188,7 +188,7 @@ requested" or "Lost contact", follows it in the tooltip and opens line 2. The
 State column is gone; Display › Sort still orders by state.
 
 **Two lines per row.** Line 1 is the name only: the ticket key opens it
-("PHAROS-12 · Restore the backups"), and a lead adds Lead. The session's own
+("PHAROS-12 · Restore the backups"), and the project's claimed lead adds Lead. The session's own
 label is in the name's tooltip; its computer has its own column, never line 1.
 Line 2 says what it works on, what it asks or how it ended. A state change
 changes the badge, line 2 and the time, never the row's height.
@@ -246,3 +246,32 @@ for 10 minutes, then moves to Ended at the next allowed moment. Line 2 says how
 and when it ended and when it moves: "Finished 11:57 · moves to Ended at 12:07"
 for Done only; any other end names its cause ("Cancelled", "Budget exhausted",
 "Lost contact"), or "Stopped" when the reason is withheld.
+
+## How sessions ended, the claimed lead, the live account and retries (AEON-1285)
+
+**How it ended, in words.** No row and no details show a reported stop code. A
+known reason reads as a label ("Process failed", "Cancelled", "Lost contact")
+and, on line 2, as a short sentence with what to do ("The worker process failed
+· Retry or check the ticket"). Any other reason reads "Stopped"; a failure among
+them reads "The session reported a failure · Retry or check the ticket", without
+repeating what the reporter wrote.
+
+**Lead means the lead claim.** Only the session the project's lead names (the
+harness lead claim) shows Lead on its row and in its spoken name. A coordinator
+without the claim shows no badge; its details call it a coordinator.
+
+**The account in use.** The heartbeat reports the account the harness is signed
+in to now, so a session whose harness switched accounts shows the current one.
+For Claude Code the heartbeat asks `claude auth status --json` at most every
+10 minutes and sends only the login's email, never a credential. Other
+harnesses, API-key logins and failed probes keep the label given at launch;
+`AEON_ACCOUNT_PROBE=off` always keeps it.
+
+**Retried attempts fold away.** A failed session with a newer attempt in its
+run family (the same ticket, owner and role, and the same label but for its
+trailing round: "-r2" and "-r3", "-fix4" and "-fix5", "-2" and "-3") reads
+Ended, says "Retried as … · Process failed" and moves to Ended like any ended
+row, after its 10 minutes. The list works this out when it reads the sessions,
+so failures from before this release fold too; nothing is written. Its details
+keep its history and link to the retry. A failure nobody retried stays a
+problem, with its bin.

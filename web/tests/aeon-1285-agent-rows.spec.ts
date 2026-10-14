@@ -38,7 +38,7 @@ async function setup(page: Page, theme: 'light' | 'dark', failedMinutes: number,
   // A failure nobody retried stays a problem, with its bin.
   data.sessions.push({ ...base, project_id: 'p-frozen', project: { id: 'p-frozen', key: 'PRJ-26', title: 'Studio infrastructure' }, id: ORPHAN, role: 'worker', display_label: 'release-check', ticket_node_id: 'n-5', ticket: { id: 'n-5', key: 'PRJ-26-5', title: 'Release check' }, phase: 'stopped', activity: 'idle', heartbeat_at: ago(20.2), stopped_at: ago(20), stop_reason: 'process_failed', finished: false, created_at: ago(25) })
   await mockAgents(page, data)
-  const lead = (project: string, session: string | null): ProjectLead => ({ project_id: project, state: session ? 'working' : 'none', reason: '', revision: 1, generation: session ? 1 : 0, session_id: session, process_active: !!session, automatic_launch_enabled: true })
+  const lead = (project: string, session: string | null): ProjectLead => ({ project_id: project, state: session ? 'working' : 'none', reason: '', revision: 1, generation: session ? 1 : 0, session_id: session, process_active: !!session, automatic_launch_enabled: true, actions: { start: { available: !session, blocked_reason: session ? 'lead_required' : '' } } })
   const leads: Record<string, ProjectLead> = { 'p-pharos': lead('p-pharos', data.sessions[0]!.id), 'p-aeon': lead('p-aeon', AEON_LEAD), 'p-frozen': lead('p-frozen', null) }
   await page.route(/\/api\/projects\/[^/]+\/lead$/, route => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]!)
