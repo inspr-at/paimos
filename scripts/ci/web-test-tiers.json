@@ -17154,6 +17154,8 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"turns an account_matrix projection row into a settings link-out without a source warning","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"preselects Once for an unavailable suggestion and disables Decide with the reason","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the project link and colour on a question or handover after deciding","tier":"GATED-FULL"}
