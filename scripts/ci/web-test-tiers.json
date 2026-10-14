@@ -14640,6 +14640,10 @@
     ,
     {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/access-module-split.test.ts","name":"Access loads one tab at a time, and agent sheets load when opened","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/access-module-split.test.ts","name":"test-mode Vite closes each module response; dev mode and the HMR upgrade keep their connection","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/access.test.ts","name":"Full access includes mixed workspace/project role scopes without promoting workspace-only project permissions","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"Ticket worker includes activity history only within creator, role and registry ceilings","tier":"GATED-FULL"}
@@ -17175,6 +17179,8 @@
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision null unavailable","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"turns an account_matrix projection row into a settings link-out without a source warning","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"preselects Once for an unavailable suggestion and disables Decide with the reason","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}
     ,

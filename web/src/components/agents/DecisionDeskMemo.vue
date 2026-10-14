@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { answerFor, deskProject, draftFor, fieldTarget, kindLabels, projectColor, projectSwitch, type DeskProject, macPlatform, outcomeLabels, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
+import { answerFor, deskProject, draftFor, fieldTarget, kindLabels, projectColor, projectSwitch, type DeskProject, macPlatform, outcomeLabels, outcomeUnavailable, roundCounts, submitModifier, suggestedUnavailableNote, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
 import { deliveryTime, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
 import { RISK_LABEL, riskFor, scopeLabel } from '../../lib/agentState'
 import { contentUrl, fileKind, hasThumbnail } from '../../lib/attachments'
@@ -77,7 +77,40 @@ watch(frame, element => {
 })
 const blocked = computed(() => !item.value || !props.allowed(item.value) || !!item.value.unavailable || expired.value || busy.value)
 const trimDeclinable = computed(() => item.value?.kind === 'key_trim' && !item.value.decided && props.allowed(item.value) && !expired.value && !busy.value && (!item.value.unavailable || item.value.unavailable === item.value.keyTrim?.blocked_reason))
-const primaryDisabled = computed(() => busy.value || ((!item.value?.decided || trimRestorable.value) && (blocked.value || (item.value?.kind !== 'key_trim' && item.value?.kind !== 'stepup' && (!draft.value?.optionId || !!item.value?.choices.find(choice => choice.id === draft.value?.optionId)?.unavailable)))))
+const suggestedNote = computed(() => item.value ? suggestedUnavailableNote(item.value) : '')
+// A question whose selected stamp cannot be used must not look decidable.
+const outcomeBlock = computed(() => {
+  const current = item.value, sent = draft.value
+  if (!current || !sent || (current.decided && !sent.dirty)) return ''
+  if (current.kind !== 'question' && current.kind !== 'handover') return ''
+  return outcomeUnavailable(current, sent.outcome)
+})
+const memoStatus = computed(() => {
+  if (error.value) return error.value
+  if (status.value) return status.value
+  const current = item.value, sent = draft.value
+  if (!current || !sent) return ''
+  if (current.unavailable) return current.unavailable
+  if (expired.value) return 'This request expired.'
+  if (!props.allowed(current)) return 'You do not have permission to decide.'
+  if (current.kind !== 'stepup') {
+    const reason = outcomeUnavailable(current, sent.outcome)
+    if (reason) return reason
+  }
+  if (current.delivery) return current.delivery
+  if (suggestedNote.value) {
+    const why = outcomeUnavailable(current, current.outcome)
+    // The short hint names the stamp. The server sentence is the restriction.
+    return why ? `${suggestedNote.value}. ${why}` : suggestedNote.value
+  }
+  return current.suggestion
+})
+const statusTitle = computed(() => {
+  const current = item.value
+  if (!current || !suggestedNote.value || !memoStatus.value.startsWith(suggestedNote.value)) return undefined
+  return outcomeUnavailable(current, current.outcome) || undefined
+})
+const primaryDisabled = computed(() => busy.value || !!outcomeBlock.value || ((!item.value?.decided || trimRestorable.value) && (blocked.value || (item.value?.kind !== 'key_trim' && item.value?.kind !== 'stepup' && (!draft.value?.optionId || !!item.value?.choices.find(choice => choice.id === draft.value?.optionId)?.unavailable)))))
 // Step-up and key trim decide through their own Approve / Decline pair.
 const nativePending = computed(() => (item.value?.kind === 'key_trim' || item.value?.kind === 'stepup') && !item.value.decided)
 const stepupPending = computed(() => item.value?.kind === 'stepup' && !item.value.decided)
@@ -175,7 +208,14 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
   const choiceUnavailable = current.choices.find(choice => choice.id === sentDraft.optionId)?.unavailable
   if (choiceUnavailable) { error.value = choiceUnavailable; return }
   const unavailable = (current.kind === 'question' || current.kind === 'handover') && outcomeUnavailable(current, sentDraft.outcome)
-  if (unavailable) { error.value = unavailable; return }
+  if (unavailable) {
+    error.value = unavailable
+    announcement.value = `${unavailable} Choose an available stamp.`
+    const row = dialog.value?.querySelector<HTMLElement>('[data-testid="desk-stamps"]')
+    const open = row?.querySelector<HTMLElement>('button:not(:disabled)')
+    ;(open ?? row)?.focus({ preventScroll: true })
+    return
+  }
   if (!trim && !answerFor(current, sentDraft)) {
     const hasAnswerField = current.choices.find(choice => choice.id === sentDraft.optionId)?.field
     error.value = hasAnswerField ? 'Set an answer before deciding.' : 'Choose an answer above.'
@@ -288,14 +328,14 @@ onBeforeUnmount(() => { window.removeEventListener('resize', sizeTab); live = fa
           <svg class="folder-outline" :viewBox="`0 0 ${tabWidth} 46`" preserveAspectRatio="none" aria-hidden="true"><path :d="tabOutline" /></svg>
           <span class="pager-label"><span v-if="project" class="ft-project" :class="{ switched: !!switchedFrom }" :style="{ '--pc': projectColor(project) }" :title="switchedFrom ? `${project.name}: another project than the item before (${switchedFrom.name})` : `Project: ${project.name}`" data-testid="desk-tab-project"><i class="project-dot" aria-hidden="true" /><span>{{ project.name }}</span></span><span class="pager-kind">{{ item ? kindLabels[item.kind] : 'Memo' }}</span></span><span class="pager-count">{{ index + 1 }} of {{ round.length }}<AppIcon name="chevron" :size="12" /></span>
         </button>
-        <span class="toolbar-space"><span v-if="arrivalsCount" class="arrival-hint" role="status">{{ arrivalsCount }} new for the next round</span></span>
+        <span class="toolbar-space"><span v-if="arrivalsCount" class="arrival-hint" role="status">{{ arrivalsCount }} new for the next round</span><span v-if="outcomeBlock" class="decide-reason" data-testid="desk-decide-reason" :title="outcomeBlock">{{ outcomeBlock }}</span></span>
         <div class="action-buttons">
           <span v-if="revoke || editRule" class="native-action">
             <button v-if="revoke" type="button" :style="{ visibility: item?.kind === 'approval' && item.decided && item.optionId === 'approved' ? 'visible' : 'hidden' }" :disabled="busy || !item || !canRevoke?.(item)" data-testid="desk-revoke" @click="revokeGrant">Revoke</button>
             <button v-if="editRule" type="button" :style="{ visibility: item?.kind === 'rule' && !item.decided ? 'visible' : 'hidden' }" :disabled="blocked || !canEdit" data-testid="desk-edit-rule" @click="editRuleProposal">Edit</button>
           </span>
           <button type="button" :disabled="busy || (item?.kind === 'key_trim' && !item.decided && !trimDeclinable) || (stepupPending && blocked)" data-testid="desk-skip" @click="declineOrSkip">{{ nativePending ? 'Decline' : 'Skip' }} <kbd v-if="!nativePending">S</kbd></button>
-          <button ref="decideButton" class="desk-primary" type="button" :disabled="primaryDisabled" data-testid="desk-decide" @click="submit()"><span class="primary-label" data-size-label="Replace & next"><span v-if="stepupPending" class="stepup-approve"><span>{{ primary }}</span><small data-testid="stepup-method">{{ stepupMethod || 'Passkey or sign-in' }}</small></span><span v-else>{{ primary }}</span></span> <KeyCap :style="{ visibility: editing ? 'visible' : 'hidden' }" :aria-hidden="!editing" k="mod" /><KeyCap k="enter" /></button>
+          <button ref="decideButton" class="desk-primary" :class="{ 'is-blocked': !!outcomeBlock }" type="button" :disabled="primaryDisabled" :title="outcomeBlock || undefined" :aria-describedby="outcomeBlock ? 'desk-status' : undefined" data-testid="desk-decide" @click="submit()"><span class="primary-label" data-size-label="Replace & next"><span v-if="stepupPending" class="stepup-approve"><span>{{ primary }}</span><small data-testid="stepup-method">{{ stepupMethod || 'Passkey or sign-in' }}</small></span><span v-else>{{ primary }}</span></span> <KeyCap :style="{ visibility: editing ? 'visible' : 'hidden' }" :aria-hidden="!editing" k="mod" /><KeyCap k="enter" /></button>
           <button class="close-desk" type="button" aria-label="Close memo" data-testid="desk-close" @click="close"><AppIcon name="close" :size="18" /></button>
         </div>
         <div v-if="pager" class="jump-popover">
@@ -318,7 +358,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', sizeTab); live = fa
             <span class="stamp-label">Stamp it as</span>
             <button v-for="(outcome, at) in outcomes" :key="outcome" class="stamp" :class="[`stamp-${outcome}`, { selected: draft.outcome === outcome, unavailable: !!outcomeUnavailable(item, outcome) }]" type="button" :aria-pressed="draft.outcome === outcome" :disabled="blocked || !canEdit || !!outcomeUnavailable(item, outcome)" :title="outcomeUnavailable(item, outcome) || ({ once: 'For this question only.', always: 'Answer the same question from the record.', requirement: 'Add an acceptance criterion.', doctrine: 'Propose a rule change.' }[outcome])" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)">{{ outcomeLabels[outcome] }}<kbd :style="{ visibility: outcomeUnavailable(item, outcome) ? 'hidden' : 'visible' }" :aria-hidden="!!outcomeUnavailable(item, outcome)">{{ outcomeKeys[at] }}</kbd></button>
           </div>
-          <div class="memo-status" data-testid="desk-status">{{ error || status || item.unavailable || (expired ? 'This request expired.' : !allowed(item) ? 'You do not have permission to decide.' : (item.kind !== 'stepup' && outcomeUnavailable(item, draft.outcome)) || item.delivery || item.suggestion) }}</div>
+          <div id="desk-status" class="memo-status" :class="{ 'is-explained': !!statusTitle }" data-testid="desk-status" :title="statusTitle">{{ memoStatus }}</div>
           <div ref="body" class="memo-body" data-testid="desk-body">
             <section v-if="item.keyTrim" class="answer-column key-trim-evidence" aria-label="Key trim evidence" data-testid="key-trim-evidence">
               <h3>{{ item.keyTrim.key_name }} · {{ item.keyTrim.owner_name }}</h3>
@@ -421,8 +461,9 @@ a.project-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .project-switch > span { overflow: hidden; text-overflow: ellipsis; }.project-switch svg { flex: none; color: var(--pc); }.project-switch b { color: var(--pc); font-weight: 700; }
 .folder-outline { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; fill: none; stroke: var(--line-2); stroke-width: 1; }
 .pager-count { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.toolbar-space { flex: 1; display: flex; align-items: center; min-width: 0; }
+.toolbar-space { flex: 1; display: flex; align-items: center; min-width: 0; gap: 8px; }
 .arrival-hint { color: var(--ink-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decide-reason { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
 .action-buttons { display: flex; align-items: center; gap: 8px; }
 .action-buttons button[data-testid="desk-skip"] { width: 92px; }
 .stepup-approve { display: inline-grid; justify-items: start; line-height: 1.2; vertical-align: middle; }.stepup-approve small { font-size: 11px; font-weight: 500; opacity: .8; }
@@ -438,6 +479,7 @@ a.project-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .rule-diff { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 var(--mono); }.rule-diff ins { background: var(--row-selected); }
 .action-buttons button { height: 42px; border: 0; padding: 0 14px; background: transparent; color: var(--ink-2); border-radius: 8px; font-size: 13px; white-space: nowrap; }
 .action-buttons .desk-primary { display: flex; align-items: center; justify-content: center; background: var(--primary); color: var(--primary-on); font-weight: 600; }
+.action-buttons .desk-primary.is-blocked { opacity: .45; }
 /* Labels and field shortcuts reserve their intrinsic width for the whole round. */
 .primary-label { display: grid; }
 .primary-label::before { content: attr(data-size-label); visibility: hidden; grid-area: 1 / 1; }
@@ -458,7 +500,7 @@ h2 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 550; display: -
 .stamp-label { font-size: 11px; color: var(--ink-3); }
 .stamp { background: transparent; border: 0; padding: 6px 0; color: var(--ink-3); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .stamp.selected.stamp-once, .large-stamp.stamp-once { color: var(--primary-ink); }.stamp.selected.stamp-always, .large-stamp.stamp-always { color: var(--ok); }.stamp.selected.stamp-requirement, .large-stamp.stamp-requirement { color: var(--secondary-ink); }.stamp.selected.stamp-doctrine, .large-stamp.stamp-doctrine { color: var(--danger); }
-.stamp.unavailable { opacity: .1; }.memo-status { flex: none; height: 42px; display: flex; align-items: center; font-size: 12px; color: var(--ink-2); overflow: auto; overflow-wrap: anywhere; }
+.stamp.unavailable { opacity: .1; }.memo-status { flex: none; height: 42px; display: flex; align-items: center; font-size: 12px; color: var(--ink-2); overflow: auto; overflow-wrap: anywhere; }.memo-status.is-explained { display: block; line-height: 16px; padding-top: 5px; }
 .memo-body { overflow: auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 32px; scrollbar-gutter: stable; }
 h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 10px; }
 .answer-column, .context-column { min-width: 0; }.context-column { border-left: 1px solid var(--line); padding-left: 26px; }

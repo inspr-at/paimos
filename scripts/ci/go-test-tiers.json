@@ -4502,6 +4502,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAskDisplaysReuseProvenance","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAskKeepWithoutMappingDowngradesToOnce","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAskOptionAndContextBounds","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAskStatusDistinguishesQueuedFailedAndReceived","tier":"NIGHTLY"}

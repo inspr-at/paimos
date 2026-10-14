@@ -111,6 +111,81 @@ func TestAskCLIAndMCPParity(t *testing.T) {
 		t.Fatal("invalid MCP ask reached HTTP")
 	}
 }
+func TestAskKeepWithoutMappingDowngradesToOnce(t *testing.T) {
+	isolate(t)
+	mapped := questions.Input{SuggestedOutcome: "doctrine", Doctrine: &questions.DoctrineTarget{SourceID: "b0000000-0000-4000-8000-000000000009", Path: "AGENTS.md", RuleKey: "work", RuleSHA: strings.Repeat("ab", 32)}}
+	if warning := adjustKeep(&mapped); warning != "" || mapped.SuggestedOutcome != "doctrine" {
+		t.Fatalf("mapped doctrine changed: %q %+v", warning, mapped.SuggestedOutcome)
+	}
+	withTicket := questions.Input{SuggestedOutcome: "requirement", TicketID: "a0000000-0000-4000-8000-000000000005"}
+	if warning := adjustKeep(&withTicket); warning != "" || withTicket.SuggestedOutcome != "requirement" {
+		t.Fatalf("linked requirement changed: %q", warning)
+	}
+	always := questions.Input{SuggestedOutcome: "always"}
+	if warning := adjustKeep(&always); warning != "" || always.SuggestedOutcome != "always" {
+		t.Fatal("always is a person permission, not an asker mapping")
+	}
+
+	const project = "a0000000-0000-4000-8000-000000000001"
+	const sessionID = "a0000000-0000-4000-8000-000000000002"
+	const ticketID = "a0000000-0000-4000-8000-000000000005"
+	var mu sync.Mutex
+	var inputs []questions.Input
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testKey {
+			t.Error("missing configured authorization")
+			w.WriteHeader(401)
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/api/projects/"+project+"/questions" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(404)
+			return
+		}
+		var got questions.Input
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		inputs = append(inputs, got)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(201)
+		_ = json.NewEncoder(w).Encode(questions.Question{ID: "a0000000-0000-4000-8000-000000000004", ProjectID: project, State: "open", Revision: 1, SuggestedOutcome: got.SuggestedOutcome, Input: got, Pending: []questions.Pending{}})
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	ask := func(requestID string, extra ...string) (int, string, string) {
+		args := []string{"aeon", "ask", "--project", project, "--session", sessionID, "--request-id", requestID, "Which option?", "--option", `["Local","Simple","Use local."]`}
+		args = append(args, extra...)
+		return runCLI(args, "")
+	}
+	code, _, errOut := ask("a0000000-0000-4000-8000-000000000011", "--keep", "doctrine")
+	if code != 0 || !strings.Contains(errOut, "Suggested: Doctrine · not available for this question; asking with Once.") || !strings.Contains(errOut, "Doctrine needs an authorized source, rule and exact base mapping.") {
+		t.Fatalf("doctrine keep: %d %s", code, errOut)
+	}
+	code, _, errOut = ask("a0000000-0000-4000-8000-000000000012", "--keep", "requirement")
+	if code != 0 || !strings.Contains(errOut, "Suggested: Requirement · not available for this question; asking with Once.") || !strings.Contains(errOut, "Requirement needs a linked editable ticket.") {
+		t.Fatalf("requirement keep: %d %s", code, errOut)
+	}
+	code, _, errOut = ask("a0000000-0000-4000-8000-000000000013", "--keep", "requirement", "--ticket", ticketID)
+	if code != 0 || strings.Contains(errOut, "not available") {
+		t.Fatalf("linked requirement refused: %d %s", code, errOut)
+	}
+	code, _, errOut = ask("a0000000-0000-4000-8000-000000000014", "--keep", "always")
+	if code != 0 || strings.Contains(errOut, "not available") {
+		t.Fatalf("always keep: %d %s", code, errOut)
+	}
+	mu.Lock()
+	got := append([]questions.Input(nil), inputs...)
+	mu.Unlock()
+	if len(got) != 4 || got[0].SuggestedOutcome != "once" || got[1].SuggestedOutcome != "once" || got[2].SuggestedOutcome != "requirement" || got[2].TicketID != ticketID || got[3].SuggestedOutcome != "always" {
+		t.Fatalf("posted suggestions: %+v", got)
+	}
+}
+
 func TestAskOptionAndContextBounds(t *testing.T) {
 	isolate(t)
 	for _, raw := range []string{`["one","two"]`, `{"id":"a","title":"X","description":"","answer":"Y","principal_id":"forged"}`, `{"id":"a"} {}`, `not json`} {
