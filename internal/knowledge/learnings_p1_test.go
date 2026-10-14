@@ -356,7 +356,9 @@ func TestDeskRecommendationRevisionBindsNativeWrites(t *testing.T) {
 	expect(t, first, 200)
 	revision := decode[Recommendation](t, first).EventID
 	body["lesson"] = "Check recovery before releasing."
-	expect(t, call(t, f, f.a, "PUT", recommendPath(id), body), 200)
+	second := call(t, f, f.a, "PUT", recommendPath(id), body)
+	expect(t, second, 200)
+	prepared := decode[Recommendation](t, second)
 	for _, action := range []string{"accept", "dismiss", "draft"} {
 		input := map[string]any{}
 		if action == "accept" {
@@ -378,9 +380,14 @@ func TestDeskRecommendationRevisionBindsNativeWrites(t *testing.T) {
 		}
 	}
 	page := learningHTTPPage(t, f, f.a)
-	if len(page.Items) != 1 || page.Items[0].Recommendation.Lesson != body["lesson"] {
+	if len(page.Items) != 1 || page.Items[0].Recommendation.Lesson != prepared.Lesson || page.Items[0].Recommendation.Line != prepared.Line || page.Items[0].Recommendation.EventID != prepared.EventID {
 		t.Fatalf("refused writes changed lesson: %+v", page)
 	}
+	unchanged := call(t, f, f.a, "GET", "/api/knowledge/"+entry.ID, nil)
+	expect(t, unchanged, 200)
+	if got := decode[Entry](t, unchanged); got.Body != entry.Body {
+		t.Fatal("a refused decision changed the entry")
+	}
 	current := page.Items[0].Recommendation.EventID
-	expect(t, call(t, f, f.a, "POST", "/api/knowledge/learnings/"+id+"/accept", map[string]any{"knowledge_id": entry.ID, "lesson": body["lesson"]}, "If-Match", `"`+strconv.FormatInt(current, 10)+`"`), 200)
+	expect(t, call(t, f, f.a, "POST", "/api/knowledge/learnings/"+id+"/accept", map[string]any{"knowledge_id": entry.ID, "lesson": prepared.Lesson}, "If-Match", `"`+strconv.FormatInt(current, 10)+`"`), 200)
 }
