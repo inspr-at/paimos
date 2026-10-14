@@ -2,7 +2,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { entryLabel, entryLine, useEntryChecks } from '../../lib/entryChecks'
+import { entryLabel, entryLine } from '../../lib/entryChecks'
+import { useEntryChecks } from '../../lib/useEntryChecks'
 import { absoluteTime } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'

@@ -62,7 +62,7 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
   await expect(menu.getByRole('menuitemradio', { name: /QA/ })).toContainText('0 of 2')
   await menu.getByRole('menuitemradio', { name: /QA/ }).click()
   const refused = page.getByRole('dialog', { name: 'PHAROS-14: QA checks' })
-  const move = refused.getByRole('button', { name: /^Move to QA / })
+  const move = refused.getByRole('button', { name: /^Move to QA (Command|Ctrl) Enter$/ })
   await expect(refused.getByRole('textbox', { name: 'Why move it now?' })).toBeVisible()
   await expect(move).toBeDisabled()
   await refused.getByRole('textbox', { name: 'Why move it now?' }).fill('Time-sensitive review; evidence follows the approved work')
