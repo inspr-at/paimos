@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
@@ -52,9 +53,16 @@ func TestEntryChecksEnforcementOverrideAndOwnership(t *testing.T) {
 	if checks.LatestRefusal == nil || checks.LatestRefusal.Count != 2 || checks.Blocks[0].Passed != 1 || checks.Blocks[0].Total != 3 {
 		t.Fatalf("refusal/history: %s", raw)
 	}
-	for _, body := range []string{`{"state":"in_progress"}`, `{"state":"in_progress","override_reason":"   "}`} {
-		code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, body)
-		if code != 409 && code != 400 {
+	for _, tc := range []struct {
+		body    string
+		status  int
+		message string
+	}{
+		{`{"state":"in_progress"}`, 409, "entry_checks_failed"},
+		{`{"state":"in_progress","override_reason":"   "}`, 400, "requires a reason"},
+	} {
+		code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, tc.body)
+		if code != tc.status || !strings.Contains(string(raw), tc.message) {
 			t.Fatalf("person skipped required reason: %d %s", code, raw)
 		}
 	}
@@ -90,6 +98,20 @@ func TestEntryChecksEnforcementOverrideAndOwnership(t *testing.T) {
 	code, raw = call(t, &agent, "PUT", "/api/nodes/"+n.ID+"/entry-checks/manual:release-reviewed", body)
 	if code != 403 {
 		t.Fatalf("agent ticked human evidence: %d %s", code, raw)
+	}
+	// A current writer who is neither owner nor admin cannot tick a human step.
+	member := tenant.Principal{ID: addPrincipalIn(t, p.TenantID, "Other editor").ID, TenantID: p.TenantID, Kind: tenant.Person, Name: "Other editor"}
+	if _, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, p.TenantID, member.ID, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	code, raw = call(t, &member, "GET", "/api/nodes/"+n.ID+"/entry-checks", "")
+	otherChecks := decode[workqueue.EntryChecks](t, code, raw, 200)
+	if otherChecks.Blocks[2].Checks[1].CanTick {
+		t.Fatal("nonowner was offered a manual tick")
+	}
+	code, raw = call(t, &member, "PUT", "/api/nodes/"+n.ID+"/entry-checks/manual:release-reviewed", body)
+	if code != 403 {
+		t.Fatalf("nonowner ticked human evidence: %d %s", code, raw)
 	}
 	code, raw = call(t, &p, "PUT", "/api/nodes/"+n.ID+"/entry-checks/manual:release-reviewed", body)
 	checks = decode[workqueue.EntryChecks](t, code, raw, 200)

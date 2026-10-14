@@ -7,7 +7,7 @@ import { conditionWords, entryFailure, entryLabel, entryStatus, tickEntryCheck, 
 import { rowStore } from '../../lib/rowStore'
 import { applyQueueEstimate, queueReadiness, type QueueWireEntry } from '../../lib/workQueue'
 import { absoluteTime, statusMeta } from '../../lib/work'
-import { isSettingsField, isSettingsSubmit } from '../../lib/settingsOverlays'
+import { isSettingsField, settingsSubmitKey } from '../../lib/settingsOverlays'
 import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
 import { toast } from '../../lib/toast'
@@ -112,7 +112,7 @@ async function add() {
   await run(async () => { const result = await queue.add(props.projectId, originId); if (result && alive() && !disposed) { emit('queued', result); emit('close', true) } })
 }
 function keys(event: KeyboardEvent) {
-  if (isSettingsSubmit(event)) { event.preventDefault(); event.stopPropagation(); if (fixing.value) void saveFix(); else if (anyway.value) void move() }
+  if (settingsSubmitKey(event)) { event.preventDefault(); event.stopPropagation(); if (fixing.value) void saveFix(); else if (anyway.value) void move() }
   else if (event.key === 'Escape' && isSettingsField(event.target)) { event.preventDefault(); event.stopPropagation(); (event.target as HTMLElement).blur(); reasonField.value?.closest<HTMLElement>('[role=dialog]')?.focus() }
 }
 </script>
