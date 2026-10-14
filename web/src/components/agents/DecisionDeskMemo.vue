@@ -138,7 +138,8 @@ function ago(value?: string) {
   const minutes = Math.max(0, Math.round((now.value - at) / 60_000))
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : minutes < 2880 ? 'yesterday' : `${Math.round(minutes / 1440)} days ago`
 }
-const graceLeft = (row: DeskItem) => row.deliverAfter ? Math.max(0, Math.ceil((Date.parse(row.deliverAfter) - now.value) / 1000)) : 0
+// Seconds left in the server's ten-second grace; a client clock that runs off never shows more than the grace.
+const graceLeft = (row: DeskItem) => row.deliverAfter ? Math.min(10, Math.max(0, Math.round((Date.parse(row.deliverAfter) - now.value) / 1000))) : 0
 // The answer's own delivery, in one line where the open memo shows what the agent does meanwhile.
 // It stops at "waiting for it to read" until the read receipt exists (Tick, AEON-1340).
 const deliveryLine = computed<MemoLine | undefined>(() => {
@@ -427,7 +428,7 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     }
     drafts.value[capturedId] = draftFor(result); skipped.value.delete(capturedId)
     const reopened = new Set(changing.value); reopened.delete(capturedId); changing.value = reopened
-    emit('recorded', result)
+    emit('recorded', result); now.value = Date.now()
     announcement.value = `Decision recorded for ${current.title}.`
     status.value = ''
     await landed()
@@ -608,11 +609,11 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
             <button v-if="revoke" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'approval' && item.decided && item.optionId === 'approved' ? 'visible' : 'hidden' }" :disabled="busy || !item || !canRevoke?.(item)" data-testid="desk-revoke" @click="revokeGrant">Revoke</button>
             <button v-if="editRule" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'rule' && !item.decided ? 'visible' : 'hidden' }" :disabled="blocked || !editable" data-testid="desk-edit-rule" @click="editRuleProposal">Edit</button>
           </span>
-          <button type="button" class="desk-btn ghost" :class="{ slot: !ghost }" :aria-hidden="!ghost || undefined" :tabindex="ghost ? undefined : -1" :disabled="busy || !ghost || (ghost === 'decline' && ((item?.kind === 'key_trim' && !trimDeclinable) || (stepupPending && blocked)))" :aria-keyshortcuts="ghost === 'skip' ? 'S' : ghost === 'change' ? 'C' : undefined" data-testid="desk-skip" @click="declineOrSkip"><span class="lbls" data-size-label="Decline"><span>{{ ghost === 'decline' ? 'Decline' : ghost === 'change' ? 'Change' : 'Skip' }}</span></span><KeyCap v-if="ghost === 'skip'" k="S" /><KeyCap v-else-if="ghost === 'change'" k="C" /></button>
+          <button type="button" class="desk-btn ghost" :class="{ slot: !ghost }" :aria-hidden="!ghost || undefined" :tabindex="ghost ? undefined : -1" :disabled="busy || !ghost || (ghost === 'decline' && ((item?.kind === 'key_trim' && !trimDeclinable) || (stepupPending && blocked)))" :aria-keyshortcuts="ghost === 'skip' ? 'S' : ghost === 'change' ? 'C' : undefined" data-testid="desk-skip" @click="declineOrSkip"><span class="lbl">{{ ghost === 'decline' ? 'Decline' : ghost === 'change' ? 'Change' : 'Skip' }}</span><KeyCap v-if="ghost === 'skip'" k="S" /><KeyCap v-else-if="ghost === 'change'" k="C" /></button>
           <button ref="decideButton" class="desk-btn primary" type="button" :aria-disabled="primaryBlocked || undefined" :aria-describedby="topStatus ? 'desk-status' : undefined" aria-keyshortcuts="Enter" data-testid="desk-decide" @click="submit()">
             <AppIcon :name="finished || !decidedView ? 'check' : 'arrow'" :size="15" />
-            <span class="lbls" data-size-label="Replace &amp; next"><span v-if="stepupPending" class="stepup-approve"><span>{{ primary }}</span><small data-testid="stepup-method">{{ stepupMethod || 'Passkey or sign-in' }}</small></span><span v-else class="lbl">{{ primary }}</span></span>
-            <KeyCap :style="{ visibility: editing ? 'visible' : 'hidden' }" :aria-hidden="!editing" k="mod" /><KeyCap k="enter" />
+            <span v-if="stepupPending" class="stepup-approve"><span class="lbl">{{ primary }}</span><small data-testid="stepup-method">{{ stepupMethod || 'Passkey or sign-in' }}</small></span><span v-else class="lbl">{{ primary }}</span>
+            <KeyCap k="enter" />
           </button>
         </div>
         <button class="desk-x" type="button" aria-label="Close memo" data-tip="Close · esc" data-testid="desk-close" @click="close"><AppIcon name="close" :size="16" /></button>
@@ -802,10 +803,8 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .desk-btn.primary[aria-disabled="true"] { opacity: .4; cursor: default; filter: none; }
 .desk-btn:disabled { opacity: .4; cursor: default; }
 .desk-btn.ghost.slot:disabled { opacity: 1; }
-/* The primary keeps one width whatever its label: every label is stacked, only one shows. */
-.lbls { display: grid; }
-.lbls::before { content: attr(data-size-label); visibility: hidden; grid-area: 1 / 1; }
-.lbls > span { grid-area: 1 / 1; text-align: center; }
+/* The primary keeps one width whatever its label (212 px holds the longest, "Replace & next"). */
+.lbl { white-space: nowrap; }
 .stepup-approve { display: inline-grid; justify-items: center; line-height: 1.2; }.stepup-approve small { font-size: 11px; font-weight: 500; opacity: .8; }
 .native-action { display: grid; }.native-action > button { grid-area: 1 / 1; }
 .desk-x { grid-area: x; align-self: center; display: grid; place-items: center; width: 40px; height: 40px; margin-top: 14px; margin-bottom: 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); cursor: pointer; }

@@ -3,6 +3,7 @@
 // nothing on a click, the round stays open after the last decision, the legend wraps, the project
 // shows twice with a dot, or the folder tab's shoulder draws a kinked or uneven hairline.
 import { expect, test, type Page } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { expectStableControls } from './helpers/stable'
 
@@ -165,7 +166,7 @@ test.describe('sheet outline at device scale factor 2', () => {
       for (let t = -3; t <= 3; t += 0.25) seam.push(at(seamX, S0 + t))
       return { straight, shoulder: arcs.shoulder!.map(v => v / straight), corner: arcs.corner!.map(v => v / straight), seam: Math.max(...seam) - Math.min(...seam) }
     }, { b64: png.toString('base64'), clip, geo })
-    await testInfo.attach(`stroke-${theme}.json`, { body: JSON.stringify(result, null, 2), contentType: 'application/json' })
+    await writeFile(testInfo.outputPath(`stroke-2x-${theme}.md`), `# Sheet hairline at 2x, ${theme}\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`)
     expect(result.straight, 'the straight edge carries ink').toBeGreaterThan(1)
     for (const [name, weights] of [['shoulder', result.shoulder], ['corner', result.corner]] as const) for (const [at, weight] of weights.entries()) {
       expect(Math.abs(weight - 1), `${name} weight ${weight.toFixed(2)} px at sample ${at}`).toBeLessThanOrEqual(0.25)

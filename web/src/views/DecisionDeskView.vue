@@ -116,7 +116,7 @@ function expiry(value?: string) {
   return minutes < 1 ? 'expires now' : minutes < 120 ? `expires in ${minutes} min` : `expires in ${Math.round(minutes / 60)} h`
 }
 const soon = (value?: string) => !!value && Date.parse(value) - now.value < 30 * 60_000
-const graceLeft = (item: DeskItem) => (item.kind === 'question' || item.kind === 'handover') && item.deliveryState === 'pending' && item.deliverAfter ? Math.max(0, Math.ceil((Date.parse(item.deliverAfter) - now.value) / 1000)) : 0
+const graceLeft = (item: DeskItem) => (item.kind === 'question' || item.kind === 'handover') && item.deliveryState === 'pending' && item.deliverAfter ? Math.min(10, Math.max(0, Math.round((Date.parse(item.deliverAfter) - now.value) / 1000))) : 0
 // What the agent does meanwhile, as one quiet line under a question.
 function meanwhileLine(item: DeskItem) {
   const text = item.meanwhile && !['carries on', 'parked', 'paused', 'stopped'].includes(item.meanwhile) ? item.meanwhile : ''
@@ -472,7 +472,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 
 <style scoped>
 /* AEON-1339: the Desk page as the approved rev 11 artifact draws it. */
-.desk-page { max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }
+.desk-page { width: 100%; max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }
 .dp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 18px; }
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }
 .dp-head .head-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
