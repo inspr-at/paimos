@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import type { EntryBlock, EntryCheck, EntryChecks, EntryRecord } from '../src/lib/entryChecks'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { controlStability } from './control-stability'
@@ -25,7 +25,7 @@ test('AEON-1315 defined entry row reserves space before reads and keeps the tick
           queued: { run_id: `run-${node.id}`, position, by: { ...me, kind: 'person' }, at: node.created_at, target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: false, wait_reason: '' } })),
         manual_order: false, capacity: { queued_hours: 4, parallel_runs: 1, work_hours: 4, warning: false },
       } }))
-      const pending: { id: string; release: () => void }[] = []
+      const pending: { id: string; revision: string; until: Promise<void>; release: () => void }[] = []
       await page.route('**/api/nodes/*/entry-checks', async route => {
         const id = new URL(route.request().url()).pathname.split('/')[3]!
         const node = data.nodes.find(item => item.id === id)!
@@ -36,13 +36,21 @@ test('AEON-1315 defined entry row reserves space before reads and keeps the tick
             { id: 'acceptance_present', label: 'Acceptance criteria written', applicable: true, passed: true, reason: '', can_tick: false },
           ] }], entries: [], latest_refusal: null,
         }
-        await new Promise<void>(release => pending.push({ id, release }))
+        // Navigation may refresh the same revision twice. Hold every such
+        // request on the same barrier; the save must create a distinct one.
+        let held = pending.find(read => read.id === id && read.revision === result.revision)
+        if (!held) {
+          let release!: () => void
+          const until = new Promise<void>(resolve => { release = resolve })
+          held = { id, revision: result.revision, until, release }; pending.push(held)
+        }
+        await held.until
         await route.fulfill({ json: result })
       })
       await page.goto('/p/PHAROS?sort=key&closed=1')
       await page.locator('tr.ticket-row').filter({ hasText: 'PHAROS-14' }).locator('.title-text').click()
       const workspace = page.getByRole('complementary', { name: 'Ticket details' }), slot = workspace.locator('[data-entry-slot]')
-      const controls = { details: workspace.locator('.meta').first(), queue: workspace.locator('.q-card'), ...(touch
+      const controls: Record<string, Locator> = { details: workspace.locator('.meta').first(), queue: workspace.locator('.q-card'), ...(touch
         ? { actions: workspace.getByRole('button', { name: 'More actions', exact: true }) }
         : { previous: workspace.getByRole('button', { name: 'Previous ticket', exact: true }), next: workspace.getByRole('button', { name: 'Next ticket', exact: true }) }) }
       await expect.poll(() => pending.length).toBe(1)
@@ -75,6 +83,7 @@ test('AEON-1315 defined entry row reserves space before reads and keeps the tick
       await workspace.getByRole('button', { name: 'Save', exact: true }).click()
       await expect.poll(() => pending.length).toBe(3)
       expect(pending[2]!.id).toBe(nodes[1]!.id)
+      expect(pending[2]!.revision).not.toBe(pending[1]!.revision)
       await expect(slot.getByRole('button', { name: 'Ready 1/2', exact: true })).toBeVisible()
       const refreshed = await controlStability(page, { slot, ...controls })
       await refreshed.check(async () => {
