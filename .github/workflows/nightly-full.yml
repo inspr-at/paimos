@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+# Nightly still executes the catalogue when shadow observation is disabled.
+env:
+  CI_IMPACT: ${{ vars.CI_IMPACT }}
+
 jobs:
   nightly-go-test:
     strategy:

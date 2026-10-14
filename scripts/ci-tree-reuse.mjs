@@ -155,7 +155,8 @@ export async function verifyPRRun(repository, runID, api, sha) {
   return verified;
 }
 
-export async function decideMergeGroup({ event, killSwitch, sha, repository, api }) {
+export async function decideMergeGroup({ event, killSwitch, impact, sha, repository, api }) {
+  if (impact === 'off') return { reuse: 'none', reason: 'CI_IMPACT=off rejects all prior reuse evidence' };
   if (event !== 'merge_group' || killSwitch !== 'on') return { reuse: 'none', reason: 'merge-group reuse disabled' };
   try {
     ensure(oid.test(sha), 'invalid merge-group SHA');
@@ -174,7 +175,8 @@ export async function decideMergeGroup({ event, killSwitch, sha, repository, api
   }
 }
 
-export async function decide({ event, ref, killSwitch, sha, repository, api, createLookupAPI = () => api, clock = mainPushClock }) {
+export async function decide({ event, ref, killSwitch, impact, sha, repository, api, createLookupAPI = () => api, clock = mainPushClock }) {
+  if (impact === 'off') return { reuse: 'none', reason: 'CI_IMPACT=off rejects all prior reuse evidence' };
   if (event !== 'push' || ref !== 'refs/heads/main' || killSwitch === 'off') return { reuse: 'none', reason: 'disabled or not a main push' };
   const started = clock.now();
   let lookups = 0;
@@ -216,14 +218,15 @@ export async function decide({ event, ref, killSwitch, sha, repository, api, cre
 
 export async function main(vars, fetcher = fetch, clock = mainPushClock) {
   let decision = { reuse: 'none', reason: 'disabled or not a main push' };
-  if (vars.GITHUB_EVENT_NAME === 'push' && vars.GITHUB_REF === 'refs/heads/main' && vars.CI_TREE_REUSE !== 'off') {
+  if (vars.CI_IMPACT === 'off') decision = { reuse: 'none', reason: 'CI_IMPACT=off rejects all prior reuse evidence' };
+  if (vars.CI_IMPACT !== 'off' && vars.GITHUB_EVENT_NAME === 'push' && vars.GITHUB_REF === 'refs/heads/main' && vars.CI_TREE_REUSE !== 'off') {
     ensure(repositoryPattern.test(vars.GITHUB_REPOSITORY), 'invalid repository');
     const signal = AbortSignal.timeout(mainPushBudget);
     // Each listing plus candidate verification keeps its original 10 s bound.
     const createLookupAPI = () => github(vars.GITHUB_REPOSITORY, transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.any([signal, AbortSignal.timeout(lookupTimeout)]), fetcher));
     decision = await decide({ event: vars.GITHUB_EVENT_NAME, ref: vars.GITHUB_REF, killSwitch: vars.CI_TREE_REUSE, sha: vars.GITHUB_SHA, repository: vars.GITHUB_REPOSITORY, createLookupAPI, clock });
   }
-  if (vars.GITHUB_EVENT_NAME === 'merge_group' && vars.CI_MG_REUSE === 'on') {
+  if (vars.CI_IMPACT !== 'off' && vars.GITHUB_EVENT_NAME === 'merge_group' && vars.CI_MG_REUSE === 'on') {
     const request = transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.timeout(10000), fetcher);
     const api = github(vars.GITHUB_REPOSITORY, request);
     if (vars.CONFIRM_PR_RUN) {
@@ -233,7 +236,7 @@ export async function main(vars, fetcher = fetch, clock = mainPushClock) {
     } else {
       decision = await decideMergeGroup({ event: vars.GITHUB_EVENT_NAME, killSwitch: vars.CI_MG_REUSE, sha: vars.GITHUB_SHA, repository: vars.GITHUB_REPOSITORY, api });
     }
-  } else if (vars.CONFIRM_PR_RUN) {
+  } else if (vars.CI_IMPACT !== 'off' && vars.CONFIRM_PR_RUN) {
     throw new Error('PR proof confirmation disabled or wrong event');
   }
   if (vars.GITHUB_OUTPUT) appendFileSync(vars.GITHUB_OUTPUT, `reuse=${decision.reuse}\nrun=${decision.run || ''}\n`);
