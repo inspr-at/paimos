@@ -197,6 +197,13 @@ func TestMessagingOnlyAgentThroughProductionAuth(t *testing.T) {
 	if countSQL(t, w.db.App, w.sender.TenantID, `SELECT count(*) FROM events WHERE type='inbox.sent'`) != 2 || countSQL(t, w.db.App, w.sender.TenantID, `SELECT count(*) FROM events WHERE type='inbox.acked'`) != 2 {
 		t.Fatal("send/ack audit missing or duplicate ack appended another event")
 	}
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, keyID); err != nil {
+		t.Fatal(err)
+	}
+	status, _ = receiptRequest(t, srv, amy, "GET", "/api/inbox/messages?wait_ms=0", "")
+	if status != 401 {
+		t.Fatalf("expired key authenticated: %d", status)
+	}
 	if err := auth.OperatorRevokeAgentKey(t.Context(), w.db.App, w.sender.TenantID, keyID); err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +211,30 @@ func TestMessagingOnlyAgentThroughProductionAuth(t *testing.T) {
 	if status != 401 {
 		t.Fatalf("revoked key authenticated: %d", status)
 	}
+	t.Run("existing project-only harness messaging", func(t *testing.T) {
+		w, m, project, _ := messagingWorld(t)
+		projectOnly(t, w, w.sender, project)
+		projectOnly(t, w, w.agent, project)
+		session := messageTestSession(t, w, project, w.agent, "Existing worker")
+		srv := messagingOnlyServer(t, w, m)
+		sender := receiptSession(t, w, w.sender)
+		recipient := receiptAgentKey(t, w, w.agent, "inbox.send", "inbox.read")
+		path := "/api/projects/" + project + "/messages"
+		body := fmt.Sprintf(`{"to":%q,"body":"bound fixture","idempotency_key":"bound-fixture","recipient_session_id":%q,"delivery_level":"simple"}`, w.agent.ID, session)
+		status, data := receiptRequest(t, srv, sender, "POST", path, body)
+		if status != 201 {
+			t.Fatalf("project-only send %d %s", status, data)
+		}
+		sent := mustJSON[CompatMessage](t, data)
+		status, data = receiptRequest(t, srv, recipient, "GET", path+"/listen?session="+session, "")
+		if status != 200 || len(mustJSON[compatPage](t, data).Items) != 1 {
+			t.Fatalf("project-only session listen %d %s", status, data)
+		}
+		status, data = receiptRequest(t, srv, recipient, "POST", path+"/"+sent.ID+"/ack", "")
+		if status != 200 {
+			t.Fatalf("project-only session ack %d %s", status, data)
+		}
+	})
 }
 
 // Risk: admission succeeds but rights change before the final mutation. Pause

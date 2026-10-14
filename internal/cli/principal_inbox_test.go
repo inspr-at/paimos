@@ -187,8 +187,8 @@ func TestMessagingOnlyInboxCLI(t *testing.T) {
 					t.Fatalf("output failure consumed message: err=%v acks=%d", err, acks.Load())
 				}
 			case "ack failure":
-				if err == nil || acks.Load() != 1 || !strings.Contains(stderr.String(), "ack failed") {
-					t.Fatal("ack failure reported success or retried one-shot")
+				if err == nil || acks.Load() != 1 || !strings.Contains(err.Error(), "ack failed") {
+					t.Fatalf("ack failure reported success or retried one-shot: err=%v acks=%d", err, acks.Load())
 				}
 			default:
 				if err != nil || acks.Load() != 1 || !strings.Contains(out.String(), fixture.Body) || !strings.Contains(out.String(), sender) || !strings.Contains(out.String(), recipient) || !strings.Contains(out.String(), principalInboxPreamble) {
