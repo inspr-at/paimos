@@ -78,7 +78,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f.owner = tenant.Principal{TenantID: tid, ID: uuid.NewString(), Kind: tenant.Person}
-	f.agent = tenant.Principal{TenantID: tid, ID: uuid.NewString(), Kind: tenant.Agent, Scopes: []string{"harness.worker", "harness.read", "chat.receive", "chat.send"}}
+	f.agent = tenant.Principal{TenantID: tid, ID: uuid.NewString(), Kind: tenant.Agent, Scopes: []string{"harness.worker", "harness.read"}}
 	for _, p := range []tenant.Principal{f.owner, f.agent} {
 		if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,$3,'native fixture')`, tid, p.ID, p.Kind); err != nil {
 			t.Fatal(err)
@@ -117,7 +117,7 @@ func newFixture(t *testing.T) *fixture {
 	inputID := uuid.NewString()
 	grant := nativecontract.FinalDrainGrant{GrantID: uuid.NewString(), Binding: f.binding, ConversationRef: "opaque-conversation", ExpiresAt: f.now.Add(24 * time.Hour), MaximumFinals: 64, MaximumBytes: 4 << 20}
 	f.final = nativecontract.FinalPublish{RequestID: uuid.NewString(), ExpectedBinding: f.binding, FinalID: uuid.NewString(), InputID: inputID, TurnRef: "opaque-turn", Text: "explicit final canary", DrainGrantID: grant.GrantID}
-	f.authority = &testAuthority{owner: f.owner.ID, generation: f.actor.DaemonGeneration, intent: nativereceipts.Intent{Receipt: nativecontract.Receipt{RequestID: uuid.NewString(), OperationID: uuid.NewString(), Binding: &f.binding, Operation: "input", State: "accepted", InputID: &inputID, SourceSequence: "0", UpdatedAt: f.now}, ActorID: f.owner.ID, PayloadSHA256: strings.Repeat("b", 64), ExpiresAt: f.now.Add(time.Hour)}, final: FinalAuthority{Grant: grant, CurrentBinding: f.binding, Sender: f.agent, Target: chat.NativeFinalTarget{OwnerPersonID: f.owner.ID, ConversationID: thread.ID, RoleID: role.ID, SessionID: session}, ConversationRef: grant.ConversationRef, IssuedAt: f.now, RetentionApproved: true}}
+	f.authority = &testAuthority{owner: f.owner.ID, generation: f.actor.DaemonGeneration, intent: nativereceipts.Intent{Receipt: nativecontract.Receipt{RequestID: uuid.NewString(), OperationID: uuid.NewString(), Binding: &f.binding, Operation: "input", State: "accepted", InputID: &inputID, SourceSequence: "0", UpdatedAt: f.now}, ActorID: f.owner.ID, PayloadSHA256: strings.Repeat("b", 64), ExpiresAt: f.now.Add(time.Hour)}, final: FinalAuthority{Grant: grant, CurrentBinding: f.binding, Sender: f.agent, OriginalActor: f.owner, Target: chat.NativeFinalTarget{OwnerPersonID: f.owner.ID, ConversationID: thread.ID, RoleID: role.ID, SessionID: session}, ConversationRef: grant.ConversationRef, IssuedAt: f.now, RetentionApproved: true}}
 	f.repo, err = New(f.d.App, f.authority, f.chat, func() time.Time { return f.now })
 	if err != nil {
 		t.Fatal(err)

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,8 +134,18 @@ func (w *socketWire) post(ctx context.Context, b nativecontract.Binding, method,
 	return json.Unmarshal(raw, dest)
 }
 
-func (w *socketWire) receipts(ctx context.Context, b nativecontract.Binding, headers map[string]string, after string, dest *nativecontract.ReceiptPage) error {
-	q := url.Values{"limit": {"25"}}
+func readCoordinates(b nativecontract.Binding, generation int64) url.Values {
+	return url.Values{
+		"expected_runtime_epoch":      {b.RuntimeEpoch},
+		"expected_harness_session_id": {b.HarnessSessionID},
+		"expected_binding_revision":   {strconv.FormatInt(b.BindingRevision, 10)},
+		"generation":                  {strconv.FormatInt(generation, 10)},
+	}
+}
+
+func (w *socketWire) receipts(ctx context.Context, b nativecontract.Binding, generation int64, headers map[string]string, after string, dest *nativecontract.ReceiptPage) error {
+	q := readCoordinates(b, generation)
+	q.Set("limit", "25")
 	if after != "" {
 		q.Set("after", after)
 	}

@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativestream"
 )
 
 var fixtureTime = time.Date(2026, 10, 13, 2, 0, 0, 0, time.UTC)
@@ -179,6 +180,19 @@ func (f *fakeSocket) serve(w http.ResponseWriter, r *http.Request) {
 	method := strings.TrimPrefix(r.URL.Path, "/v1/native-sessions/"+f.view.OwnedSessionID+"/")
 	if method == "attach/renew" {
 		method = "renew"
+	}
+	if r.Method == http.MethodGet {
+		if err := nativestream.ValidateReadQuery(nativestream.LocalRequest{Query: r.URL.Query()}, method); err != nil {
+			f.refusal(w, nativecontract.ReasonInvalidInput)
+			return
+		}
+		f.mu.Lock()
+		matches := nativestream.QueryMatches(r.URL.Query(), nativecontract.ValidationContext{Binding: f.view.CurrentBinding, Generation: f.view.Generation})
+		f.mu.Unlock()
+		if !matches {
+			f.refusal(w, nativecontract.ReasonWrongGeneration)
+			return
+		}
 	}
 	if r.Method == http.MethodGet && method == "stream" {
 		id := r.Header.Get(nativecontract.ViewerHeader)
@@ -418,6 +432,24 @@ func TestFakeSocketDetachViewerAndStaleBinding(t *testing.T) {
 		defer f.mu.Unlock()
 		if !f.running || f.inputAttempts != 0 {
 			t.Fatal("viewer renewal altered the writer")
+		}
+	})
+	t.Run("receipt read pins generation and closes stale authority", func(t *testing.T) {
+		f := newFakeSocket(t)
+		s := f.open(t, true)
+		if _, err := s.Receipts(t.Context(), ""); err != nil {
+			t.Fatalf("exact receipt coordinates refused: %v", err)
+		}
+		f.mu.Lock()
+		f.view.Generation++
+		f.mu.Unlock()
+		_, err := s.Receipts(t.Context(), "")
+		var refused *nativecontract.ValidationError
+		if !errors.As(err, &refused) || refused.Reason != nativecontract.ReasonWrongGeneration {
+			t.Fatalf("stale read did not return wrong_generation: %v", err)
+		}
+		if _, err := s.Submit(t.Context(), "stale viewer must not write", "now"); !errors.Is(err, ErrBindingChanged) {
+			t.Fatalf("stale receipt read retained controller authority: %v", err)
 		}
 	})
 }

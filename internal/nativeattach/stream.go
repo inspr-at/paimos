@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -63,7 +62,8 @@ func (s *Session) readStreamOnce(ctx context.Context, guard *nativecontract.Sequ
 		<-deadlineDone
 	}()
 	b := s.binding
-	q := url.Values{"view": {"structured"}, "expected_runtime_epoch": {b.RuntimeEpoch}, "expected_harness_session_id": {b.HarnessSessionID}, "expected_binding_revision": {strconv.FormatInt(b.BindingRevision, 10)}}
+	q := readCoordinates(b, s.generation)
+	q.Set("view", "structured")
 	headers := s.headers(false)
 	if *lastID != "" {
 		headers["Last-Event-ID"] = *lastID
