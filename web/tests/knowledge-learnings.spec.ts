@@ -53,11 +53,14 @@ async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; 
   await page.goto('/p/PHAROS/knowledge')
   await page.locator('.k-frame').waitFor()
   await page.evaluate(async options => {
-    const vuePath = '/node_modules/.vite/deps/vue.js', piniaPath = '/node_modules/.vite/deps/pinia.js'
     const componentPath = '/src/components/knowledge/MethodLearnings.vue', apiPath = '/src/lib/knowledge.ts'
-    const Vue = await import(vuePath), Pinia = await import(piniaPath), knowledge = await import(apiPath)
+    // Use the exact Vite URL (including its version) of the existing runtime.
+    // A second Vue/Pinia instance would invalidate this integration fixture.
+    const compiled = await (await fetch(componentPath)).text()
+    const vuePath = /from ["']([^"']*\/vue\.js[^"']*)["']/.exec(compiled)![1]!
+    const Vue = await import(vuePath), knowledge = await import(apiPath)
     const { default: Legacy } = await import(componentPath)
-    const root = document.querySelector('#app') as Element & { __vue_app__: { config: { globalProperties: { $router: { afterEach: (callback: (to: { path: string }) => void) => () => void } } } } }
+    const root = document.querySelector('#app') as Element & { __vue_app__: { config: { globalProperties: { $pinia: unknown; $router: { afterEach: (callback: (to: { path: string }) => void) => () => void } } } } }
     const router = root.__vue_app__.config.globalProperties.$router
     const entries = Vue.ref((await knowledge.listKnowledge({ project_id: 'p-pharos' })).items)
     const host = document.createElement('div'); document.querySelector('.k-frame')!.prepend(host)
@@ -67,7 +70,7 @@ async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; 
       onEmptied: () => document.querySelector<HTMLInputElement>('[aria-label="Search knowledge in Pharos"]')?.focus({ preventScroll: true }),
       onAccepted: async () => { entries.value = (await knowledge.listKnowledge({ project_id: 'p-pharos' })).items },
     }) })
-    app.use(Pinia.getActivePinia()); app.use(router); app.mount(host)
+    app.use(root.__vue_app__.config.globalProperties.$pinia); app.use(router); app.mount(host)
     const stop = router.afterEach(to => { if (!to.path.endsWith('/knowledge')) { app.unmount(); stop() } })
   }, { readOnly: !!options.readOnly, agent: !!options.agent })
   const heading = page.getByRole('heading', { name: 'Method learnings' })

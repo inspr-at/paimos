@@ -582,6 +582,7 @@ var ErrDeskLessonCoverage = errors.New("desk lesson candidate coverage exceeds 1
 // rows and pages share one budget, so stale or empty scan pages cannot hide an
 // unbounded scan behind an apparently exact count.
 func DeskLessonsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projects []string) ([]DeskLesson, error) {
+	ctx = tenant.WithPrincipal(ctx, p)
 	out := []DeskLesson{}
 	rows, err := tx.Query(ctx, `SELECT DISTINCT project_id::text FROM method_learning_recommendations
  WHERE tenant_id=$1 AND project_id=ANY($2::uuid[]) AND decision='accept'
