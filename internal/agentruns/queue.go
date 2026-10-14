@@ -222,6 +222,9 @@ func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queu
 	}
 	return t, err
 }
+func entryReadiness(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket) (workqueue.Readiness, error) {
+	return workqueue.DefinitionReadinessTx(ctx, tx, p, workqueue.EntryTicket{ID: t.ID, Kind: t.Kind, State: t.State, Title: t.Title, Body: t.Body, ProjectID: t.ProjectID, Fields: t.Fields, NamedBlocker: t.NamedBlocker}, readiness(t))
+}
 func readiness(t queueTicket) workqueue.Readiness {
 	return workqueue.Check(t.Kind, t.State, t.Title, t.Body, t.Fields, t.NamedBlocker, t.Stale)
 }
@@ -233,7 +236,7 @@ func (m *module) queueReadiness(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if err = queuePermission(r.Context(), tx, p, t.ProjectID, false); err != nil {
 		return nil, err
 	}
-	return readiness(t), nil
+	return entryReadiness(r.Context(), tx, p, t)
 }
 func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -256,7 +259,7 @@ func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (
 		return nil, workorders.Fail(400, "estimate_hours must be greater than 0 and at most 200")
 	}
 	if workqueue.Hours(t.Fields) > 0 {
-		return readiness(t), nil
+		return entryReadiness(r.Context(), tx, p, t)
 	}
 	t.Fields["estimate_hours"] = in.Hours
 	t.Fields["estimate_source"] = string(p.Kind)
@@ -266,7 +269,7 @@ func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (
 	if err = queueUpdateTicket(r.Context(), tx, p, t, "queue.estimate_applied"); err != nil {
 		return nil, err
 	}
-	return readiness(t), nil
+	return entryReadiness(r.Context(), tx, p, t)
 }
 func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, event string, runID ...string) error {
 	change, _, err := queueUpdateTicketDeferred(ctx, tx, t, event, runID...)
@@ -364,7 +367,10 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	}
 	// Preserve the existing readiness refusal before writer exclusion. Both
 	// checks remain under the tenant/tree fence and precede every queue write.
-	ready := readiness(t)
+	ready, err := entryReadiness(ctx, tx, p, t)
+	if err != nil {
+		return queuePrepared{}, err
+	}
 	if !ready.Ready {
 		return queuePrepared{}, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
 	}

@@ -120,7 +120,11 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 			return nil, err
 		}
-		if workqueue.State(t.State) == "blocked" || !readiness(t).Ready {
+		ready, err := entryReadiness(r.Context(), tx, p, t)
+		if err != nil {
+			return nil, err
+		}
+		if workqueue.State(t.State) == "blocked" || !ready.Ready {
 			continue
 		}
 		// A queue entry cannot mint a retry lineage or an unbounded cost hold.
@@ -324,7 +328,11 @@ func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
 	if v.QueueTargetAgentID == nil && v.QueueRoutedAt == nil {
 		return workorders.Fail(409, "coordinator routing required")
 	}
-	if workqueue.State(t.State) != "open" || !readiness(t).Ready {
+	ready, err := entryReadiness(ctx, tx, tenant.Principal{}, t)
+	if err != nil {
+		return err
+	}
+	if workqueue.State(t.State) != "open" || !ready.Ready {
 		return workorders.Fail(409, "ticket is not ready for pickup")
 	}
 	var earlier bool
@@ -441,7 +449,11 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		out.Routed, out.Replay = true, true
 		return out, nil
 	}
-	if !readiness(t).Ready || workqueue.State(t.State) != "open" {
+	ready, err := entryReadiness(ctx, tx, p, t)
+	if err != nil {
+		return out, err
+	}
+	if !ready.Ready || workqueue.State(t.State) != "open" {
 		return out, workorders.Fail(409, "work_not_eligible")
 	}
 	if err = requireWriterFree(ctx, tx, t.ID, v.ID); err != nil {

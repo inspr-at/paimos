@@ -62,13 +62,14 @@ func (t *bulkTag) UnmarshalJSON(raw []byte) error {
 }
 
 type bulkRequest struct {
-	IDs        []string        `json:"ids"`
-	State      *string         `json:"state"`
-	Priority   json.RawMessage `json:"priority"`
-	Assignee   json.RawMessage `json:"assignee"`
-	TagsAdd    []bulkTag       `json:"tags_add"`
-	TagsRemove []string        `json:"tags_remove"`
-	ParentID   *string         `json:"parent_id"`
+	IDs            []string        `json:"ids"`
+	State          *string         `json:"state"`
+	OverrideReason *string         `json:"override_reason"`
+	Priority       json.RawMessage `json:"priority"`
+	Assignee       json.RawMessage `json:"assignee"`
+	TagsAdd        []bulkTag       `json:"tags_add"`
+	TagsRemove     []string        `json:"tags_remove"`
+	ParentID       *string         `json:"parent_id"`
 	// Per node: the updated_at the caller last saw.
 	IfUnmodifiedSince map[string]string `json:"if_unmodified_since"`
 }
@@ -139,6 +140,7 @@ func (m *Module) handleBulk(w http.ResponseWriter, r *http.Request) {
 type bulkPlan struct {
 	ids                    []string
 	state                  *string
+	overrideReason         *string
 	setPriority, setAssign bool
 	priority, assignee     *string
 	tagsAdd                []bulkTag
@@ -153,6 +155,7 @@ func (b bulkPlan) changesFields() bool {
 
 func parseBulk(in bulkRequest) (bulkPlan, error) {
 	var plan bulkPlan
+	plan.overrideReason = in.OverrideReason
 	if len(in.IDs) == 0 || len(in.IDs) > maxBulkNodes {
 		return plan, badRequest("ids must list 1 to 500 nodes")
 	}
@@ -434,6 +437,33 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				})
 				continue
 			}
+			var entry *workqueue.EntryRecord
+			if state != current.State {
+				t, err := workqueue.EntryTicketTx(ctx, tx, current.ID)
+				if err != nil {
+					return err
+				}
+				if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
+					return err
+				}
+				t.Fields = workqueue.Fields(fields)
+				to, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, state)
+				if err != nil {
+					return err
+				}
+				entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, plan.overrideReason)
+				var failed *workqueue.EntryFailure
+				if errors.As(err, &failed) {
+					result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: failed.Error(), Code: "entry_checks_failed"})
+					if err = m.recordRefusal(ctx, tx, p, current.ID, failed); err != nil {
+						return err
+					}
+					continue
+				}
+				if err != nil {
+					return err
+				}
+			}
 			edit := state != current.State || !sameJSON(fields, current.Fields)
 			if !edit && !move {
 				result.Unchanged = append(result.Unchanged, current.ID)
@@ -452,7 +482,7 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				if err != nil {
 					return dbErr("bulk update", err)
 				}
-				if err := m.record(ctx, tx, p.ID, &latest.ID, evNodeUpdated, current, latest); err != nil {
+				if err := m.recordNodeEntry(ctx, tx, p, evNodeUpdated, current, latest, entry); err != nil {
 					return err
 				}
 			}

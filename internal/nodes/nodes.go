@@ -391,7 +391,19 @@ func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		if scanErr != nil {
 			return dbErr("insert node", scanErr)
 		}
-		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeCreated, nil, loaded); err != nil {
+		t, err := workqueue.EntryTicketTx(ctx, tx, loaded.ID)
+		if err != nil {
+			return err
+		}
+		to, err := workqueue.EntryStatusTx(ctx, tx, kindID, state)
+		if err != nil {
+			return err
+		}
+		entry, err := workqueue.RequireEntryTx(ctx, tx, p, t, to, nil)
+		if err != nil {
+			return err
+		}
+		if err := m.recordNodeEntry(ctx, tx, p, evNodeCreated, nil, loaded, entry); err != nil {
 			return err
 		}
 		node = loaded
@@ -423,11 +435,36 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		return nodeJSON{}, err
 	}
 	var out nodeJSON
+	var denied error
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		out, err = m.updateNodeTx(ctx, tx, p, id, raw, expected)
-		return err
+		if err := lockTree(ctx, tx); err != nil {
+			return err
+		}
+		step, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer step.Rollback(ctx)
+		out, err = m.updateNodeTx(ctx, step, p, id, raw, expected)
+		var failure *workqueue.EntryFailure
+		if errors.As(err, &failure) {
+			if rollback := step.Rollback(ctx); rollback != nil {
+				return rollback
+			}
+			if audit := m.recordRefusal(ctx, tx, p, id, failure); audit != nil {
+				return audit
+			}
+			denied = failure
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return step.Commit(ctx)
 	})
+	if err == nil && denied != nil {
+		err = denied
+	}
 	return out, dbErr("update node", err)
 }
 
@@ -437,7 +474,7 @@ func validateNodePatch(raw map[string]json.RawMessage) error {
 	}
 	for key := range raw {
 		switch key {
-		case "title", "body", "fields", "estimate_hours", "state", "human_check", "kind_id", "type", "kind":
+		case "title", "body", "fields", "estimate_hours", "state", "override_reason", "human_check", "kind_id", "type", "kind":
 		case "key":
 			return badRequest("key is immutable")
 		case "parent_id":
@@ -623,6 +660,41 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		if len(issues) > 0 {
 			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 		}
+		t, err := workqueue.EntryTicketTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
+			return err
+		}
+		var entry *workqueue.EntryRecord
+		if _, hasState := raw["state"]; hasState && current.State != nextState {
+			to, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, nextState)
+			if err != nil {
+				return err
+			}
+			priorCategory, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, current.State)
+			if err != nil {
+				return err
+			}
+			var reason *string
+			if value, ok := raw["override_reason"]; ok {
+				var text string
+				if json.Unmarshal(value, &text) != nil {
+					return badRequest("override_reason must be text")
+				}
+				reason = &text
+			}
+			t.Fields = workqueue.Fields(nextFields)
+			if to != priorCategory {
+				entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, reason)
+			}
+			if err != nil {
+				return err
+			}
+		} else if _, ok := raw["override_reason"]; ok {
+			return badRequest("override_reason requires a status change")
+		}
 		if _, hasState := raw["state"]; hasState && workqueue.Terminal(nextState) {
 			if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
 				return err
@@ -638,7 +710,7 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		if scanErr != nil {
 			return dbErr("update node", scanErr)
 		}
-		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeUpdated, current, loaded); err != nil {
+		if err := m.recordNodeEntry(ctx, tx, p, evNodeUpdated, current, loaded, entry); err != nil {
 			return err
 		}
 		node = loaded

@@ -16,6 +16,8 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type httpError struct {
@@ -67,6 +69,16 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	var entry *workqueue.EntryFailure
+	if errors.As(err, &entry) {
+		writeJSON(w, 409, map[string]any{"error": "entry_checks_failed", "code": "entry_checks_failed", "to_status": entry.ToStatus, "failed": entry.Failed, "override_allowed": entry.OverrideAllowed})
+		return
+	}
+	var public interface{ HTTPStatus() int }
+	if errors.As(err, &public) {
+		workorders.WriteError(w, err)
+		return
+	}
 	if errors.Is(err, authz.ErrForbidden) {
 		authz.WriteForbidden(w, err)
 		return
