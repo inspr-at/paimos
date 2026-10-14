@@ -138,6 +138,10 @@ func TestNativeRootsFenceWorkerAliasAndProjectOwnClaim(t *testing.T) {
 		if status != 409 || !strings.Contains(string(raw), "capacity") {
 			t.Fatalf("%s: wrong worker refusal %d %s", state, status, raw)
 		}
+		status, raw = call(t, mod, &admin, "", "POST", "/api/agent-accounts/"+first.ID+"/archive", "")
+		if status != 409 || !strings.Contains(string(raw), "account_busy") {
+			t.Fatalf("%s: native account archive was not fenced: %d %s", state, status, raw)
+		}
 	}
 	seed(t, admin, func(tx pgx.Tx) error {
 		// The second hold uses the alias; a forged worker sidecar adds no root.

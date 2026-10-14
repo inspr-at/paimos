@@ -693,6 +693,15 @@ func archiveAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountI
 	if archived {
 		return before, nil
 	}
+	// Check before DisconnectAccount can revoke enrollment or final-report
+	// authority. A native root is an owned writer even when no worker run exists.
+	roots, err := NativeRootCountTx(ctx, tx, accountID, "", "")
+	if err != nil {
+		return Account{}, err
+	}
+	if roots > 0 {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "a native session is still using this account", code: "account_busy"}
+	}
 	if err := agentpairing.DisconnectAccount(ctx, tx, p, accountID); errors.Is(err, agentpairing.ErrActiveRuns) {
 		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
 	} else if err != nil {

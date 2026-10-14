@@ -169,6 +169,21 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, route nativecontr
 		nativeError(w, err)
 		return
 	}
+	// Reapply the public projection at transport egress, including replies from
+	// mutating stores and native-context lookups. Agent keys never receive URLs.
+	switch value := result.(type) {
+	case nativecontract.SessionView:
+		result = nativecontract.PersonProjection(value, actor.PrincipalKind, true)
+	case nativecontract.OperationResult:
+		if value.Session != nil {
+			view := nativecontract.PersonProjection(*value.Session, actor.PrincipalKind, true)
+			value.Session = &view
+		}
+		result = value
+	case nativecontract.AttachResult:
+		value.Snapshot = nativecontract.PersonProjection(value.Snapshot, actor.PrincipalKind, true)
+		result = value
+	}
 	if err = m.validateResponse(route.ResponseSchema, result); err != nil {
 		nativeError(w, err)
 		return
