@@ -7928,6 +7928,8 @@
     ,
     {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRetainsBackgroundAndUnconfirmedWriter","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeintegration","name":"TestPilotDefaultsOffAndRejectsIncompleteQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExactOnceAndRuntimeFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExpiryRevocationAndRestart","tier":"ESSENTIAL"}

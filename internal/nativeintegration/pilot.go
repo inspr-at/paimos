@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
@@ -16,10 +17,47 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/nativeadmission"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Options is supplied only by the server/owning-supervisor composition, never
+// from an API body. Enablement still requires the coordinator's terms, native
+// actor/history/tool grant and pin qualification. Supplying ports issues none.
+type Options struct {
+	Enabled   bool
+	Services  nativecontract.Services
+	Host      nativecontract.Host
+	Launcher  nativecontract.Launcher
+	Admission *RootAuthority
+}
+
+type Pilot struct {
+	HTTP      *nativesessions.Module
+	Host      nativecontract.Host
+	Launcher  nativecontract.Launcher
+	Admission *RootAuthority
+}
+
+// New defaults off even when qualified-looking ports are supplied. It mounts
+// only C0's disabled routes until ALL production ports are deliberately wired;
+// neither construction nor a person request can enable automatic LeadRuntime.
+func New(opts Options) (*Pilot, error) {
+	if !opts.Enabled {
+		return &Pilot{HTTP: nativesessions.NewDisabled()}, nil
+	}
+	if opts.Host == nil || opts.Launcher == nil || opts.Admission == nil || opts.Admission.Pool == nil || opts.Admission.Grants == nil {
+		return nil, refuse(nativecontract.ReasonQualificationMissing)
+	}
+	module, err := nativesessions.New(opts.Services)
+	if err != nil {
+		return nil, err
+	}
+	return &Pilot{HTTP: module, Host: opts.Host, Launcher: opts.Launcher, Admission: opts.Admission}, nil
+}
 
 // RootAuthority connects P4c's local admission port to the exact server-owned
 // native root. It never invents a worker run, authenticating principal or key.
@@ -55,6 +93,18 @@ func (a RootAuthority) Revalidate(ctx context.Context, request nativeadmission.R
 		request.Profile.BindingRevision != b.BindingRevision {
 		return refuse(nativecontract.ReasonIdentityMismatch)
 	}
+	for _, id := range []string{b.TenantID, b.ProjectID, b.OwnedSessionID, b.HarnessSessionID, b.RuntimeEpoch,
+		request.Profile.AccountID, request.Profile.OwnerPersonID, request.Launch.ModelProfileID} {
+		if !workorders.UUID(id) {
+			return refuse(nativecontract.ReasonInvalidInput)
+		}
+	}
+	for _, value := range []string{b.DaemonID, b.DaemonGeneration, request.Profile.AccountKey, request.Profile.WorkspaceID,
+		request.Profile.Harness, request.AccountBindingDigest, request.Launch.Model} {
+		if len(value) > 256 {
+			return refuse(nativecontract.ReasonBufferFull)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	// Include a delegated original actor's key BEFORE the resource transaction.
@@ -77,10 +127,10 @@ func (a RootAuthority) Revalidate(ctx context.Context, request nativeadmission.R
 			return err
 		}
 		var in agentaccounts.NativeAdmission
-		var policyRaw []byte
+		var policyRaw, launchRaw []byte
 		var workspace, key string
 		err := tx.QueryRow(ctx, `SELECT b.owner_person_id::text,b.account_id::text,b.computer_id::text,b.harness,
- b.model_profile_id::text,b.ledger_generation,b.workspace_id,coalesce(i.actor_key_id::text,''),i.policy
+ b.model_profile_id::text,b.ledger_generation,b.workspace_id,coalesce(i.actor_key_id::text,''),i.policy,i.launch_config
  FROM native_session_bindings b JOIN native_session_intents i ON i.tenant_id=b.tenant_id AND i.owned_session_id=b.id
  JOIN native_session_roots root ON root.tenant_id=b.tenant_id AND root.owned_session_id=b.id AND root.runtime_epoch=b.runtime_epoch
  JOIN harness_sessions h ON h.tenant_id=b.tenant_id AND h.id=b.current_harness_session_id
@@ -88,26 +138,33 @@ func (a RootAuthority) Revalidate(ctx context.Context, request nativeadmission.R
  WHERE b.tenant_id=$1 AND b.id=$2 AND b.project_id=$3 AND b.paired_principal_id=$4
  AND b.current_harness_session_id=$5 AND b.runtime_epoch=$6 AND b.binding_revision=$7
  AND b.daemon_id=$8 AND b.daemon_generation=$9 AND b.run_id IS NULL
+ AND root.project_id=b.project_id AND root.owner_person_id=b.owner_person_id
+ AND root.account_id=b.account_id AND root.computer_id=b.computer_id
  AND root.run_id IS NULL AND root.released_at IS NULL AND h.stopped_at IS NULL AND h.archived_at IS NULL
  AND n.deleted_at IS NULL FOR NO KEY UPDATE OF b,i,root,h`, p.TenantID, b.OwnedSessionID, b.ProjectID,
 			p.ID, b.HarnessSessionID, b.RuntimeEpoch, b.BindingRevision, b.DaemonID, b.DaemonGeneration).Scan(
-			&in.OwnerPersonID, &in.AccountID, &in.ComputerID, &in.Harness, &in.ModelProfileID, &in.LedgerGeneration, &workspace, &key, &policyRaw)
+			&in.OwnerPersonID, &in.AccountID, &in.ComputerID, &in.Harness, &in.ModelProfileID, &in.LedgerGeneration, &workspace, &key, &policyRaw, &launchRaw)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return refuse(nativecontract.ReasonWrongGeneration)
 		}
 		if err != nil {
 			return err
 		}
-		if len(policyRaw) > 16384 {
+		if len(policyRaw) > 16384 || len(launchRaw) > 16384 {
 			return refuse(nativecontract.ReasonBufferFull)
 		}
 		var policy nativecontract.Policy
 		if err = json.Unmarshal(policyRaw, &policy); err != nil {
 			return err
 		}
+		var launch nativecontract.LaunchConfig
+		if err = json.Unmarshal(launchRaw, &launch); err != nil {
+			return err
+		}
 		if key != originalKey || request.Profile.OwnerPersonID != in.OwnerPersonID ||
 			request.Profile.AccountID != in.AccountID || request.Profile.Harness != in.Harness ||
 			request.Profile.WorkspaceID != workspace || request.Launch.ModelProfileID != in.ModelProfileID ||
+			!reflect.DeepEqual(request.Launch, launch) ||
 			!samePolicy(policy, request.Profile.Policy) || request.Launch.ToolPolicyDigest != policy.ToolPolicyDigest ||
 			request.Launch.SettingsPolicyDigest != policy.SettingsPolicyDigest {
 			return refuse(nativecontract.ReasonIdentityMismatch)

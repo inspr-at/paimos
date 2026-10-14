@@ -203,8 +203,8 @@ func requireNativeActorTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, no
 	}
 	if intent.Role == "coordinator" {
 		var owner string
-		if err := tx.QueryRow(ctx, `SELECT `+modelprefs.CanonicalPersonSQL("id")+`::text FROM principals
- WHERE id=$1 AND kind='person' AND status='active'`, original.ID).Scan(&owner); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT `+modelprefs.CanonicalPersonSQL("actor.id")+`::text FROM principals actor
+ WHERE actor.id=$1 AND actor.kind='person' AND actor.status='active'`, original.ID).Scan(&owner); err != nil {
 			return nativeDenial(nativecontract.ReasonWrongPrincipal)
 		}
 		if owner != in.OwnerPersonID {
