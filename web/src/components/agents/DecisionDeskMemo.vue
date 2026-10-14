@@ -146,7 +146,7 @@ const graceLeft = (row: DeskItem) => row.deliverAfter ? Math.min(10, Math.max(0,
 // It stops at "waiting for it to read" until the read receipt exists (Tick, AEON-1340).
 const deliveryLine = computed<MemoLine | undefined>(() => {
   const row = item.value
-  if (!row || !decidedView.value) return undefined
+  if (!row || !decidedView.value || row.kind === 'lesson') return undefined
   if (row.kind !== 'question' && row.kind !== 'handover') return { tone: 'd-sent', icon: 'check' as IconName, ...decidedText(row) }
   if (row.deliveryState === 'failed') return { tone: 'd-failed', icon: 'alert' as IconName, bold: 'Not delivered', text: 'The answer is recorded; delivery to the agent failed.' }
   if (row.deliveryState === 'pending' && graceLeft(row) > 0) return { tone: 'd-grace', icon: 'clock' as IconName, bold: `Decided ${clockTime(row.decidedAt)}`.trim(), grace: graceLeft(row) }
@@ -755,6 +755,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   <pre class="diff"><ins class="ln"><span class="sg" aria-hidden="true">+</span><span class="tx" data-testid="lesson-line">{{ item.lesson.learning.recommendation?.rule_text || item.lesson.learning.recommendation?.line }}</span></ins></pre>
                   <h3 class="eyebrow">What Dismiss does</h3><p>Nothing is written.</p>
                   <h3 class="eyebrow">Where the answer goes</h3><p>{{ item.destination }}</p>
+                  <p v-if="item.delivery">{{ item.delivery }}</p>
                   <p v-if="item.decided">Undo restores this lesson before deciding again.</p>
                 </section>
                 <template v-if="item.approval">
