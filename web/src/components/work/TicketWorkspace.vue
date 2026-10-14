@@ -47,7 +47,7 @@ import TicketEntryLine from './TicketEntryLine.vue'
 import TicketBenefits from './TicketBenefits.vue'
 import TicketExtensions from './TicketExtensions.vue'
 import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap, firstPillGap } from '../../lib/ticketBenefits'
-import { useEntryChecks } from '../../lib/useEntryChecks'
+import type { EntryChecks } from '../../lib/entryChecks'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -99,7 +99,6 @@ const item = computed(() => {
 })
 // Set below from the editors: while one is open, changes by others wait.
 const liveBusy = ref(false)
-const entryChecks = useEntryChecks(() => item.value)
 const ticket = useTicket(item, {
   names: props.names,
   onRemoved: removed => emit('removed', removed),
@@ -229,6 +228,7 @@ const editing = ref(false)
 const saving = ref(false)
 const benefitNotice = ref('')
 const benefitInvalidKey = ref('')
+const editEntryChecks = ref<EntryChecks | null>(null)
 const titleField = ref<HTMLTextAreaElement>()
 const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '', humanCheck: '' })
 let base = { ...draft }
@@ -277,6 +277,7 @@ async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
   base = snapshot(copy ?? item.value); Object.assign(draft, base)
   benefitNotice.value = ''
   benefitInvalidKey.value = ''
+  editEntryChecks.value = null
   editing.value = true
   await nextTick()
   // The caret goes to the end of the title: typing adds to it rather than replacing it.
@@ -328,7 +329,7 @@ async function saveEdit() {
   // The benefit editor is already on this form. Point at the first incomplete field.
   const pillGap = ['ticket', 'work'].includes(target.kind_slug) ? firstPillGap(fields) : null
   const schema = rowStore.kindSchema(target.kind_id)
-  const configuredCopy = entryChecks.data.value?.node_id === target.id && entryChecks.data.value.revision === target.updated_at && entryChecks.data.value.blocks.find(b => b.to_status === 'done')?.checks.some(c => c.applicable && ['release_copy_set', 'pills_benefits_set'].includes(c.id))
+  const configuredCopy = editEntryChecks.value?.node_id === target.id && editEntryChecks.value.revision === target.updated_at && editEntryChecks.value.blocks.find(b => b.to_status === 'done')?.checks.some(c => c.applicable && ['release_copy_set', 'pills_benefits_set'].includes(c.id))
   const completing = !completedTicketState(target.state, schema) && completedTicketState(draft.state, schema)
   const copyGap = configuredCopy && completing && fields.hide_from_release_notes !== true && fields.no_release_needed !== true ? firstBenefitGap(fields) : null
   if (pillGap || copyGap) {
@@ -390,8 +391,8 @@ function editMenuKeys(kind: 'status' | 'priority' | 'assignee', event: KeyboardE
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (editMenu.value?.kind !== kind) openEditMenu(kind, event) }
 }
 function closeEditMenu(restore: boolean) { menuGeneration++; const anchor = editMenu.value?.anchor; editMenu.value = null; if (restore) anchor?.focus() }
-function chooseEdit(kind: 'status' | 'priority' | 'assignee', value: string) {
-  if (kind === 'status') draft.state = value
+function chooseEdit(kind: 'status' | 'priority' | 'assignee', value: string, checks: EntryChecks | null = null) {
+  if (kind === 'status') { draft.state = value; editEntryChecks.value = checks }
   else if (kind === 'priority') draft.priority = value
   else draft.assignee = value
   closeEditMenu(true)
@@ -830,7 +831,7 @@ defineExpose({
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <AssigneeMenu v-if="menu?.kind === 'assignee' && item" :row="item" :project-id="project.id" :anchor="menu.anchor" :people="assigneeOptions" :can-assign="editable" @choose="chooseAssignee" @changed="emit('assigned')" @close="closeMenu" />
     <QueueView v-if="queueAnchor" :project-id="project.id" :anchor="queueAnchor" @close="restore => { const anchor = queueAnchor; queueAnchor = null; if (restore) anchor?.focus() }" @open="key => { queueAnchor = null; openLinked(key) }" @filter="() => { queueAnchor = null; void routerToQueued() }" />
-    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :derived="item.status_derived" :children-count="item.work_children_count" :node-id="item.id" :revision="item.updated_at" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
+    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :derived="item.status_derived" :children-count="item.work_children_count" :node-id="item.id" :revision="item.updated_at" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="(value, checks) => chooseEdit('status', value, checks)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
     <RelationPicker
