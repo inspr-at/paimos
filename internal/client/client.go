@@ -359,11 +359,12 @@ func errorMessage(payload []byte) string {
 				return wrap.Error
 			}
 			parts := []string{wrap.Error}
-			remaining := 4096 - len(wrap.Error)
+			const omitted = "additional check details omitted"
+			remaining := 4096 - len(wrap.Error) - len(omitted) - 2
 			for _, check := range details.Failed {
 				part := check.ID + " (" + check.Label + "): " + check.Reason
 				if len(part)+2 > remaining {
-					parts = append(parts, "additional check details omitted")
+					parts = append(parts, omitted)
 					break
 				}
 				parts = append(parts, part)

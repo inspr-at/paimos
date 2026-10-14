@@ -188,11 +188,30 @@ func TestErrorMessagesReadBothErrorShapes(t *testing.T) {
 		`{"error":"node not found"}`:                        "node not found",
 		`{"code":"forbidden","message":"not your session"}`: "not your session",
 		`plain text`: "plain text",
+		// Risk: reducing a structured entry refusal to its code hides how the
+		// agent can repair it. Only the explicit public check details are shown.
+		`{"error":"entry_checks_failed","failed":[{"id":"release_copy_set","label":"Release text set (EN + DE)","reason":"benefit_de is required","ignored":"not rendered"}]}`: "entry_checks_failed; release_copy_set (Release text set (EN + DE)): benefit_de is required",
 	} {
 		if got := errorMessage([]byte(payload)); got != want {
 			t.Fatalf("%s: got %q, want %q", payload, got, want)
 		}
 	}
+	t.Run("bounded-entry-details", func(t *testing.T) {
+		payload := map[string]any{"error": "entry_checks_failed", "failed": []map[string]string{{"id": "release_copy_set", "label": "Release text", "reason": strings.Repeat("x", 5000)}}}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := errorMessage(raw)
+		if len(got) > 4096 || !strings.HasPrefix(got, "entry_checks_failed;") || !strings.HasSuffix(got, "additional check details omitted") {
+			t.Fatal("oversized check details lost their refusal or explicit truncation")
+		}
+		payload["failed"] = make([]map[string]string, 33)
+		raw, err = json.Marshal(payload)
+		if err != nil || errorMessage(raw) != "entry_checks_failed" {
+			t.Fatal("oversized check list was rendered", err)
+		}
+	})
 }
 
 type workRetryTransport func(*http.Request) (*http.Response, error)
