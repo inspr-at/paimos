@@ -3,6 +3,7 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -27,7 +28,7 @@ func (m *Module) mountStatusTiming(mux *http.ServeMux) {
 }
 
 func timingError(w http.ResponseWriter, err error) {
-	if db.IsStatementTimeout(err) || err == context.DeadlineExceeded || err == context.Canceled {
+	if db.IsStatementTimeout(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		respondError(w, fail(503, "status timing read deadline exceeded; retry or narrow the scope"))
 		return
 	}

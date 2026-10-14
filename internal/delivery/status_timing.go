@@ -103,7 +103,7 @@ func deriveLifeline(n timingNode, events []timingEvent, now time.Time) ticketLif
 		if strings.HasPrefix(e.Type, "import.") {
 			source = "imported"
 		}
-		if e.Type == "status_history.backfilled" {
+		if e.Type == "node.status_history_backfilled" {
 			source = "inferred"
 			e.Actor = nil // The recorder is not an historical mover.
 		}

@@ -45,7 +45,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: backfillTicketStatusBaselines
-      description: 'Explicit, idempotent baseline backfill for live work leaves without any creation, imported history, status transition or previous backfill evidence. Requires nodes.write and events.read under the tenant/tree access fence in the final transaction. Does not change ticket status or invent historical actors. Records the documented assumption that the current status held since creation as status_history.backfilled; inferred intervals never enter timing percentiles. UUID keyset batches contain at most 200 leaves; continue until next_cursor is null. No automatic backfill on GET.'
+      description: 'Explicit, idempotent baseline backfill for live work leaves without any creation, imported history, status transition or previous backfill evidence. Requires nodes.write and events.read under the tenant/tree access fence in the final transaction. Does not change ticket status or invent historical actors. Records the documented assumption that the current status held since creation as node.status_history_backfilled; inferred intervals never enter timing percentiles. UUID keyset batches contain at most 200 leaves; continue until next_cursor is null. No automatic backfill on GET.'
       security: *auth
       requestBody:
         required: true

@@ -152,7 +152,7 @@ func TestTicketStatusTimingBackfillIsIdempotentAndTenantScoped(t *testing.T) {
 	var count int
 	var state string
 	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT n.state,(SELECT count(*) FROM events WHERE node_id=n.id AND type='status_history.backfilled') FROM nodes n WHERE id=$1`, f.ticket).Scan(&state, &count)
+		return tx.QueryRow(t.Context(), `SELECT n.state,(SELECT count(*) FROM events WHERE node_id=n.id AND type='node.status_history_backfilled') FROM nodes n WHERE id=$1`, f.ticket).Scan(&state, &count)
 	})
 	if count != 1 || state != "open" {
 		t.Fatalf("backfill mutated status or duplicated evidence: %s/%d", state, count)

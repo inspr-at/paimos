@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -20,7 +19,7 @@ var timingEventTypes = []string{
 	"node.created", "node.updated", "import.history", "import.node_created", "import.node_updated", "import.parent_changed",
 	"status_autopilot.changed", "status_autopilot.derived", "status_autopilot.undone", "status_autopilot.attention_apply",
 	"status_autopilot.attention_dismiss", "status_autopilot.attention_undone", "delivery.merge_done",
-	"queue.added", "queue.add_undone", "status_history.backfilled",
+	"queue.added", "queue.add_undone", "node.status_history_backfilled",
 }
 
 const timingLeafSQL = `k.slug IN ('work','ticket','task','epic') AND n.deleted_at IS NULL
@@ -100,7 +99,7 @@ func loadTimingEvents(ctx context.Context, tx pgx.Tx, nodes []timingNode, now ti
  left(coalesce(e.after->'fields'->>'release',''),128) AS release
  FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id=ANY($1::uuid[])
  AND e.type=ANY($2::text[]) AND e.at<=$3
- AND (e.type IN ('node.created','import.history','import.node_created','status_history.backfilled')
+ AND (e.type IN ('node.created','import.history','import.node_created','node.status_history_backfilled')
   OR e.before->>'state' IS DISTINCT FROM e.after->>'state')
  ORDER BY e.node_id,e.at,e.id LIMIT $4
  ) SELECT f.id,f.node_id::text,f.type,f.at,f.before_state,f.after_state,
@@ -195,7 +194,7 @@ func backfillTimingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projec
 			continue
 		}
 		id, created := n.ID, n.Created
-		changes = append(changes, events.Change{NodeID: &id, Type: "status_history.backfilled", At: &created,
+		changes = append(changes, events.Change{NodeID: &id, Type: "node.status_history_backfilled", At: &created,
 			After: map[string]any{"state": n.State, "source": "inferred", "assumption": "current state since creation", "rule_version": 1}})
 	}
 	for _, change := range changes {
