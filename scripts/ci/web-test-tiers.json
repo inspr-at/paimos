@@ -14626,6 +14626,8 @@
     ,
     {"kind":"node","file":"tests/access-module-split.test.ts","name":"Access loads one tab at a time, and agent sheets load when opened","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/access-module-split.test.ts","name":"test-mode Vite closes each module response; dev mode and the HMR upgrade keep their connection","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/access.test.ts","name":"Full access includes mixed workspace/project role scopes without promoting workspace-only project permissions","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"Ticket worker includes activity history only within creator, role and registry ceilings","tier":"GATED-FULL"}
