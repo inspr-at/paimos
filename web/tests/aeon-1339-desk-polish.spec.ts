@@ -50,6 +50,12 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       await expect(page.getByRole('button', { name: 'Keys' })).toBeHidden()
     }
     await page.screenshot({ path: testInfo.outputPath(`memo-${width}-${theme}.png`) })
+    if (width === 1440) {
+      // Tick: the hairline is gated at 2× (below); at 1× a visual crop of the shoulder beside the sheet corner.
+      const tab = (await page.getByTestId('desk-tab').boundingBox())!, stack = (await page.locator('.stack').boundingBox())!
+      await page.screenshot({ path: testInfo.outputPath(`shoulder-1x-${theme}.png`), clip: { x: tab.x + tab.width - 30, y: stack.y - 30, width: 60, height: 50 } })
+      await page.screenshot({ path: testInfo.outputPath(`corner-1x-${theme}.png`), clip: { x: stack.x + stack.width - 30, y: stack.y - 10, width: 50, height: 40 } })
+    }
 
     await expectStableControls({
       controls: { decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), tab: page.getByTestId('desk-tab'), stamps: page.getByTestId('desk-stamps'), first: page.getByTestId('choice-row-0') },

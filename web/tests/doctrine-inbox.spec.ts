@@ -115,7 +115,7 @@ test('native doctrine proposals retain diff, notices, source links and protected
   await expect(page.getByTestId('desk-from')).toHaveText('builder')
   await expect(page.getByTestId('desk-body')).toContainText('every heartbeat ETA honest')
   const axe = await new AxeBuilder({ page }).include('.desk-dlg').analyze()
-  expect(axe.violations.map(v => v.id)).toEqual([])
+  expect(axe.violations.map(v => `${v.id}: ${v.nodes.map(node => node.target.join(' ')).join(', ')}`)).toEqual([])
   // A bookmarked source reopens on reload; opening an overview row is local
   // round state and does not change the overview's URL.
   await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)

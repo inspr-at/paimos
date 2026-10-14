@@ -693,8 +693,8 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <pre v-if="item.rule && ruleLines.length" class="diff" aria-label="The proposed change" data-testid="desk-rule-diff"><template v-for="(line, at) in ruleLines" :key="at"><del v-if="line.op === 'del'" class="ln"><span class="sg">−</span><span class="tx">{{ line.text }}</span></del><ins v-else-if="line.op === 'ins'" class="ln"><span class="sg">+</span><span class="tx">{{ line.text }}</span></ins><span v-else class="ln"><span class="sg" /><span class="tx">{{ line.text }}</span></span></template></pre>
                 <p v-if="item.rule?.outdated" class="m-note">The rule changed since this was proposed. Edit against the current rule first.</p>
                 <h3 id="desk-h-answer" class="eyebrow">Your decision</h3>
-                <ol class="choices" role="radiogroup" aria-labelledby="desk-h-answer" data-testid="desk-choices">
-                  <li v-for="(choice, at) in item.choices" :key="choice.id" :data-testid="`choice-row-${at}`">
+                <div class="choices" role="radiogroup" aria-labelledby="desk-h-answer" data-testid="desk-choices">
+                  <div v-for="(choice, at) in item.choices" :key="choice.id" class="choice-li" :data-testid="`choice-row-${at}`">
                     <div class="choice" :class="{ checked: draft.optionId === choice.id, off: !!choice.unavailable, 'has-field': !!choice.field }">
                       <button type="button" class="choice-hit" role="radio" :aria-checked="draft.optionId === choice.id" :disabled="!editable || !!choice.unavailable" :data-tip="choice.unavailable || undefined" :data-testid="`choice-${at}`" @click="choose(choice.id)">
                         <span class="ck" aria-hidden="true" /><KeyCap v-if="at < 9" :k="String(at + 1)" /><span v-else />
@@ -703,8 +703,8 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                       <span v-if="choice.field && !decidedView" class="field-row"><input v-model="draft.answer" data-field="answer" class="ul-field" :aria-label="choiceTitle(item, choice)" maxlength="8000" :disabled="!editable" :placeholder="fieldPlaceholder(item)" enterkeyhint="done" autocomplete="off" @input="typed(choice.id)" @focus="editing = 'answer'" @blur="editing === 'answer' && (editing = '')" /><span class="field-hint" aria-hidden="true"><KeyCap k="enter" /> done</span></span>
                       <span v-else-if="choice.field && draft.optionId === choice.id && draft.answer" class="c-answer" data-testid="desk-answer-set">{{ draft.answer }}</span>
                     </div>
-                  </li>
-                </ol>
+                  </div>
+                </div>
                 <div v-if="question" class="stamps">
                   <h3 id="desk-h-stamp" class="eyebrow">Stamp it as</h3>
                   <div class="stamp-row" role="radiogroup" aria-labelledby="desk-h-stamp" data-testid="desk-stamps">
@@ -808,7 +808,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .desk-btn.ghost.sm { min-width: 0; padding: 0 16px; }
 .desk-btn.ghost.slot { visibility: hidden; }
 @media (hover: hover) { .desk-btn.ghost:hover:not(:disabled) { background: var(--btn-bg-hover); box-shadow: var(--shadow-btn-hover); } }
-.desk-btn :deep(.keycap) { margin-left: 2px; opacity: .75; }
+.desk-btn :deep(.keycap) { margin-left: 2px; }
 .desk-btn.primary { min-width: 212px; background: var(--brass); color: var(--brass-ink); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 8px 18px -10px rgba(0, 0, 0, .7); }
 .desk-btn.primary :deep(.keycap) { background: rgba(255, 255, 255, .35); box-shadow: inset 0 0 0 1px rgba(42, 28, 4, .25); color: var(--brass-ink); }
 @media (hover: hover) { .desk-btn.primary:hover:not([aria-disabled="true"]) { filter: brightness(1.05); } }
@@ -855,7 +855,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 /* Where the stamp lands: a fixed slot at the top right; the stamp only ever moves by transform. */
 .stamp-slot { display: grid; place-items: center; min-height: 92px; }
 .stamp-big { --t: var(--ok); grid-area: 1 / 1; display: inline-flex; align-items: center; padding: 11px 16px; border: 2.5px solid var(--t); border-radius: 6px; background: color-mix(in srgb, var(--t) 7%, var(--paper)); box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 4.5px color-mix(in srgb, var(--t) 80%, transparent); color: var(--t); font: 800 17px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; white-space: nowrap; transform: rotate(-8deg); }
-.stamp-big.empty { --t: var(--ink-3); border-style: dashed; background: transparent; box-shadow: none; font-size: 12px; font-weight: 600; letter-spacing: .14em; opacity: .7; }
+.stamp-big.empty { --t: var(--ink-3); border-style: dashed; border-color: color-mix(in srgb, var(--ink-3) 70%, transparent); background: transparent; box-shadow: none; font-size: 12px; font-weight: 600; letter-spacing: .14em; }
 .stamp-big.landed { background: color-mix(in srgb, var(--t) 14%, var(--paper)); }
 @media (prefers-reduced-motion: no-preference) {
   .stamp-big.slam { animation: stamp-slam .44s cubic-bezier(.3, .7, .3, 1) both; }
@@ -927,7 +927,7 @@ a.res-key:hover { text-decoration: underline; }
 .thumb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
 /* Choices: rows on hairlines; the chosen one gets a quiet wash. The description wraps in the row. */
 .choices { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--paper-line); }
-.choices > li { border-bottom: 1px solid var(--paper-line); }
+.choices > .choice-li { border-bottom: 1px solid var(--paper-line); }
 .choice { display: grid; }
 @media (hover: hover) { .choice:hover:not(.off) { background: color-mix(in srgb, var(--teal) 4%, transparent); } }
 .choice.checked { background: color-mix(in srgb, var(--teal) 9%, transparent); }
@@ -964,11 +964,11 @@ a.res-key:hover { text-decoration: underline; }
 /* Stamps: what the answer becomes. The chosen one is inked; its line below never changes size. */
 .stamps { display: grid; gap: 10px; }
 .stamp-row { display: flex; flex-wrap: wrap; gap: 10px 12px; }
-.stamp { --t: var(--ink-2); position: relative; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border: 1.5px solid var(--t); border-radius: 5px; background: transparent; box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 3px color-mix(in srgb, var(--t) 60%, transparent); color: var(--t); font: 700 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; opacity: .9; cursor: pointer; }
+.stamp { --t: var(--ink-2); position: relative; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border: 1.5px solid var(--t); border-radius: 5px; background: transparent; box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 3px color-mix(in srgb, var(--t) 60%, transparent); color: var(--t); font: 700 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
 @media (prefers-reduced-motion: no-preference) { .stamp { transition: color .2s ease, border-color .2s ease, background-color .2s ease, box-shadow .2s ease, opacity .2s ease; } }
 .stamp[aria-checked="false"] { --t: var(--ink-3); }
-@media (hover: hover) { .stamp:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { --t: var(--ink-2); opacity: 1; } }
-.stamp[aria-checked="true"] { opacity: 1; background: color-mix(in srgb, var(--t) 9%, transparent); }
+@media (hover: hover) { .stamp:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { --t: var(--ink-2); } }
+.stamp[aria-checked="true"] { background: color-mix(in srgb, var(--t) 9%, transparent); }
 .stamp u { text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 /* An unavailable stamp is visibly disabled and still readable (3.4:1 light, 3.6:1 dark), with its reason. */
 .stamp[data-off] { --t: color-mix(in srgb, var(--ink-3) 80%, var(--paper)); opacity: 1; border-style: dashed; box-shadow: none; cursor: not-allowed; }
