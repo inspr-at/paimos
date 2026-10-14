@@ -98,8 +98,10 @@ export function nightlyBrowserMap(checkout, base, catalogue, { exec = execFileSy
   }
   const tree = gitTree(checkout, base, boundedExec)
   if (!tree || !/^[a-f0-9]{40}$/.test(base ?? '')) return { baseTree: tree }
+  if (!Array.isArray(catalogue) || catalogue.length > 20_000) return { baseTree: tree }
   const fingerprint = dependencyFingerprint(checkout, base, boundedExec)
-  const cacheKey = `${checkout}:${base}:${compatible}`
+  const catalogueKey = createHash('sha256').update(JSON.stringify(catalogue.filter(row => row.kind === 'browser' && row.active !== false).map(browserIdentity).sort())).digest('hex')
+  const cacheKey = `${checkout}:${base}:${compatible}:${catalogueKey}`
   if (exec === execFileSync && maps.has(cacheKey)) return maps.get(cacheKey)
   const api = (path, maxBuffer = 2 * 1024 * 1024) => boundedExec('gh', ['api', path], { cwd: checkout, timeout: 15_000, maxBuffer })
   const json = path => JSON.parse(api(path).toString())
