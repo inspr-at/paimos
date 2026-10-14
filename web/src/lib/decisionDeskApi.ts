@@ -506,6 +506,7 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
       if (reply.status === 'held') throw new Error('The reply remains held. Delivery was not confirmed.')
       if (reply.status === 'pending' && (!reply.question_id || !reply.answer_revision || !reply.deliver_after)) throw new Error('The pending reply response is incomplete. Refresh before trying again.')
       return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason,
+        deliveryState: reply.status === 'pending' ? 'pending' : 'delivered', deliverAfter: reply.deliver_after,
         delivery: reply.status === 'pending' ? `Reply recorded; delivery scheduled for ${deliveryTime(reply.deliver_after)}.` : 'Reply accepted by the inbox; receiver confirmation is pending.' }
     } else await resolveMessage(item.projectId, source.id, draft.optionId === 'resolved' ? 'resolved' : 'dismissed', draft.reason.trim())
   } else if (item.kind === 'rule') {

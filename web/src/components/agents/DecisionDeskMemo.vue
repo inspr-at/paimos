@@ -159,7 +159,11 @@ function decidedText(row: DeskItem): { bold: string; text: string } {
     if (revokedHere.value.has(row.id)) return { bold: 'Revoked', text: 'The original decision stays in history.' }
     return row.optionId === 'approved' ? { bold: 'Approved', text: `${who} can go ahead.` } : row.optionId === 'denied' ? { bold: 'Denied', text: `${who} sees your reason.` } : { bold: row.answer || 'Closed', text: '' }
   }
-  if (row.kind === 'action') return row.optionId === 'reply' ? { bold: `Sent to ${askerName.value}`, text: 'waiting for it to read' } : { bold: row.optionId === 'resolved' ? 'Resolved' : 'Dismissed', text: '' }
+  if (row.kind === 'action') {
+    // A reply inside its grace is recorded, not sent yet (the inbox reports `pending`).
+    if (row.optionId === 'reply') return row.deliveryState === 'pending' ? { bold: 'Decided', text: `sends to ${askerName.value} shortly` } : { bold: `Sent to ${askerName.value}`, text: 'waiting for it to read' }
+    return { bold: row.optionId === 'resolved' ? 'Resolved' : 'Dismissed', text: '' }
+  }
   if (row.kind === 'rule') return row.optionId === 'propose' ? { bold: 'Pull request opened', text: 'You merge it as usual.' } : { bold: 'Not now', text: `${who} gets your reason.` }
   return { bold: row.answer || 'Decided', text: row.delivery || '' }
 }
