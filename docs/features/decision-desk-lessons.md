@@ -5,7 +5,7 @@ shows the lesson sentence, the linked source when available, the agent’s sourc
 summary, and the exact line that Accept adds to an entry’s Changelog or a rule
 draft. Dismiss changes no entry and needs no reason; the decision remains audited.
 Both decisions support the existing event Undo, available in the memo and its
-confirmation toast. Rule drafts still require a separate publication approval.
+confirmation toast after closing. Rule drafts still require a separate publication approval.
 
 The Knowledge tab replaces the Method learnings inbox with one quiet link to the
 project’s lessons on the Desk, shown only when lessons wait. Unprepared, stale,

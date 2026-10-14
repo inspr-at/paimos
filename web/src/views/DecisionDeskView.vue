@@ -220,14 +220,27 @@ async function undoLesson(item: DeskItem): Promise<DeskItem> {
     return { ...current, decided: false, optionId: undefined, answer: undefined, reason: undefined, delivery: undefined, undoEvent: undefined }
   } finally { undoingLessons.delete(eventId) }
 }
+let pendingLessonToast: DeskItem | undefined
+function showLessonToast(item: DeskItem) {
+  const current = captureToastOwner()
+  toast(item.delivery ?? 'Lesson decision recorded.', { timeout: 8000, action: { label: 'Undo', run: () => {
+    if (!current()) return
+    void undoLesson(item).then(restored => { if (current()) recorded(restored) })
+      .catch(cause => { if (current()) toast(cause instanceof Error ? cause.message : 'Undo did not work.', { tone: 'error' }) })
+  } } })
+}
+// The memo already offers Undo in its pinned native action slot. Its toast
+// appears on closing, where it cannot cover the phone's decision controls.
+watch(opened, open => {
+  if (!open && pendingLessonToast) { const item = pendingLessonToast; pendingLessonToast = undefined; showLessonToast(item) }
+})
 function recorded(item: DeskItem) {
-  if (item.kind === 'lesson' && item.decided && item.undoEvent && item.undoEvent !== items.value.find(row => row.id === item.id)?.undoEvent) {
-    const current = captureToastOwner()
-    toast(item.delivery ?? 'Lesson decision recorded.', { timeout: 8000, action: { label: 'Undo', run: () => {
-      if (!current()) return
-      void undoLesson(item).then(restored => { if (current()) recorded(restored) })
-        .catch(cause => { if (current()) toast(cause instanceof Error ? cause.message : 'Undo did not work.', { tone: 'error' }) })
-    } } })
+  if (item.kind === 'lesson') {
+    if (!item.decided && pendingLessonToast?.id === item.id) pendingLessonToast = undefined
+    if (item.decided && item.undoEvent && item.undoEvent !== items.value.find(row => row.id === item.id)?.undoEvent) {
+      if (opened.value) pendingLessonToast = item
+      else showLessonToast(item)
+    }
   }
   if (item.kind === 'rule' && item.decided && !items.value.find(row => row.id === item.id)?.decided) inboxChanged(doctrineInbox.pending - 1, item.id.slice(2))
   items.value = items.value.map(row => row.id === item.id ? item : row)
@@ -236,6 +249,7 @@ function recorded(item: DeskItem) {
   void desk.refresh()
 }
 function resetDesk() {
+  pendingLessonToast = undefined
   capabilityGeneration++
   ruleEdit.value = undefined
   generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []

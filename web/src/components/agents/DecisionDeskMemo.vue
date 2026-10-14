@@ -408,9 +408,9 @@ onBeforeUnmount(() => { window.removeEventListener('resize', sizeTab); live = fa
                 <p v-if="editing === 'answer'">Editing · Enter finishes · {{ submitKey }} decides</p>
               </div>
               <label class="ps-line"><span>{{ item.kind === 'lesson' ? 'Why not? (optional)' : item.kind === 'approval' || item.kind === 'rule' ? 'Reason' : 'P.S.' }}</span><input v-model="draft.reason" data-field="reason" :aria-label="item.kind === 'lesson' ? 'Why not? (optional)' : item.kind === 'approval' || item.kind === 'rule' ? 'Reason' : 'P.S. for the agent'" :maxlength="item.kind === 'lesson' ? 500 : 2000" :disabled="blocked || !canEdit" :class="{ editing: editing === 'reason' }" :placeholder="item.kind === 'lesson' ? 'Why not? (optional)' : 'A note for the agent'" @input="touch" @focus="editing = 'reason'" /></label>
-              <p class="editing-slot">{{ editing === 'reason' ? `Enter finishes · ${submitKey} decides` : item.fromRecord || (item.decided ? 'Changing an answer records a replacement through its native workflow.' : 'A decision is recorded only when Decide is pressed.') }}</p>
+              <p class="editing-slot">{{ editing === 'reason' ? `Enter finishes · ${submitKey} decides` : item.fromRecord || (item.decided ? (item.kind === 'lesson' ? 'Undo restores this lesson before deciding again.' : 'Changing an answer records a replacement through its native workflow.') : 'A decision is recorded only when Decide is pressed.') }}</p>
               <p v-if="item.why" class="recommend-why"><strong>Why this recommendation</strong>{{ item.why }}</p>
-              <p v-if="item.decided && !canEdit" class="native-restriction">This protected decision keeps its native restrictions. <span v-if="item.kind === 'approval'">Active grants can be revoked with Revoke above.</span></p>
+              <p v-if="item.decided && !canEdit && !item.lesson" class="native-restriction">This protected decision keeps its native restrictions. <span v-if="item.kind === 'approval'">Active grants can be revoked with Revoke above.</span></p>
             </section>
             <aside class="context-column" aria-label="Background and destination">
               <section v-if="titleClipped" data-testid="desk-full-title"><h3>Question in full</h3><p>{{ item.title }}</p></section>
