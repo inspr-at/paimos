@@ -8334,6 +8334,10 @@
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a refused save and a failed read together keep both alerts and both retries, and Learn still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-tab-switch.spec.ts","name":"Flow: fast section switches keep one hint stream per mounted view and its lanes render","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-tab-switch.spec.ts","name":"Numbers: fast section switches keep Delivery responsive and its cards render","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a failed refresh keeps the delivery rows and notes the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a later hold on a lifted row can be lifted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -17396,6 +17400,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live update keeps the person viewing the past, and moves the playhead with now while following","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a parent re-render with the same project neither reads again nor reopens the hint stream (AEON-1352)","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an ingested release record shows the catalogue timing, the rehearsal, the qualification link and the rollback class","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an open step shows elapsed time and a separate expected end at both levels","tier":"ESSENTIAL"}
@@ -17425,6 +17431,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the release record panel shows the timing and the evidence as a ticket link, and keeps four rows when facts are missing","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the run picker stays mounted through loading and errors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"unmounting aborts the read in flight and closes the stream; a late answer changes nothing (AEON-1352)","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"where the time went splits the critical path and lists the incident and the biggest waits","tier":"ESSENTIAL"}
     ,
