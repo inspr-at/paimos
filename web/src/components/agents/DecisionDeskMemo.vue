@@ -98,12 +98,16 @@ const memoStatus = computed(() => {
     if (reason) return reason
   }
   if (current.delivery) return current.delivery
-  if (suggestedNote.value) return suggestedNote.value
+  if (suggestedNote.value) {
+    const why = outcomeUnavailable(current, current.outcome)
+    // The short hint names the stamp. The server sentence is the restriction.
+    return why ? `${suggestedNote.value}. ${why}` : suggestedNote.value
+  }
   return current.suggestion
 })
 const statusTitle = computed(() => {
   const current = item.value
-  if (!current || !suggestedNote.value || memoStatus.value !== suggestedNote.value) return undefined
+  if (!current || !suggestedNote.value || !memoStatus.value.startsWith(suggestedNote.value)) return undefined
   return outcomeUnavailable(current, current.outcome) || undefined
 })
 const primaryDisabled = computed(() => busy.value || !!outcomeBlock.value || ((!item.value?.decided || trimRestorable.value) && (blocked.value || (item.value?.kind !== 'key_trim' && item.value?.kind !== 'stepup' && (!draft.value?.optionId || !!item.value?.choices.find(choice => choice.id === draft.value?.optionId)?.unavailable)))))
@@ -354,7 +358,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', sizeTab); live = fa
             <span class="stamp-label">Stamp it as</span>
             <button v-for="(outcome, at) in outcomes" :key="outcome" class="stamp" :class="[`stamp-${outcome}`, { selected: draft.outcome === outcome, unavailable: !!outcomeUnavailable(item, outcome) }]" type="button" :aria-pressed="draft.outcome === outcome" :disabled="blocked || !canEdit || !!outcomeUnavailable(item, outcome)" :title="outcomeUnavailable(item, outcome) || ({ once: 'For this question only.', always: 'Answer the same question from the record.', requirement: 'Add an acceptance criterion.', doctrine: 'Propose a rule change.' }[outcome])" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)">{{ outcomeLabels[outcome] }}<kbd :style="{ visibility: outcomeUnavailable(item, outcome) ? 'hidden' : 'visible' }" :aria-hidden="!!outcomeUnavailable(item, outcome)">{{ outcomeKeys[at] }}</kbd></button>
           </div>
-          <div id="desk-status" class="memo-status" data-testid="desk-status" :title="statusTitle">{{ memoStatus }}</div>
+          <div id="desk-status" class="memo-status" :class="{ 'is-explained': !!statusTitle }" data-testid="desk-status" :title="statusTitle">{{ memoStatus }}</div>
           <div ref="body" class="memo-body" data-testid="desk-body">
             <section v-if="item.keyTrim" class="answer-column key-trim-evidence" aria-label="Key trim evidence" data-testid="key-trim-evidence">
               <h3>{{ item.keyTrim.key_name }} · {{ item.keyTrim.owner_name }}</h3>
@@ -496,7 +500,7 @@ h2 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 550; display: -
 .stamp-label { font-size: 11px; color: var(--ink-3); }
 .stamp { background: transparent; border: 0; padding: 6px 0; color: var(--ink-3); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .stamp.selected.stamp-once, .large-stamp.stamp-once { color: var(--primary-ink); }.stamp.selected.stamp-always, .large-stamp.stamp-always { color: var(--ok); }.stamp.selected.stamp-requirement, .large-stamp.stamp-requirement { color: var(--secondary-ink); }.stamp.selected.stamp-doctrine, .large-stamp.stamp-doctrine { color: var(--danger); }
-.stamp.unavailable { opacity: .1; }.memo-status { flex: none; height: 42px; display: flex; align-items: center; font-size: 12px; color: var(--ink-2); overflow: auto; overflow-wrap: anywhere; }
+.stamp.unavailable { opacity: .1; }.memo-status { flex: none; height: 42px; display: flex; align-items: center; font-size: 12px; color: var(--ink-2); overflow: auto; overflow-wrap: anywhere; }.memo-status.is-explained { display: block; line-height: 16px; padding-top: 5px; }
 .memo-body { overflow: auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 32px; scrollbar-gutter: stable; }
 h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 10px; }
 .answer-column, .context-column { min-width: 0; }.context-column { border-left: 1px solid var(--line); padding-left: 26px; }

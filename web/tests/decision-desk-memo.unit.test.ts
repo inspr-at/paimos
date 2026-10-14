@@ -59,8 +59,13 @@ it('preselects Once for an unavailable suggestion and disables Decide with the r
   expect(tag(html, 'stamp-doctrine')).toContain('disabled')
   expect(tag(html, 'stamp-doctrine')).toContain('aria-pressed="false"')
   const status = tag(html, 'desk-status')
-  expect(status).toContain('title="Doctrine needs an authorized source, rule and exact base mapping."')
+  const why = 'Doctrine needs an authorized source, rule and exact base mapping.'
+  expect(status).toContain(`title="${why}"`)
   expect(html.slice(html.indexOf(status), html.indexOf(status) + status.length + 80)).toContain('Suggested: Doctrine · not available for this question')
+  // The server reason is the status text. A title tooltip is not the explanation.
+  const statusText = html.slice(html.indexOf(status) + status.length, html.indexOf('</div>', html.indexOf(status)))
+  expect(statusText).toContain(why)
+  expect(statusText).toContain('Suggested: Doctrine · not available for this question')
   expect(html).not.toContain('data-testid="desk-decide-reason"')
   expect(tag(html, 'desk-decide')).not.toContain('disabled')
 
