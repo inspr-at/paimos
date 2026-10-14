@@ -567,6 +567,7 @@ func TestSensitiveRangeFieldsMatchContract(t *testing.T) {
 	}{
 		{"PUT", recommendPath(ticketID), map[string]any{"decision": "accept", "knowledge_id": book.ID, "lesson": "Use " + secret}},
 		{"PUT", recommendPath(ticketID), map[string]any{"decision": "dismiss", "reason": "Has " + secret}},
+		{"PUT", recommendPath(ticketID), map[string]any{"decision": "accept", "knowledge_id": book.ID, "lesson": "Validate rollback.", "source_summary": "Has " + secret}},
 		{"POST", "/api/knowledge/learnings/" + ticketID + "/dismiss", map[string]any{"reason": "Has " + secret}},
 		{"POST", "/api/knowledge/learnings/" + ticketID + "/accept", map[string]any{"knowledge_id": book.ID, "lesson": "Use " + secret}},
 	} {

@@ -165,6 +165,9 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../knowledge/learning_cleanup.go", "recordDismissal", "FOR KEY SHARE", "events.Append("},
 		{"../knowledge/learning_cleanup.go", "cleanupLegacyItem", "authz.LockProjectWrite(", "lockLearning("},
 		{"../knowledge/learning_cleanup.go", "cleanupLegacyItem", "requireCleanupActor(", "recordDismissal("},
+		{"../knowledge/learning_draft.go", "draftLearning", "fenceLearningWrite(", "rules.PrepareWrite("},
+		{"../knowledge/learning_draft.go", "draftLearning", "FOR KEY SHARE", "rules.AppendLearningRule("},
+		{"../knowledge/learning_draft.go", "draftLearning", "rules.AppendLearningRule(", "events.Append("},
 		// Autopilot settings and project overrides (AEON-696) enter the shared
 		// project fence before the settings row; the event is appended after it.
 		{"../statusautopilot/settings.go", "settings", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_settings"},
