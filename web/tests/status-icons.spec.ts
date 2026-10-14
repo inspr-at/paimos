@@ -8,7 +8,8 @@ import { controlStability } from './control-stability'
 import { statusFill } from '../src/lib/statusMotion'
 
 // The UI config runs specs with reduced motion; motion is what this spec is about (the reduced-motion test emulates it).
-test.use({ reducedMotion: 'no-preference' })
+// 2× pixels, so the screenshots and mid-animation frames saved for the visual check show the icons' detail.
+test.use({ reducedMotion: 'no-preference', deviceScaleFactor: 2 })
 
 type OneOffCall = { part: string; status: string; delay: number; duration: number; easing: string; fill: string; props: string[] }
 
@@ -144,8 +145,7 @@ for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
   })
 }
 
-// 4× pixels, so the mid-animation frames saved for the visual check show the icon's detail.
-test.describe(() => { test.use({ deviceScaleFactor: 4 }); for (const theme of ['light', 'dark']) {
+for (const theme of ['light', 'dark']) {
   test(`AEON-1362 every one-off in the status menu (${theme}): timings, marks only, base never blanks, ends static, keyboard`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     await instrument(page)
@@ -218,7 +218,7 @@ test.describe(() => { test.use({ deviceScaleFactor: 4 }); for (const theme of ['
     await page.screenshot({ path: testInfo.outputPath(`status-icons-menu-${theme}.png`) })
     expect(errors).toEqual([])
   })
-} })
+}
 
 test('AEON-1362 reduced motion: nothing slides and no one-off plays', async ({ page }, testInfo) => {
   await instrument(page)
