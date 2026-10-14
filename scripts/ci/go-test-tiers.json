@@ -4994,6 +4994,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeRoleRecipesRequireSeparateAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeWorkerDispatchFrozenEnvelopeAndReceipt","tier":"ESSENTIAL"}
@@ -7979,6 +7981,10 @@
     {"kind":"go","package":"internal/nativereceipts","name":"TestPrivateStoreBoundsAndRejectsSymlinkOrSharedState","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestReceiptEvidenceRejectsWrongInputAndFalseExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeroles","name":"TestNativeRoleResumeExitAndReceiptEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeroles","name":"TestNativeRoleSwitchFencesAndSingleWriter","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
