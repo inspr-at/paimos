@@ -75,6 +75,7 @@ type writerFixture struct {
 	unknownExit, unknownPTY            bool
 	prepareErr, commitErr              error
 	tweak                              func(*nativecontract.LaunchSpec)
+	identityTweak                      func(*nativecontract.NativeIdentity)
 	pty                                *testPTY
 	auth                               *testAuthority
 }
@@ -152,7 +153,11 @@ func (f *writerFixture) start(s nativecontract.LaunchSpec) nativecontract.Native
 	f.active++
 	f.starts++
 	f.maximum = max(f.maximum, f.active)
-	return nativecontract.NativeIdentity{RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 100 + f.starts, StartedAt: time.Now(), ProcessIdentityDigest: strings.Repeat(string(rune('a'+f.starts)), 64)}
+	i := nativecontract.NativeIdentity{Provider: "fixture", NativeSessionRef: s.ResumeRef, RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 100 + f.starts, StartedAt: time.Now(), ProcessIdentityDigest: strings.Repeat(string(rune('a'+f.starts)), 64)}
+	if f.identityTweak != nil {
+		f.identityTweak(&i)
+	}
+	return i
 }
 func (f *writerFixture) OpenPTY(_ context.Context, s nativecontract.PTYLaunchSpec) (nativecontract.PTYRuntime, error) {
 	f.pty = &testPTY{fixture: f, identity: f.start(s.LaunchSpec)}
@@ -245,7 +250,7 @@ func takeoverFixture(t *testing.T) (*Manager, *writerFixture, Caller, *testClock
 	s.Tools = nativecontract.ToolCapability{Binding: b, Token: bytes.Repeat([]byte{1}, 32), ExpiresAt: now.Add(time.Hour)}
 	c := Caller{Actor: nativecontract.Actor{TenantID: b.TenantID, PrincipalID: uuid.NewString(), PrincipalKind: "person", OwnerPersonID: uuid.NewString(), GrantID: policy.GrantID, GrantRevision: 1}, ClientID: uuid.NewString(), Capability: "fixture-control-proof", Local: true}
 	a := &testAuthority{capability: c.Capability, access: Access{Controller: nativecontract.ControllerView{ActorID: c.Actor.PrincipalID, ClientID: c.ClientID, ControllerID: uuid.NewString(), Epoch: uuid.NewString()}, Deadline: now.Add(30 * time.Second)}}
-	f := &writerFixture{spec: s, active: 1, starts: 1, maximum: 1, callbacks: 3, inputOpen: true, auth: a, identity: nativecontract.NativeIdentity{RuntimeEpoch: b.RuntimeEpoch, PID: 100, StartedAt: now, ProcessIdentityDigest: strings.Repeat("a", 64)}}
+	f := &writerFixture{spec: s, active: 1, starts: 1, maximum: 1, callbacks: 3, inputOpen: true, auth: a, identity: nativecontract.NativeIdentity{Provider: "fixture", NativeSessionRef: s.ResumeRef, RuntimeEpoch: b.RuntimeEpoch, PID: 100, StartedAt: now, ProcessIdentityDigest: strings.Repeat("a", 64)}}
 	q := &testQualification{}
 	m, err := New(Config{Current: s, State: "running", Revision: 1, Coordinator: f, Authority: a, Qualification: q, PTY: f, Structured: f, Clock: clock})
 	if err != nil {
@@ -441,6 +446,32 @@ func TestTakeoverFailedRebindKeepsPossibleFork(t *testing.T) {
 	active, starts, maximum := f.counts()
 	if active != 1 || starts != 2 || maximum != 1 {
 		t.Fatal("failed rebind admitted another writer")
+	}
+}
+func TestTakeoverLaunchIdentityMustMatchConversationAndFreshProof(t *testing.T) {
+	for _, change := range []string{"conversation", "provider", "process-proof"} {
+		t.Run(change, func(t *testing.T) {
+			m, f, c, _, _ := takeoverFixture(t)
+			f.identityTweak = func(i *nativecontract.NativeIdentity) {
+				switch change {
+				case "conversation":
+					i.NativeSessionRef = "foreign-conversation"
+				case "provider":
+					i.Provider = "foreign-provider"
+				case "process-proof":
+					i.ProcessIdentityDigest = f.identity.ProcessIdentityDigest
+				}
+			}
+			_, err := m.Take(context.Background(), c, takeRequest(m, f))
+			requireReason(t, err, nativecontract.ReasonOwnershipUnconfirmed)
+			if m.state != "recovering" || m.pty == nil {
+				t.Fatal("mismatched possible writer was forgotten")
+			}
+			active, starts, maximum := f.counts()
+			if active != 1 || starts != 2 || maximum != 1 {
+				t.Fatal("mismatched identity admitted another writer")
+			}
+		})
 	}
 }
 

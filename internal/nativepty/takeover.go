@@ -251,13 +251,16 @@ func (m *Manager) Take(ctx context.Context, caller Caller, in nativecontract.Tak
 		if !m.config.Clock.Now().Before(access.Deadline) || !m.config.Clock.Now().Before(in.ExpiresAt) {
 			return refuse(nativecontract.ReasonControllerExpired)
 		}
+		if !m.config.Clock.Now().Before(m.spec.Policy.ExpiresAt) {
+			return refuse(nativecontract.ReasonGrantExpired)
+		}
 		m.state, m.holder, transitioning = "quiescing", nil, true
 		var err error
 		writer, err = m.config.Coordinator.Quiesce(ioCtx, cloneBinding(m.spec.Binding), "take")
 		if err != nil {
 			return err
 		}
-		if !writer.Binding.Equal(m.spec.Binding) || !validIdentity(writer.Identity, m.spec.Binding) {
+		if !writer.Binding.Equal(m.spec.Binding) || !validConversationIdentity(writer.Identity, m.spec) {
 			return refuse(nativecontract.ReasonIdentityMismatch)
 		}
 		exit, err = m.config.Coordinator.CloseStructured(ioCtx, writer)
@@ -295,7 +298,7 @@ func (m *Manager) Take(ctx context.Context, caller Caller, in nativecontract.Tak
 		if openErr != nil {
 			return openErr
 		}
-		if m.pty == nil || !validIdentity(m.pty.Identity(), spec.Binding) {
+		if m.pty == nil || !validSuccessorIdentity(m.pty.Identity(), writer.Identity, spec) {
 			return refuse(nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		return nil
@@ -328,6 +331,14 @@ func validIdentity(identity nativecontract.NativeIdentity, binding nativecontrac
 		}
 	}
 	return true
+}
+func validConversationIdentity(identity nativecontract.NativeIdentity, spec nativecontract.LaunchSpec) bool {
+	return validIdentity(identity, spec.Binding) && identity.Provider != "" &&
+		(identity.NativeSessionRef == spec.ResumeRef || identity.NativeThreadRef == spec.ResumeRef)
+}
+func validSuccessorIdentity(identity, predecessor nativecontract.NativeIdentity, spec nativecontract.LaunchSpec) bool {
+	return validConversationIdentity(identity, spec) && identity.Provider == predecessor.Provider &&
+		identity.ProcessIdentityDigest != predecessor.ProcessIdentityDigest && identity.StartedAt.After(predecessor.StartedAt)
 }
 func (m *Manager) confirm(ctx context.Context, writer nativecontract.WriterRecord, exit nativecontract.ExitEvidence) error {
 	if !exit.RootExited || !exit.GroupAbsent || exit.ObservedAt.IsZero() || exit.ProcessIdentityDigest != writer.Identity.ProcessIdentityDigest {
@@ -472,7 +483,7 @@ func (m *Manager) Return(ctx context.Context, caller Caller, in nativecontract.R
 		if openErr != nil {
 			return openErr
 		}
-		if m.structured == nil || !validIdentity(m.structured.Identity(), spec.Binding) {
+		if m.structured == nil || !validSuccessorIdentity(m.structured.Identity(), writer.Identity, spec) {
 			return refuse(nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		return nil

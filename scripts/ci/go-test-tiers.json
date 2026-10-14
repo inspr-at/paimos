@@ -7986,6 +7986,8 @@
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverFailedRebindKeepsPossibleFork","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverLaunchIdentityMustMatchConversationAndFreshProof","reason":"AEON-1288: retain possible forks with wrong conversation/provider or reused process proof","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverLeaseExpiryDuringQualificationPreventsFork","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverRechecksAuthorityAfterExit","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
