@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -209,11 +210,31 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 				// Check an actual control handler with this authenticated runtime.
 				mux := http.NewServeMux()
 				harness.New(f.d.App).Mount(mux)
-				r := httptest.NewRequest("POST", "/api/projects/"+f.project+"/harness-sessions/"+claimed.ExpectedBinding.HarnessSessionID+"/controls/interrupt", strings.NewReader(`{}`)).WithContext(f.daemonCtx(t))
-				w := httptest.NewRecorder()
-				mux.ServeHTTP(w, r)
-				if w.Code != http.StatusForbidden {
-					t.Fatalf("ordinary runtime reached harness control: %d %s", w.Code, w.Body.String())
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), f.agent)))
+				}))
+				t.Cleanup(server.Close)
+				var prefix string
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT prefix FROM agent_keys WHERE id=$1`, f.agent.KeyID).Scan(&prefix); err != nil {
+					t.Fatal(err)
+				}
+				r, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/api/projects/"+f.project+"/harness-sessions/"+claimed.ExpectedBinding.HarnessSessionID+"/controls/interrupt", strings.NewReader(`{}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_"+strings.Repeat("r", 64))
+				response, err := server.Client().Do(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				raw, err := io.ReadAll(io.LimitReader(response.Body, 8193))
+				var denial struct {
+					Error string `json:"error"`
+				}
+				if err != nil || len(raw) > 8192 || json.Unmarshal(raw, &denial) != nil ||
+					response.StatusCode != http.StatusForbidden || denial.Error != "key scope required: harness.control" {
+					t.Fatalf("ordinary control route did not refuse its exact key ceiling: HTTP %d %s (%v)", response.StatusCode, raw, err)
 				}
 				return
 			}
