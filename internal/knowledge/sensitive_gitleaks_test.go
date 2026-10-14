@@ -26,11 +26,11 @@ func providerForms() map[string]string {
 // the same incident without one is nominated.
 func TestSensitiveProviderFormsNotStored(t *testing.T) {
 	f := setup(t)
-	control := commentLearningID(f.ticket, addComment(t, f, f.ticket, "Incident: the deploy failed because the provider token expired"))
+	control := commentLearningID(f.ticket, addComment(t, f, f.ticket, "#process-learning Incident: the deploy failed because the provider token expired"))
 	forms := providerForms()
 	keys := map[string]string{}
 	for id, token := range forms {
-		keys[id] = commentLearningID(f.ticket, addComment(t, f, f.ticket, "Incident: "+token))
+		keys[id] = commentLearningID(f.ticket, addComment(t, f, f.ticket, "#process-learning Incident: "+token))
 	}
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
@@ -43,9 +43,14 @@ func TestSensitiveProviderFormsNotStored(t *testing.T) {
 			t.Errorf("%s stored (excerpt contains token: %v)", id, strings.Contains(excerpt, forms[id]))
 		}
 	}
-	w := call(t, f, f.b, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
+	scout := scopedAgent(t, f, "Provider guard scout")
+	w := call(t, f, scout, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
 	expect(t, w, 200)
-	for _, item := range decode[LearningPage](t, w).Items {
+	page := decode[LearningPage](t, w)
+	if !hasLearning(page.Items, control) {
+		t.Fatal("control lesson missing from the agent inbox")
+	}
+	for _, item := range page.Items {
 		for id, token := range forms {
 			if strings.Contains(item.Text, token) {
 				t.Errorf("%s visible in the learning inbox", id)

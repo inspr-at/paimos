@@ -312,7 +312,7 @@ func TestPreparedLearningRuleDraft(t *testing.T) {
 	set := rulesSet(t, h, f.a, layer.ID, "Prepared recovery rules")
 	agent := scopedAgent(t, f, "Rule scout")
 	agent.KeyCreatorID = f.a.ID
-	agent.Scopes = append(agent.Scopes, "rules.read")
+	agent.Scopes = append(agent.Scopes, "rules.read", "nodes.read")
 	w := call(t, f, agent, "PUT", recommendPath(nodeLearningID(f.ticket)), map[string]any{"decision": "accept", "knowledge_id": set.ID, "rule_layer_id": layer.ID, "lesson": "Rehearse rollback before releasing.", "source_summary": "The incident showed recovery was untested."})
 	expect(t, w, 200)
 	rec := decode[Recommendation](t, w)
