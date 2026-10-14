@@ -5,7 +5,7 @@ import { onReset } from '../lib/position'
 import { onAccessRevalidate } from '../lib/authz'
 import { getNode, type ListItem } from '../lib/api'
 import { rowStore } from '../lib/rowStore'
-import { addToQueue, movedQueue, readQueue, removeFromQueue, moveQueue, resetQueue, queueReadiness, undoQueueAddition, staleProgress, staleWork, type QueueUndoToken, type QueueReadiness, type QueueSnapshot, type QueueTarget } from '../lib/workQueue'
+import { addToQueue, movedQueue, readQueue, removeFromQueue, moveQueue, resetQueue, queueReadiness, readyGaps, undoQueueAddition, staleProgress, staleWork, type QueueUndoToken, type QueueReadiness, type QueueSnapshot, type QueueTarget } from '../lib/workQueue'
 
 export const useWorkQueue = defineStore('workQueue', () => {
   // Read projections only; order and queue membership always come from the run service.
@@ -45,7 +45,9 @@ export const useWorkQueue = defineStore('workQueue', () => {
   }
   function gaps(row: ListItem) {
     const saved = advice[row.id]
-    return saved?.revision === row.updated_at ? saved.value.missing.filter(gap => gap !== 'status') : []
+    // Provisional advice only: Queue always checks the current definition on
+    // the server, whose answer (including an empty definition) replaces this.
+    return saved?.revision === row.updated_at ? saved.value.missing.filter(gap => gap !== 'status') : readyGaps(row)
   }
   function checkReadiness(row: ListItem): Promise<QueueReadiness> {
     const started = epoch, revision = row.updated_at, key = `${row.id}:${revision}`

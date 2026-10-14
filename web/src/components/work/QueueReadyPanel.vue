@@ -6,6 +6,7 @@ import { can } from '../../lib/authz'
 import { conditionWords, entryFailure, entryLabel, entryStatus, tickEntryCheck, type EntryCheck, type EntryFailure, type EntryRecord } from '../../lib/entryChecks'
 import { useEntryChecks } from '../../lib/useEntryChecks'
 import { rowStore } from '../../lib/rowStore'
+import { firstBenefitGap, firstPillGap } from '../../lib/ticketBenefits'
 import { applyQueueEstimate, queueReadiness, type QueueWireEntry } from '../../lib/workQueue'
 import { absoluteTime, statusMeta } from '../../lib/work'
 import { isSettingsField, settingsSubmitKey } from '../../lib/settingsOverlays'
@@ -32,6 +33,7 @@ const person = computed(() => session.identity?.principal.kind === 'person')
 const readonly = computed(() => props.mode === 'record')
 const busy = ref(false), error = ref(''), fixing = ref<EntryCheck | null>(null), text = ref(''), reason = ref(''), anyway = ref(props.mode === 'status'), reasonField = ref<HTMLTextAreaElement>()
 const releaseFields = ref<Record<string, unknown>>({ ...props.row.fields })
+const releaseInvalidKey = ref('')
 const originId = props.row.id, originActor = session.identity?.principal.id, originTenant = session.identity?.tenant.id
 const alive = () => props.row.id === originId && session.identity?.principal.id === originActor && session.identity?.tenant.id === originTenant
 let disposed = false
@@ -68,7 +70,7 @@ async function run(action: () => Promise<void>) {
 async function fix(check: EntryCheck) {
   if (!canEdit.value || readonly.value) return
   if (check.id === 'release_copy_set' || check.id === 'pills_benefits_set') {
-    releaseFields.value = { ...current.value.fields }; fixing.value = check; return
+    releaseFields.value = { ...current.value.fields }; releaseInvalidKey.value = ''; fixing.value = check; return
   }
   if (check.id !== 'estimate_set') {
     fixing.value = check
@@ -81,6 +83,9 @@ async function saveFix() {
   if (!fixing.value || !canEdit.value) return
   if (fixing.value.id === 'release_copy_set' || fixing.value.id === 'pills_benefits_set') {
     const revision = current.value.updated_at, fields = { ...releaseFields.value }
+    const gap = firstPillGap(fields) ?? (fields.hide_from_release_notes === true || fields.no_release_needed === true ? null : firstBenefitGap(fields))
+    if (gap) { releaseInvalidKey.value = gap.key; return }
+    releaseInvalidKey.value = ''
     await run(async () => { await updateNode(originId, { fields }, { ifUnmodifiedSince: revision }); await refresh(); if (alive()) fixing.value = null }); return
   }
   if (!text.value.trim()) return
@@ -94,11 +99,11 @@ async function tick(check: EntryCheck) {
 }
 function openReason() { anyway.value = true; void nextTick(() => reasonField.value?.focus()) }
 async function move() {
-  if (!person.value || !canEdit.value || readonly.value || !reason.value.trim()) return
+  if (!person.value || !canEdit.value || readonly.value || !block.value || checks.loading.value || checks.error.value || (failed.value.length && !reason.value.trim())) return
   const revision = current.value.updated_at, value = reason.value.trim(), state = props.toStatus, sent = rowStore.mark()
   await run(async () => {
     try {
-      const node = await updateNode(originId, { state, override_reason: value }, { ifUnmodifiedSince: revision })
+      const node = await updateNode(originId, { state, ...(failed.value.length ? { override_reason: value } : {}) }, { ifUnmodifiedSince: revision })
       if (!alive() || disposed) return
       rowStore.wrote(node, sent)
       toast(`${props.row.key} is now ${statusMeta(node.state).label}`); emit('changed'); emit('close', true)
@@ -139,11 +144,11 @@ function keys(event: KeyboardEvent) {
           <RouterLink v-if="checks.data.value?.definition" :to="sourcePath" class="nr-source">{{ source }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
           <div v-if="!readonly" class="nr-actions"><button v-if="person && canEdit && block?.total" type="button" class="link-btn" :aria-expanded="anyway" @click="openReason">Move to {{ statusMeta(toStatus).label }} anyway…</button><span v-else-if="!person && failed.length" class="nr-agent"><AppIcon name="lock" :size="12" />Agents move it only when every check passes.</span><button v-if="mode === 'queue'" type="button" class="btn sm primary queue-submit" :disabled="busy || checks.loading.value || !block || failed.length > 0 || !can('run.create', projectId)" @click="add"><AppIcon name="queue-add" :size="13" />Queue</button></div>
         </div>
-        <form v-if="fixing && !readonly" class="nr-form" @submit.prevent="saveFix"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="fixing = null">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || (!text.trim() && fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set')">Save <KeyCap k="mod" /><KeyCap k="enter" /></button></div><TicketBenefits v-if="fixing.id === 'release_copy_set' || fixing.id === 'pills_benefits_set'" :fields="releaseFields" editing :disabled="busy" @change="(key, value) => releaseFields[key] = value" /><label v-else :for="`entry-fix-${row.id}`">{{ fixing.id === 'acceptance_present' ? 'Acceptance criteria' : 'Name the blocker' }}</label><textarea v-if="fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set'" :id="`entry-fix-${row.id}`" v-model="text" class="field" rows="3" :disabled="busy" /></form>
-        <form v-if="anyway && person && canEdit && !readonly" class="nr-form" @submit.prevent="move"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="anyway = false">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || !reason.trim() || checks.loading.value">Move to {{ statusMeta(toStatus).label }} <KeyCap k="mod" /><KeyCap k="enter" /></button></div><label :for="`entry-reason-${row.id}`">Why move it now?</label><textarea :id="`entry-reason-${row.id}`" ref="reasonField" v-model="reason" class="field" rows="3" maxlength="500" :disabled="busy" /><p class="nr-hint">Required. It’s logged in {{ row.key }}’s activity with the missing checks: {{ failed.map(c => c.label).join(', ') }}.</p></form>
+        <form v-if="fixing && !readonly" class="nr-form" @submit.prevent="saveFix"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="fixing = null">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || (!text.trim() && fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set')">Save <KeyCap k="mod" /><KeyCap k="enter" /></button></div><TicketBenefits v-if="fixing.id === 'release_copy_set' || fixing.id === 'pills_benefits_set'" :fields="releaseFields" editing :disabled="busy" :invalid-key="releaseInvalidKey" @change="(key, value) => releaseFields[key] = value" /><label v-else :for="`entry-fix-${row.id}`">{{ fixing.id === 'acceptance_present' ? 'Acceptance criteria' : 'Name the blocker' }}</label><textarea v-if="fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set'" :id="`entry-fix-${row.id}`" v-model="text" class="field" rows="3" :disabled="busy" /></form>
+        <form v-if="anyway && person && canEdit && !readonly" class="nr-form" @submit.prevent="move"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="anyway = false">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || !block || checks.loading.value || !!checks.error.value || (failed.length > 0 && !reason.trim())">Move to {{ statusMeta(toStatus).label }} <KeyCap k="mod" /><KeyCap k="enter" /></button></div><label :for="`entry-reason-${row.id}`">Why move it now?</label><textarea :id="`entry-reason-${row.id}`" ref="reasonField" v-model="reason" class="field" rows="3" maxlength="500" :disabled="busy" /><p class="nr-hint"><template v-if="failed.length">Required. It’s logged in {{ row.key }}’s activity with the missing checks: {{ failed.map(c => c.label).join(', ') }}.</template><template v-else>Every check passes. No override reason is needed.</template></p></form>
         <p v-if="error" role="alert" class="error">{{ error }}</p>
       </div>
-      <div v-if="!readonly" class="nr-phone-actions"><button type="button" class="btn" @click="emit('close', true)">Cancel</button><button v-if="fixing" type="button" class="btn primary" :disabled="busy || (!text.trim() && fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set')" @click="saveFix">Save <KeyCap k="mod" /><KeyCap k="enter" /></button><button v-else-if="mode === 'queue'" type="button" class="btn primary" :disabled="busy || checks.loading.value || !block || failed.length > 0 || !can('run.create', projectId)" @click="add">Queue</button><button v-else-if="person && canEdit" type="button" class="btn primary" :disabled="busy || !reason.trim() || checks.loading.value" @click="move">Move to {{ statusMeta(toStatus).label }}</button></div>
+      <div v-if="!readonly" class="nr-phone-actions"><button type="button" class="btn" @click="emit('close', true)">Cancel</button><button v-if="fixing" type="button" class="btn primary" :disabled="busy || (!text.trim() && fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set')" @click="saveFix">Save <KeyCap k="mod" /><KeyCap k="enter" /></button><button v-else-if="mode === 'queue'" type="button" class="btn primary" :disabled="busy || checks.loading.value || !block || failed.length > 0 || !can('run.create', projectId)" @click="add">Queue</button><button v-else-if="person && canEdit" type="button" class="btn primary" :disabled="busy || !block || checks.loading.value || !!checks.error.value || (failed.length > 0 && !reason.trim())" @click="move">Move to {{ statusMeta(toStatus).label }}</button></div>
     </div>
   </FloatingPanel>
 </template>

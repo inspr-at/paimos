@@ -345,6 +345,32 @@ func errorMessage(payload []byte) string {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(payload, &wrap) == nil && wrap.Error != "" {
+		// Keep the server's explicit failed checks readable in CLI refusals.
+		// Render only this public contract, with bounded output, never raw JSON.
+		if wrap.Error == "entry_checks_failed" && len(payload) <= 65536 {
+			var details struct {
+				Failed []struct {
+					ID     string `json:"id"`
+					Label  string `json:"label"`
+					Reason string `json:"reason"`
+				} `json:"failed"`
+			}
+			if json.Unmarshal(payload, &details) != nil || len(details.Failed) > 32 {
+				return wrap.Error
+			}
+			parts := []string{wrap.Error}
+			remaining := 4096 - len(wrap.Error)
+			for _, check := range details.Failed {
+				part := check.ID + " (" + check.Label + "): " + check.Reason
+				if len(part)+2 > remaining {
+					parts = append(parts, "additional check details omitted")
+					break
+				}
+				parts = append(parts, part)
+				remaining -= len(part) + 2
+			}
+			return strings.Join(parts, "; ")
+		}
 		return wrap.Error
 	}
 	if wrap.Message != "" {

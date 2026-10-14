@@ -76,7 +76,9 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 
 		"recurrences/engine.go:syncSubscriptionPublications": "recurrence.lock",
 
-		"nodes/bulk.go:applyBulk":                     "pairing.Lock",
+		// AEON-1315 pre-acquires the sorted builder advisory batch before rows.
+		// The scanner's "tree" label covers this seed-0 builder advisory.
+		"nodes/bulk.go:applyBulk":                     "pairing.Lock tree",
 		"nodes/module.go:lockTree":                    "tree.Mutation",
 		"nodes/causal_undo.go:undoWorkChild":          "project.Write",
 		"nodes/vocabulary.go:handlePutVocabulary":     "tenant:NO KEY UPDATE",

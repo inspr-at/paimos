@@ -6,6 +6,7 @@ import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMo
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
+import { entryStatus, requestEntryPanel, type EntryChecks } from '../lib/entryChecks'
 import { benefitGateError, benefitSkip, benefitStepSummary, completionFields, needsBenefitPrompt, skippedStatusLabel } from '../lib/doneGate'
 import { can, ensurePermissions } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
@@ -1015,10 +1016,18 @@ function closeStatus(restore: boolean) {
   statusMenu.value = null
   if (restore) menu?.anchor.focus()
 }
-function chooseStatus(state: string) {
+function chooseStatus(state: string, checks: EntryChecks | null = null) {
   const menu = statusMenu.value
   statusMenu.value = null
   if (!menu) return
+  const current = rowStore.latest(menu.row.id) ?? menu.row
+  const block = checks?.blocks.find(b => b.to_status === entryStatus(state))
+  // Use the menu's current advisory snapshot to open the one checklist before
+  // changing the row. The mutation still enforces the live definition.
+  if (checks?.node_id === current.id && checks.revision === current.updated_at && block?.checks.some(c => c.applicable && !c.passed)) {
+    requestEntryPanel({ row: current, toStatus: state, anchor: menu.anchor })
+    return
+  }
   void list.setStatus(menu.row, state).then(changed => { if (changed) { void projects.load(true); outline.refreshStatsFor(menu.row.id) } })
   if (menu.from === 'panel') menu.anchor.focus()
   else table.value?.focusGrid()

@@ -26,11 +26,11 @@ const filled = computed(() => languages.filter(language => text(`pill_${language
 const guidance = computed(() => {
   if (props.editing) return props.done
     ? `${completedGapOnOpen ? 'This completed ticket has incomplete benefit fields. ' : ''}Each non-empty pill needs 2–4 words to save. The project’s entry checks determine what is needed before Done.`
-    : 'Each non-empty pill needs 2–4 words to save. The project’s entry checks determine what is needed before Done.'
+    : 'Each non-empty pill needs 2–4 words to save. Before Done, the project’s entry checks determine whether both languages and benefits are required.'
   if (props.parent || !issues.value.length) return ''
   return props.done
     ? 'This completed ticket has incomplete benefit fields. The project’s entry checks determine what is needed before Done.'
-    : 'Release text: a 2–4 word pill and a plain benefit, in both languages.'
+    : 'Before Done, the project’s entry checks determine whether release text is required: a 2–4 word pill and a plain benefit, in both languages.'
 })
 const raw = (key: string) => typeof props.fields[key] === 'string' ? props.fields[key] as string : ''
 const countLabel = (value: string) => { const n = pillWords(value); return n ? `${n} ${n === 1 ? 'word' : 'words'} of 2–4` : '2–4 words' }

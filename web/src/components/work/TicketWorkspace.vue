@@ -47,6 +47,7 @@ import TicketEntryLine from './TicketEntryLine.vue'
 import TicketBenefits from './TicketBenefits.vue'
 import TicketExtensions from './TicketExtensions.vue'
 import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap, firstPillGap } from '../../lib/ticketBenefits'
+import { useEntryChecks } from '../../lib/useEntryChecks'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -98,6 +99,7 @@ const item = computed(() => {
 })
 // Set below from the editors: while one is open, changes by others wait.
 const liveBusy = ref(false)
+const entryChecks = useEntryChecks(() => item.value)
 const ticket = useTicket(item, {
   names: props.names,
   onRemoved: removed => emit('removed', removed),
@@ -325,8 +327,12 @@ async function saveEdit() {
   for (const [key, value] of Object.entries(changed)) { if (value === undefined) delete fields[key]; else fields[key] = value }
   // The benefit editor is already on this form. Point at the first incomplete field.
   const pillGap = ['ticket', 'work'].includes(target.kind_slug) ? firstPillGap(fields) : null
-  if (pillGap) {
-    const gap = pillGap ?? firstBenefitGap(fields)
+  const schema = rowStore.kindSchema(target.kind_id)
+  const configuredCopy = entryChecks.data.value?.node_id === target.id && entryChecks.data.value.revision === target.updated_at && entryChecks.data.value.blocks.find(b => b.to_status === 'done')?.checks.some(c => c.applicable && ['release_copy_set', 'pills_benefits_set'].includes(c.id))
+  const completing = !completedTicketState(target.state, schema) && completedTicketState(draft.state, schema)
+  const copyGap = configuredCopy && completing && fields.hide_from_release_notes !== true && fields.no_release_needed !== true ? firstBenefitGap(fields) : null
+  if (pillGap || copyGap) {
+    const gap = pillGap ?? copyGap
     // Pill errors already have an in-place word count and invalid outline.
     // Keep the guidance in place so focusing the field never moves controls.
     benefitNotice.value = pillGap ? '' : gap?.line ?? 'A 2–4 word pill and a benefit, in both languages, are required.'

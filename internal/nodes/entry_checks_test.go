@@ -26,6 +26,39 @@ func TestEntryChecksEnforcementOverrideAndOwnership(t *testing.T) {
 	definition := `{"expected_revision":null,"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"no_active_build"}],"qa":[{"id":"ci_green_latest_main"},{"id":"review_ok_cross_family"},{"id":"visual_ok"}],"done":[{"id":"release_copy_set"},{"id":"manual:release-reviewed","label":"Release notes reviewed"}]}}`
 	code, raw := call(t, &p, "PUT", "/api/projects/"+project.ID+"/definitions", definition)
 	d := decode[workqueue.EntryDefinition](t, code, raw, 200)
+	t.Run("bulk-builder-fence-before-node-rows", func(t *testing.T) {
+		// Risk: a bulk writer holding node rows while it waits for admission
+		// deadlocks a direct builder that holds the admission lock first.
+		pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool { return strings.Contains(sql, "aeon-builder:") })
+		module := New(pool, SQLWriter{}).(*Module)
+		type outcome struct {
+			result bulkResult
+			err    error
+		}
+		done := make(chan outcome, 1)
+		state := "in_progress"
+		go func() {
+			result, err := module.applyBulk(tenant.WithPrincipal(ctx, p), p, bulkPlan{ids: []string{n.ID}, state: &state})
+			done <- outcome{result, err}
+		}()
+		barrier.Wait(t, ctx)
+		row, err := adminPool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer row.Rollback(t.Context())
+		if _, err := row.Exec(ctx, `SELECT id FROM nodes WHERE id=$1 FOR UPDATE NOWAIT`, n.ID); err != nil {
+			t.Fatalf("bulk acquired the node row before its builder fence: %v", err)
+		}
+		if err := row.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		barrier.Release()
+		got := dbtest.Await(t, ctx, done)
+		if got.err != nil || len(got.result.Items) != 0 || len(got.result.Skipped) != 1 || got.result.Skipped[0].Code != "entry_checks_failed" {
+			t.Fatalf("bulk did not retain the entry refusal: %+v, %v", got.result, got.err)
+		}
+	})
 	code, raw = call(t, &agent, "PUT", "/api/projects/"+project.ID+"/definitions", definition)
 	if code != 403 {
 		t.Fatalf("agent changed governance: %d %s", code, raw)

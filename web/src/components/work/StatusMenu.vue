@@ -5,14 +5,14 @@ import { normaliseState, statusMeta, statusOptions } from '../../lib/work'
 import { getStatusHelp } from '../../lib/api'
 import { defaultStatusHelp, statusHint } from '../../lib/statusDefinitions'
 import { openStatusHelp } from '../../lib/statusHelp'
-import { entryMenuCount } from '../../lib/entryChecks'
+import { entryMenuCount, type EntryChecks } from '../../lib/entryChecks'
 import { useEntryChecks } from '../../lib/useEntryChecks'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import StatusIcon from './StatusIcon.vue'
 
 const props = defineProps<{ anchor: HTMLElement | null; current: string; knownStates: string[]; ticketKey: string; nodeId?: string; revision?: string; projectId?: string; derived?: boolean; childrenCount?: number }>()
-const emit = defineEmits<{ choose: [state: string]; close: [restoreFocus: boolean] }>()
+const emit = defineEmits<{ choose: [state: string, checks: EntryChecks | null]; close: [restoreFocus: boolean] }>()
 const checks = useEntryChecks(() => props.nodeId ? { id: props.nodeId, updated_at: props.revision ?? '' } : null)
 const count = (state: string) => entryMenuCount(checks.data.value, props.current, state)
 const list = ref<HTMLElement>()
@@ -46,7 +46,7 @@ function move(event: KeyboardEvent) {
     <div v-else ref="list" class="menu" role="menu" :aria-label="`Status of ${ticketKey}`" @keydown="move">
       <template v-for="(option, index) in options" :key="option.value">
       <span v-if="option.meta.key === 'cancelled'" class="menu-sep" role="separator" aria-label="Exits" />
-      <button type="button" role="menuitemradio" class="menu-item" :aria-checked="normaliseState(option.value) === current" :data-autofocus="normaliseState(option.value) === current ? '' : undefined" :data-tip="hint(option.value)" data-tip-side="end" :aria-describedby="`${id}-hint-${index}`" @click="emit('choose', option.value)">
+      <button type="button" role="menuitemradio" class="menu-item" :aria-checked="normaliseState(option.value) === current" :data-autofocus="normaliseState(option.value) === current ? '' : undefined" :data-tip="hint(option.value)" data-tip-side="end" :aria-describedby="`${id}-hint-${index}`" @click="emit('choose', option.value, checks.data.value)">
         <StatusIcon :state="option.value" />
         <span class="label">{{ option.meta.label }}</span>
         <span v-if="count(option.value)" class="entry-count"><AppIcon v-if="count(option.value)?.overridden" name="skip" :size="12" />{{ count(option.value)?.text }}</span>

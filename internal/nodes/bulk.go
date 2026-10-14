@@ -339,16 +339,20 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			}
 			plan.assignee = &canonical
 		}
-		targets, err := loadBulkTargets(ctx, tx, plan.ids)
-		if err != nil {
-			return err
-		}
 		if plan.state != nil {
-			for _, id := range plan.ids {
-				if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-builder:'||current_setting('aeon.tenant_id')||':'||$1::uuid::text,0))`, id); err != nil {
+			// Entry checks may re-enter a builder fence. Acquire the whole batch
+			// in a stable order before node rows or any refusal/status event.
+			ids := append([]string(nil), plan.ids...)
+			sort.Strings(ids)
+			for _, id := range ids {
+				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-builder:'||current_setting('aeon.tenant_id')||':'||$1::uuid::text,0))`, id); err != nil {
 					return err
 				}
 			}
+		}
+		targets, err := loadBulkTargets(ctx, tx, plan.ids)
+		if err != nil {
+			return err
 		}
 		var parent *bulkTarget
 		var parentAncestors map[string]bool

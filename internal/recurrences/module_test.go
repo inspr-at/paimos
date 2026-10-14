@@ -210,10 +210,12 @@ func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
 		legacy, incomplete bool
 	}{
 		{name: "legacy", legacy: true},
+		{name: "legacy visible", hidden: new(false), legacy: true},
 		{name: "hidden by default"},
 		{name: "explicit hidden", hidden: new(true)},
 		{name: "explicit visible", hidden: new(false)},
 		{name: "incomplete hidden", hidden: new(true), incomplete: true},
+		{name: "incomplete visible", hidden: new(false), incomplete: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setup(t)
@@ -221,6 +223,9 @@ func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
 			f.m.Mount(mux)
 			nodes.New(f.d.App, nil).Mount(mux)
 			f.handler = mux
+			// Q1 (AEON-1248): release copy is a configured entry check,
+			// with a deliberate exemption for hidden recurring work.
+			f.call(f.p, "PUT", "/api/settings/definitions", map[string]any{"expected_revision": nil, "checks": map[string]any{"done": []map[string]string{{"id": "release_copy_set"}}}}, 200)
 			in := f.input()
 			in.OverlapPolicy = "create"
 			in.Template.HideFromReleaseNotes = tc.hidden
@@ -262,12 +267,12 @@ func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
 					}
 				}
 				status := http.StatusOK
-				if tc.legacy || tc.incomplete {
-					status = http.StatusUnprocessableEntity
+				if (tc.legacy || tc.incomplete) && before.Fields["hide_from_release_notes"] != true {
+					status = http.StatusConflict
 				}
 				raw := f.call(f.p, "PATCH", "/api/nodes/"+*o.NodeID, map[string]string{"state": "done"}, status)
-				if status == http.StatusUnprocessableEntity {
-					if !strings.Contains(string(raw), `"code":"benefit_required"`) || !strings.Contains(string(raw), "benefit_de") {
+				if status == http.StatusConflict {
+					if !strings.Contains(string(raw), `"code":"entry_checks_failed"`) || !strings.Contains(string(raw), `"id":"release_copy_set"`) || !strings.Contains(string(raw), "benefit_de") {
 						t.Fatalf("wrong Done rejection: %s", raw)
 					}
 					var after struct{ State string }
