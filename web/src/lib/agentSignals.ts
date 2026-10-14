@@ -77,6 +77,41 @@ export const LOST_CONTACT = 'heartbeat_lost'
 export function problemReason(reason?: string | null) {
   return !!reason && reason !== LOST_CONTACT && /\b(error|errored|failed|failure|blocked|crash(?:ed)?|ownership lost|heartbeat lost|timeout|timed out)\b/i.test(reason.replace(/[_-]+/g, ' '))
 }
+// AEON-1285: the page never shows a stop reason as reported. A known one reads as a label
+// ("Process failed") and a short sentence with what to do; any other reads "Stopped", and
+// a failure among them reads as a failure without echoing the reporter's text.
+const STOP_WORDS: Record<string, readonly [label: string, sentence: string]> = {
+  process_failed: ['Process failed', 'The worker process failed · Retry or check the ticket'],
+  harness_crashed: ['Harness crashed', 'The harness crashed · Retry or check the ticket'],
+  ownership_lost: ['Ownership lost', 'The session lost its run · Check the run before a retry'],
+  process_exited: ['Process exited', 'The worker process exited'],
+  [LOST_CONTACT]: ['Lost contact', 'Reports stopped arriving, so the session was closed'],
+  stopped: ['Stopped', 'The session was stopped'],
+  'user requested': ['Stopped on request', 'Stopped at a person’s request'],
+  cancelled: ['Cancelled', 'The run was cancelled'],
+  canceled: ['Cancelled', 'The run was cancelled'],
+  completed: ['Completed', 'The session completed'],
+  paused: ['Paused', 'Paused with a handover'],
+  budget_exhausted: ['Budget exhausted', 'The run used up its budget'],
+  token_budget_exhausted: ['Budget exhausted', 'The run used up its token budget'],
+  turn_budget_exhausted: ['Budget exhausted', 'The run used up its turn budget'],
+  archived: ['Removed', 'The session was removed'],
+}
+const FAILED_WORDS = ['Stopped', 'The session reported a failure · Retry or check the ticket'] as const
+function stopWords(reason: string | null | undefined): readonly [string, string] | null {
+  const text = reason?.trim() ?? ''
+  if (!text) return null
+  const known = STOP_WORDS[text] ?? STOP_WORDS[text.toLowerCase()]
+  if (known) return known
+  if (/^watch daemon restarted\b/i.test(text)) return ['Stopped', 'The watching daemon restarted · Process exit unconfirmed']
+  if (/^attach confirmed exited\b/i.test(text)) return ['Process exited', 'The attached process exited']
+  if (/^attach\b.*\bunconfirmed$/i.test(text)) return ['Stopped', 'The attachment ended · Process exit unconfirmed']
+  return problemReason(text) ? FAILED_WORDS : ['Stopped', 'The session stopped']
+}
+/** The words for how a session ended: '' without a reason, "Stopped" for one it does not know. */
+export const stopReasonLabel = (reason: string | null | undefined) => stopWords(reason)?.[0] ?? ''
+/** One short sentence on how it ended and what to do; '' without a reason. */
+export const stopReasonSentence = (reason: string | null | undefined) => stopWords(reason)?.[1] ?? ''
 // AEON-437: Done is positive evidence: the worker reported all of its work AND its
 // launcher recorded a clean exit. The server derives `finished` from exactly that
 // (aeon_session_finished) and puts it in every session, live and event payload, so
@@ -113,7 +148,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     return result('pausing', [{ code: 'stop-requested', detail: 'A stop was requested; the worker has not confirmed it yet.', next: 'Wait for the worker’s stop report. A request does not prove process exit.' }], 'Stop requested')
   }
   const problems: StateReason[] = []
-  if (problemReason(evidence.stop_reason)) problems.push({ code: 'stop', detail: `Reported stop reason: ${evidence.stop_reason}`, next: 'Check the session activity and its bound ticket before starting a replacement.' })
+  if (problemReason(evidence.stop_reason)) problems.push({ code: 'stop', detail: stopReasonSentence(evidence.stop_reason), next: 'Check the session activity and its bound ticket before starting a replacement.' })
   if (!evidence.vendor_limited && ['failed', 'ownership_lost', 'blocked'].includes(evidence.run_status ?? '')) problems.push({ code: 'run', detail: `The bound run reported ${evidence.run_status!.replace(/_/g, ' ')}.`, next: 'Check the current run and its history for the failure context.' })
   if (evidence.has_problem ?? (problems.length > 0)) {
     if (!problems.length) problems.push({ code: 'reported', detail: 'The service reported a problem without a visible reason.', next: 'Refresh this session and check its run history or ask the session owner for the missing reason.' })

@@ -1268,7 +1268,8 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(session.id + "/advertised/" + model + "/" + effort), Harness: o.Harness, Model: model, Effort: effort, Status: "advertised"}}
 		}
 	}
-	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
+	// The account the harness is signed in to now, not only the one it launched with (AEON-1285).
+	putText(body, "account_label", rt.heartbeatAccountLabel(ctx, o, &session.disk, time.Now().UTC()), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)

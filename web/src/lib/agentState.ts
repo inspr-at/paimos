@@ -7,7 +7,7 @@ import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agent
 import type { HarnessSessionRow } from './agentRows.ts'
 import type { DeepReadonly } from './ledger.ts'
 
-import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
+import { DEFAULT_AGENT_STATE, STATE_LABEL, assessAgentState, stopReasonLabel, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
 export const HEARTBEAT_STALE_MS = 3 * 60_000
 // The harness by its product name: Claude Code runs Claude models (Tick, AEON-1160); accounts keep the vendor's name.
@@ -71,10 +71,45 @@ export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> |
   }
 }
 
-export function stopReasonLabel(reason: string | null | undefined) {
-  if (!reason) return ''
-  if (reason === 'heartbeat_lost') return 'Lost contact'
-  return reason.replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase())
+// How a session ended, in words (AEON-1285): never the reported code itself.
+export { stopReasonLabel, stopReasonSentence } from './agentSignals.ts'
+
+// ---------- Retried attempts (AEON-1285) ----------
+// A run family: one ticket, one owner, one role and one label but for its trailing round
+// ("…-gate-r2" and "…-gate-r3", "-fix4" and "-fix5", "-2" and "-3"). A failed attempt with a
+// newer attempt in its family was retried: it ends in favour of the next one. Read from the
+// sessions on hand, so attempts that failed before this rule fold too; nothing is written.
+export const runFamily = (label: string | null | undefined) => (label ?? '').trim().replace(/[-_](?:r|fix|round)?\d+$/i, '').toLowerCase()
+const familyKey = (s: HarnessSession) => {
+  const family = runFamily(s.display_label)
+  return family && s.ticket_node_id ? [s.project_id, s.ticket_node_id, s.owner_principal_id || s.agent_principal_id, s.role, family].join('\u0000') : ''
+}
+/** Each failed attempt that was retried, by id, with the attempt that followed it. */
+export function retriedBy<T extends { session: HarnessSession; status: SessionStatus }>(views: readonly T[]): Map<string, T> {
+  const families = new Map<string, T[]>(), seen = new Set<string>()
+  for (const view of views) {
+    const key = familyKey(view.session)
+    if (!key || seen.has(view.session.id)) continue
+    seen.add(view.session.id)
+    const family = families.get(key)
+    if (family) family.push(view)
+    else families.set(key, [view])
+  }
+  const out = new Map<string, T>()
+  for (const family of families.values()) {
+    if (family.length < 2) continue
+    family.sort((a, b) => byStart(a.session, b.session))
+    family.forEach((view, index) => {
+      const next = family[index + 1]
+      if (next && view.status.state === 'problem' && view.session.stopped_at) out.set(view.session.id, next)
+    })
+  }
+  return out
+}
+/** A retried attempt reads Ended and names its retry; why it failed stays in its words. */
+export function retriedStatus(session: Pick<HarnessSession, 'stop_reason'>, retry: string): SessionStatus {
+  const detail = [`Retried as ${retry}`, stopReasonLabel(session.stop_reason)].filter(Boolean).join(' · ')
+  return { state: 'stopped', group: 'stopped', tone: 'stopped', label: STATE_LABEL.stopped, reasons: [{ code: 'retried', detail, next: 'This attempt failed and was retried; the retry carries the work on.' }] }
 }
 
 // Prefer the session's public label; otherwise the name part of its message address ("claude:camy" is camy),
