@@ -172,8 +172,32 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 	// when a role write has not emitted a node event.
 	reader := insertPerson(t, p.TenantID, "restricted reader")
 	bindNamesOnly(t, p.TenantID, reader.ID)
+	if _, err := adminPool.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,id,'harness.read' FROM roles WHERE tenant_id=$1 AND key='names_only'`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(reader, ""); got.Columns["cost"] == nil {
+		t.Fatal("cost grant did not project cost")
+	}
+	if _, err := adminPool.Exec(t.Context(), `DELETE FROM role_permissions WHERE tenant_id=$1 AND permission='harness.read' AND role_id IN (SELECT id FROM roles WHERE tenant_id=$1 AND key='names_only')`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
 	if got := get(reader, ""); got.Columns["cost"] != nil {
-		t.Fatal("restricted reader saw cost")
+		t.Fatal("revoked cost grant reused a privileged cache entry")
+	}
+	// A project-only binding may read its own figures but cannot use the
+	// project UUID or a narrower subtree to cross that visibility boundary.
+	otherRoot := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Other project","state":"active"}`, projectKind.ID))
+	create("Other project work", "open", otherRoot.ID, 88, "high")
+	projectReader := insertPerson(t, p.TenantID, "project reader")
+	bindProjectRole(t, p.TenantID, projectReader.ID, "viewer", root.ID)
+	if got := get(projectReader, ""); got.TotalHours != 28.5 || got.Scope.ProjectLeaves != 10 {
+		t.Fatalf("project binding scope: %+v", got)
+	}
+	if code, body := callAs(t, mod, &projectReader, "GET", "/api/projects/"+otherRoot.ID+"/figures", ""); code != 404 {
+		t.Fatalf("hidden project: %d %s", code, body)
+	}
+	if code, body := callAs(t, mod, &p, "GET", base+"?within="+otherRoot.ID, ""); code != 400 {
+		t.Fatalf("other project subtree: %d %s", code, body)
 	}
 	if _, err := adminPool.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, reader.ID); err != nil {
 		t.Fatal(err)
@@ -200,6 +224,10 @@ func TestFigureColumnsLeafPolicyAndUsage(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		rows = append(rows, figureRow{item: listItem{nodeJSON: nodeJSON{Key: fmt.Sprintf("F-%d", i+2), CreatedAt: now.AddDate(0, 0, -20), UpdatedAt: now.AddDate(0, 0, -8)}}, leaf: true, bucket: "in_progress", status: "in_progress", hours: ptr(2), labels: map[string]any{"tags": []any{"tag", "tag"}, "cost_unit": "core", "priority": "high"}, assignee: fmt.Sprintf("Worker %d", i), eta: &columnETA{Progress: &pct, Running: true, ReadyAt: &now}, plan: &planningView{Tokens: planningTokens{Spent: &spent, Estimated: &estimated, Unreported: 1}, Cost: &planningCost{ListSpent: str("1.5"), ListEstimated: str("2.5")}}})
 	}
+	for i := 1; i <= 7; i++ {
+		rows[i].plan.Models = []planningModel{{Model: "used-model"}}
+		rows[i].plan.Route = &planningRoute{Model: "planned-model"}
+	}
 	rows = append(rows, figureRow{item: listItem{nodeJSON: nodeJSON{Key: "F-9", CreatedAt: now, UpdatedAt: now}}, leaf: true, bucket: "cancelled", status: "cancelled", hours: ptr(200), labels: map[string]any{}, eta: &columnETA{Progress: &pct}})
 	out := &projectFigures{Scope: figureScope{Rows: len(rows)}, MarksReleases: true, Groups: map[string]*figureGroup{}, Columns: map[string]*columnFigure{}}
 	for _, group := range []string{"completed", "done_not_live", "in_progress", "open"} {
@@ -215,6 +243,9 @@ func TestFigureColumnsLeafPolicyAndUsage(t *testing.T) {
 	if out.Columns["cost"].Measured.Total != 10.5 || out.Columns["cost"].Estimated.Count != 0 || !out.Columns["cost"].Partial {
 		t.Fatalf("cost cohorts: %+v", out.Columns["cost"])
 	}
+	if *out.Columns["tokens"].Typical.Median != 100 || out.Columns["tokens"].Typical.Approximate || out.Columns["model"].Values[0].Value != "used-model" {
+		t.Fatal("displayed typical or actual model differs from list")
+	}
 	if out.Columns["assignee"].Others != 4 || len(out.Columns["assignee"].Values) != 3 || out.Columns["assignee"].WithoutValue != 1 || out.Columns["tag"].Values[0].Count != 7 || *out.Columns["created_at"].Stale != 7 || *out.Columns["eta_ready"].Running != 7 {
 		t.Fatal("top-N, tag deduplication or dates incorrect")
 	}
@@ -224,7 +255,10 @@ func TestFigureColumnsLeafPolicyAndUsage(t *testing.T) {
 	for i := 2; i < 8; i++ {
 		rows[i].plan = nil
 	}
-	out.Columns = map[string]*columnFigure{}
+	out = &projectFigures{Scope: figureScope{Rows: len(rows)}, MarksReleases: true, Groups: map[string]*figureGroup{}, Columns: map[string]*columnFigure{}}
+	for _, group := range []string{"completed", "done_not_live", "in_progress", "open"} {
+		out.Groups[group] = &figureGroup{Statuses: map[string]int{}}
+	}
 	fillFigureColumns(out, rows, false, now)
 	if out.Columns["cost"] != nil || out.Columns["tokens"].Estimated.Total != 200 || out.Columns["tokens"].Measured.Count != 0 {
 		t.Fatal("estimated-only or permission projection incorrect")

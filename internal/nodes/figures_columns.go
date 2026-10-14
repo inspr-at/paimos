@@ -20,10 +20,20 @@ type figureNumbers struct {
 
 type figureValue struct {
 	Value         string   `json:"value"`
+	Kind          string   `json:"kind,omitempty"`
 	Count         int      `json:"count"`
 	Hours         float64  `json:"hours"`
 	MeasuredCost  *float64 `json:"measured_cost,omitempty"`
 	EstimatedCost *float64 `json:"estimated_cost,omitempty"`
+}
+
+// Typical displayed values can include estimated rows, but expose no mixed
+// total. Measured and estimated totals remain separate cohorts.
+type figureTypical struct {
+	Count       int      `json:"count"`
+	Median      *float64 `json:"median"`
+	Average     *float64 `json:"average"`
+	Approximate bool     `json:"approximate"`
 }
 
 type figureFinish struct {
@@ -41,6 +51,7 @@ type columnFigure struct {
 	Numbers          *figureNumbers `json:"numbers,omitempty"`
 	Measured         *figureNumbers `json:"measured,omitempty"`
 	Estimated        *figureNumbers `json:"estimated,omitempty"`
+	Typical          *figureTypical `json:"typical,omitempty"`
 	WeightedPercent  *float64       `json:"weighted_percent,omitempty"`
 	ReadingCount     *int           `json:"reading_count,omitempty"`
 	From             *time.Time     `json:"from,omitempty"`
@@ -122,6 +133,9 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 		v := counts[name][label]
 		if v == nil {
 			v = &figureValue{Value: label}
+			if name == "assignee" {
+				v.Kind = row.assigneeKind
+			}
 			counts[name][label] = v
 		}
 		v.Count++
@@ -254,7 +268,13 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 				out.Columns["tokens"].WithoutValue++
 			}
 			out.Columns["tokens"].Partial = out.Columns["tokens"].Partial || p.Tokens.Unreported > 0 || p.RouteTruncated
-			if p.Route != nil {
+			if len(p.Models) > 0 {
+				model = p.Models[0].Model
+			} else if p.Snapshot != nil {
+				if p.Snapshot.Route != nil {
+					model = p.Snapshot.Route.Model
+				}
+			} else if p.Route != nil {
 				model = p.Route.Model
 			}
 			if costVisible && p.Cost != nil {
@@ -310,8 +330,15 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 	out.Columns["estimate"].Numbers = figureStats(hours)
 	out.Columns["estimate"].WithoutValue = out.WithoutEstimate
 	out.Columns["tokens"].Measured, out.Columns["tokens"].Estimated = figureStats(tokensMeasured), figureStats(tokensEstimated)
+	typical := func(measured, estimated []float64) *figureTypical {
+		s := figureStats(append(slices.Clone(measured), estimated...))
+		return &figureTypical{s.Count, s.Median, s.Average, len(estimated) > 0}
+	}
+	out.Columns["tokens"].Typical = typical(tokensMeasured, tokensEstimated)
 	if costVisible {
 		out.Columns["cost"].Measured, out.Columns["cost"].Estimated = figureStats(costMeasured), figureStats(costEstimated)
+		out.Columns["cost"].Typical = typical(costMeasured, costEstimated)
+		out.Columns["cost_unit"].Partial = out.Columns["cost"].Partial
 	}
 	p := out.Columns["progress"]
 	p.Numbers = figureStats(progress)

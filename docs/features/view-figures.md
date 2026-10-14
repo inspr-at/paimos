@@ -40,6 +40,10 @@ and Cost retain Closed work and provide separate measured and estimated cohorts
 usage or incomplete pricing/planning evidence. Cost and per-unit cost are
 projected only with `harness.read`; amounts are API list-price USD. Top-N
 categories retain their tail as `others` and missing values as `without_value`.
+Tokens/Cost also provide the median and average of displayed values as `typical`,
+marked approximate when estimates occur in that sample, without a mixed total.
+Model counts follow the list's primary used model, then its frozen planned
+route or current planned route when there is no used model.
 ETA's next/last finish are the earliest/latest reported ready estimates, with
 their ticket keys. Progress includes only leaves with a progress reading and
 weights readings with valid hour estimates; no weighted percentage is invented

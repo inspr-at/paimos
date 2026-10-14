@@ -103,6 +103,7 @@ components:
       required: [value, count, hours]
       properties:
         value: {type: string}
+        kind: {type: string, enum: [person, agent], description: "Assignee principal kind when available."}
         count: {type: integer}
         hours: {type: number}
         measured_cost: {type: number, description: "API list-price USD, only with harness.read."}
@@ -113,6 +114,14 @@ components:
       properties:
         at: {type: string, format: date-time}
         key: {type: string}
+    FigureTypical:
+      type: object
+      required: [count, median, average, approximate]
+      properties:
+        count: {type: integer}
+        median: {type: [number, 'null']}
+        average: {type: [number, 'null']}
+        approximate: {type: boolean, description: "At least one displayed value in the sample is estimated; total is intentionally absent."}
     ColumnFigures:
       type: object
       required: [rows, included, without_value, others, partial]
@@ -126,6 +135,7 @@ components:
         numbers: {$ref: '#/components/schemas/FigureNumbers'}
         measured: {$ref: '#/components/schemas/FigureNumbers'}
         estimated: {$ref: '#/components/schemas/FigureNumbers'}
+        typical: {$ref: '#/components/schemas/FigureTypical'}
         weighted_percent: {type: number}
         reading_count: {type: integer}
         from: {type: string, format: date-time}

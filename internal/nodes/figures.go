@@ -137,6 +137,10 @@ func (m *Module) handleProjectFigures(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if len(q.Q) > 300 {
+		writeErr(w, badRequest("figures search exceeds 300 bytes"))
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	var result *projectFigures
@@ -213,16 +217,17 @@ func figuresHash(v any) string {
 }
 
 type figureRow struct {
-	item     listItem
-	leaf     bool
-	bucket   string
-	status   string
-	hours    *float64
-	labels   map[string]any
-	ep       string
-	assignee string
-	eta      *columnETA
-	plan     *planningView
+	item         listItem
+	leaf         bool
+	bucket       string
+	status       string
+	hours        *float64
+	labels       map[string]any
+	ep           string
+	assignee     string
+	assigneeKind string
+	eta          *columnETA
+	plan         *planningView
 }
 
 type columnETA struct {
@@ -270,7 +275,7 @@ func (m *Module) computeFigures(ctx context.Context, tx pgx.Tx, project string, 
 	if err := tx.QueryRow(ctx, prefix+` SELECT count(*)::int FROM filtered f WHERE `+figureLeafSQL("f.id"), args...).Scan(&out.Scope.ProjectLeaves); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.project_id=$1::uuid AND e.at >= $2::timestamptz-interval '90 days' AND e.at <= $2 AND `+workStatusSQL("e.after->>'state'")+` IN ('delivered','accepted') AND `+workStatusSQL("e.before->>'state'")+` IS DISTINCT FROM `+workStatusSQL("e.after->>'state'")+`)`, project, now).Scan(&out.MarksReleases); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.project_id=$1::uuid AND k.slug IN ('work','ticket','task','epic') AND e.at >= $2::timestamptz-interval '90 days' AND e.at <= $2 AND `+workStatusSQL("e.after->>'state'")+` IN ('delivered','accepted') AND `+workStatusSQL("e.before->>'state'")+` IS DISTINCT FROM `+workStatusSQL("e.after->>'state'")+`)`, project, now).Scan(&out.MarksReleases); err != nil {
 		return nil, err
 	}
 	// Only leaves need ETA/planning. Chunk roots so existing scope budgets are
@@ -326,7 +331,7 @@ func readFigureRows(ctx context.Context, tx pgx.Tx, q listQuery) ([]figureRow, e
  f.kind_slug IN ('work','ticket','task','epic') AND ` + figureLeafSQL("n.id") + `,
  ` + estimateHoursSQL("n.fields") + `::float8,
  CASE WHEN octet_length(n.fields::text)<=65536 THEN n.fields END,
- coalesce(ap.name,worker.shown_name,''),coalesce(epic.key,'')
+ coalesce(ap.name,worker.shown_name,''),coalesce(ap.kind,'agent'),coalesce(epic.key,'')
  FROM filtered f JOIN nodes n ON n.id=f.id
  LEFT JOIN figure_states cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state") + `
  LEFT JOIN principals ap ON ap.id=f.assignee_id::uuid AND ap.tenant_id=n.tenant_id
@@ -355,7 +360,7 @@ func readFigureRows(ctx context.Context, tx pgx.Tx, q listQuery) ([]figureRow, e
 		var row figureRow
 		var raw []byte
 		var project *string
-		if err := result.Scan(&row.item.ID, &row.item.Key, &row.item.KindID, &row.item.KindSlug, &row.item.State, &row.item.CreatedAt, &row.item.UpdatedAt, &project, &row.status, &row.bucket, &row.leaf, &row.hours, &raw, &row.assignee, &row.ep); err != nil {
+		if err := result.Scan(&row.item.ID, &row.item.Key, &row.item.KindID, &row.item.KindSlug, &row.item.State, &row.item.CreatedAt, &row.item.UpdatedAt, &project, &row.status, &row.bucket, &row.leaf, &row.hours, &raw, &row.assignee, &row.assigneeKind, &row.ep); err != nil {
 			return nil, err
 		}
 		bytes += len(raw)
