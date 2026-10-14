@@ -134,7 +134,7 @@ func newPairedStartFixture(t *testing.T) (*startFixture, pairedGrantAuthority) {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule)
- SELECT tenant_id,principal_id,scope,$1::text,$1::uuid,schedule FROM account_capacity_schedules WHERE account_id<>$1
+ SELECT tenant_id,principal_id,scope,$1::text,$1::uuid,schedule FROM account_capacity_schedules WHERE account_id<>$1::uuid
  ON CONFLICT DO NOTHING`, f.intent.AccountID)
 		return err
 	})
