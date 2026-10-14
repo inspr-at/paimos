@@ -66,6 +66,6 @@ it('keeps a rule-draft lesson on the draft and off the changelog chevron', () =>
 
 it('draws the Knowledge lesson link with an SVG chevron', () => {
   const source = readFileSync(new URL('../src/components/knowledge/KnowledgeTab.vue', import.meta.url), 'utf8')
-  expect(source).toContain('lessons wait on the Decision Desk<AppIcon name="chevron-right" :size="12" class="lesson-go" />')
+  expect(source).toContain('on the Decision <span class="lesson-tail">Desk<AppIcon name="chevron-right" :size="12" class="lesson-go" /></span>')
   expect(source).not.toContain(CHEVRON)
 })

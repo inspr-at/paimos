@@ -619,8 +619,9 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(expertTerminal && gated.some(spec => spec.file === expertTerminal.file), 'Expert terminal regressions must remain in the gate')
   // AEON-1331 adds lesson decisions after the prior baseline. Preserve that
   // baseline and charge only this slice's independently bounded spec budget.
+  // AEON-1363 adds three Knowledge lesson-line cases to the same spec.
   const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
-  assert.ok(deskLessons && deskLessons.listedTests === 23, 'Lesson decision regressions must remain in the gate')
+  assert.ok(deskLessons && deskLessons.listedTests === 26, 'Lesson decision regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
   const priorGate = {
     ...real,
