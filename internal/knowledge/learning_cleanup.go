@@ -111,6 +111,8 @@ const legacySources = `
 `
 
 func cleanupLegacyTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 	ctx = db.AllProjects(ctx, "method learning legacy cleanup")
 	var actor tenant.Principal
 	var complete bool
@@ -141,6 +143,9 @@ func cleanupLegacyTenant(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 		err = db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
 			var cutoff time.Time
 			if err := tx.QueryRow(ctx, `SELECT cutoff FROM method_learning_legacy_cleanup WHERE tenant_id=$1`, tenantID).Scan(&cutoff); err != nil {
+				return err
+			}
+			if err := db.SetLocalStatementTimeout(ctx, tx, 20*time.Second); err != nil {
 				return err
 			}
 			rows, err := tx.Query(ctx, `SELECT source_key FROM (`+legacySources+`) old

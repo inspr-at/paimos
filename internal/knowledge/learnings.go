@@ -993,6 +993,9 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 			}
 			return Learning{}, closedLearning()
 		}
+		if nom != nil && looksSensitive(body) {
+			return Learning{}, closedLearning()
+		}
 		text, tagged := commentLearningText(body)
 		if nom != nil {
 			nomText, ok, err := nominationText(ctx, tx, tenantID, *nom, item.Title, kind, rootProject, &body)

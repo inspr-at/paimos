@@ -383,7 +383,7 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCurs
 		  AND coalesce(latest.after->>'deleted','false') <> 'true'
 		  AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)'
           AND EXISTS (SELECT 1 FROM principals p WHERE p.tenant_id=c.tenant_id AND p.id=c.actor_principal_id AND p.kind IN ('person','agent'))
-          		  AND NOT EXISTS (
+		  AND NOT EXISTS (
 		    SELECT 1 FROM method_learning_nominations m
 		    WHERE m.tenant_id=c.tenant_id AND m.source_key='c-'||n.id::text||'-'||c.id::text)
 		  AND NOT EXISTS (
