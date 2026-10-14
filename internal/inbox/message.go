@@ -402,9 +402,6 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
-		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.RouteScope(ctx)); err != nil {
-			return errForbidden
-		}
 		// Lock order (AEON-280): the bound session first, then the message.
 		// recipient and session are immutable, so an unlocked read picks the lock.
 		var recipient, sender string
@@ -421,6 +418,9 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 				return errForbidden
 			}
 			return errNotFound
+		}
+		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.RouteScope(ctx)); err != nil {
+			return errForbidden
 		}
 		// Keep the generation live through commit, including idempotent retries.
 		if _, err := listeningSession(ctx, tx, session, p.ID, ""); err != nil {
