@@ -418,3 +418,7 @@
 :root { --st-ok-on: #ffffff; --paused-mark-ink: #ffffff; }
 :root[data-theme="dark"] { --st-ok-on: #102327; --paused-mark-ink: #102327; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --st-ok-on: #102327; --paused-mark-ink: #102327; } }
+/* The Decision Desk (AEON-1339, approved rev 11 artifact): cream paper on a glass frame, brass for the one action. */
+:root { --paper: #fffefa; --paper-line: rgba(32, 60, 61, 0.12); --paper-edge: rgba(32, 60, 61, 0.14); --sheet-back: #e9ecea; --brass: linear-gradient(180deg, #f1d18f, #d69b31); --brass-ink: #2a1c04; }
+:root[data-theme="dark"] { --paper: #21404a; --paper-line: rgba(237, 244, 240, 0.12); --paper-edge: rgba(237, 244, 240, 0.16); --sheet-back: #1a3238; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper: #21404a; --paper-line: rgba(237, 244, 240, 0.12); --paper-edge: rgba(237, 244, 240, 0.16); --sheet-back: #1a3238; } }

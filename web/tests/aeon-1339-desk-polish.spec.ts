@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// AEON-1339 risk: the shipped Decision Desk drifts from the approved rev 11 artifact: Decide does
+// nothing on a click, the round stays open after the last decision, the legend wraps, the project
+// shows twice with a dot, or the folder tab's shoulder draws a kinked or uneven hairline.
+import { expect, test, type Page } from '@playwright/test'
+import { mockDecisionDesk } from './decision-desk-fixtures'
+import { expectStableControls } from './helpers/stable'
+
+const heading = (page: Page) => page.getByTestId('desk-paper').getByRole('heading', { level: 2 })
+// One open question: approval decided, action merged into the question, rule proposed, the second question gone.
+async function oneQuestion(page: Page, theme?: 'light' | 'dark') {
+  const world = await mockDecisionDesk(page, { theme })
+  world.approval.decision = 'approved'; world.rule.state = 'proposed'; world.questions.splice(1)
+  world.questions[0]!.input.source_request_id = world.action.id
+  return world
+}
+
+for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`the memo matches the approved sheet and closes after the last decision ${width} ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const world = await oneQuestion(page, theme)
+    await page.goto('/decision-desk')
+    await expect(page.getByRole('heading', { level: 1, name: 'Decision Desk' })).toBeVisible()
+    await expect(page.getByText('Handover-question import')).toHaveCount(0)
+    await expect(page.getByText('Sign-ins and account setup')).toHaveCount(0)
+    await expect(page.getByTestId('desk-list')).toContainText('Recommends')
+    await page.screenshot({ path: testInfo.outputPath(`list-${width}-${theme}.png`), fullPage: true })
+
+    await page.getByTestId('desk-one-by-one').click()
+    await expect(heading(page)).toHaveText('Which migration should carry the index?')
+    // The project once: its key on the folder tab, its name with the folder icon in the meta; no dot anywhere.
+    await expect(page.getByTestId('desk-tab-project')).toHaveText('PRJ-35')
+    await expect(page.getByTestId('desk-project-link')).toHaveText('Paimos Aeon')
+    await expect(page.locator('.desk-dlg .project-dot, .desk-dlg i[aria-hidden]')).toHaveCount(0)
+    // A round of one has no pager, and its primary reads Decide.
+    await expect(page.getByTestId('desk-pager')).toHaveCount(0)
+    await expect(page.getByTestId('desk-decide')).toHaveAccessibleName(/^Decide\b(?! &)/)
+    await expect(page.getByTestId('desk-stamp')).toHaveText('Once')
+    await expect(page.getByTestId('desk-line')).toContainText('Parked')
+    // Options wrap in the row; there is no second copy of the selected answer and one scroll container.
+    await expect(page.getByTestId('desk-answer-summary')).toHaveCount(0)
+    expect(await page.getByTestId('desk-body').evaluate(element => getComputedStyle(element).overflowY)).toBe('visible')
+    await expect(page.getByTestId('desk-paper')).toHaveCSS('outline-style', 'none')
+    if (width === 1440) {
+      // The legend never wraps: one line, no Keys fold at 1440.
+      const hint = page.locator('.desk-hint')
+      await expect(hint).toBeVisible()
+      expect(await hint.evaluate(element => element.scrollWidth <= element.clientWidth + 0.5 && element.getBoundingClientRect().height < 30)).toBe(true)
+      await expect(page.getByRole('button', { name: 'Keys' })).toBeHidden()
+    }
+    await page.screenshot({ path: testInfo.outputPath(`memo-${width}-${theme}.png`) })
+
+    await expectStableControls({
+      controls: { decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), tab: page.getByTestId('desk-tab'), stamps: page.getByTestId('desk-stamps'), first: page.getByTestId('choice-row-0') },
+      scrollAreas: { body: page.getByTestId('desk-body') },
+      interactions: [
+        { name: 'choose the second option', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },
+        { name: 'stamp Always', run: async () => { await page.getByTestId('stamp-always').click(); await expect(page.getByTestId('desk-stamp')).toHaveText('Always') } },
+        { name: 'click the unavailable Doctrine stamp', run: async () => { await page.getByTestId('stamp-doctrine').click({ force: true }); await expect(page.getByTestId('stamp-always')).toHaveAttribute('aria-checked', 'true') } },
+      ],
+    })
+    await page.getByTestId('stamp-once').click()
+    await page.getByTestId('desk-decide').click()
+    // All decided for 1.2 s, with Undo; the tab reads Round finished and Done keeps the primary's size.
+    await expect(page.getByTestId('desk-all-decided')).toContainText('All decided')
+    await expect(page.getByTestId('desk-all-decided')).toContainText('1 answered, stamped Once.')
+    await expect(page.getByTestId('desk-tab')).toContainText('Round finished')
+    await page.screenshot({ path: testInfo.outputPath(`all-decided-${width}-${theme}.png`) })
+    await expect(page.getByTestId('desk-paper')).toBeHidden({ timeout: 5000 })
+    expect(world.calls.filter(call => call.path.endsWith('/decision'))).toHaveLength(1)
+    // Undo acts as Change until a withdraw exists (AEON-1340): the memo reopens on the recorded answer.
+    const undo = page.getByRole('button', { name: 'Undo', exact: true })
+    await expect(page.getByText(/^Decided\. It goes to .+ in a few seconds\.$/)).toBeVisible()
+    await undo.click()
+    await expect(heading(page)).toHaveText('Which migration should carry the index?')
+    await expect(page.getByTestId('desk-status')).toContainText('Change your answer')
+    await expect(page.getByTestId('choice-0')).toBeEnabled()
+  })
+}
+
+test('Decide is never a silent no-op: it says why beside the button and moves focus to what is missing', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const world = await mockDecisionDesk(page)
+  world.questions[0]!.suggested_outcome = 'doctrine'; world.questions[0]!.suggestion_reason = 'agent_suggestion'
+  await page.goto('/decision-desk')
+  await page.getByTestId('desk-row-a:approval-1').click()
+  await expect(heading(page)).toHaveText('Allow nodes.read?')
+  const decide = page.getByTestId('desk-decide')
+  await expect(decide).toHaveAttribute('aria-disabled', 'true')
+  await expect(page.getByTestId('desk-stamp')).toHaveText('Not decided')
+  await decide.click({ force: true })
+  await expect(page.getByTestId('desk-status')).toHaveText('Choose Approve or Deny first.')
+  await expect(page.getByTestId('choice-0')).toBeFocused()
+  expect(world.calls).toHaveLength(0)
+  await page.keyboard.press('j')
+  // The agent suggested Doctrine, which is unavailable: Once starts selected, with a quiet note, and decides in one press.
+  await expect(heading(page)).toHaveText('Which migration should carry the index?')
+  await expect(page.getByTestId('stamp-once')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('stamp-doctrine')).toHaveAttribute('aria-disabled', 'true')
+  await expect(page.getByTestId('desk-suggest-off')).toHaveText('Suggested: Doctrine · not available for this question')
+  await expect(page.getByTestId('desk-suggest-off')).toHaveAttribute('data-tip', /didn’t name the rule/)
+  await decide.click()
+  await expect.poll(() => world.calls.filter(call => call.path.endsWith('/decision')).length).toBe(1)
+  expect(world.calls.at(-1)!.body).toMatchObject({ outcome: 'once', option_id: 'partial' })
+})
+
+// The sheet outline: tab, shoulder and sheet are one path; the hairline keeps one weight (±0.25 px)
+// through both shoulder junctions and the sheet corner, with no fill seam under the tab (Markus 10-14 09:47).
+test.describe('sheet outline at device scale factor 2', () => {
+  test.use({ deviceScaleFactor: 2 })
+  for (const theme of ['light', 'dark'] as const) test(`one even hairline from tab to sheet ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await oneQuestion(page, theme)
+    await page.goto('/decision-desk')
+    await page.getByTestId('desk-one-by-one').click()
+    await expect(heading(page)).toBeVisible()
+    const path = page.locator('.sheet-shape path')
+    await expect(path).toHaveAttribute('d', /^M.+Z$/)
+    expect((await path.getAttribute('d'))!.match(/A13\.5 13\.5/g)).toHaveLength(6)
+    const geo = await page.evaluate(() => {
+      const svg = document.querySelector('.sheet-shape')!.getBoundingClientRect(), tab = document.querySelector('[data-testid="desk-tab"]')!.getBoundingClientRect(), stack = document.querySelector('.stack')!.getBoundingClientRect()
+      const snap = (v: number) => Math.round(v * devicePixelRatio) / devicePixelRatio
+      return { svg: { x: svg.x, y: svg.y }, tabRight: snap(tab.right) - 0.5, tabTop: snap(tab.top) + 0.5, tabLeft: snap(tab.left), sheetTop: snap(stack.top) + 0.5, sheetRight: snap(stack.right) - 0.5, r: 13.5 }
+    })
+    const clip = { x: Math.floor(geo.tabRight - 40), y: Math.floor(geo.tabTop - 10), width: Math.ceil(geo.sheetRight - geo.tabRight + 60), height: Math.ceil(geo.sheetTop - geo.tabTop + 50) }
+    const png = await page.screenshot({ clip })
+    await testInfo.attach(`shoulder-${theme}`, { body: png, contentType: 'image/png' })
+    await page.screenshot({ path: testInfo.outputPath(`shoulder-2x-${theme}.png`), clip: { x: geo.tabRight - 30, y: geo.sheetTop - 30, width: 60, height: 50 } })
+    await page.screenshot({ path: testInfo.outputPath(`corner-2x-${theme}.png`), clip: { x: geo.sheetRight - 30, y: geo.sheetTop - 10, width: 50, height: 40 } })
+    const result = await page.evaluate(async ({ b64, clip, geo }) => {
+      const image = new Image(); image.src = `data:image/png;base64,${b64}`; await image.decode()
+      const canvas = new OffscreenCanvas(image.width, image.height), ctx = canvas.getContext('2d')!
+      ctx.drawImage(image, 0, 0)
+      const { data, width } = ctx.getImageData(0, 0, image.width, image.height), scale = image.width / clip.width
+      const lum = (x: number, y: number) => { const i = (Math.round(y) * width + Math.round(x)) * 4; return 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]! }
+      // Bilinear luminance at a CSS-px point in viewport coordinates.
+      const at = (px: number, py: number) => {
+        const x = (px - clip.x) * scale - 0.5, y = (py - clip.y) * scale - 0.5, x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0
+        return lum(x0, y0) * (1 - fx) * (1 - fy) + lum(x0 + 1, y0) * fx * (1 - fy) + lum(x0, y0 + 1) * (1 - fx) * fy + lum(x0 + 1, y0 + 1) * fx * fy
+      }
+      // The hairline's ink across the edge at a point, along its normal from the glass (t < 0) into the paper (t > 0).
+      const ink = (x: number, y: number, nx: number, ny: number) => {
+        const step = 0.125, samples: { t: number; v: number }[] = []
+        for (let t = -3; t <= 3 + 1e-9; t += step) samples.push({ t, v: at(x + nx * t, y + ny * t) })
+        const mean = (from: number, to: number) => { const rows = samples.filter(s => s.t >= from && s.t <= to); return rows.reduce((sum, s) => sum + s.v, 0) / rows.length }
+        const glass = mean(-3, -2.25), paper = mean(2.25, 3)
+        return samples.reduce((sum, s) => sum + Math.abs(s.v - (s.t < 0 ? glass : paper)) * step, 0)
+      }
+      const average = (points: [number, number, number, number][]) => points.reduce((sum, p) => sum + ink(...p), 0) / points.length
+      const { tabRight: TR, sheetTop: S0, sheetRight: R, r } = geo
+      // The straight tab edge: glass on the right, paper on the left.
+      const midY = S0 - r - 3
+      const straight = average([-1.2, 0, 1.2].map(d => [TR, midY + d, -1, 0]))
+      const arcs: Record<string, number[]> = { shoulder: [], corner: [] }
+      for (const share of [0, 0.15, 0.3, 0.5, 0.7, 0.85, 1]) {
+        // The concave shoulder: centre in the glass, paper away from it.
+        const a = Math.PI - share * Math.PI / 2, cx = TR + r, cy = S0 - r
+        arcs.shoulder!.push(average([-1.2, 0, 1.2].map(d => { const b = a + d / r; return [cx + r * Math.cos(b), cy + r * Math.sin(b), Math.cos(b), Math.sin(b)] as [number, number, number, number] })))
+        // The sheet's top-right corner: centre in the paper.
+        const c = -Math.PI / 2 + share * Math.PI / 2, kx = R - r, ky = S0 + r
+        arcs.corner!.push(average([-1.2, 0, 1.2].map(d => { const b = c + d / r; return [kx + r * Math.cos(b), ky + r * Math.sin(b), -Math.cos(b), -Math.sin(b)] as [number, number, number, number] })))
+      }
+      // No seam where the tab meets the sheet: a flat paper profile across the sheet top inside the tab.
+      const seamX = TR - 60, seam: number[] = []
+      for (let t = -3; t <= 3; t += 0.25) seam.push(at(seamX, S0 + t))
+      return { straight, shoulder: arcs.shoulder!.map(v => v / straight), corner: arcs.corner!.map(v => v / straight), seam: Math.max(...seam) - Math.min(...seam) }
+    }, { b64: png.toString('base64'), clip, geo })
+    await testInfo.attach(`stroke-${theme}.json`, { body: JSON.stringify(result, null, 2), contentType: 'application/json' })
+    expect(result.straight, 'the straight edge carries ink').toBeGreaterThan(1)
+    for (const [name, weights] of [['shoulder', result.shoulder], ['corner', result.corner]] as const) for (const [at, weight] of weights.entries()) {
+      expect(Math.abs(weight - 1), `${name} weight ${weight.toFixed(2)} px at sample ${at}`).toBeLessThanOrEqual(0.25)
+    }
+    expect(result.seam, 'no fill seam under the tab').toBeLessThanOrEqual(3)
+  })
+})

@@ -7,20 +7,20 @@ import DecisionDeskMemo from '../src/components/agents/DecisionDeskMemo.vue'
 
 afterEach(() => vi.unstubAllGlobals())
 
-function outcomes(once: string): DeskOutcomeAvailability[] {
+function outcomes(unusable: string): DeskOutcomeAvailability[] {
   return [
-    { outcome: 'once', available: !once, why: once },
-    { outcome: 'always', available: true, why: '' },
-    { outcome: 'requirement', available: false, why: 'Requirement needs a linked editable ticket.' },
-    { outcome: 'doctrine', available: false, why: 'Doctrine needs an authorized source, rule and exact base mapping.', mapping_present: false },
+    { outcome: 'once', available: !unusable, why: unusable },
+    { outcome: 'always', available: !unusable, why: unusable },
+    { outcome: 'requirement', available: false, why: unusable || 'Requirement needs a linked editable ticket.' },
+    { outcome: 'doctrine', available: false, why: unusable || 'Doctrine needs an authorized source, rule and exact base mapping.', mapping_present: false },
   ]
 }
-function question(onceWhy = ''): DeskItem {
+function question(unusable = ''): DeskItem {
   return {
     id: 'q:1', kind: 'question', projectId: 'p', projectName: 'Aeon', projectKey: 'AEON', title: 'Which doctrine?',
     context: '', findings: '', meanwhile: 'parked', destination: 'ticket comment', why: '', suggestion: 'Suggested by the agent.',
-    choices: [{ id: '1', title: 'Ship', description: 'Now', answer: 'Ship it.' }], outcome: 'doctrine', revision: 1, createdAt: '', held: true, decided: false,
-    outcomes: outcomes(onceWhy),
+    choices: [{ id: '1', title: 'Ship', description: 'Now', answer: 'Ship it.' }], outcome: 'doctrine', suggested: 'doctrine', suggestedBy: 'agent', revision: 1, createdAt: '', held: true, decided: false,
+    outcomes: outcomes(unusable),
   }
 }
 function stubBrowser() {
@@ -48,34 +48,36 @@ function tag(html: string, testId: string): string {
   if (at < 0) throw new Error(`missing ${testId}`)
   return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1)
 }
+const text = (html: string, testId: string) => { const open = tag(html, testId), at = html.indexOf(open) + open.length; return html.slice(at, html.indexOf('</', at)) }
 
-it('preselects Once for an unavailable suggestion and disables Decide with the reason', async () => {
+// AEON-1343 + AEON-1339 risk: the memo starts on a stamp that cannot be used, so Decide does nothing.
+it('starts an unavailable suggestion on the scope default and keeps Decide decidable, with the reason in plain words', async () => {
   const open = question()
-  expect(draftFor(open).outcome).toBe('once')
+  // No ticket: the scope default is Always (the approved design: suggestion, then scope default, then Once).
+  expect(draftFor(open).outcome).toBe('always')
   const html = await htmlFor(open)
-  expect(html).toContain('<strong class="stamp-once large-stamp"')
-  expect(tag(html, 'stamp-once')).toContain('aria-pressed="true"')
-  expect(tag(html, 'stamp-once')).not.toContain('disabled')
-  expect(tag(html, 'stamp-doctrine')).toContain('disabled')
-  expect(tag(html, 'stamp-doctrine')).toContain('aria-pressed="false"')
-  const status = tag(html, 'desk-status')
-  const why = 'Doctrine needs an authorized source, rule and exact base mapping.'
-  expect(status).toContain(`title="${why}"`)
-  expect(html.slice(html.indexOf(status), html.indexOf(status) + status.length + 80)).toContain('Suggested: Doctrine · not available for this question')
-  // The server reason is the status text. A title tooltip is not the explanation.
-  const statusText = html.slice(html.indexOf(status) + status.length, html.indexOf('</div>', html.indexOf(status)))
-  expect(statusText).toContain(why)
-  expect(statusText).toContain('Suggested: Doctrine · not available for this question')
-  expect(html).not.toContain('data-testid="desk-decide-reason"')
-  expect(tag(html, 'desk-decide')).not.toContain('disabled')
+  expect(tag(html, 'stamp-always')).toContain('aria-checked="true"')
+  expect(tag(html, 'stamp-always')).not.toContain('aria-disabled')
+  expect(tag(html, 'stamp-doctrine')).toContain('aria-disabled="true"')
+  expect(tag(html, 'stamp-doctrine')).toContain('aria-checked="false"')
+  expect(tag(html, 'stamp-doctrine')).toContain('data-tip="Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to."')
+  expect(text(html, 'desk-suggest-off')).toBe('Suggested: Doctrine · not available for this question')
+  expect(tag(html, 'desk-suggest-off')).toContain('didn’t name the rule')
+  expect(text(html, 'desk-stamp')).toBe('Always')
+  expect(tag(html, 'desk-decide')).not.toContain('aria-disabled')
+  expect(tag(html, 'desk-decide')).not.toContain(' disabled')
+  // A round of one: no pager, and the primary reads Decide.
+  expect(html).not.toContain('data-testid="desk-pager"')
+  expect(html.slice(html.indexOf(tag(html, 'desk-decide')))).toMatch(/class="lbl"[^>]*>Decide</)
+})
 
+it('names a lasting restriction beside a muted Decide when no stamp can be used', async () => {
   const blocked = await htmlFor(question('A signed-in person chooses this outcome.'))
   const decide = tag(blocked, 'desk-decide')
-  expect(decide).toContain('disabled')
-  expect(decide).toContain('is-blocked')
-  expect(decide).toContain('title="A signed-in person chooses this outcome."')
-  const reason = tag(blocked, 'desk-decide-reason')
-  expect(reason).toContain('title="A signed-in person chooses this outcome."')
-  expect(blocked.slice(blocked.indexOf(reason), blocked.indexOf(reason) + reason.length + 80)).toContain('A signed-in person chooses this outcome.')
-  expect(blocked).toContain('>A signed-in person chooses this outcome.</div>')
+  // aria-disabled, never disabled: a click still answers with the reason.
+  expect(decide).toContain('aria-disabled="true"')
+  expect(decide).not.toContain(' disabled=')
+  expect(decide).toContain('aria-describedby="desk-status"')
+  expect(text(blocked, 'desk-status')).toContain('A signed-in person chooses this outcome.')
+  for (const outcome of ['once', 'always', 'requirement', 'doctrine']) expect(tag(blocked, `stamp-${outcome}`)).toContain('aria-disabled="true"')
 })

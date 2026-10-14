@@ -99,6 +99,12 @@ export function questionItem(question: Question, projectName: string): DeskItem 
     outcomes: question.outcomes?.map(row => ({ ...row })), doctrine: question.input.doctrine ? { ...question.input.doctrine } : undefined,
     outcomeEffects: question.pending.filter(effect => effect.revision === question.revision && effect.kind === 'outcome').map(effect => ({ ...effect, effect_data: effect.effect_data ? { ...effect.effect_data, review_required: effect.effect_data.review_required?.map(review => ({ ...review })) } : undefined })),
     fromRecord: reuse ? `${reuse.label} · revision ${reuse.revision}` : undefined,
+    askers: question.askers.slice(0, 20).map(asker => ({ principalId: asker.principal_id, sessionId: asker.session_id })),
+    meanwhileKind: question.input.meanwhile, suggested: question.suggested_outcome,
+    suggestedBy: question.suggestion_reason === 'agent_suggestion' ? 'agent' : question.suggestion_reason === 'ticket_default' ? 'ticket' : 'project',
+    decidedAt: question.answer?.created_at, deliverAfter: question.answer?.deliver_after ?? pending[0]?.deliver_after,
+    deliveryState: pending.some(effect => effect.state === 'failed' || effect.receipt_state === 'failed') ? 'failed'
+      : pending.some(effect => effect.state === 'pending') ? 'pending' : pending.some(effect => effect.state === 'delivered') ? 'delivered' : undefined,
   }
 }
 function base(id: string, kind: DeskItem['kind'], title: string, context: string, choices: DeskChoice[]): DeskItem {
@@ -109,20 +115,20 @@ export function approvalItem(approval: Approval, projectName = approval.resource
   return { ...base(`a:${approval.id}`, 'approval', `Allow ${approval.scope}?`, approval.rationale, [
     { id: 'approved', title: 'Approve', description: 'Grant this request through the approvals API.', answer: 'Approved' },
     { id: 'denied', title: 'Deny', description: 'Keep the permission unchanged.', answer: 'Denied' },
-  ]), approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
+  ]), askers: [{ principalId: approval.agent_principal_id, name: approval.agent_name?.trim() || undefined }], approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
 }
 export function actionItem(message: ProjectMessage, projectId: string, projectName: string): DeskItem {
   return { ...base(`m:${message.id}`, 'action', 'An agent needs your steer', message.body, [
     { id: 'reply', title: 'Reply to the agent', description: 'Steer the work with an inbox reply.', answer: '', field: true },
     { id: 'resolved', title: 'I did it myself', description: 'Resolve the request.', answer: 'Resolved' },
     { id: 'dismissed', title: 'Not needed', description: 'Dismiss the request.', answer: 'Dismissed' },
-  ]), projectId, projectName, createdAt: message.created_at ?? '', destination: 'Reply to the original request, or its native Resolve / Dismiss action.' }
+  ]), projectId, projectName, createdAt: message.created_at ?? '', askers: [{ principalId: message.sender_principal_id, sessionId: message.sender_session_id ?? undefined, name: message.sender_label?.trim() || undefined }], destination: 'Reply to the original request, or its native Resolve / Dismiss action.' }
 }
 export function ruleItem(rule: DoctrineInboxItem): DeskItem {
   return { ...base(`r:${rule.id}`, 'rule', rule.label, rule.why ?? '', [
     { id: 'propose', title: 'Propose the change', description: 'Open the existing doctrine pull request flow.', answer: 'Propose the change', unavailable: rule.outdated ? 'The rule changed since this was proposed. Edit against the current rule first.' : undefined },
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
-  ]), rule: { ...rule }, prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
+  ]), askers: rule.proposer ? [{ principalId: '', name: rule.proposer }] : undefined, rule: { ...rule }, prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
 export function keyTrimItem(proposal: KeyTrimProposal): DeskItem {
   const pending = proposal.state === 'pending'

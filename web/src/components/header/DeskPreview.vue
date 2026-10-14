@@ -7,25 +7,24 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
-import { useAgentAppearance } from '../../lib/agentAppearance'
 import { deskItemID, deskLinkOut, type DeskProjectionItem } from '../../lib/decisionDesk'
 import { getDoctrineInbox } from '../../lib/doctrine'
 import { readDoctrineProjects } from '../../lib/decisionDeskApi'
 import { plural, relativeTime } from '../../lib/work'
-import AppIcon from '../AppIcon.vue'
-import AgentStateMark from '../indicators/AgentStateMark.vue'
+import AppIcon, { type IconName } from '../AppIcon.vue'
 
 // On phones the preview is a full-height sheet with its link pinned at the foot.
 defineProps<{ phone?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
 const desk = useDecisionDesk(), projects = useProjects(), session = useSession()
-const { appearance } = useAgentAppearance()
 // A preview, not the Desk: the first rows, and how many the Desk holds.
 const ROWS = 12
 const KIND: Record<DeskProjectionItem['kind'], string> = {
   question: 'Question', approval: 'Approval', action_request: 'Action request', doctrine: 'Rule change', tier_request: 'Tier request',
   key_trim: 'Key trim', stepup: 'Step-up', account_matrix: 'Account matrix', routine_consent: 'Routine consent',
 }
+// AEON-1339: each row's kind mark, as on the Desk; held questions and approvals are amber.
+const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat' }
 const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
 const root = ref<HTMLElement>()
 // A dialog: keyboard focus moves to its first row (or the Desk link) as it opens.
@@ -71,10 +70,11 @@ const items = computed(() => {
   const all = desk.projection?.items ?? []
   return [...all.filter(item => item.held), ...all.filter(item => !item.held)]
 })
+// The Desk returns to the page under the preview after the last decision of a round opened here.
 const shown = computed(() => items.value.slice(0, ROWS).map(item => ({
-  key: deskItemID(item), held: item.held, title: item.title,
-  detail: [where(item), KIND[item.kind], relativeTime(item.created_at, { now: now.value })].filter(Boolean).join(' · '),
-  to: deskLinkOut(item) || { path: '/decision-desk', query: { item: deskItemID(item) } },
+  key: deskItemID(item), held: item.held, title: item.title, kind: item.kind, project: where(item),
+  detail: [KIND[item.kind], relativeTime(item.created_at, { now: now.value })].filter(Boolean).join(' · '),
+  to: deskLinkOut(item) || { path: '/decision-desk', query: { from: 'preview', item: deskItemID(item) } },
 })))
 const groups = computed(() => [
   { label: 'Waiting on you', note: 'Something is held up until an answer.', rows: shown.value.filter(row => row.held) },
@@ -98,16 +98,16 @@ const partial = computed(() => desk.count !== null && shown.value.length < desk.
       <RouterLink v-if="!phone" class="dp-go" to="/decision-desk" @click="emit('navigate')">Open the Decision Desk<AppIcon name="chevron-right" :size="13" /></RouterLink>
     </div>
     <div class="dp-body">
-      <p v-if="desk.error" class="dp-note" role="alert">{{ desk.error }} <button type="button" class="btn sm ghost dp-retry" :disabled="desk.loading" @click="desk.refresh()">Retry</button></p>
+      <p v-if="desk.error" class="dp-note dp-error" role="alert"><AppIcon name="alert" :size="14" /><span>Couldn’t load the desk</span><span class="dp-sep">·</span><button type="button" class="dp-retry" :disabled="desk.loading" @click="desk.refresh()">Try again</button></p>
       <p v-else-if="desk.count === null" class="dp-note">Reading the Desk…</p>
       <p v-else-if="!groups.length" class="dp-note">Nothing waits on you.</p>
       <section v-for="group in groups" :key="group.label" class="dp-group" :aria-label="group.label">
         <p class="dp-group-title">{{ group.label }}<small>{{ group.note }}</small></p>
         <ul>
           <li v-for="row in group.rows" :key="row.key">
-            <RouterLink class="dp-row" :to="row.to" :aria-label="`${row.title}, ${row.detail}`" :data-testid="`desk-preview-item-${row.key}`" @click="emit('navigate')">
-              <span class="dp-ic" :style="appearance('waiting')"><AgentStateMark state="waiting" :size="14" /></span>
-              <span class="dp-t"><b>{{ row.title }}</b><small>{{ row.detail }}</small></span>
+            <RouterLink class="dp-row" :to="row.to" :aria-label="`${row.title}, ${[row.project, row.detail].filter(Boolean).join(' · ')}`" :data-testid="`desk-preview-item-${row.key}`" @click="emit('navigate')">
+              <span class="dp-ic" :class="[`k-${row.kind}`, { held: row.held }]"><AppIcon :name="KIND_ICON[row.kind]" :size="14" /></span>
+              <span class="dp-t"><b>{{ row.title }}</b><small><span v-if="row.project" class="dp-project"><AppIcon name="folder" :size="12" />{{ row.project }}</span><span v-if="row.project && row.detail"> · </span>{{ row.detail }}</small></span>
               <span class="dp-open" aria-hidden="true">Open</span>
             </RouterLink>
           </li>
@@ -141,7 +141,12 @@ li + li .dp-row { box-shadow: 0 -1px 0 var(--line); }
 @media (hover: hover) { .dp-row:hover { background: var(--row-hover); } }
 .dp-row:active { background: var(--row-selected); }
 .dp-row:focus-visible { outline: none; background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
-.dp-ic { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-sunken); }
+.dp-ic { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--ink-2); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
+.dp-ic.k-question { color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.dp-ic.k-approval, .dp-ic.k-question.held { color: var(--queue-wait-ink); background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); }
+.dp-project { display: inline-flex; align-items: center; gap: 4px; }.dp-project svg { color: var(--ink-3); }
+.dp-error { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }.dp-error svg { color: var(--ink-3); }.dp-sep { color: var(--ink-3); }
+.dp-retry { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--teal-ink); font: inherit; font-weight: 600; cursor: pointer; }.dp-retry:hover { text-decoration: underline; text-underline-offset: 2px; }.dp-retry:disabled { opacity: .55; cursor: default; }.dp-retry:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .dp-t { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .dp-t b { font-size: 13px; font-weight: 600; line-height: 1.35; }
 .dp-t small { color: var(--ink-3); font-size: 11.5px; line-height: 1.35; }
