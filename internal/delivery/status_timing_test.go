@@ -258,6 +258,10 @@ func TestTicketStatusTimingImportedHistoryAndQuantilesAPI(t *testing.T) {
 	if !life.Complete || life.InitialOffsetSeconds != 1 || len(life.Visits) != 4 || life.Visits[0].Seconds != 7200 || life.Visits[1].Status != "in_progress" || life.Visits[1].MovedBy.Name != "Historical builder" {
 		t.Fatalf("imported API life %+v", life)
 	}
+	f.call(t, f.person, "GET", "/api/nodes/"+parent+"/lifeline", nil, 200, &life)
+	if life.NodeID != parent || len(life.Visits) != 1 {
+		t.Fatalf("parent's own lifeline %+v", life)
+	}
 	// Directly exercise the bounded reader without creating 2001 fixture rows.
 	err := db.InTenantReadSnapshot(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		_, err := loadTimingEvents(t.Context(), tx, []timingNode{{ID: f.ticket}}, f.at, 1)

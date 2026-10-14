@@ -22,8 +22,8 @@ var timingEventTypes = []string{
 	"queue.added", "queue.add_undone", "node.status_history_backfilled",
 }
 
-const timingLeafSQL = `k.slug IN ('work','ticket','task','epic') AND n.deleted_at IS NULL
- AND (SELECT is_leaf FROM aeon_work_shape(n.id))`
+const timingWorkSQL = `k.slug IN ('work','ticket','task','epic') AND n.deleted_at IS NULL`
+const timingLeafSQL = timingWorkSQL + ` AND (SELECT is_leaf FROM aeon_work_shape(n.id))`
 
 func requireTiming(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, permission string) error {
 	s := authz.Scope{}
@@ -48,7 +48,8 @@ func loadTimingNodes(ctx context.Context, tx pgx.Tx, project, node string) ([]ti
  EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) tag
   WHERE lower(CASE WHEN jsonb_typeof(tag)='string' THEN tag#>>'{}' ELSE tag->>'name' END)='bug')
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND `+timingLeafSQL+`
+ WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND `+timingWorkSQL+`
+ AND ($2::uuid IS NOT NULL OR (SELECT is_leaf FROM aeon_work_shape(n.id)))
  AND ($1::uuid IS NULL OR n.project_id=$1) AND ($2::uuid IS NULL OR n.id=$2)
  ORDER BY n.id LIMIT $3`, timingNullable(project), timingNullable(node), timingNodeLimit+1)
 	if err != nil {
