@@ -30,7 +30,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>]; accepted: [entry: KnowledgeEntry]; reverted: [] }>()
 const desk = useDecisionDesk()
-const waitingLessons = computed(() => props.person ? desk.projection?.items.filter(item => item.kind === 'lesson' && item.project_id === props.project.id).length ?? 0 : 0)
+const waitingLessons = computed(() => props.person ? desk.projection?.counts.lessons?.[props.project.id] ?? (desk.projection?.has_more ? 0 : desk.projection?.items.filter(item => item.kind === 'lesson' && item.project_id === props.project.id).length ?? 0) : 0)
 const router = useRouter()
 const route = useRoute()
 const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))

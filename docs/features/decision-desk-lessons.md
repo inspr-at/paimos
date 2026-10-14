@@ -8,7 +8,8 @@ Both decisions support the existing event Undo, available in the memo and its
 confirmation toast after closing. Rule drafts still require a separate publication approval.
 
 The Knowledge tab replaces the Method learnings inbox with one quiet link to the
-project’s lessons on the Desk, shown only when lessons wait. Unprepared, stale,
+project’s lessons on the Desk, shown only when lessons wait. Its count uses
+canonical project lesson totals, including lessons beyond the loaded Desk page. Unprepared, stale,
 decided, inaccessible or missing-target candidates never enter the projection.
 Lesson IDs are stable UUIDs derived from the native learning ID, and their revision
 is the recommendation event ID. A changed target is named in the memo; Accept

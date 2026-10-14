@@ -240,6 +240,12 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 			return page, err
 		}
 	}
+	if !eligibleOnly {
+		page.Counts.Lessons = make(map[string]int)
+		for _, lesson := range lessonRows {
+			page.Counts.Lessons[lesson.ProjectID]++
+		}
+	}
 	lessonSource, err := json.Marshal(lessonRows)
 	if err != nil {
 		return page, err

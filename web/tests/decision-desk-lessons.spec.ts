@@ -13,7 +13,7 @@ const nativeId = `n-${id}`
 const sentence = 'Rehearse recovery before releasing.'
 const line = '- 2026-10-14 · Rehearse recovery before releasing. ([AEON-1](/p/AEON/AEON-1))'
 async function mockLessons(page: Page, options: { theme?: 'light' | 'dark'; outdated?: boolean; rule?: boolean; noSource?: boolean; empty?: boolean; long?: boolean } = {}) {
-  const state = { decided: false, revision: 700, fail: false, undoFail: false, calls: [] as { path: string; body: Record<string, unknown>; match?: string }[] }
+  const state = { decided: false, revision: 700, fail: false, undoFail: false, crowded: false, calls: [] as { path: string; body: Record<string, unknown>; match?: string }[] }
   const lessonSentence = options.long ? 'Vor jeder Freigabe wird der vollständige Wiederherstellungsablauf mit den aktuellen Berechtigungen und den dokumentierten Prüfschritten überprüft.' : sentence
   const learning: MethodLearning = {
     id: nativeId, source: 'ticket', node_id: id, key: 'AEON-1', title: options.noSource ? '' : 'Recovery failed during release',
@@ -35,9 +35,15 @@ async function mockLessons(page: Page, options: { theme?: 'light' | 'dark'; outd
     learning.recommendation!.line = `- 2026-10-14 · ${lessonSentence} ([AEON-1](/p/AEON/AEON-1))`
   }
   target.updated_at = options.outdated ? '2026-10-14T09:00:00Z' : '2026-10-13T08:00:00Z'
-  await page.route('**/api/decision-desk/projection*', route => route.fulfill({ json: {
-    items: state.decided || options.empty ? [] : [row()], counts: { open: state.decided || options.empty ? 0 : 1, held: 0, chores: 0 }, has_more: false, as_of: '2026-10-14T10:00:00Z',
-  } }))
+  await page.route('**/api/decision-desk/projection*', route => {
+    const lessons = state.decided || options.empty ? 0 : 1
+    if (state.crowded) {
+      const offset = Number(new URL(route.request().url()).searchParams.get('cursor') || 0)
+      const rows = Array.from({ length: 100 }, (_, at) => ({ ...row(), id: `question-${offset + at}`, kind: 'question', project_id: 'p-pharos' }))
+      return route.fulfill({ json: { items: rows, counts: { open: 1001, held: 0, chores: 0, lessons: { 'p-aeon': lessons } }, has_more: true, next_cursor: String(offset + 100), as_of: '2026-10-14T10:00:00Z' } })
+    }
+    return route.fulfill({ json: { items: lessons ? [row()] : [], counts: { open: lessons, held: 0, chores: 0, lessons: { 'p-aeon': lessons } }, has_more: false, as_of: '2026-10-14T10:00:00Z' } })
+  })
   await page.route('**/api/knowledge/learnings*', route => route.fulfill({ json: {
     items: state.decided || options.empty ? [] : [{ ...learning, recommendation: { ...learning.recommendation, event_id: state.revision } }], truncated: false,
   } }))
@@ -95,10 +101,10 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: testInfo.outputPath('accepted-with-undo.png') }); guard.done()
   })
   test(`AEON-1331 pending lesson and Knowledge link at ${width} ${theme}`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 1000 }); await mockLessons(page, { theme, long: true })
+    await page.setViewportSize({ width, height: 1000 }); const { state } = await mockLessons(page, { theme, long: true })
     await openLesson(page); await expect(page.getByTestId('lesson-outdated')).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath('pending.png') })
-    await page.getByTestId('desk-close').click(); await page.goto('/p/AEON/knowledge')
+    await page.getByTestId('desk-close').click(); state.crowded = true; await page.goto('/p/AEON/knowledge')
     await expect(page.getByRole('heading', { name: 'Method learnings' })).toHaveCount(0)
     const link = page.getByRole('link', { name: '1 lessons wait on the Decision Desk ›' })
     await expect(link).toHaveAttribute('href', '/decision-desk?kind=lesson&project=p-aeon')
@@ -106,6 +112,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const guard = await controlStability(page, { search, newEntry: page.getByRole('button', { name: 'New knowledge entry' }) })
     await guard.check(() => search.fill('Ship')); guard.done()
     await page.screenshot({ path: testInfo.outputPath('knowledge-with-lessons.png') })
+    state.crowded = false
     await link.click(); await expect(page).toHaveURL(/kind=lesson&project=p-aeon/)
     await expect(page.locator('.desk-row')).toHaveCount(1)
   })

@@ -109,7 +109,7 @@ export interface DeskProjectionItem {
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
-  items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number }
+  items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number; lessons?: Record<string, number> }
   has_more: boolean; next_cursor?: string; as_of: string
 }
 

@@ -77,6 +77,7 @@ components:
             open: {type: integer, minimum: 0}
             held: {type: integer, minimum: 0}
             chores: {type: integer, minimum: 0}
+            lessons: {type: object, maxProperties: 1000, additionalProperties: {type: integer, minimum: 0}, description: "Prepared lesson totals keyed by authorized project UUID, independent of the loaded projection page."}
         has_more: {type: boolean}
         next_cursor: {type: string}
         as_of: {type: string, format: date-time}

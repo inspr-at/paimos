@@ -533,7 +533,7 @@ func TestPreparedLessonProjectionVisibilityAndDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := f.page(t, f.person, 1, nil)
-	if len(page.Items) != 1 || page.Counts.Open != 1 || page.Counts.Held != 0 {
+	if len(page.Items) != 1 || page.Counts.Open != 1 || page.Counts.Held != 0 || page.Counts.Lessons[f.project] != 1 {
 		t.Fatalf("wrong lesson counts: %+v", page)
 	}
 	item := page.Items[0]

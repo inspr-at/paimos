@@ -62,9 +62,10 @@ func (i Item) PushEligible(now time.Time) bool {
 }
 
 type Counts struct {
-	Open   int `json:"open"`
-	Held   int `json:"held"`
-	Chores int `json:"chores"`
+	Open    int            `json:"open"`
+	Held    int            `json:"held"`
+	Chores  int            `json:"chores"`
+	Lessons map[string]int `json:"lessons,omitempty"`
 }
 
 type Page struct {
