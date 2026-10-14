@@ -107,6 +107,7 @@ func TestNativeRootsFenceWorkerAliasAndProjectOwnClaim(t *testing.T) {
 	const session = "01900000-0000-4000-8000-000000000101"
 	const sibling = "01900000-0000-4000-8000-000000000102"
 	const computer = "01900000-0000-4000-8000-000000000103"
+	first.QuotaPoolFingerprint, alias.QuotaPoolFingerprint = strings.Repeat("ac", 32), strings.Repeat("ac", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1 WHERE id=ANY($2::uuid[])`, strings.Repeat("ac", 32), []string{first.ID, alias.ID})
 		if err != nil {
