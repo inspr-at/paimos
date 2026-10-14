@@ -19,8 +19,8 @@ import (
 // cmdMessagingTell is selected by the coordinator entry point RunMessaging.
 func (rt *runtime) cmdMessagingTell() *Command {
 	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession, sessionCookieFile string
-	var expectsReply, action bool
-	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
+	var expectsReply, action, principalInbox bool
+	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <principal-uuid> --inbox -m TEXT | tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
 		subs: []*Command{{Name: "status", Short: "Read your message's push receipt", Use: "tell status <message-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
 			if !validUUID(args[0]) {
 				return usagef("message ID must be a UUID")
@@ -36,7 +36,8 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			return err
 		}}},
 		addFlags: func(fs *flagSet) {
-			fs.string(&project, "project", 0, "project key (required)")
+			fs.bool(&principalInbox, "inbox", 0, "send directly to a principal UUID without project or harness discovery")
+			fs.string(&project, "project", 0, "project key (required unless --inbox)")
 			fs.string(&message, "message", 'm', "message text (required)")
 			fs.string(&messageFile, "message-file", 0, "message text file, or - for stdin")
 			fs.string(&level, "level", 0, "simple or steer")
@@ -50,6 +51,15 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			fs.bool(&action, "action-request", 0, "hold for human inspection; never deliver")
 		}, run: func(args []string) error {
 			address := strings.TrimSpace(args[0])
+			if principalInbox {
+				if !validUUID(address) {
+					return usagef("--inbox requires a recipient principal UUID")
+				}
+				if project != "" || thread != "" || level != "" || recipientSession != "" || senderSession != "" || sessionCookieFile != "" || expectsReply || action {
+					return usagef("--inbox cannot be combined with --project, --thread, --level, session flags, --expects-reply or --action-request")
+				}
+				return rt.tellPrincipalInbox(address, message, messageFile, reply, key)
+			}
 			if !validUUID(address) && !messagingAddressRE.MatchString(address) {
 				return usagef("invalid harness:agent address or principal UUID")
 			}
@@ -199,12 +209,13 @@ func tellReceiptState(receipt inbox.Receipt) string {
 }
 func (rt *runtime) cmdMessagingListen() *Command {
 	var as, project, deliver, after, poll, sessionID, targetRefFile string
-	var follow, ack bool
+	var follow, ack, principalInbox bool
 	limit := 10
-	return &Command{Name: "listen", Short: "Read your project inbox", Use: "listen --project KEY [--as harness:agent] [--ack] | listen --project KEY --session UUID --deliver codex|claude_resume --target-ref-file PATH --follow", maxArgs: 0, addFlags: func(fs *flagSet) {
+	return &Command{Name: "listen", Short: "Read your inbox", Use: "listen --inbox [--follow] [--ack] | listen --project KEY [--as harness:agent] [--ack] | listen --project KEY --session UUID --deliver codex|claude_resume --target-ref-file PATH --follow", maxArgs: 0, addFlags: func(fs *flagSet) {
+		fs.bool(&principalInbox, "inbox", 0, "read your principal inbox without project or harness discovery")
 		fs.string(&sessionID, "session", 0, "read only this session plus principal-wide broadcasts")
 		fs.string(&as, "as", 0, "own harness:agent, name or UUID")
-		fs.string(&project, "project", 'p', "project key (required)")
+		fs.string(&project, "project", 'p', "project key (required unless --inbox)")
 		fs.string(&after, "after", 0, "last printed event cursor")
 		fs.int(&limit, "limit", "page size (1–10)")
 		fs.string(&deliver, "deliver", 0, "local transport adapter")
@@ -219,10 +230,13 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		if targetRefFile != "" && (sessionID == "" || deliver == "") {
 			return usagef("--target-ref-file requires --session and --deliver")
 		}
-		if project == "" {
+		if principalInbox && (project != "" || as != "" || sessionID != "" || deliver != "" || targetRefFile != "") {
+			return usagef("--inbox cannot be combined with --project, --as, --session, --deliver or --target-ref-file")
+		}
+		if !principalInbox && project == "" {
 			return usagef("--project is required")
 		}
-		if rt.program == "paimos" && !messagingAddressRE.MatchString(as) {
+		if !principalInbox && rt.program == "paimos" && !messagingAddressRE.MatchString(as) {
 			return usagef("--as requires a harness:agent address")
 		}
 		if limit < 1 || limit > 10 {
@@ -244,6 +258,11 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		}
 		if deliver != "" && ((sessionID == "" && !messagingAddressRE.MatchString(as)) || !localMessagingAdapter(deliver)) {
 			return usagef("--deliver requires --as harness:agent and a registered local adapter")
+		}
+		if principalInbox {
+			ctx, stop := signal.NotifyContext(rt.context(), os.Interrupt)
+			defer stop()
+			return rt.listenPrincipalInbox(ctx, after, limit, follow, ack, interval)
 		}
 		projectID, err := rt.projectIdentityCtx(rt.context(), project)
 		if err != nil {
