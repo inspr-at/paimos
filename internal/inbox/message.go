@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -189,6 +190,9 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
+		}
+		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{}); err != nil {
+			return errForbidden
 		}
 		if m.attached.Enabled() {
 			if request, err := attachedmsg.AttachmentForSend(ctx, tx, in.Recipient, in.RecipientSessionID); err != nil {
@@ -394,6 +398,10 @@ func (m *module) handleAck(w http.ResponseWriter, r *http.Request) {
 func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Message, error) {
 	var out Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Fence live access before session/message rows; the event counter is last.
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
 		// Lock order (AEON-280): the bound session first, then the message.
 		// recipient and session are immutable, so an unlocked read picks the lock.
 		var recipient, sender string
@@ -410,6 +418,9 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 				return errForbidden
 			}
 			return errNotFound
+		}
+		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.RouteScope(ctx)); err != nil {
+			return errForbidden
 		}
 		// Keep the generation live through commit, including idempotent retries.
 		if _, err := listeningSession(ctx, tx, session, p.ID, ""); err != nil {
