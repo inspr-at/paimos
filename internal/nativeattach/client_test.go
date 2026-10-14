@@ -436,6 +436,7 @@ func TestFakeSocketDetachViewerAndStaleBinding(t *testing.T) {
 	})
 	t.Run("receipt read pins generation and closes stale authority", func(t *testing.T) {
 		f := newFakeSocket(t)
+		f.receipts = []nativecontract.Receipt{}
 		s := f.open(t, true)
 		if _, err := s.Receipts(t.Context(), ""); err != nil {
 			t.Fatalf("exact receipt coordinates refused: %v", err)
