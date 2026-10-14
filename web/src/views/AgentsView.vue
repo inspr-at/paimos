@@ -675,7 +675,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 </template>
 
 <style scoped>
-.agents-page { --page-x: var(--gutter); width: 100%; margin: 0; padding: 22px var(--page-x) 24px; }
+.agents-page { --page-x: var(--gutter); width: 100%; min-width: 0; margin: 0; padding: 22px var(--page-x) 24px; }
 /* One control height for the head, the capacity row and the Sessions card head (AEON-1209): 36 px, 44 on touch. */
 .agents-page { --ctl-h: 36px; }
 @media (pointer: coarse), (max-width: 720px) { .agents-page { --ctl-h: 44px; } }
@@ -721,12 +721,15 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 .layout-button { position: absolute; top: 15px; right: 11px; width: var(--ctl-h); height: var(--ctl-h); color: var(--ink-2); }
 .layout-button:not([data-layout="list"]) { color: var(--teal-ink); }
 .layout-button[aria-disabled="true"] { opacity: .5; }
-.agents-split { display: flex; gap: 0; align-items: flex-start; }
-.agents-list-pane { flex: 0 0 100%; min-width: 0; container: sessions / inline-size; transition: flex-basis 240ms ease; }
+.agents-split { display: flex; gap: 0; align-items: flex-start; min-width: 0; }
+/* The saved list basis is a pixel width from the last wide layout. The viewport
+   can shrink before the split class updates, and the basis then eases for 240ms.
+   Cap the pane at the row and let the divider yield so that frame cannot widen main. */
+.agents-list-pane { flex: 0 0 100%; min-width: 0; max-width: 100%; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
 .split { padding-bottom: 8px; }
 .agents-divider { position: relative; flex: 0 0 0; align-self: stretch; transition: flex-basis 240ms ease; }
-.split .agents-divider { flex-basis: 16px; cursor: col-resize; touch-action: none; }
+.split .agents-divider { flex-basis: 16px; flex-shrink: 1; min-width: 0; cursor: col-resize; touch-action: none; }
 .split .agents-divider::before { content: ''; position: absolute; top: 8px; bottom: 8px; left: 7.5px; width: 1px; background: var(--line); }
 .grip { display: none; }
 .split .grip { position: sticky; top: 45vh; display: block; width: 6px; height: 36px; margin: 40vh auto 0; border-radius: 999px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); }

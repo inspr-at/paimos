@@ -113,9 +113,10 @@ test('revision watch backs off after outages and rechecks immediately on focus',
   for(let i=0;i<3;i++)delays.push(await page.evaluate(async()=>{const s=(window as any).quoteCollab;await s.check();return s.checkDelay}))
   expect(delays).toEqual([8000,16000,20000])
   await page.evaluate(()=>window.dispatchEvent(new Event('focus')))
-  await expect.poll(()=>reads).toBe(5)
-  const state=await page.evaluate(()=>{const s=(window as any).quoteCollab;return {delay:s.checkDelay,remote:s.view.remote}})
-  expect(state).toEqual({delay:4000,remote:'newer'})
+  // reads increments when the route starts, before the session applies the draft.
+  // Wait until this client shows the reset delay, then require that it was the fifth read.
+  await expect.poll(()=>page.evaluate(()=>{const s=(window as any).quoteCollab;return {delay:s.checkDelay,remote:s.view.remote}})).toEqual({delay:4000,remote:'newer'})
+  expect(reads).toBe(5)
 })
 
 test('verified overlay follows its stable node and stays out of print and saved JSON',async({page})=>{
