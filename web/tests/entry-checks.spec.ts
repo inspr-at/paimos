@@ -85,13 +85,20 @@ test('AEON-1315 defined entry row reserves space before reads and keeps the tick
   }
 })
 
-// Risk: a loading-only row briefly displaces the ticket below its properties,
-// both on first open and after a save. Response barriers and a DOM observer
-// retain transient insertions that a settled-state assertion would miss.
+// Risk: a project known to have no definition flashes a loading-only row on
+// another ticket or after a save. Learn that from a real sibling read first;
+// then retain every transient insertion with the observer and response barriers.
 test('AEON-1315 entry row stays absent without a definition during reads and saves', async ({ page }) => {
   const data = fixtures(), node = data.nodes.find(n => n.id === 'n-4')!
   await mockWork(page, data)
-  await page.addInitScript(() => {
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  const workspace = page.getByRole('complementary', { name: 'Ticket details' }), slot = workspace.locator('[data-entry-slot]')
+  const empty = page.waitForResponse('**/api/nodes/n-5/entry-checks')
+  await page.locator('tr.ticket-row').filter({ hasText: 'PHAROS-15' }).locator('.title-text').click()
+  expect((await (await empty).json()).definition).toBeNull()
+  await expect(workspace.getByRole('heading', { name: data.nodes.find(n => n.id === 'n-5')!.title })).toBeVisible()
+  await expect(slot).toHaveCount(0)
+  await page.evaluate(() => {
     const observed = { slots: 0 }
     Object.assign(window, { entryRowObserved: observed })
     new MutationObserver(records => {
@@ -106,9 +113,7 @@ test('AEON-1315 entry row stays absent without a definition during reads and sav
     await new Promise<void>(resolve => pending.push(resolve))
     await route.fulfill({ json: { node_id: node.id, revision, definition: null, blocks: [], entries: [], latest_refusal: null } })
   })
-  await page.goto('/p/PHAROS?sort=key&closed=1')
-  await page.locator('tr.ticket-row').filter({ hasText: 'PHAROS-14' }).locator('.title-text').click()
-  const workspace = page.getByRole('complementary', { name: 'Ticket details' }), slot = workspace.locator('[data-entry-slot]')
+  await workspace.getByRole('button', { name: 'Previous ticket', exact: true }).click()
   await expect.poll(() => pending.length).toBe(1)
   await expect(slot).toHaveCount(0)
   const stable = await controlStability(page, { details: workspace.locator('.meta').first() })

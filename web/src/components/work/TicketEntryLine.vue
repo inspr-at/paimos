@@ -8,8 +8,13 @@ import { absoluteTime } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import QueueReadyPanel from './QueueReadyPanel.vue'
-const props = defineProps<{ row: ListItem; projectId: string }>()
+const props = defineProps<{ row: ListItem; projectId: string; definitionKnown: boolean | null }>()
+const emit = defineEmits<{ definition: [defined: boolean] }>()
 const session = useSession(), checks = useEntryChecks(() => props.row)
+// Unknown projects reserve the normal row from the first render. A successful
+// empty result removes it and informs the workspace's next-ticket layout hint.
+const reserve = computed(() => checks.error.value || checks.defined.value || (!checks.data.value && props.definitionKnown !== false))
+watch(checks.data, result => { if (result && props.row.is_leaf !== false) emit('definition', !!result.definition) }, { flush: 'sync' })
 const line = computed(() => entryLine(checks.data.value, props.row.state))
 const anchor = ref<HTMLElement | null>(null)
 const waiting = computed(() => line.value?.block?.checks.filter(check => check.applicable && !check.passed && check.owner) ?? [])
@@ -26,7 +31,7 @@ const tip = computed(() => {
 watch(() => [props.row.id, session.identity?.principal.id], () => { anchor.value = null })
 </script>
 <template>
-  <div v-if="row.is_leaf !== false && (checks.error.value || checks.defined.value)" class="entry-slot" data-entry-slot>
+  <div v-if="row.is_leaf !== false && reserve" class="entry-slot" data-entry-slot>
     <button v-if="line?.block" type="button" class="entry-line" :class="{ passing: line.block.passed === line.block.total && !line.readonly }" :data-tip="tip" :aria-label="`${line.text}${ownerText ? ` · ${ownerText}` : ''}`" @click="anchor = $event.currentTarget as HTMLElement">
       <AppIcon :name="line.readonly && line.record?.override_reason ? 'skip' : line.block.passed === line.block.total ? 'circle-check' : 'list-checks'" :size="14" />
       <span>{{ line.text }}</span><span v-if="ownerText" class="waiting">· {{ ownerText }}</span>

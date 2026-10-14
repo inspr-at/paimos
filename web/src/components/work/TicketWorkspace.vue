@@ -143,6 +143,10 @@ function closeConvert() {
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
 const session = useSession()
+// Cache only the current project's layout hint, never another ticket's checks.
+// It survives the keyed line on next/previous, but belongs to this identity.
+const entryDefinitionKnown = ref<boolean | null>(null)
+watch([() => props.project.id, () => session.identity?.principal.id, () => session.identity?.tenant.id], () => { entryDefinitionKnown.value = null }, { flush: 'sync' })
 const vocabulary = useWorkVocabulary()
 const repeatSource = ref<ListItem | null>(null)
 const originRecurrence = ref<Recurrence | null>(null), recurrenceEdit = ref<Recurrence | null>(null)
@@ -727,7 +731,7 @@ defineExpose({
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
-          <TicketEntryLine :key="item.id" :row="item" :project-id="project.id" />
+          <TicketEntryLine :key="item.id" :row="item" :project-id="project.id" :definition-known="entryDefinitionKnown" @definition="entryDefinitionKnown = $event" />
           <section v-if="queueEntry" class="q-card" :class="{ wait: queueEntry.waiting_reason }" aria-label="Work queue">
             <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />
             <div class="q-card-acts">
