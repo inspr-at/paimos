@@ -2,7 +2,7 @@
 // Fixed go-static selector lane: imported by test-tiers.test.mjs.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -266,20 +266,27 @@ test('AEON-1333 workflow publishes shadow evidence from immutable base with Acti
 test('AEON-1333 archived base capsule starts with its full dependency set and produces the current gated plan', t => {
   const repository = fileURLToPath(new URL('../../', import.meta.url))
   const directory = mkdtempSync(resolve(tmpdir(), 'aeon-impact-capsule-'))
-  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const linkDirectory = mkdtempSync(resolve(tmpdir(), 'aeon-impact-link-'))
+  t.after(() => { rmSync(directory, { recursive: true, force: true }); rmSync(linkDirectory, { recursive: true, force: true }) })
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim()
   const archive = execFileSync('git', ['archive', sha, 'scripts', 'web/src', 'web/tests', 'web/e2e', 'web/scripts', 'web/ci-web-shards.json'], { cwd: repository, maxBuffer: 64 * 1024 * 1024, timeout: 15_000 })
   execFileSync('tar', ['-x', '-C', directory], { input: archive, timeout: 15_000 })
   // Git metadata stays in the candidate directory; every imported module and
   // policy/ownership input comes from the archived immutable base.
-  const outcome = spawnSync(process.execPath, [resolve(directory, 'scripts/test-tiers/impact-plan.mjs')], {
+  // A symlink plus a cleared plan fails the old lexical argv guard: Node
+  // realpaths the module URL, main never runs, and a stale file would pass.
+  const output = resolve(repository, 'tmp/test-tiers/impact-plan.json')
+  rmSync(output, { force: true })
+  const link = resolve(linkDirectory, 'impact-plan.mjs')
+  symlinkSync(resolve(directory, 'scripts/test-tiers/impact-plan.mjs'), link)
+  const outcome = spawnSync(process.execPath, [link], {
     cwd: repository, encoding: 'utf8', timeout: 30_000, env: { PATH: process.env.PATH,
       AEON_IMPACT_CHECKOUT: repository, PR_BASE_SHA: sha, PR_HEAD_SHA: sha, GITHUB_SHA: sha,
       GITHUB_EVENT_NAME: 'pull_request', GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1',
       EXECUTION_MODE: 'full', EXECUTION_LAYOUT: 'full', EXECUTION_LANE: 'full' },
   })
   assert.equal(outcome.status, 0, outcome.stderr)
-  const result = JSON.parse(readFileSync(resolve(repository, 'tmp/test-tiers/impact-plan.json')))
+  const result = JSON.parse(readFileSync(output))
   assert.equal(result.complete, true); assert.equal(result.browser_scope, 'gated-full')
   const manifest = JSON.parse(readFileSync(resolve(directory, 'scripts/ci/web-test-tiers.json')))
   assert.equal(result.selected_cases.length, manifest.tests.filter(row => row.kind === 'browser' && row.tier !== 'NIGHTLY' && row.active !== false).length)

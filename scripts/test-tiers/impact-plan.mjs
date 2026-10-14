@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // S1 publishes observations only. No execution job consumes this plan.
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { browserIdentity, browserImpact, nightlyBrowserMap, gitTree } from './browser-impact.mjs'
@@ -190,6 +190,13 @@ export function main(env = process.env, { trustedRoot = root, browserCoverage = 
   return plan
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node realpaths import.meta.url. argv keeps the given path, so a macOS tmpdir
+// symlink (/var -> /private/var) or any other symlink skips main and exits 0.
+function invokedDirectly(argv = process.argv[1]) {
+  if (!argv) return false
+  try { return realpathSync(argv) === realpathSync(fileURLToPath(import.meta.url)) }
+  catch { return false }
+}
+if (invokedDirectly()) {
   try { main() } catch (error) { console.error(error.message); process.exitCode = 1 }
 }
