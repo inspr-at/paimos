@@ -135,7 +135,7 @@ Builder verification on the completed source:
   `grant_missing`. Source was restored and the scratch branch removed; no
   throwaway commit remains.
 - **INCOMPLETE:** the prescribed guarded remote package run and
-  `ci-static-locked.sh` both refused with exit 3 for occupied mbp2606 slots.
+  `ci-static-locked.sh` both refused with exit 3 for occupied remote runner slots.
   Neither is reported green or retried in a loop. Authoritative PR CI must
   complete the remote/static validation before merge. I2 production wiring and
   coordinator review/release decisions remain outside this slice.
