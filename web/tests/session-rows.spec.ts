@@ -37,7 +37,8 @@ for (const pass of [1, 2]) for (const theme of ['light', 'dark'] as const) for (
     await expect(row.locator('.session-name')).toHaveCount(0)
     await expect(row.locator('.result')).toHaveAttribute('title', 'Keep fleet membership consistent while the connector lands · camy')
     await expect(row.locator('.l1')).not.toContainText('imac0')
-    await expect(row.locator('.role')).toHaveText('Lead')
+    // Its coordinator role alone is no lead claim: no Lead chip (AEON-1285).
+    await expect(row.locator('.role')).toHaveCount(0)
     // AEON-1211: the avatar carries the state badge only; the harness is in Execution, or the 12 px opener of a compact row.
     await expect(row.locator('.ava .harness-badge')).toHaveCount(0)
     if (width === 390) {

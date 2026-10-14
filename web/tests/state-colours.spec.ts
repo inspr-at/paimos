@@ -314,7 +314,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const problem = page.locator('.row[data-state="problem"]').first()
     await problem.locator('.agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    await expect(panel.locator('.now-step')).toHaveText('Reported stop reason: worker failed: exit 2')
+    await expect(panel.locator('.now-step')).toHaveText('The session reported a failure · Retry or check the ticket')
     if (width === 1600) {
       // AEON-1213 (#591) split the rendered list into its own pane.
       const listBounds = (await page.locator('.agents-list-pane').boundingBox())!

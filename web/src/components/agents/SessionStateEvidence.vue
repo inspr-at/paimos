@@ -20,6 +20,7 @@ const beatMatters = computed(() => ['problem', 'awaiting', 'unresponsive', 'stal
       <li v-for="(reason, index) in view.status.reasons" :key="reason.code">
         <strong v-if="index > 0">{{ reason.detail }}</strong><span>{{ reason.next }}</span>
         <RouterLink v-if="reason.code.includes('approval')" to="/decision-desk">Permission requests</RouterLink>
+        <RouterLink v-else-if="reason.code === 'retried' && view.retry" :to="`/agents/${view.retry.id}`">Open the retry</RouterLink>
       </li>
     </ul>
     <template v-if="beatMatters">

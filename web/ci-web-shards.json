@@ -760,6 +760,8 @@
         ,
         {"file":"tests/aeon-1279-touch-scroll.spec.ts","listedTests":6,"weightSeconds":60,"weightSource":"remote-one-worker-AEON-1279-30s-plus-margin"}
         ,
+        {"file":"tests/aeon-1285-agent-rows.spec.ts","listedTests":5,"weightSeconds":30,"weightSource":"local-single-worker-AEON-1285-14s-plus-margin"}
+        ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
@@ -1553,6 +1555,8 @@
       "tests/aeon-1213-agents-split.spec.ts": {"seconds":76.689,"selectedTests":15}
       ,
       "tests/aeon-1279-touch-scroll.spec.ts": {"seconds":28.546,"selectedTests":6}
+      ,
+      "tests/aeon-1285-agent-rows.spec.ts": {"seconds":14.3,"selectedTests":5}
       ,
       "tests/aeon-632b-clip-settings.spec.ts": {"seconds":187.653,"selectedTests":12}
       ,

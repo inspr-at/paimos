@@ -245,6 +245,8 @@ const projectStore = useProjects()
 const customOrder = usePreference<{ ids?: string[] }>('projects:order')
 const orderedProjects = computed<ProjectRef[]>(() => orderProjects(projectStore.projects.filter(p => !p.archived).map(p => ({ id: p.id, key: p.routeKey, title: p.title })), customOrder.value.value?.ids ?? []))
 const leadOf = (projectId: string | null | undefined) => projectId ? props.projects?.lead(projectId) ?? null : null
+// The harness lead claim: the project's lead names this very session (AEON-1285), whatever its role.
+const claimedLead = (view: SessionView) => !!view.session.project_id && leadOf(view.session.project_id)?.session_id === view.session.id
 const queuedOf = (projectId: string | null | undefined) => projectId ? props.projects?.queued(projectId) ?? null : null
 // A count from a queue read cut short reads “4+”; a queue that can't be read says so below the list (AEON-1210 G2).
 const qWord = (count: number | null) => count === null ? '?' : queuedWord(count, !!props.projects?.queuePartial)
@@ -453,7 +455,8 @@ const workingChildren = (branch: Branch) => descendants(branch).filter(sessionWo
 function lineTwo(branch: Branch, view: SessionView) {
   const lead = view.session.archived_at ? 'Removed' : tierRequestLabel(view) || pendingLabel(view)
   const handedOver = view.session.stopped_at && view.session.handed_over_to_id ? `Handed over to ${lineageName(view.session.handed_over_to_id)}` : ''
-  if (keepsPlace(branch.view)) return [lead, handedOver, endedLine(view)].filter(Boolean).join(' · ')
+  // A retried attempt names its retry while it keeps its place (AEON-1285), as a handover does.
+  if (keepsPlace(branch.view)) return [lead, handedOver, view.retry ? `Retried as ${view.retry.name}` : '', endedLine(view)].filter(Boolean).join(' · ')
   const step = handedOver || activityLine(branch, view) || currentStep(view, descendants(branch).filter(countedLive).length, props.now)
   // A word more precise than the badge's ("Stop requested", "Lost contact") opens the line.
   const precise = view.status.label !== STATE_LABEL[view.status.state] && view.status.label !== step ? view.status.label : ''
@@ -473,7 +476,7 @@ function endedLine(view: SessionView) {
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.
 const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
-type Row = TreeRow<SessionView> & { view: SessionView; primary: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; leadRoot: boolean; queueChip: boolean; queued: number | null; line: string; sub: number; under: ReturnType<typeof below> }
+type Row = TreeRow<SessionView> & { view: SessionView; primary: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; coordinates: boolean; leadRoot: boolean; queueChip: boolean; queued: number | null; line: string; sub: number; under: ReturnType<typeof below> }
 // Sessions as a tree of any depth (AEON-784): the list decides which children a
 // parent offers and whether it is open; sessionTree lays out the rows.
 function rowsOf(section: Section): Row[] {
@@ -493,7 +496,8 @@ function rowsOf(section: Section): Row[] {
     return {
       ...row, view, primary, line, exec: sessionExecution(view, names.value),
       family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
-      lead: view.session.role === 'coordinator' || row.branch.children.length > 0,
+      // Only the project's claimed lead says Lead (AEON-1285); a coordinator without the claim says nothing.
+      lead: claimedLead(view), coordinates: view.session.role === 'coordinator' || row.branch.children.length > 0,
       leadRoot, queueChip: leadRoot && !section.line && chipRoots.value.has(view.session.id) && hasQueue(view.session.project_id), queued: queuedOf(view.session.project_id), sub, under,
     }
   })
@@ -1085,7 +1089,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             <RouterLink v-slot="{ href }" :to="`/agents/${row.view.session.id}`" custom>
             <a class="agent-link" :href="href" @click="sessionLinkClick($event, row.view.session.id)" :aria-label="`${row.view.harness} ${row.view.name}, ${row.view.status.label}${row.lead ? ', lead' : ''}${row.under.problem ? `, ${rollLabel(row)}` : ''}${row.primary !== row.view.name ? `. ${row.primary}` : ''}`">
               <!-- The avatar carries the state badge only (AEON-1211); its word is the tooltip and part of the name. -->
-              <SessionAvatar :view="row.view" :size="30" :lead="row.lead" :tip="timeTip(row.view, now)" />
+              <SessionAvatar :view="row.view" :size="30" :lead="row.coordinates" :project-lead="row.lead" :tip="timeTip(row.view, now)" />
               <!-- Two lines whatever the state, so a state change never changes the row's height. Line 1 is the
                    name only: the ticket key opens it ("PHAROS-12 · …"), a lead adds Lead (AEON-1211). Compact
                    rows open it with the harness mark and end it with the time. -->
@@ -1094,7 +1098,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
                   <HarnessOpener class="opener" :harness="row.view.session.harness" :harness-label="row.view.harness" :exec="row.exec" />
                   <span v-if="row.view.ticket" class="key-inline">{{ row.view.ticket.key }} ·</span>
                   <span class="result" :title="row.primary !== row.view.name ? `${row.primary} · ${row.view.name}` : row.primary">{{ row.primary }}</span>
-                  <span v-if="row.lead" class="role" data-tip="Coordinates other sessions">Lead</span>
+                  <span v-if="row.lead" class="role" data-tip="Leads this project">Lead</span>
                   <time class="t-inline" :datetime="row.view.session.stopped_at ?? row.view.session.created_at">{{ timeShort(row.view, now) }}</time>
                 </span>
                 <!-- Whether it listens (AEON-280) or has an inbox (AEON-282) is said in words in the details. -->

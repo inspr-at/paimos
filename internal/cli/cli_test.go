@@ -28,6 +28,8 @@ func isolate(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+	// A test never asks the real harness which account it is signed in to (AEON-1285).
+	t.Setenv("AEON_ACCOUNT_PROBE", "off")
 }
 
 func meServer(t *testing.T, token string) *httptest.Server {

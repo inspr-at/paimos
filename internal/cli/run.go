@@ -24,7 +24,7 @@ import (
 // served yet (see unsupportedCompat). MCP tools that still lack a handler
 // report the same with "arrives in R1".
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon"}
+	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon", harnessAccount: probeHarnessAccount}
 	if len(args) > 0 {
 		rt.program = programName(args[0])
 	}
@@ -73,6 +73,9 @@ type runtime struct {
 	// subagentLocked observes child-lock ownership in barrier tests. Production
 	// leaves it nil; it never supplies lifecycle metadata or changes lock order.
 	subagentLocked func()
+	// harnessAccount asks a harness which account it is signed in to (AEON-1285).
+	// Run installs the real probe; a test runtime leaves it nil or injects one.
+	harnessAccount harnessAccountProbe
 }
 
 func (rt *runtime) execute(args []string) error {
