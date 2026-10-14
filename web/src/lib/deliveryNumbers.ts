@@ -74,6 +74,8 @@ function formatter<T extends Intl.NumberFormat | Intl.DateTimeFormat>(key: strin
   if (!format) { format = make(); formats.set(key, format) }
   return format
 }
+// toLocale…String says "Invalid Date" where format throws; a malformed date must not break the page.
+const dateText = (format: Intl.DateTimeFormat, date: Date) => Number.isNaN(date.getTime()) ? 'Invalid Date' : format.format(date)
 export function num(value: number, lang: DeliveryLanguage, digits = 0): string {
   const at = locale(lang)
   return formatter(`n|${at}|${digits}`, () => new Intl.NumberFormat(at, { minimumFractionDigits: digits, maximumFractionDigits: digits })).format(value)
@@ -90,12 +92,12 @@ const dateOf = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`)
 type DateFields = Pick<Intl.DateTimeFormatOptions, 'weekday' | 'day' | 'month' | 'year'>
 function fmtDate(iso: string, lang: DeliveryLanguage, options: DateFields) {
   const at = locale(lang)
-  return formatter(`d|${at}|${options.weekday ?? ''}|${options.day ?? ''}|${options.month ?? ''}|${options.year ?? ''}`, () => new Intl.DateTimeFormat(at, { timeZone: 'UTC', ...options })).format(dateOf(iso))
+  return dateText(formatter(`d|${at}|${options.weekday ?? ''}|${options.day ?? ''}|${options.month ?? ''}|${options.year ?? ''}`, () => new Intl.DateTimeFormat(at, { timeZone: 'UTC', ...options })), dateOf(iso))
 }
 export const shortDate = (iso: string, lang: DeliveryLanguage) => fmtDate(iso, lang, { day: 'numeric', month: 'short' })
 export function clockTime(iso: string, lang: DeliveryLanguage) {
   const at = locale(lang)
-  return formatter(`t|${at}`, () => new Intl.DateTimeFormat(at, { hour: '2-digit', minute: '2-digit', hour12: false })).format(new Date(iso))
+  return dateText(formatter(`t|${at}`, () => new Intl.DateTimeFormat(at, { hour: '2-digit', minute: '2-digit', hour12: false })), new Date(iso))
 }
 
 // ---------- The tiles: ten Arion numbers (3 and 7 carry two metrics), then the v5 readings ----------
