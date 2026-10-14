@@ -149,6 +149,9 @@ test('knowledge keys open visible scoped entries and superseded responses stay d
   expect(world.entries).toContain(invisible)
 
   await page.goto('/')
+  // A paused clock during navigation freezes the palette mount, so Control+K
+  // never opens a dialog. Wait until the home shell is up, then stop time.
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
   // Let the old response arrive even after cancellation, to exercise the stale
   // response guard rather than relying on the browser to drop it.
   await page.evaluate(() => {
@@ -170,6 +173,8 @@ test('knowledge keys open visible scoped entries and superseded responses stay d
   await page.clock.install({ time: clockStart })
   await page.clock.pauseAt(new Date(clockStart.getTime() + 1000))
   await page.keyboard.press('Control+k')
+  await expect(palette(page)).toBeVisible()
+  await expect(input).toBeFocused()
   for (const releaseDuringDebounce of [true, false]) {
     let release!: () => void, started!: () => void
     const held = new Promise<void>(resolve => { release = resolve })

@@ -344,7 +344,9 @@ jobs:
     runs-on: ubuntu-latest
     # Keep browser execution bounded at 20 minutes independently of the
     # 13-minute dependency install, with seven minutes for setup and evidence.
-    # AEON-1325: the full catalogue needs 24 shards; keep the execution cap.
+    # AEON-1325: the full catalogue needs 24 shards.
+    # AEON-1327: run 38488051180 packs every shard near 15 minutes, so this
+    # cap keeps about five minutes of headroom. PR lanes keep their budgets.
     timeout-minutes: 40
     strategy:
       fail-fast: false

@@ -9,8 +9,8 @@ import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import {
-  balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, parseArgs,
-  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, validateManifest, mergeReports, webRoot,
+  balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, nightlyWeights, parseArgs,
+  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, tierWeights, validateManifest, mergeReports, webRoot,
 } from './ci-web-shard.mjs'
 
 const group = (id, weights) => ({ id, config: 'playwright.ui.config.ts', project: null,
@@ -199,6 +199,28 @@ test('hosted tier timings override historical worker conversion and scale only t
     spec.tierTiming = timing
     assert.throws(() => tierWeights(manifest), /Invalid tier timing/)
   }
+})
+
+test('nightly timings schedule the catalogue and leave PR tier weights untouched', () => {
+  const manifest = fixture(), spec = manifest.groups[0].specs[0]
+  spec.listedTests = 4
+  spec.tierTiming = { seconds: 40, selectedTests: 4 }
+  manifest.nightlyTiming = { run: '38488051180', files: { [spec.file]: { seconds: 80, selectedTests: 4 } } }
+  assert.equal(validateManifest(manifest), manifest)
+  assert.equal(tierWeights(manifest)[spec.file], 40)
+  assert.equal(nightlyWeights(manifest)[spec.file], 80)
+  assert.equal(nightlyWeights(manifest, [{ file: spec.file }, { file: spec.file }])[spec.file], 40)
+  assert.equal(nightlyWeights(manifest)[manifest.groups[0].specs[1].file], tierWeights(manifest)[manifest.groups[0].specs[1].file])
+  assert.deepEqual(nightlyWeights(fixture()), tierWeights(fixture()))
+  for (const files of [null, { [spec.file]: { seconds: 0, selectedTests: 4 } }, { [spec.file]: { seconds: 80, selectedTests: 0 } }]) {
+    const broken = structuredClone(manifest)
+    broken.nightlyTiming = { files }
+    assert.throws(() => validateManifest(broken), /Invalid nightly timing/)
+  }
+  const unknown = structuredClone(manifest)
+  unknown.nightlyTiming = { files: { 'tests/missing.spec.ts': { seconds: 1, selectedTests: 1 } } }
+  assert.equal(validateManifest(unknown), unknown)
+  assert.throws(() => nightlyWeights(unknown), /Invalid nightly timing/)
 })
 
 test('assignment is deterministic despite manifest group/spec order and breaks ties by path', () => {

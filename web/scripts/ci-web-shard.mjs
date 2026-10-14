@@ -57,6 +57,17 @@ export function validateManifest(manifest) {
     if (excluded.has(exclusion.file)) throw new Error(`Duplicate exclusion: ${exclusion.file}`)
     excluded.add(exclusion.file)
   }
+  if (manifest.nightlyTiming !== undefined) {
+    const files = manifest.nightlyTiming?.files
+    if (typeof manifest.nightlyTiming !== 'object' || manifest.nightlyTiming === null || Array.isArray(manifest.nightlyTiming) ||
+        typeof files !== 'object' || files === null || Array.isArray(files)) throw new Error('Invalid nightly timing')
+    for (const [file, entry] of Object.entries(files)) {
+      // Membership is not required here: callers filter groups and still carry
+      // the catalogue map. Packing rejects a file the manifest does not own.
+      if (!specPath.test(file) || !Number.isFinite(entry?.seconds) || entry.seconds <= 0 || !Number.isSafeInteger(entry?.selectedTests) || entry.selectedTests < 1)
+        throw new Error(`Invalid nightly timing: ${file}`)
+    }
+  }
   return manifest
 }
 
@@ -168,6 +179,25 @@ export function tierWeights(manifest, rows) {
     if (!Number.isSafeInteger(factor) || factor < 1 || factor > 64) throw new Error(`Invalid measured worker count: ${spec.file}`)
     return [spec.file, spec.weightSeconds * factor]
   })))
+}
+
+// Catalogue shards (nightly --all and schedule) pack from hosted wall time.
+// PR and merge-group lanes keep tierTiming. Files this run did not measure
+// fall back to that lane so a new spec still has a weight.
+export function nightlyWeights(manifest, rows) {
+  const base = tierWeights(manifest, rows)
+  const files = manifest.nightlyTiming?.files
+  if (files == null) return base
+  const known = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
+  const weights = { ...base }
+  for (const [file, entry] of Object.entries(files)) {
+    const { seconds, selectedTests } = entry ?? {}
+    if (!known.has(file) || !Number.isFinite(seconds) || seconds <= 0 || !Number.isSafeInteger(selectedTests) || selectedTests < 1)
+      throw new Error(`Invalid nightly timing: ${file}`)
+    const selected = rows ? rows.filter(row => row.file === file).length : selectedTests
+    weights[file] = seconds * selected / selectedTests
+  }
+  return weights
 }
 
 export function balanceShards(manifest, count, { all = false } = {}) {

@@ -8,7 +8,7 @@ import { validate, select, shard, key, counts, exactPattern, webGraph, measuredW
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures, printFlakeWarnings } from './failures.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
-import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import { loadManifest as loadBrowserPolicy, nightlyWeights, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
@@ -87,7 +87,7 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
     {mode:plannerMode,layout:plannerLayout})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
-  if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy,filtered))
+  if(kind==='web'&&!unit) Object.assign(weights,(selection.scope==='catalogue'?nightlyWeights:tierWeights)(browserPolicy,filtered))
   if(kind==='go') {
     for(const line of readFileSync(resolve(root,'scripts/ci/go-shards.txt'),'utf8').split('\n')) {
       const match=/^\d+ (\d+) github\.com\/inspr-at\/paimos\/(\S+)/.exec(line)

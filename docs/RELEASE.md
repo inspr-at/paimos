@@ -343,12 +343,14 @@ still fail accounting. Spec-only reports explicitly use `untiered` coverage and
 claim no tier case passes; its native checks still block `web`.
 
 Nightly-full uses 24 hosted browser shards (AEON-1325), each selecting every tier
-with `scripts/test-tiers/cli.mjs run web --all --shard i/24`. Browser execution
-keeps its 20-minute cap; the 40-minute job budget includes bounded dependency
-installation, setup and evidence uploads. The `nightly-web` aggregate requires
-setup and the entire shard matrix; tier accounting consumes all 24 shard
-measurements and rejects missing or interrupted evidence. PR and merge-group
-layouts retain their existing shard counts.
+with `scripts/test-tiers/cli.mjs run web --all --shard i/24`. Catalogue packing
+uses `nightlyTiming` from hosted run 38488051180 (AEON-1327); the measured
+24-shard estimate peaks near 15 minutes. Browser execution keeps its 20-minute
+cap; the 40-minute job budget includes bounded dependency installation, setup
+and evidence uploads. The `nightly-web` aggregate requires setup and the entire
+shard matrix; tier accounting consumes all 24 shard measurements and rejects
+missing or interrupted evidence. PR and merge-group layouts retain their
+existing shard counts and `tierTiming` weights.
 
 **Affected PR planning (OPS-257 / AEON-743):** `CI_AFFECTED_LANE` is a repository
 variable, default off. Only its exact value `on` enables new rules; unset, `off`

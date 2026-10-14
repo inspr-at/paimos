@@ -867,6 +867,10 @@ button.sheet-sum { cursor: pointer; }
 .toggle:focus-visible,.to-current:focus-visible,.next-up:focus-visible,.evidence-control:focus-visible { outline:none; box-shadow:var(--focus-ring); }
 @media(hover:hover) { .row:hover:not([aria-selected="true"]) { background:var(--row-hover); border-radius:10px; } .toggle:hover { background:var(--btn-bg-hover); } }
 @media(max-width:1180px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
+/* The peek is absolute, so the article would otherwise run underneath it. */
+@media (min-width: 761px) {
+  .shell.peeking .detail-scroll { padding-right: min(416px, calc(100% - 24px)); }
+}
 @media(max-width:760px) {
  .shell { padding:0 16px; grid-template-rows:auto minmax(0,1fr) auto; }
  .head { gap:10px; padding:12px 0 10px; }
