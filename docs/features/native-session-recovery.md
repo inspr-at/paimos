@@ -68,13 +68,21 @@ must not be projected as another session's public data.
 The dedicated private `agentsetup.Store` uses owned physical paths and its
 existing atomic write/fsync behavior. `recovery-<owned-session>.json` retains
 content-free request/actor digests, predecessor/successor bindings, at-most-once
-decision state and restart consumption. It contains no PID, transcript, prompt,
-PTY bytes, approval payload or vendor credentials. This is a small decision
+decision state, grant-window retention deadlines and restart consumption. It
+contains no PID, transcript, prompt, PTY bytes, approval payload or vendor
+credentials. This is a small decision
 snapshot, not a second process ledger or append-only event log. Limits are 128
 conversation snapshots, 32 decisions per conversation and 64 KiB per file,
-checked before decoding or adding records. There is no eviction of uncertain
-decisions. Ambiguous disk writes close further admission on that handle. The
-local metadata is personal, located by owner state root + tenant/session;
+checked before decoding or adding records. Before refusing a new conversation at
+the cap, recovery reclaims one obsolete snapshot under `recovery.lock` through
+`Store.RemoveExact` with the inspected content digest. Every decision must be
+complete, and either every recorded grant window has ended or a qualified current
+binding has advanced past every recorded successor. An active consumed bounded
+restart remains retained even after binding advancement. Legacy decisions without
+retention deadlines need advancement proof; a stale or missing runtime lookup is
+never that proof. There is no eviction of uncertain decisions. Unknown or corrupt
+artifacts stay intact. Ambiguous disk writes or removals close further admission
+on that handle. The local metadata is personal, located by owner state root + tenant/session;
 it creates no database table requiring DSAR inventory changes.
 
 Acceptance evidence:
@@ -96,10 +104,16 @@ Acceptance evidence:
    before/after native acknowledgement and final persistence against P3a's real
    private store. Native input is written once, old callbacks expire, final-ID
    replay persists once, and unresolved process occupancy remains held.
+6. `TestRecoveryJournalReclaimsOnlyObsoleteCompletedSessions` fills the private
+   store with 128 completed conversations and resumes a 129th after expiry or
+   qualified binding advancement. It preserves an earlier incomplete decision
+   even when the last decision is complete, refuses a store of incomplete or
+   still-needed decisions, retains active restart consumption, and rejects stale
+   lookup, wrong-tenant advancement and an injected exact-content collision.
 
 `TestRecoveryJournalBoundsAndLocalAuthorityRefusal` additionally rejects corrupt
 and overfull decision arrays before adoption and refuses JSON export of local
-history, snapshot, absence and successor authority. These seven named tests are
+history, snapshot, absence and successor authority. These eight named tests are
 the exact ESSENTIAL rows added to `scripts/ci/go-test-tiers.json` under the R0
 grant; no existing row was changed or removed.
 
@@ -107,6 +121,15 @@ All tests use fake native transport and injected clocks, never real vendor/model
 calls. The source belongs to the existing S2 `internal/native*/**` audit glob.
 Only this slice's Go test rows are added to R0's canonical ESSENTIAL manifest;
 no shared-fence, table, permission, route or web-shard rows are needed.
+
+Fix round 3 negative control: the new reclamation regression ran against
+`b93705cd` on a temporary scratch branch. The expired, advanced and mixed
+incomplete inventories each failed specifically with `buffer_full` on the
+129th session, with zero spawns and retained writer occupancy. The guarded remote
+lane refused for capacity, so this used the permitted single small local Go
+package run. The scratch branch was removed; no negative-control commit remains
+on the assigned branch. Only the eighth named ESSENTIAL row was added in this
+round; existing rows and non-blocking review findings remain unchanged.
 
 Required checks on committed HEAD:
 
@@ -122,7 +145,7 @@ explicit incomplete handoff to authoritative PR CI, never a passing check.
 Only the coordinator runs cross-family review, pushes, merges, deploys or enables
 live recovery. No rollout or account/profile change is authorized by this slice.
 
-Builder verification on the completed source:
+Initial builder verification before fix round 3:
 
 - **PASS 1–5:** all seven tests in the permitted single small local package
   (`GOMAXPROCS=2`, `go test -p 2 -count=1 ./internal/nativerecovery`) exit 0.

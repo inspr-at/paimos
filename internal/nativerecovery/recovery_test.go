@@ -585,3 +585,170 @@ func TestRecoveryJournalBoundsAndLocalAuthorityRefusal(t *testing.T) {
 		t.Fatal("overfull recovery metadata changed occupancy")
 	}
 }
+
+type recoveryInventory struct {
+	*recoveryFixture
+	current    map[string]Snapshot
+	beforeRead func(nativecontract.Binding)
+}
+
+func (r recoveryInventory) Read(ctx context.Context, b nativecontract.Binding) (Snapshot, error) {
+	if s, ok := r.current[b.OwnedSessionID]; ok {
+		if r.beforeRead != nil {
+			r.beforeRead(b)
+		}
+		return s, nil
+	}
+	return r.recoveryFixture.Read(ctx, b)
+}
+
+// Risk: 128 historical sessions permanently exhaust recovery, or reclamation
+// drops an uncertain decision or renews an already consumed bounded restart.
+func TestRecoveryJournalReclaimsOnlyObsoleteCompletedSessions(t *testing.T) {
+	for _, mode := range []string{"expired", "advanced", "incomplete retained", "all incomplete", "unexpired", "stale lookup", "wrong tenant", "restart consumed", "content changed"} {
+		t.Run(mode, func(t *testing.T) {
+			seed := newFixture(t, false)
+			seed.snapshot.Policy.Continuation = "bounded_preapproved"
+			if _, err := seed.coordinator.Resume(t.Context(), seed.actor, seed.intent("approved_restart")); err != nil {
+				t.Fatalf("complete the retained decision: %v", err)
+			}
+			raw, err := seed.state.Read(journalName(seed.oldBinding.OwnedSessionID), journalBytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var template decisionJournal
+			if err = json.Unmarshal(raw, &template); err != nil || len(template.Attempts) != 1 || !template.Attempts[0].Complete || !template.AutoUsed {
+				t.Fatalf("fixture must retain a completed bounded decision: %v, %+v", err, template)
+			}
+
+			f := newFixture(t, false)
+			inventory := recoveryInventory{recoveryFixture: f, current: map[string]Snapshot{}}
+			if mode == "expired" || mode == "incomplete retained" || mode == "all incomplete" {
+				// The original window has ended even for the incomplete decisions.
+				f.now = seed.snapshot.Policy.ExpiresAt
+				f.snapshot.Policy.ExpiresAt = f.now.Add(time.Hour)
+				f.request.Profile.Policy = f.snapshot.Policy
+			}
+			var retainedName string
+			var retainedBytes []byte
+			for i := 0; i < MaxSessions; i++ {
+				j := template
+				j.TenantID, j.SessionID = f.oldBinding.TenantID, uuid.NewString()
+				entry := template.Attempts[0]
+				entry.Previous.TenantID, entry.Next.TenantID = j.TenantID, j.TenantID
+				entry.Previous.OwnedSessionID, entry.Next.OwnedSessionID = j.SessionID, j.SessionID
+				j.Attempts = []attempt{entry}
+				if mode != "expired" && mode != "incomplete retained" && mode != "all incomplete" && mode != "restart consumed" {
+					j.AutoUsed = false
+				}
+				if mode == "all incomplete" || mode == "incomplete retained" && i == 0 {
+					// The last decision is complete; an earlier uncertain one still
+					// forbids eviction of the entire conversation snapshot.
+					uncertain := entry
+					uncertain.RequestID, uncertain.Complete = uuid.NewString(), false
+					j.Attempts = []attempt{uncertain, entry}
+				}
+				name := journalName(j.SessionID)
+				raw, err := json.Marshal(j)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = f.state.Write(name, raw, true); err != nil {
+					t.Fatal(err)
+				}
+				if i == 0 {
+					retainedName, retainedBytes = name, raw
+				}
+				current := seed.snapshot
+				current.Writer.Binding = cloneBinding(entry.Next)
+				if mode == "advanced" || mode == "wrong tenant" || mode == "restart consumed" || mode == "content changed" {
+					current.Writer.Binding.BindingRevision++
+					current.Writer.Binding.RuntimeEpoch = uuid.NewString()
+					current.Writer.Binding.HarnessSessionID = uuid.NewString()
+					current.Writer.Identity.RuntimeEpoch = current.Writer.Binding.RuntimeEpoch
+				}
+				if mode == "wrong tenant" {
+					current.Writer.Binding.TenantID = uuid.NewString()
+				}
+				if mode != "stale lookup" {
+					inventory.current[j.SessionID] = current
+				}
+			}
+			if mode == "content changed" {
+				// Replace precisely the inspected snapshot before RemoveExact,
+				// without sleeps or an unrelated failure in the owner runtime.
+				inventory.beforeRead = func(b nativecontract.Binding) {
+					retainedName = journalName(b.OwnedSessionID)
+					raw, err := f.state.Read(retainedName, journalBytes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var j decisionJournal
+					if err = json.Unmarshal(raw, &j); err != nil {
+						t.Fatal(err)
+					}
+					j.Attempts[0].Complete = false
+					retainedBytes, err = json.Marshal(j)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err = f.state.Write(retainedName, retainedBytes, false); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			lock, err := f.state.LockNamed("recovery.lock")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = lock.Close(); err != nil {
+				t.Fatal(err)
+			}
+			names, err := f.state.Names(MaxSessions + 1)
+			if err != nil || len(names) != MaxSessions+1 {
+				t.Fatalf("fixture must reach the 128-session cap plus its lock: %v, %d", err, len(names))
+			}
+			f.coordinator, err = New(Config{Runtime: inventory, State: f.state, Receipts: f.receipts, Now: func() time.Time { return f.now }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := f.coordinator.Resume(t.Context(), f.actor, f.intent("person_continue"))
+			allowed := mode == "expired" || mode == "advanced" || mode == "incomplete retained"
+			if allowed {
+				if err != nil || status.State != "resumed" || f.spawns != 1 || f.held(t) != 1 {
+					t.Fatalf("129th session must resume while retaining its writer: status=%+v err=%v spawns=%d held=%d", status, err, f.spawns, f.held(t))
+				}
+				if _, err = f.state.Read(journalName(f.oldBinding.OwnedSessionID), journalBytes); err != nil {
+					t.Fatalf("the new decision must be durable: %v", err)
+				}
+			} else {
+				want := nativecontract.ReasonBufferFull
+				if mode == "content changed" {
+					want = nativecontract.ReasonOwnershipUnconfirmed
+					if !errors.Is(err, agentsetup.ErrCollision) {
+						t.Fatalf("reclamation must refuse exactly the content mismatch: %v", err)
+					}
+					_, retryErr := f.coordinator.Resume(t.Context(), f.actor, f.intent("person_continue"))
+					reason(t, retryErr, want)
+				} else {
+					reason(t, err, want)
+				}
+				if status.State != "recovery_needed" || status.Reason != want {
+					t.Fatalf("retained inventory must report the actual refusal: %+v", status)
+				}
+				if f.spawns != 0 || f.expires != 0 || f.held(t) != 1 {
+					t.Fatal("full retained inventory changed callbacks or writer occupancy")
+				}
+			}
+			if mode == "incomplete retained" || !allowed {
+				raw, err := f.state.Read(retainedName, journalBytes)
+				if err != nil || string(raw) != string(retainedBytes) {
+					t.Fatalf("a still-needed journal must remain byte-for-byte intact: %v", err)
+				}
+			}
+			if names, err = f.state.Names(MaxSessions + 1); err != nil || len(names) > MaxSessions+1 {
+				t.Fatalf("reclamation must keep the inventory bounded: %v, %d", err, len(names))
+			}
+		})
+	}
+}

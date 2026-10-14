@@ -4,11 +4,15 @@ package nativerecovery
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"strings"
+	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 )
@@ -23,6 +27,8 @@ type attempt struct {
 	Previous  nativecontract.Binding `json:"previous"`
 	Next      nativecontract.Binding `json:"next"`
 	Complete  bool                   `json:"complete"`
+	// Missing on older snapshots: expiry alone then cannot authorize removal.
+	RetainUntil *time.Time `json:"retain_until,omitempty"`
 }
 
 type decisionJournal struct {
@@ -35,7 +41,7 @@ type decisionJournal struct {
 
 func journalName(session string) string { return "recovery-" + session + ".json" }
 
-func (c *Coordinator) read(b nativecontract.Binding) (decisionJournal, error) {
+func (c *Coordinator) read(ctx context.Context, b nativecontract.Binding) (decisionJournal, error) {
 	out := decisionJournal{Version: 1, TenantID: b.TenantID, SessionID: b.OwnedSessionID, Attempts: []attempt{}}
 	raw, err := c.cfg.State.Read(journalName(b.OwnedSessionID), journalBytes)
 	if errors.Is(err, os.ErrNotExist) {
@@ -45,13 +51,24 @@ func (c *Coordinator) read(b nativecontract.Binding) (decisionJournal, error) {
 		}
 		// One recovery.lock plus at most 128 conversation decision snapshots.
 		if len(names) >= MaxSessions+1 {
-			return out, fail(nativecontract.ReasonBufferFull)
+			reclaimed, err := c.reclaim(ctx, names)
+			if err != nil {
+				return out, err
+			}
+			if !reclaimed {
+				return out, fail(nativecontract.ReasonBufferFull)
+			}
 		}
 		return out, nil
 	}
 	if err != nil {
 		return out, err
 	}
+	return c.decodeJournal(raw, b.TenantID, b.OwnedSessionID)
+}
+
+func (c *Coordinator) decodeJournal(raw []byte, tenant, session string) (decisionJournal, error) {
+	out := decisionJournal{Version: 1, TenantID: tenant, SessionID: session, Attempts: []attempt{}}
 	// Inspect the bounded array as raw bytes before allocating attempts. The
 	// file cap and item count both precede decoding local metadata structs.
 	var header struct {
@@ -64,9 +81,11 @@ func (c *Coordinator) read(b nativecontract.Binding) (decisionJournal, error) {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if d.Decode(&header) != nil || d.Decode(new(any)) != io.EOF || header.Version != 1 ||
-		header.TenantID != b.TenantID || header.SessionID != b.OwnedSessionID || header.AutoUsed == nil {
+		!validUUID(header.TenantID) || header.SessionID != session || !validUUID(session) || header.AutoUsed == nil ||
+		tenant != "" && header.TenantID != tenant {
 		return out, fail(nativecontract.ReasonOwnershipUnconfirmed)
 	}
+	out.TenantID = header.TenantID
 	d = json.NewDecoder(bytes.NewReader(header.Attempts))
 	d.DisallowUnknownFields()
 	if token, err := d.Token(); err != nil || token != json.Delim('[') {
@@ -80,10 +99,11 @@ func (c *Coordinator) read(b nativecontract.Binding) (decisionJournal, error) {
 		var entry attempt
 		if d.Decode(&entry) != nil || !validUUID(entry.RequestID) || ids[entry.RequestID] || !nativereceipts.ValidDigest(entry.Digest) ||
 			c.validateBinding(entry.Previous) != nil || c.validateBinding(entry.Next) != nil ||
-			entry.Previous.TenantID != b.TenantID || entry.Next.TenantID != b.TenantID ||
-			entry.Previous.OwnedSessionID != b.OwnedSessionID || entry.Next.OwnedSessionID != b.OwnedSessionID ||
+			entry.Previous.TenantID != out.TenantID || entry.Next.TenantID != out.TenantID ||
+			entry.Previous.OwnedSessionID != session || entry.Next.OwnedSessionID != session ||
 			entry.Previous.ProjectID != entry.Next.ProjectID || entry.Previous.RuntimeEpoch == entry.Next.RuntimeEpoch ||
-			entry.Previous.HarnessSessionID == entry.Next.HarnessSessionID || entry.Next.BindingRevision <= entry.Previous.BindingRevision {
+			entry.Previous.HarnessSessionID == entry.Next.HarnessSessionID || entry.Next.BindingRevision <= entry.Previous.BindingRevision ||
+			entry.RetainUntil != nil && entry.RetainUntil.IsZero() {
 			return out, fail(nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		ids[entry.RequestID] = true
@@ -94,6 +114,69 @@ func (c *Coordinator) read(b nativecontract.Binding) (decisionJournal, error) {
 	}
 	out.AutoUsed = *header.AutoUsed
 	return out, nil
+}
+
+// Called only under recovery.lock and the owner's mutation fence. Free one
+// snapshot before admitting a new conversation; inventory, bytes and decisions
+// remain bounded. Unknown files, corrupt snapshots and uncertain attempts stay.
+func (c *Coordinator) reclaim(ctx context.Context, names []string) (bool, error) {
+	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		session := strings.TrimSuffix(strings.TrimPrefix(name, "recovery-"), ".json")
+		if !validUUID(session) || journalName(session) != name {
+			continue
+		}
+		raw, err := c.cfg.State.Read(name, journalBytes)
+		if err != nil {
+			continue
+		}
+		journal, err := c.decodeJournal(raw, "", session)
+		if err != nil || len(journal.Attempts) == 0 {
+			continue
+		}
+		complete, expired := true, true
+		for _, entry := range journal.Attempts {
+			complete = complete && entry.Complete
+			expired = expired && entry.RetainUntil != nil && !c.cfg.Now().Before(*entry.RetainUntil)
+		}
+		if !complete {
+			continue
+		}
+		if !expired {
+			// Advancing a binding must not erase restart consumption while its
+			// original grant window may still be open.
+			if journal.AutoUsed {
+				continue
+			}
+			last := journal.Attempts[len(journal.Attempts)-1].Next
+			current, err := c.cfg.Runtime.Read(ctx, last)
+			if err != nil || c.validateSnapshot(current, current.Writer.Binding) != nil {
+				continue // a stale/missing lookup is never advancement proof
+			}
+			b := current.Writer.Binding
+			advanced := true
+			for _, entry := range journal.Attempts {
+				next := entry.Next
+				advanced = advanced && b.TenantID == next.TenantID && b.ProjectID == next.ProjectID &&
+					b.OwnedSessionID == next.OwnedSessionID && b.DaemonID == next.DaemonID && sameRun(b.RunID, next.RunID) &&
+					b.BindingRevision > next.BindingRevision
+			}
+			if !advanced {
+				continue
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if err := c.cfg.State.RemoveExact(name, agentsetup.Hash(raw)); err != nil {
+			c.poisoned = true // an ambiguous unlink/fsync closes admission too
+			return false, err
+		}
+		return true, nil
+	}
+	return false, ctx.Err()
 }
 
 func (c *Coordinator) save(j decisionJournal) error {

@@ -95,6 +95,8 @@ type Effects struct {
 // WithWriter holds the SAME lock as input, access/controller changes, dispatch,
 // takeover and resume, and honors ctx. Read consults the existing possible-fork
 // journal AND shared ledger; absence from a RAM registry is not evidence.
+// Reclamation may Read an older binding: only a validated current snapshot with
+// a greater revision proves advancement, never a stale/missing lookup error.
 // ExpireCallbacks invalidates every old approval/controller, without replay.
 // ProveAbsent only observes qualified provenance; it never signals saved PIDs.
 // ConfirmAbsent durably settles the existing journal/ledger only on independently
@@ -263,7 +265,7 @@ func (c *Coordinator) Resume(ctx context.Context, actor nativecontract.Actor, in
 		return status, err
 	}
 	err := c.fenced(ctx, in.ExpectedBinding, func(ctx context.Context) error {
-		journal, err := c.read(in.ExpectedBinding)
+		journal, err := c.read(ctx, in.ExpectedBinding)
 		if err != nil {
 			return err
 		}
@@ -334,7 +336,15 @@ func (c *Coordinator) Resume(ctx context.Context, actor nativecontract.Actor, in
 			return err
 		}
 		journal.AutoUsed = journal.AutoUsed || in.Reason == "approved_restart"
-		journal.Attempts = append(journal.Attempts, attempt{RequestID: in.RequestID, Digest: digest, Previous: cloneBinding(in.ExpectedBinding), Next: cloneBinding(next.Launch.Binding)})
+		retainUntil := snapshot.Policy.ExpiresAt
+		if snapshot.Policy.Continuation == "bounded_preapproved" && snapshot.Budget.UsageKnown &&
+			!snapshot.Budget.StartedAt.IsZero() && !snapshot.Budget.StartedAt.After(c.cfg.Now()) {
+			retainUntil = c.windowEnd(snapshot)
+		}
+		if next.Launch.Policy.ExpiresAt.After(retainUntil) {
+			retainUntil = next.Launch.Policy.ExpiresAt
+		}
+		journal.Attempts = append(journal.Attempts, attempt{RequestID: in.RequestID, Digest: digest, Previous: cloneBinding(in.ExpectedBinding), Next: cloneBinding(next.Launch.Binding), RetainUntil: &retainUntil})
 		// Commit the continuation consumption before the owner's possible-fork
 		// journal/Open. A crash in either window cannot repeat this request.
 		if err = c.save(journal); err != nil {
