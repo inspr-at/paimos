@@ -38,3 +38,11 @@ ones. It copies no source text into new events. Checkpoints resume interrupted
 work, and the completion marker prevents a restart from dismissing a source
 that a person has reopened by undo. This backend package does not add the
 Decision Desk UI; that is the separate P2 delivery.
+
+The six ESSENTIAL behavior tests cover signal selection, prepared person and
+project visibility, audited agent dismissal and authorized person undo,
+person-only acceptance, resumable cleanup, and exact prepared rule text.
+Full knowledge and contract suites pass; isolated negative controls reject
+broadened signals, unprepared person visibility, blocked agent dismissal,
+agent acceptance, disabled cleanup and a missing source-summary range enum.
+The static merge check passes all 42 checks without skips.
