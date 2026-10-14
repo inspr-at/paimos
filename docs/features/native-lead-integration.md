@@ -1,7 +1,9 @@
-# Native LEAD integration: Round 2 handoff (AEON-1290)
+# Native LEAD integration: Round 3 handoff (AEON-1290)
 
-I1 remains **incomplete and blocked**. Round 2 implements native root occupancy
-in the assigned legacy admission paths and the qualified C0 HTTP constructor.
+I1 remains **incomplete and blocked**. Round 3 closes the granted pairing
+drain/removal/disconnect ownership gap, alongside Round 2's native root occupancy
+and qualified C0 HTTP constructor. The next dependency is the incompatible
+paired-runtime authority described below; its writers are outside this grant.
 Production still mounts `NewDisabled`; paired agentd has no native-session
 callbacks configured. No live LEAD handover, vendor call or daemon restart was
 performed. This is not an enabled pilot or live-soak result.
@@ -40,21 +42,36 @@ Private daemon routes require a `DaemonRequests` implementation to resolve
 current paired identity and private proof. Missing qualified extensions refuse
 the operation; body generation identifiers never substitute for pairing proof.
 
+Pairing drain now retains enrollments for every unreleased null-run native root.
+Computer-level finalization also checks roots directly, including roots whose
+enrollment is absent. Immediate computer, enrollment and self-disconnect,
+computer removal, account disconnect and request-expiry revocation refuse with
+`native_roots_unreleased` before changing ownership. Neither a display state,
+stale heartbeat, old daemon generation nor a viewer's departure is release
+evidence. Released roots and worker sidecars do not block final drain.
+The changes use the existing tenant/tree/pairing fence and add no lock caller.
+
 ## Remaining ownership and integration blockers
 
-The Round 2 grant covers `agentaccounts/groups.go`, `native_root.go` and
-`nativesessions/module.go` plus their tests. It does not cover these additional
-pairing lifecycle files:
+The Round 3 grant covers the earlier pairing lifecycle blocker. The next
+production boundary appears before native-root context or C0 composition can
+be qualified:
 
 | File | Blocker before live pilot |
 | --- | --- |
-| `internal/agentpairing/lifecycle.go` | `finalizeDrain` revokes an enrollment when no active or uncertain worker run exists. It does not check unreleased native roots, so a live/idle native root can lose the paired key needed for reconciliation or final delivery. |
-| `internal/agentpairing/remove.go` | Computer removal's unsettled-work check and `DisconnectAccount` consider worker runs only. They can archive/revoke a native root's account/computer. The in-scope account archive guard protects that entry point, not every pairing entry point. |
+| `internal/agentpairing/types.go`, `internal/agentpairing/provision.go` | Actual person-approved pairing issues both the role and runtime key from `RuntimePermissions`. It includes `harness.worker`, but omits `harness.control` and `chat.receive`. The production paired supervisor uses this runtime key. These issuance files are outside the grant. |
+| `internal/nativesessions/store/claim.go` | Final native start claim requires the authenticated daemon to pass `harness.control`, in addition to the original actor's start authority. The real paired role/key cannot pass it. `currentDaemon` also pins the exact pairing `c.key_id`, so a separately scoped key is not interchangeable. The existing start-store fixtures supply broader synthetic daemon scopes and a member role. This dependency file is outside the grant. |
+| `internal/agentaccounts/native_session.go` | `RequireNativeSessionTx` repeats `harness.worker` and `harness.control` against that same paired daemon before account/context/capacity checks. Exact-root runtime revalidation cannot pass with the actual issued authority. This dependency file is outside the grant. |
 
-These paths need an explicit ownership grant or a coordinator-owned prerequisite
-fix and behavior tests. They were inspected read-only and not changed. The
+The coordinator must qualify a narrow native execution delegation or grant the
+dependency files for a fix that validates the original actor's current native
+grant separately from the ordinary runtime ceiling. Adding control/chat scopes
+to every ordinary runtime, passing a fabricated principal, substituting the
+CLI coordinator identity or omitting these final checks would violate the
+authority boundary. No such workaround was installed. These files were inspected
+read-only and not changed. The
 original brief requires stopping at an additional write-set boundary; the
-Round 2 grant does not transfer these files.
+Round 3 grant does not transfer these files.
 
 Full I1 composition is also still outstanding. The start store requires
 transactional native actor/tool/settings/history authority and a trusted local
@@ -70,10 +87,10 @@ native grant. No permissive authority callback or fake worker run was added.
 
 | Item | Result |
 | --- | --- |
-| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | PARTIAL. Qualified HTTP dispatch and P2a stream mount seam implemented. Production Store/Host/Launcher composition and combined fake-native smoke remain outstanding. |
+| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | PARTIAL. Qualified HTTP dispatch and P2a stream mount seam implemented in Round 2. Production composition cannot pass native claim with the actual paired runtime authority; the dependency files above are not granted. |
 | A2: person-invoked native path separate from automatic LeadRuntime | INCOMPLETE. Existing automatic and native runtime callbacks remain disabled; no person-invoked production composition installed. |
-| A3: native roots in legacy account/host admission; exact root context | PARTIAL. Listed account/shared-quota/pairing/engine/routine admission counts and own-root replay exclusion implemented. Pairing lifecycle safety is blocked above; exact root runtime context wiring remains outstanding. |
-| A4: default account, confined adapter and legacy CLI compatibility; inventories | PARTIAL. No account-home, adapter or CLI behavior changed. Three own behavior tests classified ESSENTIAL via the canonical R0 writer; no new route, permission, table or source ownership row. |
+| A3: native roots in legacy account/host admission; exact root context | PARTIAL. Legacy counts and own-root replay exclusion implemented in Round 2. Round 3 pairing drain/removal/disconnect retention is implemented and remotely proven. Exact root runtime revalidation remains blocked by the real paired daemon's missing control authority. |
+| A4: default account, confined adapter and legacy CLI compatibility; inventories | PARTIAL. Account-home, adapter and CLI behavior remain unchanged. Round 3 adds a real-pairing ceiling regression and two own ESSENTIAL rows via the canonical R0 writer. It does not install an enabled native compatibility path. |
 | A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | NOT IMPLEMENTED. No combined I1 smoke exists; individual dependency tests do not prove this integration. |
 | A6: concrete disabled pilot for coordinator self-handover | INCOMPLETE. Default-off production behavior preserved; pilot bootstrap and live self-handover are not claimed. |
 
@@ -85,12 +102,21 @@ no 48-hour live-soak or enablement evidence is claimed.
 
 ## Verification
 
-PASS: guarded `ci-static-locked.sh` (underlying remote
+Historical Round 2 PASS: guarded `ci-static-locked.sh` (underlying remote
 `node scripts/ci-static.mjs --merge-main`) exits 0: 42 checks passed, zero optional
 checks skipped, including strict `go-tiers`, test-tier manifests, source ownership,
 shared inventories, migration and reporter/OpenAPI checks. Earlier host-guard
 refusals (exit 3) and the old feature document's public-name failure are not
-counted as green; the updated document passed the rerun.
+counted as green; the updated document passed the rerun. Round 3 results are
+recorded separately below and do not inherit this green status.
+
+Round 3 PASS ownership behavior at `26ed89b9b`: guarded remote
+`./internal/agentpairing/... -run TestNativeRootOwnershipSurvivesPairingDrainAndRemoval
+-count=1 -v` exits 0. The test covers queued, starting, running, idle, taken and
+uncertain roots; exact refusal cause; immediate whole/enrollment/self disconnect;
+removal; direct account disconnect; sibling enrollment isolation; and retention
+of enrollment/account/key through repeated drain until persisted release.
+Released roots and worker sidecars do not retain the daemon after release.
 
 PASS A1/A4 constructor boundary:
 `TestQualifiedNativeRoutesBindCallerAndTargetBeforeDispatch` and
@@ -127,11 +153,12 @@ PASS: `node scripts/test-tiers/affected.mjs --base origin/main` exits 0 and
 conservatively selects FULL because the Go manifest changed. This is selection
 evidence, not an executed full suite. `git diff --check` exits 0.
 
-NOT RUN: full I1 combined fake-native smoke and negative control, because the
+NOT RUN: full I1 combined fake-native smoke and its negative control, because the
 full runtime composition is incomplete. No browser check is applicable. No
 push to origin, deployment, review gate, real model call, daemon restart or live
 pilot was performed. The approved remote runner's temporary test refs are not
-origin pushes. Progress remains below 100 with the pairing files named BLOCKED.
+origin pushes. Progress remains below 100 with the native claim/root-authority
+dependency files named BLOCKED.
 
 R0 additions are exactly these ESSENTIAL rows in `scripts/ci/go-test-tiers.json`:
 
@@ -139,6 +166,14 @@ R0 additions are exactly these ESSENTIAL rows in `scripts/ci/go-test-tiers.json`
 - `internal/agentaccounts/TestNativeRootFencesLegacyHostAdmission`
 - `internal/nativesessions/TestQualifiedNativeRoutesBindCallerAndTargetBeforeDispatch`
 
+Round 3 adds exactly these further ESSENTIAL rows through the same canonical
+writer:
+
+- `internal/agentpairing/TestNativeRootOwnershipSurvivesPairingDrainAndRemoval`
+- `internal/agentpairing/TestNativePilotCannotExpandPairedRuntimeAuthority`
+
 No source ownership, shared-fence, route, DSAR, permission, migration, web-tier
 or shard rows were added because this round introduces none of those entries.
-Shared counter/module/tier edits are limited to the explicit grant and own tests.
+Shared counter/module/lifecycle/tier edits are limited to the explicit grant
+and own tests. Round 3 changes only lifecycle/removal, their existing test file,
+the own tier rows and this handoff.
