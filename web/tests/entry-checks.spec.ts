@@ -4,6 +4,87 @@ import type { EntryBlock, EntryCheck, EntryChecks, EntryRecord } from '../src/li
 import { fixtures, me, mockWork } from './work-fixtures'
 import { controlStability } from './control-stability'
 
+// Risk: the usual definition arrives after the ticket is already interactive.
+// Hold each read to measure the reserved slot and the controls below it before
+// the first result, after next-ticket navigation, and during a saved refresh.
+test('AEON-1315 defined entry row reserves space before reads and keeps the ticket stable', async ({ browser }, testInfo) => {
+  for (const width of [1440, 1024, 390]) {
+    const touch = width === 390
+    const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height: 1000 }, hasTouch: touch, reducedMotion: 'reduce' })
+    try {
+      const page = await context.newPage(), data = fixtures()
+      const nodes = ['n-4', 'n-5'].map(id => data.nodes.find(node => node.id === id)!)
+      for (const node of nodes) {
+        node.state = 'open'
+        node.title = 'Freigaberegeln für lang beschriebene Arbeit vor Beginn, Qualitätsprüfung und Abschluss nachvollziehbar anzeigen'
+        node.fields.acceptance_criteria = '- [ ] The work satisfies the approved criteria'
+      }
+      await mockWork(page, data)
+      await page.route(url => url.pathname === '/api/queue', route => route.fulfill({ json: {
+        items: nodes.map((node, position) => ({ node_id: node.id, project_id: node.project, key: node.key, title: node.title, state: node.state, priority: 'medium', estimate_hours: 2,
+          queued: { run_id: `run-${node.id}`, position, by: { ...me, kind: 'person' }, at: node.created_at, target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: false, wait_reason: '' } })),
+        manual_order: false, capacity: { queued_hours: 4, parallel_runs: 1, work_hours: 4, warning: false },
+      } }))
+      const pending: { id: string; release: () => void }[] = []
+      await page.route('**/api/nodes/*/entry-checks', async route => {
+        const id = new URL(route.request().url()).pathname.split('/')[3]!
+        const node = data.nodes.find(item => item.id === id)!
+        const result: EntryChecks = { node_id: id, revision: node.updated_at,
+          definition: { id: '00000000-0000-0000-0000-000000000000', revision: '2026-10-13T00:00:00Z', source: 'workspace', checks: {} },
+          blocks: [{ to_status: 'in_progress', passed: node.fields.estimate_hours ? 2 : 1, total: 2, checks: [
+            { id: 'estimate_set', label: 'Estimate set', applicable: true, passed: !!node.fields.estimate_hours, reason: '', can_tick: false },
+            { id: 'acceptance_present', label: 'Acceptance criteria written', applicable: true, passed: true, reason: '', can_tick: false },
+          ] }], entries: [], latest_refusal: null,
+        }
+        await new Promise<void>(release => pending.push({ id, release }))
+        await route.fulfill({ json: result })
+      })
+      await page.goto('/p/PHAROS?sort=key&closed=1')
+      await page.locator('tr.ticket-row').filter({ hasText: 'PHAROS-14' }).locator('.title-text').click()
+      const workspace = page.getByRole('complementary', { name: 'Ticket details' }), slot = workspace.locator('[data-entry-slot]')
+      const controls = { details: workspace.locator('.meta').first(), queue: workspace.locator('.q-card'), previous: workspace.getByRole('button', { name: 'Previous ticket', exact: true }), next: workspace.getByRole('button', { name: 'Next ticket', exact: true }) }
+      await expect.poll(() => pending.length).toBe(1)
+      expect(pending[0]!.id).toBe(nodes[0]!.id)
+      await expect(slot).toBeVisible()
+      await expect(slot.getByRole('button')).toHaveCount(0)
+      expect((await slot.boundingBox())?.height).toBe(touch ? 44 : 28)
+      const initial = await controlStability(page, { slot, ...controls })
+      await initial.check(async () => {
+        pending[0]!.release()
+        await expect(slot.getByRole('button', { name: 'Ready 1/2', exact: true })).toBeVisible()
+      })
+      initial.done()
+      await controls.next.click()
+      await expect.poll(() => pending.length).toBe(2)
+      expect(pending[1]!.id).toBe(nodes[1]!.id)
+      await expect(slot).toBeVisible()
+      await expect(slot.getByRole('button')).toHaveCount(0)
+      const next = await controlStability(page, { slot, ...controls })
+      await next.check(async () => {
+        pending[1]!.release()
+        await expect(slot.getByRole('button', { name: 'Ready 1/2', exact: true })).toBeVisible()
+      })
+      next.done()
+      await workspace.getByRole('button', { name: 'Add estimate', exact: true }).click()
+      await workspace.getByRole('textbox', { name: 'Estimate in agent hours' }).fill('2h')
+      await workspace.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect.poll(() => pending.length).toBe(3)
+      expect(pending[2]!.id).toBe(nodes[1]!.id)
+      await expect(slot.getByRole('button', { name: 'Ready 1/2', exact: true })).toBeVisible()
+      const refreshed = await controlStability(page, { slot, ...controls })
+      await refreshed.check(async () => {
+        pending[2]!.release()
+        await expect(slot.getByRole('button', { name: 'Ready 2/2', exact: true })).toBeVisible()
+      })
+      refreshed.done()
+      for (const theme of ['light', 'dark']) {
+        await page.evaluate(value => document.documentElement.dataset.theme = value, theme)
+        await page.screenshot({ path: testInfo.outputPath(`entry-loading-${width}-${theme}.png`) })
+      }
+    } finally { await context.close() }
+  }
+})
+
 // Risk: a loading-only row briefly displaces the ticket below its properties,
 // both on first open and after a save. Response barriers and a DOM observer
 // retain transient insertions that a settled-state assertion would miss.

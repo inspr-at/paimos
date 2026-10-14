@@ -8542,6 +8542,8 @@
     ,
     {"kind":"browser","file":"tests/done-gate.spec.ts","name":"one ticket asks before Done (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1315 defined entry row reserves space before reads and keeps the ticket stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1315 entry checklist preserves controls and refuses or audits status moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1315 entry row stays absent without a definition during reads and saves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
