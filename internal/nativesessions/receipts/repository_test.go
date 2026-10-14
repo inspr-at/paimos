@@ -214,55 +214,64 @@ func TestFinalDrainReplayAfterExitPersistsOnceAndRechecksAuthority(t *testing.T)
 // access revocation. Hold the canonical tenant fence, observe the real waiting
 // final transaction, revoke the sender scope, then release the barrier.
 func TestFinalDrainRevocationWinsBeforeFinalWrite(t *testing.T) {
-	f := newFixture(t)
-	f.complete(t)
-	ctx, cancel := context.WithTimeout(f.ctx(t), 15*time.Second)
-	defer cancel()
-	holder, err := f.d.App.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer holder.Rollback(context.Background())
-	if _, err = holder.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, f.agent.TenantID); err != nil {
-		t.Fatal(err)
-	}
-	if err = db.LockTree(ctx, holder, f.agent.TenantID); err != nil {
-		t.Fatal(err)
-	}
-	pid := holder.Conn().PgConn().PID()
-	ready := make(chan struct{})
-	result := make(chan struct {
-		r   nativecontract.NativeFinalReceipt
-		err error
-	}, 1)
-	go func() {
-		defer close(ready)
-		r, err := f.repo.Persist(ctx, f.actor, f.final)
-		result <- struct {
-			r   nativecontract.NativeFinalReceipt
-			err error
-		}{r, err}
-	}()
-	if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, ready); lock == "" {
-		t.Fatal("final write never overlapped the access fence")
-	}
-	// Revoke the CURRENT sender role, rather than changing the fake authorizer.
-	if _, err = holder.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.agent.TenantID, f.agent.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err = holder.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	out := dbtest.Await(t, ctx, result)
-	if out.err != nil || out.r.State != "rejected" || out.r.Reason == nil || *out.r.Reason != nativecontract.ReasonPermissionRevoked {
-		t.Fatalf("revoked final: %+v %v", out.r, out.err)
-	}
-	var count int
-	if err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM native_session_finals WHERE tenant_id=$1`, f.agent.TenantID).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatal("revoked final projection committed")
+	for _, originalActor := range []bool{false, true} {
+		t.Run(fmt.Sprint("original_actor_", originalActor), func(t *testing.T) {
+			f := newFixture(t)
+			f.complete(t)
+			ctx, cancel := context.WithTimeout(f.ctx(t), 15*time.Second)
+			defer cancel()
+			holder, err := f.d.App.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer holder.Rollback(context.Background())
+			if _, err = holder.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, f.agent.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.LockTree(ctx, holder, f.agent.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			pid := holder.Conn().PgConn().PID()
+			ready := make(chan struct{})
+			result := make(chan struct {
+				r   nativecontract.NativeFinalReceipt
+				err error
+			}, 1)
+			go func() {
+				defer close(ready)
+				r, err := f.repo.Persist(ctx, f.actor, f.final)
+				result <- struct {
+					r   nativecontract.NativeFinalReceipt
+					err error
+				}{r, err}
+			}()
+			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, ready); lock == "" {
+				t.Fatal("final write never overlapped the access fence")
+			}
+			// Revoke the CURRENT role under the actual access fence. The native
+			// authorizer remains unchanged, so RequireTx must observe the revocation.
+			revokedID := f.agent.ID
+			if originalActor {
+				revokedID = f.owner.ID
+			}
+			if _, err = holder.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.agent.TenantID, revokedID); err != nil {
+				t.Fatal(err)
+			}
+			if err = holder.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			out := dbtest.Await(t, ctx, result)
+			if out.err != nil || out.r.State != "rejected" || out.r.Reason == nil || *out.r.Reason != nativecontract.ReasonPermissionRevoked {
+				t.Fatalf("revoked final: %+v %v", out.r, out.err)
+			}
+			var count int
+			if err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM native_session_finals WHERE tenant_id=$1`, f.agent.TenantID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatal("revoked final projection committed")
+			}
+		})
 	}
 }
 

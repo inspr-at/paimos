@@ -96,6 +96,8 @@ func TestNativeSessionCLIStartsOnlyThroughOwningDaemon(t *testing.T) {
 		if receipt.State == "uncertain" {
 			reason := nativecontract.ReasonOwnershipUnconfirmed
 			receipt.Reason = &reason
+			binding := nativecontract.Binding{TenantID: transcriptEntryID, ProjectID: transcriptProjectID, OwnedSessionID: transcriptSessionID, HarnessSessionID: transcriptEntryID, RuntimeEpoch: transcriptProjectID, DaemonID: "fixture", DaemonGeneration: "fixture", BindingRevision: 1}
+			receipt.Binding, view.CurrentBinding = &binding, &binding
 		}
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(nativecontract.OperationResult{Receipt: receipt, Session: &view})

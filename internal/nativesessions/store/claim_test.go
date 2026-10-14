@@ -3,6 +3,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,10 +19,12 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativeadmission"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeintegration"
@@ -216,11 +219,12 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 					t.Fatalf("native admission accepted another account enrollment: %v", err)
 				}
 				// Check an actual control handler with this authenticated runtime.
-				mux := http.NewServeMux()
-				harness.New(f.d.App).Mount(mux)
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), f.agent)))
-				}))
+				boundary, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{7}, 32), PublicURL: "https://native.test"}, f.d.App)
+				if err != nil {
+					t.Fatal(err)
+				}
+				api := &httpapi.Server{Pool: f.d.App, Modules: []httpapi.Module{boundary, harness.New(f.d.App)}, Middleware: []func(http.Handler) http.Handler{boundary.Middleware}}
+				server := httptest.NewServer(api.Handler())
 				t.Cleanup(server.Close)
 				var prefix string
 				if err := f.d.Admin.QueryRow(t.Context(), `SELECT prefix FROM agent_keys WHERE id=$1`, f.agent.KeyID).Scan(&prefix); err != nil {
