@@ -139,6 +139,20 @@ func TestUnpreparedLearningsHiddenFromPeople(t *testing.T) {
 	body["lesson"] = "Rehearse recovery before the next rollout."
 	expect(t, call(t, f, agent, "PUT", recommendPath(nodeLearningID(f.ticket)), body), 200)
 	rec = *learningHTTPPage(t, f, f.a).Items[0].Recommendation
+	moveNode(t, f, book.ID, f.other)
+	if len(learningHTTPPage(t, f, f.a).Items) != 0 {
+		t.Fatal("person sees an unavailable target")
+	}
+	moveNode(t, f, f.ticket, f.other)
+	moved := call(t, f, agent, "GET", "/api/knowledge/learnings?project_id="+f.other, nil)
+	expect(t, moved, 200)
+	for _, item := range decode[LearningPage](t, moved).Items {
+		if item.ID == nodeLearningID(f.ticket) && item.Recommendation != nil {
+			t.Fatal("moved source carried its old project proposal")
+		}
+	}
+	moveNode(t, f, book.ID, f.project)
+	moveNode(t, f, f.ticket, f.project)
 	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(f.ticket)+"/accept", map[string]any{"knowledge_id": book.ID, "learning_text": "Changed incident"})
 	expect(t, w, 200)
 	if got := decode[LearningDecision](t, w); got.Line != rec.Line || !strings.Contains(entryBody(t, f, book.ID), rec.Line) {

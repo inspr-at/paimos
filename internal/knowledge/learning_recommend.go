@@ -477,7 +477,7 @@ func attachRecommendations(ctx context.Context, tx pgx.Tx, tenantID, projectID s
 	  JOIN principals who ON who.tenant_id=r.tenant_id AND who.id=r.recommended_by
 	  LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.knowledge_id
 	  `+nearestProject+`
-	  WHERE r.tenant_id=$1 AND r.source_key = ANY($2::text[])`, tenantID, keys, projectID)
+	  WHERE r.tenant_id=$1 AND r.project_id=$3::uuid AND r.source_key = ANY($2::text[])`, tenantID, keys, projectID)
 	if err != nil {
 		return err
 	}
@@ -540,7 +540,7 @@ func preparedClause(ctx context.Context, sourceKey string) string {
 		return ""
 	}
 	return ` AND EXISTS (SELECT 1 FROM method_learning_recommendations ready
-      WHERE ready.tenant_id=n.tenant_id AND ready.source_key=` + sourceKey + `
+      WHERE ready.tenant_id=n.tenant_id AND ready.project_id=$2::uuid AND ready.source_key=` + sourceKey + `
       AND ready.decision='accept' AND btrim(coalesce(ready.lesson,''))<>''
       AND btrim(coalesce(ready.source_summary,''))<>''
       AND (btrim(coalesce(ready.changelog_line,''))<>'' OR ready.rule_layer_id IS NOT NULL)) `
