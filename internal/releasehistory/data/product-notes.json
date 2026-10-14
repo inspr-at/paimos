@@ -6627,6 +6627,271 @@
           "group": "fixes"
         }
       ]
+    },
+    "261014191553.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 133,
+      "snapshot_sha256": "119737d5b5c573a9198af0604825e2d90f0edb5f23496c68d24627e9d2dd92eb",
+      "captured_at": "2026-10-14T19:17:50Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1240",
+          "pill_en": "Smoother small details",
+          "pill_de": "Feinere Details",
+          "benefit_en": "Models carry the same name everywhere, counts read correctly, and a few small layout details on Models, Routines and Accounts are cleaned up.",
+          "benefit_de": "Modelle tragen überall denselben Namen, Zählungen stimmen, und kleine Layout-Details auf Models, Routines und Accounts sind bereinigt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1253",
+          "pill_en": "History with fewer permissions",
+          "pill_de": "Historie mit weniger Rechten",
+          "benefit_en": "Delivery history works with fewer GitHub permissions, so linking a repository needs no extra access.",
+          "benefit_de": "Die Lieferhistorie funktioniert mit weniger GitHub-Berechtigungen, sodass das Verknüpfen eines Repositorys keinen zusätzlichen Zugriff braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1254",
+          "pill_en": "Session chat delivers",
+          "pill_de": "Sitzungs-Chat stellt zu",
+          "benefit_en": "Messages to a running Claude Code session arrive, and its chat shows the conversation; if delivery is impossible, the session says why.",
+          "benefit_de": "Nachrichten an eine laufende Claude-Code-Sitzung kommen an, und ihr Chat zeigt das Gespräch; ist die Zustellung unmöglich, nennt die Sitzung den Grund.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1258",
+          "pill_en": "No double builds",
+          "pill_de": "Keine Doppel-Builds",
+          "benefit_en": "PAIMOS never starts a second build for the same ticket by mistake; parallel work happens only on purpose and is recorded.",
+          "benefit_de": "PAIMOS startet nie versehentlich einen zweiten Build für dasselbe Ticket; parallele Arbeit geschieht nur absichtlich und wird festgehalten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1261",
+          "pill_en": "Lead runs in PAIMOS",
+          "pill_de": "Lead läuft in PAIMOS",
+          "benefit_en": "The lead agent runs inside PAIMOS: messages arrive directly, stop works, nothing to attach.",
+          "benefit_de": "Der Lead-Agent läuft in PAIMOS: Nachrichten kommen direkt an, Stoppen funktioniert, nichts muss angehängt werden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1265",
+          "pill_en": "Exact attachment downloads",
+          "pill_de": "Anhänge bytegenau laden",
+          "benefit_en": "Downloading ticket attachments with the CLI works byte-exact again.",
+          "benefit_de": "Das Herunterladen von Ticket-Anhängen per CLI funktioniert wieder bytegenau.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1275",
+          "pill_en": "PAIMOS starts work again",
+          "pill_de": "PAIMOS startet Arbeit wieder",
+          "benefit_en": "Routines, Start buttons and model selection can admit new agent work on a paired computer again.",
+          "benefit_de": "Routinen, Start-Schaltflächen und Modellwahl nehmen auf einem gekoppelten Computer wieder neue Agentenarbeit an.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1277",
+          "pill_en": "Codex survives Node upgrades",
+          "pill_de": "Codex übersteht Node-Updates",
+          "benefit_en": "A routine Homebrew upgrade no longer stops agent work on a paired Mac, and the repair command works when it is needed.",
+          "benefit_de": "Ein gewöhnliches Homebrew-Update stoppt die Agentenarbeit auf einem gekoppelten Mac nicht mehr, und der Reparaturbefehl funktioniert im Bedarfsfall.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1279",
+          "pill_en": "Phone layout fits",
+          "pill_de": "Telefon-Layout passt",
+          "benefit_en": "On a phone the Agents page shows the sessions instead of the chrome, and scrolling follows the finger.",
+          "benefit_de": "Am Telefon zeigt die Agenten-Seite die Sitzungen statt der Bedienleisten, und das Scrollen folgt dem Finger.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1282",
+          "pill_en": "Queued section spaced",
+          "pill_de": "Warteschlange mit Abstand",
+          "benefit_en": "The Queued section on the Agents page is clearly separated from the session list.",
+          "benefit_de": "Der Bereich Wartend auf der Agenten-Seite ist klar von der Sitzungsliste getrennt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1284",
+          "pill_en": "Amy messages directly",
+          "pill_de": "Amy schreibt direkt",
+          "benefit_en": "The Grok assistant talks to AEON over HTTPS with a messaging-only key, independent of the tailnet.",
+          "benefit_de": "Die Grok-Assistentin kommuniziert mit AEON über HTTPS mit einem reinen Nachrichten-Schlüssel, unabhängig vom Tailnet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1285",
+          "pill_en": "Clearer agent rows",
+          "pill_de": "Klarere Agentenzeilen",
+          "benefit_en": "Agent rows explain why a run stopped, mark only the real project lead and show the account actually in use.",
+          "benefit_de": "Agentenzeilen erklären, warum ein Lauf endete, kennzeichnen nur die echte Projektleitung und zeigen das tatsächlich genutzte Konto.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1287",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1288",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1289",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1293",
+          "pill_en": "Live terminal link works",
+          "pill_de": "Live-Terminal-Link funktioniert",
+          "benefit_en": "The Open live terminal link for coordinators running in Zellij is accepted and shown to people.",
+          "benefit_de": "Der Link Live-Terminal öffnen für Koordinatoren in Zellij wird angenommen und Personen angezeigt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1298",
+          "pill_en": "Automatic lead claim",
+          "pill_de": "Automatische Lead-Übernahme",
+          "benefit_en": "Confirming a running session as project lead takes effect on its own, without an agent running a claim command.",
+          "benefit_de": "Die Bestätigung einer laufenden Sitzung als Projekt-Lead wirkt von selbst, ohne dass ein Agent einen Claim-Befehl ausführen muss.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1302",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1303",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1304",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1305",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1306",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1307",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1308",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1322",
+          "pill_en": "Faster small-change CI",
+          "pill_de": "Schnellere CI für Kleines",
+          "benefit_en": "Small pull requests no longer time out in CI; their UI tests finish in about ten minutes.",
+          "benefit_de": "Kleine Pull Requests laufen in der CI nicht mehr in die Zeitgrenze; ihre UI-Tests sind in etwa zehn Minuten fertig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1325",
+          "pill_en": "Green nightly again",
+          "pill_de": "Nächtliche Tests wieder grün",
+          "benefit_en": "The full nightly test run finishes in time and passes, so new work can start on a healthy main.",
+          "benefit_de": "Der volle nächtliche Testlauf ist rechtzeitig fertig und grün; neue Arbeit startet auf einem gesunden main.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1326",
+          "pill_en": "Green nightly again",
+          "pill_de": "Nächtliche Tests wieder grün",
+          "benefit_en": "The full nightly test run passes again, so new work starts on a healthy main.",
+          "benefit_de": "Der volle nächtliche Testlauf ist wieder grün; neue Arbeit startet auf einem gesunden main.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1327",
+          "pill_en": "Green nightly again",
+          "pill_de": "Nächtliche Tests wieder grün",
+          "benefit_en": "The full nightly test run finishes in time and passes, so new work starts on a healthy main.",
+          "benefit_de": "Der volle nächtliche Testlauf ist rechtzeitig fertig und grün; neue Arbeit startet auf einem gesunden main.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1328",
+          "pill_en": "Green nightly again",
+          "pill_de": "Nächtliche Tests wieder grün",
+          "benefit_en": "The full nightly test run passes again, so new work starts on a healthy main.",
+          "benefit_de": "Der volle nächtliche Testlauf ist wieder grün; neue Arbeit startet auf einem gesunden main.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1330",
+          "pill_en": "Lessons, not noise",
+          "pill_de": "Lehren statt Rauschen",
+          "benefit_en": "Only real lessons reach a person, as a clear decision on the Decision Desk; the noise is cleared automatically.",
+          "benefit_de": "Nur echte Lehren erreichen einen Menschen, als klare Entscheidung im Decision Desk; das Rauschen wird automatisch entfernt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1331",
+          "pill_en": "Lessons, not noise",
+          "pill_de": "Lehren statt Rauschen",
+          "benefit_en": "Only real lessons reach a person, as a clear decision on the Decision Desk; the noise is cleared automatically.",
+          "benefit_de": "Nur echte Lehren erreichen einen Menschen, als klare Entscheidung im Decision Desk; das Rauschen wird automatisch entfernt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1343",
+          "pill_en": "Decide always works",
+          "pill_de": "Entscheiden funktioniert immer",
+          "benefit_en": "Clicking Decide on the Decision Desk always records the decision or says clearly why it cannot yet.",
+          "benefit_de": "Ein Klick auf Entscheiden im Decision Desk speichert die Entscheidung oder sagt klar, warum das noch nicht geht.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
