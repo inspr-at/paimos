@@ -12,7 +12,7 @@ import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
-import KeyCap from './KeyCap.vue'
+import KeyCap from '../KeyCap.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import TicketBenefits from './TicketBenefits.vue'
 const props = withDefaults(defineProps<{ row: ListItem; projectId: string; anchor: HTMLElement; mode?: 'queue' | 'entry' | 'status' | 'record'; toStatus?: string; entryRecord?: EntryRecord; refusal?: EntryFailure }>(), { mode: 'queue', toStatus: 'in_progress' })

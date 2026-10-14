@@ -8,7 +8,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/inspr-at/paimos/internal/workqueue"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -17,11 +17,11 @@ import (
 // Workspace/project policy controls audit attribution; pickup still transitions
 // directly when automatic status rules are disabled.
 func PickupTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, runID string) error {
-	target, err := workqueue.EntryTicketTx(ctx, tx, id)
+	target, err := workorders.EntryTicketTx(ctx, tx, id)
 	if err != nil {
 		return err
 	}
-	entry, err := workqueue.RequireEntryTx(ctx, tx, p, target, "in_progress", nil)
+	entry, err := workorders.RequireEntryTx(ctx, tx, p, target, "in_progress", nil)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func PickupTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, runID stri
 	return err
 }
 
-func entryMetadata(entry *workqueue.EntryRecord) json.RawMessage {
+func entryMetadata(entry *workorders.EntryRecord) json.RawMessage {
 	if entry == nil {
 		return nil
 	}

@@ -264,7 +264,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/entry-checks.spec.ts"}
+        {"file":"tests/entry-checks.spec.ts","weightSeconds":30}
         ,
         {"file":"tests/work-queue.spec.ts","listedTests":30,"tierTiming":{"caseSeconds":{"max":11.202,"median":1.5205,"min":1.024},"seconds":53.363,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
       ]
@@ -1719,6 +1719,8 @@
       "tests/doctrine-inbox.spec.ts": {"seconds":25.846,"selectedTests":7}
       ,
       "tests/done-gate.spec.ts": {"seconds":54.425,"selectedTests":20}
+      ,
+      "tests/entry-checks.spec.ts": {"seconds":30,"selectedTests":1}
       ,
       "tests/estimates.spec.ts": {"seconds":21.506,"selectedTests":7}
       ,

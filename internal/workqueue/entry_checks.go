@@ -3,508 +3,49 @@ package workqueue
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"regexp"
-	"slices"
-	"strings"
-	"time"
-	"unicode/utf8"
 
-	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
-type EntryRule struct {
-	ID        string   `json:"id"`
-	Label     string   `json:"label,omitempty"`
-	LabelDE   string   `json:"label_de,omitempty"`
-	Condition string   `json:"condition,omitempty"`
-	Kinds     []string `json:"kinds,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	OwnerID   *string  `json:"owner_id,omitempty"`
-}
-type EntryDefinition struct {
-	ID         string                 `json:"id"`
-	Revision   time.Time              `json:"revision"`
-	Source     string                 `json:"source"`
-	CopiedFrom *time.Time             `json:"copied_from_revision"`
-	Checks     map[string][]EntryRule `json:"checks"`
-}
-type EntryPerson struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-type EntryResult struct {
-	EntryRule
-	Applicable bool         `json:"applicable"`
-	Passed     bool         `json:"passed"`
-	Reason     string       `json:"reason"`
-	Owner      *EntryPerson `json:"owner"`
-	CheckedBy  *EntryPerson `json:"checked_by"`
-	CheckedAt  *time.Time   `json:"checked_at"`
-	CanTick    bool         `json:"can_tick"`
-}
-type EntryBlock struct {
-	ToStatus string        `json:"to_status"`
-	Passed   int           `json:"passed"`
-	Total    int           `json:"total"`
-	Checks   []EntryResult `json:"checks"`
-}
-type EntryRecord struct {
-	EntryBlock
-	At                 time.Time   `json:"at"`
-	By                 EntryPerson `json:"by"`
-	OverrideReason     *string     `json:"override_reason"`
-	DefinitionID       string      `json:"definition_id"`
-	DefinitionRevision time.Time   `json:"definition_revision"`
-}
-type EntryRefusal struct {
-	ToStatus string        `json:"to_status"`
-	Failed   []EntryResult `json:"failed"`
-	At       time.Time     `json:"at"`
-	By       EntryPerson   `json:"by"`
-	Count    int           `json:"count"`
-}
-type EntryChecks struct {
-	NodeID        string           `json:"node_id"`
-	Revision      time.Time        `json:"revision"`
-	Definition    *EntryDefinition `json:"definition"`
-	Blocks        []EntryBlock     `json:"blocks"`
-	Entries       []EntryRecord    `json:"entries"`
-	LatestRefusal *EntryRefusal    `json:"latest_refusal"`
-}
-type EntryFailure struct {
-	ToStatus        string        `json:"to_status"`
-	Failed          []EntryResult `json:"failed"`
-	OverrideAllowed bool          `json:"override_allowed"`
-}
-
-func (e *EntryFailure) Error() string     { return "entry_checks_failed" }
-func (e *EntryFailure) HTTPStatus() int   { return 409 }
-func (e *EntryFailure) ErrorCode() string { return "entry_checks_failed" }
-func (e *EntryFailure) ErrorDetails() map[string]any {
-	return map[string]any{"to_status": e.ToStatus, "failed": e.Failed, "override_allowed": e.OverrideAllowed}
-}
-
-type entryCatalogItem struct{ en, de, condition string }
-
-var entryCatalog = map[string]entryCatalogItem{
-	"estimate_set":           {"Estimate set", "Schätzung gesetzt", "all"},
-	"acceptance_present":     {"Acceptance criteria written", "Abnahmekriterien beschrieben", "all"},
-	"design_attached":        {"Approved design attached", "Freigegebenes Design angehängt", "ui"},
-	"blocker_named":          {"Blocker named", "Blocker benannt", "blocked"},
-	"no_active_build":        {"No other build in flight", "Kein anderer Build aktiv", "all"},
-	"ci_green_latest_main":   {"Full CI green on latest main", "Volle CI grün auf aktuellem main", "code"},
-	"review_ok_cross_family": {"Cross-family review ok", "Review durch andere Modellfamilie ok", "code"},
-	"visual_ok":              {"Visual check ok", "Visuelle Prüfung ok", "ui"},
-	"pills_benefits_set":     {"Pills and benefits set", "Pills und Nutzen beschrieben", "release_notes"},
-	"release_copy_set":       {"Release text set (EN + DE)", "Release-Text gesetzt (EN + DE)", "release_notes"},
-	"merged":                 {"Merged to main", "In main gemergt", "code"},
-	"released":               {"Shipped in a release", "In einem Release ausgeliefert", "releases"},
-}
-var manualEntryID = regexp.MustCompile(`^manual:[a-z][a-z0-9-]{0,71}$`)
+// Queue consumers share the lower-level status policy without making the
+// automatic-status package depend on its own queue projection.
+type EntryRule = workorders.EntryRule
+type EntryDefinition = workorders.EntryDefinition
+type EntryPerson = workorders.EntryPerson
+type EntryResult = workorders.EntryResult
+type EntryBlock = workorders.EntryBlock
+type EntryRecord = workorders.EntryRecord
+type EntryRefusal = workorders.EntryRefusal
+type EntryChecks = workorders.EntryChecks
+type EntryFailure = workorders.EntryFailure
+type EntryTicket = workorders.EntryTicket
 
 func ValidateEntryRules(checks map[string][]EntryRule) error {
-	if checks == nil || len(checks) > 3 {
-		return workorders.Fail(400, "checks must contain Ready, QA or Done blocks")
-	}
-	encoded, err := json.Marshal(checks)
-	if err != nil || len(encoded) > 65536 {
-		return workorders.Fail(400, "definition checks exceed 64 KiB")
-	}
-	seen := map[string]bool{}
-	for state, rules := range checks {
-		if !slices.Contains([]string{"in_progress", "qa", "done"}, state) || len(rules) > 32 {
-			return workorders.Fail(400, "invalid entry check block")
-		}
-		for _, r := range rules {
-			_, builtin := entryCatalog[r.ID]
-			if !builtin && (!manualEntryID.MatchString(r.ID) || strings.TrimSpace(r.Label) == "") || seen[r.ID] {
-				return workorders.Fail(400, "unknown or duplicate entry check")
-			}
-			seen[r.ID] = true
-			if len(r.ID) > 80 || !utf8.ValidString(r.Label+r.LabelDE) || utf8.RuneCountInString(r.Label) > 200 || utf8.RuneCountInString(r.LabelDE) > 200 || len(r.Kinds) > 16 || len(r.Labels) > 16 || !slices.Contains([]string{"", "all", "ui", "code", "blocked", "release_notes", "releases"}, r.Condition) || r.OwnerID != nil && (!manualEntryID.MatchString(r.ID) || !workorders.UUID(*r.OwnerID)) {
-				return workorders.Fail(400, "invalid bounded entry check rule")
-			}
-			for _, s := range append(slices.Clone(r.Kinds), r.Labels...) {
-				if strings.TrimSpace(s) == "" || len(s) > 100 || !utf8.ValidString(s) {
-					return workorders.Fail(400, "invalid check condition")
-				}
-			}
-		}
-	}
-	return nil
+	return workorders.ValidateEntryRules(checks)
 }
-
-// Definitions are ordinary nodes at exactly two scopes. The project copy is
-// selected even when empty; malformed/duplicate definitions fail closed.
 func EntryDefinitionTx(ctx context.Context, tx pgx.Tx, project *string, inherit bool) (*EntryDefinition, error) {
-	load := func(scope *string) (*EntryDefinition, error) {
-		rows, err := tx.Query(ctx, `SELECT n.id::text,n.updated_at,n.fields FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='definition' AND n.deleted_at IS NULL AND n.parent_id IS NOT DISTINCT FROM $1::uuid ORDER BY n.id LIMIT 2`, scope)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		var out *EntryDefinition
-		for rows.Next() {
-			if out != nil {
-				return nil, workorders.Fail(409, "multiple definitions at this scope")
-			}
-			d := EntryDefinition{Source: "workspace"}
-			if scope != nil {
-				d.Source = "project"
-			}
-			var raw []byte
-			if err = rows.Scan(&d.ID, &d.Revision, &raw); err != nil {
-				return nil, err
-			}
-			if len(raw) > 65536 {
-				return nil, workorders.Fail(409, "definition exceeds size limit")
-			}
-			var fields struct {
-				Checks     map[string][]EntryRule `json:"checks"`
-				CopiedFrom *time.Time             `json:"copied_from_revision"`
-			}
-			if json.Unmarshal(raw, &fields) != nil {
-				return nil, workorders.Fail(409, "invalid definition")
-			}
-			if err = ValidateEntryRules(fields.Checks); err != nil {
-				return nil, workorders.Fail(409, "invalid definition checks")
-			}
-			d.Checks, d.CopiedFrom = fields.Checks, fields.CopiedFrom
-			out = &d
-		}
-		return out, rows.Err()
-	}
-	d, err := load(project)
-	if err != nil || d != nil || project == nil || !inherit {
-		return d, err
-	}
-	return load(nil)
+	return workorders.EntryDefinitionTx(ctx, tx, project, inherit)
 }
-
-type EntryTicket struct {
-	ID, Kind, State, Title, Body string
-	ProjectID                    *string
-	Fields                       map[string]any
-	Revision                     time.Time
-	NamedBlocker                 bool
-}
-
 func EntryTicketTx(ctx context.Context, tx pgx.Tx, id string) (EntryTicket, error) {
-	var t EntryTicket
-	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT n.id::text,k.slug,n.state,n.title,n.body,n.project_id::text,n.fields,n.updated_at,EXISTS(SELECT 1 FROM node_relations r JOIN nodes b ON b.tenant_id=r.tenant_id AND b.id=r.source_node_id WHERE r.target_node_id=n.id AND r.type='blocks' AND b.deleted_at IS NULL) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL`, id).Scan(&t.ID, &t.Kind, &t.State, &t.Title, &t.Body, &t.ProjectID, &raw, &t.Revision, &t.NamedBlocker)
-	t.Fields = Fields(raw)
-	return t, err
+	return workorders.EntryTicketTx(ctx, tx, id)
 }
-func EntryStatusTx(ctx context.Context, tx pgx.Tx, kindID, state string) (string, error) {
-	var category string
-	err := tx.QueryRow(ctx, `SELECT aeon_work_status_category($2,field_schema) FROM node_kinds WHERE id=$1`, kindID, state).Scan(&category)
-	if category == "delivered" || category == "accepted" {
-		category = "done"
-	}
-	if Progress(category) {
-		category = "in_progress"
-	}
-	return category, err
+func EntryStatusTx(ctx context.Context, tx pgx.Tx, kind, state string) (string, error) {
+	return workorders.EntryStatusTx(ctx, tx, kind, state)
 }
-
-func entryLabels(fields map[string]any) []string {
-	out := []string{}
-	for _, key := range []string{"tags", "labels"} {
-		switch v := fields[key].(type) {
-		case string:
-			out = append(out, strings.ToLower(v))
-		case []any:
-			for _, x := range v {
-				switch y := x.(type) {
-				case string:
-					out = append(out, strings.ToLower(y))
-				case map[string]any:
-					if s, ok := y["name"].(string); ok {
-						out = append(out, strings.ToLower(s))
-					}
-				}
-			}
-		}
-	}
-	return out
-}
-func entryApplies(r EntryRule, t EntryTicket, usesReleases bool) bool {
-	labels := entryLabels(t.Fields)
-	if len(r.Kinds) > 0 && !slices.Contains(r.Kinds, t.Kind) {
-		return false
-	}
-	for _, s := range r.Labels {
-		if !slices.Contains(labels, strings.ToLower(s)) {
-			return false
-		}
-	}
-	condition := r.Condition
-	if condition == "" {
-		condition = entryCatalog[r.ID].condition
-	}
-	switch condition {
-	case "ui":
-		return slices.Contains(labels, "ui") || t.Fields["area"] == "frontend"
-	case "code":
-		return t.Fields["no_release_needed"] != true && !slices.Contains(labels, "docs") && !slices.Contains(labels, "content")
-	case "blocked":
-		return State(t.State) == "blocked"
-	case "release_notes":
-		return !ticketbenefits.OmitFromReleaseNotes(mustEntryJSON(t.Fields))
-	case "releases":
-		return usesReleases && t.Fields["no_release_needed"] != true
-	}
-	return true
-}
-func mustEntryJSON(v any) json.RawMessage { raw, _ := json.Marshal(v); return raw }
-
 func EntryOwnerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t EntryTicket, r EntryRule) (*EntryPerson, error) {
-	project := ""
-	if t.ProjectID != nil {
-		project = *t.ProjectID
-	}
-	candidates := []string{}
-	if r.OwnerID != nil {
-		candidates = append(candidates, *r.OwnerID)
-	} else if assignee, ok := t.Fields["assignee"].(string); ok && workorders.UUID(assignee) {
-		candidates = append(candidates, assignee)
-	}
-	rows, err := tx.Query(ctx, `SELECT id::text,name FROM principals WHERE kind='person' AND (id=ANY($1::uuid[]) OR EXISTS(SELECT 1 FROM role_bindings pm JOIN roles r ON r.tenant_id=pm.tenant_id AND r.id=pm.role_id WHERE pm.principal_id=principals.id AND ((pm.scope_type='project' AND pm.scope_id=$2::uuid AND r.key='admin') OR (pm.scope_type='workspace' AND r.key IN ('admin','owner'))))) ORDER BY (id=ANY($1::uuid[])) DESC,id LIMIT 100`, candidates, t.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	people := []EntryPerson{}
-	for rows.Next() {
-		var v EntryPerson
-		if err = rows.Scan(&v.ID, &v.Name); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		people = append(people, v)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range people {
-		actor := tenant.Principal{ID: v.ID, TenantID: p.TenantID, Kind: tenant.Person}
-		if slices.Contains(candidates, v.ID) {
-			if authz.RequireTx(ctx, tx, actor, "nodes.read", authz.Scope{ProjectID: project}) == nil {
-				return &v, nil
-			}
-		}
-		if authz.RequireProjectAdminTx(ctx, tx, actor, project) == nil {
-			return &v, nil
-		}
-	}
-	return nil, nil
+	return workorders.EntryOwnerTx(ctx, tx, p, t, r)
 }
-
-// EvaluateEntryTx runs under the same tenant/tree fence as status and queue
-// writers. No client boolean is delivery, review, visual or manual evidence.
 func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t EntryTicket, d *EntryDefinition, status string) (EntryBlock, error) {
-	out := EntryBlock{ToStatus: status, Checks: []EntryResult{}}
-	if d == nil || !slices.Contains([]string{"work", "ticket", "task"}, t.Kind) {
-		return out, nil
-	}
-	var usesReleases bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.project_id=$1 AND k.slug='release' AND n.deleted_at IS NULL)`, t.ProjectID).Scan(&usesReleases); err != nil {
-		return out, err
-	}
-	for _, rule := range d.Checks[status] {
-		r := EntryResult{EntryRule: rule, Reason: ""}
-		if c, ok := entryCatalog[rule.ID]; ok {
-			r.Label, r.LabelDE = c.en, c.de
-		}
-		r.Applicable = entryApplies(rule, t, usesReleases)
-		if !r.Applicable {
-			r.Reason = "Not applicable"
-			out.Checks = append(out.Checks, r)
-			continue
-		}
-		out.Total++
-		var err error
-		switch rule.ID {
-		case "estimate_set":
-			r.Passed = Hours(t.Fields) > 0
-			r.Reason = "Set an estimate between 0 and 200 hours"
-		case "acceptance_present":
-			r.Passed = len(Criteria(t.Fields)) > 0
-			r.Reason = "Write what must be true when the work is done"
-		case "blocker_named":
-			r.Passed = t.NamedBlocker
-			for _, key := range []string{"blocker", "blocked_by"} {
-				if v, ok := t.Fields[key].(string); ok && strings.TrimSpace(v) != "" && !strings.EqualFold(strings.TrimSpace(v), "unnamed") {
-					r.Passed = true
-				}
-			}
-			r.Reason = "Name the ticket or reason blocking the work"
-		case "release_copy_set", "pills_benefits_set":
-			r.Passed = len(ticketbenefits.Issues(mustEntryJSON(t.Fields))) == 0
-			r.Reason = strings.Join(ticketbenefits.Issues(mustEntryJSON(t.Fields)), "; ")
-		case "no_active_build":
-			err = workorders.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil)
-			var conflict *workorders.BuildConflict
-			if errors.As(err, &conflict) {
-				r.Reason = conflict.Error()
-				err = nil
-			} else if err == nil {
-				r.Passed = true
-			}
-		case "merged":
-			err = tx.QueryRow(ctx, `SELECT coalesce((SELECT d.state='merged' OR d.observation->>'merged'='true' FROM delivery_items d JOIN delivery_metric_sources s ON s.tenant_id=d.tenant_id AND s.project_id=d.project_id AND s.repository=d.repository WHERE d.ticket_node_id=$1 ORDER BY d.updated_at DESC,d.id DESC LIMIT 1),false)`, t.ID).Scan(&r.Passed)
-			r.Reason = "Merge the current build to main"
-		case "released":
-			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_tickets t JOIN journey_releases r ON r.tenant_id=t.tenant_id AND r.release_node_id=t.release_node_id WHERE t.ticket_node_id=$1 AND r.project_node_id=$2 AND r.state IN ('released','superseded'))`, t.ID, t.ProjectID).Scan(&r.Passed)
-			r.Reason = "Publish the release that includes this work"
-		case "ci_green_latest_main":
-			r.Passed, err = entryCITx(ctx, tx, t)
-			r.Reason = "Run the required CI checks on the current build against latest main"
-		case "review_ok_cross_family":
-			var order string
-			err = tx.QueryRow(ctx, `SELECT work_order_id::text FROM work_order_reviews WHERE ticket_node_id=$1 ORDER BY created_at DESC,work_order_id DESC LIMIT 1`, t.ID).Scan(&order)
-			if errors.Is(err, pgx.ErrNoRows) {
-				err = nil
-			} else if err == nil {
-				r.Passed, err = reviewgate.VerifiedLatestTx(ctx, tx, order, t.ID)
-			}
-			if err == nil && !r.Passed {
-				r.Passed, err = reviewgate.CoordinatorOKTx(ctx, tx, t.ID)
-			}
-			r.Reason = "Record a passing review from another model family for the current build"
-		case "design_attached", "visual_ok":
-			r.Passed, err = entryEvidenceTx(ctx, tx, t, rule.ID)
-			r.Reason = "A project admin records approval for the attached design or current build"
-		default:
-			r.Owner, err = EntryOwnerTx(ctx, tx, p, t, rule)
-			if err != nil {
-				return out, err
-			}
-			r.Reason = "A person must tick this"
-			if r.Owner != nil {
-				r.Reason += " · waiting for " + r.Owner.Name
-			}
-			project := ""
-			if t.ProjectID != nil {
-				project = *t.ProjectID
-			}
-			r.CanTick = p.Kind == tenant.Person && r.Owner != nil && (r.Owner.ID == p.ID || authz.RequireProjectAdminTx(ctx, tx, p, project) == nil)
-			var raw []byte
-			err = tx.QueryRow(ctx, `SELECT after FROM events WHERE node_id=$1 AND type='entry_check.ticked' AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, rule.ID, d.ID, d.Revision).Scan(&raw)
-			if errors.Is(err, pgx.ErrNoRows) {
-				err = nil
-			} else if err == nil {
-				var mark struct {
-					Checked bool         `json:"checked"`
-					By      *EntryPerson `json:"by"`
-					At      *time.Time   `json:"at"`
-				}
-				err = json.Unmarshal(raw, &mark)
-				r.Passed, r.CheckedBy, r.CheckedAt = mark.Checked, mark.By, mark.At
-			}
-		}
-		if err != nil {
-			return out, err
-		}
-		if r.Passed {
-			out.Passed++
-			r.Reason = ""
-		}
-		out.Checks = append(out.Checks, r)
-	}
-	return out, nil
+	return workorders.EvaluateEntryTx(ctx, tx, p, t, d, status)
 }
-
-func entryCITx(ctx context.Context, tx pgx.Tx, t EntryTicket) (bool, error) {
-	var raw []byte
-	var latestMain string
-	err := tx.QueryRow(ctx, `SELECT d.observation,coalesce((SELECT head_sha FROM delivery_metric_runs r WHERE r.repository=d.repository AND r.head_branch='main' ORDER BY r.created_at DESC,r.run_id DESC,r.attempt DESC LIMIT 1),'') FROM delivery_items d JOIN delivery_metric_sources s ON s.tenant_id=d.tenant_id AND s.project_id=d.project_id AND s.repository=d.repository WHERE d.ticket_node_id=$1 ORDER BY d.updated_at DESC,d.id DESC LIMIT 1`, t.ID).Scan(&raw, &latestMain)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if len(raw) > 65536 {
-		return false, nil
-	}
-	var observation struct {
-		Head     string `json:"head_sha"`
-		Base     string `json:"base_sha"`
-		Checks   []struct{ Name, Status, Conclusion string }
-		Settings struct {
-			RequiredChecks []string `json:"required_checks"`
-		} `json:"settings"`
-	}
-	if json.Unmarshal(raw, &observation) != nil || !reviewgate.ValidSHA(latestMain) || observation.Base != latestMain || !reviewgate.ValidSHA(observation.Head) || len(observation.Settings.RequiredChecks) == 0 || len(observation.Checks) > 1000 {
-		return false, nil
-	}
-	for _, name := range observation.Settings.RequiredChecks {
-		found := false
-		for _, c := range observation.Checks {
-			if c.Name == name {
-				found = c.Status == "completed" && c.Conclusion == "success"
-				break
-			}
-		}
-		if !found {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-func entryEvidenceTx(ctx context.Context, tx pgx.Tx, t EntryTicket, check string) (bool, error) {
-	var ok bool
-	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT (e.after->>'ok')::boolean FROM events e WHERE e.node_id=$1 AND e.type='entry_check.evidence' AND e.after->>'check_id'=$2 AND CASE WHEN $2='design_attached' THEN EXISTS(SELECT 1 FROM attachments a WHERE a.node_id=$1 AND a.id::text=e.after->>'attachment_id' AND a.deleted_at IS NULL) ELSE e.after->>'head_sha'=(SELECT head_sha FROM delivery_items d WHERE d.ticket_node_id=$1 ORDER BY d.updated_at DESC,d.id DESC LIMIT 1) END ORDER BY e.id DESC LIMIT 1),false)`, t.ID, check).Scan(&ok)
-	return ok, err
-}
-
 func RequireEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t EntryTicket, status string, reason *string) (*EntryRecord, error) {
-	if reason != nil && (strings.TrimSpace(*reason) == "" || len(*reason) > 2000 || utf8.RuneCountInString(*reason) > 500 || !utf8.ValidString(*reason)) {
-		return nil, workorders.Fail(400, "a person override requires a reason of 1–500 characters")
-	}
-	d, err := EntryDefinitionTx(ctx, tx, t.ProjectID, true)
-	if err != nil {
-		return nil, err
-	}
-	b, err := EvaluateEntryTx(ctx, tx, p, t, d, status)
-	if err != nil || d == nil || b.Total == 0 {
-		return nil, err
-	}
-	failed := []EntryResult{}
-	for _, r := range b.Checks {
-		if r.Applicable && !r.Passed {
-			failed = append(failed, r)
-		}
-	}
-	if len(failed) > 0 && (p.Kind != tenant.Person || reason == nil) {
-		return nil, &EntryFailure{ToStatus: status, Failed: failed, OverrideAllowed: p.Kind == tenant.Person}
-	}
-	var at time.Time
-	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
-		return nil, err
-	}
-	if len(failed) == 0 {
-		reason = nil
-	} else {
-		s := strings.TrimSpace(*reason)
-		reason = &s
-	}
-	return &EntryRecord{EntryBlock: b, At: at, By: EntryPerson{p.ID, p.Name}, OverrideReason: reason, DefinitionID: d.ID, DefinitionRevision: d.Revision}, nil
+	return workorders.RequireEntryTx(ctx, tx, p, t, status, reason)
 }
 
-// Queue policy keeps eligibility and estimate advice in their published shape,
-// but all readiness gaps come from the very same Ready block as status writes.
+// Eligibility and estimate advice retain the published queue shape; readiness
+// gaps all come from the same Ready definition as status writes.
 func DefinitionReadinessTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t EntryTicket, legacy Readiness) (Readiness, error) {
 	d, err := EntryDefinitionTx(ctx, tx, t.ProjectID, true)
 	if err != nil {
@@ -535,5 +76,3 @@ func DefinitionReadinessTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t
 	legacy.Ready = legacy.Queueable && len(legacy.Missing) == 0
 	return legacy, nil
 }
-
-func EntrySummary(b EntryBlock) string { return fmt.Sprintf("%s %d/%d", b.ToStatus, b.Passed, b.Total) }

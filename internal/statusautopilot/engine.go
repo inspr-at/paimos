@@ -15,7 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/inspr-at/paimos/internal/workqueue"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -226,13 +226,13 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)`, n.ID, d.Rule, d.Anchor).Scan(&seen); err != nil || seen {
 		return err
 	}
-	var entry *workqueue.EntryRecord
+	var entry *workorders.EntryRecord
 	if d.Rule == "queue_pickup" {
-		target, err := workqueue.EntryTicketTx(ctx, tx, n.ID)
+		target, err := workorders.EntryTicketTx(ctx, tx, n.ID)
 		if err != nil {
 			return err
 		}
-		entry, err = workqueue.RequireEntryTx(ctx, tx, p, target, "in_progress", nil)
+		entry, err = workorders.RequireEntryTx(ctx, tx, p, target, "in_progress", nil)
 		if err != nil {
 			return err
 		}
