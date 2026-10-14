@@ -27,8 +27,8 @@ async function box(locator: Locator, name = 'control') {
     }
     return { x, y, width: rect.width, height: rect.height }
   })
-  expect(sample.width, `sampled ${name} width must be positive`).toBeGreaterThan(0)
-  expect(sample.height, `sampled ${name} height must be positive`).toBeGreaterThan(0)
+  expect(sample.width, `sampled control width must be positive (${name})`).toBeGreaterThan(0)
+  expect(sample.height, `sampled control height must be positive (${name})`).toBeGreaterThan(0)
   return sample
 }
 

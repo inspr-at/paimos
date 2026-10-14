@@ -173,7 +173,8 @@ test('the preview says when it shows part of the Desk, nothing, or could not rea
   await page.reload()
   await chevron(page).click()
   await expect(preview(page)).toContainText('Count unavailable')
-  await expect(preview(page).getByRole('alert')).toContainText('Decision Desk could not be read (403).')
+  // One calm line with its action inline (AEON-1339), never the raw server sentence.
+  await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
   await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, count unavailable')
   control.failProjection = false
   await preview(page).getByRole('button', { name: 'Try again', exact: true }).click()
@@ -517,7 +518,8 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
       { name: 'a poll fails', run: async () => {
         control.failProjection = true
         await page.clock.runFor(30_000)
-        await expect(preview(page).getByRole('alert')).toContainText('Decision Desk could not be read (403).')
+        // One calm line with its action inline (AEON-1339), never the raw server sentence.
+        await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
       } },
       { name: 'Retry reads it again', run: async () => {
         control.failProjection = false

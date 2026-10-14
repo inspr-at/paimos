@@ -101,7 +101,8 @@ test('Decline needs no step-up; the Decided view names who and how, and a first 
   await expect(page.getByTestId('desk-row-s:step-2')).toContainText(/Approved · Anna · fresh sign-in at /)
   await page.getByTestId('desk-row-s:step-2').click()
   await expect(page.getByTestId('stepup-answer')).toHaveText(/Approved · Anna · fresh sign-in at /)
-  await expect(page.getByTestId('desk-decide')).toHaveText(/Next/)
+  // Nothing in this round of history is open, so the primary reads Close (AEON-1339).
+  await expect(page.getByTestId('desk-decide')).toHaveText(/Close/)
 })
 test('without a passkey Approve leaves for a fresh sign-in and the return opens the decided memo', async ({ page }) => {
   const control = await mockStepups(page, { passkeys: false })

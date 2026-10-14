@@ -152,7 +152,10 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expect(page.getByTestId('desk-body')).toContainText('The rule changed since this was proposed.')
     await expect(page.getByTestId('choice-0')).toBeDisabled()
     await expect(page.getByTestId('desk-decide')).toBeDisabled()
-    await page.getByTestId('choice-1').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
+    // Not now needs a reason first (AEON-1339: Decide stays muted until it can decide).
+    await page.getByTestId('choice-1').click(); await expect(page.getByTestId('desk-decide')).toBeDisabled()
+    await page.getByRole('textbox', { name: 'Reason', exact: true }).fill('Rebase on the current rule first.')
+    await expect(page.getByTestId('desk-decide')).toBeEnabled()
     expect(mock.calls.filter(c => c.method === 'POST' && !c.path.endsWith('/notified'))).toHaveLength(0)
     await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)
     const edit = page.getByTestId('desk-edit-rule')
