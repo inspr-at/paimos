@@ -14440,6 +14440,8 @@
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the situations link on Models still lands on the limits, opening the fold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the situations link stays on the limits when the kinds arrive after the scroll","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the ⋯ menu orders and archives; built-in kinds say why they cannot be archived","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"⌘/Ctrl+Enter saves once from any field; the area stays; Undo restores the words","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15075,6 +15077,12 @@
     {"kind":"node","file":"tests/api.test.ts","name":"reads the public OIDC display name on anonymous and authenticated responses","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"rejects malformed identities and server errors","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/arrival.test.ts","name":"a scroll away from the target or any input by the person lets go; later changes stay with them","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/arrival.test.ts","name":"content that arrives above the target after the scroll brings it back to the top, and our own scroll keeps the hold","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/arrival.test.ts","name":"the hold is bounded: it ends after its window, when the target leaves, or when the page lets it go","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/attach-copy.test.ts","name":"pairing and a session link stay separate in the app language for English and German profiles","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
