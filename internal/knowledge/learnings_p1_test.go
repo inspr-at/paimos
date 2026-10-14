@@ -220,7 +220,8 @@ func TestAcceptLearningRemainsPersonOnly(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	_, err := (&module{pool: f.db.App}).acceptLearning(t.Context(), agent, id, f.ticket, "", false, acceptInput{KnowledgeID: book.ID}, nil)
-	if err == nil || decisionOf(t, f, id) != "" || entryBody(t, f, book.ID) != "Notes\n" {
+	apiErr, personGate := err.(*apiError)
+	if !personGate || apiErr.code != "person_required" || decisionOf(t, f, id) != "" || entryBody(t, f, book.ID) != "Notes\n" {
 		t.Fatal("agent acceptance crossed the person gate")
 	}
 }
