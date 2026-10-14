@@ -50,6 +50,9 @@ func removeComputerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, comput
 	if archived != nil {
 		return nil
 	}
+	if err := requireNativeRootsReleased(ctx, tx, computer, ""); err != nil {
+		return err
+	}
 	if state != "revoked" {
 		// Never confirmed: approved, but the computer never redeemed or reported.
 		if seen != nil || request == "redeemed" {
@@ -95,6 +98,27 @@ func removeComputerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, comput
 // ErrActiveRuns reports that an account binding still has work in progress.
 var ErrActiveRuns = errors.New("account has active runs")
 
+// ErrNativeRootsUnreleased identifies ownership that must retain its paired
+// enrollment and daemon key for reconciliation and explicit final delivery.
+var ErrNativeRootsUnreleased = fail(409, "native_roots_unreleased", "native roots have not been released; retain paired ownership until verified exit")
+
+// Callers hold LockMutation, the same tenant/tree/pairing fence as native
+// claim/release. Do not infer release from state, heartbeat or generation.
+// Account-scoped checks include the account's holds on every computer.
+func requireNativeRootsReleased(ctx context.Context, tx pgx.Tx, computer, account string) error {
+	var held bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_session_roots
+ WHERE run_id IS NULL AND released_at IS NULL
+ AND (($2='' AND computer_id::text=$1) OR ($2<>'' AND account_id::text=$2)))`, computer, account).Scan(&held)
+	if err != nil {
+		return err
+	}
+	if held {
+		return ErrNativeRootsUnreleased
+	}
+	return nil
+}
+
 // DisconnectAccount ends a paired account binding before a person removes the
 // account (AEON-402): queued runs are cancelled and the enrollment is revoked.
 // It refuses while a run is starting, running or waiting on the account, so
@@ -106,6 +130,9 @@ func DisconnectAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accou
 		return nil
 	}
 	if err != nil {
+		return err
+	}
+	if err = requireNativeRootsReleased(ctx, tx, computer, account); err != nil {
 		return err
 	}
 	var active bool

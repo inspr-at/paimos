@@ -2,6 +2,8 @@
 package agentpairing_test
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -10,8 +12,106 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: pairing cleanup revokes the only principal that can reconcile an
+// owned native root or drain its explicit final, because it has no worker run.
+func TestNativeRootOwnershipSurvivesPairingDrainAndRemoval(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude", "codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	a, sibling := v.Enrollments[0], v.Enrollments[1]
+	computer := *v.ComputerID
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	root := uuid(t, f.db)
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,account_id,computer_id,runtime_epoch,hold_state)
+ VALUES($1,$2,gen_random_uuid(),$3,$4,gen_random_uuid(),'queued')`, f.tenantID, root, a.AccountID, computer); err != nil {
+		t.Fatal(err)
+	}
+	// Neither an already released root nor a worker sidecar may keep another
+	// enrollment alive or delay final drain after the actual root releases.
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,account_id,computer_id,hold_state,released_at,run_id)
+ VALUES($1,gen_random_uuid(),gen_random_uuid(),$2,$3,'idle',clock_timestamp(),NULL),
+ ($1,gen_random_uuid(),gen_random_uuid(),$2,$3,'exit_unconfirmed',NULL,gen_random_uuid())`, f.tenantID, sibling.AccountID, computer); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/agent-pairing/computers/" + computer
+	assertCause := func(path string, body any, person bool, credential string) {
+		t.Helper()
+		w := f.call("POST", path, body, person, credential, 409)
+		var response struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Code != "native_roots_unreleased" {
+			t.Fatalf("ownership refusal for %s: %s (%v)", path, w.Body.String(), err)
+		}
+	}
+	owner := tenant.Principal{TenantID: f.tenantID, ID: f.person, Kind: tenant.Person}
+	for _, state := range []string{"queued", "starting", "running", "idle", "taken", "exit_unconfirmed"} {
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE native_session_roots SET hold_state=$2 WHERE id=$1`, root, state); err != nil {
+			t.Fatal(err)
+		}
+		assertCause(base+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "")
+		assertCause(base+"/enrollments/"+a.AccountID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "")
+		assertCause("/api/agent-pairing/self/disconnect", map[string]string{"mode": "revoke_now"}, false, key)
+		assertCause(base+"/remove", nil, true, "")
+		ctx := tenant.WithPrincipal(t.Context(), owner)
+		err := db.InTenant(ctx, f.db.App, f.tenantID, func(tx pgx.Tx) error {
+			if err := agentpairing.LockMutation(ctx, tx); err != nil {
+				return err
+			}
+			return agentpairing.DisconnectAccount(ctx, tx, owner, a.AccountID)
+		})
+		if !errors.Is(err, agentpairing.ErrNativeRootsUnreleased) {
+			t.Fatalf("%s account disconnect lost exact ownership cause: %v", state, err)
+		}
+	}
+	f.call("POST", base+"/enrollments/"+sibling.AccountID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200)
+	f.call("POST", base+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200)
+	assertRetained := func() {
+		t.Helper()
+		var computerState, enrollmentState string
+		var revoked, archived, released bool
+		err := f.db.Admin.QueryRow(t.Context(), `SELECT c.state,e.state,k.revoked_at IS NOT NULL,
+ c.archived_at IS NOT NULL OR a.archived_at IS NOT NULL,r.released_at IS NOT NULL
+ FROM agent_pairing_computers c JOIN agent_pairing_enrollments e ON e.computer_id=c.id
+ JOIN agent_accounts a ON a.id=e.account_id JOIN agent_keys k ON k.id=c.key_id
+ JOIN native_session_roots r ON r.id=$2 WHERE c.id=$1 AND e.account_id=$3`, computer, root, a.AccountID).Scan(&computerState, &enrollmentState, &revoked, &archived, &released)
+		if err != nil || computerState != "draining" || enrollmentState != "draining" || revoked || archived || released {
+			t.Fatalf("native owner lost during drain: computer=%s enrollment=%s revoked=%t archived=%t released=%t err=%v", computerState, enrollmentState, revoked, archived, released, err)
+		}
+		f.call("GET", "/api/agent-pairing/self", nil, false, key, 200)
+	}
+	assertRetained()
+	finish := func() {
+		t.Helper()
+		ctx := tenant.WithPrincipal(t.Context(), owner)
+		if err := db.InTenant(ctx, f.db.App, f.tenantID, func(tx pgx.Tx) error {
+			if err := agentpairing.LockMutation(ctx, tx); err != nil {
+				return err
+			}
+			return agentpairing.FinishDrain(ctx, tx, a.AccountID)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish()
+	assertRetained()
+	// Release evidence is supplied by the owning lifecycle service; pairing
+	// reads only its persisted release, never a display state or stale heartbeat.
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE native_session_roots SET released_at=clock_timestamp() WHERE id=$1`, root); err != nil {
+		t.Fatal(err)
+	}
+	finish()
+	var revoked bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT revoked_at IS NOT NULL FROM agent_keys WHERE id=(SELECT key_id FROM agent_pairing_computers WHERE id=$1)`, computer).Scan(&revoked); err != nil || !revoked {
+		t.Fatalf("released root did not finish drain: revoked=%t err=%v", revoked, err)
+	}
+	f.call("POST", base+"/remove", nil, true, "", 200)
+}
 
 func (f *fixture) listedComputers() []string {
 	f.t.Helper()

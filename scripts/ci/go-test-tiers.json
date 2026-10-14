@@ -2548,6 +2548,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestNativeGrokVerificationQualifiedOnlyOnMacOSArm64","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestNativeRootOwnershipSurvivesPairingDrainAndRemoval","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestNixGuideBelongsToDeploymentOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestObservedCapacityPreservesSeparatePairingApproval","tier":"GATED-FULL"}
