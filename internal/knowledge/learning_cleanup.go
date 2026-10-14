@@ -25,7 +25,7 @@ const legacyCleanupBatch = 100
 // recordDismissal is shared by agent/person dismissals and the release cleanup.
 // Its caller holds the tenant/tree and learning locks. All referenced rows are
 // locked before Append takes the event counter; decisions reuse those locks.
-func recordDismissal(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Learning, reason string) (LearningDecision, error) {
+func recordDismissal(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Learning, reason string, legacy bool) (LearningDecision, error) {
 	if _, err := tx.Exec(ctx, `SELECT id FROM nodes WHERE tenant_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR KEY SHARE`, p.TenantID, nonEmpty(item.NodeID, item.projectID)); err != nil {
 		return LearningDecision{}, err
 	}
@@ -33,7 +33,7 @@ func recordDismissal(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Le
 		return LearningDecision{}, err
 	}
 	var metadata json.RawMessage
-	if reason == legacyDismissReason {
+	if legacy {
 		metadata = json.RawMessage(`{"job":"learning-legacy-cleanup","ticket":"AEON-1330"}`)
 	}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &item.NodeID, Type: evLearningDismissed, Metadata: metadata, After: learningAudit{
@@ -264,7 +264,7 @@ func cleanupLegacyItem(ctx context.Context, pool *pgxpool.Pool, p tenant.Princip
 		if err := requireCleanupActor(ctx, tx, p); err != nil {
 			return err
 		}
-		if _, err := recordDismissal(ctx, tx, p, item, legacyDismissReason); err != nil {
+		if _, err := recordDismissal(ctx, tx, p, item, legacyDismissReason, true); err != nil {
 			return err
 		}
 		wrote = true

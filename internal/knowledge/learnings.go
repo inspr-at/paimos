@@ -903,7 +903,7 @@ func (m *module) dismissLearning(ctx context.Context, p tenant.Principal, public
 		if looksSensitive(reason) {
 			return sensitiveLearning(sensitiveRanges("reason", reason))
 		}
-		out, err = recordDismissal(ctx, tx, p, item, reason)
+		out, err = recordDismissal(ctx, tx, p, item, reason, false)
 		if err != nil {
 			return err
 		}

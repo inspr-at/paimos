@@ -189,6 +189,17 @@ func TestAgentDismissAuditedAndPersonUndo(t *testing.T) {
 	if actor != agent.ID || kind != "agent" || audit.Reason != "Already covered by the recovery runbook." || decisionOf(t, f, id) != "dismissed" {
 		t.Fatalf("wrong agent audit %+v %s %s", audit, actor, kind)
 	}
+	comment := addComment(t, f, f.ticket, "#process-learning Another covered lesson.")
+	spoof := call(t, f, agent, "POST", "/api/knowledge/learnings/"+commentLearningID(f.ticket, comment)+"/dismiss", map[string]any{"reason": legacyDismissReason})
+	expect(t, spoof, 200)
+	var job string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT coalesce(metadata->>'job','') FROM events WHERE tenant_id=$1 AND id=$2`, f.a.TenantID, decode[LearningDecision](t, spoof).EventID).Scan(&job); err != nil {
+		t.Fatal(err)
+	}
+	if job != "" {
+		t.Fatal("an agent's reason impersonated the cleanup job")
+	}
+
 	expect(t, call(t, f, agent, "POST", "/api/events/"+strconv.FormatInt(decision.EventID, 10)+"/undo", nil), 403)
 	dbtest.BindRole(t, f.db, f.a.TenantID, f.b.ID, "admin")
 	expect(t, call(t, f, f.b, "POST", "/api/events/"+strconv.FormatInt(decision.EventID, 10)+"/undo", nil), 201)
