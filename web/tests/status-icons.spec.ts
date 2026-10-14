@@ -7,6 +7,9 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
 import { statusFill } from '../src/lib/statusMotion'
 
+// The UI config runs specs with reduced motion; motion is what this spec is about (the reduced-motion test emulates it).
+test.use({ reducedMotion: 'no-preference' })
+
 type OneOffCall = { part: string; status: string; delay: number; duration: number; easing: string; fill: string; props: string[] }
 
 // §7.2, written out here so the spec checks the design's numbers rather than the code's table.
