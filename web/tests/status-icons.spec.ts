@@ -278,7 +278,7 @@ test('AEON-1362 bar form: diagonal stripes slide only live or under the pointer;
     const host = document.createElement('div')
     host.id = 'fill-probe'; host.style.cssText = 'position: fixed; left: 20px; top: 20px; display: grid; gap: 8px; width: 240px; z-index: 9999'
     host.innerHTML = `<div class="f-slide-hover" data-probe="hover"><i class="${classes.diag}" data-probe="past" style="display: block; height: 10px"></i></div>
-      <i class="${classes.diag} f-live" data-probe="live" style="display: block; height: 10px"></i>
+      <i class="${classes.diag} f-now" data-probe="live" style="display: block; height: 10px"></i>
       <i class="${classes.diag} f-short" data-probe="short" style="display: block; width: 8px; height: 10px"></i>
       <i class="${classes.cancel}" data-probe="cancel" style="display: block; height: 10px"></i>
       <i class="${classes.accepted}" data-probe="accepted" style="display: block; height: 10px"></i>

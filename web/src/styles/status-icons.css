@@ -33,7 +33,7 @@
 .f-diag::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1.5px currentColor; pointer-events: none; }
 @keyframes diag-slide { from { transform: translateX(0); } to { transform: translateX(6.364px); } }
 /* A live segment always slides; others slide while the pointer is over their container. Swatches never slide. */
-.f-diag.f-live::before, .f-slide-hover:hover .f-diag::before { animation-play-state: running; }
+.f-diag.f-now::before, .f-slide-hover:hover .f-diag::before { animation-play-state: running; }
 /* Too short for its pattern: the stripes fall back to the ring. */
 .f-diag.f-short::before { display: none; }
 .f-solid, .f-deep { background: currentColor; }

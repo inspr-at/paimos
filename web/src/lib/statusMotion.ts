@@ -6,9 +6,9 @@
 // - useStatusMotion(): call once, in App.vue. When the control around a status icon is hovered (once per pointer entry)
 //   or gets keyboard focus, the icon plays its one-off. It also marks hidden tabs with `tab-hidden` on <html>.
 // - useOffscreenPause(el): a ref that is true while el is off-screen. Bind it as the `offscreen` class on anything that
-//   slides continuously: the in-progress icon does this itself, and a live `f-diag f-live` segment should too.
+//   slides continuously: the in-progress icon does this itself, and a live `f-diag f-now` segment should too.
 // - statusFill(state): the status icon as a bar fill, the `f-<pattern> fc-<status>` classes from styles/status-icons.css.
-//   `f-diag` stripes slide with `f-live` (always) or inside an `f-slide-hover` container (while the pointer is over it);
+//   `f-diag` stripes slide with `f-now` (always) or inside an `f-slide-hover` container (while the pointer is over it);
 //   `f-short` drops the stripes on a segment too short for them (under 10 px).
 // Nothing moves with prefers-reduced-motion.
 
