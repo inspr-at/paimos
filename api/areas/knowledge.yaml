@@ -139,7 +139,9 @@ paths:
         learning_sensitive with the matched ranges (positions only). A person
         may repeat the request with confirm_not_sensitive; the event records
         confirmed_not_sensitive. An agent cannot confirm (403). An optional
-        lesson (AEON-788) replaces the learning's own text in the line. With
+        lesson (AEON-788) replaces the learning's own text in the line. A current
+        matching recommendation supplies its lesson when omitted and its exact
+        prepared changelog line (AEON-1330). With
         learning_text, a learning whose text changed since the person
         reviewed it is 409 learning_changed and nothing is written.
       parameters:
