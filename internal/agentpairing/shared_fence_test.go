@@ -24,7 +24,7 @@ var sharedFenceCallers = map[string][]string{
 	"agentpairing.Lock":         {"agentaccounts/native_session.go", "agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/routine_launch.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "harness/lead_runtime.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/harness_probes.go", "modelregistry/preparation.go", "nativesessions/interaction/store.go", "nativesessions/store/claim.go", "nativesessions/store/read.go", "nativesessions/store/start.go", "nodes/bulk.go", "nodes/nodes.go", "routineactions/catalog.go", "routineactions/pipeline.go", "routineactions/pr.go", "routinebudget/store.go", "routineexec/dispatch.go", "routineexec/recovery.go", "routineexec/review.go"},
 	"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go", "questions/store.go"},
 	"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
-	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
+	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learning_cleanup.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
 	"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "operatoractor/actor.go"},
 	"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
 }
@@ -161,7 +161,13 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../knowledge/learnings.go", "acceptLearning", "fenceLearningWrite(", "lockLearning("},
 		{"../knowledge/learnings.go", "acceptLearning", "lockNode(", "events.Append("},
 		{"../knowledge/learnings.go", "dismissLearning", "fenceLearningWrite(", "lockLearning("},
-		{"../knowledge/learnings.go", "dismissLearning", "lockLearning(", "events.Append("},
+		{"../knowledge/learnings.go", "dismissLearning", "lockLearning(", "recordDismissal("},
+		{"../knowledge/learning_cleanup.go", "recordDismissal", "FOR KEY SHARE", "events.Append("},
+		{"../knowledge/learning_cleanup.go", "cleanupLegacyItem", "authz.LockProjectWrite(", "lockLearning("},
+		{"../knowledge/learning_cleanup.go", "cleanupLegacyItem", "requireCleanupActor(", "recordDismissal("},
+		{"../knowledge/learning_draft.go", "draftLearning", "fenceLearningWrite(", "rules.PrepareWrite("},
+		{"../knowledge/learning_draft.go", "draftLearning", "FOR KEY SHARE", "rules.AppendLearningRule("},
+		{"../knowledge/learning_draft.go", "draftLearning", "rules.AppendLearningRule(", "events.Append("},
 		// Autopilot settings and project overrides (AEON-696) enter the shared
 		// project fence before the settings row; the event is appended after it.
 		{"../statusautopilot/settings.go", "settings", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_settings"},

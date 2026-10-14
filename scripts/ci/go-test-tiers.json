@@ -7296,6 +7296,10 @@
     ,
     {"kind":"go","package":"internal/journey","name":"TestRetiredJourneyNeverTouchesStorage","tags":[],"tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestAcceptLearningRemainsPersonOnly","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestAgentDismissAuditedAndPersonUndo","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestAnalysisLearningAdapterPreservesCurrentInbox","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestAppendChangelog","tier":"GATED-FULL"}
@@ -7336,6 +7340,8 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningRuleDraft","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningSignalSelection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningWritesAuthorizeCurrentProject","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsContinuePastFifty","tier":"GATED-FULL"}
@@ -7348,6 +7354,14 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsProjectSessionThroughAuth","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupFailureStillTags","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupIdempotentPreservesPrepared","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupItemRecheckIsKeyed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupPostReleaseTenant","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLinksAuthorAndImportedEntries","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLooksSensitive","tier":"GATED-FULL"}
@@ -7359,6 +7373,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestOpenLearningsSurviveDecidedWindow","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestOpenNominationSurvivesDecidedWindow","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestPreparedLearningRuleDraft","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestRecommendationAgentsCannotApply","tier":"GATED-FULL"}
     ,
@@ -7409,6 +7425,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestTaggerWithoutOutcomeTable","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestTaggerWritesSystemEvent","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestUnpreparedLearningsHiddenFromPeople","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestUpdateConflictRenameAndUndo","tier":"ESSENTIAL"}
     ,
@@ -8043,6 +8061,22 @@
     {"kind":"go","package":"internal/nativereceipts","name":"TestPrivateStoreBoundsAndRejectsSymlinkOrSharedState","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestReceiptEvidenceRejectsWrongInputAndFalseExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestBoundedContinuationUsesOriginalWindowAtMostOnce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestCrashForkWindowsNeverDuplicateOrReleaseUncertainWriter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestFinalPersistenceCrashRetainsOutboxAndUncertainSlot","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestInputAckCrashKeepsEffectsVisibleAndNeverReinjects","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestLossKindsRetainWriterUntilExactAbsence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestRecoveryJournalBoundsAndLocalAuthorityRefusal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestRecoveryJournalReclaimsOnlyObsoleteCompletedSessions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestResumeRequiresCurrentProofPolicyHistoryAndExpiresCallbacks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeroles","name":"TestNativeRoleResumeExitAndReceiptEvidence","tier":"ESSENTIAL"}
     ,

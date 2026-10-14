@@ -104,14 +104,12 @@ func canonicalUUID(s string) bool {
 
 func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, layerID, setID string, confirm bool) (LearningDecision, error) {
 	var out LearningDecision
+	if err := requirePerson(p); err != nil {
+		return out, err
+	}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		// Undo already holds this fence before taking the learning lock. Take
-		// it first here too, and recheck write access while it is held.
-		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+		if err := fenceLearningWrite(ctx, tx, p, nodeID); err != nil {
 			return err
-		}
-		if !canWrite(ctx, tx, p, "knowledge.write") {
-			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 		}
 		// Enter tenant/tree before learning/resource locks.
 		if err := rules.PrepareWrite(ctx, tx, p); err != nil {
@@ -127,6 +125,18 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 		if err != nil {
 			return err
 		}
+		var lesson, sourceText string
+		err = tx.QueryRow(ctx, `SELECT coalesce(lesson,''), learning_text FROM method_learning_recommendations
+          WHERE tenant_id=$1 AND source_key=$2 AND knowledge_id=$3::uuid AND rule_layer_id=$4::uuid AND project_id=$5::uuid`, p.TenantID, publicID, setID, layerID, item.projectID).Scan(&lesson, &sourceText)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if lesson != "" {
+			if sourceText != item.Text {
+				return changedLearning()
+			}
+			item.Text = lesson
+		}
 		confirmed, err := sensitiveCheck(append(sensitiveRanges("text", item.Text), sensitiveRanges("title", item.Title)...), confirm)
 		if err != nil {
 			return err
@@ -139,15 +149,23 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 			SourceKey: publicID, Source: item.Source, NodeID: item.NodeID, CommentID: item.CommentID,
 			ProjectID: item.projectID, Text: item.Text, Rule: rule, ConfirmedNotSensitive: confirmed,
 		}
+		// Hold every decision FK reference before the rules writer acquires
+		// the event counter. Its resource writes precede both audit events.
+		if _, err := tx.Exec(ctx, `SELECT id FROM nodes WHERE tenant_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR KEY SHARE`, p.TenantID, nonEmpty(item.NodeID, item.projectID, layerID, setID)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT id FROM principals WHERE tenant_id=$1 AND id=$2::uuid FOR KEY SHARE`, p.TenantID, p.ID); err != nil {
+			return err
+		}
+		if _, err := rules.AppendLearningRule(ctx, tx, p, layerID, setID, item.projectID, rule); err != nil {
+			return asKnowledgeRule(err)
+		}
 		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &item.NodeID, Type: evLearningDrafted, After: audit})
 		if err != nil {
 			return err
 		}
 		if err = insertDecision(ctx, tx, p, item.projectID, publicID, "drafted", nil, nil, nil, ev.ID, &setID, &layerID, &rule.Identity); err != nil {
 			return err
-		}
-		if _, err = rules.AppendLearningRule(ctx, tx, p, layerID, setID, item.projectID, rule); err != nil {
-			return asKnowledgeRule(err)
 		}
 		out = LearningDecision{
 			ID: publicID, Decision: "drafted", EventID: ev.ID,

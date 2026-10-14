@@ -50,7 +50,7 @@ func (p *taggerRowPause) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, q pg
 
 func TestTaggerAndStatusAutopilotDoNotDeadlock(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-534", "work", "Concurrent startup jobs", &f.project)
+	ticket := addNode(t, f, "DONE-534", "work", "Incident: Concurrent startup jobs", &f.project)
 	release := addNode(t, f, "REL-534", "release", "Next release", &f.project)
 	setFields(t, f, ticket, map[string]any{"priority": "high", "tags": []any{"ops"}})
 	closeAged(t, f, ticket, "done", "1 hour")
@@ -176,7 +176,7 @@ func TestTaggerAndStatusAutopilotDoNotDeadlock(t *testing.T) {
 
 func TestTaggerWaitsForLongTreeLock(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "WAIT-534", "work", "Long startup batch", &f.project)
+	ticket := addNode(t, f, "WAIT-534", "work", "Incident: Long startup batch", &f.project)
 	closeAged(t, f, ticket, "done", "1 hour")
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
@@ -260,7 +260,7 @@ func TestTaggerRetriesRolledBackTenantPass(t *testing.T) {
 	for _, failThrough := range []int{1, 3} {
 		t.Run(fmt.Sprintf("fail_%d_attempts", failThrough), func(t *testing.T) {
 			f := setup(t)
-			ticket := addNode(t, f, "RETRY-534", "work", "Retry atomically", &f.project)
+			ticket := addNode(t, f, "RETRY-534", "work", "Incident: Retry atomically", &f.project)
 			closeAged(t, f, ticket, "done", "1 hour")
 			// A sequence survives rollback. Fail at the final cursor write, after
 			// tags, nominations and events, so retry atomicity is observable.
