@@ -17478,6 +17478,8 @@
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"retains the other unavailable reasons and their precedence","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/entry-checks-layout.unit.test.ts","name":"keeps bounded empty-project layout hints only for the current person and tenant","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/features.unit.test.ts","name":"discards old tenant and revoked-session responses","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/features.unit.test.ts","name":"drops a slower older answer after a newer evaluation","tier":"NIGHTLY"}

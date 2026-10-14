@@ -58,7 +58,7 @@ test('AEON-1315 defined entry row reserves space before reads and keeps the tick
       initial.done()
       if (touch) {
         await workspace.getByRole('button', { name: 'More actions', exact: true }).click()
-        await workspace.getByRole('menuitem', { name: 'Next ticket', exact: true }).click()
+        await page.getByRole('menu', { name: `Actions for ${nodes[0]!.key}`, exact: true }).getByRole('menuitem', { name: 'Next ticket', exact: true }).click()
       } else await workspace.getByRole('button', { name: 'Next ticket', exact: true }).click()
       await expect.poll(() => pending.length).toBe(2)
       expect(pending[1]!.id).toBe(nodes[1]!.id)
