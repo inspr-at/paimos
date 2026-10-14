@@ -3,56 +3,26 @@ import { test, expect } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import { hostname, platform, arch } from 'node:os'
 import { execFileSync } from 'node:child_process'
+import { graphMeasurementFault, instrumentationSource, measurementPass, measurementReducedMotion } from './measure.mjs'
 
 const actions = ['list', 'outline', 'graph', 'return-list', 'filter', 'sort', 'search', 'hide-closed', 'open-ticket', 'close-ticket', 'decision-desk', 'agents', 'header-hover', 'scroll']
 const listReady = { type: 'list' }
 const graphReady = { type: 'graph' }
 const ticketReady = { type: 'ticket' }
 
-function instrumentation() {
-  window.__baselineReady = requirement => {
-    const find = selector => document.querySelector(selector)
-    const list = !!find('table.tickets[aria-busy="false"] tr.ticket-row:not(.ghost)')
-    if (requirement.type === 'list') {
-      if (!list) return false
-      if (requirement.role && !find(`table[role="${requirement.role}"]`)) return false
-      if (requirement.query && new URLSearchParams(location.search).get(requirement.query[0]) !== requirement.query[1]) return false
-      if (requirement.absent && find(requirement.absent)) return false
-      if ('checked' in requirement && find('input[aria-label="Hide closed"]')?.checked !== requirement.checked) return false
-      if ('sortBefore' in requirement && find('th[data-column-id="title"]')?.getAttribute('aria-sort') === requirement.sortBefore) return false
-      return true
-    }
-    if (requirement.type === 'graph') return !!find('.ticket-graph-canvas[data-ready="true"]') && !find('.tg-state, .graph-error')
-    if (requirement.type === 'ticket') return !!find('.ticket-ws .inline-title') && !find('.ws-skeleton')
-    if (requirement.type === 'desk') return !!find('#desk-title') && ![...document.querySelectorAll('[role="status"]')].some(el => el.textContent.includes('Reading the desk')) && !find('.source-warnings')
-    if (requirement.type === 'agents') return !!find('#agents-title') && !find('[aria-label="Loading sessions"]')
-    if (requirement.type === 'hover') return !!find('.tooltip')
-    if (requirement.type === 'scroll') return find('#main').scrollTop > 0
-    return false
-  }
-  window.__baseline = { start: 0, paint: null, usable: null, tasks: [] }
-  const observer = new PerformanceObserver(list => {
-    for (const entry of list.getEntries()) window.__baseline.tasks.push({ start: entry.startTime, duration: entry.duration })
-  })
-  observer.observe({ type: 'longtask', buffered: true })
-  window.__baselineObserver = observer
-  window.__baselineArm = requirement => {
-    const m = window.__baseline
-    m.start = performance.now(); m.paint = null; m.usable = null
-    performance.mark('AEON1355-start')
-    const sample = () => {
-      if (window.__baselineReady(requirement)) {
-        // The first frame containing the result, followed by a full paint
-        // opportunity. All timestamps stay inside the browser, not the driver.
-        m.paint = performance.now()
-        requestAnimationFrame(() => { m.usable = performance.now(); performance.mark('AEON1355-usable') })
-      } else requestAnimationFrame(sample)
-    }
-    requestAnimationFrame(sample)
-  }
+async function failGraphDimension(page) {
+  const dimension = await page.evaluate(() => window.__baselineGraphDimension || '')
+  if (!dimension) return
+  const fault = graphMeasurementFault(dimension)
+  if (fault) throw new Error(fault)
 }
 async function waitReady(page, requirement) {
-  await page.waitForFunction(requirement => window.__baselineReady(requirement), requirement)
+  await page.waitForFunction(requirement => window.__baselineGraphDimension || window.__baselineReady(requirement), requirement)
+  await failGraphDimension(page)
+}
+async function waitUsable(page) {
+  await page.waitForFunction(() => window.__baselineGraphDimension || window.__baseline.usable !== null)
+  await failGraphDimension(page)
 }
 
 async function idle(page) {
@@ -102,7 +72,7 @@ async function act(page, project, action, measure = true, cache = 'cold') {
   if (action === 'list') {
     if (measure && cache === 'warm') {
       await armClick(page.locator(`a[href^="/p/${project}"]`).first(), listReady)
-      await page.waitForFunction(() => window.__baseline.usable !== null)
+      await waitUsable(page)
       return
     }
     // Document first paint is measured from the Navigation Timing origin.
@@ -149,7 +119,7 @@ async function act(page, project, action, measure = true, cache = 'cold') {
     }, measure)
     if (!measure) await waitReady(page, { type: 'scroll' })
   }
-  if (measure) await page.waitForFunction(() => window.__baseline.usable !== null)
+  if (measure) await waitUsable(page)
   await idle(page)
 }
 
@@ -174,13 +144,13 @@ async function chromeTrace(cdp, testInfo, filename) {
 
 for (const project of ['AIT', 'AEON']) for (const cache of ['cold', 'warm']) for (const action of actions) {
   test(`AEON-1355 ${project} ${cache} ${action}`, async ({ browser, baseURL }, testInfo) => {
-    const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
+    const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 }, reducedMotion: measurementReducedMotion })
     // Cookies are generated for this local synthetic person and never logged,
     // saved as storage state, or included in measured network/trace artifacts.
     const login = await context.request.post('/api/auth/dev-login', { data: { email: 'perf@example.invalid', tenant: 'perf1355' } })
     expect(login.ok()).toBe(true)
     const page = await context.newPage()
-    await page.addInitScript(instrumentation)
+    await page.addInitScript({ content: instrumentationSource })
     const cdp = await context.newCDPSession(page)
     await cdp.send('Network.enable')
     if (cache === 'cold') await cdp.send('Network.setCacheDisabled', { cacheDisabled: true })
@@ -216,6 +186,11 @@ for (const project of ['AIT', 'AEON']) for (const cache of ['cold', 'warm']) for
       })
       await cdp.send('Tracing.start', { categories: 'devtools.timeline,v8,blink.user_timing,disabled-by-default-v8.cpu_profiler', transferMode: 'ReturnAsStream' })
       await act(page, project, action, true, cache)
+      if (action === 'graph') {
+        const dimension = await page.locator('.ticket-graph-canvas').getAttribute('data-dimension')
+        const fault = graphMeasurementFault(dimension)
+        if (fault) throw new Error(fault)
+      }
       const metrics = await page.evaluate(() => {
         const m = window.__baseline
         m.tasks.push(...window.__baselineObserver.takeRecords().map(entry => ({ start: entry.startTime, duration: entry.duration })))
@@ -233,7 +208,7 @@ for (const project of ['AIT', 'AEON']) for (const cache of ['cold', 'warm']) for
       }
       const budget = action === 'list' ? (cache === 'cold' ? 1000 : 300) : 100
       const row = { project, cache, action, sample: 1, source_sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), host: hostname(), platform: platform(), arch: arch(), chromium: browser.version(),
-        ...metrics, budget_ms: budget, pass: metrics.usable_ms <= budget && metrics.long_tasks.length === 0,
+        ...metrics, budget_ms: budget, pass: measurementPass(action, metrics.usable_ms, budget, metrics.long_tasks),
         request_count: waterfall.length, network: waterfall }
       await writeFile(testInfo.outputPath('metrics.json.md'), JSON.stringify(row, null, 2))
       console.log(`AEON1355 ${JSON.stringify({ project, cache, action, usable_ms: Math.round(metrics.usable_ms), long_tasks: metrics.long_tasks.length })}`)
