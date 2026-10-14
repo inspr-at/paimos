@@ -227,6 +227,9 @@ func TestLegacyCleanupIdempotentPreservesPrepared(t *testing.T) {
 	}
 	projectComment := addLegacyComment(t, f, f.project, "#process-learning Old status comment.")
 	ticketComment := addLegacyComment(t, f, f.ticket, "#process-learning Old ticket comment.")
+	newlyTaggedComment := addLegacyComment(t, f, f.ticket, "An old status without a learning tag.")
+	reviseComment(t, f, f.ticket, newlyTaggedComment, "#process-learning A new lesson after the release cutoff.", false)
+	reviseComment(t, f, f.project, projectComment, "#process-learning An edited legacy lesson still needs cleanup.", false)
 	book := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "cleanup-safe", "title": "Prepared target", "body": "Notes\n"})
 	agent := scopedAgent(t, f, "Cleanup scout")
 	expect(t, call(t, f, agent, "PUT", recommendPath(nodeLearningID(protected)), map[string]any{"decision": "accept", "knowledge_id": book.ID, "lesson": "Check recovery before rollout.", "source_summary": "An incident exposed missing recovery validation."}), 200)
@@ -263,7 +266,7 @@ func TestLegacyCleanupIdempotentPreservesPrepared(t *testing.T) {
 			t.Fatalf("missed legacy source %s", key)
 		}
 	}
-	if decisionOf(t, f, nodeLearningID(protected)) != "" || decisionOf(t, f, nodeLearningID(fresh)) != "" {
+	if decisionOf(t, f, nodeLearningID(protected)) != "" || decisionOf(t, f, nodeLearningID(fresh)) != "" || decisionOf(t, f, commentLearningID(f.ticket, newlyTaggedComment)) != "" {
 		t.Fatal("cleanup touched prepared or post-cutoff source")
 	}
 	var eventID int64

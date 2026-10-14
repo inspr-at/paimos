@@ -97,7 +97,12 @@ const legacySources = `
  WHERE m.tenant_id=$1 AND m.nominated_at<$2 AND n.deleted_at IS NULL
  UNION
  SELECT 'n-'||n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND n.updated_at<$2 AND n.project_id IS NOT NULL
+ WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND n.project_id IS NOT NULL
+ AND (n.updated_at<$2 OR EXISTS (
+ SELECT 1 FROM events tagged WHERE tagged.tenant_id=n.tenant_id AND tagged.node_id=n.id AND tagged.at<$2
+ AND tagged.type IN ('node.created','node.updated')
+ AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(tagged.after->'fields'->'tags')='array' THEN tagged.after->'fields'->'tags' ELSE '[]'::jsonb END) old_tag
+ WHERE lower(btrim(CASE WHEN jsonb_typeof(old_tag)='string' THEN old_tag #>> '{}' ELSE coalesce(old_tag->>'name','') END))='process-learning')))
  AND k.slug IN ('work','ticket','task','epic','incident')
  AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) tag
  WHERE lower(btrim(CASE WHEN jsonb_typeof(tag)='string' THEN tag #>> '{}' ELSE coalesce(tag->>'name','') END))='process-learning')
@@ -108,6 +113,10 @@ const legacySources = `
  WHERE c.tenant_id=$1 AND c.type='comment.created' AND c.at<$2 AND n.deleted_at IS NULL
  AND coalesce(latest.after->>'deleted','false')<>'true'
  AND coalesce(latest.after->>'body_markdown',c.after->>'body_markdown','') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)'
+ AND (coalesce(c.after->>'body_markdown','') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)'
+ OR EXISTS (SELECT 1 FROM events tagged WHERE tagged.tenant_id=c.tenant_id AND tagged.node_id=c.node_id AND tagged.at<$2
+ AND tagged.type='comment.updated' AND tagged.after->>'comment_id'=c.id::text
+ AND coalesce(tagged.after->>'body_markdown','') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)'))
 `
 
 func cleanupLegacyTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, error) {
