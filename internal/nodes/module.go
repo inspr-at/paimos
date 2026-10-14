@@ -17,8 +17,9 @@ import (
 
 // Module serves /api/kinds, /api/nodes and atomic /api/tags mutations.
 type Module struct {
-	pool   *pgxpool.Pool
-	events Writer
+	pool    *pgxpool.Pool
+	events  Writer
+	figures figuresCache
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -51,6 +52,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes", m.handleListNodes)
 	mux.HandleFunc("GET /api/projects", m.handleListProjects)
 	mux.HandleFunc("GET /api/projects/lookup", m.handleLookupProject)
+	mux.HandleFunc("GET /api/projects/{projectId}/figures", m.handleProjectFigures)
 	mux.HandleFunc("POST /api/nodes", m.handleCreateNode)
 	mux.HandleFunc("POST /api/nodes/bulk", m.handleBulk)
 	mux.HandleFunc("GET /api/nodes/lookup", m.handleLookupNodes)

@@ -8192,6 +8192,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestFieldSchemaExactNumbers","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestFigureColumnsLeafPolicyAndUsage","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestFitKindFieldsExactNumbers","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestHeaderSelectorBounds","tier":"NIGHTLY"}
@@ -8399,6 +8401,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestPortalMutationGuard","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestProjectCountsWorkKindsAndStateGroups","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestProjectFiguresScopeBucketsCacheAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin","tier":"ESSENTIAL"}
     ,
