@@ -69,6 +69,13 @@ it('starts an unavailable suggestion on the scope default and keeps Decide decid
   // A round of one: no pager, and the primary reads Decide.
   expect(html).not.toContain('data-testid="desk-pager"')
   expect(html.slice(html.indexOf(tag(html, 'desk-decide')))).toMatch(/class="lbl"[^>]*>Decide</)
+  // Skip, Change and Decline each reserve a face, so the ghost button cannot grow when the label changes (AEON-1339).
+  const skipAt = html.indexOf(tag(html, 'desk-skip'))
+  const skip = html.slice(skipAt, html.indexOf('</button>', skipAt))
+  expect(skip).toContain('data-reserve="decline"')
+  expect(skip).toContain('data-reserve="change"')
+  expect(skip).toContain('data-reserve="skip"')
+  expect(skip).toContain('>Skip<')
 })
 
 it('names a lasting restriction beside a muted Decide when no stamp can be used', async () => {

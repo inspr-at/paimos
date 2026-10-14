@@ -631,7 +631,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
             <button v-if="revoke" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'approval' && item.decided && item.optionId === 'approved' ? 'visible' : 'hidden' }" :disabled="busy || !item || !canRevoke?.(item)" data-testid="desk-revoke" @click="revokeGrant">Revoke</button>
             <button v-if="editRule" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'rule' && !item.decided ? 'visible' : 'hidden' }" :disabled="blocked || !editable" data-testid="desk-edit-rule" @click="editRuleProposal">Edit</button>
           </span>
-          <button type="button" class="desk-btn ghost" :class="{ slot: !ghost }" :aria-hidden="!ghost || undefined" :tabindex="ghost ? undefined : -1" :disabled="busy || !ghost || (ghost === 'decline' && ((item?.kind === 'key_trim' && !trimDeclinable) || (stepupPending && blocked)))" :aria-keyshortcuts="ghost === 'skip' ? 'S' : ghost === 'change' ? 'C' : undefined" data-testid="desk-skip" @click="declineOrSkip"><span class="lbl">{{ ghost === 'decline' ? 'Decline' : ghost === 'change' ? 'Change' : 'Skip' }}</span><KeyCap v-if="ghost === 'skip'" k="S" /><KeyCap v-else-if="ghost === 'change'" k="C" /></button>
+          <button type="button" class="desk-btn ghost" :class="{ slot: !ghost }" :aria-hidden="!ghost || undefined" :tabindex="ghost ? undefined : -1" :disabled="busy || !ghost || (ghost === 'decline' && ((item?.kind === 'key_trim' && !trimDeclinable) || (stepupPending && blocked)))" :aria-keyshortcuts="ghost === 'skip' ? 'S' : ghost === 'change' ? 'C' : undefined" data-testid="desk-skip" @click="declineOrSkip"><span class="btn-face"><span class="face"><span class="lbl">{{ ghost === 'decline' ? 'Decline' : ghost === 'change' ? 'Change' : 'Skip' }}</span><KeyCap v-if="ghost === 'skip'" k="S" /><KeyCap v-else-if="ghost === 'change'" k="C" /></span><span class="face-size" data-reserve="decline" aria-hidden="true"></span><span class="face-size" data-reserve="change" aria-hidden="true"></span><span class="face-size" data-reserve="skip" aria-hidden="true"></span></span></button>
           <button ref="decideButton" class="desk-btn primary" type="button" :aria-disabled="primaryBlocked || undefined" :aria-describedby="topStatus ? 'desk-status' : undefined" aria-keyshortcuts="Enter" data-testid="desk-decide" @click="submit()">
             <AppIcon :name="finished || !decidedView ? 'check' : 'arrow'" :size="15" />
             <span v-if="stepupPending" class="stepup-approve"><span class="lbl">{{ primary }}</span><small data-testid="stepup-method">{{ stepupMethod || 'Passkey or sign-in' }}</small></span><span v-else class="lbl">{{ primary }}</span>
@@ -813,7 +813,18 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .arrival-hint { color: var(--ink-3); font-weight: 450; }
 .desk-acts { grid-area: acts; align-self: center; display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-bottom: 8px; }
 .desk-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 22px; border: 0; border-radius: 999px; font-size: 13.5px; font-weight: 650; white-space: nowrap; cursor: pointer; }
+/* Skip, Change and Decline share one box. A min-width sized for Skip let Change plus its key grow ~3px and slide the bar (AEON-1339 CI). */
 .desk-btn.ghost { min-width: 128px; border: 1px solid var(--glass-edge); background: var(--btn-bg); color: var(--ink); box-shadow: var(--shadow-btn); }
+.desk-btn .btn-face { display: inline-grid; }
+.desk-btn .btn-face > * { grid-area: 1 / 1; }
+.desk-btn .face { justify-self: center; display: inline-flex; align-items: center; gap: 10px; }
+.desk-btn .face :deep(.keycap) { margin: 0; }
+/* Generated faces are not the button's name. The key copy is 2px wider than the live cap, so the live label cannot win the width. */
+.face-size { visibility: hidden; display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; pointer-events: none; }
+.face-size[data-reserve="decline"]::before { content: "Decline"; }
+.face-size[data-reserve="change"]::before { content: "Change"; }
+.face-size[data-reserve="skip"]::before { content: "Skip"; }
+.face-size[data-reserve="change"]::after, .face-size[data-reserve="skip"]::after { content: "C"; display: inline-grid; place-items: center; box-sizing: border-box; min-width: 20px; height: 18px; padding: 0 5px; font-family: var(--mono); font-size: 10.5px; font-weight: 500; font-variant-ligatures: none; line-height: 1; }
 .desk-btn.ghost.sm { min-width: 0; padding: 0 16px; }
 .desk-btn.ghost.slot { visibility: hidden; }
 @media (hover: hover) { .desk-btn.ghost:hover:not(:disabled) { background: var(--btn-bg-hover); box-shadow: var(--shadow-btn-hover); } }
@@ -1050,7 +1061,7 @@ a.res-key:hover { text-decoration: underline; }
   .desk-acts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; margin: 0; padding: 10px 0 0; }
   .desk-acts .native-action { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   .desk-acts .desk-btn { min-width: 0; height: 48px; font-size: 14.5px; }
-  .desk-btn :deep(.keycap) { display: none; }
+  .desk-btn :deep(.keycap), .face-size::after { display: none; }
   .jump { top: 60px; left: 10px; width: calc(100% - 20px); }
   .jump-row { grid-template-columns: 22px minmax(0, 1fr) auto; }
   .jr-kind { display: none; }
