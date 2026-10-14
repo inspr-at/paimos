@@ -35,6 +35,7 @@ const frame = ref<HTMLElement>(), stack = ref<HTMLElement>(), tab = ref<HTMLElem
 const index = ref(Math.max(0, props.round.indexOf(props.start))), pager = ref(false), jumpIndex = ref(0), busy = ref(false), status = ref(''), editing = ref(''), slam = ref(false)
 const drafts = ref<Record<string, DeskDraft>>({}), skipped = ref(new Set<string>()), context = ref<DeskContext>({ attachments: [], related: [], outcomes: [], warnings: [] }), contextLoading = ref(false)
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>(), viewing = ref(false), brokenThumbs = ref(new Set<string>())
+const contexts = new Map<string, DeskContext>()
 // Decided questions reopened with Change (or Undo, which acts as Change until a withdraw exists, AEON-1340).
 const changing = ref(new Set<string>(props.change && props.round.includes(props.change) ? [props.change] : []))
 // The round's own decisions, in order; after the last one the sheet says "All decided".
@@ -293,15 +294,19 @@ watch(item, async (current, previous) => {
   if (current?.id !== previous?.id) { editing.value = ''; pager.value = false; keysOpen.value = false; brokenThumbs.value = new Set() }
   // A source that changed under the memo replaces any passing note with its lasting restriction.
   else if (current?.unavailable && !previous?.unavailable) status.value = ''
-  context.value = { attachments: [], related: [], outcomes: [], warnings: [] }; contextLoading.value = false
+  // One read per ticket for this memo session: revisiting an item shows its context at once.
+  const ticketKey = current?.ticketId || current?.ticketKey || ''
+  context.value = contexts.get(ticketKey) ?? { attachments: [], related: [], outcomes: [], warnings: [] }; contextLoading.value = false
   clearTimeout(expiryTimer)
   expired.value = !!current?.expiresAt && Date.parse(current.expiresAt) <= Date.now()
   if (current?.expiresAt && !expired.value) expiryTimer = setTimeout(() => { expired.value = true; status.value = 'This request expired. No permission was granted.'; announcement.value = status.value }, Math.min(2_147_483_647, Math.max(0, Date.parse(current.expiresAt) - Date.now())))
   void nextTick(measure)
-  if (current?.ticketId || current?.ticketKey) {
+  if (ticketKey && !contexts.has(ticketKey)) {
     contextLoading.value = true
-    const result = await loadDeskContext(current.ticketId ?? '', current.ticketKey)
-    if (live && turn === contextGeneration && item.value?.id === current.id) { context.value = result; contextLoading.value = false }
+    const result = await loadDeskContext(current!.ticketId ?? '', current!.ticketKey)
+    if (!live) return
+    if (!result.warnings.length) contexts.set(ticketKey, result)
+    if (turn === contextGeneration && item.value?.id === current!.id) { context.value = result; contextLoading.value = false }
   }
 }, { immediate: true })
 function touch() { if (draft.value) draft.value.dirty = true; if (!busy.value) status.value = '' }
@@ -661,7 +666,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <dl class="memo-meta" data-testid="desk-project-line">
                   <div v-if="project"><dt>Project</dt><dd><a v-if="project.href" class="proj-link" :href="project.href" target="_blank" rel="noopener" :data-tip="`Open ${project.name} in a new tab · key P`" data-testid="desk-project-link" ><AppIcon name="folder" :size="14" /><span>{{ project.name }}</span><AppIcon class="pj-open" name="external" :size="12" /></a><span v-else class="proj-quiet" data-testid="desk-project-link"><AppIcon name="folder" :size="13" />{{ project.name }}</span></dd></div>
                   <div v-if="asker || item.askers?.length"><dt>From</dt><dd><span class="from-one" :data-tip="asker?.model ? `${asker.model}` : undefined" data-testid="desk-from"><HarnessMark v-if="asker?.harness" :harness="asker.harness" :size="14" />{{ askerName }}</span></dd></div>
-                  <div><dt>Re</dt><dd data-testid="desk-re"><template v-if="ticketRef"><RouterLink v-if="context.ticket" class="res-key" :to="`/work/${context.ticket.id}`">{{ ticketRef.key }}</RouterLink><span v-else class="res-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span></dd></div>
+                  <div><dt>Re</dt><dd data-testid="desk-re"><template v-if="ticketRef"><RouterLink v-if="context.ticket" class="res-key" :to="`/work/${context.ticket.id}`">{{ ticketRef.key }}</RouterLink><span v-else class="res-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else-if="item.ticketId || item.ticketKey" class="re-title faint">The ticket</span><span v-else class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span></dd></div>
                   <div v-if="item.createdAt"><dt>Received</dt><dd>{{ ago(item.createdAt) }}</dd></div>
                 </dl>
               </div>
@@ -958,6 +963,8 @@ a.res-key:hover { text-decoration: underline; }
 .field-row:has(.ul-field:focus) .field-hint { visibility: visible; }
 /* Decided: the chosen row keeps its tint and its filled radio; the others step back. */
 .paper.decided .choice-hit { cursor: default; }
+.paper.decided .choice-hit:disabled { opacity: 1; }
+.re-title.faint { color: var(--ink-3); }
 @media (hover: hover) { .paper.decided .choice:not(.checked):hover { background: transparent; } }
 .paper.decided .choice:not(.checked) :is(.c-name, .c-desc, .c-why) { color: var(--ink-3); }
 .paper.decided .choice:not(.checked) :deep(.keycap) { opacity: .55; }
