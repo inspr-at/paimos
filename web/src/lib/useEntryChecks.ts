@@ -1,8 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { defineStore } from 'pinia'
+import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import type { ListItem } from './api'
 import { readEntryChecks, type EntryChecks } from './entryChecks'
 import { useSession } from '../stores/session'
+
+// A layout hint survives keyed ticket workspaces; check results never do.
+// Forget it on identity changes and bound it to recently read empty projects.
+export const useEntryDefinitionLayout = defineStore('entryDefinitionLayout', () => {
+  const session = useSession(), emptyProjects = reactive(new Set<string>())
+  watch([() => session.identity?.principal.id, () => session.identity?.tenant.id], () => emptyProjects.clear(), { flush: 'sync' })
+  function remember(project: string, defined: boolean) {
+    emptyProjects.delete(project)
+    if (!defined && project) {
+      if (emptyProjects.size >= 64) emptyProjects.delete(emptyProjects.values().next().value!)
+      emptyProjects.add(project)
+    }
+  }
+  return { isEmpty: (project: string) => emptyProjects.has(project), remember }
+})
 
 export function useEntryChecks(row: () => Pick<ListItem, 'id' | 'updated_at'> | null | undefined) {
   const session = useSession(), data = ref<EntryChecks | null>(null), error = ref(''), loading = ref(false)

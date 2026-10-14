@@ -3,18 +3,17 @@
 import { computed, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { entryLabel, entryLine } from '../../lib/entryChecks'
-import { useEntryChecks } from '../../lib/useEntryChecks'
+import { useEntryChecks, useEntryDefinitionLayout } from '../../lib/useEntryChecks'
 import { absoluteTime } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import QueueReadyPanel from './QueueReadyPanel.vue'
-const props = defineProps<{ row: ListItem; projectId: string; definitionKnown: boolean | null }>()
-const emit = defineEmits<{ definition: [defined: boolean] }>()
-const session = useSession(), checks = useEntryChecks(() => props.row)
+const props = defineProps<{ row: ListItem; projectId: string }>()
+const session = useSession(), checks = useEntryChecks(() => props.row), layout = useEntryDefinitionLayout()
 // Unknown projects reserve the normal row from the first render. A successful
-// empty result removes it and informs the workspace's next-ticket layout hint.
-const reserve = computed(() => checks.error.value || checks.defined.value || (!checks.data.value && props.definitionKnown !== false))
-watch(checks.data, result => { if (result && props.row.is_leaf !== false) emit('definition', !!result.definition) }, { flush: 'sync' })
+// empty result removes it and informs the next ticket's layout hint.
+const reserve = computed(() => checks.error.value || checks.defined.value || (!checks.data.value && !layout.isEmpty(props.projectId)))
+watch(checks.data, result => { if (result && props.row.is_leaf !== false) layout.remember(props.projectId, !!result.definition) }, { flush: 'sync' })
 const line = computed(() => entryLine(checks.data.value, props.row.state))
 const anchor = ref<HTMLElement | null>(null)
 const waiting = computed(() => line.value?.block?.checks.filter(check => check.applicable && !check.passed && check.owner) ?? [])
