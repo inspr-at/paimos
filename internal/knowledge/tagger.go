@@ -8,7 +8,6 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/systemactor"
 )
 
@@ -53,6 +53,11 @@ func (t *Tagger) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+		}
+		if _, err := CleanupLegacyLearnings(ctx, t.pool); err != nil && ctx.Err() == nil {
+			slog.Error("method learning legacy cleanup", "err", err)
+			timer.Reset(time.Minute)
+			continue
 		}
 		if _, err := TagOnce(ctx, t.pool); err != nil && ctx.Err() == nil {
 			slog.Error("method learning tagger", "err", err)
@@ -214,7 +219,7 @@ func tagTenantPass(ctx context.Context, pool *pgxpool.Pool, tenantID string) (in
 		if tickets, err = tagClosedTickets(ctx, tx, tenantID, tickets, end, &run); err != nil {
 			return err
 		}
-		if comments, err = tagComments(ctx, tx, tenantID, comments, end, !verdictsOK, &run); err != nil {
+		if comments, err = tagComments(ctx, tx, tenantID, comments, end, &run); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO method_learning_tag_cursor
@@ -282,8 +287,13 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, cursor ta
 	rows, err := tx.Query(ctx, `SELECT n.id::text, n.title, n.updated_at, n.project_id::text
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket')
-		  AND n.state = ANY($2::text[])
+		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','incident')
+		  AND (k.slug='incident' OR n.title ~* '(^|[^A-Za-z0-9_-])incident([^A-Za-z0-9_-]|$)'
+          OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) tag
+            WHERE lower(btrim(CASE WHEN jsonb_typeof(tag)='string' THEN tag #>> '{}' ELSE coalesce(tag->>'name','') END))='incident')
+          OR EXISTS (SELECT 1 FROM events e WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type='node.updated'
+            AND e.at > $3 AND e.at <= $4 AND e.before->>'state'=ANY($2::text[])
+            AND e.after->>'state' IS NOT NULL AND NOT (e.after->>'state'=ANY($2::text[]))))
 		  AND n.project_id IS NOT NULL
 		  AND (($5::uuid IS NULL AND n.updated_at > $3) OR (n.updated_at, n.id) > ($3, $5::uuid))
 		  AND n.updated_at <= $4
@@ -338,7 +348,7 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, cursor ta
 		}
 		ok, err := insertNomination(ctx, tx, tenantID, nominationRow{
 			sourceKey: nodeLearningID(hit.id), projectID: hit.project, nodeID: hit.id,
-			origin: "closed_ticket", excerpt: excerpt, hash: sourceHash(hit.title),
+			origin: "closed_ticket", signal: "ticket_signal", excerpt: excerpt, hash: sourceHash(hit.title),
 		})
 		if err != nil {
 			return cursor, err
@@ -354,7 +364,7 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, cursor ta
 	return nextCursor(len(hits), last.at, last.id, end), nil
 }
 
-func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCursor, end time.Time, scanVerdict bool, run *tagRun) (tagCursor, error) {
+func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCursor, end time.Time, run *tagRun) (tagCursor, error) {
 	start, after := cursor.start(end)
 	rows, err := tx.Query(ctx, `SELECT c.id::text, c.at, n.id::text, n.project_id::text,
 		  coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '')
@@ -368,22 +378,19 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCurs
 		    ORDER BY e.id DESC LIMIT 1
 		) latest ON true
 		WHERE c.tenant_id=$1 AND c.type='comment.created' AND n.project_id IS NOT NULL
-		  AND (($5::bigint IS NULL AND c.at > $2) OR (c.at, c.id) > ($2, $5::bigint))
+		  AND (($4::bigint IS NULL AND c.at > $2) OR (c.at, c.id) > ($2, $4::bigint))
 		  AND c.at <= $3
 		  AND coalesce(latest.after->>'deleted','false') <> 'true'
-		  AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '') !~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)'
-		  AND (
-		    coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '') ILIKE '%incident%'
-		    OR ($4::bool AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '') LIKE '%VERDICT%')
-		  )
-		  AND NOT EXISTS (
+		  AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)'
+          AND EXISTS (SELECT 1 FROM principals p WHERE p.tenant_id=c.tenant_id AND p.id=c.actor_principal_id AND p.kind IN ('person','agent'))
+          		  AND NOT EXISTS (
 		    SELECT 1 FROM method_learning_nominations m
 		    WHERE m.tenant_id=c.tenant_id AND m.source_key='c-'||n.id::text||'-'||c.id::text)
 		  AND NOT EXISTS (
 		    SELECT 1 FROM method_learning_decisions d
 		    WHERE d.tenant_id=c.tenant_id AND d.source_key='c-'||n.id::text||'-'||c.id::text)
 		ORDER BY c.at, c.id
-		LIMIT $6`, tenantID, start, end, scanVerdict, after, taggerBatch)
+		LIMIT $5`, tenantID, start, end, after, taggerBatch)
 	if err != nil {
 		return cursor, err
 	}
@@ -405,19 +412,11 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCurs
 	}
 	rows.Close()
 	for _, hit := range hits {
-		if processLearningToken.MatchString(hit.body) {
+		if !processLearningToken.MatchString(hit.body) {
 			continue
 		}
-		origin := ""
-		if scanVerdict && strings.Contains(hit.body, "VERDICT") {
-			origin = "review_verdict"
-		}
-		if origin == "" && incidentWord.MatchString(hit.body) {
-			origin = "incident_comment"
-		}
-		if origin == "" {
-			continue
-		}
+		// Keep the legacy origin enum; signal identifies new explicit comments.
+		origin := "incident_comment"
 		// The whole body, not only the excerpt: the inbox re-derives its
 		// text from the live comment.
 		if looksSensitive(hit.body) {
@@ -434,7 +433,7 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCurs
 		}
 		ok, err := insertNomination(ctx, tx, tenantID, nominationRow{
 			sourceKey: commentLearningID(hit.nodeID, hit.commentID), projectID: hit.project, nodeID: hit.nodeID,
-			commentID: &comment, origin: origin, excerpt: excerpt, hash: sourceHash(hit.body),
+			commentID: &comment, origin: origin, signal: "explicit_comment", excerpt: excerpt, hash: sourceHash(hit.body),
 		})
 		if err != nil {
 			return cursor, err
@@ -500,13 +499,14 @@ type outcomeVerdict struct {
 }
 
 // verdictText is a review verdict's inbox text and the material it came from.
-// ok is false for a payload that is not a pass or fail verdict.
+// Only a changes verdict with an explicit round is a learning signal.
 func verdictText(payload json.RawMessage, title string) (excerpt, material string, ok bool) {
 	var body struct {
 		Verdict string `json:"verdict"`
 		Summary string `json:"summary"`
+		Round   int    `json:"round"`
 	}
-	if json.Unmarshal(payload, &body) != nil || (body.Verdict != "pass" && body.Verdict != "fail") {
+	if json.Unmarshal(payload, &body) != nil || (body.Verdict != "changes" || body.Round < 1) {
 		return "", "", false
 	}
 	if excerpt = oneLine(body.Summary, false); excerpt != "" {
@@ -540,6 +540,17 @@ func nominateVerdict(ctx context.Context, tx pgx.Tx, tenantID string, hit outcom
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return false, err
+	}
+	limits, err := modelprefs.LoadSituationLimits(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	var signal struct {
+		Verdict string `json:"verdict"`
+		Round   int    `json:"round"`
+	}
+	if json.Unmarshal(hit.payload, &signal) != nil || signal.Verdict != "changes" || signal.Round < limits.FixRounds {
+		return false, nil
 	}
 	excerpt, material, ok := verdictText(hit.payload, title)
 	if !ok {
@@ -629,10 +640,10 @@ func withLearningTag(fields json.RawMessage) (json.RawMessage, bool, error) {
 }
 
 type nominationRow struct {
-	sourceKey, projectID, nodeID string
-	commentID                    *int64
-	outcomeID                    *string
-	origin, excerpt, hash        string
+	sourceKey, projectID, nodeID  string
+	commentID                     *int64
+	outcomeID                     *string
+	origin, excerpt, hash, signal string
 }
 
 func insertNomination(ctx context.Context, tx pgx.Tx, tenantID string, row nominationRow) (bool, error) {
@@ -644,17 +655,18 @@ func insertNomination(ctx context.Context, tx pgx.Tx, tenantID string, row nomin
 	// A later review verdict replaces an earlier nomination of the same ticket,
 	// with its own project, outcome id and source hash.
 	tag, err := tx.Exec(ctx, `INSERT INTO method_learning_nominations
-		(tenant_id, source_key, project_id, node_id, comment_id, outcome_id, origin, excerpt, source_hash)
-		VALUES ($1, $2, $3::uuid, $4::uuid, $5::bigint, $6, $7, $8, $9)
+		(tenant_id, source_key, project_id, node_id, comment_id, outcome_id, origin, excerpt, source_hash, signal)
+		VALUES ($1, $2, $3::uuid, $4::uuid, $5::bigint, $6, $7, $8, $9, $10)
 		ON CONFLICT (tenant_id, source_key) DO UPDATE SET
 		  project_id = EXCLUDED.project_id,
 		  outcome_id = EXCLUDED.outcome_id,
 		  origin = EXCLUDED.origin,
+          signal = EXCLUDED.signal,
 		  excerpt = EXCLUDED.excerpt,
 		  source_hash = EXCLUDED.source_hash,
 		  nominated_at = clock_timestamp()
 		WHERE EXCLUDED.origin = 'review_verdict'`,
-		tenantID, row.sourceKey, row.projectID, row.nodeID, row.commentID, row.outcomeID, row.origin, excerpt, row.hash)
+		tenantID, row.sourceKey, row.projectID, row.nodeID, row.commentID, row.outcomeID, row.origin, excerpt, row.hash, nullable(row.signal))
 	if err != nil {
 		return false, err
 	}

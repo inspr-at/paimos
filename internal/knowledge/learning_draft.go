@@ -127,6 +127,18 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 		if err != nil {
 			return err
 		}
+		var lesson, sourceText string
+		err = tx.QueryRow(ctx, `SELECT coalesce(lesson,''), learning_text FROM method_learning_recommendations
+          WHERE tenant_id=$1 AND source_key=$2 AND knowledge_id=$3::uuid AND rule_layer_id=$4::uuid`, p.TenantID, publicID, setID, layerID).Scan(&lesson, &sourceText)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if lesson != "" {
+			if sourceText != item.Text {
+				return changedLearning()
+			}
+			item.Text = lesson
+		}
 		confirmed, err := sensitiveCheck(append(sensitiveRanges("text", item.Text), sensitiveRanges("title", item.Title)...), confirm)
 		if err != nil {
 			return err

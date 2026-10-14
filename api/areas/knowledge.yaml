@@ -103,7 +103,10 @@ paths:
         still there, to people who can read that verdict. Accepted, dismissed
         and drafted items are omitted. At most 50, newest first. Each item
         carries its current recommendation when an agent or person prepared
-        one (AEON-788). When truncated is true, next_cursor continues the list
+        one (AEON-788). People see only prepared recommendations with a lesson,
+        source_summary and a live target (entry with exact line, or rule set
+        with rule text); agents also see unprepared candidates. Stale or
+        incomplete recommendations stay agent-only (AEON-1330). When truncated is true, next_cursor continues the list
         after the last item.
       security: *auth
       parameters:
@@ -176,8 +179,10 @@ paths:
       description: |
         A person with knowledge.write dismisses one open method learning.
         Records knowledge.learning_dismissed and does not change a knowledge
-        entry. Agents cannot dismiss. An optional reason (AEON-788) is
-        recorded in the event; no body or an empty object still dismisses.
+        entry. Agents with knowledge.write may dismiss with a nonblank reason
+        (AEON-1330); the event records the agent as actor. People may undo it.
+        A missing agent reason is 400 invalid_request. An optional person
+        reason (AEON-788) is recorded; people may still send no body or {}.
         With learning_text, a learning whose text changed since the person
         reviewed it is 409 learning_changed. A reason that looks like it holds
         a credential is 409 learning_sensitive with ranges in field reason.
@@ -249,10 +254,14 @@ paths:
       operationId: recommendMethodLearning
       description: |
         Prepares a decision on one open method learning (AEON-788): accept with
-        a target entry in the learning's project and an optional lesson line,
+        a target entry in the learning's project and a lesson line,
         or dismiss with a reason. Agents and people with knowledge.write may
         recommend; nothing is accepted or dismissed. A person applies it
-        through accept and dismiss. The recommendation replaces any earlier one
+        through accept, draft and dismiss. For a rule draft, knowledge_id names
+        the rule set and rule_layer_id names its layer; lesson is the exact
+        rule text. source_summary explains the source and impact. Legacy
+        requests without these preparation fields remain agent-only. The
+        recommendation replaces any earlier one
         for the learning and records knowledge.learning_recommended. A decided
         learning is 409 already_decided; a closed one is 404. Lesson or reason
         text that looks like it holds a credential is 409 learning_sensitive
@@ -570,7 +579,7 @@ components:
     MethodLearningDismiss:
       type: object
       properties:
-        reason: {type: string, maxLength: 500}
+        reason: {type: string, maxLength: 500, description: "Required and nonblank for agents; optional for people"}
         learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
     MethodLearningDraft:
       type: object
@@ -605,8 +614,10 @@ components:
       additionalProperties: false
       properties:
         decision: {type: string, enum: [accept, dismiss]}
-        knowledge_id: {type: string, format: uuid, description: "Required for accept; not allowed for dismiss"}
-        lesson: {type: string, maxLength: 240, description: "Accept only. The changelog sentence; the learning's own text when absent"}
+        knowledge_id: {type: string, format: uuid, description: "Required for accept; target entry, or rule set when rule_layer_id is supplied"}
+        rule_layer_id: {type: string, format: uuid, description: "Accept only; prepare a rule in this layer and the knowledge_id rule set"}
+        source_summary: {type: string, maxLength: 500, description: "Plain source and impact summary; required for person visibility"}
+        lesson: {type: string, maxLength: 240, description: "Accept only. One lesson sentence or exact rule text; required for person visibility"}
         reason: {type: string, maxLength: 500, description: "Required for dismiss, optional for accept"}
     MethodLearningRecommendation:
       type: object
@@ -615,6 +626,11 @@ components:
         decision: {type: string, enum: [accept, dismiss]}
         knowledge_id: {type: string, format: uuid}
         knowledge_title: {type: string}
+        rule_layer_id: {type: string, format: uuid}
+        source_summary: {type: string}
+        line: {type: string, description: "Exact changelog line for an entry target"}
+        rule_text: {type: string, description: "Exact rule text for a rule draft target"}
+        prepared: {type: boolean, description: "Complete, current proposal suitable for a person decision"}
         lesson: {type: string}
         reason: {type: string}
         by:
@@ -628,7 +644,7 @@ components:
       required: [field, start, end]
       additionalProperties: false
       properties:
-        field: {type: string, enum: [text, title, lesson, reason]}
+        field: {type: string, enum: [text, title, lesson, reason, source_summary]}
         start: {type: integer, minimum: 0}
         end: {type: integer, minimum: 0}
   responses:

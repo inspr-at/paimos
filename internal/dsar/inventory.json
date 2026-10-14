@@ -793,6 +793,42 @@
       "table": "inbox_messages"
     },
     {
+      "table": "method_learning_legacy_cleanup",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "cutoff": "metadata",
+        "after_key": "metadata",
+        "completed_at": "metadata"
+      }
+    },
+    {
+      "table": "method_learning_nominations",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "signal": "metadata"
+      }
+    },
+    {
+      "table": "method_learning_recommendations",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "recommended_by"
+      },
+      "columns": {
+        "source_summary": "personal",
+        "changelog_line": "personal",
+        "rule_layer_id": "metadata"
+      }
+    },
+    {
       "classification": "secret",
       "columns": {
         "account_id": "metadata",

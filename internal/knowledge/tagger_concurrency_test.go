@@ -50,7 +50,7 @@ func (p *taggerRowPause) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, q pg
 
 func TestTaggerAndStatusAutopilotDoNotDeadlock(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-534", "work", "Concurrent startup jobs", &f.project)
+	ticket := addNode(t, f, "DONE-534", "work", "Incident: Concurrent startup jobs", &f.project)
 	release := addNode(t, f, "REL-534", "release", "Next release", &f.project)
 	setFields(t, f, ticket, map[string]any{"priority": "high", "tags": []any{"ops"}})
 	closeAged(t, f, ticket, "done", "1 hour")

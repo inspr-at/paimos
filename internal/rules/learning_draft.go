@@ -130,3 +130,36 @@ func sameLearningRule(got, want Rule) bool {
 		got.Source.Reference == want.Source.Reference && got.Source.Revision == want.Source.Revision &&
 		got.Source.Identity == want.Source.Identity && got.Source.EditedHere == want.Source.EditedHere
 }
+
+// LearningTarget validates a prepared rule target without writing or changing
+// the caller's surrounding project visibility. Actual drafting checks write
+// permission again through AppendLearningRule.
+func LearningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string) (string, error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer sp.Rollback(ctx)
+	owner, err := actorOwner(ctx, sp, p)
+	if err != nil {
+		return "", err
+	}
+	agent := ""
+	if p.Kind == tenant.Agent {
+		agent = p.ID
+	}
+	if err = enterRules(ctx, sp, owner, agent); err != nil {
+		return "", err
+	}
+	f, parent, err := nodeFields(ctx, sp, setID, "set")
+	if err != nil {
+		return "", err
+	}
+	if parent != layerID || (f.Scope.Layer == "project" && f.Scope.ProjectID != projectID) {
+		return "", fail(404, "rule_unavailable", "That rule set is not available.")
+	}
+	if err := permission(ctx, sp, p, f.Scope, "rules.read"); err != nil {
+		return "", err
+	}
+	return f.Name, nil
+}
