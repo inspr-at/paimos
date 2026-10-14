@@ -112,7 +112,11 @@ Browser render/CPU cost belongs to the web client. Request queueing and asset tr
 
 - Count collector parsed; inventory totals and invalid-count rejection passed without a browser.
 - JavaScript syntax checks passed for all harness modules.
-- Browser benchmark and full ci-static --merge-main evidence: pending guarded runner capacity.
+- All seven harness files passed the ownership checker (slice S9).
+- Remote ci-static --merge-main ran: 41 checks passed; public-names failed on the initial report. The host label was neutralised, and the targeted public-name check now passes. The final full remote retry returned exit 3: remote busy, 2/2 slots occupied. This is not a full green static result.
+- The guarded benchmark reached the production-built UI with its generated DB. Its nested-config working directory was corrected in 910960b3a. The next actual run stopped because string readiness predicates violated CSP. Structured DOM predicates replaced those in 375f835cb, without bypassing CSP. JavaScript syntax passes; the corrected benchmark has no runtime proof.
+- Corrected benchmark retries were refused by the live shared browser-suite lock or by the remote slot guard (exit 3, remote busy). No foreign process or lock was signalled, and no local browser was launched.
+- **BLOCKED-REMOTE-CAPACITY:** 56 runtime metric cells, their Chrome traces/waterfalls, the measured slowest-three ranking and code attribution, and the final full static pass remain unproven. Worker progress is 95%, not 100%. The coordinator must rerun the corrected benchmark and finish the evidence/ranking before accepting phase 1. PR static CI alone cannot populate this manual measurement table.
 - Only web/perf/, this report, and the additive web/perf/** ownership entry in scripts/audit/slices.json changed. The measurement benchmark lives outside the product test configs; phase 2 owns the CI performance check and its canonical tier registration.
 
 Replay (no origin push; the approved runner uses its own temporary test ref):
