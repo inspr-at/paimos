@@ -125,7 +125,8 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(row(page, data.sessions[0]!.id)).toBeVisible()
       await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat', 'Actions'])
       const lead = row(page, data.sessions[0]!.id)
-      await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /^Lead .+: Working$/)
+      // Its coordinator role is no lead claim here, so its name says no Lead (AEON-1285).
+      await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /^camy: Working$/)
       await expect(lead.locator('.c-time')).toHaveText('1 h 12 min')
       await expect(lead.locator('.c-time')).toHaveAttribute('data-tip', 'Running 1 h 12 min')
       // Wide rows name the model in Execution; no opener mark, no harness twice.
