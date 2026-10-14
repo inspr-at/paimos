@@ -20,6 +20,7 @@ import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs
 import { buildBrowserMap } from './browser-impact.mjs'
 import { nightlyWeights, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import './browser-impact.test.mjs'
+import './impact-plan.test.mjs'
 import './manifests.test.mjs'
 import './listing-cache.test.mjs'
 import './tiers-merge-driver.test.mjs'

@@ -278,7 +278,7 @@ export function goImpact(tests, paths, imports = {}, seeds = new Set()) {
 
 // A missing diff, unmapped source, or shared input widens selection. The merge
 // queue always proves the full gate, independently of the affected PR switch.
-export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, affectedLane, forceFull = false, forceAll = false, tree, promotions, readFile }) {
+export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, fingerprint, impact, affectedLane, forceFull = false, forceAll = false, tree, promotions, readFile }) {
   const full = reason => {
     // Full CI retains the established gate. Only nightly/--all widens to the
     // entire catalogue; missing impact data must not promote ungated cases.
@@ -287,6 +287,7 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
     return { full: true, reason, scope: catalogue ? 'catalogue' : 'gated-full',
       deferredBrowserCases: tests.filter(row => row.kind === 'browser').length - selected.filter(row => row.kind === 'browser').length, tests: selected }
   }
+  if (impact === 'off') return full('CI_IMPACT=off')
   if (forceAll || forceFull || event !== 'pull_request' || !Array.isArray(paths)) {
     return full('full event or uncertain impact')
   }
@@ -318,9 +319,9 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
   // Deleted/unknown files cannot be analysed using only the candidate graph.
   if ([...changedWeb].some(file => !Object.hasOwn(webImports, file))) return full('missing web dependency metadata')
   if (hasWeb) for (const file of risk.webSeeds) if (Object.hasOwn(webImports, file)) changedWeb.add(file)
-  const impact = browserImpact([...changedWeb], webImports, browserMap, baseTree)
-  if (tests.some(row => row.kind === 'browser') && impact.full) return full(impact.reason)
-  const web = new Set([...reverseDependants(changedWeb, webImports), ...impact.specs])
+  const coverage = browserImpact([...changedWeb], webImports, browserMap, baseTree, fingerprint)
+  if (tests.some(row => row.kind === 'browser') && coverage.full) return full(coverage.reason)
+  const web = new Set([...reverseDependants(changedWeb, webImports), ...coverage.specs])
   if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return full('web module has no mapped test importer')
   if (tests.filter(t => t.kind === 'browser' && web.has(t.file)).length > 300) return full('browser fan-out exceeds 300 cases')
   const reason = 'essential plus changed area and reverse dependencies'
