@@ -130,7 +130,7 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if err != nil {
 		return events.Change{}, undoWriteErr(err)
 	}
-	return events.Change{NodeID: e.NodeID, Type: evNodeUpdated, Before: current, After: restored, Metadata: mustJSON(map[string]any{"entry_checks": entry})}, nil
+	return events.Change{NodeID: e.NodeID, Type: evNodeUpdated, Before: current, After: restored, Metadata: entryJSON(map[string]any{"entry_checks": entry})}, nil
 }
 
 func sameTime(a, b *time.Time) bool {

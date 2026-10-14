@@ -8,6 +8,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -16,6 +17,14 @@ import (
 // Workspace/project policy controls audit attribution; pickup still transitions
 // directly when automatic status rules are disabled.
 func PickupTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, runID string) error {
+	target, err := workqueue.EntryTicketTx(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	entry, err := workqueue.RequireEntryTx(ctx, tx, p, target, "in_progress", nil)
+	if err != nil {
+		return err
+	}
 	c, before, err := loadCandidate(ctx, tx, id, time.Now().UTC())
 	if err != nil {
 		return err
@@ -40,6 +49,14 @@ func PickupTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, runID stri
 	if err != nil {
 		return err
 	}
-	_, err = events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "node.updated", Before: before, After: after})
+	_, err = events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "node.updated", Before: before, After: after, Metadata: entryMetadata(entry)})
 	return err
+}
+
+func entryMetadata(entry *workqueue.EntryRecord) json.RawMessage {
+	if entry == nil {
+		return nil
+	}
+	raw, _ := json.Marshal(map[string]any{"entry_checks": entry})
+	return raw
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -36,7 +37,7 @@ func (m *Module) entryChecksTx(ctx context.Context, tx pgx.Tx, p tenant.Principa
 		}
 		out.Blocks = append(out.Blocks, block)
 		var raw []byte
-		err = tx.QueryRow(ctx, `SELECT metadata->'entry_checks' FROM events WHERE node_id=$1 AND type IN ('node.created','node.updated') AND metadata->'entry_checks'->>'to_status'=$2 ORDER BY id DESC LIMIT 1`, id, state).Scan(&raw)
+		err = tx.QueryRow(ctx, `SELECT metadata->'entry_checks' FROM events WHERE node_id=$1 AND type IN ('node.created','node.updated','status_autopilot.changed','delivery.merge_done') AND metadata->'entry_checks'->>'to_status'=$2 ORDER BY id DESC LIMIT 1`, id, state).Scan(&raw)
 		if err == nil {
 			var record workqueue.EntryRecord
 			if err = json.Unmarshal(raw, &record); err != nil {
@@ -99,7 +100,7 @@ func (m *Module) recordNodeEntry(ctx context.Context, tx pgx.Tx, p tenant.Princi
 	if err != nil {
 		return err
 	}
-	return m.writeEvent(ctx, tx, Event{ActorPrincipalID: p.ID, NodeID: &after.ID, Type: eventType, Before: beforeRaw, After: afterRaw, Metadata: mustJSON(map[string]any{"entry_checks": record})})
+	return m.writeEvent(ctx, tx, Event{ActorPrincipalID: p.ID, NodeID: &after.ID, Type: eventType, Before: beforeRaw, After: afterRaw, Metadata: entryJSON(map[string]any{"entry_checks": record})})
 }
 func (m *Module) recordRefusal(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, f *workqueue.EntryFailure) error {
 	if p.Kind != tenant.Agent {
@@ -125,13 +126,13 @@ func (m *Module) recordRefusal(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	}
 	if typ == "entry_checks.refused" {
 		var prior workqueue.EntryRefusal
-		if json.Unmarshal(raw, &prior) == nil && prior.By.ID == p.ID && prior.ToStatus == f.ToStatus && sameJSON(mustJSON(prior.Failed), mustJSON(f.Failed)) {
+		if json.Unmarshal(raw, &prior) == nil && prior.By.ID == p.ID && prior.ToStatus == f.ToStatus && sameJSON(entryJSON(prior.Failed), entryJSON(f.Failed)) {
 			refusal.Count = prior.Count + 1
 		}
 	}
 	return m.record(ctx, tx, p.ID, &id, "entry_checks.refused", nil, refusal)
 }
-func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+func entryJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 
 func (m *Module) handleEntryTick(w http.ResponseWriter, r *http.Request) {
 	p, ok := requirePrincipal(w, r)
@@ -330,7 +331,7 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		fields := mustJSON(map[string]any{"checks": in.Checks, "copied_from_revision": in.CopiedFrom})
+		fields := entryJSON(map[string]any{"checks": in.Checks, "copied_from_revision": in.CopiedFrom})
 		var id string
 		var revision time.Time
 		if current == nil {
@@ -355,7 +356,7 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'definition_copy') ON CONFLICT DO NOTHING`, p.TenantID, id, base.ID); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'cites') ON CONFLICT DO NOTHING`, p.TenantID, id, base.ID); err != nil {
 				return err
 			}
 		}
@@ -369,4 +370,12 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+func entryFailedLabels(f *workqueue.EntryFailure) string {
+	labels := []string{}
+	for _, check := range f.Failed {
+		labels = append(labels, check.Label)
+	}
+	return "Missing entry checks: " + strings.Join(labels, ", ")
 }

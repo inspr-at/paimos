@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -225,6 +226,17 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)`, n.ID, d.Rule, d.Anchor).Scan(&seen); err != nil || seen {
 		return err
 	}
+	var entry *workqueue.EntryRecord
+	if d.Rule == "queue_pickup" {
+		target, err := workqueue.EntryTicketTx(ctx, tx, n.ID)
+		if err != nil {
+			return err
+		}
+		entry, err = workqueue.RequireEntryTx(ctx, tx, p, target, "in_progress", nil)
+		if err != nil {
+			return err
+		}
+	}
 	var before, after []byte
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE id=$1`, n.ID).Scan(&before); err != nil {
 		return err
@@ -253,7 +265,7 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 			return err
 		}
 	}
-	meta, _ := json.Marshal(map[string]any{"job": Job, "rule": d.Rule, "reason": d.Reason, "flag": d.Flag})
+	meta, _ := json.Marshal(map[string]any{"job": Job, "rule": d.Rule, "reason": d.Reason, "flag": d.Flag, "entry_checks": entry})
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &n.ID, Type: typ, Before: json.RawMessage(before), After: json.RawMessage(after), Metadata: meta})
 	if err != nil {
 		return err

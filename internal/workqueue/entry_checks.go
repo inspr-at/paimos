@@ -358,7 +358,7 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 				r.Passed = true
 			}
 		case "merged":
-			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_items d JOIN delivery_metric_sources s ON s.tenant_id=d.tenant_id AND s.project_id=d.project_id AND s.repository=d.repository WHERE d.ticket_node_id=$1 AND (d.state='merged' OR d.observation->>'merged'='true'))`, t.ID).Scan(&r.Passed)
+			err = tx.QueryRow(ctx, `SELECT coalesce((SELECT d.state='merged' OR d.observation->>'merged'='true' FROM delivery_items d JOIN delivery_metric_sources s ON s.tenant_id=d.tenant_id AND s.project_id=d.project_id AND s.repository=d.repository WHERE d.ticket_node_id=$1 ORDER BY d.updated_at DESC,d.id DESC LIMIT 1),false)`, t.ID).Scan(&r.Passed)
 			r.Reason = "Merge the current build to main"
 		case "released":
 			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_tickets t JOIN journey_releases r ON r.tenant_id=t.tenant_id AND r.release_node_id=t.release_node_id WHERE t.ticket_node_id=$1 AND r.project_node_id=$2 AND r.state IN ('released','superseded'))`, t.ID, t.ProjectID).Scan(&r.Passed)

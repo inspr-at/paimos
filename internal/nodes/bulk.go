@@ -93,10 +93,12 @@ type bulkBatch struct {
 }
 
 type bulkSkip struct {
-	ID     string `json:"id"`
-	Key    string `json:"key,omitempty"`
-	Reason string `json:"reason"`
-	Code   string `json:"code,omitempty"`
+	ID       string                  `json:"id"`
+	Key      string                  `json:"key,omitempty"`
+	Reason   string                  `json:"reason"`
+	Code     string                  `json:"code,omitempty"`
+	ToStatus string                  `json:"to_status,omitempty"`
+	Failed   []workqueue.EntryResult `json:"failed,omitempty"`
 }
 
 type bulkResult struct {
@@ -341,6 +343,13 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 		if err != nil {
 			return err
 		}
+		if plan.state != nil {
+			for _, id := range plan.ids {
+				if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-builder:'||current_setting('aeon.tenant_id')||':'||$1::uuid::text,0))`, id); err != nil {
+					return err
+				}
+			}
+		}
 		var parent *bulkTarget
 		var parentAncestors map[string]bool
 		var parentAllowed []string
@@ -454,7 +463,7 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, plan.overrideReason)
 				var failed *workqueue.EntryFailure
 				if errors.As(err, &failed) {
-					result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: failed.Error(), Code: "entry_checks_failed"})
+					result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: entryFailedLabels(failed), Code: "entry_checks_failed", ToStatus: failed.ToStatus, Failed: failed.Failed})
 					if err = m.recordRefusal(ctx, tx, p, current.ID, failed); err != nil {
 						return err
 					}
@@ -698,6 +707,20 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 		}
 		if len(issues) > 0 {
 			return events.Change{}, events.ErrConflict
+		}
+		if old.State != now.State {
+			target, err := workqueue.EntryTicketTx(ctx, tx, now.ID)
+			if err != nil {
+				return events.Change{}, err
+			}
+			target.Fields = workqueue.Fields(old.Fields)
+			to, err := workqueue.EntryStatusTx(ctx, tx, now.KindID, old.State)
+			if err != nil {
+				return events.Change{}, err
+			}
+			if _, err = workqueue.RequireEntryTx(ctx, tx, p, target, to, nil); err != nil {
+				return events.Change{}, err
+			}
 		}
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {
 			if err := authz.RequireInProjects(ctx, tx, p, "nodes.write", projects[now.ID]); err != nil {

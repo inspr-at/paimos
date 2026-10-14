@@ -156,6 +156,8 @@ paths:
                         id: {type: string, format: uuid}
                         key: {type: string}
                         reason: {type: string}
+                        to_status: {type: string, description: 'Target status when entry checks refused the change.'}
+                        failed: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckResult'}}
                         code:
                           type: string
                           description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
@@ -780,6 +782,15 @@ components:
       type: object
       required: [id, at, type, author]
       properties:
+        entry_checks:
+          type: object
+          required: [type, to_status, failed, reason, count]
+          properties:
+            type: {type: string, enum: [refused, override]}
+            to_status: {type: string}
+            failed: {type: array, maxItems: 32, items: {type: string}}
+            reason: {type: [string, 'null']}
+            count: {type: integer, minimum: 1}
         automatic_change: {$ref: '#/components/schemas/StatusAutopilotChange'}
         id: {type: string, description: "Stable tenant-local event ID, represented as a decimal string"}
         at: {type: string, format: date-time}

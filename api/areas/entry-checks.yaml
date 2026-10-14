@@ -130,7 +130,6 @@ components:
         done: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckRule'}}
     EntryCheckRule:
       type: object
-      additionalProperties: false
       required: [id]
       properties:
         id: {type: string, maxLength: 80, description: 'estimate_set, acceptance_present, design_attached, blocker_named, no_active_build, ci_green_latest_main, review_ok_cross_family, visual_ok, pills_benefits_set, release_copy_set, merged, released, or manual:<slug>.'}
