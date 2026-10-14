@@ -63,15 +63,23 @@ async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; 
     const root = document.querySelector('#app') as Element & { __vue_app__: { config: { globalProperties: { $pinia: unknown; $router: { afterEach: (callback: (to: { path: string }) => void) => () => void } } } } }
     const router = root.__vue_app__.config.globalProperties.$router
     const entries = Vue.ref((await knowledge.listKnowledge({ project_id: 'p-pharos' })).items)
-    const host = document.createElement('div'); document.querySelector('.k-frame')!.prepend(host)
-    const app = Vue.createApp({ setup: () => () => Vue.h(Legacy, {
-      project: { id: 'p-pharos', routeKey: 'PHAROS', title: 'Pharos' }, entries: entries.value,
-      canWrite: !options.readOnly, person: !options.agent, now: Date.now(),
-      onEmptied: () => document.querySelector<HTMLInputElement>('[aria-label="Search knowledge in Pharos"]')?.focus({ preventScroll: true }),
-      onAccepted: async () => { entries.value = (await knowledge.listKnowledge({ project_id: 'p-pharos' })).items },
-    }) })
-    app.use(root.__vue_app__.config.globalProperties.$pinia); app.use(router); app.mount(host)
-    const stop = router.afterEach(to => { if (!to.path.endsWith('/knowledge')) { app.unmount(); stop() } })
+    let app: ReturnType<typeof Vue.createApp> | undefined
+    const mountLegacy = () => {
+      if (app || !document.querySelector('.k-frame')) return
+      const host = document.createElement('div'); document.querySelector('.k-frame')!.prepend(host)
+      app = Vue.createApp({ setup: () => () => Vue.h(Legacy, {
+        project: { id: 'p-pharos', routeKey: 'PHAROS', title: 'Pharos' }, entries: entries.value,
+        canWrite: !options.readOnly, person: !options.agent, now: Date.now(),
+        onEmptied: () => document.querySelector<HTMLInputElement>('[aria-label="Search knowledge in Pharos"]')?.focus({ preventScroll: true }),
+        onAccepted: async () => { entries.value = (await knowledge.listKnowledge({ project_id: 'p-pharos' })).items },
+      }) })
+      app.use(root.__vue_app__.config.globalProperties.$pinia); app.use(router); app.mount(host)
+    }
+    mountLegacy()
+    router.afterEach(async to => {
+      if (!to.path.endsWith('/knowledge')) { app?.unmount(); app = undefined }
+      else { await Vue.nextTick(); mountLegacy() }
+    })
   }, { readOnly: !!options.readOnly, agent: !!options.agent })
   const heading = page.getByRole('heading', { name: 'Method learnings' })
   if (options.inbox === false) await expect(heading).toHaveCount(0)
