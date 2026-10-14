@@ -199,6 +199,12 @@ func TestFinalDrainReplayAfterExitPersistsOnceAndRechecksAuthority(t *testing.T)
 	if messages != 1 || projections != 1 || privateEvents != 1 {
 		t.Fatalf("duplicate final: %d %d %d", messages, projections, privateEvents)
 	}
+	for _, substitute := range []tenant.Principal{f.owner, {TenantID: f.agent.TenantID, ID: f.agent.ID, Kind: tenant.Agent, Scopes: []string{"harness.worker", "harness.read", "chat.send", "chat.receive"}}} {
+		f.authority.final.Sender = substitute
+		_, err := f.repo.Persist(f.ctx(t), f.actor, f.final)
+		reason(t, err, nativecontract.ReasonWrongPrincipal)
+	}
+	f.authority.final.Sender = f.agent
 	for _, mutate := range []func(*nativecontract.FinalPublish){func(f *nativecontract.FinalPublish) { f.Text = "changed answer" }, func(f *nativecontract.FinalPublish) { f.TurnRef = "different-turn" }} {
 		changed := f.final
 		mutate(&changed)
@@ -270,7 +276,25 @@ func TestFinalDrainRevocationWinsBeforeFinalWrite(t *testing.T) {
 			if originalActor {
 				revokedID = f.owner.ID
 			}
-			if _, err = holder.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.agent.TenantID, revokedID); err != nil {
+			if originalActor {
+				permissions, _ := authz.BuiltinPermissions("member")
+				kept := make([]string, 0, len(permissions))
+				for _, permission := range permissions {
+					if permission != "chat.send" {
+						kept = append(kept, permission)
+					}
+				}
+				var role string
+				if err = holder.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'native_final_without_send','Final actor without chat send') RETURNING id::text`, f.owner.TenantID).Scan(&role); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = holder.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.owner.TenantID, role, kept); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = holder.Exec(ctx, `UPDATE role_bindings SET role_id=$3 WHERE tenant_id=$1 AND principal_id=$2`, f.owner.TenantID, revokedID, role); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err = holder.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.agent.TenantID, revokedID); err != nil {
 				t.Fatal(err)
 			}
 			if err = holder.Commit(ctx); err != nil {
@@ -583,7 +607,7 @@ func (h *pilotHost) snapshot() nativecontract.SessionView {
 func (h *pilotHost) Attach(_ context.Context, in nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
 	h.controller = &nativecontract.ControllerView{ControllerID: uuid.NewString(), ActorID: h.f.owner.ID, ClientID: in.ClientID, Epoch: uuid.NewString(), ExpiresAt: time.Now().Add(30 * time.Second)}
 	proof := "fixture-derived-control"
-	return nativecontract.AttachResult{Binding: h.f.binding, Snapshot: h.snapshot(), ViewerID: uuid.NewString(), Mode: in.Mode, Controller: h.controller, ControlCapability: &proof, ExpiresInMS: 30000, StreamPath: "/v1/native-sessions/" + h.f.binding.OwnedSessionID + "/stream"}, nil
+	return nativecontract.AttachResult{Binding: h.f.binding, Snapshot: h.snapshot(), ViewerID: uuid.NewString(), Mode: in.Mode, Controller: h.controller, ControlCapability: &proof, ExpiresAt: h.controller.ExpiresAt, ExpiresInMS: 30000, StreamPath: "/v1/native-sessions/" + h.f.binding.OwnedSessionID + "/stream"}, nil
 }
 func (h *pilotHost) register(op string, in nativecontract.Input) {
 	digest, _ := nativereceipts.Digest(in)

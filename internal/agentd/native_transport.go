@@ -62,8 +62,12 @@ func serveNativeStart(s *Supervisor, authorize func(*http.Request) bool) http.Ha
 			return
 		}
 		peer, ok := r.Context().Value(attachPeerKey{}).(attachObservation)
+		if !ok || peer.UID != os.Getuid() {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonWrongPrincipal))
+			return
+		}
 		current, peerErr := observeAttachProcess(peer.PID)
-		if !ok || peerErr != nil || peer.UID != os.Getuid() || !sameAttachProcessIdentity(peer, current) {
+		if peerErr != nil || !sameAttachProcessIdentity(peer, current) {
 			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonWrongPrincipal))
 			return
 		}

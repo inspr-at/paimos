@@ -305,7 +305,7 @@ func (d *Delivery) Final(ctx context.Context, operation string, in nativecontrac
 		return nativereceipts.FinalStatus{}, err
 	}
 	defer unlock()
-	if !d.binding.Equal(in.ExpectedBinding) || d.transport.Identity() != d.identity {
+	if !d.binding.Equal(in.ExpectedBinding) {
 		return nativereceipts.FinalStatus{}, refuse(nativecontract.ReasonWrongGeneration)
 	}
 	if len(in.Text) > nativereceipts.MaxTextBytes {
