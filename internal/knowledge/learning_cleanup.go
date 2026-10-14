@@ -48,10 +48,12 @@ func recordDismissal(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Le
 	return LearningDecision{ID: item.ID, Decision: "dismissed", EventID: ev.ID}, nil
 }
 
-// CleanupLegacyLearnings runs on every instance's next startup. The migration
-// records the release cutoff for existing tenants. Each tenant resumes its
-// bounded keyset scan after interruption, then remains complete even after undo.
-// Any recommendation, including a legacy or stale one, is preserved.
+// CleanupLegacyLearnings runs on every instance's next startup. Migration 1350
+// records the release cutoff for tenants that existed then. A tenant with no
+// row was created later, so it has nothing legacy to dismiss and is recorded
+// complete. Each release-era tenant resumes its bounded keyset scan after
+// interruption, then remains complete even after undo. Any recommendation,
+// including a legacy or stale one, is preserved.
 func CleanupLegacyLearnings(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	total := 0
 	after := ""
@@ -130,7 +132,10 @@ func cleanupLegacyTenant(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 		if err := authz.LockProjectWrite(ctx, tx, tenantID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO method_learning_legacy_cleanup(tenant_id) VALUES($1) ON CONFLICT DO NOTHING`, tenantID); err != nil {
+		// No row means this tenant did not exist when migration 1350 recorded the
+		// release cutoff. Insert it already complete so a later pass cannot
+		// adopt "now" as a cutoff and dismiss post-release learnings.
+		if _, err := tx.Exec(ctx, `INSERT INTO method_learning_legacy_cleanup(tenant_id, completed_at) VALUES($1, clock_timestamp()) ON CONFLICT DO NOTHING`, tenantID); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `SELECT completed_at IS NOT NULL FROM method_learning_legacy_cleanup WHERE tenant_id=$1 FOR UPDATE`, tenantID).Scan(&complete); err != nil {
@@ -251,8 +256,10 @@ func cleanupLegacyItem(ctx context.Context, pool *pgxpool.Pool, p tenant.Princip
 		if err := tx.QueryRow(ctx, `SELECT cutoff FROM method_learning_legacy_cleanup WHERE tenant_id=$1`, p.TenantID).Scan(&cutoff); err != nil {
 			return err
 		}
-		var eligible bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+legacySources+`) old WHERE source_key=$3)`, p.TenantID, cutoff, key).Scan(&eligible); err != nil {
+		// The batch scan is the only full union. Recheck this key through its
+		// nomination, node, or comment id so the lookup can use those indexes.
+		eligible, err := legacyItemEligible(ctx, tx, p.TenantID, cutoff, key, nodeID, commentID, comment)
+		if err != nil {
 			return err
 		}
 		if !eligible {
@@ -271,6 +278,27 @@ func cleanupLegacyItem(ctx context.Context, pool *pgxpool.Pool, p tenant.Princip
 		return nil
 	})
 	return wrote, err
+}
+
+// legacyItemEligible answers whether one inventoried key is still a legacy
+// source. It never reruns the tenant-wide union: nominations use their primary
+// key, and a node or comment uses its own id plus that row's history.
+func legacyItemEligible(ctx context.Context, tx pgx.Tx, tenantID string, cutoff time.Time, key, nodeID, commentID string, comment bool) (bool, error) {
+	var nominated bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM method_learning_nominations m JOIN nodes n ON n.tenant_id=m.tenant_id AND n.id=m.node_id WHERE m.tenant_id=$1 AND m.source_key=$2 AND m.nominated_at<$3 AND n.deleted_at IS NULL)`, tenantID, key, cutoff).Scan(&nominated); err != nil {
+		return false, err
+	}
+	if nominated {
+		return true, nil
+	}
+	if comment {
+		var ok bool
+		err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events c JOIN nodes n ON n.tenant_id=c.tenant_id AND n.id=c.node_id LEFT JOIN LATERAL (SELECT after FROM events e WHERE e.tenant_id=c.tenant_id AND e.node_id=c.node_id AND e.type IN ('comment.updated','comment.deleted') AND e.after->>'comment_id'=c.id::text ORDER BY e.id DESC LIMIT 1) latest ON true WHERE c.tenant_id=$1 AND c.node_id=$2::uuid AND c.id=$3::bigint AND c.type='comment.created' AND c.at<$4 AND n.deleted_at IS NULL AND coalesce(latest.after->>'deleted','false')<>'true' AND coalesce(latest.after->>'body_markdown',c.after->>'body_markdown','') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)' AND (coalesce(c.after->>'body_markdown','') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)' OR EXISTS (SELECT 1 FROM events tagged WHERE tagged.tenant_id=c.tenant_id AND tagged.node_id=c.node_id AND tagged.at<$4 AND tagged.type='comment.updated' AND tagged.after->>'comment_id'=c.id::text AND coalesce(tagged.after->>'body_markdown','') ~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)')))`, tenantID, nodeID, commentID, cutoff).Scan(&ok)
+		return ok, err
+	}
+	var ok bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL AND n.project_id IS NOT NULL AND (n.updated_at<$3 OR EXISTS (SELECT 1 FROM events tagged WHERE tagged.tenant_id=n.tenant_id AND tagged.node_id=n.id AND tagged.at<$3 AND tagged.type IN ('node.created','node.updated') AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(tagged.after->'fields'->'tags')='array' THEN tagged.after->'fields'->'tags' ELSE '[]'::jsonb END) old_tag WHERE lower(btrim(CASE WHEN jsonb_typeof(old_tag)='string' THEN old_tag #>> '{}' ELSE coalesce(old_tag->>'name','') END))='process-learning'))) AND k.slug IN ('work','ticket','task','epic','incident') AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) tag WHERE lower(btrim(CASE WHEN jsonb_typeof(tag)='string' THEN tag #>> '{}' ELSE coalesce(tag->>'name','') END))='process-learning'))`, tenantID, nodeID, cutoff).Scan(&ok)
+	return ok, err
 }
 
 func logLegacyCounts(ctx context.Context, pool *pgxpool.Pool, tenantID string) error {

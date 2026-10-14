@@ -54,13 +54,25 @@ func (t *Tagger) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		if _, err := CleanupLegacyLearnings(ctx, t.pool); err != nil && ctx.Err() == nil {
-			slog.Error("method learning legacy cleanup", "err", err)
-			timer.Reset(time.Minute)
-			continue
+		// Cleanup failure must not stop nomination. A source created after the
+		// release cutoff is never legacy, and an interrupted scan resumes from
+		// after_key on the next pass.
+		_, cleanupErr := CleanupLegacyLearnings(ctx, t.pool)
+		if cleanupErr != nil && ctx.Err() == nil {
+			slog.Error("method learning legacy cleanup", "err", cleanupErr)
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		if _, err := TagOnce(ctx, t.pool); err != nil && ctx.Err() == nil {
 			slog.Error("method learning tagger", "err", err)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if cleanupErr != nil {
+			timer.Reset(time.Minute)
+			continue
 		}
 		timer.Reset(taggerInterval)
 	}

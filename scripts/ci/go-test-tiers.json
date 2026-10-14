@@ -7340,7 +7340,13 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsProjectSessionThroughAuth","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupFailureStillTags","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupIdempotentPreservesPrepared","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupItemRecheckIsKeyed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupPostReleaseTenant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLinksAuthorAndImportedEntries","tier":"GATED-FULL"}
     ,
