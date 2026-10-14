@@ -708,6 +708,7 @@ test('AEON-1334 browser registry timing edits preserve every execution policy fi
     value=>value.groups[0].specs[0].tierTiming.flags=['--grep=omitted'],
     value=>value.nightlyTiming.files[Object.keys(value.nightlyTiming.files)[0]].seconds=-1,
     value=>value.groups[0].specs[0].weightSeconds=0,
+    value=>value.groups[0].specs[0].tierTiming.seconds=0,
     value=>value.groups[0].specs[0].tierTiming.caseSeconds={median:Infinity},
   ]) {
     const unsafe=structuredClone(after);change(unsafe)
@@ -795,8 +796,12 @@ test('AEON-1334 registry reads bind the base and fail wide on malformed, missing
     assert.equal(registryChangesBetween(undefined,[file],{cwd:directory}).get(file).full,true)
     const other='web/ci-web-shards.json'
     assert.equal(registryChangesBetween(base,[other],{cwd:directory,exec:()=>JSON.stringify(before)}).get(other).full,true)
-    const link=resolve(directory,'web');symlinkSync(resolve(directory,'scripts'),link,'dir')
-    assert.equal(registryChangesBetween(base,['web/ci-web-shards.json'],{cwd:directory,exec:()=>JSON.stringify(before)}).get('web/ci-web-shards.json').full,true)
+    // The symlink's target contains a valid, unchanged registry. Rejecting it
+    // must come from the bounded reader, rather than malformed policy data.
+    const target=resolve(directory,'fixture.json');writeFileSync(target,JSON.stringify(before))
+    rmSync(path);symlinkSync(target,path)
+    const linked=registryChangesBetween(base,[file],{cwd:directory,exec:()=>JSON.stringify(before)}).get(file)
+    assert.equal(linked.full,true);assert.equal(linked.reason,'registry comparison unavailable')
   } finally { rmSync(directory,{recursive:true,force:true}) }
 })
 

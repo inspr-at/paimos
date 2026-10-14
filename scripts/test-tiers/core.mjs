@@ -117,8 +117,8 @@ export function manifestPromotions(base = {}, head = {}) {
 const stableRegistry = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
 const registryObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
-const timingEntry = entry => {
-  if (!registryObject(entry) || !Number.isFinite(entry.seconds) || entry.seconds < 0 ||
+const timingEntry = (entry, positive = false) => {
+  if (!registryObject(entry) || !Number.isFinite(entry.seconds) || (positive ? entry.seconds <= 0 : entry.seconds < 0) ||
       !Number.isSafeInteger(entry.selectedTests) || entry.selectedTests < 1) throw new Error('invalid measured timing')
   const { seconds, selectedTests, caseSeconds, split, ...policy } = entry
   if (caseSeconds !== undefined) {
@@ -154,7 +154,7 @@ function registryPolicy(file, registry) {
     }
   } else {
     for (const group of result.groups) for (const spec of group.specs) {
-      if (spec.tierTiming !== undefined) spec.tierTiming = timingEntry(spec.tierTiming)
+      if (spec.tierTiming !== undefined) spec.tierTiming = timingEntry(spec.tierTiming, true)
       delete spec.weightSeconds
     }
     if (result.nightlyTiming !== undefined) result.nightlyTiming.files = timingMap(result.nightlyTiming.files)
