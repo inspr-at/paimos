@@ -149,6 +149,27 @@ func TestTicketStatusTimingBackfillIsIdempotentAndTenantScoped(t *testing.T) {
 	if result.Recorded != 0 {
 		t.Fatalf("duplicate backfill %+v", result)
 	}
+	// A different project-scoped editor must see the previous recorder's
+	// evidence through event RLS; actor-only visibility would duplicate it.
+	var editor, role string
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Timing editor') RETURNING id::text`, f.person.TenantID).Scan(&editor); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'timing_editor','Timing editor') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read'),($1,$2,'nodes.write'),($1,$2,'events.read')`, f.person.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, editor, role, f.project)
+		return err
+	})
+	who := tenant.Principal{ID: editor, TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.call(t, who, "POST", path, map[string]any{}, 200, &result)
+	if result.Recorded != 0 {
+		t.Fatalf("another project editor duplicated backfill: %+v", result)
+	}
 	var count int
 	var state string
 	f.tx(t, func(tx pgx.Tx) error {
@@ -161,6 +182,10 @@ func TestTicketStatusTimingBackfillIsIdempotentAndTenantScoped(t *testing.T) {
 	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/lifeline", nil, 200, &life)
 	if !life.Inferred || life.Complete || len(life.Visits) != 1 || life.Visits[0].Source != "inferred" || life.Visits[0].MovedBy != nil || life.Visits[0].Seconds != 7200 {
 		t.Fatalf("inferred life %+v", life)
+	}
+	f.call(t, who, "GET", "/api/nodes/"+f.ticket+"/lifeline", nil, 200, &life)
+	if !life.Inferred || life.GapCount != 0 {
+		t.Fatalf("project reader lost baseline provenance: %+v", life)
 	}
 	f.call(t, f.foreign, "GET", "/api/nodes/"+f.ticket+"/lifeline", nil, 404, nil)
 	f.call(t, f.agent, "GET", "/api/nodes/"+f.ticket+"/lifeline", nil, 403, nil)

@@ -93,3 +93,29 @@ no usable status history. It does not alter ticket state or claim that the
 recording principal was a historical mover. Replays append no duplicate event.
 Inferred or discontinuous histories are excluded from percentile samples.
 Parents never contribute to project metrics.
+
+- `GET /api/projects/{projectId}/delivery/tickets?window=90&type=all&priority=all&worked_by=all`
+  returns current/previous per-step samples, nearest-rank p50/p90, rework count,
+  coverage and daily/weekly/monthly buckets. The window is 7, 30, 90, 180 or
+  365 days; a step belongs to `[now-window, now)` by its ending timestamp.
+- `GET /api/nodes/{nodeId}/lifeline` returns separate status visits with entry
+  and exit actors, optional release, repeated/ongoing flags and source labels.
+  A current terminal status has zero duration; its preceding visits retain
+  their time. The UI obtains usual/slow values from the unfiltered 90-day API.
+- `POST /api/projects/{projectId}/delivery/tickets/backfill` accepts
+  `{"limit":100}` and then the returned UUID `cursor` until `next_cursor` is
+  null. It appends `node.status_history_backfilled` only for history-free
+  leaves. The node namespace preserves existing project event visibility for
+  subsequent editors. Permission changes and concurrent backfills serialize
+  through the tenant/tree fence, followed by sorted row locks and the event
+  counter last. No new tables, permissions, migrations or production backfill
+  are needed.
+
+GETs reject over-budget work rather than returning truncated metrics: 5,000
+leaves / 100,000 timing events per project, 2,000 events per lifeline, and a
+five-second deadline. Coverage is explicitly partial for absent/inferred
+histories, visible chain discontinuities or a window before retained history.
+Existing event RLS can hide an event (for example another actor's private queue
+event); the API preserves that boundary and excludes a resulting discontinuous
+history. Source actor names without a tenant-local identity mapping are kept
+with kind `unknown`, so worker filters never guess person/agent provenance.
