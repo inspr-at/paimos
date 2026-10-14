@@ -412,6 +412,8 @@
         ,
         {"file":"tests/decision-desk-fix3.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":5.193,"median":5.007,"min":1.858},"seconds":38.466,"selectedTests":9},"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
         ,
+        {"file":"tests/decision-desk-lessons.spec.ts","listedTests":23,"weightSeconds":29.944,"weightSource":"AEON-1331 remote-spec 4625de40f: upper bound from 38 registrations (22 lesson + 16 legacy), wall_ms 29944"}
+        ,
         {"file":"tests/decision-desk-project.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":18.858,"median":4.248,"min":2.151},"seconds":81.17,"selectedTests":14},"weightSeconds":40,"weightSource":"AEON-1057 project and refresh regressions; conservative initial estimate"}
         ,
         {"file":"tests/decision-desk.spec.ts","listedTests":60,"tierTiming":{"caseSeconds":{"max":15.827,"median":2.739,"min":1.449},"seconds":324.203,"selectedTests":60},"weightSeconds":128,"weightSource":"web-14"}
@@ -1681,6 +1683,8 @@
       "tests/decision-desk-fix2.spec.ts": {"seconds":67.927,"selectedTests":8}
       ,
       "tests/decision-desk-fix3.spec.ts": {"seconds":47.556,"selectedTests":9}
+      ,
+      "tests/decision-desk-lessons.spec.ts": {"seconds":29.944,"selectedTests":22,"source":"AEON-1331 remote-spec 4625de40f: upper bound from 38 registrations (22 lesson + 16 legacy), wall_ms 29944"}
       ,
       "tests/decision-desk-project.spec.ts": {"seconds":60.895,"selectedTests":14}
       ,

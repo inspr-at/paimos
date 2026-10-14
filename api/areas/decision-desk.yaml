@@ -34,6 +34,9 @@ paths:
         missing or stale revision consent, live management authority and an effective output-project qualification gate.
         It opens exactly project settings, personal settings or workspace routine settings at the consent step.
         Routine candidate coverage above 1000 returns 422; partial counts are never presented as exact.
+        Prepared lessons are quiet sources, filtered by knowledge.read and current source/target validity.
+        Their stable UUID derives from the native learning ID; revision is the recommendation event ID.
+        Accept and Dismiss use the existing knowledge learning APIs. Lesson candidate coverage above 1000 returns 422.
         The existing question-only decision-desk endpoint remains available.
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
@@ -52,7 +55,7 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix, routine_consent]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix, routine_consent, lesson]}
         project_id: {type: string, format: uuid}
         revision: {type: integer, minimum: 0, description: "Native tier revisions can begin at zero; other source revisions begin at one."}
         title: {type: string}
@@ -74,6 +77,7 @@ components:
             open: {type: integer, minimum: 0}
             held: {type: integer, minimum: 0}
             chores: {type: integer, minimum: 0}
+            lessons: {type: object, maxProperties: 1000, additionalProperties: {type: integer, minimum: 0}, description: "Prepared lesson totals keyed by authorized project UUID, independent of the loaded projection page."}
         has_more: {type: boolean}
         next_cursor: {type: string}
         as_of: {type: string, format: date-time}

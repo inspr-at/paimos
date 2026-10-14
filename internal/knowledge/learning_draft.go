@@ -47,6 +47,11 @@ func (m *module) handleDraftLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	ctx, err := recommendationContext(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	nodeID, commentID, comment, err := parseLearningID(r.PathValue("learningId"))
 	if err != nil {
 		writeErr(w, err)
@@ -62,7 +67,7 @@ func (m *module) handleDraftLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	decision, err := m.draftLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, layerID, setID, confirm)
+	decision, err := m.draftLearning(ctx, p, r.PathValue("learningId"), nodeID, commentID, comment, layerID, setID, confirm)
 	if err != nil {
 		writeErr(w, err)
 		return

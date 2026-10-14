@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
+import { acceptLearning, dismissLearning, draftLearning, getKnowledge, listLearnings, type MethodLearning } from './knowledge'
 import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
 import { approveStepup, declineStepup, readStepups, stepupAnswer, stepupDelivery, stepupTitle, type StepupDevices, type StepupRequest } from './stepup'
 import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
@@ -124,6 +125,58 @@ export function ruleItem(rule: DoctrineInboxItem): DeskItem {
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
   ]), rule: { ...rule }, prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
+/** The entry and its Changelog. The house separator is a word divider; a text chevron is an icon. */
+export function lessonChangelogLabel(title: string | undefined): string {
+  return `${title} · Changelog`
+}
+/** A lesson keeps the exact native recommendation frozen for the round. */
+export function lessonItem(row: DeskProjectionItem, learning: MethodLearning, projectName: string, outdated = false): DeskItem {
+  const rec = learning.recommendation!
+  return { ...base(deskItemID(row), 'lesson', rec.lesson!, rec.source_summary ?? '', [
+    { id: 'accept', title: 'Accept', description: rec.rule_layer_id ? 'Add the prepared line to the rule draft.' : 'Add the prepared line to the changelog.', answer: 'Accepted' },
+    { id: 'dismiss', title: 'Dismiss', description: 'Nothing is written.', answer: 'Dismissed' },
+  ]), projectId: row.project_id!, projectName, revision: rec.event_id, createdAt: row.created_at, held: false,
+    source: row.source, destination: rec.rule_layer_id ? `Rule draft ${rec.knowledge_title}` : lessonChangelogLabel(rec.knowledge_title),
+    lesson: { learning: { ...learning, recommendation: { ...rec } }, outdated }, suggestion: 'Accept or Dismiss the prepared lesson.' }
+}
+async function readLessons(rows: readonly DeskProjectionItem[], name: (id: string) => string) {
+  const items: DeskItem[] = [], warnings: string[] = []
+  const targets = new Map<string, Promise<{ id: string; updated_at: string }>>()
+  const pending = rows.filter(row => row.kind === 'lesson')
+  const projects = [...new Set(pending.map(row => row.project_id).filter((id): id is string => !!id))]
+  if (pending.length > 1000) throw new Error('Lesson coverage exceeds 1,000 records.')
+  for (let at = 0; at < projects.length; at += 5) {
+    const reads = await Promise.allSettled(projects.slice(at, at + 5).map(async project => {
+      const wanted = pending.filter(row => row.project_id === project), found = new Map<string, MethodLearning>()
+      let cursor: string | undefined
+      const cursors = new Set<string>()
+      for (let page = 0; page < 20; page++) {
+        const result = await listLearnings(project, undefined, cursor)
+        if (result.items.length > 50) throw new Error('The lesson page exceeded its limit.')
+        for (const learning of result.items) found.set(`/api/knowledge/learnings/${learning.id}`, learning)
+        if (wanted.every(row => found.has(row.source)) || !result.truncated) break
+        if (!result.next_cursor || result.next_cursor.length > 512 || cursors.has(result.next_cursor)) throw new Error('Lesson continuation is unavailable.')
+        cursor = result.next_cursor; cursors.add(cursor)
+      }
+      const confirmed: DeskItem[] = []
+      for (const row of wanted) {
+        const learning = found.get(row.source), rec = learning?.recommendation
+        if (!learning || !rec?.prepared || rec.event_id !== row.revision || rec.lesson !== row.title) continue
+        // The timestamp is read from the native target; do not guess a stale
+        // target from the source-learning stale flag.
+        const targetId = rec.knowledge_id!
+        if (!targets.has(targetId)) targets.set(targetId, rec.rule_layer_id ? getNode(targetId) : getKnowledge(targetId))
+        const target = await targets.get(targetId)!
+        if (target.id !== rec.knowledge_id) throw new Error('Lesson target identity changed.')
+        confirmed.push(lessonItem(row, learning, name(project), Date.parse(target.updated_at) > Date.parse(rec.at)))
+      }
+      return confirmed
+    }))
+    for (const read of reads) if (read.status === 'fulfilled') items.push(...read.value)
+    else warnings.push('Lessons could not be read. Retry before deciding.')
+  }
+  return { items, warnings }
+}
 export function keyTrimItem(proposal: KeyTrimProposal): DeskItem {
   const pending = proposal.state === 'pending'
   return { ...base(`k:${proposal.id}`, 'key_trim', `Trim ${proposal.key_name}?`, proposal.evidence.summary, []),
@@ -149,8 +202,8 @@ export function stepupItem(request: StepupRequest, projectName = request.project
     delivery: stepupDelivery(request),
   }
 }
-export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal>; stepups: Map<string, StepupRequest> }
-export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map(), stepups: new Map() })
+export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal>; stepups: Map<string, StepupRequest>; lessons: Map<string, MethodLearning> }
+export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map(), stepups: new Map(), lessons: new Map() })
 /** Upstream owners supply their native, permission-checked flows here. No
  * guessed endpoints, boolean verification bypass, or Q&A fallback is accepted. */
 export interface ProtectedDeskAdapters {
@@ -389,6 +442,9 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     }
     catch { warnings.push('Tier requests could not be read.') }
   }
+  const lessonRead = await readLessons(projection?.items ?? [], name)
+  warnings.push(...lessonRead.warnings)
+  for (const item of lessonRead.items) { sources.lessons.set(item.id, item.lesson!.learning); items.push(item) }
   // Canonical membership suppresses every linked source, even beyond the
   // question pages loaded for history. One source has one position and count.
   if (projection !== undefined) {
@@ -427,7 +483,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
         ...(row.kind === 'approval' && row.project_id ? { projectId: row.project_id, projectName: name(row.project_id) } : {}),
         unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
       warnings.push('Some source details could not be confirmed. Retry remains available.')
-      return { ...base(id, row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : row.kind === 'account_matrix' ? 'account_matrix' : 'approval', row.title, '', []),
+      return { ...base(id, row.kind === 'lesson' ? 'lesson' : row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : row.kind === 'account_matrix' ? 'account_matrix' : 'approval', row.title, '', []),
         projectId: row.project_id ?? '', projectName: row.project_id ? name(row.project_id) : 'Workspace', revision: row.revision, createdAt: row.created_at,
         held: row.held, source: row.source, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }
     })
@@ -443,6 +499,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
+  if (item.kind === 'lesson') return !!sources.lessons.get(item.id) && can('knowledge.read', item.projectId) && can('knowledge.write', item.projectId) && (!item.lesson?.learning.recommendation?.rule_layer_id || can('rules.write', item.projectId))
   if (item.kind === 'key_trim') return can('keys.manage')
   if (item.kind === 'stepup') return !!item.stepup && can(item.stepup.permission, item.stepup.project_id)
   if (item.kind === 'approval') { const approval = sources.approvals.get(item.id); return !!approval && canDecideApproval(approval, can) }
@@ -451,6 +508,18 @@ export function decisionPermission(item: DeskItem, sources: DeskSources, can: (p
   return item.kind === 'tier' && adapters.tiers?.allowed(item) === true
 }
 export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: DeskSources, requestId: string, phone: boolean, adapters: ProtectedDeskAdapters = {}): Promise<DeskItem> {
+  if (item.kind === 'lesson') {
+    const source = sources.lessons.get(item.id), rec = source?.recommendation
+    if (!source || !rec?.prepared || rec.event_id !== item.revision || !item.lesson || source.id !== item.lesson.learning.id || item.decided) throw new Error('The lesson changed. Reopen it before deciding.')
+    if (draft.optionId !== 'accept' && draft.optionId !== 'dismiss') throw new Error('Choose Accept or Dismiss.')
+    const result = draft.optionId === 'dismiss' ? await dismissLearning(source.id, draft.reason.trim() || undefined, source.text, rec.event_id)
+      : rec.rule_layer_id ? await draftLearning(source.id, { layer_id: rec.rule_layer_id, set_id: rec.knowledge_id! }, rec.event_id)
+      : await acceptLearning(source.id, rec.knowledge_id!, undefined, false, rec.lesson, source.text, rec.event_id)
+    const expected = draft.optionId === 'dismiss' ? 'dismissed' : rec.rule_layer_id ? 'drafted' : 'accepted'
+    if (result.id !== source.id || result.decision !== expected || !Number.isSafeInteger(result.event_id) || result.event_id <= 0 || (expected === 'accepted' && (result.line !== rec.line || result.knowledge_id !== rec.knowledge_id)) || (expected === 'drafted' && (result.rule_set_id !== rec.knowledge_id || result.rule_layer_id !== rec.rule_layer_id))) throw new Error('The native lesson decision was not confirmed. Refresh before continuing.')
+    return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason,
+      undoEvent: result.event_id, delivery: expected === 'dismissed' ? 'Dismissed. Nothing is written.' : expected === 'drafted' ? 'Added to the rule draft.' : 'Added to the changelog.' }
+  }
   if (item.kind === 'key_trim') {
     const source = sources.keyTrims.get(item.id)
     if (!source || !item.keyTrim || source.key_id !== item.keyTrim.key_id || source.revision !== item.revision || source.state !== item.keyTrim.state) throw new Error('The key trim source changed. Reopen the memo.')
