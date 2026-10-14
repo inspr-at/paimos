@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1327: a ctrl/cmd press on a ticket link opens one real tab even when the
-// row moves and the click never lands. A plain click still opens the peek.
+// row moves and the click never lands. A plain click still opens the peek, a
+// keyboard activation keeps the browser's own tab, and a press never opens a
+// ticket the link did not show when it was pressed.
 import { readFileSync } from 'node:fs'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
@@ -45,11 +47,12 @@ new Function('require', 'exports', outputText)((id: string) => {
 const apps: Vue.App[] = []
 const opened: string[] = []
 const peek = { open: vi.fn(), openKey: Vue.ref<string | null>(null) }
+const ticket = Vue.ref({ ticketKey: 'pharos-11', href: '/p/PHAROS/PHAROS-11', tip: 'Connect Hetzner' })
 
 function mount() {
   const root = node('root')
   const app = renderer.createApp({
-    render: () => Vue.h(compiled.default!, { ticketKey: 'pharos-11', href: '/p/PHAROS/PHAROS-11', tip: 'Connect Hetzner' }),
+    render: () => Vue.h(compiled.default!, { ...ticket.value }),
   })
   app.provide(peekKey, peek)
   apps.push(app)
@@ -68,7 +71,7 @@ function handler(link: Node, name: string) {
 function pointer(partial: Record<string, unknown> = {}) {
   const event: Record<string, unknown> = {
     button: 0, metaKey: false, ctrlKey: true, shiftKey: false, altKey: false, defaultPrevented: false,
-    clientX: 10, clientY: 20, pointerId: 1, currentTarget: null,
+    clientX: 10, clientY: 20, pointerId: 1, detail: 1, currentTarget: null,
     preventDefault() { event.defaultPrevented = true },
     ...partial,
   }
@@ -82,6 +85,7 @@ afterEach(() => {
   opened.length = 0
   peek.open.mockClear()
   peek.openKey.value = null
+  ticket.value = { ticketKey: 'pharos-11', href: '/p/PHAROS/PHAROS-11', tip: 'Connect Hetzner' }
   push.mockClear()
 })
 
@@ -144,6 +148,52 @@ it('a drag away from a modified press does not open a tab', async () => {
     handler(link, 'onPointerdown')(down)
     handler(link, 'onPointerup')(pointer({ clientX: 40, clientY: 20 }))
     await flush()
+    expect(opened).toEqual([])
+    expect(peek.open).not.toHaveBeenCalled()
+  } finally { globalThis.window = original }
+})
+
+it('repeated ctrl or cmd key presses keep the browser tab after a press opened one', async () => {
+  const original = globalThis.window
+  globalThis.window = { open: (url: string) => { opened.push(String(url)); return null } } as unknown as Window & typeof globalThis
+  try {
+    const link = mount()
+    const down = pointer()
+    down.currentTarget = link
+    handler(link, 'onPointerdown')(down)
+    handler(link, 'onPointerup')(pointer())
+    await flush()
+    expect(opened).toEqual(['/p/PHAROS/PHAROS-11'])
+    // Ctrl/cmd+Enter fires a click with detail 0; the browser opens each tab.
+    for (const modifiers of [{ ctrlKey: true }, { ctrlKey: false, metaKey: true }]) {
+      const key = pointer({ ...modifiers, detail: 0 })
+      handler(link, 'onClick')(key)
+      await flush()
+      expect(key.defaultPrevented).toBe(false)
+    }
+    expect(opened).toEqual(['/p/PHAROS/PHAROS-11'])
+    expect(peek.open).not.toHaveBeenCalled()
+  } finally { globalThis.window = original }
+})
+
+it('a ctrl or cmd press opens no tab when the link shows another ticket by release', async () => {
+  const original = globalThis.window
+  globalThis.window = { open: (url: string) => { opened.push(String(url)); return null } } as unknown as Window & typeof globalThis
+  try {
+    const link = mount()
+    const down = pointer()
+    down.currentTarget = link
+    handler(link, 'onPointerdown')(down)
+    ticket.value = { ticketKey: 'pharos-12', href: '/p/PHAROS/PHAROS-12', tip: 'Rotate keys' }
+    await Vue.nextTick()
+    expect(link.props.href).toBe('/p/PHAROS/PHAROS-12')
+    handler(link, 'onPointerup')(pointer())
+    await flush()
+    // The click may still land; the browser must not open the new ticket either.
+    const click = pointer()
+    handler(link, 'onClick')(click)
+    await flush()
+    expect(click.defaultPrevented).toBe(true)
     expect(opened).toEqual([])
     expect(peek.open).not.toHaveBeenCalled()
   } finally { globalThis.window = original }
