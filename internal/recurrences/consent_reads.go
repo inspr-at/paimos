@@ -15,6 +15,19 @@ import (
 
 var ErrConsentCoverage = errors.New("routine consent coverage exceeds 1000 candidates")
 
+// consentCandidatesSQL walks the owner's definitions in key order and probes
+// each live recurrence and project through a LIMIT 1 lateral lookup. Postgres
+// cannot flatten that lookup, so a pooled connection's plan cached while the
+// tables were small still does constant work per candidate instead of
+// rescanning every owned definition for every recurrence.
+const consentCandidatesSQL = `SELECT d.recurrence_id::text FROM recurrence_definitions d
+ CROSS JOIN LATERAL (SELECT 1 FROM recurrences r
+  JOIN nodes project ON project.tenant_id=r.tenant_id AND project.id=r.project_id
+  WHERE r.tenant_id=d.tenant_id AND r.id=d.recurrence_id AND r.retired_at IS NULL
+  AND project.deleted_at IS NULL AND project.state<>'archived' LIMIT 1) live
+ WHERE d.owner_principal_id=$1 AND d.assignment IS NOT NULL
+ ORDER BY d.recurrence_id LIMIT 1001`
+
 type ConsentRequest struct {
 	ID        string    `json:"id"`
 	ProjectID string    `json:"project_id"`
@@ -43,12 +56,7 @@ func ConsentRequestsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, reade
 	if person != p.ID {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT r.id::text FROM recurrences r
- JOIN recurrence_definitions d ON d.tenant_id=r.tenant_id AND d.recurrence_id=r.id
- JOIN nodes project ON project.tenant_id=r.tenant_id AND project.id=r.project_id
- WHERE d.owner_principal_id=$1 AND d.assignment IS NOT NULL AND r.retired_at IS NULL
- AND project.deleted_at IS NULL AND project.state<>'archived'
- ORDER BY r.id LIMIT 1001`, person)
+	rows, err := tx.Query(ctx, consentCandidatesSQL, person)
 	if err != nil {
 		return nil, err
 	}
