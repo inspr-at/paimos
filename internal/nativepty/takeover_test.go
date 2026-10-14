@@ -595,6 +595,11 @@ func TestPTYInputRejectsStaleControlAndUncertainRetry(t *testing.T) {
 	requireReason(t, err, nativecontract.ReasonInputOutcomeUnconfirmed)
 	_, err = m.Input(context.Background(), c, in)
 	requireReason(t, err, nativecontract.ReasonInputOutcomeUnconfirmed)
+	if _, err = m.RegainControl(context.Background(), c, resizeRequest(m, f, 120, 36)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.Input(context.Background(), c, in)
+	requireReason(t, err, nativecontract.ReasonInputOutcomeUnconfirmed)
 	if f.pty.writes != 1 {
 		t.Fatal("uncertain bytes were replayed")
 	}

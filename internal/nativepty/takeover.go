@@ -231,26 +231,38 @@ func (m *Manager) Take(ctx context.Context, caller Caller, in nativecontract.Tak
 	if m.config.Qualification == nil {
 		return out, refuse(nativecontract.ReasonQualificationMissing)
 	}
-	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "take", in.ExpiresAt, func(Access) error {
-		return m.config.Qualification.Require(ctx, caller.Actor, cloneSpec(m.spec), "terminal")
-	})
-	if err != nil {
-		return out, err
-	}
-	m.state, m.holder = "quiescing", nil
+	transitioning := false
 	defer func() {
-		if err != nil {
+		if err != nil && transitioning {
 			m.recovering()
 		}
 	}()
-	writer, err := m.config.Coordinator.Quiesce(ctx, cloneBinding(m.spec.Binding), "take")
-	if err != nil {
-		return out, err
-	}
-	if !writer.Binding.Equal(m.spec.Binding) || !validIdentity(writer.Identity, m.spec.Binding) {
-		return out, refuse(nativecontract.ReasonIdentityMismatch)
-	}
-	exit, err := m.config.Coordinator.CloseStructured(ctx, writer)
+	var writer nativecontract.WriterRecord
+	var exit nativecontract.ExitEvidence
+	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "take", in.ExpiresAt, func(access Access) error {
+		ioCtx, finish := context.WithDeadline(ctx, minDeadline(access.Deadline, in.ExpiresAt))
+		defer finish()
+		if err := m.qualify(ioCtx, caller.Actor, m.spec, "terminal"); err != nil {
+			return err
+		}
+		if err := ioCtx.Err(); err != nil {
+			return err
+		}
+		if !m.config.Clock.Now().Before(access.Deadline) || !m.config.Clock.Now().Before(in.ExpiresAt) {
+			return refuse(nativecontract.ReasonControllerExpired)
+		}
+		m.state, m.holder, transitioning = "quiescing", nil, true
+		var err error
+		writer, err = m.config.Coordinator.Quiesce(ioCtx, cloneBinding(m.spec.Binding), "take")
+		if err != nil {
+			return err
+		}
+		if !writer.Binding.Equal(m.spec.Binding) || !validIdentity(writer.Identity, m.spec.Binding) {
+			return refuse(nativecontract.ReasonIdentityMismatch)
+		}
+		exit, err = m.config.Coordinator.CloseStructured(ioCtx, writer)
+		return err
+	})
 	if err != nil {
 		return out, err
 	}
@@ -266,7 +278,7 @@ func (m *Manager) Take(ctx context.Context, caller Caller, in nativecontract.Tak
 	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "take", in.ExpiresAt, func(access Access) error {
 		ioCtx, finish := context.WithDeadline(ctx, minDeadline(access.Deadline, in.ExpiresAt))
 		defer finish()
-		if err := m.config.Qualification.Require(ioCtx, caller.Actor, cloneSpec(spec), "terminal"); err != nil {
+		if err := m.qualify(ioCtx, caller.Actor, spec, "terminal"); err != nil {
 			return err
 		}
 		if err := ioCtx.Err(); err != nil {
@@ -299,6 +311,11 @@ func (m *Manager) Take(ctx context.Context, caller Caller, in nativecontract.Tak
 	m.retiredEpoch, m.state, m.mode = in.ControllerEpoch, "taken", "terminal"
 	m.cols, m.rows, m.sequence = int(in.Cols), int(in.Rows), 0
 	return out, nil
+}
+func (m *Manager) qualify(ctx context.Context, actor nativecontract.Actor, spec nativecontract.LaunchSpec, mode string) error {
+	copy := cloneSpec(spec)
+	defer copy.Tools.Close()
+	return m.config.Qualification.Require(ctx, actor, copy, mode)
 }
 
 func validIdentity(identity nativecontract.NativeIdentity, binding nativecontract.Binding) bool {
@@ -389,35 +406,40 @@ func (m *Manager) Return(ctx context.Context, caller Caller, in nativecontract.R
 	if in.ExpectedRevision != m.revision {
 		return out, refuse(nativecontract.ReasonStaleRevision)
 	}
-	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "return", in.ExpiresAt, func(access Access) error {
-		if m.holder != nil {
-			return m.requireHolder(access)
-		}
-		return nil
-	})
-	if err != nil {
-		return out, err
-	}
-	m.state, m.holder = "returning", nil
+	transitioning := false
 	defer func() {
-		if err != nil {
+		if err != nil && transitioning {
 			m.recovering()
 		}
 	}()
-	writer, err := m.config.Coordinator.Quiesce(ctx, cloneBinding(m.spec.Binding), "return")
+	var writer nativecontract.WriterRecord
+	var exit, waitExit nativecontract.ExitEvidence
+	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "return", in.ExpiresAt, func(access Access) error {
+		if m.holder != nil {
+			if err := m.requireHolder(access); err != nil {
+				return err
+			}
+		}
+		ioCtx, finish := context.WithDeadline(ctx, minDeadline(access.Deadline, in.ExpiresAt))
+		defer finish()
+		m.state, m.holder, transitioning = "returning", nil, true
+		var err error
+		writer, err = m.config.Coordinator.Quiesce(ioCtx, cloneBinding(m.spec.Binding), "return")
+		if err != nil {
+			return err
+		}
+		if !writer.Binding.Equal(m.spec.Binding) || writer.Identity != m.pty.Identity() {
+			return refuse(nativecontract.ReasonIdentityMismatch)
+		}
+		exit, err = m.pty.Close(ioCtx)
+		if err != nil {
+			return err
+		}
+		waitExit, err = m.pty.Wait(ioCtx)
+		return err
+	})
 	if err != nil {
 		return out, err
-	}
-	if !writer.Binding.Equal(m.spec.Binding) || writer.Identity != m.pty.Identity() {
-		return out, refuse(nativecontract.ReasonIdentityMismatch)
-	}
-	exit, err := m.pty.Close(ctx)
-	if err != nil {
-		return out, err
-	}
-	waitExit, waitErr := m.pty.Wait(ctx)
-	if waitErr != nil {
-		return out, waitErr
 	}
 	if !waitExit.RootExited || !waitExit.GroupAbsent || waitExit.ProcessIdentityDigest != writer.Identity.ProcessIdentityDigest || waitExit.ObservedAt.IsZero() {
 		return out, refuse(nativecontract.ReasonOwnershipUnconfirmed)
@@ -433,7 +455,7 @@ func (m *Manager) Return(ctx context.Context, caller Caller, in nativecontract.R
 	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "return", in.ExpiresAt, func(access Access) error {
 		ioCtx, finish := context.WithDeadline(ctx, minDeadline(access.Deadline, in.ExpiresAt))
 		defer finish()
-		if err := m.config.Qualification.Require(ioCtx, caller.Actor, cloneSpec(spec), "structured"); err != nil {
+		if err := m.qualify(ioCtx, caller.Actor, spec, "structured"); err != nil {
 			return err
 		}
 		if err := ioCtx.Err(); err != nil {
