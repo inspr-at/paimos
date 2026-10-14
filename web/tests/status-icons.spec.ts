@@ -190,14 +190,14 @@ for (const theme of ['light', 'dark']) {
       for (const opacity of frames.hidden) expect(opacity).toBe('0')
     }
 
-    // Moving inside an item does not replay; leaving and coming back does.
+    // Moving inside the last item (Archived) does not replay; leaving and coming back does.
     count = await oneOffs(page)
-    await items.nth(7).hover({ position: { x: 30, y: 8 } })
+    await items.nth(10).hover({ position: { x: 30, y: 8 } })
     expect(await oneOffsSince(page, count)).toEqual([])
-    await items.nth(6).hover()
     await items.nth(7).hover()
+    await items.nth(10).hover()
     const back = await oneOffsSince(page, count)
-    expect(back.map(call => call.status)).toEqual(['done', 'delivered'])
+    expect(back.map(call => call.status)).toEqual(['delivered', 'archived'])
 
     // Keyboard focus plays it too.
     await items.nth(9).focus()
