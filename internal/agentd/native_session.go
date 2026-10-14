@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -67,6 +68,11 @@ type NativeLeadPlan struct {
 // Authorize reserves the server root before return. Revalidate fences current
 // rights immediately before fork/input. ReportExit settles only observed exits.
 type NativeSessionConfig struct {
+	// StartLocal resolves the exact persisted PERSON-issued C0 intent and
+	// revalidates its original actor/current grant before using the owning
+	// supervisor. Socket possession and wire selectors grant no authority.
+	// Nil leaves C0 start unavailable; it never falls back to the P1a DTO.
+	StartLocal    func(context.Context, nativecontract.LocalStart) (nativecontract.OperationResult, error)
 	Authorize     func(context.Context, NativeSessionStartRequest) (NativeLeadPlan, error)
 	Revalidate    func(context.Context, NativeLeadGrant) error
 	Register      func(context.Context, NativeLeadPlan) (HarnessSession, error)

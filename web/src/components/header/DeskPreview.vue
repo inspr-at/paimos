@@ -24,7 +24,7 @@ const { appearance } = useAgentAppearance()
 const ROWS = 12
 const KIND: Record<DeskProjectionItem['kind'], string> = {
   question: 'Question', approval: 'Approval', action_request: 'Action request', doctrine: 'Rule change', tier_request: 'Tier request',
-  key_trim: 'Key trim', stepup: 'Step-up', account_matrix: 'Account matrix', routine_consent: 'Routine consent',
+  key_trim: 'Key trim', stepup: 'Step-up', account_matrix: 'Account matrix', routine_consent: 'Routine consent', lesson: 'Lesson to adopt',
 }
 const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
 const root = ref<HTMLElement>()

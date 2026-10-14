@@ -53,7 +53,7 @@ export const statusLabel = (status: KnowledgeStatus) => STATUSES.find(s => s.sta
 
 // ---------- Calls ----------
 // A suspected credential in a method learning, as code point offsets.
-export interface SensitiveRange { field: 'text' | 'title' | 'lesson' | 'reason'; start: number; end: number }
+export interface SensitiveRange { field: 'text' | 'title' | 'lesson' | 'reason' | 'source_summary'; start: number; end: number }
 export class KnowledgeError extends Error {
   readonly status: number
   readonly code: string
@@ -124,6 +124,7 @@ export const deleteKnowledge = (id: string, ifUnmodifiedSince?: string) =>
 export interface MethodLearningRecommendation {
   decision: 'accept' | 'dismiss'; knowledge_id?: string; knowledge_title?: string; lesson?: string; reason?: string
   by: KnowledgePerson | null; at: string; event_id: number; stale: boolean; target_missing: boolean
+  rule_layer_id?: string; source_summary?: string; line?: string; rule_text?: string; prepared?: boolean
 }
 export interface MethodLearning {
   id: string; source: 'ticket' | 'comment'; node_id: string; key: string; title: string; text: string
@@ -143,21 +144,21 @@ export const listLearnings = (projectId: string, signal?: AbortSignal, cursor?: 
 // lesson replaces the learning's own text in the changelog line. learningText
 // is the learning's text as the person reviewed it; when it reads differently
 // now, the server answers 409 learning_changed and writes nothing.
-export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string, confirmNotSensitive = false, lesson?: string, learningText?: string) =>
+export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string, confirmNotSensitive = false, lesson?: string, learningText?: string, recommendationEventId?: number) =>
   send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/accept`, {
     method: 'POST',
     body: {
       knowledge_id: knowledgeId, ...(lesson ? { lesson } : {}), ...(learningText !== undefined ? { learning_text: learningText } : {}),
       ...(confirmNotSensitive ? { confirm_not_sensitive: true } : {}),
     },
-    headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {},
+    headers: { ...(ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {}), ...(recommendationEventId ? { 'If-Match': `"${recommendationEventId}"` } : {}) },
   })
-export const dismissLearning = (id: string, reason?: string, learningText?: string) =>
+export const dismissLearning = (id: string, reason?: string, learningText?: string, recommendationEventId?: number) =>
   send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, {
-    method: 'POST', body: { ...(reason ? { reason } : {}), ...(learningText !== undefined ? { learning_text: learningText } : {}) },
+    method: 'POST', body: { ...(reason ? { reason } : {}), ...(learningText !== undefined ? { learning_text: learningText } : {}) }, headers: recommendationEventId ? { 'If-Match': `"${recommendationEventId}"` } : {},
   })
-export const draftLearning = (id: string, body: { layer_id: string; set_id: string; confirm_not_sensitive?: true }) =>
-  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/draft`, { method: 'POST', body })
+export const draftLearning = (id: string, body: { layer_id: string; set_id: string; confirm_not_sensitive?: true }, recommendationEventId?: number) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/draft`, { method: 'POST', body, headers: recommendationEventId ? { 'If-Match': `"${recommendationEventId}"` } : {} })
 // ---------- Apply recommendations (AEON-788) ----------
 // One row of the review list, frozen when the person opens it: applying sends
 // exactly the lesson, entry and reason that were on screen.

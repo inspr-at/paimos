@@ -441,6 +441,11 @@ func (m *module) handleAcceptLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	ctx, err := recommendationContext(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	nodeID, commentID, comment, err := parseLearningID(r.PathValue("learningId"))
 	if err != nil {
 		writeErr(w, err)
@@ -461,7 +466,7 @@ func (m *module) handleAcceptLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	decision, err := m.acceptLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, in, expected)
+	decision, err := m.acceptLearning(ctx, p, r.PathValue("learningId"), nodeID, commentID, comment, in, expected)
 	if errors.Is(err, errStale) {
 		writeErr(w, m.stale(r.Context(), p, in.KnowledgeID))
 		return
@@ -478,6 +483,11 @@ func (m *module) handleDismissLearning(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ctx, err := recommendationContext(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	nodeID, commentID, comment, err := parseLearningID(r.PathValue("learningId"))
 	if err != nil {
 		writeErr(w, err)
@@ -488,7 +498,7 @@ func (m *module) handleDismissLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	decision, err := m.dismissLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, reason, reviewed)
+	decision, err := m.dismissLearning(ctx, p, r.PathValue("learningId"), nodeID, commentID, comment, reason, reviewed)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -917,7 +927,37 @@ func lockLearning(ctx context.Context, tx pgx.Tx, tenantID, publicID string) err
 	return err
 }
 
+// recommendationContext binds a Desk write to the prepared proposal on screen.
+// Older native clients omit the header and keep their existing behavior.
+type recommendationRevisionKey struct{}
+
+func recommendationContext(r *http.Request) (context.Context, error) {
+	raw := r.Header.Get("If-Match")
+	if raw == "" {
+		return r.Context(), nil
+	}
+	if len(raw) > 24 || len(raw) < 3 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return nil, fail(400, "invalid_request", "invalid recommendation revision")
+	}
+	revision, err := strconv.ParseInt(raw[1:len(raw)-1], 10, 64)
+	if err != nil || revision < 1 {
+		return nil, fail(400, "invalid_request", "invalid recommendation revision")
+	}
+	return context.WithValue(r.Context(), recommendationRevisionKey{}, revision), nil
+}
+
 func ensureUndecided(ctx context.Context, tx pgx.Tx, tenantID, publicID string) error {
+	// lockLearning serializes recommendation replacement and every decision.
+	if expected, ok := ctx.Value(recommendationRevisionKey{}).(int64); ok {
+		var actual int64
+		err := tx.QueryRow(ctx, `SELECT event_id FROM method_learning_recommendations WHERE tenant_id=$1 AND source_key=$2`, tenantID, publicID).Scan(&actual)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && actual != expected {
+			return changedLearning()
+		}
+		if err != nil {
+			return err
+		}
+	}
 	var decision string
 	err := tx.QueryRow(ctx, `SELECT decision FROM method_learning_decisions WHERE tenant_id=$1 AND source_key=$2`, tenantID, publicID).Scan(&decision)
 	if errors.Is(err, pgx.ErrNoRows) {

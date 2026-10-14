@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Method learnings (AEON-275): the Knowledge tab inbox, accept into a changelog,
+// Legacy MethodLearnings component integration coverage (AEON-275). AEON-1331
+// removes it from production Knowledge; mount it only in this test fixture so
+// its native API, credential and interleaving assertions remain intact.
+// Accept into a changelog,
 // dismiss, and the read-only and agent states. Screenshots stay outside the repo
 // and run only with VISUAL_AUDIT=1 (optional VISUAL_AUDIT_DIR).
 import { mkdirSync } from 'node:fs'
@@ -48,6 +51,36 @@ async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; 
     })
   }
   await page.goto('/p/PHAROS/knowledge')
+  await page.locator('.k-frame').waitFor()
+  await page.evaluate(async options => {
+    const componentPath = '/src/components/knowledge/MethodLearnings.vue', apiPath = '/src/lib/knowledge.ts'
+    // Use the exact Vite URL (including its version) of the existing runtime.
+    // A second Vue/Pinia instance would invalidate this integration fixture.
+    const compiled = await (await fetch(componentPath)).text()
+    const vuePath = /from ["']([^"']*\/vue\.js[^"']*)["']/.exec(compiled)![1]!
+    const Vue = await import(vuePath), knowledge = await import(apiPath)
+    const { default: Legacy } = await import(componentPath)
+    const root = document.querySelector('#app') as Element & { __vue_app__: { config: { globalProperties: { $pinia: unknown; $router: { afterEach: (callback: (to: { path: string }) => void) => () => void } } } } }
+    const router = root.__vue_app__.config.globalProperties.$router
+    const entries = Vue.ref((await knowledge.listKnowledge({ project_id: 'p-pharos' })).items)
+    let app: ReturnType<typeof Vue.createApp> | undefined
+    const mountLegacy = () => {
+      if (app || !document.querySelector('.k-frame')) return
+      const host = document.createElement('div'); document.querySelector('.k-frame')!.prepend(host)
+      app = Vue.createApp({ setup: () => () => Vue.h(Legacy, {
+        project: { id: 'p-pharos', routeKey: 'PHAROS', title: 'Pharos' }, entries: entries.value,
+        canWrite: !options.readOnly, person: !options.agent, now: Date.now(),
+        onEmptied: () => document.querySelector<HTMLInputElement>('[aria-label="Search knowledge in Pharos"]')?.focus({ preventScroll: true }),
+        onAccepted: async () => { entries.value = (await knowledge.listKnowledge({ project_id: 'p-pharos' })).items },
+      }) })
+      app.use(root.__vue_app__.config.globalProperties.$pinia); app.use(router); app.mount(host)
+    }
+    mountLegacy()
+    router.afterEach(async to => {
+      if (!to.path.endsWith('/knowledge')) { app?.unmount(); app = undefined }
+      else { await Vue.nextTick(); mountLegacy() }
+    })
+  }, { readOnly: !!options.readOnly, agent: !!options.agent })
   const heading = page.getByRole('heading', { name: 'Method learnings' })
   if (options.inbox === false) await expect(heading).toHaveCount(0)
   else await expect(heading).toBeVisible()

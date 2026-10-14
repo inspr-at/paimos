@@ -2,13 +2,15 @@
 package agentd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativestream"
 )
 
 type NativeStartEnvelope struct {
@@ -21,46 +23,77 @@ type NativeStartEnvelope struct {
 
 func serveNativeStart(s *Supervisor, authorize func(*http.Request) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set(NativeSessionProtocolHeader, NativeSessionProtocol)
+		nativestream.Headers(w)
 		if !authorize(r) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			nativestream.WriteError(w, &nativestream.Failure{Status: http.StatusUnauthorized, Reason: nativecontract.ReasonGrantMissing})
 			return
 		}
-		if r.Header.Get(NativeSessionProtocolHeader) != NativeSessionProtocol {
-			http.Error(w, "native_protocol_mismatch", http.StatusBadRequest)
+		if r.Header.Get(nativecontract.LocalProtocolHeader) != nativecontract.LocalProtocol {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonUnsupported))
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+		if r.URL.RawQuery != "" {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonInvalidInput))
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, nativecontract.RequestBodyBytes)
 		raw, err := io.ReadAll(r.Body)
-		if err != nil || rejectDuplicateKeys(raw) != nil {
-			http.Error(w, "native_invalid_request", http.StatusBadRequest)
-			return
-		}
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.DisallowUnknownFields()
-		var envelope NativeStartEnvelope
-		if decoder.Decode(&envelope) != nil || decoder.Decode(&struct{}{}) != io.EOF || envelope.Protocol != NativeSessionProtocol || envelope.Method != "start" || envelope.RequestID != envelope.Params.RequestID || string(envelope.ExpectedBinding) != "null" {
-			http.Error(w, "native_invalid_request", http.StatusBadRequest)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-		defer cancel()
-		result, err := s.StartNativeSession(ctx, envelope.Params)
 		if err != nil {
-			code, status := "native_start_unconfirmed", http.StatusConflict
-			switch {
-			case errors.Is(err, ErrNativeUnqualified):
-				code, status = "native_coordinator_unqualified", http.StatusServiceUnavailable
-			case errors.Is(err, ErrScope):
-				code, status = "native_scope_mismatch", http.StatusBadRequest
-			case errors.Is(err, ErrReplay):
-				code = "native_request_conflict"
-			}
-			http.Error(w, code, status)
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonBufferFull))
+			return
+		}
+		validator, err := nativecontract.NewValidator()
+		if err != nil {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonQualificationMissing))
+			return
+		}
+		envelope, err := validator.DecodeLocal(raw, nativecontract.LocalProtocol, "start", nativecontract.ValidationContext{PrincipalKind: "person"})
+		if err != nil {
+			nativestream.WriteError(w, err)
+			return
+		}
+		var local nativecontract.LocalStart
+		if err = validator.DecodeJSON("NativeLocalStart", envelope.Params, &local); err != nil {
+			nativestream.WriteError(w, err)
+			return
+		}
+		if s.native == nil || s.native.config == nil || s.native.config.StartLocal == nil {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonQualificationMissing))
+			return
+		}
+		peer, ok := r.Context().Value(attachPeerKey{}).(attachObservation)
+		if !ok || peer.UID != os.Getuid() {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonWrongPrincipal))
+			return
+		}
+		current, peerErr := observeAttachProcess(peer.PID)
+		if peerErr != nil || !sameAttachProcessIdentity(peer, current) {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonWrongPrincipal))
+			return
+		}
+		if local.Intent.Role != "coordinator" || local.Intent.Profile != "native" || local.Intent.Harness != Claude {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonUnsupported))
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), nativecontract.LocalOperationSeconds*time.Second)
+		defer cancel()
+		result, err := s.native.config.StartLocal(ctx, local)
+		if err != nil {
+			nativestream.WriteError(w, err)
+			return
+		}
+		if result.Receipt.RequestID != local.Intent.RequestID || result.Receipt.Operation != "start" {
+			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonIdentityMismatch))
+			return
+		}
+		if _, err := nativestream.Encode(validator, "NativeOperationResult", result); err != nil {
+			nativestream.WriteError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if result.Receipt.State == "accepted" || result.Receipt.State == "queued" {
+			w.WriteHeader(http.StatusAccepted)
+		}
 		_ = json.NewEncoder(w).Encode(result)
 	}
 }

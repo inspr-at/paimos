@@ -6,12 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"time"
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/chat"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
@@ -45,6 +49,27 @@ func (s *Repository) Persist(ctx context.Context, daemon nativecontract.DaemonAc
 	if err != nil {
 		return out, err
 	}
+	if s.chat == nil {
+		return out, nativereceipts.Fail(nativecontract.ReasonFeatureDisabled)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	// Declare any delegated original key before acquiring resource fences.
+	// FinalTx must re-read that immutable actor and refuse a changed identity.
+	var originalKey string
+	err = db.InTenant(ctx, s.pool, p.TenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT coalesce(actor_key_id::text,'') FROM native_session_intents WHERE tenant_id=$1 AND owned_session_id=$2 AND project_id=$3`, p.TenantID, in.ExpectedBinding.OwnedSessionID, in.ExpectedBinding.ProjectID).Scan(&originalKey)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // standalone authority adapters still have to return a person
+		}
+		return err
+	})
+	if err != nil {
+		return out, err
+	}
+	if originalKey != "" {
+		ctx = db.WithKeyScopeUse(ctx, p.TenantID, originalKey)
+	}
 	digest, err := nativereceipts.FinalDigest(in)
 	if err != nil {
 		return out, err
@@ -70,13 +95,21 @@ func (s *Repository) Persist(ctx context.Context, daemon nativecontract.DaemonAc
 			a.Sender.TenantID != p.TenantID || a.Target.SessionID != b.HarnessSessionID {
 			return nativereceipts.Fail(nativecontract.ReasonWrongGeneration)
 		}
+		if a.Sender.ID != p.ID || a.Sender.Kind != tenant.Agent || a.Sender.KeyID != p.KeyID ||
+			a.Sender.AuthKeyID != p.AuthKeyID || !slices.Equal(a.Sender.Scopes, p.Scopes) ||
+			a.Sender.KeyCreatorID != p.KeyCreatorID || a.Sender.FullAccess != p.FullAccess ||
+			a.OriginalActor.TenantID != p.TenantID || !workorders.UUID(a.OriginalActor.ID) ||
+			a.OriginalActor.Kind != tenant.Person && a.OriginalActor.Kind != tenant.Agent ||
+			a.OriginalActor.KeyID != originalKey || a.OriginalActor.Kind == tenant.Agent && originalKey == "" {
+			return nativereceipts.Fail(nativecontract.ReasonWrongPrincipal)
+		}
 		if !s.now().Before(a.Grant.ExpiresAt) {
 			return nativereceipts.Fail(nativecontract.ReasonPublicationGrantExpired)
 		}
 		if !a.RetentionApproved || a.IssuedAt.IsZero() || a.Grant.ExpiresAt.After(a.IssuedAt.Add(nativereceipts.MaxRetention)) {
 			return nativereceipts.Fail(nativecontract.ReasonRetentionUnapproved)
 		}
-		a.Target.ExpiresAt, a.Target.Now = a.Grant.ExpiresAt, s.now
+		a.Target.ExpiresAt, a.Target.Now, a.Target.OriginalActor = a.Grant.ExpiresAt, s.now, a.OriginalActor
 		if err = authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: b.ProjectID}); err != nil {
 			return err
 		}

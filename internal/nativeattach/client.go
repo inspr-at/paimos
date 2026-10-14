@@ -297,6 +297,10 @@ func (s *Session) Receipts(ctx context.Context, after string) (nativecontract.Re
 	if len(after) > 512 {
 		return out, errors.New("receipt cursor too large")
 	}
-	err := s.wire.receipts(ctx, s.binding, s.headers(false), after, &out)
+	err := s.wire.receipts(ctx, s.binding, s.generation, s.headers(false), after, &out)
+	if err != nil {
+		s.authorityLost = true
+		s.capability = ""
+	}
 	return out, err
 }

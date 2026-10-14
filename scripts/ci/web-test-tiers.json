@@ -7884,6 +7884,52 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"revision-zero native tier request can decline with exact ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 failed decisions and Undo keep the lesson honest","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo has no accessibility violations","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson scope names its filter and Show all restores other waiting items","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 replaced proposal refuses the frozen lesson","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 rule draft, omitted source and keyboard use the native decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"every kind names its project with a new-tab link; P opens it, but not while typing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"revisiting a question after Decide & next retains its project link, colour and P action","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8287,6 +8333,10 @@
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed refresh keeps Learn still through the error and the retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a refused save and a failed read together keep both alerts and both retries, and Learn still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-tab-switch.spec.ts","name":"Flow: fast section switches keep one hint stream per mounted view and its lanes render","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-tab-switch.spec.ts","name":"Numbers: fast section switches keep Delivery responsive and its cards render","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a failed refresh keeps the delivery rows and notes the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14400,6 +14450,8 @@
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the situations link on Models still lands on the limits, opening the fold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the situations link stays on the limits when the kinds arrive after the scroll","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the ⋯ menu orders and archives; built-in kinds say why they cannot be archived","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"⌘/Ctrl+Enter saves once from any field; the area stays; Undo restores the words","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14772,6 +14824,14 @@
     ,
     {"kind":"node","file":"tests/add-account.test.ts","name":"sign-in reuses known commands and invents none","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 graph cells reject every canvas that is not 3d","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 graph harness uses SwiftShader and allows motion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 harness files keep the measurement contract wired","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 time budget decides pass and long tasks fail only search and scroll","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/aeon-635.test.ts","name":"Other follows the displayed groups when an untold feature or fix is shown as maintenance (AEON-635)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/aeon-635.test.ts","name":"a named ticket claims all its commits and does not make the release match Other (AEON-635)","tier":"GATED-FULL"}
@@ -15035,6 +15095,12 @@
     {"kind":"node","file":"tests/api.test.ts","name":"reads the public OIDC display name on anonymous and authenticated responses","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"rejects malformed identities and server errors","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/arrival.test.ts","name":"a scroll away from the target or any input by the person lets go; later changes stay with them","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/arrival.test.ts","name":"content that arrives above the target after the scroll brings it back to the top, and our own scroll keeps the hold","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/arrival.test.ts","name":"the hold is bounded: it ends after its window, when the target leaves, or when the page lets it go","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/attach-copy.test.ts","name":"pairing and a session link stay separate in the app language for English and German profiles","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -17186,6 +17252,12 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"turns an account_matrix projection row into a settings link-out without a source warning","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"draws the Knowledge lesson link with an SVG chevron","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"keeps a rule-draft lesson on the draft and off the changelog chevron","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"names a changelog lesson with the entry title and no text chevron","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"preselects Once for an unavailable suggestion and disables Decide with the reason","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}
@@ -17342,6 +17414,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live update keeps the person viewing the past, and moves the playhead with now while following","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a parent re-render with the same project neither reads again nor reopens the hint stream (AEON-1352)","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an ingested release record shows the catalogue timing, the rehearsal, the qualification link and the rollback class","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an open step shows elapsed time and a separate expected end at both levels","tier":"ESSENTIAL"}
@@ -17371,6 +17445,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the release record panel shows the timing and the evidence as a ticket link, and keeps four rows when facts are missing","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the run picker stays mounted through loading and errors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"unmounting aborts the read in flight and closes the stream; a late answer changes nothing (AEON-1352)","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"where the time went splits the critical path and lists the incident and the biggest waits","tier":"ESSENTIAL"}
     ,

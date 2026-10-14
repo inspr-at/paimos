@@ -68,7 +68,7 @@ import (
 	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/modelprovider"
 	"github.com/inspr-at/paimos/internal/modelregistry"
-	"github.com/inspr-at/paimos/internal/nativesessions"
+	"github.com/inspr-at/paimos/internal/nativeintegration"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
 	"github.com/inspr-at/paimos/internal/parentbenefits"
@@ -417,6 +417,12 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	startWorker(func() { deliveryMod.RunAlerts(workerCtx) })
 	startWorker(func() { deliveryMod.RunFlow(workerCtx) })
 	startWorker(func() { deliveryMod.RunAudit(workerCtx) })
+	// Person-invoked native integration is an explicit default-off composition.
+	// The automatic routine LeadRuntime remains independently unqualified.
+	nativePilot, err := nativeintegration.New(nativeintegration.Options{})
+	if err != nil {
+		return err
+	}
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
@@ -458,7 +464,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			harnessMod,
 			// Native route declarations reuse the authz native-sessions table;
 			// authMod.Middleware applies their envelope before authentication.
-			nativesessions.NewDisabled(),
+			nativePilot.HTTP,
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),
