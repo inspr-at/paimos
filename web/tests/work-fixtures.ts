@@ -346,6 +346,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    const entryNode = /^\/api\/nodes\/([^/]+)\/entry-checks$/.exec(path)
+    if (entryNode && method === 'GET') {
+      const node = data.nodes.find(n => n.id === entryNode[1])
+      return route.fulfill({ json: { node_id: entryNode[1], revision: node?.updated_at ?? '', definition: null, blocks: [], entries: [], latest_refusal: null } })
+    }
     if (path === '/api/me/theme' && method === 'GET') return route.fulfill({ json: { theme: defaultTheme, default_theme_id: defaultTheme.id, selected_theme_id: null, revision: 0, fallback_notice: null } })
     if (path === '/api/themes' && method === 'GET') return route.fulfill({ json: { items: [defaultTheme], next_cursor: null } })
     if (path === '/api/status/help' && method === 'GET') return route.fulfill({ json: defaultStatusHelp() })

@@ -68,6 +68,16 @@ func setup(t *testing.T) *fixture {
 	dbtest.BindRole(t, f.d, tid, f.person.ID, "admin")
 	dbtest.BindRole(t, f.d, tid, f.agent.ID, "member")
 	dbtest.BindRole(t, f.d, tid, f.other.ID, "member")
+	// AEON-1248 Q3: readiness is explicitly configured; no definition is free movement.
+	// Retain the queue tests' readiness risks with the original three checks.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var kind string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'definition','Definition','DEF','list') RETURNING id::text`, tid).Scan(&kind); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) VALUES($1,$2,aeon_next_node_key($1,'DEF'),'Queue checks','{"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"blocker_named"}]}}')`, tid, kind)
+		return err
+	})
 	f.profile = uuid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'test','1','codex','openai','requested-test-model','high','strong')`, tid, f.profile)

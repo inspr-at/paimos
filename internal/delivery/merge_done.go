@@ -423,7 +423,7 @@ func prepareMergeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, repo
 			e.Result = "refused"
 			labels := []string{}
 			for _, check := range failed.Failed {
-				labels = append(labels, check.Label)
+				labels = append(labels, check.Label+": "+check.Reason)
 			}
 			e.Reason = "Entry checks missing: " + strings.Join(labels, ", ")
 			return nil, nil

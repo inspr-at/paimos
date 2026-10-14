@@ -460,7 +460,13 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				if err != nil {
 					return err
 				}
-				entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, plan.overrideReason)
+				prior, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, current.State)
+				if err != nil {
+					return err
+				}
+				if prior != to {
+					entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, plan.overrideReason)
+				}
 				var failed *workqueue.EntryFailure
 				if errors.As(err, &failed) {
 					result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: entryFailedLabels(failed), Code: "entry_checks_failed", ToStatus: failed.ToStatus, Failed: failed.Failed})
@@ -718,8 +724,18 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			if err != nil {
 				return events.Change{}, err
 			}
-			if _, err = workqueue.RequireEntryTx(ctx, tx, p, target, to, nil); err != nil {
+			prior, err := workqueue.EntryStatusTx(ctx, tx, now.KindID, now.State)
+			if err != nil {
 				return events.Change{}, err
+			}
+			if prior != to {
+				if _, err = workqueue.RequireEntryTx(ctx, tx, p, target, to, nil); err != nil {
+					var failed *workqueue.EntryFailure
+					if errors.As(err, &failed) {
+						return events.Change{}, events.ErrConflict
+					}
+					return events.Change{}, err
+				}
 			}
 		}
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {

@@ -119,9 +119,19 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 		if err != nil {
 			return events.Change{}, err
 		}
-		entry, err = workqueue.RequireEntryTx(ctx, tx, p, target, to, nil)
+		prior, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, current.State)
 		if err != nil {
 			return events.Change{}, err
+		}
+		if prior != to {
+			entry, err = workqueue.RequireEntryTx(ctx, tx, p, target, to, nil)
+			if err != nil {
+				var failed *workqueue.EntryFailure
+				if errors.As(err, &failed) {
+					return events.Change{}, events.ErrConflict
+				}
+				return events.Change{}, err
+			}
 		}
 	}
 	restored, err := scanNode(tx.QueryRow(ctx, `UPDATE nodes SET title=$2,body=$3,fields=$4::jsonb,state=$5,human_check=$6,deleted_at=$7,
