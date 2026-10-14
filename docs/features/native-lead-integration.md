@@ -139,11 +139,16 @@ evidence, not the still-missing combined I1 smoke's negative control.
 
 Round 3 static at `25a0c4e3d` exits 1: 40 checks pass, zero optional checks
 are skipped, and `web-tiers` plus `web-classification` exceed their existing
-120-second bounds. Strict Go tiers, source ownership, shared inventories,
-vet, migration, reporter/OpenAPI, web typecheck and lint pass. No timeout was
-raised and no check was skipped. The guarded retry is pending. Earlier exit 3
-attempts were remote-capacity refusals, not green results. No local fallback
-or unguarded static check was used; Round 2's 42-check pass is historical only.
+120-second bounds. No timeout was raised and no check was skipped.
+
+Round 3 PASS static retry at `8ebe62e42`: guarded `ci-static-locked.sh
+--merge-main` runs the underlying remote `node scripts/ci-static.mjs
+--merge-main` and exits 0, with all 42 checks passing and zero optional skips.
+This includes strict Go/web tiers, source ownership, shared inventories, vet,
+migrations, reporter/OpenAPI, web typecheck and lint. Earlier exit 3 attempts
+were remote-capacity refusals, not green results. No local fallback or unguarded
+static check was used. The final documentation-only commit records this result;
+no production/test implementation changed after these passes.
 
 Round 3 PASS: `node scripts/test-tiers/cli.mjs manifests --check` and
 `node scripts/test-tiers/affected.mjs --base origin/main` exit 0. The affected
