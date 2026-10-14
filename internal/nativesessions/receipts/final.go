@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"time"
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -51,6 +52,8 @@ func (s *Repository) Persist(ctx context.Context, daemon nativecontract.DaemonAc
 	if s.chat == nil {
 		return out, nativereceipts.Fail(nativecontract.ReasonFeatureDisabled)
 	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	// Declare any delegated original key before acquiring resource fences.
 	// FinalTx must re-read that immutable actor and refuse a changed identity.
 	var originalKey string
