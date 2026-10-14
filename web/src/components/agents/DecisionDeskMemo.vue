@@ -818,8 +818,8 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .desk-btn.ghost.slot { visibility: hidden; }
 @media (hover: hover) { .desk-btn.ghost:hover:not(:disabled) { background: var(--btn-bg-hover); box-shadow: var(--shadow-btn-hover); } }
 .desk-btn :deep(.keycap) { margin-left: 2px; }
-.desk-btn.primary { min-width: 212px; background: var(--brass), var(--brass-solid); color: var(--brass-ink); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 8px 18px -10px rgba(0, 0, 0, .7); }
-.desk-btn.primary :deep(.keycap) { background: rgba(255, 255, 255, .35); box-shadow: inset 0 0 0 1px rgba(42, 28, 4, .25); color: var(--brass-ink); }
+.desk-btn.primary { min-width: 212px; background: var(--brass), var(--brass-solid); color: var(--brass-ink); box-shadow: var(--brass-shadow); }
+.desk-btn.primary :deep(.keycap) { background: var(--brass-keycap-bg); box-shadow: inset 0 0 0 1px var(--brass-keycap-line); color: var(--brass-ink); }
 @media (hover: hover) { .desk-btn.primary:hover:not([aria-disabled="true"]) { filter: brightness(1.05); } }
 /* Decide while it can't decide yet: muted, but it still answers a click with its reason. */
 .desk-btn.primary[aria-disabled="true"] { opacity: .4; cursor: default; filter: none; }
@@ -850,7 +850,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .jump-row.skipped .jr-state { color: var(--ink-2); }
 /* ---------- The memo: one scroll container, the sheet ---------- */
 .stack { grid-area: stack; display: flex; flex-direction: column; min-height: 0; }
-.paper { position: relative; flex: 0 1 auto; min-height: 0; margin: 1px; overflow: hidden auto; overscroll-behavior: contain; padding: 0 32px 30px; border-radius: 0 13px 13px 13px; background: transparent; color: var(--ink); box-shadow: 0 22px 44px -28px rgba(16, 35, 39, .55); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; outline: none; }
+.paper { position: relative; flex: 0 1 auto; min-height: 0; margin: 1px; overflow: hidden auto; overscroll-behavior: contain; padding: 0 32px 30px; border-radius: 0 13px 13px 13px; background: transparent; color: var(--ink); box-shadow: var(--paper-shadow); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; outline: none; }
 .desk[style] .stack, .desk[style] .paper { flex: 1 1 auto; }
 .paper::-webkit-scrollbar { width: 10px; }
 .paper::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--line-2) padding-box; }
@@ -1031,7 +1031,7 @@ a.res-key:hover { text-decoration: underline; }
 .keys-pop dd { margin: 0; }
 @media (pointer: coarse) and (hover: none) { .desk-foot { display: none; } }
 /* On narrow desks the status shows as a toast above the action bar, never over it. */
-.dlg-toast { position: fixed; z-index: 9; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100vw - 32px); min-height: 40px; padding: 8px 14px; border-radius: 16px; background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px rgba(0, 0, 0, .45); }
+.dlg-toast { position: fixed; z-index: 9; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100vw - 32px); min-height: 40px; padding: 8px 14px; border-radius: 16px; background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: var(--shadow-pop); }
 @media (prefers-reduced-motion: no-preference) { .dlg-toast { animation: toast-in .2s ease; } @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } } }
 /* Touch: 44 px hit areas without growing the visuals. */
 @media (pointer: coarse) {

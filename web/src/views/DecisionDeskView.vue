@@ -540,7 +540,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .answer { color: var(--teal-ink); }
 .btn.approve-soft { border-color: transparent; background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .btn.approve-soft:hover { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
-.btn.deny { color: #fff; background: var(--danger); border-color: transparent; }
+.btn.deny { color: var(--danger-on); background: var(--danger); border-color: transparent; }
 .btn.deny:hover { filter: brightness(1.06); background: var(--danger); }
 .decision { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
 .decision label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
