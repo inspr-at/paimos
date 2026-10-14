@@ -6126,6 +6126,14 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestTicketHintsOnlyCanonicalPrefixes","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingBackfillIsIdempotentAndTenantScoped","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingImportedHistoryAndQuantilesAPI","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingReopenSkipBackwardAndWindows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingSourceReplayInferenceAndGaps","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryIncludesCreatorProjectForWorkspaceAgent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
