@@ -5,24 +5,43 @@ import { hostname, platform, arch } from 'node:os'
 import { execFileSync } from 'node:child_process'
 
 const actions = ['list', 'outline', 'graph', 'return-list', 'filter', 'sort', 'search', 'hide-closed', 'open-ticket', 'close-ticket', 'decision-desk', 'agents', 'header-hover', 'scroll']
-const listReady = `!!document.querySelector('table.tickets[aria-busy="false"] tr.ticket-row:not(.ghost)')`
-const graphReady = `!!document.querySelector('.ticket-graph-canvas[data-ready="true"]') && !document.querySelector('.tg-state, .graph-error')`
-const ticketReady = `!!document.querySelector('.ticket-ws .inline-title') && !document.querySelector('.ws-skeleton')`
+const listReady = { type: 'list' }
+const graphReady = { type: 'graph' }
+const ticketReady = { type: 'ticket' }
 
 function instrumentation() {
+  window.__baselineReady = requirement => {
+    const find = selector => document.querySelector(selector)
+    const list = !!find('table.tickets[aria-busy="false"] tr.ticket-row:not(.ghost)')
+    if (requirement.type === 'list') {
+      if (!list) return false
+      if (requirement.role && !find(`table[role="${requirement.role}"]`)) return false
+      if (requirement.query && new URLSearchParams(location.search).get(requirement.query[0]) !== requirement.query[1]) return false
+      if (requirement.absent && find(requirement.absent)) return false
+      if ('checked' in requirement && find('input[aria-label="Hide closed"]')?.checked !== requirement.checked) return false
+      if ('sortBefore' in requirement && find('th[data-column-id="title"]')?.getAttribute('aria-sort') === requirement.sortBefore) return false
+      return true
+    }
+    if (requirement.type === 'graph') return !!find('.ticket-graph-canvas[data-ready="true"]') && !find('.tg-state, .graph-error')
+    if (requirement.type === 'ticket') return !!find('.ticket-ws .inline-title') && !find('.ws-skeleton')
+    if (requirement.type === 'desk') return !!find('#desk-title') && ![...document.querySelectorAll('[role="status"]')].some(el => el.textContent.includes('Reading the desk')) && !find('.source-warnings')
+    if (requirement.type === 'agents') return !!find('#agents-title') && !find('[aria-label="Loading sessions"]')
+    if (requirement.type === 'hover') return !!find('.tooltip')
+    if (requirement.type === 'scroll') return find('#main').scrollTop > 0
+    return false
+  }
   window.__baseline = { start: 0, paint: null, usable: null, tasks: [] }
   const observer = new PerformanceObserver(list => {
     for (const entry of list.getEntries()) window.__baseline.tasks.push({ start: entry.startTime, duration: entry.duration })
   })
   observer.observe({ type: 'longtask', buffered: true })
   window.__baselineObserver = observer
-  window.__baselineArm = source => {
+  window.__baselineArm = requirement => {
     const m = window.__baseline
     m.start = performance.now(); m.paint = null; m.usable = null
     performance.mark('AEON1355-start')
-    const ready = new Function(`return (${source})`)
     const sample = () => {
-      if (ready()) {
+      if (window.__baselineReady(requirement)) {
         // The first frame containing the result, followed by a full paint
         // opportunity. All timestamps stay inside the browser, not the driver.
         m.paint = performance.now()
@@ -31,6 +50,9 @@ function instrumentation() {
     }
     requestAnimationFrame(sample)
   }
+}
+async function waitReady(page, requirement) {
+  await page.waitForFunction(requirement => window.__baselineReady(requirement), requirement)
 }
 
 async function idle(page) {
@@ -44,7 +66,7 @@ async function setSearch(page, value, measured) {
   const input = page.getByRole('searchbox', { name: 'Search tickets in this project' })
   await expect(input).toBeVisible()
   await input.evaluate((element, { value, measured, listReady }) => {
-    if (measured) window.__baselineArm(`${listReady} && new URLSearchParams(location.search).get('q') === ${JSON.stringify(value)}`)
+    if (measured) window.__baselineArm({ ...listReady, query: ['q', value] })
     element.focus()
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(element, value)
     element.dispatchEvent(new Event('input', { bubbles: true }))
@@ -56,14 +78,14 @@ async function setSearch(page, value, measured) {
 }
 async function prepare(page, project, action) {
   await page.goto(`/p/${project}/tickets`, { waitUntil: 'commit' })
-  await page.waitForFunction(listReady)
+  await waitReady(page, listReady)
   if (action === 'return-list') {
     await page.getByRole('tab', { name: 'Outline', exact: true }).click()
-    await page.waitForFunction(`document.querySelector('table[role="treegrid"][aria-busy="false"]')`)
+    await waitReady(page, { ...listReady, role: 'treegrid' })
   }
   if (action === 'close-ticket') {
     await page.locator('tr.ticket-row:not(.ghost) .title-link').first().click()
-    await page.waitForFunction(ticketReady)
+    await waitReady(page, ticketReady)
   }
   if (action === 'filter') {
     await page.getByRole('button', { name: 'Add a filter', exact: true }).click()
@@ -75,7 +97,7 @@ async function prepare(page, project, action) {
 async function act(page, project, action, measure = true, cache = 'cold') {
   const armClick = async (locator, predicate) => {
     if (measure) await nativeClick(locator, predicate)
-    else { await locator.click(); await page.waitForFunction(predicate) }
+    else { await locator.click(); await waitReady(page, predicate) }
   }
   if (action === 'list') {
     if (measure && cache === 'warm') {
@@ -92,41 +114,40 @@ async function act(page, project, action, measure = true, cache = 'cold') {
     await page.goto(`/p/${project}/tickets`, { waitUntil: 'commit' })
   } else if (['outline', 'graph', 'return-list'].includes(action)) {
     const name = action === 'outline' ? 'Outline' : action === 'graph' ? 'Graph' : 'List'
-    const ready = action === 'graph' ? graphReady : `${listReady} && !!document.querySelector('table[role="${action === 'outline' ? 'treegrid' : 'grid'}"]')`
+    const ready = action === 'graph' ? graphReady : { ...listReady, role: action === 'outline' ? 'treegrid' : 'grid' }
     await armClick(page.getByRole('tab', { name, exact: true }), ready)
   } else if (action === 'filter') {
-    await armClick(page.getByRole('checkbox', { name: /^High/ }), `${listReady} && new URLSearchParams(location.search).get('priority') === 'high'`)
+    await armClick(page.getByRole('checkbox', { name: /^High/ }), { ...listReady, query: ['priority', 'high'] })
   } else if (action === 'sort') {
     const header = page.locator('th[data-column-id="title"]')
     const previous = await header.getAttribute('aria-sort')
-    await armClick(header.locator('button.th-sort'), `${listReady} && document.querySelector('th[data-column-id="title"]').getAttribute('aria-sort') !== ${JSON.stringify(previous)}`)
+    await armClick(header.locator('button.th-sort'), { ...listReady, sortBefore: previous })
   } else if (action === 'search') await setSearch(page, 'Synthetic task 12', measure)
   else if (action === 'hide-closed') {
     const checkbox = page.getByRole('checkbox', { name: 'Hide closed', exact: true })
     const checked = await checkbox.isChecked()
-    await armClick(checkbox, `${listReady} && document.querySelector('input[aria-label="Hide closed"]').checked === ${!checked}`)
+    await armClick(checkbox, { ...listReady, checked: !checked })
   } else if (action === 'open-ticket') {
     await armClick(page.locator('tr.ticket-row:not(.ghost) .title-link').first(), ticketReady)
   } else if (action === 'close-ticket') {
-    await armClick(page.getByRole('button', { name: 'Close ticket details', exact: true }), `${listReady} && !document.querySelector('.ticket-ws')`)
+    await armClick(page.getByRole('button', { name: 'Close ticket details', exact: true }), { ...listReady, absent: '.ticket-ws' })
   } else if (action === 'decision-desk' || action === 'agents') {
     const desk = action === 'decision-desk'
-    await armClick(page.locator(`a[href="/${desk ? 'decision-desk' : 'agents'}"]`).first(), desk
-      ? `!!document.querySelector('#desk-title') && ![...document.querySelectorAll('[role="status"]')].some(el => el.textContent.includes('Reading the desk')) && !document.querySelector('.source-warnings')`
-      : `!!document.querySelector('#agents-title') && !document.querySelector('[aria-label="Loading sessions"]')`)
+    await armClick(page.locator(`a[href="/${desk ? 'decision-desk' : 'agents'}"]`).first(), { type: desk ? 'desk' : 'agents' })
   } else if (action === 'header-hover') {
     const header = page.locator('th[data-column-id="title"] button.th-sort')
+    await page.mouse.move(0, 0)
     await header.evaluate((element, measure) => {
-      if (measure) element.addEventListener('pointerover', () => window.__baselineArm(`!!document.querySelector('.tooltip')`), { once: true })
+      if (measure) element.addEventListener('pointerover', () => window.__baselineArm({ type: 'hover' }), { once: true })
     }, measure)
     await header.hover()
     if (!measure) await expect(page.locator('.tooltip')).toBeVisible()
   } else if (action === 'scroll') {
     await page.locator('#main').evaluate((element, measure) => {
-      if (measure) window.__baselineArm(`document.querySelector('#main').scrollTop > 0`)
+      if (measure) window.__baselineArm({ type: 'scroll' })
       element.scrollTop = 300
     }, measure)
-    if (!measure) await page.waitForFunction(`document.querySelector('#main').scrollTop > 0`)
+    if (!measure) await waitReady(page, { type: 'scroll' })
   }
   if (measure) await page.waitForFunction(() => window.__baseline.usable !== null)
   await idle(page)
