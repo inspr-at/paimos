@@ -342,11 +342,12 @@ jobs:
   nightly-web-shard:
     needs: nightly-web-setup
     runs-on: ubuntu-latest
-    # Keep browser execution bounded at 20 minutes independently of the
-    # 13-minute dependency install, with seven minutes for setup and evidence.
-    # AEON-1325: the full catalogue needs 24 shards.
-    # AEON-1327: run 38488051180 packs every shard near 15 minutes, so this
-    # cap keeps about five minutes of headroom. PR lanes keep their budgets.
+    # AEON-1351: the UI step is 30 minutes. Shard 23 on run 38582896804
+    # passed every case and still hit the old 20-minute step at 19.83 minutes.
+    # The job stays at 40 minutes so a hung job is still caught. Dependency
+    # install keeps its own 13-minute step cap. AEON-1325: 24 shards.
+    # AEON-1327: run 38488051180 packs every shard near 15 minutes.
+    # PR lanes keep their budgets.
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -381,7 +382,7 @@ jobs:
         working-directory: web
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
       - name: Run selected UI cases without retries
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
