@@ -398,13 +398,13 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 </script>
 
 <template>
-  <main class="desk-page" aria-labelledby="desk-title">
+  <main class="desk-page decision-desk" aria-labelledby="desk-title">
     <header class="dp-head">
       <div><h1 id="desk-title" tabindex="-1">Decision Desk</h1><p class="head-note">Agents keep working unless something is held up.</p></div>
       <button v-if="filter === 'open' && reviewable.length" type="button" class="btn" :disabled="loading && !items.length" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" />Answer one by one</button>
     </header>
     <div class="dp-bar">
-      <div class="seg" role="radiogroup" aria-label="Show">
+      <div class="seg view-tabs" role="radiogroup" aria-label="Show">
         <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ desk.count ?? '?' }}</span></button>
         <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCount }}</span></button>
       </div>
@@ -420,8 +420,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
         <div v-for="group in [{ key: 'held', label: 'Waiting on you', note: 'something is held up until you answer', rows: heldRows }, { key: 'ready', label: 'When you’re ready', note: 'the agents carry on meanwhile', rows: readyRows }].filter(group => group.rows.length)" :key="group.key" class="q-group" :class="group.key">
           <p class="q-group-label">{{ group.label }}<span class="n">{{ group.rows.length }}</span><span class="group-note">{{ group.note }}</span></p>
           <ul class="items desk-list" :aria-label="group.label">
-            <li v-for="item in group.rows" :key="item.id" class="item" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }">
-              <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="desk-row row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" :data-testid="`desk-row-${item.id}`" @click="item.linkOut || begin(item.id)" />
+            <li v-for="item in group.rows" :key="item.id" class="item desk-row" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }" :data-testid="`desk-row-${item.id}`">
+              <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" @click="item.linkOut || begin(item.id)" />
               <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="16" /></span>
               <div class="body">
                 <p class="line1"><strong class="what">{{ item.title }}</strong><span class="meta"><time v-if="item.expiresAt" class="expiry" :class="{ soon: soon(item.expiresAt) }" :datetime="item.expiresAt">{{ expiry(item.expiresAt) }}</time><time v-else-if="item.createdAt" class="expiry" :datetime="item.createdAt">{{ ago(item.createdAt) }}</time><span v-if="item.approval" class="risk" :class="{ high: riskFor(item.approval) === 'high' }">{{ RISK_LABEL[riskFor(item.approval)] }}</span></span></p>
@@ -451,8 +451,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
       <template v-else>
         <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon name="check" :size="16" /><span>{{ outcomeFilter ? 'Nothing decided with this stamp yet' : 'No decisions recorded yet' }}</span></p>
         <ul v-else class="dec-list desk-list" aria-label="Decided">
-          <li v-for="item in visible" :key="item.id" class="dec">
-            <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="desk-row row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" :data-testid="`desk-row-${item.id}`" @click="item.linkOut || begin(item.id)" />
+          <li v-for="item in visible" :key="item.id" class="dec desk-row" :data-testid="`desk-row-${item.id}`">
+            <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" @click="item.linkOut || begin(item.id)" />
             <span class="mark" :class="outcomeOf(item).tone" aria-hidden="true"><AppIcon :name="outcomeOf(item).icon" :size="15" /></span>
             <span class="dec-text"><span class="dec-q">{{ item.title }}</span><span v-if="item.answer" class="dec-a">{{ item.answer }}</span><span class="dec-meta"><template v-if="who(item)"><span>{{ who(item)!.name }}</span><span>·</span></template><span class="proj-quiet"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span>·</span><span>{{ ticketOf(item)!.key }}</span></template><template v-if="item.decidedAt || item.createdAt"><span>·</span><span>decided {{ ago(item.decidedAt || item.createdAt) }}</span></template><template v-if="graceLeft(item)"><span>·</span><span>sends in <span class="n">{{ graceLeft(item) }}</span> s</span></template><template v-else-if="item.deliveryState === 'failed'"><span>·</span><span class="dl-bad">not delivered</span></template><template v-else-if="item.deliveryState"><span>·</span><span>waiting for it to read</span></template></span></span>
             <span class="dec-side"><span class="dec-out" :class="outcomeOf(item).tone"><AppIcon :name="outcomeOf(item).icon" :size="13" />{{ outcomeOf(item).word }}</span><button v-if="graceLeft(item)" type="button" class="btn sm ghost" @click="undoRow(item)"><AppIcon name="rollback" :size="13" />Undo</button></span>

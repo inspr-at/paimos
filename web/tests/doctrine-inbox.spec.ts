@@ -108,12 +108,13 @@ test('native doctrine proposals retain diff, notices, source links and protected
   await page.getByRole('button', { name: 'Review', exact: true }).click()
   await expect(page).toHaveURL('/decision-desk')
   await page.getByTestId(`desk-row-r:${ESTIMATE.id}`).click()
-  const details = page.getByRole('region', { name: 'Rule proposal details', exact: true })
-  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', `/settings/agent-rules#${ESTIMATE.id}`)
+  // AEON-1339: the diff reads line by line with full tints; the proposer is the memo's From.
+  const details = page.getByTestId('desk-rule-diff')
+  await expect(page.getByRole('link', { name: 'Source', exact: true })).toHaveAttribute('href', `/settings/agent-rules#${ESTIMATE.id}`)
   await expect(details.locator('ins')).toContainText('and a written estimate')
-  await expect(details).toContainText('Proposed by builder')
+  await expect(page.getByTestId('desk-from')).toHaveText('builder')
   await expect(page.getByTestId('desk-body')).toContainText('every heartbeat ETA honest')
-  const axe = await new AxeBuilder({ page }).include('.desk-dialog').analyze()
+  const axe = await new AxeBuilder({ page }).include('.desk-dlg').analyze()
   expect(axe.violations.map(v => v.id)).toEqual([])
   // A bookmarked source reopens on reload; opening an overview row is local
   // round state and does not change the overview's URL.

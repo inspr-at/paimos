@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1057 risk: the person decides an item without seeing that its project
 // changed, the project link opens in place of the desk, or P fires while typing.
+// AEON-1339 (Markus 10-14): the project appears once, without a dot: its key on the
+// folder tab (filled when it changed), its name with the folder icon in the meta.
 import { expect, test, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,7 +11,7 @@ import { expectStableControls } from './helpers/stable'
 // AEON-1209: the Agents page no longer carries the Desk panel; its harness keeps the panel covered until the header preview (AEON-1214).
 const DESK_PANEL = '/tests/desk-panel-harness.html'
 
-const AEON = { name: 'Paimos Aeon', href: '/p/PRJ-35' }, PHAROS = { name: 'Pharos', href: '/p/PRJ-17' }
+const AEON = { name: 'Paimos Aeon', key: 'PRJ-35', href: '/p/PRJ-35' }, PHAROS = { name: 'Pharos', key: 'PRJ-17', href: '/p/PRJ-17' }
 const notice = (now: string, before: string) => `Now in ${now}. The item before was in ${before}.`
 
 // The round: approval (Aeon), question (Aeon), handover question (Pharos), action request (Aeon), rule change (Aeon, through its ticket).
@@ -42,8 +44,9 @@ test('every kind names its project with a new-tab link; P opens it, but not whil
     await expect(link).toHaveAttribute('href', project.href)
     await expect(link).toHaveAttribute('target', '_blank')
     await expect(link).toHaveAttribute('rel', /\bnoopener\b/)
-    await expect(page.getByTestId('desk-tab-project')).toHaveText(project.name)
-    kinds.push(await page.locator('.pager-kind').innerText())
+    await expect(page.getByTestId('desk-tab-project')).toHaveText(project.key)
+    await expect(page.locator('.desk-dlg .project-dot, .desk-dlg i[aria-hidden="true"]')).toHaveCount(0)
+    kinds.push(await page.locator('.ft-kind').innerText())
     if (at < 4) { const before = await page.getByTestId('desk-paper').getByRole('heading', { level: 2 }).innerText(); await page.keyboard.press('j'); await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).not.toHaveText(before) }
   }
   expect(kinds).toEqual(['Approval', 'Question', 'Handover question', 'Action request', 'Rule change'])
@@ -61,40 +64,38 @@ test('every kind names its project with a new-tab link; P opens it, but not whil
   expect(await opened(page)).toEqual([[AEON.href, '_blank'], [AEON.href, '_blank']])
 })
 
-test('the switch notice follows the item shown before, through J/K, the jump list and Decide & next', async ({ page }) => {
+test('the filled key chip follows the item shown before, through J/K, the jump list and Decide & next', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await openRound(page)
-  const switched = page.getByTestId('desk-project-switch'), chip = page.getByTestId('desk-tab-project')
-  await expect(switched, 'the first item of a round never shows it').toHaveCount(0)
+  const chip = page.getByTestId('desk-tab-project')
+  // Rev 12's extra "Now in" sentence is dropped (Tick 10-14); screen readers still hear the change.
+  await expect(page.getByTestId('desk-project-switch')).toHaveCount(0)
+  await expect(chip, 'the first item of a round is never marked').not.toHaveClass(/switched/)
   await move(page, 'j', 'Which migration should carry the index?')
-  await expect(switched, 'same project').toHaveCount(0)
-  await expect(chip).not.toHaveClass(/switched/)
+  await expect(chip, 'same project').not.toHaveClass(/switched/)
   await move(page, 'j', 'Should the successor continue the review?')
-  await expect(switched).toHaveText(notice(PHAROS.name, AEON.name))
+  await expect(chip).toHaveText(PHAROS.key)
   await expect(chip).toHaveClass(/switched/)
   await expect(page.getByTestId('desk-announcement')).toContainText(notice(PHAROS.name, AEON.name))
   await move(page, 'j', 'An agent needs your steer')
-  await expect(switched).toHaveText(notice(AEON.name, PHAROS.name))
+  await expect(chip).toHaveText(AEON.key)
+  await expect(chip).toHaveClass(/switched/)
   await move(page, 'k', 'Should the successor continue the review?')
-  await expect(switched).toHaveText(notice(PHAROS.name, AEON.name))
+  await expect(chip).toHaveClass(/switched/)
 
   await page.getByTestId('desk-pager').click()
-  await expect(page.getByTestId('desk-jump-head')).toContainText('· 2 projects')
   const names = await page.getByTestId('desk-jump-project').allInnerTexts()
-  expect(names).toEqual([AEON.name, AEON.name, PHAROS.name, AEON.name, AEON.name])
-  for (const [at, change] of [false, false, true, true, false].entries()) {
-    if (change) await expect(page.getByTestId(`desk-jump-${at}`)).toHaveClass(/project-change/)
-    else await expect(page.getByTestId(`desk-jump-${at}`)).not.toHaveClass(/project-change/)
-  }
+  expect(names).toEqual([`${AEON.key} · Approval`, `${AEON.key} · Question`, `${PHAROS.key} · Handover question`, `${AEON.key} · Action request`, `${AEON.key} · Rule change`])
   await page.getByTestId('desk-jump-0').click()
   await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText('Allow nodes.read?')
-  await expect(switched).toHaveText(notice(AEON.name, PHAROS.name))
+  await expect(chip).toHaveClass(/switched/)
 
   await move(page, 'j', 'Which migration should carry the index?')
-  await expect(switched).toHaveCount(0)
+  await expect(chip).not.toHaveClass(/switched/)
   await page.getByTestId('desk-decide').click()
   await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText('Should the successor continue the review?')
-  await expect(switched).toHaveText(notice(PHAROS.name, AEON.name))
+  await expect(chip).toHaveText(PHAROS.key)
+  await expect(chip).toHaveClass(/switched/)
 })
 
 test('the Agents desk panel names each item\'s project with a new-tab link', async ({ page }) => {
@@ -122,7 +123,8 @@ test('revisiting a question after Decide & next retains its project link, colour
   await page.getByTestId('desk-decide').click()
   await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText('Should the successor continue the review?')
   await move(page, 'k', 'Which migration should carry the index?')
-  await expect(page.getByTestId('desk-paper').locator('.waiting')).toHaveText('Decided')
+  await expect(page.getByTestId('desk-decide')).toContainText('Next')
+  await expect(page.getByTestId('desk-stamp')).toHaveAttribute('aria-label', 'Stamped Once')
   await expect(link).toHaveAttribute('href', AEON.href)
   expect(await link.evaluate(element => getComputedStyle(element).color)).toBe(color)
   await page.keyboard.press('p')
@@ -196,7 +198,7 @@ for (const theme of ['light', 'dark'] as const) {
     await openRound(page, theme)
     const actions = { pager: page.getByTestId('desk-pager'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close') }
     const fits = async () => {
-      const dialog = await page.locator('dialog.desk-dialog').boundingBox()
+      const dialog = await page.locator('dialog.desk-dlg').boundingBox()
       expect(dialog).not.toBeNull()
       for (const [name, control] of Object.entries(actions)) {
         const box = await control.boundingBox()
@@ -234,25 +236,26 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.getByTestId('desk-row-q:question-1').click()
     const title = page.getByTestId('desk-paper').getByRole('heading', { level: 2 })
     await expect(title).toHaveText('Which migration should carry the index?')
+    // The bar, the folder tab and the phone sheet stay still; the key chip changes in place.
     await expectStableControls({
-      controls: { pager: page.getByTestId('desk-pager'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'),
-        stamps: page.getByTestId('desk-stamps'), once: page.getByTestId('stamp-once'), ...(width === 390 ? { frame: page.getByTestId('desk-frame') } : {}) },
+      controls: { pager: page.getByTestId('desk-pager'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), tab: page.getByTestId('desk-tab'),
+        ...(width === 390 ? { frame: page.getByTestId('desk-frame') } : {}) },
       scrollAreas: { body: page.getByTestId('desk-body') },
       interactions: [
         { name: 'J into another project', run: async () => {
-          await page.keyboard.press('j'); await expect(page.getByTestId('desk-project-switch')).toHaveText(notice(PHAROS.name, AEON.name))
+          await page.keyboard.press('j'); await expect(page.getByTestId('desk-tab-project')).toHaveText(PHAROS.key); await expect(page.getByTestId('desk-tab-project')).toHaveClass(/switched/)
           await page.screenshot({ path: join(dir, `desk-switch-${width}-${theme}.png`) })
         } },
         { name: 'J back into the first project', run: async () => {
-          await page.keyboard.press('j'); await expect(page.getByTestId('desk-project-switch')).toHaveText(notice(AEON.name, PHAROS.name))
+          await page.keyboard.press('j'); await expect(page.getByTestId('desk-tab-project')).toHaveText(AEON.key); await expect(page.getByTestId('desk-tab-project')).toHaveClass(/switched/)
         } },
         { name: 'K returns to the other project', run: async () => {
-          await page.keyboard.press('k'); await expect(page.getByTestId('desk-project-switch')).toHaveText(notice(PHAROS.name, AEON.name))
+          await page.keyboard.press('k'); await expect(page.getByTestId('desk-tab-project')).toHaveText(PHAROS.key)
         } },
       ],
     })
     await page.getByTestId('desk-pager').click()
-    await expect(page.getByTestId('desk-jump-head')).toContainText('· 2 projects')
+    await expect(page.getByTestId('desk-jump-head')).toContainText('open')
     // A long title stays on one line, so the project column and every row keep their place.
     const titleHeight = await page.getByTestId('desk-jump-2').locator(':scope > span').nth(2).evaluate(element => element.getBoundingClientRect().height)
     expect(titleHeight).toBeLessThan(20)

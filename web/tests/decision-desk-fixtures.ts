@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 import type { Question } from '../src/lib/decisionDeskApi'
 import { fixtures, mockWork, PNG } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -127,4 +127,14 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
     return route.fallback()
   })
   return control
+}
+
+/** AEON-1339: the Desk has no Refresh link; it reads again on window focus. Wait until that
+ * read of the open questions has landed and the list is no longer busy. */
+export async function refreshDesk(page: Page, world: { reads: string[] }) {
+  const reads = () => world.reads.filter(path => path.startsWith('/api/decision-desk?state=open')).length
+  const before = reads()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(reads).toBeGreaterThan(before)
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
 }

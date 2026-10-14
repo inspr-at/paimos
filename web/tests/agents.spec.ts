@@ -220,7 +220,7 @@ test('native approval choices and field shortcuts record the exact source and re
   expect(calls.find(c => c.path.endsWith('/decision'))).toMatchObject({ path: `/api/approvals/${approval.id}/decision`, body: { decision: 'approved', reason: 'Fine for this run.' } })
   expect(approval.decision).toBe('approved')
   await page.getByTestId('desk-close').click()
-  await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.getByRole('radio', { name: /^Decided/ }).click()
   await expect(page.getByTestId(`desk-row-a:${approval.id}`)).toBeVisible()
 })
 
@@ -516,7 +516,7 @@ test('a held action request opens the exact native desk memo', async ({ page }) 
   await page.goto(`/agents?needs=m:${held.id}`)
   await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
   await expect(page.getByTestId('desk-body')).toContainText('Please merge the release fix once CI is green')
-  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', `/agents?needs=m:${held.id}`)
+  await expect(page.getByRole('link', { name: 'Source', exact: true })).toHaveAttribute('href', `/agents?needs=m:${held.id}`)
 })
 
 test('held action requests resolve with an optional note through their original endpoint', async ({ page }) => {

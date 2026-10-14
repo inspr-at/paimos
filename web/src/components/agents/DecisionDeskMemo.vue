@@ -85,13 +85,13 @@ const decideBlock = computed<{ why: string; focus: string }>(() => {
   const current = item.value, sent = draft.value
   if (finished.value || !current || !sent) return { why: '', focus: '' }
   if (decidedView.value && !(current.kind === 'key_trim' && trimRestorable.value)) return { why: '', focus: '' }
-  if (busy.value) return { why: status.value || 'Recording the decision…', focus: '' }
   if (expired.value) return { why: 'This request expired.', focus: '' }
   if (current.unavailable) return { why: current.unavailable, focus: '' }
   if (!props.allowed(current)) return { why: 'You don’t have permission to decide this.', focus: '' }
+  if (busy.value) return { why: status.value || 'Recording the decision…', focus: '' }
   if (current.kind === 'key_trim' || current.kind === 'stepup') return { why: '', focus: '' }
   const choice = current.choices.find(row => row.id === sent.optionId)
-  if (!choice) return { why: current.kind === 'approval' || current.kind === 'tier' ? 'Choose Approve or Deny first.' : current.kind === 'rule' ? 'Choose Propose the change or Not now first.' : question.value ? 'Choose an answer first.' : 'Choose what to do first.', focus: 'choice' }
+  if (!choice) return { why: current.kind === 'approval' ? 'Choose Approve or Deny first.' : current.kind === 'rule' ? 'Choose Propose the change or Not now first.' : question.value ? 'Choose an answer first.' : 'Choose what to do first.', focus: 'choice' }
   if (choice.unavailable) return { why: choice.unavailable, focus: 'choice' }
   if (choice.field && !sent.answer.trim()) return { why: current.kind === 'action' ? `Write your reply to ${askerName.value} first.` : 'Write your answer first, or pick an option.', focus: 'answer' }
   if (question.value && outcomeUnavailable(current, sent.outcome)) {
@@ -231,6 +231,12 @@ const ruleLines = computed(() => {
     pieces.forEach((piece, at) => { if (at) flush(); if (piece) current.push({ op: part.op, text: piece }) })
   }
   flush()
+  // Without a word diff, the rule today is removed and the proposed text inserted, line by line.
+  if (!lines.length && item.value?.rule) {
+    const { base, proposed } = item.value.rule
+    if (base && base !== proposed) lines.push(...base.split('\n').filter(Boolean).map(text => ({ op: 'del' as const, text })))
+    if (proposed) lines.push(...proposed.split('\n').filter(Boolean).map(text => ({ op: 'ins' as const, text })))
+  }
   return lines.slice(0, 400)
 })
 const legend = computed<LegendEntry[]>(() => {
@@ -285,6 +291,8 @@ watch(item, async (current, previous) => {
   }
   if (current && (!drafts.value[current.id] || current.decided && current.id === previous?.id && !previous.decided && current.kind !== 'question' && current.kind !== 'handover')) drafts.value[current.id] = draftFor(current)
   if (current?.id !== previous?.id) { editing.value = ''; pager.value = false; keysOpen.value = false; brokenThumbs.value = new Set() }
+  // A source that changed under the memo replaces any passing note with its lasting restriction.
+  else if (current?.unavailable && !previous?.unavailable) status.value = ''
   context.value = { attachments: [], related: [], outcomes: [], warnings: [] }; contextLoading.value = false
   clearTimeout(expiryTimer)
   expired.value = !!current?.expiresAt && Date.parse(current.expiresAt) <= Date.now()
@@ -376,19 +384,19 @@ function changeDecision(id = item.value?.id) {
   setStatus(row.deliveryState === 'pending' && graceLeft(row) > 0 ? 'Change your answer before it goes out. Closing keeps it as it is.' : 'Change your answer. Deciding again sends a correction.')
   void nextTick(() => memo.value?.focus({ preventScroll: true }))
 }
-function advance(decided: string) {
+function advance(decided: string, notice: string) {
   done.value = [...done.value.filter(id => id !== decided), decided]
   const next = nextOpen(index.value)
-  if (next >= 0) { jumpTo(next); return }
+  if (next >= 0) { jumpTo(next, notice); return }
   // Skipped items are still open: go back to them instead of closing.
   const back = nextOpen(index.value, true)
-  if (back >= 0) { const id = props.round[back]!; skipped.value.delete(id); jumpTo(back, 'Back to the one you skipped.'); setStatus('Back to the one you skipped.'); return }
-  allDecided()
+  if (back >= 0) { const id = props.round[back]!; skipped.value.delete(id); jumpTo(back, `${notice} Back to the one you skipped.`); status.value = 'Back to the one you skipped.'; return }
+  allDecided(notice)
 }
 // The last decision: "All decided" for 1.2 s, with Undo, then the desk closes back to where it was opened.
-function allDecided() {
+function allDecided(notice = '') {
   finished.value = true; status.value = ''; pager.value = false
-  announcement.value = 'All decided. The desk closes by itself.'
+  announcement.value = `${notice} All decided. The desk closes by itself.`.trim()
   scheduleClose()
   void nextTick(() => decideButton.value?.focus({ preventScroll: true }))
 }
@@ -429,7 +437,8 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     drafts.value[capturedId] = draftFor(result); skipped.value.delete(capturedId)
     const reopened = new Set(changing.value); reopened.delete(capturedId); changing.value = reopened
     emit('recorded', result); now.value = Date.now()
-    announcement.value = `Decision recorded for ${current.title}.`
+    const notice = `Decision recorded for ${current.title}. ${deliveryNote(result)}`.trim()
+    announcement.value = notice
     status.value = ''
     await landed()
     slam.value = false
@@ -438,14 +447,20 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
       busy.value = false
       // A restored key trim stays on its record: the outcome is shown in place.
       if (trimAction === 'restore' || (trim && current.decided)) { await nextTick(); focusDecision(); return }
-      advance(capturedId); await nextTick(); if (!finished.value) focusDecision()
+      advance(capturedId, notice); await nextTick(); if (!finished.value) focusDecision()
     }
   } catch (cause) {
     // The fresh sign-in replaces this page; the desk reopens the request afterwards.
     if (cause instanceof StepupNavigation) { navigating = true; slam.value = false; setStatus(cause.message); return }
-    if (live && item.value?.id === capturedId) { busy.value = false; setStatus(`The decision was not confirmed. ${cause instanceof Error ? cause.message : 'Your answer is kept.'}`) }
+    if (live && item.value?.id === capturedId) {
+      busy.value = false
+      const why = cause instanceof Error ? cause.message : 'The decision was not confirmed. Your answer is kept.'
+      setStatus(why); announcement.value = `Decision not confirmed. ${why}`
+    }
   } finally { if (live && !navigating) { busy.value = false; slam.value = false } }
 }
+// What the server said about delivery, for the announcement after a decision.
+function deliveryNote(row: DeskItem) { return row.kind === 'question' || row.kind === 'handover' ? (row.deliveryState === 'pending' ? 'It goes out after the ten-second grace.' : '') : row.delivery ?? '' }
 // The stamp slams only on Decide (none with reduced motion); the round waits for it to land.
 function landed() {
   if (!slam.value || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return Promise.resolve()
@@ -489,7 +504,7 @@ async function revokeGrant() {
     emit('recorded', result)
     await nextTick()
     if (!live || item.value?.id !== id || item.value.revision !== revision) return
-    revokedHere.value = new Set([...revokedHere.value, id]); setStatus('Grant revoked. The original decision stays in history.')
+    revokedHere.value = new Set([...revokedHere.value, id]); setStatus('The grant was revoked. The original decision stays in history.')
   } catch (cause) {
     if (live && item.value?.id === id) setStatus(cause instanceof Error ? cause.message : 'Revocation was not confirmed.')
   } finally { if (live) busy.value = false }
@@ -597,7 +612,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
   <dialog ref="dialog" class="desk-dlg" aria-label="Decision Desk memo" @keydown="keys" @cancel.prevent="close">
     <div ref="frame" class="desk" :style="lockedHeight ? { height: `${lockedHeight}px` } : undefined" data-testid="desk-frame">
       <svg ref="sheet" class="sheet-shape" aria-hidden="true" focusable="false"><path :d="sheetPath" /></svg>
-      <div class="desk-top" data-testid="desk-actions">
+      <div class="desk-top desk-toolbar" data-testid="desk-actions">
         <div ref="tab" class="folder-tab" data-testid="desk-tab">
           <span v-if="project?.key && !finished" class="ft-key" :class="{ switched: !!switchedFrom }" :data-tip="switchedFrom ? `${project.name}: another project than the item before (${switchedFrom.name})` : project.name" data-testid="desk-tab-project">{{ project.key }}</span>
           <span class="ft-kind">{{ finished ? 'Round finished' : item ? kindLabels[item.kind] : 'Memo' }}</span>
@@ -639,7 +654,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
             <p class="done-acts"><button v-if="doneSummary.grace" type="button" class="btn sm" data-testid="desk-undo" @pointerenter="holdClose = true" @pointerleave="holdClose = false" @focus="holdClose = true" @blur="holdClose = false" @click="changeDecision(doneSummary.grace.id)"><AppIcon name="rollback" :size="13" />Undo</button><span>The desk closes by itself.</span></p>
           </div>
           <template v-else-if="item && draft">
-            <header class="memo-head">
+            <header class="memo-head memo-heading">
               <div class="stamp-slot" aria-live="polite">
                 <span class="stamp-big" :class="[`t-${impression?.tone ?? 'ink'}`, { empty: !impression, landed: decidedView && !!impression, slam }]" :aria-label="impression ? (decidedView ? `Stamped ${impression.word}` : `Will be stamped ${impression.word}`) : 'Not decided yet'" data-testid="desk-stamp">{{ impression?.word ?? 'Not decided' }}</span>
               </div>
@@ -703,7 +718,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <p v-else-if="noteField && draft.reason" class="ps"><span class="ps-label">{{ noteField.label }}</span><span class="c-answer">{{ draft.reason }}</span></p>
                 <p v-if="item.fromRecord && !item.decided" class="m-note">{{ item.fromRecord }}</p>
               </section>
-              <aside class="margin" aria-label="Background">
+              <aside class="margin context-column" aria-label="Background">
                 <template v-if="item.approval">
                   <section class="m-sec"><h3 class="eyebrow">Why</h3><p>{{ item.approval.rationale || 'No reason supplied by the agent.' }}</p></section>
                   <section class="m-sec" aria-label="Permission request"><h3 class="eyebrow">What it runs</h3><p class="mono-line">{{ scopeLabel(item.approval.scope) }}</p><p>{{ item.approval.resource_kind === 'tenant' ? 'The whole workspace' : `${item.approval.resource_kind === 'node' ? 'Ticket' : 'Run'} ${item.approval.resource_id || 'not named'}` }} · {{ RISK_LABEL[riskFor(item.approval)] }}</p><p>Asked by {{ askerName }} · expires <time :datetime="item.approval.expires_at">{{ deliveryTime(item.approval.expires_at) }}</time></p><TargetSummary :approval="item.approval" /></section>
@@ -738,17 +753,17 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <section v-if="item.kind === 'tier'" class="m-sec"><h3 class="eyebrow">Afterwards</h3><p>Applied at the next safe point of the session.</p></section>
                 <section v-if="item.outcomeEffects?.length && item.decided" class="m-sec" aria-label="Outcome effects" data-testid="desk-outcome-effects"><h3 class="eyebrow">Afterwards</h3>
                   <div v-for="effect in item.outcomeEffects" :key="effect.id" class="effect">
-                    <p>{{ effect.state === 'failed' ? `${outcomeLabels[item.outcome]} failed; the answer stays recorded.` : effect.state === 'pending' ? `${outcomeLabels[item.outcome]} applies ${deliveryTime(effect.deliver_after)}.` : effect.state === 'replaced' ? 'Replaced by a correction.' : `${outcomeLabels[item.outcome]} applied.` }}</p>
+                    <p>{{ effect.state === 'failed' ? `The ${outcomeLabels[item.outcome]} outcome failed; the answer stays recorded.` : effect.state === 'pending' ? `The ${outcomeLabels[item.outcome]} outcome applies ${deliveryTime(effect.deliver_after)}.` : effect.state === 'replaced' ? 'Replaced by a correction.' : `The ${outcomeLabels[item.outcome]} outcome is applied.` }}</p>
                     <p v-if="effect.state === 'failed' && (effect.error_message || effect.error_code)">{{ effect.error_message || 'The source did not supply a reason.' }}</p>
                     <p v-if="effect.state === 'failed'">{{ effect.effect_data?.retryable === false ? 'It won’t retry by itself. Change the answer to try again.' : effect.effect_data?.retryable === true ? 'It retries by itself.' : '' }}</p>
                     <p v-if="effect.effect_data?.ticket_id"><RouterLink class="src-link" :to="`/work/${encodeURIComponent(effect.effect_data.ticket_id)}`">Open the ticket</RouterLink></p>
                     <p v-if="effect.effect_data?.knowledge_id"><a class="src-link" :href="`/api/nodes/${encodeURIComponent(effect.effect_data.knowledge_id)}`" target="_blank" rel="noopener noreferrer">Open the decision in Knowledge</a></p>
                     <p v-if="effect.effect_data?.doctrine_id"><RouterLink class="src-link" :to="doctrineReviewPath(effect.effect_data.doctrine_id, effect.doctrine_state ?? 'pending')">Review the doctrine draft</RouterLink></p>
-                    <p v-for="review in effect.effect_data?.review_required" :key="`${review.kind}:${review.ref}`">{{ review.why }} <RouterLink class="src-link" :to="review.kind === 'criterion' ? `/work/${encodeURIComponent(review.ref)}` : doctrineReviewPath(review.ref, review.ref === effect.effect_data?.doctrine_id ? effect.doctrine_state : undefined)">Review the {{ review.kind === 'criterion' ? 'criterion' : 'doctrine draft' }}</RouterLink></p>
+                    <p v-for="review in effect.effect_data?.review_required" :key="`${review.kind}:${review.ref}`">{{ review.why }} <RouterLink class="src-link" :to="review.kind === 'criterion' ? `/work/${encodeURIComponent(review.ref)}` : doctrineReviewPath(review.ref, review.ref === effect.effect_data?.doctrine_id ? effect.doctrine_state : undefined)">{{ review.kind === 'criterion' ? 'Open the criterion to review' : 'Open the draft to review' }}</RouterLink></p>
                   </div>
                 </section>
                 <section v-if="context.attachments.length" class="m-sec"><h3 class="eyebrow">Attachments · {{ context.attachments.length }}</h3><div class="thumbs"><button v-for="(attachment, at) in context.attachments" :key="attachment.id" type="button" class="thumb" :aria-label="`Open ${attachment.caption || attachment.name}`" @click="showAttachment(at)"><span class="thumb-img"><img v-if="hasThumbnail(attachment) && !brokenThumbs.has(attachment.id)" :src="contentUrl(attachment.id, 'thumb')" alt="" @error="brokenThumbs.add(attachment.id)" /><span v-else class="thumb-kind">{{ fileKind(attachment) }}</span></span><span class="thumb-name" :data-tip="attachment.caption || attachment.name">{{ attachment.caption || attachment.name }}</span></button></div></section>
-                <p v-if="item.source && !item.ticketId && !item.ticketKey && !item.approval && !item.rule" class="m-sec"><a v-if="item.source.startsWith('/api/')" class="src-link" :href="item.source" target="_blank" rel="noopener noreferrer">Source <AppIcon name="external" :size="12" /></a><RouterLink v-else class="src-link" :to="item.source">Source <AppIcon name="external" :size="12" /></RouterLink></p>
+                <p v-if="item.source && !item.ticketId && !item.ticketKey && !item.approval" class="m-sec"><a v-if="item.source.startsWith('/api/')" class="src-link" :href="item.source" target="_blank" rel="noopener noreferrer">Source <AppIcon name="external" :size="12" /></a><RouterLink v-else class="src-link" :to="item.source">Source <AppIcon name="external" :size="12" /></RouterLink></p>
               </aside>
             </div>
           </template>
@@ -1014,8 +1029,8 @@ a.res-key:hover { text-decoration: underline; }
   .stamp { height: 40px; }
   .ul-field { height: 44px; }
   .sug-off { white-space: normal; }
-  :is(.linkish, .proj-link, .res-key, .tk-open, .keys-btn, .ft-pager, .desk-x, .stamp) { position: relative; }
-  :is(.linkish, .proj-link, .res-key, .tk-open, .keys-btn, .ft-pager, .desk-x, .stamp)::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  :is(.linkish, .proj-link, .res-key, .tk-open, .keys-btn, .ft-pager, .desk-x, .desk-btn, .stamp) { position: relative; }
+  :is(.linkish, .proj-link, .res-key, .tk-open, .keys-btn, .ft-pager, .desk-x, .desk-btn, .stamp)::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
 /* Narrow desks (a phone, a small window; the artifact's 640 px desk): one column, background first, actions in a bottom bar. */
 @media (max-width: 688px) {
