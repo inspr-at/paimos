@@ -30,6 +30,12 @@ project, configuration, title and repeated-title occurrence. First adoption or
 unavailable trusted code publishes a full fallback with `complete: false` and
 explicitly unavailable shard accounting; it never claims skipped coverage.
 
+The `tier-plan` checkout stays depth 1. The shadow step then fetches that merge
+commit at depth 2, so the base and source head exist as parent objects.
+`merge-base` cannot see those parents in the depth-1 commit alone, and fetching
+only the base leaves it unrelated to `HEAD`. Without the deepen, every pull
+request publishes the full fallback and zero planned skips.
+
 The shadow planner and its dependency graph come from the immutable PR base.
 Candidate files are parsed as bounded data. Imports are supplemented by
 navigation ownership of the application entry/router and URL-loaded harness

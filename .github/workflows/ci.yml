@@ -262,8 +262,14 @@ jobs:
           trap 'rm -rf "$snapshot"' EXIT
           # The planner, selectors, graph and policy all come from immutable
           # base code. Head files supply data only. Bootstrap fails wide.
+          # A depth-1 merge checkout records parent SHAs but does not have the
+          # parent objects, so merge-base cannot see the base or the head.
+          # Deepen this commit by one before planning. Fetching only the base
+          # leaves it unrelated to HEAD and still omits the head.
           if [[ "$PR_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] &&
+             [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]] &&
              git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" &&
+             git fetch --no-tags --depth=2 origin "$GITHUB_SHA" &&
              git archive "$PR_BASE_SHA" scripts web/src web/tests web/e2e web/scripts web/ci-web-shards.json > "$snapshot/base.tar" &&
              tar -xf "$snapshot/base.tar" -C "$snapshot" &&
              [ -f "$snapshot/scripts/test-tiers/impact-plan.mjs" ] &&

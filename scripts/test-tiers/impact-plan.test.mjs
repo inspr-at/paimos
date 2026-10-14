@@ -254,6 +254,7 @@ test('AEON-1333 workflow publishes shadow evidence from immutable base with Acti
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const tier = /\n  tier-plan:\n([\s\S]*?)(?=\n  runner-route:)/.exec(workflow)[1]
   assert.match(tier, /actions: read/); assert.match(tier, /GH_TOKEN: \$\{\{ secrets.GITHUB_TOKEN \}\}/)
+  assert.match(tier, /git fetch --no-tags --depth=2 origin "\$GITHUB_SHA"/)
   assert.match(tier, /git archive "\$PR_BASE_SHA"/); assert.match(tier, /AEON_IMPACT_CHECKOUT="\$GITHUB_WORKSPACE" node "\$snapshot\/scripts\/test-tiers\/impact-plan.mjs"/)
   assert.match(tier, /name: impact-ci-shadow-plan/); assert.match(tier, /if-no-files-found: error/)
   assert.equal((workflow.match(/impact-plan\.json/g) ?? []).length, 2, 'only producer/fallback and upload reference the plan')
@@ -322,4 +323,50 @@ test('AEON-1333 workflow bootstrap publishes an honest adoption fallback and nev
   assert.equal(result.complete, false); assert.equal(result.browser_scope, 'gated-full')
   assert.equal(result.selected_cases.length, 4); assert.equal(result.would_have_skipped.count, 0)
   assert.deepEqual(result.shards, []); assert.match(result.fallback_reasons.join(), /accounting unavailable/)
+})
+
+test('AEON-1333 depth-1 merge checkout publishes complete would-have-skipped evidence after the shadow step deepens the merge parents', t => {
+  const repository = fileURLToPath(new URL('../../', import.meta.url))
+  const root = mkdtempSync(resolve(tmpdir(), 'aeon-impact-shallow-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const full = resolve(root, 'full'), shallow = resolve(root, 'shallow')
+  mkdirSync(full)
+  const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 15_000 }).trim()
+  const write = (file, text) => { const path = resolve(full, file); mkdirSync(resolve(path, '..'), { recursive: true }); writeFileSync(path, text) }
+  git(full, ['init', '-q', '-b', 'main'])
+  git(full, ['config', 'user.name', 'Fixture']); git(full, ['config', 'user.email', 'fixture@example.invalid'])
+  git(full, ['config', 'uploadpack.allowReachableSHA1InWant', 'true'])
+  for (const file of ['scripts/test-tiers/impact-plan.mjs', 'scripts/test-tiers/browser-impact.mjs', 'scripts/test-tiers/inputs.mjs',
+    'scripts/test-tiers/core.mjs', 'scripts/test-tiers/migration.mjs', 'scripts/playwright-safe.mjs', 'scripts/playwright-global-setup.mjs',
+    'scripts/playwright-lock.mjs', 'scripts/playwright-processes.mjs', 'scripts/ci-pr-plan.mjs', 'web/scripts/ci-web-shard.mjs'])
+    write(file, readFileSync(resolve(repository, file)))
+  write('scripts/ci/web-test-tiers.json', JSON.stringify(manifest(tests)))
+  write('scripts/ci/known-flaky.json', JSON.stringify({ version: 1, entries: [] }))
+  const launch = policy(); launch.groups[0].specs = tests.map(row => ({ file: row.file, weightSeconds: 1 }))
+  write('web/ci-web-shards.json', JSON.stringify(launch))
+  for (const file of ['web/src/screen.ts', 'web/tests/essential.spec.ts', 'web/e2e/keep.ts']) write(file, '')
+  write('docs/example.md', 'base')
+  git(full, ['add', '.']); git(full, ['commit', '-qm', 'base']); const base = git(full, ['rev-parse', 'HEAD'])
+  git(full, ['checkout', '-q', '-b', 'pr']); write('docs/example.md', 'head')
+  git(full, ['add', '.']); git(full, ['commit', '-qm', 'docs']); const head = git(full, ['rev-parse', 'HEAD'])
+  git(full, ['checkout', '-q', 'main']); git(full, ['merge', '-q', '--no-ff', 'pr', '-m', 'merge'])
+  const merge = git(full, ['rev-parse', 'HEAD'])
+  git(root, ['clone', '-q', '--depth', '1', `file://${full}`, shallow])
+  assert.equal(git(shallow, ['rev-parse', 'HEAD']), merge)
+  assert.throws(() => execFileSync('git', ['merge-base', '--is-ancestor', base, 'HEAD'], { cwd: shallow, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] }))
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const step = workflow.split('      - name: Publish trusted Impact CI shadow plan\n')[1].split('\n      - ')[0]
+  const script = step.split('        run: |\n')[1].replace(/^          /gm, '')
+  mkdirSync(resolve(root, 'runtime'))
+  const outcome = spawnSync('bash', ['-c', script], { cwd: shallow, encoding: 'utf8', timeout: 30_000,
+    env: { PATH: process.env.PATH, GIT_TERMINAL_PROMPT: '0', RUNNER_TEMP: resolve(root, 'runtime'), GITHUB_WORKSPACE: shallow,
+      PR_BASE_SHA: base, PR_HEAD_SHA: head, GITHUB_SHA: merge, GITHUB_EVENT_NAME: 'pull_request', GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_STEP_SUMMARY: resolve(root, 'summary.md'), EXECUTION_MODE: 'full', EXECUTION_LAYOUT: 'full', EXECUTION_LANE: 'full' } })
+  assert.equal(outcome.status, 0, outcome.stderr)
+  const result = JSON.parse(readFileSync(resolve(shallow, 'tmp/test-tiers/impact-plan.json')))
+  assert.equal(result.complete, true, JSON.stringify(result.fallback_reasons))
+  assert.equal(result.mode, 'shadow'); assert.equal(result.browser_scope, 'none')
+  assert.equal(result.would_have_skipped.count, 4); assert.equal(result.fallback_reasons.length, 0)
+  assert.equal(result.shards.length, 12); assert.deepEqual(result.shards.flatMap(shard => shard.cases), [])
+  assert.equal(result.identity.base_sha, base); assert.equal(result.identity.head_sha, head); assert.equal(result.identity.checkout_sha, merge)
 })
