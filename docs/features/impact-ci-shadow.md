@@ -71,6 +71,6 @@ unexpected skips and missing dependencies stay red. Unset or other values keep
 S1 shadow reporting and the existing execution behavior.
 
 Selector risks and switch behavior are covered in
-`scripts/test-tiers/impact-plan.test.mjs`, imported by the existing unconditional
+`scripts/test-tiers/impact-plan.test.mjs`, imported by the existing
 `go-static` selector regression lane. New files are covered by the existing S7
 platform/CI ownership slice; no browser/Go case membership changes are needed.
