@@ -137,3 +137,10 @@ Acceptance coverage is registered as ESSENTIAL in the same change:
   `TestPTYUnixPasteDrainsOutputWhileInputIsBlocked` verifies an acknowledged
   8 KiB paste, exact child input/output and confirmed owned exit. A raw-mode
   barrier fills input before the child emits 128 KiB and then reads stdin.
+
+FIX2 validation (2026-10-14): the blocked-paste regression reproduced the
+deadlock on reviewed head `4a08173f` before the fix. Remote `nativepty` and `cli`
+package tests and `nativepty -race` passed on implementation commit `f11a1d4ff`.
+Guarded `ci-static --merge-main` exited 0 with 42 checks passed and no optional
+skips. Canonical tier validation and affected selection also exited 0; selection
+requires the FULL CI lane. Non-blocking review findings remain follow-up work.
