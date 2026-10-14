@@ -5,7 +5,7 @@ package authz
 // Route and scope declarations for nodes.
 func init() {
 	registerRoutes("nodes", map[string]string{
- "POST /api/nodes/{nodeId}/entry-evidence":"nodes.write",
+		"POST /api/nodes/{nodeId}/entry-evidence":                     "nodes.write",
 		"GET /api/nodes/{nodeId}/entry-checks":                        "nodes.read",
 		"PUT /api/nodes/{nodeId}/entry-checks/{checkId}":              "nodes.write",
 		"GET /api/projects/{projectId}/definitions":                   "nodes.read",

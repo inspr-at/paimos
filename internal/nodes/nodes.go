@@ -660,15 +660,17 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		if len(issues) > 0 {
 			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 		}
-		t, err := workqueue.EntryTicketTx(ctx, tx, id)
-		if err != nil {
-			return err
-		}
-		if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
-			return err
-		}
 		var entry *workqueue.EntryRecord
 		if _, hasState := raw["state"]; hasState && current.State != nextState {
+			// Field patches stay on the route check. Repeating nodes.write here
+			// rejected agents whose key scopes are enforced only at the route.
+			t, err := workqueue.EntryTicketTx(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
+				return err
+			}
 			to, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, nextState)
 			if err != nil {
 				return err
