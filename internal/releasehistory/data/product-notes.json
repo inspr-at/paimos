@@ -6631,8 +6631,8 @@
     "261014191553.0.0": {
       "release_channel": "stable",
       "release_sequence": 133,
-      "snapshot_sha256": "82859f2c6abb1269070b5d4c57a425ced744b54316f961aae52e77c7db7575ad",
-      "captured_at": "2026-10-14T19:29:09Z",
+      "snapshot_sha256": "cf9bdc05af340cf3c2849371f5befb80da6b290f32e7e137cdc93a2c71547db0",
+      "captured_at": "2026-10-14T21:20:54Z",
       "release_revision": 1,
       "items": [
         {
@@ -6754,6 +6754,14 @@
           "benefit_en": "Clicking Decide on the Decision Desk always records the decision or says clearly why it cannot yet.",
           "benefit_de": "Ein Klick auf Entscheiden im Decision Desk speichert die Entscheidung oder sagt klar, warum das noch nicht geht.",
           "group": "features"
+        },
+        {
+          "key": "AEON-1365",
+          "pill_en": "Reliable section links",
+          "pill_de": "Verlässliche Abschnittslinks",
+          "benefit_en": "Links to a section of the settings land on that section even when the page data arrives late.",
+          "benefit_de": "Links zu einem Abschnitt der Einstellungen landen auch dann im richtigen Abschnitt, wenn die Seitendaten verspätet eintreffen.",
+          "group": "fixes"
         }
       ]
     }
