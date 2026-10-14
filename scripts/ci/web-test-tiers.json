@@ -22400,6 +22400,18 @@
     ,
     {"kind":"vitest","file":"tests/ticket-outcomes.unit.test.ts","name":"describes each outcome without raw ids","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a ctrl or cmd click opens one ticket tab and does not open the peek","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a ctrl or cmd press opens no tab when the link shows another ticket by release","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a ctrl or cmd press opens one ticket tab when the click never lands","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a drag away from a modified press does not open a tab","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a plain click opens the peek and leaves the tab closed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"repeated ctrl or cmd key presses keep the browser tab after a press opened one","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/ticket-peek.unit.test.ts","name":"the route owns the panel even when a stale peek query survives navigation","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/ticket-search.unit.test.ts","name":"shared palette and relation search includes canonical work for PHAROS-29","tier":"GATED-FULL"}

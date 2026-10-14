@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { collectGo, command, flattenBrowser, web } from './collect.mjs'
 import { key, exactPattern, select, shard, splitOwner } from './core.mjs'
 import { load, plan } from './cli.mjs'
-import { loadManifest, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import { loadManifest, nightlyWeights, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 
 export const baseline = JSON.parse(readFileSync(new URL('../ci/slow-owner-baseline.json', import.meta.url), 'utf8'))
 
@@ -61,7 +61,7 @@ export function proveSlowOwners(browserRows, goRows) {
       }
     }
     const selected = select(browserRows, { event, paths: ['.github/workflows/ci.yml'] }).tests.filter(row => row.kind === 'browser')
-    const weights = tierWeights(policy, selected)
+    const weights = (event === 'schedule' ? nightlyWeights : tierWeights)(policy, selected)
     const count = event === 'schedule' ? 24 : 12
     const bins = Array.from({ length: count }, (_, i) => shard(selected, i + 1, count, weights))
     provePartition(selected, bins)

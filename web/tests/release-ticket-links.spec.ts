@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ticket keys in the release history (AEON-173): real links to the ticket's own
-// page, a plain click opens the ticket in the app's side panel beside the
-// history, keys this workspace does not have stay plain text.
+// page, a plain click opens the ticket as an overlay on the release sheet
+// (AEON-1326: the article does not move), keys this workspace does not have
+// stay plain text.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
@@ -74,17 +75,32 @@ test('a ticket key opens the ticket beside the history, with one lookup for the 
   expect(lookups).toHaveLength(1)
   expect(lookups[0].query.get('keys')!.split(',').sort()).toEqual(['AEON-74', 'PHAROS-11'])
 
-  await chip.click()
-  await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
+  // Opening the key can scroll the release. Measure like the stability guard
+  // so that scroll is not a move, and a real shrink still fails.
+  const article = sheet(page).locator('article.detail')
+  const guard = await controlStability(page, { releaseArticle: article })
+  await guard.check(async () => {
+    await chip.click()
+    await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
+  })
+  guard.done()
   await expect(panel(page).getByRole('button', { name: /Status: In progress/ })).toBeVisible()
   await expect(chip).toHaveAttribute('aria-current', 'true')
-  // The history stays: same address, the list and the release beside the ticket.
+  // The history stays on the same address. The ticket overlays the release
+  // (AEON-1326): the article's box does not move, and the panel sits inside
+  // the sheet's right edge, over the article.
   await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
   await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
-  const detail = (await sheet(page).locator('.detail').boundingBox())!
+  const after = (await article.boundingBox())!
   const aside = (await panel(page).boundingBox())!
-  expect(aside.x).toBeGreaterThanOrEqual(detail.x + detail.width)
-  expect(aside.x + aside.width).toBeLessThanOrEqual(1440)
+  const frame = (await sheet(page).boundingBox())!
+  expect(aside.width).toBeGreaterThan(0)
+  expect(aside.x).toBeGreaterThanOrEqual(frame.x)
+  expect(aside.y).toBeGreaterThanOrEqual(frame.y)
+  expect(aside.x + aside.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5)
+  expect(aside.y + aside.height).toBeLessThanOrEqual(frame.y + frame.height + 0.5)
+  expect(aside.x).toBeGreaterThan(after.x)
+  expect(aside.x).toBeLessThan(after.x + after.width - 1)
 
   // The panel's menus work inside the history (they live in its top layer).
   await panel(page).getByRole('button', { name: 'More actions' }).click()

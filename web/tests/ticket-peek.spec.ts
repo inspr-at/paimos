@@ -113,6 +113,7 @@ test('cmd-click on an agents session ticket keeps the real link', async ({ page 
   const chip = await openSession(page)
   await expect(peek(page)).toHaveCount(0)
   // One modified click opens a real ticket tab and leaves the session visible.
+  // The link opens that tab on the press, so a moving row cannot drop it.
   const pending = page.context().waitForEvent('page', { timeout: 15_000 })
   await chip.click({ modifiers: ['ControlOrMeta'], force: true })
   const tab = await pending

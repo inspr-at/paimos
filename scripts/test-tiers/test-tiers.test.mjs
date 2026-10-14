@@ -18,7 +18,7 @@ import { createGoRunner } from './go-runner.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { buildBrowserMap } from './browser-impact.mjs'
-import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import { nightlyWeights, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import './browser-impact.test.mjs'
 import './manifests.test.mjs'
 import './listing-cache.test.mjs'
@@ -178,7 +178,7 @@ test('AEON-1313 interrupted shards checkpoint completed failures and keep measur
     const jobBudget=Number(/^    timeout-minutes: (\d+)$/m.exec(shardJob)[1])
     const executionBudget=Number(/Run selected UI cases without retries\n        timeout-minutes: (\d+)/.exec(shardJob)[1])
     const installBudget=Number(/Install Chromium system dependencies\n        timeout-minutes: (\d+)/.exec(shardJob)[1])
-    assert.equal(executionBudget,20,'execution sizing awaits complete repaired-run timings')
+    assert.equal(executionBudget,20,'AEON-1327 measured packing stays inside the 20-minute nightly cap')
     assert.ok(jobBudget>=installBudget+executionBudget+7,'reserve bounded setup and evidence-upload headroom')
     assert.match(shardJob,/run web --all --shard/,'NIGHTLY registrations stay selected')
   } finally {
@@ -1802,7 +1802,11 @@ test('AEON-1325 nightly shards retain every browser case and require all 24 meas
   assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
   const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
-  const weights=tierWeights(JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url))),selected)
+  const policy=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
+  const declared=new Set(policy.groups.flatMap(group=>group.specs.map(spec=>spec.file)))
+  for(const file of Object.keys(policy.nightlyTiming.files)) assert.ok(declared.has(file),`stale nightly timing: ${file}`)
+  for(const file of new Set(selected.map(row=>row.file))) assert.ok(policy.nightlyTiming.files[file],`missing nightly timing: ${file}`)
+  const weights=nightlyWeights(policy,selected)
   const bins=indices.map(index=>shard(selected,index,indices.length,weights))
   assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort())
   assert.equal(new Set(bins.flat().map(key)).size,selected.length)
@@ -1812,7 +1816,8 @@ test('AEON-1325 nightly shards retain every browser case and require all 24 meas
     owners.set(row.file,i)
   }))
   const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0))
-  assert.ok(Math.max(...loads)<20*60,`Nightly case estimates exceed the execution cap: ${loads}`)
+  const peak=Math.max(...loads)
+  assert.ok(peak<=16*60,`Nightly estimates need four minutes under the 20-minute cap: ${peak}`)
   const jobs=indices.map(index=>({name:`nightly-web-shard (${index})`,status:'completed',conclusion:'success',
     started_at:'2026-10-13T01:00:00Z',completed_at:'2026-10-13T01:10:00Z'}))
   const reports=bins.map((bin,i)=>reportCases(bin,bin.map(row=>({key:key(row),status:'passed',started:true})),600,`web-shard-${i+1}`))
