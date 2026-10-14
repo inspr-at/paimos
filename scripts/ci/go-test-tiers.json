@@ -7998,6 +7998,8 @@
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverUnknownExitRetainsOccupancy","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativepty","name":"TestTakeoverUsesCurrentAuthorityRevision","reason":"AEON-1288: actions compare against the current server revision inside the write fence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverWaitsForBothOwnedExits","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativequalification","name":"TestNativeLeadBackgroundCompactionAndConsumedFinal","tier":"ESSENTIAL"}

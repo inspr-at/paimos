@@ -85,7 +85,13 @@ func (c *TakeClient) acceptAttach(out nativecontract.AttachResult, started time.
 	if !out.Binding.Equal(c.binding) || out.Snapshot.CurrentBinding == nil || !out.Snapshot.CurrentBinding.Equal(c.binding) || out.Snapshot.Generation != c.view.Generation || out.Snapshot.OwnedSessionID != c.binding.OwnedSessionID || out.Snapshot.Mode != c.view.Mode {
 		return refuse(nativecontract.ReasonWrongGeneration)
 	}
+	if out.Snapshot.Mode == "terminal" && (out.Snapshot.State != "taken" || !out.Snapshot.Capabilities.TerminalView) {
+		return refuse(nativecontract.ReasonOwnershipUnconfirmed)
+	}
 	if out.Mode != "control" || out.Controller == nil || out.ControlCapability == nil || *out.ControlCapability == "" || out.Controller.ClientID != c.clientID || out.Snapshot.Controller == nil || *out.Controller != *out.Snapshot.Controller || out.Controller.Epoch == retired && retired != "" || renew && (out.Controller.Epoch != c.epoch || out.ViewerID != c.viewerID) {
+		return refuse(nativecontract.ReasonControllerConflict)
+	}
+	if renew && (c.view.Controller == nil || out.Controller.ControllerID != c.view.Controller.ControllerID || out.Controller.ActorID != c.view.Controller.ActorID) {
 		return refuse(nativecontract.ReasonControllerConflict)
 	}
 	if out.StreamPath != localPath(c.binding, "stream") || out.ExpiresInMS <= 0 || out.ExpiresInMS > 30000 {
@@ -101,6 +107,10 @@ func (c *TakeClient) acceptAttach(out nativecontract.AttachResult, started time.
 func (c *TakeClient) live() error {
 	if c.lost || c.detached || c.capability == "" {
 		return refuse(nativecontract.ReasonControllerExpired)
+	}
+	if c.view.Mode == "terminal" && (c.view.State != "taken" || !c.view.Capabilities.TerminalView) {
+		c.lose()
+		return refuse(nativecontract.ReasonOwnershipUnconfirmed)
 	}
 	if !c.clock.Now().Before(c.deadline) {
 		c.lose()

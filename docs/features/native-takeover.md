@@ -29,8 +29,11 @@ their meaning. The new command node is deliberately unmounted in this slice.
 `PTYLauncher` and `Launcher`. Required integration obligations are:
 
 - `Authority.WithWrite` authenticates the local kernel peer and current person,
-  client, control capability, lease, exact binding and target permissions. It
-  holds the supervisor's shared native/access-change fence through the final
+  client, control capability, lease, exact binding and target permissions. Its
+  `Access.Revision` is the current server session revision; take/return compare
+  the captured action revision there, including changes caused by renewals.
+  Public revision/generation projections come from the coordinator, not Manager.
+  It holds the supervisor's shared native/access-change fence through the final
   native write. All structured input, approval and control paths share this
   fence. Quiesce/close use that held fence rather than recursively acquiring it.
   Server permission changes still use `RequireTx` in their final database

@@ -43,6 +43,9 @@ func (w *clientWire) Post(_ context.Context, b nativecontract.Binding, method, i
 			viewerID = viewer
 		}
 		controller := nativecontract.ControllerView{ControllerID: uuid.NewString(), ActorID: w.view.OwnerPersonID, ClientID: client, Epoch: epoch, ExpiresAt: w.clock.Now().Add(30 * time.Second)}
+		if method == "renew" {
+			controller.ControllerID = w.view.Controller.ControllerID
+		}
 		w.view.Controller = &controller
 		capability := strings.Repeat("p", 32)
 		*dest.(*nativecontract.AttachResult) = nativecontract.AttachResult{Binding: b, Mode: "control", ViewerID: viewerID, Controller: &controller, ControlCapability: &capability, ExpiresAt: controller.ExpiresAt, ExpiresInMS: 30000, StreamPath: localPath(b, "stream"), Snapshot: w.view}
@@ -188,6 +191,17 @@ func TestNativeTakeClientAcknowledgementAndHandBack(t *testing.T) {
 	}
 	if countMethod(w, "attach") != 2 || countMethod(w, "return") != 1 || countMethod(w, "stop") != 0 || countMethod(w, "detach") != 0 {
 		t.Fatal("hand-back claimed successor control or silently stopped")
+	}
+	c, w = clientFixture(t, nil)
+	if err := c.Begin(context.Background(), 120, 36); err != nil {
+		t.Fatal(err)
+	}
+	w.view.State = "returning"
+	requireReason(t, c.Renew(context.Background()), nativecontract.ReasonOwnershipUnconfirmed)
+	requireReason(t, c.Write(context.Background(), []byte("x")), nativecontract.ReasonControllerExpired)
+	requireReason(t, c.Resize(context.Background(), 132, 40, false), nativecontract.ReasonControllerExpired)
+	if countMethod(w, "pty_input") != 0 || countMethod(w, "resize") != 1 {
+		t.Fatal("paused control sent input or resize")
 	}
 }
 

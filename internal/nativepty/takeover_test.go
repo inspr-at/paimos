@@ -249,17 +249,17 @@ func takeoverFixture(t *testing.T) (*Manager, *writerFixture, Caller, *testClock
 	s := nativecontract.LaunchSpec{Binding: b, Mode: "structured", Cwd: "/fixture/work", ResumeRef: "fixture-conversation", OwnedWriterID: uuid.NewString(), Lifetime: context.Background(), Policy: policy, Profile: nativecontract.LocalProfile{AccountID: uuid.NewString(), AccountHome: "/fixture/account", WorkspaceRoot: "/fixture/work", UserHome: "/fixture/user", ConversationRoot: "/fixture/account/history", ProfileBindingRevision: 1}, Options: nativecontract.LaunchConfig{ModelProfileID: uuid.NewString(), Model: "fixture-model", Effort: &effort, ServiceTier: "standard", ToolPolicyDigest: policy.ToolPolicyDigest, SettingsPolicyDigest: policy.SettingsPolicyDigest}}
 	s.Tools = nativecontract.ToolCapability{Binding: b, Token: bytes.Repeat([]byte{1}, 32), ExpiresAt: now.Add(time.Hour)}
 	c := Caller{Actor: nativecontract.Actor{TenantID: b.TenantID, PrincipalID: uuid.NewString(), PrincipalKind: "person", OwnerPersonID: uuid.NewString(), GrantID: policy.GrantID, GrantRevision: 1}, ClientID: uuid.NewString(), Capability: "fixture-control-proof", Local: true}
-	a := &testAuthority{capability: c.Capability, access: Access{Controller: nativecontract.ControllerView{ActorID: c.Actor.PrincipalID, ClientID: c.ClientID, ControllerID: uuid.NewString(), Epoch: uuid.NewString()}, Deadline: now.Add(30 * time.Second)}}
+	a := &testAuthority{capability: c.Capability, access: Access{Controller: nativecontract.ControllerView{ActorID: c.Actor.PrincipalID, ClientID: c.ClientID, ControllerID: uuid.NewString(), Epoch: uuid.NewString()}, Deadline: now.Add(30 * time.Second), Revision: 1}}
 	f := &writerFixture{spec: s, active: 1, starts: 1, maximum: 1, callbacks: 3, inputOpen: true, auth: a, identity: nativecontract.NativeIdentity{Provider: "fixture", NativeSessionRef: s.ResumeRef, RuntimeEpoch: b.RuntimeEpoch, PID: 100, StartedAt: now, ProcessIdentityDigest: strings.Repeat("a", 64)}}
 	q := &testQualification{}
-	m, err := New(Config{Current: s, State: "running", Revision: 1, Coordinator: f, Authority: a, Qualification: q, PTY: f, Structured: f, Clock: clock})
+	m, err := New(Config{Current: s, State: "running", Coordinator: f, Authority: a, Qualification: q, PTY: f, Structured: f, Clock: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return m, f, c, clock, q
 }
 func takeRequest(m *Manager, f *writerFixture) nativecontract.TakeIntent {
-	return nativecontract.TakeIntent{RequestID: uuid.NewString(), ExpectedBinding: cloneBinding(m.spec.Binding), ControllerEpoch: f.auth.access.Controller.Epoch, ExpectedRevision: m.revision, Cols: 120, Rows: 36, ExpiresAt: f.auth.access.Deadline}
+	return nativecontract.TakeIntent{RequestID: uuid.NewString(), ExpectedBinding: cloneBinding(m.spec.Binding), ControllerEpoch: f.auth.access.Controller.Epoch, ExpectedRevision: f.auth.access.Revision, Cols: 120, Rows: 36, ExpiresAt: f.auth.access.Deadline}
 }
 func resizeRequest(m *Manager, f *writerFixture, cols, rows int64) nativecontract.Resize {
 	return nativecontract.Resize{RequestID: uuid.NewString(), ExpectedBinding: cloneBinding(m.spec.Binding), ControllerEpoch: f.auth.access.Controller.Epoch, Cols: cols, Rows: rows, ExpiresAt: f.auth.access.Deadline}
@@ -271,6 +271,7 @@ func freshControl(f *writerFixture, c Caller, clock *testClock) {
 	f.auth.access.Controller.ControllerID = uuid.NewString()
 	f.auth.access.Controller.ClientID = c.ClientID
 	f.auth.access.Deadline = clock.Now().Add(30 * time.Second)
+	f.auth.access.Revision = f.spec.Binding.BindingRevision
 }
 func takeAndRegain(t *testing.T, m *Manager, f *writerFixture, c Caller, clock *testClock) {
 	t.Helper()
@@ -326,7 +327,7 @@ func TestTakeoverWaitsForBothOwnedExits(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.ptyEntered, f.ptyRelease = make(chan struct{}), make(chan struct{})
-	ret := nativecontract.ReturnIntent{RequestID: uuid.NewString(), ExpectedBinding: cloneBinding(m.spec.Binding), ControllerEpoch: f.auth.access.Controller.Epoch, ExpectedRevision: m.revision, ExpiresAt: f.auth.access.Deadline}
+	ret := nativecontract.ReturnIntent{RequestID: uuid.NewString(), ExpectedBinding: cloneBinding(m.spec.Binding), ControllerEpoch: f.auth.access.Controller.Epoch, ExpectedRevision: f.auth.access.Revision, ExpiresAt: f.auth.access.Deadline}
 	go func() { _, err := m.Return(context.Background(), c, ret); done <- err }()
 	waitBarrier(t, f.ptyEntered)
 	if active, starts, maximum := f.counts(); active != 1 || starts != 2 || maximum != 1 {
@@ -356,7 +357,7 @@ func TestTakeoverUnknownExitRetainsOccupancy(t *testing.T) {
 			}
 			var err error
 			if side == "pty" {
-				_, err = m.Return(context.Background(), c, nativecontract.ReturnIntent{RequestID: uuid.NewString(), ExpectedBinding: m.spec.Binding, ControllerEpoch: f.auth.access.Controller.Epoch, ExpectedRevision: m.revision, ExpiresAt: f.auth.access.Deadline})
+				_, err = m.Return(context.Background(), c, nativecontract.ReturnIntent{RequestID: uuid.NewString(), ExpectedBinding: m.spec.Binding, ControllerEpoch: f.auth.access.Controller.Epoch, ExpectedRevision: f.auth.access.Revision, ExpiresAt: f.auth.access.Deadline})
 			} else {
 				_, err = m.Take(context.Background(), c, takeRequest(m, f))
 			}
@@ -387,6 +388,29 @@ func TestTakeoverRequiresIndependentTUIFence(t *testing.T) {
 	_, starts, _ := f.counts()
 	if starts != 1 {
 		t.Fatal("unqualified TUI launched")
+	}
+}
+func TestTakeoverUsesCurrentAuthorityRevision(t *testing.T) {
+	m, f, c, clock, _ := takeoverFixture(t)
+	in := takeRequest(m, f)
+	f.auth.access.Revision = 7
+	_, err := m.Take(context.Background(), c, in)
+	requireReason(t, err, nativecontract.ReasonStaleRevision)
+	if !f.inputOpen || f.callbacks != 3 {
+		t.Fatal("stale action quiesced the serving writer")
+	}
+	in.ExpectedRevision = 7
+	if _, err = m.Take(context.Background(), c, in); err != nil {
+		t.Fatal(err)
+	}
+	freshControl(f, c, clock)
+	f.auth.access.Revision = 11
+	ret := nativecontract.ReturnIntent{RequestID: uuid.NewString(), ExpectedBinding: m.spec.Binding, ControllerEpoch: f.auth.access.Controller.Epoch, ExpectedRevision: 10, ExpiresAt: f.auth.access.Deadline}
+	_, err = m.Return(context.Background(), c, ret)
+	requireReason(t, err, nativecontract.ReasonStaleRevision)
+	ret.ExpectedRevision = 11
+	if _, err = m.Return(context.Background(), c, ret); err != nil {
+		t.Fatal(err)
 	}
 }
 func TestTakeoverRechecksAuthorityAfterExit(t *testing.T) {

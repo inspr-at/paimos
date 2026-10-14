@@ -50,6 +50,7 @@ func (Caller) Format(f fmt.State, _ rune) { _, _ = fmt.Fprint(f, "[local takeove
 type Access struct {
 	Controller nativecontract.ControllerView
 	Deadline   time.Time
+	Revision   int64 // current authoritative session revision, not a local counter
 }
 type Authority interface {
 	WithWrite(context.Context, Caller, nativecontract.Binding, string, func(Access) error) error
@@ -66,7 +67,6 @@ type Qualification interface {
 type Config struct {
 	Current       nativecontract.LaunchSpec
 	State         string
-	Revision      int64
 	Coordinator   nativecontract.WriterCoordinator
 	Authority     Authority
 	Qualification Qualification
@@ -82,7 +82,6 @@ type Config struct {
 type Status struct {
 	Binding                      nativecontract.Binding
 	State, Mode                  string
-	Revision                     int64
 	Cols, Rows                   int
 	HasController, OccupancyHeld bool
 }
@@ -93,7 +92,6 @@ type Manager struct {
 	validator     *nativecontract.Validator
 	spec          nativecontract.LaunchSpec
 	state, mode   string
-	revision      int64
 	cols, rows    int
 	holder        *Access
 	retiredEpoch  string
@@ -125,13 +123,13 @@ func New(config Config) (*Manager, error) {
 	if _, err = nativestream.Encode(v, "NativePolicy", config.Current.Policy); err != nil {
 		return nil, err
 	}
-	if config.Current.Mode != "structured" || config.Current.ResumeRef == "" || config.Current.OwnedWriterID == "" || config.Revision < 0 || config.Revision >= 9007199254740991 {
+	if config.Current.Mode != "structured" || config.Current.ResumeRef == "" || config.Current.OwnedWriterID == "" {
 		return nil, refuse(nativecontract.ReasonIdentityMismatch)
 	}
 	if config.State != "idle" && config.State != "running" && config.State != "requires_action" {
 		return nil, refuse(nativecontract.ReasonOwnershipUnconfirmed)
 	}
-	return &Manager{gate: make(chan struct{}, 1), config: config, validator: v, spec: cloneSpec(config.Current), state: config.State, mode: "structured", revision: config.Revision, cols: DefaultCols, rows: DefaultRows}, nil
+	return &Manager{gate: make(chan struct{}, 1), config: config, validator: v, spec: cloneSpec(config.Current), state: config.State, mode: "structured", cols: DefaultCols, rows: DefaultRows}, nil
 }
 
 func refuse(reason nativecontract.Reason) error {
@@ -155,7 +153,7 @@ func (m *Manager) lock(ctx context.Context) error {
 }
 func (m *Manager) unlock() { <-m.gate }
 func (m *Manager) status() Status {
-	return Status{Binding: cloneBinding(m.spec.Binding), State: m.state, Mode: m.mode, Revision: m.revision, Cols: m.cols, Rows: m.rows, HasController: m.holder != nil && m.config.Clock.Now().Before(m.holder.Deadline), OccupancyHeld: true}
+	return Status{Binding: cloneBinding(m.spec.Binding), State: m.state, Mode: m.mode, Cols: m.cols, Rows: m.rows, HasController: m.holder != nil && m.config.Clock.Now().Before(m.holder.Deadline), OccupancyHeld: true}
 }
 func (m *Manager) Status(ctx context.Context) (Status, error) {
 	if err := m.lock(ctx); err != nil {
@@ -195,6 +193,9 @@ func (m *Manager) authorize(ctx context.Context, caller Caller, binding nativeco
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if access.Revision < 0 || access.Revision > 9007199254740991 {
+			return refuse(nativecontract.ReasonStaleRevision)
+		}
 		now := m.config.Clock.Now()
 		if !now.Before(expires) || !now.Before(access.Deadline) {
 			return refuse(nativecontract.ReasonControllerExpired)
@@ -228,9 +229,6 @@ func (m *Manager) Take(ctx context.Context, caller Caller, in nativecontract.Tak
 	if m.mode != "structured" || (m.state != "idle" && m.state != "running" && m.state != "requires_action") {
 		return out, refuse(nativecontract.ReasonOwnershipUnconfirmed)
 	}
-	if in.ExpectedRevision != m.revision {
-		return out, refuse(nativecontract.ReasonStaleRevision)
-	}
 	if m.config.Qualification == nil {
 		return out, refuse(nativecontract.ReasonQualificationMissing)
 	}
@@ -243,6 +241,9 @@ func (m *Manager) Take(ctx context.Context, caller Caller, in nativecontract.Tak
 	var writer nativecontract.WriterRecord
 	var exit nativecontract.ExitEvidence
 	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "take", in.ExpiresAt, func(access Access) error {
+		if in.ExpectedRevision != access.Revision {
+			return refuse(nativecontract.ReasonStaleRevision)
+		}
 		ioCtx, finish := context.WithDeadline(ctx, minDeadline(access.Deadline, in.ExpiresAt))
 		defer finish()
 		if err := m.qualify(ioCtx, caller.Actor, m.spec, "terminal"); err != nil {
@@ -397,7 +398,7 @@ func (m *Manager) commit(ctx context.Context, spec nativecontract.LaunchSpec, id
 		return refuse(nativecontract.ReasonIdentityMismatch)
 	}
 	_ = m.spec.Tools.Close()
-	m.spec, m.revision, m.holder = cloneSpec(spec), m.revision+1, nil
+	m.spec, m.holder = cloneSpec(spec), nil
 	return nil
 }
 
@@ -417,9 +418,6 @@ func (m *Manager) Return(ctx context.Context, caller Caller, in nativecontract.R
 	if m.state != "taken" || m.pty == nil {
 		return out, refuse(nativecontract.ReasonOwnershipUnconfirmed)
 	}
-	if in.ExpectedRevision != m.revision {
-		return out, refuse(nativecontract.ReasonStaleRevision)
-	}
 	transitioning := false
 	defer func() {
 		if err != nil && transitioning {
@@ -429,6 +427,9 @@ func (m *Manager) Return(ctx context.Context, caller Caller, in nativecontract.R
 	var writer nativecontract.WriterRecord
 	var exit, waitExit nativecontract.ExitEvidence
 	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "return", in.ExpiresAt, func(access Access) error {
+		if in.ExpectedRevision != access.Revision {
+			return refuse(nativecontract.ReasonStaleRevision)
+		}
 		if m.holder != nil {
 			if err := m.requireHolder(access); err != nil {
 				return err
