@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -20,6 +21,7 @@ import (
 // completed input/turn and current retention consent. It is not a wire DTO.
 // A final-only grant can outlive its writer; it confers no ordinary worker lease.
 type NativeFinalTarget struct {
+	OriginalActor  tenant.Principal // current immutable start actor; never the attributed daemon
 	OwnerPersonID  string
 	ConversationID string
 	RoleID         string
@@ -52,6 +54,8 @@ func (m *Module) StoreNativeFinalTx(ctx context.Context, tx pgx.Tx, sender tenan
 		return out, workorders.Fail(503, "native final chat storage disabled")
 	}
 	if sender.Kind != tenant.Agent || sender.TenantID != in.ExpectedBinding.TenantID || !workorders.UUID(sender.ID) ||
+		target.OriginalActor.TenantID != sender.TenantID || !workorders.UUID(target.OriginalActor.ID) ||
+		target.OriginalActor.Kind != tenant.Person && target.OriginalActor.Kind != tenant.Agent ||
 		!workorders.UUID(target.OwnerPersonID) || !workorders.UUID(target.ConversationID) || !workorders.UUID(target.RoleID) ||
 		target.SessionID != in.ExpectedBinding.HarnessSessionID || !workorders.UUID(in.FinalID) {
 		return out, unavailable()
@@ -85,6 +89,18 @@ func (m *Module) StoreNativeFinalTx(ctx context.Context, tx pgx.Tx, sender tenan
 		roleKind == "lead" && sessionRole != "coordinator" || roleKind == "worker" && sessionRole != "worker" {
 		return out, unavailable()
 	}
+	if sessionRole == "coordinator" {
+		var canonical string
+		if target.OriginalActor.Kind != tenant.Person {
+			return out, unavailable()
+		}
+		if err := tx.QueryRow(ctx, `SELECT `+modelprefs.CanonicalPersonSQL("id")+`::text FROM principals WHERE id=$1 AND kind='person' AND status='active'`, target.OriginalActor.ID).Scan(&canonical); err != nil {
+			return out, err
+		}
+		if canonical != owner {
+			return out, unavailable()
+		}
+	}
 	var contextMatches bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chat_session_contexts WHERE session_id=$1 AND role_id=$2 AND owner_person_id=$3 AND project_id=$4 AND harness=$5 AND ref_digest=$6)`, target.SessionID, target.RoleID, owner, project, harnessName, ref).Scan(&contextMatches); err != nil {
 		return out, err
@@ -106,8 +122,11 @@ func (m *Module) StoreNativeFinalTx(ctx context.Context, tx pgx.Tx, sender tenan
 	// CURRENT target visibility and permissions are checked inside the final
 	// write, never borrowed from an earlier claim or network response.
 	scope := authz.Scope{ProjectID: project}
-	for _, permission := range []string{"chat.receive", "chat.send"} {
-		if err := authz.RequireTx(ctx, tx, sender, permission, scope); err != nil {
+	if err := authz.RequireTx(ctx, tx, sender, "harness.worker", scope); err != nil {
+		return out, err
+	}
+	for _, permission := range []string{"harness.control", "chat.receive", "chat.send"} {
+		if err := authz.RequireTx(ctx, tx, target.OriginalActor, permission, scope); err != nil {
 			return out, err
 		}
 	}
