@@ -133,7 +133,7 @@ live LEAD path to the existing terminal link still require full I1/I2 wiring.
 `G_TERMS`, `G_LEAD_GRANT` and `G_P1_LIVE` remain coordinator/person gates;
 no 48-hour live-soak or enablement evidence is claimed.
 
-## Verification
+## Prior Round 3 verification
 
 Round 3 PASS ownership behavior at `26ed89b9b`: guarded remote
 `./internal/agentpairing/... -run TestNativeRootOwnershipSurvivesPairingDrainAndRemoval
@@ -193,8 +193,9 @@ NOT RUN: full I1 combined fake-native smoke and its negative control, because th
 full runtime composition is incomplete. No browser check is applicable. No
 origin push, deployment, review gate, model CLI call, daemon restart, vendor call
 or live pilot was performed. Approved remote-runner temporary refs are not
-origin pushes. Progress remains 55% with the native claim/root-authority
-dependency files named BLOCKED; A1–A6 are not complete.
+origin pushes. At the Round 3 handoff progress remained 55% with the native claim/root-authority
+dependency files named BLOCKED; that authority boundary is addressed in Round 4.
+A1–A6 still are not complete.
 
 R0 additions are exactly these ESSENTIAL rows in `scripts/ci/go-test-tiers.json`:
 
@@ -222,7 +223,11 @@ exits 0 in the affected two-package run, including the updated existing
 run exits 1 overall because the new real-pairing fixture was missing its
 matching account-owner stamp. The corrected fixture's next targeted run at
 `f1c5fae0c` fails on a UUID/text schedule parameter; that parameter is corrected
-in `4f3ef7144`. These failures are not reported as green. Later exact-root and
+in `4f3ef7144`. The regression now also invokes the real separate person
+`capacity/approve` route (`bc532436b`), since connect-only pairing itself does
+not grant ongoing account work. Its control-route check uses the issued bearer
+and rejects the exact missing control scope, rather than accepting any 403.
+These earlier failures are not reported as green. Later exact-root and
 canonical-owner additions still require a fresh database run.
 
 PASS local at `af3c615f2`: after multiple guarded remote capacity refusals, the
@@ -237,7 +242,7 @@ substituted for the missing database, SDK, compatibility or integration checks.
 INCOMPLETE: subsequent guarded remote retries for native integration, native
 session/store, accounts, pairing, agentd, harness, reporter, CLI and both binary
 packages are refused with exit 3 (global remote slots full or CI pool 4/4).
-The guarded `ci-static-locked.sh --merge-main` attempt also exits 3 before any
+Both guarded `ci-static-locked.sh --merge-main` attempts also exit 3 before any
 checks run. No guard was bypassed, no full local suite/static check was run,
 and no timeout/exclusion was loosened. Fresh SDK correlation, per-guard negative
 controls and combined I1 smoke evidence are not claimed. PR CI is authoritative.
@@ -264,3 +269,9 @@ limited to the granted claim/account/module/server paths and own R0 rows.
 Progress remains below 100%. One BLOCKED note names all remaining boundary
 files above and the incomplete remote checks. No origin push, deployment,
 review gate, other model CLI, live daemon restart or LEAD switch was performed.
+
+Final Round 4 handoff: 65%, below completion. The last full affected remote
+retry after `bc532436b` and the last static retry after `300ab83d5` were both
+capacity-refused (exit 3). The work branch is clean; the final documentation
+commit records this incomplete result. No negative-control or throwaway commit
+was created or left on the work branch.
