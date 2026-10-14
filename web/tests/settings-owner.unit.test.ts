@@ -10,6 +10,7 @@ import * as footerProviders from '../src/lib/footerProviders'
 import * as accountsNeeds from '../src/lib/accountsNeeds'
 import * as footerSummary from '../src/lib/footerSummary'
 import * as preferences from '../src/lib/preferences'
+import * as arrival from '../src/lib/arrival'
 import { displayLanguage } from '../src/lib/displayLanguage'
 import { textForKinds } from '../src/lib/workKindsCopy'
 import { scopeOwner } from '../src/lib/identityScope'
@@ -49,7 +50,7 @@ function component() {
   const { content } = compileScript(descriptor, { id: 'settings-owner', inlineTemplate: true, templateOptions: { compilerOptions: { hoistStatic: false } } })
   const modules: Record<string, unknown> = {
     vue: Vue, 'vue-router': { useRoute: () => route, useRouter: () => ({ push: async () => {} }) }, '../lib/settings': settings,
-    '../lib/footerProviders': footerProviders, '../lib/accountsNeeds': accountsNeeds, '../lib/footerSummary': footerSummary, '../lib/preferences': preferences, '../lib/identityScope': { scopeOwner },
+    '../lib/footerProviders': footerProviders, '../lib/accountsNeeds': accountsNeeds, '../lib/footerSummary': footerSummary, '../lib/preferences': preferences, '../lib/arrival': arrival, '../lib/identityScope': { scopeOwner },
     '../stores/session': { useSession: () => session }, '../lib/doctrineInbox': { doctrineInbox: {} },
     '../stores/profile': { useProfile: () => ({ profile: null }) }, '../lib/workKindsCopy': { textForKinds }, '../lib/displayLanguage': { displayLanguage },
     '../lib/authz': { can: (permission: string) => !grants.revoked && (permission === 'settings.manage' ? grants.admin : grants.access), permissionsKnown: () => true, permissionsRevoked: () => grants.revoked, refreshPermissions: async () => {} },
