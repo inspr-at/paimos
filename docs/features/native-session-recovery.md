@@ -162,3 +162,39 @@ Initial builder verification before fix round 3:
   Neither is reported green or retried in a loop. Authoritative PR CI must
   complete the remote/static validation before merge. I2 production wiring and
   coordinator review/release decisions remain outside this slice.
+
+Fix round 4 (PR #652): **BLOCKED by frontend ownership.** The latest
+`origin/main` (`813baaf37`) was merged locally in `abac23e6f` as required for
+the conflicting PR. The canonical tier merge preserved all eight recovery
+ESSENTIAL rows. Recovery source and the phone component/spec are unchanged by
+that merge; no behavior fix or new regression test is claimed in this round.
+
+The complete failing CI step, job `115769813384` in run `38538957132`, reports
+`add.y` moving **40 px**, exceeding the unchanged **0.5 px** stability limit at
+`web/tests/control-stability.ts:27`, during the failed-settings-save interaction
+at `web/tests/phone-approvals.spec.ts:171`. The test is "device notifications
+replace Enable with state and stable Pause in both themes". The step finishes
+with 141 passing cases and this one failure; the performance cases and the
+agents split cases pass in the final job evidence. The failed aggregate web job
+does not report a separate implementation failure.
+
+The frontend fix belongs to `web/src/components/settings/PhoneApprovalSettings.vue`
+and/or `web/tests/phone-approvals.spec.ts`; the shared stability helper remains
+`web/tests/control-stability.ts`. Those files are outside P3b's exclusive
+`internal/nativerecovery/**` and this document write set. The R0 grant permits
+only this slice's registry rows, so it does not authorize frontend edits. The
+coordinator must route or explicitly grant this failure before the CI round
+can be reported complete. No assertion was loosened, no test skipped, and no
+frontend or other slice's source was changed.
+
+- **PASS 1–6:** guarded `remote-test.sh` on merge `abac23e6f`,
+  `-count=1 ./internal/nativerecovery/...`, exits 0 on the approved remote host.
+- **PASS on macOS only:** guarded `REMOTE_ONLY=1 remote-spec.sh` runs two phone
+  settings cases, including the failing CI case, with one headless worker;
+  both pass and the runner reports zero remaining browser processes. Screenshots
+  stay in the ignored `web/test-results/remote/` artifact directory. This is not
+  a Linux CI reproduction or evidence that the 40 px failure was fixed.
+- **OPEN:** Linux browser CI and the coordinator-owned policy review remain
+  unresolved. The completion status must remain below 100 until the frontend
+  ownership blocker and required CI results are resolved. No origin push,
+  deployment, model CLI or review gate was run by this worker.
