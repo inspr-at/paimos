@@ -67,6 +67,7 @@ func newPairedStartFixture(t *testing.T) (*startFixture, pairedGrantAuthority) {
 	f := newStartFixture(t)
 	mux := http.NewServeMux()
 	agentpairing.New(f.d.App, "https://native.test", "").Mount(mux)
+	agentaccounts.New(f.d.App).Mount(mux)
 	call := func(path string, body any, person bool, out any) {
 		t.Helper()
 		raw, err := json.Marshal(body)
@@ -80,7 +81,11 @@ func newPairedStartFixture(t *testing.T) (*startFixture, pairedGrantAuthority) {
 		}
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
-		if w.Code != http.StatusOK {
+		want := http.StatusOK
+		if strings.HasSuffix(path, "/capacity/approve") {
+			want = http.StatusNoContent
+		}
+		if w.Code != want {
 			t.Fatalf("pairing %s: %d %s", path, w.Code, w.Body.String())
 		}
 		if out != nil {
@@ -119,6 +124,9 @@ func newPairedStartFixture(t *testing.T) (*startFixture, pairedGrantAuthority) {
 		t.Fatal("fixture expanded the issued runtime key ceiling")
 	}
 	f.intent.ComputerID, f.intent.AccountID = *paired.ComputerID, paired.Enrollments[0].AccountID
+	// Connect-only issuance deliberately grants no ongoing account work. Use
+	// the real separate PERSON approval before seeding daemon readiness facts.
+	call("/api/agent-accounts/"+f.intent.AccountID+"/capacity/approve", nil, true, nil)
 	f.daemon.Actor = nativecontract.Actor{TenantID: f.agent.TenantID, PrincipalID: f.agent.ID, PrincipalKind: "agent", OwnerPersonID: f.person.ID, KeyCeiling: f.agent.Scopes}
 	f.daemon.ComputerID, f.daemon.DaemonID = f.intent.ComputerID, *paired.DaemonID
 	f.observer.value.PrincipalID, f.observer.value.ComputerID = f.agent.ID, f.intent.ComputerID
