@@ -59,7 +59,7 @@ func TestTicketStatusTimingReopenSkipBackwardAndWindows(t *testing.T) {
 	if out.Rework != 1 || out.Coverage.Complete != 1 || out.FinalStatus != "delivered" || out.Steps[0].N != 1 || *out.Steps[0].P50 != 15*3600 {
 		t.Fatalf("aggregate %+v", out)
 	}
-	if out.Buckets[0].State != "no_data" || out.Buckets[len(out.Buckets)-1].State != "partial" {
+	if out.Buckets[0].State != "no_data" || out.Buckets[len(out.Buckets)-1].State != "observed" || out.Buckets[len(out.Buckets)-1].From.Hour() != 0 {
 		t.Fatalf("coverage buckets %+v", out.Buckets)
 	}
 	none := aggregateTiming("project", []timingNode{n}, map[string][]timingEvent{n.ID: es}, timingFilter{Days: 7, WorkedBy: "person"}, now)

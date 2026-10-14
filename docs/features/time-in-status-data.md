@@ -3,7 +3,7 @@
 ## Real-data prerequisite
 
 Read-only audit of `ppm`, tenant INSPR, acting principal `workstation-agents`,
-2026-10-14 22:22:52–22:26 UTC. The assigned worker marker was verified on
+2026-10-14 22:22:52–22:27:59 UTC. The assigned worker marker was verified on
 AEON-1369. No production writes, source-system requests or telemetry were used.
 Design truth is AEON-1357's r4b HTML (SHA-256
 `aa73166662dc7e0897d80c1f6e8228e8ecb8f83d16cb56c9f80d1b762341d0cd`)
@@ -75,7 +75,7 @@ account, then `aeon curl` with that same absolute executable and instance:
    against the node. Count tickets separately from transition events.
 
 The audit read 8 AIT and 51 AEON bounded event pages. All continuations were
-exhausted. Only node IDs/keys, statuses, timestamps and actor-presence information
+exhausted. Only node IDs/keys, statuses, timestamps and actor identifiers/names
 were retained in local ignored scratch files; bodies and credential material
 were not retained. Reads used the existing RLS-visible API. The capture is not
 a database-wide atomic snapshot; repeat it if live edits change the corpus.
@@ -97,7 +97,10 @@ Parents never contribute to project metrics.
 - `GET /api/projects/{projectId}/delivery/tickets?window=90&type=all&priority=all&worked_by=all`
   returns current/previous per-step samples, nearest-rank p50/p90, rework count,
   coverage and daily/weekly/monthly buckets. The window is 7, 30, 90, 180 or
-  365 days; a step belongs to `[now-window, now)` by its ending timestamp.
+  365 UTC calendar days ending today; a step belongs to
+  `[first day of the window, generated_at)` by its ending timestamp. Buckets
+  use the existing Delivery day/week/calendar-month boundaries, and the
+  previous window is the immediately preceding set of complete UTC days.
 - `GET /api/nodes/{nodeId}/lifeline` returns separate status visits with entry
   and exit actors, optional release, repeated/ongoing flags and source labels.
   A current terminal status has zero duration; its preceding visits retain

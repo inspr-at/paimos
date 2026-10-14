@@ -301,8 +301,9 @@ func aggregateTiming(project string, nodes []timingNode, histories map[string][]
 			}
 		}
 	}
-	from := now.AddDate(0, 0, -filter.Days)
-	previous := from.AddDate(0, 0, -filter.Days)
+	span := windowSpan(now, filter.Days, false)
+	from := span.first
+	previous := windowSpan(now, filter.Days, true).first
 	samples := []timingSample{}
 	for _, n := range nodes {
 		l := lives[n.ID]
@@ -370,14 +371,10 @@ func aggregateTiming(project string, nodes []timingNode, histories map[string][]
 		c, d := timingQuantiles(prior)
 		out.Steps = append(out.Steps, timingStep{name, len(current), a, b, len(prior), c, d})
 	}
-	for start := from; start.Before(now); {
-		end := start.AddDate(0, 0, 1)
-		if filter.Days > 30 {
-			end = start.AddDate(0, 0, 7)
-		}
-		if filter.Days > 180 {
-			end = start.AddDate(0, 1, 0)
-		}
+	// Use Delivery's existing UTC day/week/calendar-month boundaries. A
+	// rolling clock-hour bucket would label yesterday's samples as today.
+	for _, part := range span.buckets(bucketKind(filter.Days)) {
+		start, end := part.first, part.end()
 		if end.After(now) {
 			end = now
 		}
@@ -396,7 +393,6 @@ func aggregateTiming(project string, nodes []timingNode, histories map[string][]
 		bucket.N = len(values)
 		bucket.P50, bucket.P90 = timingQuantiles(values)
 		out.Buckets = append(out.Buckets, bucket)
-		start = end
 	}
 	return out
 }
