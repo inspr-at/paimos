@@ -393,7 +393,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: localConnContext}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, ConnContext: localConnContext}
 	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup, hooks: hooks}
 	local.release = func() {
 		_ = lock.Close()

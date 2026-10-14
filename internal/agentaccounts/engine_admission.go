@@ -234,6 +234,8 @@ func engineHost(ctx context.Context, tx pgx.Tx, account, owner string, now time.
 	err := tx.QueryRow(ctx, `SELECT c.capacity_signals,c.capacity_policy,c.capacity_reported_at,
  (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.account_id IS NOT NULL AND ($3::text='' OR r.id::text<>$3) AND (r.status IN ('starting','running','waiting')
   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
+ + (SELECT count(*) FROM native_session_roots r WHERE r.tenant_id=c.tenant_id AND r.computer_id=c.id
+     AND r.run_id IS NULL AND r.released_at IS NULL)
  FROM agent_pairing_enrollments e
  JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id

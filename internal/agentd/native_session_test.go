@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -407,8 +408,9 @@ func TestNativeChatReceiptsRequireMatchingInputCorrelation(t *testing.T) {
 // coordinator without server intent, admission and actor/tool qualification.
 func TestNativeStartSocketRequiresProtocolAndQualifiedIntent(t *testing.T) {
 	s, _, _ := testSupervisor(t)
-	request := NativeSessionStartRequest{RequestID: uidLead("01"), ProjectID: uidLead("02"), Profile: "native", Role: "coordinator", Harness: Claude, Cwd: s.workspace}
-	envelope := NativeStartEnvelope{Protocol: NativeSessionProtocol, RequestID: request.RequestID, Method: "start", ExpectedBinding: json.RawMessage("null"), Params: request}
+	request := nativecontract.LocalStart{Intent: nativecontract.StartIntent{RequestID: uidLead("01"), Profile: "native", Role: "coordinator", Harness: Claude, ComputerID: uidLead("02"), AccountID: uidLead("03"), WorkspaceID: "approved-workspace", ModelProfileID: uidLead("04"), PolicyID: uidLead("05")}, Cwd: s.workspace, AccountKey: "own-default"}
+	params, _ := json.Marshal(request)
+	envelope := nativecontract.LocalEnvelope{Protocol: nativecontract.LocalProtocol, RequestID: request.Intent.RequestID, Method: "start", Params: params}
 	raw, _ := json.Marshal(envelope)
 	handler := serveNativeStart(s, func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer local-fixture" })
 	for _, test := range []struct {
@@ -421,6 +423,7 @@ func TestNativeStartSocketRequiresProtocolAndQualifiedIntent(t *testing.T) {
 		{"no-auth", false, NativeSessionProtocol, raw, 401},
 		{"wrong-protocol", true, "other/1", raw, 400},
 		{"qualified-port-missing", true, NativeSessionProtocol, raw, 503},
+		{"legacy-P1a-is-not-authority", true, NativeSessionProtocol, []byte(`{"protocol":"aeon-native-session/1","request_id":"` + uidLead("01") + `","method":"start","expected_binding":null,"params":{"project_id":"` + uidLead("02") + `","request_id":"` + uidLead("01") + `","profile":"native","role":"coordinator","harness":"claude","cwd":"/fixture"}}`), 400},
 		{"unknown-field", true, NativeSessionProtocol, []byte(strings.TrimSuffix(string(raw), "}") + `,"extra":true}`), 400},
 	} {
 		t.Run(test.name, func(t *testing.T) {

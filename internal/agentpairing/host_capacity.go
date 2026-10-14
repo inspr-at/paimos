@@ -27,7 +27,9 @@ func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity
 	// release markers alone cannot turn an external process into a managed slot.
 	err := tx.QueryRow(ctx, `SELECT capacity_policy,capacity_signals,capacity_reported_at,capacity_history,
  (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.account_id IS NOT NULL AND (r.status IN ('starting','running','waiting')
-  OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')),
+  OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
+ + (SELECT count(*) FROM native_session_roots r WHERE r.tenant_id=c.tenant_id AND r.computer_id=c.id
+     AND r.run_id IS NULL AND r.released_at IS NULL),
  (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp(),coalesce(q.details->>'platform',''),c.state
  FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now, &platform, &state)
 	if err != nil {
