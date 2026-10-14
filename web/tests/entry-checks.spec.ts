@@ -42,7 +42,9 @@ test('AEON-1315 defined entry row reserves space before reads and keeps the tick
       await page.goto('/p/PHAROS?sort=key&closed=1')
       await page.locator('tr.ticket-row').filter({ hasText: 'PHAROS-14' }).locator('.title-text').click()
       const workspace = page.getByRole('complementary', { name: 'Ticket details' }), slot = workspace.locator('[data-entry-slot]')
-      const controls = { details: workspace.locator('.meta').first(), queue: workspace.locator('.q-card'), previous: workspace.getByRole('button', { name: 'Previous ticket', exact: true }), next: workspace.getByRole('button', { name: 'Next ticket', exact: true }) }
+      const controls = { details: workspace.locator('.meta').first(), queue: workspace.locator('.q-card'), ...(touch
+        ? { actions: workspace.getByRole('button', { name: 'More actions', exact: true }) }
+        : { previous: workspace.getByRole('button', { name: 'Previous ticket', exact: true }), next: workspace.getByRole('button', { name: 'Next ticket', exact: true }) }) }
       await expect.poll(() => pending.length).toBe(1)
       expect(pending[0]!.id).toBe(nodes[0]!.id)
       await expect(slot).toBeVisible()
@@ -54,7 +56,10 @@ test('AEON-1315 defined entry row reserves space before reads and keeps the tick
         await expect(slot.getByRole('button', { name: 'Ready 1/2', exact: true })).toBeVisible()
       })
       initial.done()
-      await controls.next.click()
+      if (touch) {
+        await workspace.getByRole('button', { name: 'More actions', exact: true }).click()
+        await workspace.getByRole('menuitem', { name: 'Next ticket', exact: true }).click()
+      } else await workspace.getByRole('button', { name: 'Next ticket', exact: true }).click()
       await expect.poll(() => pending.length).toBe(2)
       expect(pending[1]!.id).toBe(nodes[1]!.id)
       await expect(slot).toBeVisible()
