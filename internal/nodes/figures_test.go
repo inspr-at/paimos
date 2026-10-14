@@ -72,6 +72,11 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 	if len(mod.figures.entries) != 1 {
 		t.Fatal("scope was not cached")
 	}
+	code, body := call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind=work&limit=1&sort=key", "")
+	page := decode[nodePage](t, code, body, 200)
+	if len(page.Items) != 1 || page.NextCursor == nil {
+		t.Fatal("fixture did not establish a paged list")
+	}
 	// Same response object and timestamp prove the warm read, including an
 	// invalid presentation cursor, did not recompute or narrow to the first page.
 	hidden := get(p, "?hide_closed=true&hide_states=accepted&limit=1&cursor=expired&sort=-estimate&facets=state")
@@ -92,7 +97,7 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 	}
 	// Saved views store UI query filters. The caller resolves them with the
 	// same node-list parameter mapping used by the rendered list.
-	code, body := callAs(t, views.New(appPool), &p, "POST", "/api/views", fmt.Sprintf(`{"name":"Needle","project_id":%q,"filters":{"q":"Needle","priority":"high","closed":"1"},"columns":["key","estimate"]}`, root.ID))
+	code, body = callAs(t, views.New(appPool), &p, "POST", "/api/views", fmt.Sprintf(`{"name":"Needle","project_id":%q,"filters":{"q":"Needle","priority":"high","closed":"1"},"columns":["key","estimate"]}`, root.ID))
 	if code != 201 {
 		t.Fatalf("saved view: %d %s", code, body)
 	}
