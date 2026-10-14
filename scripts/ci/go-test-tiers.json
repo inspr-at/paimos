@@ -5810,6 +5810,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestNotificationPointersAndNormalBriefingItem","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestPreparedLessonProjectionVisibilityAndDecision","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestProjectionApprovalLabelRetainsScopeWithoutRationale","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPushPolicyAndHTTPBounds","tier":"GATED-FULL"}
@@ -7313,6 +7315,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestDecisionRejectsUnreviewedText","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestDeleteUndoAndCreateUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestDeskRecommendationRevisionBindsNativeWrites","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestExcerpt","tier":"GATED-FULL"}
     ,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -118,6 +119,9 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
 const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT id,'routine_consent'::text,project_id,revision,title,created_at,NULL::timestamptz,false,href
  FROM jsonb_to_recordset($26::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,href text)
+), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source
+ FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
 ), visible AS MATERIALIZED (
  SELECT *,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
  CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
@@ -133,6 +137,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  UNION ALL SELECT * FROM tier_requests WHERE project_id=ANY($23::uuid[]) AND project_id=ANY($24::uuid[])
  UNION ALL SELECT * FROM account_matrix WHERE $25
  UNION ALL SELECT * FROM routine_consents
+ UNION ALL SELECT * FROM lessons
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -169,7 +174,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}}
+	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}}
 	stepupPermissions := map[string][]string{}
 	for _, permission := range stepup.TargetPermissions() {
 		stepupPermissions[permission] = []string{}
@@ -228,7 +233,18 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	lessonRows := []knowledge.DeskLesson{}
+	if !eligibleOnly {
+		lessonRows, err = knowledge.DeskLessonsTx(ctx, tx, p, projects["knowledge.read"])
+		if err != nil {
+			return page, err
+		}
+	}
+	lessonSource, err := json.Marshal(lessonRows)
+	if err != nil {
+		return page, err
+	}
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
 	if err != nil {
 		return page, err
 	}
@@ -251,7 +267,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		if err = json.Unmarshal(record.OrderAt, &i.OrderAt); err != nil {
 			return page, err
 		}
-		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:"}[i.Kind]
+		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:", "lesson": "l:"}[i.Kind]
 		i.Href = "/decision-desk?item=" + prefix + i.ID
 		if i.Kind == "routine_consent" {
 			i.Href = i.Source
@@ -285,6 +301,8 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 			i.CanDecide = check("keys.manage", "")
 		case "account_matrix":
 			i.CanDecide = check("account.use.manage", "")
+		case "lesson":
+			i.CanDecide = check("knowledge.write", i.ProjectID)
 		case "routine_consent":
 			i.CanDecide = true // Canonical owner and native policy checked before paging.
 		}

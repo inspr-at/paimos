@@ -16,6 +16,8 @@ import type { KeyTrimCursors } from '../lib/keyTrim'
 import { useDecisionDesk } from '../stores/decisionDesk'
 import { revokeApproval } from '../lib/agents'
 import { getRun } from '../lib/agentRows'
+import { undoKnowledge } from '../lib/knowledge'
+import { captureToastOwner, toast } from '../lib/toast'
 import { doctrineInbox, inboxChanged } from '../lib/doctrineInbox'
 
 const session = useSession()
@@ -49,7 +51,7 @@ const linkError = ref(''), revoked = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
 let followed = ''
 const fresh = computed(() => arrivals(items.value, roundBaseline.value))
-const visible = computed(() => items.value.filter(item => item.decided === (filter.value === 'decided') && (!outcomeFilter.value || item.outcome === outcomeFilter.value)))
+const visible = computed(() => items.value.filter(item => (!route.query.kind || item.kind === route.query.kind) && (!route.query.project || item.projectId === route.query.project) && item.decided === (filter.value === 'decided') && (!outcomeFilter.value || item.outcome === outcomeFilter.value)))
 // Link-out rows are decided on their settings page, so they never join a memo round.
 const reviewable = computed(() => visible.value.filter(item => !item.linkOut))
 const person = computed(() => session.identity?.principal.kind === 'person')
@@ -101,6 +103,8 @@ async function refresh() {
   finally { if (alive && turn === generation) { state.value = 'ready'; loading.value = false } }
 }
 function applyRead(result: DeskRead) {
+  const present = new Set(result.items.map(item => item.id))
+  result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
   nextKeyTrims.value = result.nextKeyTrims
@@ -203,7 +207,28 @@ async function decide(item: DeskItem, draft: DeskDraft, requestId: string, signa
   if (elsewhere) { recorded(result); throw new Error(elsewhere) }
   return result
 }
+const undoingLessons = new Set<number>()
+async function undoLesson(item: DeskItem): Promise<DeskItem> {
+  const identity = owner.value, id = item.id, revision = item.revision, eventId = item.undoEvent
+  const latest = items.value.find(row => row.id === id)
+  if (!eventId || undoingLessons.has(eventId) || !alive || !session.authenticationCurrent() || latest?.revision !== revision || latest.undoEvent !== eventId || !allowed(latest)) throw new Error('This lesson decision is no longer available to undo.')
+  undoingLessons.add(eventId)
+  try {
+    await undoKnowledge(eventId)
+    const current = items.value.find(row => row.id === id)
+    if (!alive || identity !== owner.value || current?.revision !== revision || current.undoEvent !== eventId) throw new Error('The source changed while undoing. Reopen the Desk to confirm the result.')
+    return { ...current, decided: false, optionId: undefined, answer: undefined, reason: undefined, delivery: undefined, undoEvent: undefined }
+  } finally { undoingLessons.delete(eventId) }
+}
 function recorded(item: DeskItem) {
+  if (item.kind === 'lesson' && item.decided && item.undoEvent && item.undoEvent !== items.value.find(row => row.id === item.id)?.undoEvent) {
+    const current = captureToastOwner()
+    toast(item.delivery ?? 'Lesson decision recorded.', { timeout: 8000, action: { label: 'Undo', run: () => {
+      if (!current()) return
+      void undoLesson(item).then(restored => { if (current()) recorded(restored) })
+        .catch(cause => { if (current()) toast(cause instanceof Error ? cause.message : 'Undo did not work.', { tone: 'error' }) })
+    } } })
+  }
   if (item.kind === 'rule' && item.decided && !items.value.find(row => row.id === item.id)?.decided) inboxChanged(doctrineInbox.pending - 1, item.id.slice(2))
   items.value = items.value.map(row => row.id === item.id ? item : row)
   if (currentRead) currentRead = { ...currentRead, items: items.value }
@@ -250,7 +275,7 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
     <p class="readiness">Handover-question import is awaiting a verified source contract. Answers to existing questions keep their verified successor route.</p>
     <p class="chore-line">Sign-ins and account setup remain in <RouterLink to="/agents">Agents</RouterLink>.</p>
     <p v-if="opened && fresh.length" class="arrival-line">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
-    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" @recorded="recorded" @close="opened = false; ruleEdit = undefined" />
+    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" @recorded="recorded" @close="opened = false; ruleEdit = undefined" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
   </main>
 </template>

@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -123,7 +124,7 @@ func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := m.Read(r.Context(), p, limit, after)
-	if errors.Is(err, ErrCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) {
+	if errors.Is(err, ErrCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) || errors.Is(err, knowledge.ErrDeskLessonCoverage) {
 		httpapi.WriteError(w, 422, err.Error())
 		return
 	}
@@ -158,7 +159,7 @@ func validID(id string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix" || kind == "routine_consent"
+	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix" || kind == "routine_consent" || kind == "lesson"
 }
 
 func (m *Module) Read(ctx context.Context, p tenant.Principal, limit int, after *cursor) (Page, error) {

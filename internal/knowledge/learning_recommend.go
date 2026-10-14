@@ -4,9 +4,11 @@ package knowledge
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -561,4 +563,86 @@ func nullable(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// DeskLesson is a quiet pointer; native learning APIs still own its decisions.
+type DeskLesson struct {
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	Revision  int64     `json:"revision"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+	Source    string    `json:"source"`
+}
+
+var ErrDeskLessonCoverage = errors.New("desk lesson candidate coverage exceeds 1000")
+
+// DeskLessonsTx reuses the person-list validation in the projection snapshot.
+// The caller supplies only projects authorized by knowledge.read. Candidate
+// rows and pages share one budget, so stale or empty scan pages cannot hide an
+// unbounded scan behind an apparently exact count.
+func DeskLessonsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projects []string) ([]DeskLesson, error) {
+	out := []DeskLesson{}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT project_id::text FROM method_learning_recommendations
+ WHERE tenant_id=$1 AND project_id=ANY($2::uuid[]) AND decision='accept'
+ AND btrim(coalesce(lesson,''))<>'' AND btrim(coalesce(source_summary,''))<>''
+ AND (btrim(coalesce(changelog_line,''))<>'' OR rule_layer_id IS NOT NULL)
+ ORDER BY project_id::text LIMIT 1001`, p.TenantID, projects)
+	if err != nil {
+		return nil, err
+	}
+	candidates := []string{}
+	for rows.Next() {
+		var project string
+		if err := rows.Scan(&project); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, project)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(candidates) > 1000 {
+		return nil, ErrDeskLessonCoverage
+	}
+	scanned, pages := 0, 0
+	for _, project := range candidates {
+		var after *learningCursor
+		for {
+			pages++
+			if pages > 1000 {
+				return nil, ErrDeskLessonCoverage
+			}
+			page, err := listLearningPageFor(ctx, tx, p.TenantID, project, after, true)
+			if err != nil {
+				return nil, err
+			}
+			scanned += len(page.Items)
+			if scanned > 1000 {
+				return nil, ErrDeskLessonCoverage
+			}
+			if err := attachRecommendations(ctx, tx, p.TenantID, project, page.Items); err != nil {
+				return nil, err
+			}
+			for _, item := range page.Items {
+				rec := item.Recommendation
+				if rec == nil || !rec.Prepared {
+					continue
+				}
+				hash := sha256.Sum256([]byte(item.ID))
+				id := fmt.Sprintf("%x-%x-%x-%x-%x", hash[:4], hash[4:6], hash[6:8], hash[8:10], hash[10:16])
+				out = append(out, DeskLesson{ID: id, ProjectID: project, Revision: rec.EventID, Title: rec.Lesson, CreatedAt: rec.At, Source: "/api/knowledge/learnings/" + item.ID})
+			}
+			if !page.Truncated {
+				break
+			}
+			after, err = parseLearningCursor(page.NextCursor)
+			if err != nil || after == nil {
+				return nil, ErrDeskLessonCoverage
+			}
+		}
+	}
+	return out, nil
 }

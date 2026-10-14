@@ -343,3 +343,44 @@ func addLegacyComment(t *testing.T, f fixture, nodeID, body string) string {
 	}
 	return id
 }
+
+// Risk: a replaced recommendation writes a different prepared rule or
+// changelog line than the one the person reviewed, including on Dismiss.
+func TestDeskRecommendationRevisionBindsNativeWrites(t *testing.T) {
+	f := setup(t)
+	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
+	entry := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "desk-revision", "title": "Recovery", "body": "Notes"})
+	id := nodeLearningID(f.ticket)
+	body := map[string]any{"decision": "accept", "knowledge_id": entry.ID, "lesson": "Rehearse recovery before releasing.", "source_summary": "A recovery incident exposed an untested path."}
+	first := call(t, f, f.a, "PUT", recommendPath(id), body)
+	expect(t, first, 200)
+	revision := decode[Recommendation](t, first).EventID
+	body["lesson"] = "Check recovery before releasing."
+	expect(t, call(t, f, f.a, "PUT", recommendPath(id), body), 200)
+	for _, action := range []string{"accept", "dismiss", "draft"} {
+		input := map[string]any{}
+		if action == "accept" {
+			input["knowledge_id"] = entry.ID
+			input["lesson"] = "Rehearse recovery before releasing."
+		}
+		if action == "draft" {
+			input["layer_id"] = f.project
+			input["set_id"] = entry.ID
+		}
+		w := call(t, f, f.a, "POST", "/api/knowledge/learnings/"+id+"/"+action, input, "If-Match", `"`+strconv.FormatInt(revision, 10)+`"`)
+		expect(t, w, 409)
+		var problem map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+			t.Fatal(err)
+		}
+		if problem["code"] != "learning_changed" {
+			t.Fatalf("wrong refusal for %s: %s", action, w.Body.String())
+		}
+	}
+	page := learningHTTPPage(t, f, f.a)
+	if len(page.Items) != 1 || page.Items[0].Recommendation.Lesson != body["lesson"] {
+		t.Fatalf("refused writes changed lesson: %+v", page)
+	}
+	current := page.Items[0].Recommendation.EventID
+	expect(t, call(t, f, f.a, "POST", "/api/knowledge/learnings/"+id+"/accept", map[string]any{"knowledge_id": entry.ID, "lesson": body["lesson"]}, "If-Match", `"`+strconv.FormatInt(current, 10)+`"`), 200)
+}

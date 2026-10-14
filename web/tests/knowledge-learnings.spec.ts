@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Method learnings (AEON-275): the Knowledge tab inbox, accept into a changelog,
+// Legacy MethodLearnings component integration coverage (AEON-275). AEON-1331
+// removes it from production Knowledge; mount it only in this test fixture so
+// its native API, credential and interleaving assertions remain intact.
+// Accept into a changelog,
 // dismiss, and the read-only and agent states. Screenshots stay outside the repo
 // and run only with VISUAL_AUDIT=1 (optional VISUAL_AUDIT_DIR).
 import { mkdirSync } from 'node:fs'
@@ -48,6 +51,25 @@ async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; 
     })
   }
   await page.goto('/p/PHAROS/knowledge')
+  await page.locator('.k-frame').waitFor()
+  await page.evaluate(async options => {
+    const vuePath = '/node_modules/.vite/deps/vue.js', piniaPath = '/node_modules/.vite/deps/pinia.js'
+    const componentPath = '/src/components/knowledge/MethodLearnings.vue', apiPath = '/src/lib/knowledge.ts'
+    const Vue = await import(vuePath), Pinia = await import(piniaPath), knowledge = await import(apiPath)
+    const { default: Legacy } = await import(componentPath)
+    const root = document.querySelector('#app') as Element & { __vue_app__: { config: { globalProperties: { $router: { afterEach: (callback: (to: { path: string }) => void) => () => void } } } } }
+    const router = root.__vue_app__.config.globalProperties.$router
+    const entries = Vue.ref((await knowledge.listKnowledge({ project_id: 'p-pharos' })).items)
+    const host = document.createElement('div'); document.querySelector('.k-frame')!.prepend(host)
+    const app = Vue.createApp({ setup: () => () => Vue.h(Legacy, {
+      project: { id: 'p-pharos', routeKey: 'PHAROS', title: 'Pharos' }, entries: entries.value,
+      canWrite: !options.readOnly, person: !options.agent, now: Date.now(),
+      onEmptied: () => document.querySelector<HTMLInputElement>('[aria-label="Search knowledge in Pharos"]')?.focus({ preventScroll: true }),
+      onAccepted: async () => { entries.value = (await knowledge.listKnowledge({ project_id: 'p-pharos' })).items },
+    }) })
+    app.use(Pinia.getActivePinia()); app.use(router); app.mount(host)
+    const stop = router.afterEach(to => { if (!to.path.endsWith('/knowledge')) { app.unmount(); stop() } })
+  }, { readOnly: !!options.readOnly, agent: !!options.agent })
   const heading = page.getByRole('heading', { name: 'Method learnings' })
   if (options.inbox === false) await expect(heading).toHaveCount(0)
   else await expect(heading).toBeVisible()

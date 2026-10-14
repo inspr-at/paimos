@@ -145,6 +145,7 @@ paths:
         learning_text, a learning whose text changed since the person
         reviewed it is 409 learning_changed and nothing is written.
       parameters:
+        - {name: If-Match, in: header, schema: {type: string, maxLength: 24}, description: "Optional quoted recommendation event ID reviewed on the Desk; checked under the final learning mutation lock. A replaced recommendation returns 409 learning_changed."}
         - {name: learningId, in: path, required: true, schema: {type: string}}
         - {name: If-Unmodified-Since, in: header, schema: {type: string}}
       security: *auth
@@ -189,6 +190,7 @@ paths:
         reviewed it is 409 learning_changed. A reason that looks like it holds
         a credential is 409 learning_sensitive with ranges in field reason.
       parameters:
+        - {name: If-Match, in: header, schema: {type: string, maxLength: 24}, description: "Optional quoted recommendation event ID reviewed on the Desk; checked under the final learning mutation lock. A replaced recommendation returns 409 learning_changed."}
         - {name: learningId, in: path, required: true, schema: {type: string}}
       security: *auth
       requestBody:
@@ -227,6 +229,7 @@ paths:
         person may repeat the request with confirm_not_sensitive; the event
         records confirmed_not_sensitive. An agent cannot confirm (403).
       parameters:
+        - {name: If-Match, in: header, schema: {type: string, maxLength: 24}, description: "Optional quoted recommendation event ID reviewed on the Desk; checked under the final learning mutation lock. A replaced recommendation returns 409 learning_changed."}
         - {name: learningId, in: path, required: true, schema: {type: string}}
       security: *auth
       requestBody:

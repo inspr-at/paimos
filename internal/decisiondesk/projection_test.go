@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -35,7 +36,7 @@ type stepupVisibilityTx struct {
 }
 
 func (tx *stepupVisibilityTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if sql == visibleSQL && len(args) == 26 {
+	if sql == visibleSQL && len(args) == 27 {
 		tx.visibility, _ = args[21].([]byte)
 	}
 	return tx.Tx.QueryRow(ctx, sql, args...)
@@ -497,5 +498,68 @@ func TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource(t *testing.T)
 		if item.Kind == "key_trim" {
 			t.Fatal("desk disclosed key trim to a non-manager")
 		}
+	}
+}
+
+// Risk: raw nominations, stale sources or inaccessible projects leak into the
+// person Desk; pagination or a decision leaves the lesson count dishonest.
+func TestPreparedLessonProjectionVisibilityAndDecision(t *testing.T) {
+	f := setup(t)
+	knowledge.New(f.d.App).Mount(f.mux)
+	call := func(method, path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		r := httptest.NewRequest(method, path, bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(t.Context(), f.person))
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		if w.Code != 200 && w.Code != 201 {
+			t.Fatalf("%s %s: %d %s", method, path, w.Code, w.Body.String())
+		}
+		return w
+	}
+	f.exec(t, `UPDATE nodes SET fields=jsonb_build_object('tags',jsonb_build_array('process-learning')) WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, f.ticket)
+	if page := f.page(t, f.person, 1, nil); page.Counts.Open != 0 {
+		t.Fatalf("raw candidate reached Desk: %+v", page)
+	}
+	w := call("POST", "/api/knowledge", map[string]any{"project_id": f.project, "type": "runbook", "slug": "recovery", "title": "Recovery", "body": "Notes"})
+	var entry knowledge.Entry
+	if err := json.Unmarshal(w.Body.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	source := "n-" + f.ticket
+	w = call("PUT", "/api/knowledge/learnings/"+source+"/recommendation", map[string]any{"decision": "accept", "knowledge_id": entry.ID, "lesson": "Rehearse recovery before release.", "source_summary": "A recovery incident exposed a missing check."})
+	var rec knowledge.Recommendation
+	if err := json.Unmarshal(w.Body.Bytes(), &rec); err != nil {
+		t.Fatal(err)
+	}
+	page := f.page(t, f.person, 1, nil)
+	if len(page.Items) != 1 || page.Counts.Open != 1 || page.Counts.Held != 0 {
+		t.Fatalf("wrong lesson counts: %+v", page)
+	}
+	item := page.Items[0]
+	if item.Kind != "lesson" || item.Title != rec.Lesson || item.Revision != rec.EventID || item.Source != "/api/knowledge/learnings/"+source || item.Href != "/decision-desk?item=l:"+item.ID || !item.CanDecide || item.PushEligible(page.AsOf) {
+		t.Fatalf("wrong lesson pointer: %+v", item)
+	}
+	var outsider tenant.Principal
+	outsider.TenantID = f.person.TenantID
+	outsider.Kind = tenant.Person
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','No project access') RETURNING id::text`, f.person.TenantID).Scan(&outsider.ID); err != nil {
+		t.Fatal(err)
+	}
+	if hidden := f.page(t, outsider, 1, nil); hidden.Counts.Open != 0 || len(hidden.Items) != 0 {
+		t.Fatalf("inaccessible lesson leaked: %+v", hidden)
+	}
+
+	f.exec(t, `UPDATE nodes SET title='Changed source' WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, f.ticket)
+	if stale := f.page(t, f.person, 1, nil); stale.Counts.Open != 0 {
+		t.Fatalf("stale source reached Desk: %+v", stale)
+	}
+	f.exec(t, `UPDATE nodes SET title='Work' WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, f.ticket)
+	if restored := f.page(t, f.person, 1, nil); len(restored.Items) != 1 || restored.Items[0].ID != item.ID {
+		t.Fatalf("lesson identity moved: %+v", restored)
+	}
+	call("POST", "/api/knowledge/learnings/"+source+"/dismiss", map[string]any{})
+	if settled := f.page(t, f.person, 1, nil); settled.Counts.Open != 0 {
+		t.Fatalf("dismissed lesson stayed open: %+v", settled)
 	}
 }
