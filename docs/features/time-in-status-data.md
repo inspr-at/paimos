@@ -122,3 +122,30 @@ Existing event RLS can hide an event (for example another actor's private queue
 event); the API preserves that boundary and excludes a resulting discontinuous
 history. Source actor names without a tenant-local identity mapping are kept
 with kind `unknown`, so worker filters never guess person/agent provenance.
+
+## Validation and handoff
+
+- Approved remote runner: full `internal/delivery`, `internal/reportercontract`
+  and `internal/agentpairing` suites passed at `6e2f8a5e5` (102.203 s,
+  8.402 s and 217.279 s respectively). This includes the shared-fence inventory.
+- The four ESSENTIAL timing behavior tests passed again on final functional
+  commit `113b326a2` (2.401 s), including the calendar buckets and direct parent
+  lifeline. Tests use an injected business clock; no sleeps establish behavior.
+- A temporary scratch-branch negative control replaced nearest-rank p50 with
+  interpolation. The test failed with p50 2.5 versus required 2. The scratch
+  branch was removed and the assigned branch restored; the negative-control
+  commit is absent from the delivery branch.
+- Generated OpenAPI matches its authored sources; canonical test-tier
+  manifests pass. All four new Go files already belong to audit slice S2 through
+  its `internal/delivery/**` glob. Added registry rows are the four ESSENTIAL
+  tests and the one `authz.LockProjectWrite` caller.
+- Migration guard passed with released base `v261013103112.0.0` (351 unique
+  numbers); this package adds no migration or DSAR inventory entry.
+
+**BLOCKED: required full `ci-static --merge-main` validation remains unproven.**
+The approved remote static runner refused execution with exit 3 under its
+night policy (“remote static check paused at night … rely on the PR's hosted
+CI static job”). This is not a successful check or a code-test failure.
+The coordinator must obtain the full static/merged-main proof in an allowed
+window or authoritative PR CI. No origin push, deployment, review gate, other
+model CLI invocation, ticket-status change or live backfill was performed.
