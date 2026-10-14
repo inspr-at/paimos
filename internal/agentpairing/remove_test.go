@@ -10,11 +10,45 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: native integration makes an ordinary paired adapter into a coordinator
+// by inventing permissions on its authenticated principal or widening its key.
+// Use the actual person-approved pairing issuance, without synthetic scopes.
+func TestNativePilotCannotExpandPairedRuntimeAuthority(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	actor := tenant.Principal{TenantID: f.tenantID, ID: *v.PrincipalID, Kind: tenant.Agent}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT k.id::text,k.created_by_principal_id::text,k.scopes
+ FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id
+ WHERE c.id=$1`, *v.ComputerID).Scan(&actor.KeyID, &actor.KeyCreatorID, &actor.Scopes); err != nil {
+		t.Fatal(err)
+	}
+	actor.AuthKeyID = actor.KeyID
+	ctx := tenant.WithPrincipal(t.Context(), actor)
+	for _, permission := range []string{"harness.worker", "harness.control", "harness.force_stop", "chat.receive"} {
+		err := db.InTenant(ctx, f.db.App, f.tenantID, func(tx pgx.Tx) error {
+			if err := agentpairing.LockMutation(ctx, tx); err != nil {
+				return err
+			}
+			return authz.RequireTx(ctx, tx, actor, permission, authz.Scope{})
+		})
+		if permission == "harness.worker" {
+			if err != nil || !slices.Contains(actor.Scopes, permission) {
+				t.Fatalf("issued runtime cannot report its own work: %v", err)
+			}
+		} else if !errors.Is(err, authz.ErrForbidden) || slices.Contains(actor.Scopes, permission) {
+			t.Fatalf("paired runtime unexpectedly has %s authority: %v", permission, err)
+		}
+	}
+}
 
 // Risk: pairing cleanup revokes the only principal that can reconcile an
 // owned native root or drain its explicit final, because it has no worker run.
