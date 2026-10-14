@@ -1073,14 +1073,24 @@ func quotaOccupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
 }
 
 func quotaOccupancyExcept(ctx context.Context, tx pgx.Tx, runID string) (map[string]int, error) {
+	return quotaOccupancyExceptNative(ctx, tx, runID, "")
+}
+
+func quotaOccupancyExceptNative(ctx context.Context, tx pgx.Tx, runID, ownedSessionID string) (map[string]int, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT a.harness || ':' || a.quota_pool_fingerprint, count(*)
-		FROM agent_runs r
+		FROM (
+		  SELECT account_id,tenant_id FROM agent_runs
+		  WHERE account_id IS NOT NULL AND id::text<>$1
+		    AND (status IN ('queued','starting','running','waiting')
+		      OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
+		  UNION ALL
+		  SELECT account_id,tenant_id FROM native_session_roots
+		  WHERE run_id IS NULL AND released_at IS NULL AND owned_session_id::text<>$2
+		) r
 		JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
-		WHERE a.quota_pool_fingerprint<>'' AND r.account_id IS NOT NULL AND r.id::text<>$1
-		  AND (r.status IN ('queued','starting','running','waiting')
-		    OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
-		GROUP BY a.harness, a.quota_pool_fingerprint`, runID)
+		WHERE a.quota_pool_fingerprint<>''
+		GROUP BY a.harness, a.quota_pool_fingerprint`, runID, ownedSessionID)
 	if err != nil {
 		return nil, err
 	}

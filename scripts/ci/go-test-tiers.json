@@ -882,7 +882,11 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNamedDenialResetRestoresRealSlots","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootFencesLegacyHostAdmission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootHoldsCountUntilVerifiedRelease","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootsFenceWorkerAliasAndProjectOwnClaim","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity","tier":"ESSENTIAL"}
     ,
@@ -7979,6 +7983,8 @@
     {"kind":"go","package":"internal/nativereceipts","name":"TestReceiptEvidenceRejectsWrongInputAndFalseExit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions","name":"TestQualifiedNativeRoutesBindCallerAndTargetBeforeDispatch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/interaction","name":"TestControllerEpochFencesConcurrentAttach","tier":"ESSENTIAL"}
     ,

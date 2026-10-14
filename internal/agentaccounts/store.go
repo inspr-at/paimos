@@ -221,15 +221,25 @@ func occupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
 }
 
 func occupancyExcept(ctx context.Context, tx pgx.Tx, runID string) (map[string]int, error) {
+	return occupancyExceptNative(ctx, tx, runID, "")
+}
+
+// Native roots hold capacity until verified release, including idle writers and
+// obsolete daemon generations. The two exclusions are separate identities:
+// a worker retry excludes its run; a root claim retry excludes only its root.
+func occupancyExceptNative(ctx context.Context, tx pgx.Tx, runID, ownedSessionID string) (map[string]int, error) {
 	// A lifecycle release clears the ticket hold, not the process's slot.
 	// Only authenticated exit telemetry clears exit_unconfirmed.
 	rows, err := tx.Query(ctx, `
-		SELECT account_id::text, count(*)
-		FROM agent_runs
-		WHERE account_id IS NOT NULL AND id::text<>$1
-		  AND (status IN ('queued', 'starting', 'running', 'waiting')
-		    OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
-		GROUP BY account_id`, runID)
+		SELECT account_id::text, count(*) FROM (
+		  SELECT account_id FROM agent_runs
+		  WHERE account_id IS NOT NULL AND id::text<>$1
+		    AND (status IN ('queued', 'starting', 'running', 'waiting')
+		      OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
+		  UNION ALL
+		  SELECT account_id FROM native_session_roots
+		  WHERE run_id IS NULL AND released_at IS NULL AND owned_session_id::text<>$2
+		) holds GROUP BY account_id`, runID, ownedSessionID)
 	if err != nil {
 		return nil, err
 	}
