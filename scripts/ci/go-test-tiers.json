@@ -8066,6 +8066,22 @@
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestReceiptEvidenceRejectsWrongInputAndFalseExit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestBoundedContinuationUsesOriginalWindowAtMostOnce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestCrashForkWindowsNeverDuplicateOrReleaseUncertainWriter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestFinalPersistenceCrashRetainsOutboxAndUncertainSlot","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestInputAckCrashKeepsEffectsVisibleAndNeverReinjects","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestLossKindsRetainWriterUntilExactAbsence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestRecoveryJournalBoundsAndLocalAuthorityRefusal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestRecoveryJournalReclaimsOnlyObsoleteCompletedSessions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativerecovery","name":"TestResumeRequiresCurrentProofPolicyHistoryAndExpiresCallbacks","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeroles","name":"TestNativeRoleResumeExitAndReceiptEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeroles","name":"TestNativeRoleSwitchFencesAndSingleWriter","tier":"ESSENTIAL"}
