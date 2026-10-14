@@ -456,8 +456,11 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     await nextTick()
     if (live) {
       busy.value = false
-      // Lessons keep their native Undo on the memo until the person moves on.
-      if (current.kind === 'lesson') { focusDecision(); return }
+      // Keep the native lesson progression; a single lesson stays with Undo.
+      if (current.kind === 'lesson') {
+        done.value = [...done.value.filter(id => id !== capturedId), capturedId]
+        navigate(1, notice); await nextTick(); focusDecision(); return
+      }
       advance(capturedId, notice); await nextTick(); if (!finished.value) focusDecision()
     }
   } catch (cause) {
