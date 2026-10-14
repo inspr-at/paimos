@@ -75,11 +75,15 @@ test('a ticket key opens the ticket beside the history, with one lookup for the 
   expect(lookups).toHaveLength(1)
   expect(lookups[0].query.get('keys')!.split(',').sort()).toEqual(['AEON-74', 'PHAROS-11'])
 
+  // Opening the key can scroll the release. Measure like the stability guard
+  // so that scroll is not a move, and a real shrink still fails.
   const article = sheet(page).locator('article.detail')
-  const before = (await article.boundingBox())!
-  expect(before.width).toBeGreaterThan(0)
-  await chip.click()
-  await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
+  const guard = await controlStability(page, { releaseArticle: article })
+  await guard.check(async () => {
+    await chip.click()
+    await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
+  })
+  guard.done()
   await expect(panel(page).getByRole('button', { name: /Status: In progress/ })).toBeVisible()
   await expect(chip).toHaveAttribute('aria-current', 'true')
   // The history stays on the same address. The ticket overlays the release
@@ -88,9 +92,6 @@ test('a ticket key opens the ticket beside the history, with one lookup for the 
   await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
   await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   const after = (await article.boundingBox())!
-  for (const edge of ['x', 'y', 'width', 'height'] as const) {
-    expect(Math.abs(after[edge] - before[edge]), `release article ${edge}`).toBeLessThanOrEqual(0.5)
-  }
   const aside = (await panel(page).boundingBox())!
   const frame = (await sheet(page).boundingBox())!
   expect(aside.width).toBeGreaterThan(0)
