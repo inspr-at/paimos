@@ -153,7 +153,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await expectStableControls({ controls: bar, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'skip to a short title', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(heading).not.toHaveText(title) } },
       { name: 'return to the long title', run: async () => { await paper.press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(heading).toHaveText(title) } },
-      { name: 'decide and advance with focus retained', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); expect(world.calls[0]!.body.option_id).toBe(world.questions[0]!.input.options[0]!.id); await expect(page.getByTestId('desk-pager')).toContainText('4 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
+      { name: 'decide and advance with focus retained', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); expect(world.calls[0]!.body.option_id).toBe(world.questions[0]!.input.options[0]!.id); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
     ] })
   })
 

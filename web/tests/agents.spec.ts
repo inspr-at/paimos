@@ -515,7 +515,8 @@ test('a held action request opens the exact native desk memo', async ({ page }) 
   const held = data.messages.find(m => m.is_action_request)!
   await page.goto(`/agents?needs=m:${held.id}`)
   await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
-  await expect(page.getByTestId('desk-body')).toContainText('Please merge the release fix once CI is green')
+  // AEON-1339: a short request is the memo's heading, as the artifact draws it.
+  await expect(page.getByTestId('desk-paper')).toContainText('Please merge the release fix once CI is green')
   await expect(page.getByRole('link', { name: 'Source', exact: true })).toHaveAttribute('href', `/agents?needs=m:${held.id}`)
 })
 

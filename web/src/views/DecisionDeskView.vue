@@ -65,6 +65,7 @@ const person = computed(() => session.identity?.principal.kind === 'person')
 const heldRows = computed(() => visible.value.filter(item => item.held || item.kind === 'approval'))
 const readyRows = computed(() => visible.value.filter(item => !(item.held || item.kind === 'approval')))
 const decidedCount = computed(() => items.value.filter(item => item.decided).length)
+const openRound = computed(() => items.value.filter(item => !item.decided && !item.linkOut))
 // The ticket each open item is about: one bounded lookup of up to 100 ticket ids per read.
 const tickets = ref(new Map<string, DeskTicket>())
 let ticketTurn = 0
@@ -389,7 +390,7 @@ function undoAfterClose(id: string) {
   void router.push({ path: '/decision-desk', query: { item: id, change: '1' } })
 }
 function undoRow(item: DeskItem) { filter.value = 'decided'; outcomeFilter.value = ''; changeId.value = item.id; begin(item.id) }
-function beginOpen() { filter.value = 'open'; begin() }
+function beginOpen() { if (!openRound.value.length) return; filter.value = 'open'; begin() }
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
@@ -401,7 +402,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
   <main class="desk-page decision-desk" aria-labelledby="desk-title">
     <header class="dp-head">
       <div><h1 id="desk-title" tabindex="-1">Decision Desk</h1><p class="head-note">Agents keep working unless something is held up.</p></div>
-      <button v-if="filter === 'open' && reviewable.length" type="button" class="btn" :disabled="loading && !items.length" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" />Answer one by one</button>
+      <!-- The slot stays on both tabs, so the tabs below never move (AEON-541); it starts the open round. -->
+      <button type="button" class="btn" :style="{ visibility: openRound.length ? 'visible' : 'hidden' }" :disabled="!openRound.length" :aria-hidden="!openRound.length || undefined" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" />Answer one by one</button>
     </header>
     <div class="dp-bar">
       <div class="seg view-tabs" role="radiogroup" aria-label="Show">

@@ -110,7 +110,7 @@ for (const width of [390, 1440]) {
     await page.getByTestId('desk-row-k:trim-1').click(); await page.getByTestId('desk-decide').click()
     await expect.poll(() => control.calls.length).toBe(1)
     await page.getByTestId('desk-close').click()
-    await page.getByRole('button', { name: /^Decided / }).click()
+    await page.getByRole('radio', { name: /^Decided / }).click()
     await expect(page.getByTestId('desk-row-k:trim-2')).toHaveCount(0)
     await next.click(); await expect(page.getByTestId('desk-row-k:trim-2')).toBeVisible()
     await page.getByTestId('desk-row-k:trim-2').click(); await expect(page.getByTestId('desk-decide')).toHaveText(/Restore/)

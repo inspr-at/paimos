@@ -445,8 +445,6 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     await nextTick()
     if (live) {
       busy.value = false
-      // A restored key trim stays on its record: the outcome is shown in place.
-      if (trimAction === 'restore' || (trim && current.decided)) { await nextTick(); focusDecision(); return }
       advance(capturedId, notice); await nextTick(); if (!finished.value) focusDecision()
     }
   } catch (cause) {
@@ -993,7 +991,7 @@ a.res-key:hover { text-decoration: underline; }
 /* Native records keep their own evidence. */
 .stepup-diff { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); align-items: start; }.stepup-arrow { display: grid; place-items: center; height: 46px; margin-top: 22px; color: var(--ink-3); }
 .stepup-diff dl { margin: 6px 0 0; font-size: 12.5px; }.stepup-diff dl > div { display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr); gap: 10px; padding: 9px 8px; border-bottom: 1px solid var(--paper-line); }.stepup-diff dt { color: var(--ink-3); }.stepup-diff dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-[data-testid="stepup-before"] .changed dd { color: var(--ink-3); }[data-testid="stepup-after"] .changed { background: color-mix(in srgb, var(--teal) 7%, transparent); }[data-testid="stepup-after"] .changed dd { font-weight: 650; }
+[data-testid="stepup-before"] .changed dd { color: var(--ink-3); }[data-testid="stepup-after"] .changed { background: var(--row-hover); }[data-testid="stepup-after"] .changed dd { font-weight: 650; }
 .stepup-answer { font-size: 13px; font-weight: 550; margin: 0; }
 .key-trim-evidence table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12.5px; }
 .key-trim-evidence th, .key-trim-evidence td { text-align: left; vertical-align: top; padding: 10px 8px 10px 0; border-bottom: 1px solid var(--paper-line); overflow-wrap: anywhere; }

@@ -78,10 +78,10 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expectStableControls({ controls: bar, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'skip to next', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-announcement')).toContainText('Skipped. It stays on the desk.') } },
       { name: 'page back', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
-      // The skipped item waits until nothing else is open.
-      { name: 'decide and advance past the skipped item', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('4 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
-      { name: 'revisit decision', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-decide')).toContainText('Next'); await expect(page.getByTestId('desk-skip')).toContainText('Change'); await expect(page.getByTestId('desk-stamp')).toHaveText('Once') } },
-      { name: 'change and restart delivery', run: async () => { await page.getByTestId('desk-paper').press('c'); await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toContainText('Replace & next'); await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('4 of') } },
+      // Deciding the skipped item takes it out of the skipped set; the round moves on to the next open item.
+      { name: 'decide and advance', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
+      { name: 'revisit decision', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-decide')).toContainText('Next'); await expect(page.getByTestId('desk-skip')).toContainText('Change'); await expect(page.getByTestId('desk-stamp')).toHaveText('Once') } },
+      { name: 'change and restart delivery', run: async () => { await page.getByTestId('desk-paper').press('c'); await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toContainText('Replace & next'); await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('3 of') } },
       { name: 'return to attachments', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByRole('button', { name: 'Open Index plan' })).toBeVisible() } },
       { name: 'lightbox and return focus', run: async () => { const attachment = page.getByRole('button', { name: 'Open Index plan' }); await attachment.click(); await expect(page.getByRole('dialog', { name: 'Index plan, attachment 1 of 1' })).toBeVisible(); await page.getByRole('button', { name: 'Close viewer' }).click(); await expect(attachment).toBeFocused(); await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible() } },
     ] })
@@ -144,7 +144,8 @@ test('denied reads keep the memo blocked and inaccessible context explicit', asy
   await expect(page.getByTestId('desk-body')).toContainText('Ticket context is unavailable or inaccessible')
   await page.getByTestId('desk-close').click(); world.failQuestions = true
   await refreshDesk(page, world)
-  await expect(page.locator('.source-warnings')).toContainText('Some questions couldn’t be loaded · Try again')
+  await expect(page.locator('.source-warnings')).toContainText('Some questions couldn’t be loaded')
+  await expect(page.locator('.source-warnings').getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
   expect(world.calls).toHaveLength(0)
 })
 
@@ -397,7 +398,7 @@ test('failed continuation retains loaded decisions and retries the same cursor',
   await expect(rows).toHaveCount(100)
   world.failQuestions = true
   await load.click()
-  await expect(page.locator('.source-warnings')).toContainText('More questions couldn’t be loaded · Try again')
+  await expect(page.locator('.source-warnings')).toContainText('More questions couldn’t be loaded')
   await expect(rows).toHaveCount(100)
   await expect(load).toBeEnabled()
   const failed = world.reads.at(-1)
@@ -516,7 +517,9 @@ test('history remains reachable without a live session and revokes through the n
   await expect(page).toHaveURL(/decision-desk/)
   await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
   await expect(page.getByTestId('desk-revoke')).toBeEnabled()
-  await expectStableControls({ controls: { revoke: page.getByTestId('desk-revoke'), next: page.getByTestId('desk-decide'), pager: page.getByTestId('desk-pager') }, interactions: [
+  // A round of one has no pager (AEON-1339).
+  await expect(page.getByTestId('desk-pager')).toHaveCount(0)
+  await expectStableControls({ controls: { revoke: page.getByTestId('desk-revoke'), next: page.getByTestId('desk-decide'), close: page.getByTestId('desk-close') }, interactions: [
     { name: 'revoke the original grant', run: async () => { await page.getByTestId('desk-revoke').click(); await expect(page.getByTestId('desk-status')).toContainText('grant was revoked'); await expect(page.getByTestId('desk-revoke')).toBeDisabled() } },
   ] })
   expect(world.calls.map(call => call.path)).toEqual(['/api/approvals/approval-1/revoke'])

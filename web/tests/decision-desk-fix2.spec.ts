@@ -59,7 +59,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(effects.getByRole('link', { name: 'Review the doctrine draft' })).toHaveAttribute('href', '/settings/agent-rules')
     await expect(effects.getByRole('link', { name: 'Open the criterion to review' })).toHaveAttribute('href', '/work/n-a1')
     await page.getByTestId('desk-paper').press('c')
-    await expectStableControls({ controls: { decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), pager: page.getByTestId('desk-pager'), stamps: page.getByTestId('desk-stamps'), clicked: page.getByTestId('stamp-requirement'), frame: page.getByTestId('desk-frame') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [{ name: 'select a corrective outcome while its failed effect stays visible', run: async () => { await page.getByTestId('stamp-requirement').click(); await expect(page.getByTestId('desk-decide')).toContainText('Replace'); await expect(effects).toContainText('outcome failed') } }] })
+    // A round of one decided item has no pager (AEON-1339).
+    await expect(page.getByTestId('desk-pager')).toHaveCount(0)
+    await expectStableControls({ controls: { decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), stamps: page.getByTestId('desk-stamps'), clicked: page.getByTestId('stamp-requirement'), frame: page.getByTestId('desk-frame') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [{ name: 'select a corrective outcome while its failed effect stays visible', run: async () => { await page.getByTestId('stamp-requirement').click(); await expect(page.getByTestId('desk-decide')).toContainText('Replace'); await expect(effects).toContainText('outcome failed') } }] })
     await effects.evaluate(element => element.scrollIntoView({ block: 'start' }))
     const dir = join(process.cwd(), 'test-results', 'aeon-569-fix2'); await mkdir(dir, { recursive: true })
     await page.screenshot({ path: join(dir, `outcome-review-${width}-${theme}.png`) })

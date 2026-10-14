@@ -133,6 +133,8 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
  * read of the open questions has landed and the list is no longer busy. */
 export async function refreshDesk(page: Page, world: { reads: string[] }) {
   const reads = () => world.reads.filter(path => path.startsWith('/api/decision-desk?state=open')).length
+  // A read already in flight would swallow the focus event.
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
   const before = reads()
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect.poll(reads).toBeGreaterThan(before)

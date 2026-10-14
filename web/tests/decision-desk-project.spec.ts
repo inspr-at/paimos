@@ -77,7 +77,7 @@ test('the filled key chip follows the item shown before, through J/K, the jump l
   await expect(chip).toHaveText(PHAROS.key)
   await expect(chip).toHaveClass(/switched/)
   await expect(page.getByTestId('desk-announcement')).toContainText(notice(PHAROS.name, AEON.name))
-  await move(page, 'j', 'An agent needs your steer')
+  await move(page, 'j', 'The reviewer needs guidance before trying again.')
   await expect(chip).toHaveText(AEON.key)
   await expect(chip).toHaveClass(/switched/)
   await move(page, 'k', 'Should the successor continue the review?')
@@ -213,7 +213,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expectStableControls({ controls: { ...actions, frame: page.getByTestId('desk-frame') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'question in the same project', run: async () => { await move(page, 'j', 'Which migration should carry the index?'); await fits() } },
       { name: 'handover in another project', run: async () => { await move(page, 'j', 'Should the successor continue the review?'); await fits() } },
-      { name: 'rule with its native action', run: async () => { await move(page, 'j', 'An agent needs your steer'); await move(page, 'j', 'Keep mutation checks in the transaction'); await fits() } },
+      { name: 'rule with its native action', run: async () => { await move(page, 'j', 'The reviewer needs guidance before trying again.'); await move(page, 'j', 'Keep mutation checks in the transaction'); await fits() } },
     ] })
     await page.screenshot({ path: testInfo.outputPath(`tablet-${theme}.png`) })
     await page.setViewportSize({ width: 1440, height: 1000 })
