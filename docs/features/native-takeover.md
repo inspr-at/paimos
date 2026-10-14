@@ -32,7 +32,8 @@ their meaning. The new command node is deliberately unmounted in this slice.
   client, control capability, lease, exact binding and target permissions. It
   holds the supervisor's shared native/access-change fence through the final
   native write. All structured input, approval and control paths share this
-  fence. Server permission changes still use `RequireTx` in their final database
+  fence. Quiesce/close use that held fence rather than recursively acquiring it.
+  Server permission changes still use `RequireTx` in their final database
   transaction; no database transaction is held over native I/O.
 - `Qualification.Require` independently qualifies each mode's exact binary,
   account, tool/settings policy, native history and OS permission fence. Nil

@@ -37,6 +37,9 @@ type Caller struct {
 func (Caller) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("local takeover authority cannot be serialized")
 }
+func (*Caller) UnmarshalJSON([]byte) error {
+	return errors.New("local takeover authority cannot be decoded")
+}
 func (Caller) Format(f fmt.State, _ rune) { _, _ = fmt.Fprint(f, "[local takeover caller]") }
 
 // Access is current server-authorized control, with a locally derived monotonic
@@ -164,7 +167,7 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 func (m *Manager) recovering() { m.state = "recovering"; m.holder = nil }
 
 func (m *Manager) validate(schema string, value any, cols, rows int64) error {
-	if cols != 0 || rows != 0 {
+	if schema == "NativeTakeIntent" || schema == "NativeResize" {
 		if !ValidSize(cols, rows) {
 			return refuse(nativecontract.ReasonInvalidInput)
 		}
