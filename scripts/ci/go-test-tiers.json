@@ -8008,6 +8008,8 @@
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestPairedNativeStartAndRevalidationKeepSeparateAuthorities","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestStartClaimRevocationBarrier","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestStartRegistrationIdempotencyAndPersonViewer","tier":"ESSENTIAL"}

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
@@ -16,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -69,13 +71,24 @@ func BindNativeAccountTx(ctx context.Context, tx pgx.Tx, in NativeAdmission) (Na
 	return out, nil
 }
 
+// NativeSessionAuthority revalidates the persisted original actor's current
+// native/tool/settings/history grant in the supplied final transaction. It must
+// perform no I/O or event writes, and refuse revoked or changed grants with their
+// exact cause. The immutable stored policy is a pin, never current consent.
+type NativeSessionAuthority interface {
+	RequireNativeGrantTx(context.Context, pgx.Tx, nativecontract.Actor, nativecontract.StartIntent, nativecontract.Policy) error
+}
+
 // RequireNativeSessionTx enters the FINAL launch/input transaction before any
-// resource lock or event. The owning service also revalidates the original
-// actor's immutable grant in this transaction; this helper cannot grant tools,
+// resource lock or event. The daemon needs only its exact live paired key and
+// harness.worker; the stored ORIGINAL actor needs current harness.control and
+// a separately revalidated native grant. This helper cannot grant tools,
 // continuation, controller rights or permission to create a successor.
+// A delegated original actor's key must be in InTenant's sorted admission batch
+// before entry (db.WithKeyScopeUse); no key fence is acquired after record locks.
 // exceptSession is empty for initial admission and the exact held session for
 // revalidation. Local admission must retain/check the shared ledger separately.
-func RequireNativeSessionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in NativeAdmission, expected NativeAccountBinding, exceptSession string, now time.Time) error {
+func RequireNativeSessionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in NativeAdmission, expected NativeAccountBinding, exceptSession string, now time.Time, authority NativeSessionAuthority) error {
 	if p.TenantID != in.TenantID || p.ID != in.PrincipalID || p.Kind != tenant.Agent ||
 		expected.TenantID != in.TenantID || expected.AccountID != in.AccountID ||
 		expected.Harness != in.Harness || expected.OwnerPersonID != in.OwnerPersonID ||
@@ -86,13 +99,27 @@ func RequireNativeSessionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
 	}
+	if authority == nil {
+		return nativeDenial(nativecontract.ReasonQualificationMissing)
+	}
+	// A second key of the same principal is not the approved pairing key.
+	var paired bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_computers c
+ JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id
+ WHERE c.tenant_id=$1 AND c.id=$2 AND c.principal_id=$3 AND c.key_id=NULLIF($4,'')::uuid
+ AND c.state='connected' AND q.state='redeemed' AND e.account_id=$5
+ AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL)`, in.TenantID, in.ComputerID, p.ID, p.KeyID, in.AccountID).Scan(&paired); err != nil {
+		return err
+	}
+	if !paired {
+		return nativeDenial(nativecontract.ReasonPermissionRevoked)
+	}
 	if err := accountuse.LockShared(ctx, tx); err != nil {
 		return err
 	}
-	for _, permission := range []string{"harness.worker", "harness.control"} {
-		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
-			return nativeDenial(nativecontract.ReasonPermissionRevoked)
-		}
+	if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: in.ProjectID}); err != nil {
+		return nativeDenial(nativecontract.ReasonPermissionRevoked)
 	}
 	actual, err := BindNativeAccountTx(ctx, tx, in)
 	if err != nil {
@@ -115,5 +142,69 @@ func RequireNativeSessionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	}
 	capacityErr := RequireNativeCapacityTx(ctx, tx, in, exceptSession, now)
 	_, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
-	return errors.Join(capacityErr, err)
+	if err := errors.Join(capacityErr, err); err != nil {
+		return err
+	}
+	return requireNativeActorTx(ctx, tx, in, now, authority)
+}
+
+func requireNativeActorTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, now time.Time, authority NativeSessionAuthority) error {
+	var actorRaw, intentRaw, policyRaw []byte
+	var principalID, kind, keyID, grantID string
+	var revision int64
+	err := tx.QueryRow(ctx, `SELECT i.actor_authority,i.intent,i.policy,i.actor_principal_id::text,
+ i.actor_kind,coalesce(i.actor_key_id::text,''),i.actor_grant_id::text,i.actor_grant_revision
+ FROM native_session_intents i JOIN native_session_bindings b ON b.tenant_id=i.tenant_id AND b.id=i.owned_session_id
+ WHERE i.tenant_id=$1 AND i.owned_session_id=$2 AND i.project_id=$3 AND i.owner_person_id=$4
+ AND b.account_id=$5 AND b.computer_id=$6 AND b.paired_principal_id=$7 AND b.daemon_id=$8
+ FOR NO KEY UPDATE OF i,b`, in.TenantID, in.OwnedSessionID, in.ProjectID, in.OwnerPersonID,
+		in.AccountID, in.ComputerID, in.PrincipalID, in.DaemonID).Scan(&actorRaw, &intentRaw, &policyRaw, &principalID, &kind, &keyID, &grantID, &revision)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nativeDenial(nativecontract.ReasonGrantMissing)
+	}
+	if err != nil {
+		return err
+	}
+	var stored struct {
+		Principal     tenant.Principal `json:"principal"`
+		KeyID         string           `json:"key_id"`
+		AuthKeyID     string           `json:"auth_key_id"`
+		ActorOwnerID  string           `json:"actor_owner_id"`
+		GrantID       string           `json:"grant_id"`
+		GrantRevision int64            `json:"grant_revision"`
+	}
+	var intent nativecontract.StartIntent
+	var policy nativecontract.Policy
+	for _, v := range []struct {
+		raw []byte
+		dst any
+	}{{actorRaw, &stored}, {intentRaw, &intent}, {policyRaw, &policy}} {
+		if len(v.raw) > 131072 {
+			return nativeDenial(nativecontract.ReasonBufferFull)
+		}
+		if err := json.Unmarshal(v.raw, v.dst); err != nil {
+			return err
+		}
+	}
+	original := stored.Principal
+	original.KeyID, original.AuthKeyID = stored.KeyID, stored.AuthKeyID
+	if original.TenantID != in.TenantID || original.ID != principalID || string(original.Kind) != kind ||
+		original.Kind != tenant.Person && original.Kind != tenant.Agent || stored.KeyID != keyID ||
+		original.Kind == tenant.Agent && keyID == "" || !workorders.UUID(principalID) ||
+		stored.ActorOwnerID != in.OwnerPersonID || stored.GrantID != grantID || stored.GrantRevision != revision ||
+		policy.GrantID != grantID || policy.GrantRevision != revision ||
+		intent.AccountID != in.AccountID || intent.ComputerID != in.ComputerID || intent.Harness != in.Harness ||
+		intent.ModelProfileID != in.ModelProfileID || !reflect.DeepEqual(intent.WorkID, in.WorkID) ||
+		intent.Role == "coordinator" && (original.Kind != tenant.Person || in.RunID != nil) {
+		return nativeDenial(nativecontract.ReasonIdentityMismatch)
+	}
+	if err := authz.RequireTx(ctx, tx, original, "harness.control", authz.Scope{ProjectID: in.ProjectID}); err != nil {
+		return nativeDenial(nativecontract.ReasonPermissionRevoked)
+	}
+	if !now.Before(policy.ExpiresAt) {
+		return nativeDenial(nativecontract.ReasonGrantExpired)
+	}
+	actor := nativecontract.Actor{TenantID: original.TenantID, PrincipalID: original.ID, PrincipalKind: string(original.Kind),
+		OwnerPersonID: stored.ActorOwnerID, KeyCeiling: original.Scopes, GrantID: stored.GrantID, GrantRevision: stored.GrantRevision}
+	return authority.RequireNativeGrantTx(ctx, tx, actor, intent, policy)
 }
