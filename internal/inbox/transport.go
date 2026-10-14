@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -63,7 +64,7 @@ func (m *messaging) ackCompatMessage(w http.ResponseWriter, r *http.Request) {
 		messagingFailure(w, err)
 		return
 	}
-	if _, err := m.base.ack(r.Context(), p, inboxID); err != nil {
+	if _, err := m.base.ack(authz.WithRouteScope(r.Context(), authz.Scope{ProjectID: project}), p, inboxID); err != nil {
 		messagingFailure(w, err)
 		return
 	}
