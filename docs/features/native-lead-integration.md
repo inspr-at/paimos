@@ -63,7 +63,22 @@ PASS: read-only inspection identified the named counters, shared-quota callers,
 native caller's additional root sum and disabled C0 constructor. No credentials,
 foreign worktree, release version or source file were changed.
 
-The affected selector and guarded static-check outcome are recorded below before
-the final local commit. The implementation Go suite and negative control are
-not applicable to this documentation-only ownership handoff. Browser checks are
-not applicable to I1. Acceptance and authoritative PR CI remain incomplete.
+PASS: `node scripts/test-tiers/affected.mjs --base origin/main` exits 0. After
+the handoff commit, its JSON projection reports mode `essential`, layout
+`static`, reason `essential plus changed area and reverse dependencies`.
+This is a selection result, not an executed test-suite pass.
+
+PASS: `git diff --check` and the staged whitespace check exit 0. The committed
+file set contains only this assigned documentation path; the ignored progress
+file records that the worker handoff is closed but implementation is incomplete.
+
+INCOMPLETE: `/Users/markus/.aeon/lead/aeon/ci-static-locked.sh` exits 3 because
+both remote run slots on mbp2606 are occupied (`2/2`; CI pool `0/4`). The static
+checks did not execute. No local fallback or copied runner was used. Any resumed
+implementation still requires guarded checks and authoritative green PR CI.
+
+NOT RUN: the planned implementation Go suite and negative control. No Go code
+or tests changed, and the required integration package/smoke does not exist.
+Browser checks are not applicable to I1. No origin push, deployment, model CLI,
+review gate, live pilot or ticket-status change was performed. Acceptance and
+release remain incomplete; this local commit is an ownership handoff only.
