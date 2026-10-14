@@ -593,15 +593,11 @@ func listLearningPageFor(ctx context.Context, tx pgx.Tx, tenantID, projectID str
 	if err != nil {
 		return page, err
 	}
-	decided, err := decidedKeys(ctx, tx, tenantID)
+	tickets, ticketsEnd, err := listTaggedIssues(ctx, tx, tenantID, projectID, projectKey, cursor)
 	if err != nil {
 		return page, err
 	}
-	tickets, ticketsEnd, err := listTaggedIssues(ctx, tx, tenantID, projectID, projectKey, decided, cursor)
-	if err != nil {
-		return page, err
-	}
-	comments, commentsEnd, err := listTaggedComments(ctx, tx, tenantID, projectID, projectKey, decided, cursor)
+	comments, commentsEnd, err := listTaggedComments(ctx, tx, tenantID, projectID, projectKey, cursor)
 	if err != nil {
 		return page, err
 	}
@@ -655,23 +651,6 @@ func AnalysisLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID strin
 	return out, err
 }
 
-func decidedKeys(ctx context.Context, tx pgx.Tx, tenantID string) (map[string]bool, error) {
-	rows, err := tx.Query(ctx, `SELECT source_key FROM method_learning_decisions WHERE tenant_id=$1`, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		out[key] = true
-	}
-	return out, rows.Err()
-}
-
 // scanEnd is the key of a scan's last row when the scan filled its limit:
 // rows after it were not read. nil when the scan reached its end.
 func scanEnd(rows int, last learningCursor) *learningCursor {
@@ -689,7 +668,7 @@ func cursorArgs(c *learningCursor) (*time.Time, string) {
 	return &c.At, c.ID
 }
 
-func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool, cursor *learningCursor) ([]Learning, *learningCursor, error) {
+func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, cursor *learningCursor) ([]Learning, *learningCursor, error) {
 	before, beforeID := cursorArgs(cursor)
 	rows, err := tx.Query(ctx, projectTree+`
 	  SELECT n.id::text, n.key, n.title, n.updated_at, n.fields, k.slug, coalesce(n.fields->>'slug','')
@@ -722,7 +701,7 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 		}
 		item.ID = nodeLearningID(item.NodeID)
 		scanned, last = scanned+1, learningCursor{At: item.At, ID: item.ID}
-		if decided[item.ID] || !issueKinds[kind] || !hasLearningTag(fields) {
+		if !issueKinds[kind] || !hasLearningTag(fields) {
 			continue
 		}
 		item.Text = oneLine(item.Title, false)
@@ -737,7 +716,7 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 	return out, scanEnd(scanned, last), rows.Err()
 }
 
-func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool, cursor *learningCursor) ([]Learning, *learningCursor, error) {
+func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, cursor *learningCursor) ([]Learning, *learningCursor, error) {
 	before, beforeID := cursorArgs(cursor)
 	rows, err := tx.Query(ctx, projectTree+`
 	  SELECT c.id::text, c.at, n.id::text, n.key, n.title, k.slug, coalesce(n.fields->>'slug',''),
@@ -782,7 +761,7 @@ func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, pro
 		text, ok := commentLearningText(body)
 		item.ID = commentLearningID(item.NodeID, item.CommentID)
 		scanned, last = scanned+1, learningCursor{At: item.At, ID: item.ID}
-		if !ok || decided[item.ID] || looksSensitive(body) {
+		if !ok || looksSensitive(body) {
 			continue
 		}
 		item.Source = "comment"

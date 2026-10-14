@@ -346,6 +346,7 @@ func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publ
 			return err
 		}
 		var ranges []SensitiveRange
+		ranges = append(ranges, sensitiveRanges("text", item.Text)...)
 		ranges = append(ranges, sensitiveRanges("lesson", in.Lesson)...)
 		ranges = append(ranges, sensitiveRanges("reason", in.Reason)...)
 		ranges = append(ranges, sensitiveRanges("source_summary", in.SourceSummary)...)
