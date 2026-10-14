@@ -6627,6 +6627,143 @@
           "group": "fixes"
         }
       ]
+    },
+    "261014191553.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 133,
+      "snapshot_sha256": "9e293420b9246df78b096ecfb4d9ab47b4dc86742fb2e649f8a11bf091174548",
+      "captured_at": "2026-10-14T21:26:51Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1240",
+          "pill_en": "Smoother small details",
+          "pill_de": "Feinere Details",
+          "benefit_en": "Models carry the same name everywhere, counts read correctly, and a few small layout details on Models, Routines and Accounts are cleaned up.",
+          "benefit_de": "Modelle tragen überall denselben Namen, Zählungen stimmen, und kleine Layout-Details auf Models, Routines und Accounts sind bereinigt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1253",
+          "pill_en": "History with fewer permissions",
+          "pill_de": "Historie mit weniger Rechten",
+          "benefit_en": "Delivery history works with fewer GitHub permissions, so linking a repository needs no extra access.",
+          "benefit_de": "Die Lieferhistorie funktioniert mit weniger GitHub-Berechtigungen, sodass das Verknüpfen eines Repositorys keinen zusätzlichen Zugriff braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1254",
+          "pill_en": "Session chat delivers",
+          "pill_de": "Sitzungs-Chat stellt zu",
+          "benefit_en": "Messages to a running Claude Code session arrive, and its chat shows the conversation; if delivery is impossible, the session says why.",
+          "benefit_de": "Nachrichten an eine laufende Claude-Code-Sitzung kommen an, und ihr Chat zeigt das Gespräch; ist die Zustellung unmöglich, nennt die Sitzung den Grund.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1258",
+          "pill_en": "Duplicate build guard",
+          "pill_de": "Schutz vor Doppel-Builds",
+          "benefit_en": "Active registered builders block duplicate admission; deliberate parallel overrides are recorded.",
+          "benefit_de": "Aktive registrierte Builder verhindern doppelte Zulassungen; absichtliche parallele Freigaben werden protokolliert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1265",
+          "pill_en": "Exact attachment downloads",
+          "pill_de": "Anhänge bytegenau laden",
+          "benefit_en": "Downloading ticket attachments with the CLI works byte-exact again.",
+          "benefit_de": "Das Herunterladen von Ticket-Anhängen per CLI funktioniert wieder bytegenau.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1275",
+          "pill_en": "Clearer model refusals",
+          "pill_de": "Klarere Modellablehnungen",
+          "benefit_en": "Model selection explains why no allowed route can run.",
+          "benefit_de": "Die Modellwahl erklärt, warum keine erlaubte Route ausgeführt werden kann.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1277",
+          "pill_en": "Safer Codex Node updates",
+          "pill_de": "Sicherere Codex-Node-Updates",
+          "benefit_en": "Verified Codex pairings can renew changed Node pins automatically; older pairings may still require repair.",
+          "benefit_de": "Verifizierte Codex-Kopplungen können geänderte Node-Pins automatisch erneuern; ältere Kopplungen benötigen gegebenenfalls weiterhin eine Reparatur.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1279",
+          "pill_en": "Phone layout fits",
+          "pill_de": "Telefon-Layout passt",
+          "benefit_en": "On a phone the Agents page shows the sessions instead of the chrome, and scrolling follows the finger.",
+          "benefit_de": "Am Telefon zeigt die Agenten-Seite die Sitzungen statt der Bedienleisten, und das Scrollen folgt dem Finger.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1282",
+          "pill_en": "Queued section spaced",
+          "pill_de": "Warteschlange mit Abstand",
+          "benefit_en": "The Queued section on the Agents page is clearly separated from the session list.",
+          "benefit_de": "Der Bereich Wartend auf der Agenten-Seite ist klar von der Sitzungsliste getrennt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1284",
+          "pill_en": "Amy messages directly",
+          "pill_de": "Amy schreibt direkt",
+          "benefit_en": "The Grok assistant talks to AEON over HTTPS with a messaging-only key, independent of the tailnet.",
+          "benefit_de": "Die Grok-Assistentin kommuniziert mit AEON über HTTPS mit einem reinen Nachrichten-Schlüssel, unabhängig vom Tailnet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1285",
+          "pill_en": "Clearer agent rows",
+          "pill_de": "Klarere Agentenzeilen",
+          "benefit_en": "Rows use readable stop labels, mark the claimed lead and periodically refresh Claude Code account labels when available.",
+          "benefit_de": "Zeilen zeigen verständliche Beendigungsgründe, kennzeichnen den bestätigten Lead und aktualisieren verfügbare Claude-Code-Kontolabels regelmäßig.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1298",
+          "pill_en": "Automatic lead claim",
+          "pill_de": "Automatische Lead-Übernahme",
+          "benefit_en": "With the updated heartbeat helper, a confirmed lead adoption is claimed automatically after its next accepted heartbeat.",
+          "benefit_de": "Mit dem aktualisierten Heartbeat-Helfer wird eine bestätigte Lead-Übernahme nach dem nächsten akzeptierten Heartbeat automatisch beansprucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1330",
+          "pill_en": "Prepared lessons",
+          "pill_de": "Vorbereitete Lehren",
+          "benefit_en": "People see prepared lesson proposals; legacy candidates without recommendations are dismissed automatically.",
+          "benefit_de": "Personen sehen vorbereitete Lernvorschläge; Altkandidaten ohne Empfehlung werden automatisch verworfen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1331",
+          "pill_en": "Lessons on the Desk",
+          "pill_de": "Lehren im Desk",
+          "benefit_en": "Prepared lesson proposals appear as decisions; legacy candidates without recommendations are cleared automatically.",
+          "benefit_de": "Vorbereitete Lernvorschläge erscheinen als Entscheidungen; Altkandidaten ohne Empfehlung werden automatisch bereinigt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1343",
+          "pill_en": "Decide always works",
+          "pill_de": "Entscheiden funktioniert immer",
+          "benefit_en": "Clicking Decide on the Decision Desk always records the decision or says clearly why it cannot yet.",
+          "benefit_de": "Ein Klick auf Entscheiden im Decision Desk speichert die Entscheidung oder sagt klar, warum das noch nicht geht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1365",
+          "pill_en": "Steadier section links",
+          "pill_de": "Stabilere Abschnittslinks",
+          "benefit_en": "After a settings link reaches its target, the page briefly corrects the scroll position if newly loaded content shifts that target.",
+          "benefit_de": "Nach dem Anspringen eines Ziels in den Einstellungen wird die Scrollposition kurzzeitig korrigiert, wenn nachgeladene Inhalte das Ziel verschieben.",
+          "group": "fixes"
+        }
+      ]
     }
   }
 }
