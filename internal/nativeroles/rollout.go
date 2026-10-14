@@ -144,7 +144,11 @@ func (s *Switcher) Switch(ctx context.Context, scope Scope, request Request) (na
 	}
 	// Freeze pointers before handing the request to asynchronous host code.
 	raw, _ := json.Marshal(request)
-	_ = json.Unmarshal(raw, &request)
+	var frozen Request
+	if err := json.Unmarshal(raw, &frozen); err != nil {
+		return result, refuse(nativecontract.ReasonInvalidInput)
+	}
+	request = frozen
 	scope.Actor.KeyCeiling = append([]string(nil), scope.Actor.KeyCeiling...)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -159,6 +163,11 @@ func (s *Switcher) Switch(ctx context.Context, scope Scope, request Request) (na
 	}
 	if err == nil && !called {
 		err = refuse(nativecontract.ReasonQualificationMissing)
+	}
+	if err != nil {
+		// A foreign/malformed host response must not leak its session/history
+		// through a partial result. Reconcile the unchanged request ID instead.
+		result = nativecontract.OperationResult{}
 	}
 	return result, err
 }
@@ -209,6 +218,9 @@ func bound(scope Scope, r Request) error {
 	}
 	if r.ExpectedBinding.TenantID != scope.Actor.TenantID || r.ExpectedBinding.ProjectID != scope.ProjectID {
 		return refuse(nativecontract.ReasonWrongInstance)
+	}
+	if scope.Actor.PrincipalKind != "person" && scope.Actor.PrincipalKind != "agent" {
+		return refuse(nativecontract.ReasonWrongPrincipal)
 	}
 	if r.Start != nil {
 		x := r.Start
@@ -292,7 +304,7 @@ func (s *Switcher) checkCurrent(scope Scope, r Request, c Current) error {
 			return refuse(nativecontract.ReasonIdentityMismatch)
 		}
 		b, p := x.AfterExit, c.Predecessor.Identity
-		if b == nil || p.PID < 2 || !c.Predecessor.PossibleFork || b.PID != int64(p.PID) || !b.ProcessStartedAt.Equal(p.StartedAt) || !digest(p.ProcessIdentityDigest) ||
+		if b == nil || p.PID < 2 || p.StartedAt.IsZero() || p.StartedAt.After(s.now()) || !c.Predecessor.PossibleFork || b.PID != int64(p.PID) || !b.ProcessStartedAt.Equal(p.StartedAt) || !digest(p.ProcessIdentityDigest) ||
 			b.ProcessIdentityDigest != p.ProcessIdentityDigest || !s.now().Before(b.Deadline) || b.Deadline.After(g.Policy.ExpiresAt) || b.Deadline.Sub(s.now()) > 300*time.Second {
 			return refuse(nativecontract.ReasonOwnershipUnconfirmed)
 		}
@@ -304,7 +316,7 @@ func (s *Switcher) checkCurrent(scope Scope, r Request, c Current) error {
 			return refuse(nativecontract.ReasonPermissionRevoked)
 		}
 		p, x := c.Predecessor.Identity, c.Exit
-		if x == nil || !c.Predecessor.PossibleFork || !c.Predecessor.ExitObserved || !x.RootExited || !x.GroupAbsent || !digest(p.ProcessIdentityDigest) ||
+		if x == nil || p.PID < 2 || p.StartedAt.IsZero() || !c.Predecessor.PossibleFork || !c.Predecessor.ExitObserved || !x.RootExited || !x.GroupAbsent || !digest(p.ProcessIdentityDigest) ||
 			x.ProcessIdentityDigest != p.ProcessIdentityDigest || x.ObservedAt.Before(p.StartedAt) || x.ObservedAt.After(s.now()) {
 			return refuse(nativecontract.ReasonOwnershipUnconfirmed)
 		}
@@ -335,7 +347,7 @@ func sameAssignment(a, b Grant) bool {
 	return a.Role == b.Role && a.Instance == b.Instance && a.ProjectID == b.ProjectID && a.Actor.TenantID == b.Actor.TenantID &&
 		a.Actor.PrincipalID == b.Actor.PrincipalID && a.Actor.OwnerPersonID == b.Actor.OwnerPersonID && a.Actor.PrincipalKind == b.Actor.PrincipalKind &&
 		a.Actor.GrantID == b.Actor.GrantID && a.Actor.GrantRevision == b.Actor.GrantRevision && slices.Equal(a.Actor.KeyCeiling, b.Actor.KeyCeiling) &&
-		a.ComputerID == b.ComputerID && a.Platform == b.Platform && a.AccountID == b.AccountID && a.AccountKey == b.AccountKey && a.WorkspaceID == b.WorkspaceID && a.WorkspaceRoot == b.WorkspaceRoot &&
+		a.ComputerID == b.ComputerID && a.Platform == b.Platform && a.Production == b.Production && a.AccountID == b.AccountID && a.AccountKey == b.AccountKey && a.WorkspaceID == b.WorkspaceID && a.WorkspaceRoot == b.WorkspaceRoot &&
 		a.ModelProfileID == b.ModelProfileID && a.PolicyID == b.PolicyID && a.Harness == b.Harness && a.NativeHistoryGrantID == b.NativeHistoryGrantID &&
 		a.Policy.ToolPolicyDigest == b.Policy.ToolPolicyDigest && a.Policy.SettingsPolicyDigest == b.Policy.SettingsPolicyDigest && slices.Equal(a.Tools, b.Tools)
 }

@@ -157,6 +157,7 @@ func TestNativeRoleSwitchFencesAndSingleWriter(t *testing.T) {
 				{"project", func(s *Scope, _ *Request, _ *Current) { s.ProjectID = roleID(80) }, nativecontract.ReasonWrongInstance},
 				{"instance", func(s *Scope, _ *Request, _ *Current) { s.Instance = "pma" }, nativecontract.ReasonWrongInstance},
 				{"principal", func(s *Scope, _ *Request, _ *Current) { s.Actor.PrincipalID = roleID(80) }, nativecontract.ReasonWrongPrincipal},
+				{"invalid principal kind", func(s *Scope, _ *Request, _ *Current) { s.Actor.PrincipalKind = "coordinator" }, nativecontract.ReasonWrongPrincipal},
 				{"owner", func(s *Scope, _ *Request, _ *Current) { s.Actor.OwnerPersonID = roleID(80) }, nativecontract.ReasonWrongPrincipal},
 				{"grant", func(s *Scope, _ *Request, _ *Current) { s.Actor.GrantID = roleID(80) }, nativecontract.ReasonGrantMissing},
 				{"grant revision", func(s *Scope, _ *Request, _ *Current) { s.Actor.GrantRevision-- }, nativecontract.ReasonGrantMissing},
@@ -190,7 +191,11 @@ func TestNativeRoleSwitchFencesAndSingleWriter(t *testing.T) {
 				{"no restricted evidence", func(_ *Scope, _ *Request, c *Current) { c.Grant.Evidence.RestrictedRunID = "" }, nativecontract.ReasonQualificationMissing},
 				{"no native evidence", func(_ *Scope, _ *Request, c *Current) { c.Grant.Evidence.NativeRunID = "" }, nativecontract.ReasonQualificationMissing},
 				{"no LEAD soak", func(_ *Scope, _ *Request, c *Current) { c.Grant.Evidence.LeadSoakID = "" }, nativecontract.ReasonQualificationMissing},
-				{"no operator execution", func(_ *Scope, _ *Request, c *Current) { c.Grant.Production = true }, nativecontract.ReasonQualificationMissing},
+				{"no operator execution", func(_ *Scope, _ *Request, c *Current) {
+					c.Grant.Production = true
+					c.PredecessorGrant.Production = true
+				}, nativecontract.ReasonQualificationMissing},
+				{"production downgrade", func(_ *Scope, _ *Request, c *Current) { c.PredecessorGrant.Production = true }, nativecontract.ReasonIdentityMismatch},
 				{"no terminal export approval", func(_ *Scope, _ *Request, c *Current) { c.Grant.Evidence.Capabilities.TerminalView = true }, nativecontract.ReasonQualificationMissing},
 				{"no history consent", func(_ *Scope, _ *Request, c *Current) { c.Grant.NativeHistoryGrantID = "" }, nativecontract.ReasonInvalidInput},
 				{"expired grant", func(_ *Scope, _ *Request, c *Current) {
@@ -274,6 +279,12 @@ func TestNativeRoleResumeExitAndReceiptEvidence(t *testing.T) {
 				o.Session.Capabilities.TakeSupported = true
 			}
 		}, nativecontract.ReasonIdentityMismatch},
+		{"agent terminal URL", func(_ *Current, r *roleRoute) {
+			r.corrupt = func(o *nativecontract.OperationResult) {
+				url := "https://approved.example:8082/OPS"
+				o.Session.TerminalViewerURL = &url
+			}
+		}, nativecontract.ReasonWrongPrincipal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switcher, scope, request, a := roleFixture(t, "OPS")
@@ -285,6 +296,9 @@ func TestNativeRoleResumeExitAndReceiptEvidence(t *testing.T) {
 			out, err := switcher.Switch(t.Context(), scope, request)
 			if tc.reason != "" {
 				requireReason(t, err, tc.reason)
+				if out.Session != nil || out.Receipt.RequestID != "" {
+					t.Fatal("failed or foreign response exposed a partial session/history result")
+				}
 			} else if err != nil || out.Receipt.State != "applied" && out.Receipt.State != "accepted" {
 				t.Fatal("exact resume refused", err)
 			}

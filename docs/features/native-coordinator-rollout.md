@@ -165,3 +165,44 @@ Existing native-package and CLI audit globs cover the new source. No new routes,
 permissions, migrations, DSAR classifications, tenant/tree lock callers, web
 tests or shard rows are introduced. Validation results are recorded at handoff;
 no fake or test result opens a live, review or release gate.
+
+## Validation
+
+At implementation commit `d7c3a33e8`, the approved remote Go and guarded static
+attempts both exited **3**, reporting both remote slots occupied (`2/2`, CI pool
+`0/4`). Neither completed; no full local suite or unguarded static fallback ran.
+
+The required strict Go registration command ran through `local-heavy.sh`:
+
+```text
+nix develop --offline -c node scripts/test-tiers/cli.mjs check go --strict
+{"nativeGoCases":5149,"inventory":{"ESSENTIAL":1255,"GATED-FULL":3739,"NIGHTLY":177}}
+```
+
+It exited **0**, with all three P5d tests ESSENTIAL. Canonical
+`node scripts/test-tiers/cli.mjs manifests --check` also exited **0**. The guarded
+strict web command was attempted but exited **1** before collection because
+`web/node_modules/vitest/package.json` is absent. No web tests/manifests are
+changed by this slice. Web registration is **incomplete, awaiting CI with its
+installed dependencies**, not green.
+
+The permitted small role-package fallback caught a real defect at
+`d7c3a33e8`: JSON decoding into an existing request retained nested pointers.
+All three role cases failed the exact assertion
+`queued request borrowed mutable caller pointers`. This is the negative control;
+no throwaway mutation or negative-control commit was added. Decoding into a
+fresh request fixes the aliasing. Failed/foreign responses now return no partial
+session/history projection, and the role tests cover that privacy boundary.
+
+The focused retest of the corrected package exited **0**:
+
+```text
+GOMAXPROCS=2 GOTOOLCHAIN=local go test -p 2 -count=1 -timeout 60s ./internal/nativeroles
+ok github.com/inspr-at/paimos/internal/nativeroles 0.433s
+```
+
+Both named role behaviors pass, including all three roles, precise refusal
+reasons, frozen request pointers, predecessor exit and revocation barriers,
+receipt/capability matching, production boundaries and unrelated-session
+preservation. Actual-host qualification, live cutover, external tooling,
+operator execution and all review/release gates remain unperformed by design.
