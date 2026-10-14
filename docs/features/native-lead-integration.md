@@ -1,11 +1,12 @@
-# Native LEAD integration: Round 4 handoff (AEON-1290)
+# Native LEAD integration: Round 5 handoff (AEON-1290)
 
-I1 remains **incomplete**. Round 4 separates the exact paired daemon's runtime
-authority from the ORIGINAL actor's current project control and native grant.
-`RuntimePermissions`, pairing issuance, roles and key ceilings are unchanged.
-The server now mounts an explicit default-off pilot constructor; the owning
-paired supervisor still has no enabled native-session callbacks. No live LEAD
-handover, vendor call, daemon restart, push or deployment was performed.
+I1 remains **incomplete**. Round 5 implements the granted final-publication,
+exact attach GET and C0 CLI boundaries. The paired daemon remains the attributed
+sender within its unchanged runtime ceiling; the ORIGINAL actor's current
+control/chat rights and native grant are separate. Production remains disabled.
+Current native-consent/final-drain authorities and complete production
+Store/Host/Launcher/supervisor composition are still absent. No live LEAD
+handover, vendor call, daemon restart, origin push or deployment was performed.
 
 ## Implemented
 
@@ -91,41 +92,84 @@ neither installs a durable publisher nor qualifies background-task/compaction
 metadata. Native refusals also retain the closed C0 reason and the store's
 precise HTTP status, including revocation and private read 404s.
 
-## Remaining ownership and integration blockers
+## Round 5 boundary changes
 
-The Round 4 authority grant is used; `types.go`/`provision.go` need no grant or
-ceiling change. These are the remaining dependency source files identified by
-tracing the production final, local attach and native CLI paths together:
+`FinalAuthority` now carries the exact authenticated paired `Sender` and
+separate `OriginalActor`. The repository rejects another sender or invented
+sender scopes, declares an original delegated key before resource fencing, and
+bounds that preflight and the final write to three seconds. The chat helper
+checks the daemon only for `harness.worker`, the original actor for current
+`harness.control`, `chat.receive` and `chat.send`, and the receiving person for
+current chat/project visibility in the final transaction. A coordinator's
+original person must resolve to the canonical conversation owner. Exact drain,
+retention, completed-input/turn, context, privacy, deadline and idempotency checks
+remain mandatory; ordinary final routes retain their stopped-lease refusal.
 
-| Boundary file (and its behavior tests) | Exact reason a grant is needed |
+Receipt and stream GETs both send the attach's pinned runtime epoch, harness ID,
+binding revision and integer session generation. The strict local query fence
+is unchanged. A stale receipt GET closes local controller authority and keeps
+its exact `wrong_generation` refusal. The socket fixture now uses the production
+query validator, so missing coordinates cannot pass unnoticed.
+
+`session start --profile native` now sends the frozen C0 `NativeLocalStart` and
+`NativeLocalEnvelope`, returning a validated `NativeOperationResult` and honest
+accepted/queued/uncertain outcomes. It requires `--intent FILE`: bounded,
+owner-only C0 local-start JSON selecting an **already persisted person-issued
+server intent**. The CLI neither issues that approval nor invents an actor,
+policy, account or request ID. Existing `--cwd`, `--resume` and `--after-exit`
+flags must match the artifact exactly, including its complete kernel exit
+barrier. The protocol uses the repository's `nativecontract.LocalProtocol`
+constant (`aeon-native-session/1`); no frozen contract was renamed.
+Legacy attribution and attachment commands keep their separate contracts.
+
+The protected local start handler now decodes C0 exclusively. An installed
+`StartLocal` callback must resolve the exact persisted original person and
+current grant before using the owning supervisor. Enabled calls also re-observe
+the kernel peer; missing qualification refuses, and the old P1a envelope cannot
+act as a fallback. Local body reads have an explicit server deadline. No callback
+is installed by production `servePairedContext`, so this remains unavailable.
+
+`nativeintegration.Delivery` composes an **already owned** C0 transport with the
+P3 input/control journal, durable receipt reporter and explicit-final sink. It
+serializes bounded operations, revalidates write authority before native I/O,
+retains only separately approved explicit finals after exact completion, and
+reports errors alongside real outcomes. Graceful close requires the exact
+process digest. Root/group exit and a persisted exit receipt precede the release
+callback; an uncertain exit retains the hold, and a qualified exit observer can
+settle/retry without another close. Viewer detach has no process-release path.
+This component does not launch/adopt a process or itself provide a native grant.
+
+## Remaining production dependencies
+
+The Round 5 file grant has been used. No additional daemon scope or substitute
+principal is needed. The remaining issue is a missing authoritative consent and
+composition source, rather than permission to edit the granted helpers:
+
+| Boundary | Remaining work and safety requirement |
 | --- | --- |
-| `internal/chat/native_final.go` | `StoreNativeFinalTx` requires an agent sender equal to the harness's paired principal, then checks that SAME sender for `chat.receive` and `chat.send`. Neither scope is in the real paired runtime ceiling. Passing the original person fails its agent/sender identity checks; inventing broader scopes or a coordinator principal is forbidden. Native attribution and original-actor authorization must be separated under the final write fence while retaining current chat context, drain, retention and permission checks. |
-| `internal/nativesessions/receipts/repository.go`, `internal/nativesessions/receipts/final.go` | `FinalAuthority.Sender` is documented as the immutable original actor and is passed directly as both authorization identity and attributed sender to the chat helper. The person-invoked root's original actor and its actual paired runtime are different parties. The final authority/result and final call must carry and validate them separately, in concert with the chat helper, without altering ordinary final routes or manufacturing an agent actor. |
-| `internal/nativeattach/socket.go`, `internal/nativeattach/client.go` | Receipt GETs send only `limit`/`after`, while the C0 local adapter requires exact runtime epoch, harness ID, binding revision and generation on every GET. The socket helper receives no generation; its caller must supply the already-pinned session generation. Filling omitted selectors from a server guess would weaken the record binding. |
-| `internal/nativeattach/stream.go` | The stream GET carries the three binding coordinates but omits the required `generation`. `ValidateReadQuery` therefore refuses before subscribing, even on a correctly attached viewer. The client must send its pinned generation; the local adapter's strict check stays intact. |
-| `internal/cli/native_session.go`, `internal/cli/native_session_unix_test.go` | The existing coordinator start helper and its strict test emit the P1a `aeon-native-session/1` envelope with `NativeSessionStartRequest`, rather than C0's `NativeLocalStart`/`aeon-native/1` envelope and native operation result. The helper also has no persisted person-issued native start selector. Safely preserving native flags, exact resume/after-exit provenance and the ORIGINAL person requires updating the owning helper/test, rather than duplicating its private socket/authentication lifecycle in the permitted legacy attribution files. |
+| Current native consent source; `internal/nativesessions/store/types.go`, `internal/agentaccounts/native_session.go`, `internal/nativequalification/policy.go` | The production implementation of current person-native/tool/settings/workspace/history consent is absent. Store `Authority` and `RequireNativeGrantTx` remain mandatory ports; stored intent policy is only a pin. Existing `agent_permission_grants` represents agent permission approvals, with no person-native policy/history/retention facts. The consent source, revocation rules and any owning contract/schema need an explicit scoped implementation before these ports can be installed. Approval/storage/schema changes are outside this write set; no consent or migration was invented. |
+| `internal/nativeintegration/pilot.go`, `cmd/aeon/serve.go` | Compose the real start Store with command/control, receipt, private daemon-proof, relay and final-drain authorities into C0 `Store`/`Services`. The start store alone lacks the complete command/report interface. The default-off constructor and the owned delivery component are present; production ports remain uninstalled. |
+| `internal/agentd/native_session.go`, `native_transport.go`, `adapters.go`, `claudeassets/bridge.mjs`, `cmd/aeon-agentd/paired_serve.go` | Install a qualified person-issued C0 Host/Launcher and exact native input/turn/event/final adapter. The existing core still uses normalized legacy chat relay callbacks; those cannot be borrowed by the issued daemon key for native final publication. SDK input correlation is retained, but no full C0 provider-event/current-final publisher is installed. Exact native evidence must not be inferred from token text. |
+| `internal/nativesessions/receipts/repository.go`, `final.go`, `internal/nativeintegration/pilot.go` | Supply production `ReceiptTx`/`ReadTx`/`FinalTx` implementations for current pairing, authoritative command/input/exit proof, exact drain grant and separately current retention consent. Tests provide bounded fake authorities; no permissive production replacement is provided. |
+| `cmd/aeon/openapi_test.go` | The full fresh-checkout command suite needs its generated OpenAPI prerequisite prepared before tests; the file is outside this write set. Static generates/checks the bundle and passes, but the standalone command suite is not reported green. |
+| `internal/nativesessions/start/start.go`, `internal/agentd/native_after_exit.go`, `native_session.go`, `internal/nativeintegration/pilot.go` | Connect the existing pinned source-exit/one-writer mechanism to C0's resume/after-exit fields and a fresh current claim. The owning first-start helper still refuses resume/after-exit. This owning start helper is outside the current grant, and changing it must retain exact source identity and confirmed group exit. CLI serialization alone is not self-handover proof. |
 
-These files were inspected read-only and were not modified. A1 production
-composition and A5's combined fake-native smoke still need their I1 adapters in
-the granted integration/agentd files after these dependency boundaries are
-closed. The start store's mandatory authority/observer and the receipt
-repository's mandatory current receipt/exit/final-drain/retention authorities
-remain unimplemented in production. No permissive callback, legacy chat route
-workaround, fake worker run, fabricated person/agent, or new credential was added.
-The C0 starter also deliberately refuses resume/after-exit: the owning
-supervisor's existing pinned-exit and one-writer mechanism must be integrated
-before a self-handover can be claimed; removing those fields is not proof.
+The new delivery smoke begins with a real managed-coordinator database fixture
+and a fake owned transport. It proves the C0 attach/input/receipt/final/interrupt/
+exit delivery section and detach independence, **not** the missing production
+first-start Store/Host/Launcher or the complete P1a SDK/supervisor path. The full
+A5 start-to-exit smoke remains incomplete until those dependencies are composed.
 
 ## Acceptance handoff
 
 | Item | Result |
 | --- | --- |
-| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | PARTIAL. Qualified HTTP dispatch and P2a stream mount seam from Round 2, plus an explicit default-off composition constructor. Production ports are not installed; final-authority and attach/CLI dependency files above remain outside the grant. |
-| A2: person-invoked native path separate from automatic LeadRuntime | PARTIAL. Actual paired-key claim code keeps the original person, current project control and native grant separate. The server's pilot composition is separate and default off. No enabled person-invoked supervisor path is installed. |
-| A3: native roots in legacy account/host admission; exact root context | IMPLEMENTED AT THE PORT, not live-qualified. Prior occupancy/drain holds remain; the real-pairing native claim/helper and exact-root local-admission adapter are implemented. Fresh database behavior verification is incomplete due to remote capacity refusals. |
-| A4: default account, confined adapter and legacy CLI compatibility; inventories | PARTIAL. Account default, confined branch, attribution and legacy attachments preserved. Two new own ESSENTIAL rows and one own shared-fence caller row registered; canonical manifests pass. Fresh compatibility suites still await remote/PR CI. |
-| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | NOT COMPLETE. The SDK final correlation seam is fixed with a strengthened existing regression; the authority regression uses actual pairing and barriers. Full combined I1 smoke and its negative control remain unimplemented because production final/attach wiring is blocked. Fresh per-guard negative-control runs are also incomplete. |
-| A6: concrete disabled pilot for coordinator self-handover | PARTIAL. The server explicitly mounts the default-off pilot and its refusal behavior passes locally. Complete qualified ports and the existing pinned after-exit writer transition remain to be composed before coordinator self-handover. No enablement or live-soak claim. |
+| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | PARTIAL. All Round 5 dependency helpers are fixed; the owned delivery component is implemented/proven. Current consent/receipt/drain authorities and complete production Store/Host/Launcher composition are absent. |
+| A2: person-invoked native path separate from automatic LeadRuntime | PARTIAL. The real paired claim keeps original-person authority separate; C0 CLI/local start selects the persisted person-issued intent. Production `StartLocal` and supervisor ports remain uninstalled; automatic LeadRuntime stays disabled. |
+| A3: native roots in legacy account/host admission; exact root context | PASS AT THE IMPLEMENTED BOUNDARIES. Fresh remote claim/root, full accounts, pairing and harness suites pass, including actual person capacity approval and exact issued-bearer authentication/control refusal. All four guard-removal controls fail their precise assertions. No live-pilot qualification is claimed. |
+| A4: default account, confined adapter and legacy CLI compatibility; inventories | PASS AT THE IMPLEMENTED BOUNDARIES. Full CLI, attach and daemon suites pass; the canonical manifest and guarded static checks pass. One own ESSENTIAL test row is added; no role/key ceiling, permission or schema changed. |
+| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | PARTIAL. The new registered-writer delivery smoke and disconnected-report negative control are proven remotely. Full production first-start and P1a SDK/supervisor composition remain incomplete. |
+| A6: concrete disabled pilot for coordinator self-handover | PARTIAL. Default-off production mount and refusal test pass. C0 intent/exit-barrier serialization is concrete; current grant ports and C0 pinned after-exit launch composition are still required. No live handover or enablement. |
 
 Z1's validated person-only `terminal_viewer_url` remains in the C0 projection
 and is stripped on agent egress. Publishing the pilot URL and connecting the
@@ -275,3 +319,73 @@ retry after `bc532436b` and the last static retry after `300ab83d5` were both
 capacity-refused (exit 3). The work branch is clean; the final documentation
 commit records this incomplete result. No negative-control or throwaway commit
 was created or left on the work branch.
+
+## Round 5 verification and exact R0 handoff
+
+PASS guarded remote at `d8d2ab16f`: the real pairing claim/root regression
+passes all five cases, with the actual separate person capacity approval and
+issued runtime key. After strengthening the bearer test to exercise real
+production authentication as well as the handler's exact scope refusal, the
+current regression passes again at `5bbe4f99a` and in the full store suite at
+`a26497c52`. `/api/me` identifies the exact issued daemon; the production
+pairing boundary rejects its control route for the exact runtime-authority
+cause. The direct handler independently rejects its exact missing control scope.
+No synthetic wider daemon role/key is used.
+
+PASS guarded remote at `5bbe4f99a`: Native selections in store, receipts and
+agentd pass. This includes
+`TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach`: exact C0 attach
+and receipt GET, actual person input retained in the fake provider, durable
+write/turn receipts, explicit final persisted through real chat storage with
+daemon attribution/person receiver, wrong-input refusal, detach survival,
+second exact-turn interrupt, uncertain group exit hold and confirmed exit
+settlement. It uses injected provider/journal time and explicit native evidence;
+no live provider/account was called.
+
+PASS affected package results at `a26497c52`: full `-count=1` suites for
+receipts, nativeintegration, nativeattach, CLI, native start store, agentd,
+harness, reportercontract, agentaccounts, agentpairing and `cmd/aeon-agentd`.
+The combined command exits 1 because `cmd/aeon/serve.go` retained an unused
+native-module import from Round 4. That import is removed in `1cd79ec86`;
+the overall failing command is not reported as green.
+
+PASS final full receipts rerun at `65ed0527e` (4.254 s), including the narrowed
+original-person chat-send revocation, exact sender/scope substitution denials,
+explicit delivery smoke and the bounded delegated-key preflight. That same
+fresh `cmd/aeon` run compiles and executes its server behaviors, but exits 1 on
+`TestOpenAPISpecParses`: the guarded runner's fresh checkout has no git-ignored
+`api/openapi.yaml`. This is an explicit test-preparation gap; it is not green and
+no assertion was skipped/loosened. The canonical generator is used in static/CI;
+a fresh-checkout preparation change to `cmd/aeon/openapi_test.go` would need a
+test-file grant. The corrected binary compilation also passes in guarded static
+Go vet. PR CI is authoritative.
+
+PASS guarded `ci-static-locked.sh --merge-main` at `65ed0527e`: exit 0,
+all **42 checks pass**, zero optional skips (164.74 s), including Go vet,
+strict tiers, ownership, shared inventories, migrations, OpenAPI and web checks.
+Earlier exit-3 static attempts were guarded capacity refusals. PR CI remains
+authoritative. `manifests --check`, affected selection and `git diff --check`
+also pass. Affected selection is FULL; it is selection, not a full-repository
+executed Go suite.
+
+Expected failing guarded negative controls use detached stash snapshots; none
+is on the work branch:
+
+| Removed wiring/guard | Snapshot | Observed intended failure |
+| --- | --- | --- |
+| P3 receipt-report wiring in Delivery | `0fb280a4b` | Explicit final remains pending with `input_outcome_unconfirmed` instead of persisted. |
+| Original person's current control checks | `7af044c40` | `actor_control` unexpectedly returns nil instead of `permission_revoked`. |
+| Current native grant checks, replaced by cached policy | `a3dcecedf` | `native_grant` unexpectedly returns nil instead of `permission_revoked`. |
+| Exact issued pairing key pin | `d4c9db538` | `different_key` unexpectedly returns nil instead of `permission_revoked`. |
+| Current pairing enrollment revocation checks | `ba4724aa7` | `pairing` reaches `quota_limited` instead of the exact `permission_revoked` guard. The regression rejects that wrong cause. |
+
+Round 5 R0 adds exactly one ESSENTIAL Go row through the canonical tier writer:
+`internal/nativesessions/receipts/TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach`.
+Existing tests are strengthened in place. Existing native source ownership
+covers the code; no new production fence caller, route, migration, DSAR,
+permission, role/key ceiling, web-tier or shard row is introduced.
+
+I1 remains below 100% for the production dependencies listed above. This is
+an implementation/ownership boundary, not a remote-capacity-only handoff.
+No origin push, deployment, model review gate, other model CLI, live daemon
+restart, vendor call or LEAD switch was performed.
