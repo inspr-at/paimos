@@ -107,8 +107,27 @@ test('explicit fresh false beats fallback evidence; only a new heartbeat clears 
 test('failure detail says how the session failed in words, never the reported text, and keeps the bound run outcome', () => {
   const status = assessAgentState(evidence({ has_problem: true, stop_reason: 'worker crashed: exit 2', run_status: 'ownership_lost' }), now)
   assert.equal(status.state, 'problem')
-  assert.deepEqual(status.reasons.map(reason => reason.detail), ['The session reported a failure · Retry or check the ticket', 'The bound run reported ownership lost.'])
+  assert.deepEqual(status.reasons.map(reason => reason.detail), ['The session reported a failure · Retry or check the ticket', 'Another session took over this run'])
+  assert.match(status.reasons[1]!.next, /Reported status: ownership_lost\./)
   assert.ok(status.reasons.every(reason => reason.next.length > 0))
+  const rendered = (assessment: ReturnType<typeof assessAgentState>) => [assessment.label, ...assessment.reasons.flatMap(reason => [reason.detail, reason.next])].join('\n')
+  for (const [run_status, sentence] of [
+    ['failed', 'The run failed · Retry or check the ticket'],
+    ['ownership_lost', 'Another session took over this run'],
+    ['blocked', 'The run is blocked · see the ticket'],
+  ] as const) {
+    const problem = assessAgentState(evidence({ run_status }), now)
+    assert.equal(problem.reasons[0]!.detail, sentence)
+    assert.match(problem.reasons[0]!.next, new RegExp(`Reported status: ${run_status}\\.`))
+    assert.doesNotMatch(rendered(problem), /bound run/)
+  }
+  const waiting = assessAgentState(evidence({ run_status: 'waiting' }), now)
+  assert.equal(waiting.reasons[0]!.detail, 'Waiting on its run')
+  assert.match(waiting.reasons[0]!.next, /Reported status: waiting\./)
+  assert.doesNotMatch(rendered(waiting), /bound run/)
+  const runWaiting = attentionReasonText({ kind: 'run_waiting', scope: 'run', actor: 'unknown', count: 1, blocking: true, location: 'session' })
+  assert.equal(runWaiting.detail, 'The run reports waiting; who must act is not specified.')
+  assert.doesNotMatch(`${runWaiting.detail}\n${runWaiting.next}`, /bound run/)
 })
 
 // AEON-1285: a stopped or failed row reads a label and a short sentence; a raw code never reaches the page.
