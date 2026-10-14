@@ -61,3 +61,7 @@ no-release work remain exempt. Once the checks pass, the move needs no override
 reason. The CLI prints the failed check ids, labels and reasons, with bounded
 output. Queue rows retain provisional missing-field advice until the server
 returns readiness for that revision, including an empty definition.
+
+Bulk status writes acquire the complete builder-fence batch in sorted ticket-id
+order before locking node rows. Entry checks can then re-enter those fences
+without acquiring another builder lock after a per-ticket audit event.
