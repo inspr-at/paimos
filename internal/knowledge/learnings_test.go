@@ -745,6 +745,10 @@ func TestLearningsProjectSessionThroughAuth(t *testing.T) {
 
 	expect(t, callSession(t, handler, "", "GET", "/api/knowledge/learnings?project_id="+f.project, nil), 401)
 
+	scout := scopedAgent(t, f, "Session lesson scout")
+	for _, id := range []string{ticketID, commentID} {
+		expect(t, call(t, f, scout, "PUT", recommendPath(id), map[string]any{"decision": "accept", "knowledge_id": entry.ID, "lesson": "Validate recovery before releasing.", "source_summary": "A recovery incident exposed missing validation."}), 200)
+	}
 	own := callSession(t, handler, cookie, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
 	expect(t, own, 200)
 	page := decode[LearningPage](t, own)

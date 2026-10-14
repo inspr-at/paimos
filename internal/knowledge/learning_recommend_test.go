@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -328,6 +329,7 @@ func TestNominationsContinuePastScan(t *testing.T) {
 // learnings that scan has not read yet, and the cursor moves past the rows.
 func TestLearningsPageEndsAtAFullScan(t *testing.T) {
 	f := setup(t)
+	agent := scopedAgent(t, f, "Horizon scout")
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		// Mentioned, not tagged: read by the ticket scan, then dropped.
 		if _, err := tx.Exec(t.Context(), `
@@ -355,14 +357,14 @@ func TestLearningsPageEndsAtAFullScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := call(t, f, f.a, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
+	w := call(t, f, agent, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
 	expect(t, w, 200)
 	first := decode[LearningPage](t, w)
 	if len(first.Items) != 0 || !first.Truncated || first.NextCursor == "" {
 		t.Fatalf("first page %+v: a learning past the full scan was listed, or the page claimed to be complete", first)
 	}
 	var keys []string
-	for _, item := range pageThrough(t, f, f.a, f.project, 4) {
+	for _, item := range pageThrough(t, f, agent, f.project, 4) {
 		keys = append(keys, item.Key)
 	}
 	slices.Sort(keys)
@@ -530,6 +532,11 @@ func TestLearningWritesAuthorizeCurrentProject(t *testing.T) {
 // Every sensitive range field the server sends is in the contract's enum:
 // lesson and reason (recommend, dismiss) as well as text (accept).
 func TestSensitiveRangeFieldsMatchContract(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
+		t.Fatalf("generate contract: %v %s", err, output)
+	}
 	raw, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)

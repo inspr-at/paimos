@@ -22,7 +22,7 @@ so a large unprepared window cannot hide an older prepared lesson.
 
 Agents with `knowledge.write` may dismiss noise with a nonblank reason. Each
 dismissal records `knowledge.learning_dismissed` with the actual agent actor.
-People may undo it. Accept and draft remain person-only; older person dismiss
+People with the existing Undo and other-actor Undo permissions may undo it. Accept and draft remain person-only; older person dismiss
 requests without a reason remain valid.
 
 At the next server startup, each instance clears pre-release open sources

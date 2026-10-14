@@ -176,7 +176,8 @@ func TestAgentDismissAuditedAndPersonUndo(t *testing.T) {
 		t.Fatalf("wrong agent audit %+v %s %s", audit, actor, kind)
 	}
 	expect(t, call(t, f, agent, "POST", "/api/events/"+strconv.FormatInt(decision.EventID, 10)+"/undo", nil), 403)
-	expect(t, call(t, f, f.a, "POST", "/api/events/"+strconv.FormatInt(decision.EventID, 10)+"/undo", nil), 201)
+	dbtest.BindRole(t, f.db, f.a.TenantID, f.b.ID, "admin")
+	expect(t, call(t, f, f.b, "POST", "/api/events/"+strconv.FormatInt(decision.EventID, 10)+"/undo", nil), 201)
 	if decisionOf(t, f, id) != "" || !hasLearning(learningHTTPPage(t, f, agent).Items, id) {
 		t.Fatal("person undo did not reopen candidate")
 	}
@@ -210,8 +211,8 @@ func TestLegacyCleanupIdempotentPreservesPrepared(t *testing.T) {
 	for _, id := range []string{tagged, protected, fresh} {
 		setFields(t, f, id, map[string]any{"tags": []any{"process-learning"}})
 	}
-	projectComment := addComment(t, f, f.project, "#process-learning Old status comment.")
-	ticketComment := addComment(t, f, f.ticket, "#process-learning Old ticket comment.")
+	projectComment := addLegacyComment(t, f, f.project, "#process-learning Old status comment.")
+	ticketComment := addLegacyComment(t, f, f.ticket, "#process-learning Old ticket comment.")
 	book := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "cleanup-safe", "title": "Prepared target", "body": "Notes\n"})
 	agent := scopedAgent(t, f, "Cleanup scout")
 	expect(t, call(t, f, agent, "PUT", recommendPath(nodeLearningID(protected)), map[string]any{"decision": "accept", "knowledge_id": book.ID, "lesson": "Check recovery before rollout.", "source_summary": "An incident exposed missing recovery validation."}), 200)
@@ -226,9 +227,6 @@ func TestLegacyCleanupIdempotentPreservesPrepared(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET updated_at='2000-01-01' WHERE tenant_id=$1 AND id=ANY($2::uuid[])`, f.a.TenantID, []string{tagged, protected}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE events SET at='2000-01-01' WHERE tenant_id=$1 AND id=ANY($2::bigint[])`, f.a.TenantID, []string{projectComment, ticketComment}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tid := range []string{f.a.TenantID, f.foreign.TenantID} {
@@ -262,7 +260,8 @@ func TestLegacyCleanupIdempotentPreservesPrepared(t *testing.T) {
 	if kind != "agent" || name != "System" || reason != legacyDismissReason {
 		t.Fatalf("wrong cleanup actor/reason %s %s %s", kind, name, reason)
 	}
-	expect(t, call(t, f, f.a, "POST", "/api/events/"+strconv.FormatInt(eventID, 10)+"/undo", nil), 201)
+	dbtest.BindRole(t, f.db, f.a.TenantID, f.b.ID, "admin")
+	expect(t, call(t, f, f.b, "POST", "/api/events/"+strconv.FormatInt(eventID, 10)+"/undo", nil), 201)
 	again, err := CleanupLegacyLearnings(t.Context(), f.db.App)
 	if err != nil || again != 0 || decisionOf(t, f, nodeLearningID(nominated)) != "" {
 		t.Fatalf("restart undid human undo: %d %v", again, err)
@@ -279,6 +278,7 @@ func TestLegacyCleanupIdempotentPreservesPrepared(t *testing.T) {
 func TestPreparedLearningRuleDraft(t *testing.T) {
 	f := setup(t)
 	h := rulesHandler(f)
+	dbtest.BindRole(t, f.db, f.a.TenantID, f.a.ID, "admin")
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
 	layer := rulesLayer(t, h, f.a, rules.Scope{Layer: "project", ProjectID: f.project})
 	set := rulesSet(t, h, f.a, layer.ID, "Prepared recovery rules")
@@ -301,4 +301,16 @@ func TestPreparedLearningRuleDraft(t *testing.T) {
 	if len(drafted.Rules) != 1 || drafted.Rules[0].Text != rec.RuleText || drafted.PublishedVersion != "" {
 		t.Fatalf("rule differs from prepared text %+v", drafted)
 	}
+}
+
+func addLegacyComment(t *testing.T, f fixture, nodeID, body string) string {
+	t.Helper()
+	var id string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at) VALUES($1,$2::uuid,$3::uuid,'comment.created',jsonb_build_object('body_markdown',$4::text),timestamptz '2000-01-01') RETURNING id::text`, f.a.TenantID, f.a.ID, nodeID, body).Scan(&id)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
