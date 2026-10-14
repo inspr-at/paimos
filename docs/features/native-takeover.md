@@ -107,3 +107,24 @@ is used. Remote Go packages are `./internal/nativepty/...` and
 `./internal/cli/...`; required static checks run only through the guarded LEAD
 runner. Release, provider/export qualification, cross-family review and live
 verification remain coordinator-owned.
+
+Acceptance coverage is registered as ESSENTIAL in the same change:
+
+- Quiesce and full exit before either successor: `TestTakeoverWaitsForBothOwnedExits`.
+- Separate native TUI fence, with the serving writer retained on refusal:
+  `TestTakeoverRequiresIndependentTUIFence`.
+- Fresh runtime/harness/process proof and fixed conversation/profile:
+  `TestTakeoverRejectsSuccessorIdentityOrProofReuse` and
+  `TestTakeoverLaunchIdentityMustMatchConversationAndFreshProof`.
+- Local holder input/size, stale control rejection and no uncertain replay:
+  `TestPTYResizeTwoHolderTabsAndViewers`,
+  `TestPTYInputRejectsStaleControlAndUncertainRetry` and the resize scenarios.
+  Durable input policy remains in P3a's required coordinator quiesce/rebind port.
+- Exit/admission/rebind failure retains occupancy:
+  `TestTakeoverUnknownExitRetainsOccupancy`,
+  `TestTakeoverRechecksAuthorityAfterExit`,
+  `TestTakeoverFailedRebindKeepsPossibleFork` and
+  `TestTakeoverUsesCurrentAuthorityRevision`.
+- Client loss retains one writer without implicit return:
+  `TestTakeoverClientLossAndExpiredLeaseDoNotRestart` and
+  `TestNativeTakeClientRebindsAndDetachNeverReturns`.
