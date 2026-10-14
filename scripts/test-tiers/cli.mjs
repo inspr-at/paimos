@@ -4,12 +4,12 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, collectNativeGo, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
-import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern, knownFlakyOwners } from './core.mjs'
+import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, knownFlakyOwners } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures, printFlakeWarnings } from './failures.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, nightlyWeights, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
-import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
+import { changedPaths, schedulingDecision, eventBase, sourceTree, registryChangesBetween } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
@@ -74,16 +74,16 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
   const all=validate(manifest,catalogueRows)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
-  // Consumer rules read the candidate tree; manifest promotions compare the
-  // fetched event base with the checkout. Both are unused unless the switch is on.
+  // Consumer rules read the candidate tree; semantic registry comparisons use
+  // the fetched event base. Both are unused unless the switch is on.
   const on=affectedLane==='on'&&event==='pull_request'&&Array.isArray(paths)
   const tree=on?sourceTree(root):undefined
-  const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(base,{cwd:root,exec}):undefined
+  const registryChanges=on?registryChangesBetween(base,paths,{cwd:root,exec}):undefined
   const readFile=path=>boundedText(root,path)
   const coverage=paths?.some(path=>path.startsWith('web/src/'))?browserCoverage(root,base,load('web').tests):{}
-  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions,imports:inventory.imports,...coverage})
+  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,registryChanges,imports:inventory.imports,...coverage})
   const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
-    forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile,...coverage},candidate,
+    forceFull:full,forceAll:catalogue,webImports:graph,tree,registryChanges,readFile,...coverage},candidate,
     {mode:plannerMode,layout:plannerLayout})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}

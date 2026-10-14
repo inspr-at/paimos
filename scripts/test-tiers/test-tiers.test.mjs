@@ -8,11 +8,11 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
-import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween } from './diff.mjs'
+import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween, registryChangesBetween } from './diff.mjs'
 import { runnerDecision, runnerSelection, browserRunnerIdentity, run } from './cli.mjs'
 import { createGoRunner } from './go-runner.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
@@ -539,11 +539,12 @@ const replayGraph=webGraph(fileURLToPath(new URL('../../web',import.meta.url)))
 const repoRoot=fileURLToPath(new URL('../../',import.meta.url))
 const repoTree=sourceTree(repoRoot)
 const noPromotions={keys:new Set(),kinds:new Set(),count:0}
+const unchangedRegistries=registryChangesBetween(undefined,['scripts/ci/go-test-tiers.json','scripts/ci/web-test-tiers.json','web/ci-web-shards.json'],{cwd:repoRoot,baseDirectory:repoRoot})
 const readRepo=path=>{ try { return readFileSync(resolve(repoRoot,path),'utf8') } catch { return undefined } }
 const realPaths=[...new Set(replay.prs.flatMap(pr=>pr.paths))]
 // Affected-lane selection against the real catalogue, tree and graph.
-const on=(paths,extra={})=>select(replayRows,{event:'pull_request',paths,affectedLane:'on',webImports:replayGraph,imports:replay.goImports,tree:repoTree,promotions:noPromotions,readFile:readRepo,...extra})
-const decide=(paths,extra={})=>schedulingDecision('pull_request',paths,path=>readRepo(path)!==undefined,{affectedLane:'on',graph:replayGraph,tree:repoTree,promotions:noPromotions,...extra})
+const on=(paths,extra={})=>select(replayRows,{event:'pull_request',paths,affectedLane:'on',webImports:replayGraph,imports:replay.goImports,tree:repoTree,promotions:noPromotions,registryChanges:unchangedRegistries,readFile:readRepo,...extra})
+const decide=(paths,extra={})=>schedulingDecision('pull_request',paths,path=>readRepo(path)!==undefined,{affectedLane:'on',graph:replayGraph,tree:repoTree,promotions:noPromotions,registryChanges:unchangedRegistries,...extra})
 const goPackages=selection=>new Set(selection.tests.filter(row=>row.kind==='go'&&row.tier!=='ESSENTIAL').map(row=>row.package))
 const webFiles=selection=>new Set(selection.tests.filter(row=>row.kind!=='go'&&row.tier!=='ESSENTIAL').map(row=>row.file))
 const essentialOnly=selection=>selection.tests.every(row=>row.tier==='ESSENTIAL')
@@ -625,18 +626,23 @@ test('every path the rules leave full forces full in the selector and the planne
   }
 })
 
-test('R1 manifest-only diffs take the static layout; promotions must execute and decide the shard layout',()=>{
+test('R1 semantically unchanged registries take the static layout; promotions must execute and decide the shard layout',()=>{
   const manifests=realPaths.filter(path=>affectedRisk(path).rule==='R1')
-  for(const path of ['scripts/ci/go-test-tiers.json','scripts/ci/web-test-tiers.json','web/ci-web-shards.json','scripts/migration-policy-exceptions.json','scripts/audit/slices.json','scripts/ci/go-shards.txt','web/scripts/ci-web-shard.test.mjs'])
+  for(const path of ['scripts/ci/go-test-tiers.json','scripts/ci/web-test-tiers.json','web/ci-web-shards.json','web/scripts/ci-web-shard.test.mjs'])
     assert.ok(manifests.includes(path),`${path} must appear in the real PR lists`)
-  for(const path of [...manifests,'scripts/ci/known-flaky.json','scripts/ci/test-tier-selection-baseline.json','web/scripts/aeon-681-ci.test.mjs']) {
+  for(const path of [...manifests,'web/scripts/aeon-681-ci.test.mjs']) {
     const selected=on([path])
     assert.equal(selected.full,false,path)
     assert.ok(essentialOnly(selected),`${path}: registration-only manifest diffs run essentials only`)
-    assert.match(selected.reason,/R1: manifest\/static checks: /)
+    assert.match(selected.reason,/R1: (?:manifest\/static|semantic registry) checks: /)
     const decision=decide([path])
     assert.deepEqual([decision.mode,decision.layout],['essential','static'],path)
     assert.ok(selected.reason.endsWith(decision.reason),path)
+  }
+  for (const path of ['scripts/migration-policy-exceptions.json','scripts/audit/slices.json','scripts/ci/go-shards.txt','scripts/ci/known-flaky.json','scripts/ci/test-tier-selection-baseline.json']) {
+    assert.equal(on([path]).full,true,path)
+    assert.equal(decide([path]).mode,'full',path)
+    assert.match(on([path]).reason,/unclassified registry or execution policy stays full/)
   }
   // The static registry itself is CI machinery, never a manifest.
   assert.equal(on(['scripts/ci/static-checks.json']).full,true)
@@ -651,8 +657,9 @@ test('R1 manifest-only diffs take the static layout; promotions must execute and
   const rows=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','TestNew','GATED-FULL'),g('internal/other','TestOther','GATED-FULL'),
     w('tests/a.unit.test.ts','unit','GATED-FULL'),{...w('tests/b.spec.ts','browser','GATED-FULL'),kind:'browser'},{...w('tests/c.unit.test.ts','vitest','GATED-FULL'),kind:'vitest'}]
   const run=(promotions,paths=['scripts/ci/web-test-tiers.json'])=>{
-    const selected=select(rows,{event:'pull_request',paths,affectedLane:'on',webImports:{},tree:{go:new Map(),webTests:new Map()},promotions})
-    const risk=impactRisk(paths,{event:'pull_request',affectedLane:'on',tree:{go:new Map(),webTests:new Map()},promotions,tests:rows})
+    const registryChanges=promotions&&new Map(paths.map(path=>[path,{full:false,promoted:rows.filter(row=>promotions.keys.has(key(row))),reason:'tier promotions execute'}]))
+    const selected=select(rows,{event:'pull_request',paths,affectedLane:'on',webImports:{},tree:{go:new Map(),webTests:new Map()},promotions,registryChanges})
+    const risk=impactRisk(paths,{event:'pull_request',affectedLane:'on',tree:{go:new Map(),webTests:new Map()},promotions,registryChanges,tests:rows})
     return {selected,risk}
   }
   const pick=keys=>({keys:new Set(keys),kinds:new Set(keys.map(k=>rows.find(row=>key(row)===k).kind)),count:keys.length})
@@ -668,13 +675,149 @@ test('R1 manifest-only diffs take the static layout; promotions must execute and
   assert.ok(result.selected.tests.some(row=>key(row)==='internal/auth:TestNew'));assert.equal(result.risk.layout,'full','Go promotions need Go shards')
   assert.ok(!result.selected.tests.some(row=>row.package==='internal/other'),'unpromoted packages stay out')
   result=run(undefined)
-  assert.equal(result.selected.full,true);assert.match(result.selected.reason,/R1 full: manifest promotions unavailable/)
-  assert.equal(run(undefined,['web/ci-web-shards.json']).selected.full,false,'only tier manifests need the base comparison')
+  assert.equal(result.selected.full,true);assert.match(result.selected.reason,/R1 full: semantic registry comparison unavailable/)
+  assert.equal(run(undefined,['web/ci-web-shards.json']).selected.full,true,'browser execution policy also needs the base comparison')
   // git-backed promotions: a base without the manifest or an invalid base fails closed.
   assert.equal(promotionsBetween(undefined,{cwd:repoRoot}),undefined)
   assert.equal(promotionsBetween('--bad',{cwd:repoRoot}),undefined)
   const same=promotionsBetween(undefined,{cwd:repoRoot,baseDirectory:repoRoot})
   assert.equal(same.count,0,'identical manifests promote nothing')
+})
+
+// Risk: a timing-shaped field can hide an exclusion, changed launch authority,
+// or split policy. Only numeric measurements at known schema locations narrow.
+test('AEON-1334 browser registry timing edits preserve every execution policy field',()=>{
+  const file='web/ci-web-shards.json'
+  const before=JSON.parse(readRepo(file))
+  const after=structuredClone(before)
+  after.groups[0].specs[0].weightSeconds+=1
+  after.groups[0].specs[0].tierTiming.seconds+=1
+  after.nightlyTiming.files[Object.keys(after.nightlyTiming.files)[0]].seconds+=1
+  assert.equal(registryImpact(file,before,after).full,false)
+  for(const change of [
+    value=>value.groups[0].flags.push('--retries=2'),
+    value=>value.groups[0].env.EXTRA='seconds',
+    value=>value.groups[0].config='playwright.perf.config.ts',
+    value=>value.groups[0].project='chromium',
+    value=>value.groups[0].hostedOnly=!value.groups[0].hostedOnly,
+    value=>value.groups[0].gate=false,
+    value=>value.groups[0].id+='-changed',
+    value=>value.groups[0].specs.pop(),
+    value=>value.groups[0].specs[0].weightSource='other-source',
+    value=>value.exclusions.push({file:'tests/unmapped.spec.ts',ticket:'AEON-1334',reason:'changed exclusion'}),
+    value=>value.groups[0].specs[0].tierTiming.flags=['--grep=omitted'],
+    value=>value.nightlyTiming.files[Object.keys(value.nightlyTiming.files)[0]].seconds=-1,
+    value=>value.groups[0].specs[0].weightSeconds=0,
+    value=>value.groups[0].specs[0].tierTiming.caseSeconds={median:Infinity},
+  ]) {
+    const unsafe=structuredClone(after);change(unsafe)
+    assert.equal(registryImpact(file,before,unsafe).full,true,change.toString())
+  }
+})
+
+test('AEON-1334 tier registry timing and promotions retain identity and run the promoted cases',()=>{
+  const file='scripts/ci/web-test-tiers.json'
+  const before={version:1,tests:[{...w('tests/a.spec.ts','browser','NIGHTLY'),kind:'browser',config:'playwright.ui.config.ts',project:''},
+    w('tests/a.test.ts','unit','NIGHTLY')],timingWeights:{owners:{'tests/a.spec.ts':{seconds:10,selectedTests:1}},runId:'1',sha:'a'.repeat(40)}}
+  const after=structuredClone(before)
+  after.tests.reverse();after.tests.forEach(row=>row.tier='GATED-FULL')
+  after.timingWeights.owners['tests/a.spec.ts'].seconds=20
+  after.timingWeights.runId='2';after.timingWeights.sha='b'.repeat(40)
+  const change=registryImpact(file,before,after)
+  assert.equal(change.full,false)
+  assert.deepEqual(change.promoted.map(key).sort(),after.tests.map(key).sort())
+  const registryChanges=new Map([[file,change]])
+  const rows=[...after.tests,g('internal/core','TestEssential','ESSENTIAL'),g('internal/other','TestOther','GATED-FULL')]
+  const options={event:'pull_request',paths:[file],affectedLane:'on',registryChanges,tree:{go:new Map(),webTests:new Map()}}
+  const selected=select(rows,options)
+  assert.equal(selected.full,false)
+  assert.deepEqual(selected.tests.map(key).sort(),[...after.tests.map(key),'internal/core:TestEssential'].sort())
+  assert.equal(impactRisk([file],{...options,tests:rows}).layout,'full','promoted browser cases need browser shards')
+  for(const mutate of [
+    value=>value.tests[0].config='playwright.perf.config.ts',
+    value=>value.tests[0].project='changed',
+    value=>value.tests[0].flags=['--grep=omitted'],
+    value=>value.policy='new policy',
+    value=>value.postGateCases=['node:tests/a.test.ts:unit'],
+    value=>value.timingWeights.owners['tests/a.spec.ts'].env={OMIT:'yes'},
+    value=>value.timingWeights.owners['tests/a.spec.ts'].seconds=NaN,
+  ]) {
+    const unsafe=structuredClone(after);mutate(unsafe)
+    const classified=registryImpact(file,before,unsafe)
+    assert.equal(classified.full,true,mutate.toString())
+    const decision=schedulingDecision('pull_request',[file],()=>true,{...options,registryChanges:new Map([[file,classified]]),tests:rows})
+    assert.equal(decision.mode,'full',mutate.toString())
+  }
+})
+
+test('AEON-1334 demotions require explicit approval; invalid and changed catalogues never narrow',()=>{
+  const file='scripts/ci/go-test-tiers.json'
+  const before={version:1,tests:[g('internal/core','TestCore','ESSENTIAL'),g('internal/a','TestA','NIGHTLY')]}
+  const demoted=structuredClone(before);demoted.tests[0].tier='GATED-FULL'
+  const result=registryImpact(file,before,demoted)
+  assert.equal(result.full,true);assert.equal(result.requiresApproval,true)
+  assert.match(result.reason,/explicit person approval/)
+  for(const after of [undefined,{version:2,tests:before.tests},{...before,tests:[]},
+    {...before,tests:[...before.tests,before.tests[0]]},
+    {...before,tests:[before.tests[0],g('internal/new','TestNew','GATED-FULL')]},
+    {...before,tests:[...before.tests,g('internal/new','TestNew','NIGHTLY')]},
+    {...before,tests:[{...before.tests[0],tier:'SOMETIMES'},before.tests[1]]}]) {
+    assert.equal(registryImpact(file,before,after).full,true)
+  }
+  assert.equal(registryImpact('scripts/ci/known-flaky.json',before,before).full,true)
+  const split={version:1,tests:before.tests,timingWeights:{owners:{'internal/core':{seconds:10,selectedTests:1,split:{count:2,overheadSeconds:1,caseSeconds:{TestCore:2}}}}}}
+  const timing=structuredClone(split);timing.timingWeights.owners['internal/core'].split.overheadSeconds=2
+  assert.equal(registryImpact(file,split,timing).full,false)
+  timing.timingWeights.owners['internal/core'].split.count=3
+  assert.equal(registryImpact(file,split,timing).full,true,'split policy is not a measurement')
+})
+
+test('AEON-1334 registry reads bind the base and fail wide on malformed, missing, symlinked and oversized files',()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-1334-registries-'))
+  const file='scripts/ci/go-test-tiers.json',base='a'.repeat(40)
+  const before={version:1,tests:[g('internal/a','TestA','NIGHTLY')]},after=structuredClone(before)
+  after.tests[0].tier='GATED-FULL'
+  const path=resolve(directory,file)
+  mkdirSync(resolve(path,'..'),{recursive:true})
+  const read=(candidate,baseText=JSON.stringify(before))=>{
+    writeFileSync(path,candidate)
+    return registryChangesBetween(base,[file],{cwd:directory,exec:(bin,args,options)=>{
+      assert.equal(bin,'git');assert.deepEqual(args,['show',`${base}:${file}`]);assert.equal(options.timeout,15_000)
+      return baseText
+    }}).get(file)
+  }
+  try {
+    assert.equal(read(JSON.stringify(after)).full,false)
+    assert.equal(read('{bad json').full,true)
+    assert.equal(read(JSON.stringify(after),'{bad base').full,true)
+    assert.equal(read(' '.repeat(4*1024*1024)).full,true)
+    assert.equal(read(JSON.stringify(after),' '.repeat(4*1024*1024)).full,true)
+    assert.equal(registryChangesBetween(undefined,[file],{cwd:directory}).get(file).full,true)
+    const other='web/ci-web-shards.json'
+    assert.equal(registryChangesBetween(base,[other],{cwd:directory,exec:()=>JSON.stringify(before)}).get(other).full,true)
+    const link=resolve(directory,'web');symlinkSync(resolve(directory,'scripts'),link,'dir')
+    assert.equal(registryChangesBetween(base,['web/ci-web-shards.json'],{cwd:directory,exec:()=>JSON.stringify(before)}).get('web/ci-web-shards.json').full,true)
+  } finally { rmSync(directory,{recursive:true,force:true}) }
+})
+
+test('AEON-1334 rollback and merge queue never consume semantic exemptions; mixed policy edits run full',()=>{
+  const paths=['scripts/ci/web-test-tiers.json']
+  const options={registryChanges:unchangedRegistries,tree:repoTree,tests:replayRows}
+  for(const affectedLane of [undefined,'off','ON','true',' on','on ']) {
+    assert.equal(schedulingDecision('pull_request',paths,()=>true,{...options,affectedLane}).mode,'full')
+    assert.equal(select(replayRows,{...options,event:'pull_request',paths,affectedLane}).full,true)
+  }
+  for(const event of ['merge_group','push','schedule','workflow_dispatch']) {
+    const decision=schedulingDecision(event,paths,()=>true,{...options,affectedLane:'on'})
+    assert.equal(decision.mode,'full');assert.equal(decision.layout,'full')
+    assert.equal(select(replayRows,{...options,event,paths,affectedLane:'on'}).full,true)
+  }
+  assert.equal(decide([...paths,'scripts/ci/known-flaky.json']).mode,'full')
+  assert.equal(on([...paths,'scripts/ci/known-flaky.json']).full,true)
+  const env={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'}
+  for (const scope of ['none','affected']) {
+    assert.throws(()=>checkFull({...reportCases(cases,[],1,'fixture'),full:true,exitCode:0,runId:'123',attempt:'2',sha:'a',scope},env),/Full execution scope is not proven/)
+  }
 })
 
 test('R2 contract diffs run the Go packages that read the contract and keep web at essentials',()=>{
@@ -1037,8 +1180,13 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
   for(const name of ['core.mjs','diff.mjs','collect.mjs','listing-cache.mjs','inputs.mjs','browser-impact.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
-  file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
-  file('scripts/ci/go-test-tiers.json',JSON.stringify({tests:[]}))
+  for(const name of ['ci-pr-plan.mjs','playwright-safe.mjs','playwright-global-setup.mjs','playwright-lock.mjs','playwright-processes.mjs'])file(`scripts/${name}`,readFileSync(new URL(`../${name}`,import.meta.url),'utf8'))
+  file('web/scripts/ci-web-shard.mjs',readFileSync(new URL('../../web/scripts/ci-web-shard.mjs',import.meta.url),'utf8'))
+  file('web/ci-web-shards.json',readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url),'utf8'))
+  const tierFixture={version:1,tests:[{kind:'vitest',file:'tests/promoted.unit.test.ts',name:'n',tier:'NIGHTLY'},
+    {kind:'browser',file:'tests/promoted.spec.ts',name:'n',tier:'NIGHTLY',config:'playwright.ui.config.ts',project:''}]}
+  file('scripts/ci/web-test-tiers.json',JSON.stringify(tierFixture))
+  file('scripts/ci/go-test-tiers.json',JSON.stringify({version:1,tests:[g('internal/fixture','TestFixture','NIGHTLY')]}))
   file('web/src/unused.ts','export {}')
   file('web/e2e/unused.ts','export {}')
   file('web/tests/helpers/shared.ts','export const value=1')
@@ -1050,15 +1198,15 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   for(let i=0;i<16;i++)file(`web/tests/extra-${i}.spec.ts`,'import "./helpers/shared"')
   const run=paths=>trustedSchedulingDecision(base,paths,env,{cwd:directory})
   // Promotions compare the base snapshot's manifest with the candidate's.
-  file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[{kind:'vitest',file:'tests/promoted.unit.test.ts',name:'n',tier:'GATED-FULL'}]}))
+  file('scripts/ci/web-test-tiers.json',JSON.stringify({...tierFixture,tests:tierFixture.tests.map(row=>({...row,tier:row.kind==='vitest'?'GATED-FULL':row.tier}))}))
   let manifest=run(['scripts/ci/web-test-tiers.json'])
   assert.deepEqual([manifest.mode,manifest.layout],['essential','static'])
   assert.match(manifest.reason,/R1: 1 promoted vitest cases execute/)
-  file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[{kind:'browser',file:'tests/promoted.spec.ts',name:'n',tier:'ESSENTIAL'}]}))
+  file('scripts/ci/web-test-tiers.json',JSON.stringify({...tierFixture,tests:tierFixture.tests.map(row=>({...row,tier:row.kind==='browser'?'ESSENTIAL':row.tier}))}))
   manifest=run(['scripts/ci/web-test-tiers.json'])
   assert.deepEqual([manifest.mode,manifest.layout],['essential','full'])
-  file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
-  assert.deepEqual(run(['scripts/ci/web-test-tiers.json','README.md']),{mode:'essential',layout:'static',reason:'R1: manifest/static checks: scripts/ci/web-test-tiers.json'})
+  file('scripts/ci/web-test-tiers.json',JSON.stringify(tierFixture))
+  assert.deepEqual(run(['scripts/ci/web-test-tiers.json','README.md']),{mode:'essential',layout:'static',reason:'R1: semantic registry checks: scripts/ci/web-test-tiers.json; R1: timing-only or semantically unchanged registry: scripts/ci/web-test-tiers.json'})
   assert.equal(run(['web/tests/helpers/shared.ts']).mode,'essential')
   assert.equal(run(['web/tests/helpers/shared.ts']).layout,'full')
   assert.match(run(['web/tests/helpers/shared.ts']).reason,/R3:.*1 specs/)
