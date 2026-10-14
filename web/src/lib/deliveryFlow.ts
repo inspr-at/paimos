@@ -119,14 +119,25 @@ export function minutesText(minutes: number): string {
   if (rounded < 60) return `${rounded}${NB}min`
   return `${Math.floor(rounded / 60)}${NB}h${NB}${String(rounded % 60).padStart(2, '0')}`
 }
+// Building a formatter costs far more than using one; the lanes label many times per render (AEON-1352).
+const zoneClocks = new Map<string, Intl.DateTimeFormat>()
+function zoneClock(timeZone: string, seconds: boolean) {
+  const key = `${timeZone}|${seconds}`
+  let clock = zoneClocks.get(key)
+  if (!clock) {
+    const options: Intl.DateTimeFormatOptions = { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }
+    if (seconds) options.second = '2-digit'
+    clock = new Intl.DateTimeFormat('en-GB', options)
+    zoneClocks.set(key, clock)
+  }
+  return clock
+}
 function wallClock(origin: number, minutes: number, seconds: boolean, timeZone?: string): string {
   const at = new Date(origin + Math.round(minutes * 60) * 1000)
   let hh: string, mm: string, ss: number
   if (timeZone) {
     // The named zone, so CI (UTC) and a Vienna reader agree on the same instant.
-    const options: Intl.DateTimeFormatOptions = { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }
-    if (seconds) options.second = '2-digit'
-    const parts = new Intl.DateTimeFormat('en-GB', options).formatToParts(at)
+    const parts = zoneClock(timeZone, seconds).formatToParts(at)
     const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? '00'
     hh = pick('hour') === '24' ? '00' : pick('hour')
     mm = pick('minute')

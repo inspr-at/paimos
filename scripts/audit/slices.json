@@ -442,6 +442,7 @@
         "web/src/**",
         "web/tests/**",
         "web/e2e/**",
+        "web/perf/**",
         "web/*",
         "web/.vscode/**",
         "web/public/**",
