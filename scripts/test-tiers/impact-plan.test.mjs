@@ -2,7 +2,7 @@
 // Fixed go-static selector lane: imported by test-tiers.test.mjs.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -285,4 +285,34 @@ test('AEON-1333 archived base capsule starts with its full dependency set and pr
   assert.equal(result.selected_cases.length, manifest.tests.filter(row => row.kind === 'browser' && row.tier !== 'NIGHTLY' && row.active !== false).length)
   assert.deepEqual(result.shards.flatMap(shard => shard.cases).sort(), result.selected_cases)
   assert.equal(result.would_have_skipped.count, 0)
+})
+
+test('AEON-1333 workflow bootstrap publishes an honest adoption fallback and never executes a candidate planner when the base has none', t => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-impact-adoption-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const git = args => execFileSync('git', args, { cwd: directory, encoding: 'utf8', timeout: 10_000 }).trim()
+  const write = (file, text) => { mkdirSync(resolve(directory, file.slice(0, file.lastIndexOf('/'))), { recursive: true }); writeFileSync(resolve(directory, file), text) }
+  git(['init', '-q']); git(['config', 'user.name', 'Fixture']); git(['config', 'user.email', 'fixture@example.invalid'])
+  write('scripts/ci/web-test-tiers.json', JSON.stringify(manifest(tests)))
+  for (const file of ['web/src/main.ts', 'web/tests/old.spec.ts', 'web/e2e/.gitkeep', 'web/scripts/.gitkeep', 'web/ci-web-shards.json']) write(file, '')
+  git(['add', '.']); git(['commit', '-qm', 'before adoption']); const base = git(['rev-parse', 'HEAD'])
+  write('scripts/test-tiers/impact-plan.mjs', 'import {writeFileSync} from "node:fs";writeFileSync("candidate-ran", "bad")')
+  git(['add', '.']); git(['commit', '-qm', 'untrusted candidate']); const head = git(['rev-parse', 'HEAD'])
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
+  mkdirSync(resolve(directory, 'bin')); mkdirSync(resolve(directory, 'runtime'))
+  writeFileSync(resolve(directory, 'bin/git'), '#!/bin/sh\nif [ "$1" = fetch ]; then exit 0; fi\nexec "$AEON_TEST_REAL_GIT" "$@"\n', { mode: 0o755 })
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const step = workflow.split('      - name: Publish trusted Impact CI shadow plan\n')[1].split('\n      - ')[0]
+  const script = step.split('        run: |\n')[1].replace(/^          /gm, '')
+  const outcome = spawnSync('bash', ['-c', script], { cwd: directory, encoding: 'utf8', timeout: 15_000,
+    env: { PATH: `${resolve(directory, 'bin')}:${process.env.PATH}`, AEON_TEST_REAL_GIT: realGit,
+      RUNNER_TEMP: resolve(directory, 'runtime'), GITHUB_WORKSPACE: directory, PR_BASE_SHA: base, PR_HEAD_SHA: head,
+      GITHUB_SHA: head, GITHUB_STEP_SUMMARY: resolve(directory, 'summary.md'),
+      EXECUTION_MODE: 'full', EXECUTION_LAYOUT: 'full', EXECUTION_LANE: 'full' } })
+  assert.equal(outcome.status, 0, outcome.stderr)
+  assert.equal(existsSync(resolve(directory, 'candidate-ran')), false)
+  const result = JSON.parse(readFileSync(resolve(directory, 'tmp/test-tiers/impact-plan.json')))
+  assert.equal(result.complete, false); assert.equal(result.browser_scope, 'gated-full')
+  assert.equal(result.selected_cases.length, 4); assert.equal(result.would_have_skipped.count, 0)
+  assert.deepEqual(result.shards, []); assert.match(result.fallback_reasons.join(), /accounting unavailable/)
 })
