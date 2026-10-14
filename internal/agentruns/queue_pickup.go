@@ -314,7 +314,7 @@ func queueTryRouteWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, t que
 	}
 	return true, attempt.Commit(ctx)
 }
-func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
+func queueClaimable(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run) error {
 	if v.QueueNodeID == nil || v.Status != "queued" {
 		return nil
 	}
@@ -328,7 +328,7 @@ func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
 	if v.QueueTargetAgentID == nil && v.QueueRoutedAt == nil {
 		return workorders.Fail(409, "coordinator routing required")
 	}
-	ready, err := entryReadiness(ctx, tx, tenant.Principal{}, t)
+	ready, err := entryReadiness(ctx, tx, p, t)
 	if err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import { controlStability } from './control-stability'
 // Risks: moving controls, status refusal disappearing behind a toast, stale
 // ticket writes, and a manual check looking actionable to an agent.
 test('AEON-1315 entry checklist preserves controls and refuses or audits status moves', async ({ page }, testInfo) => {
+  page.on('pageerror', error => { throw error })
   const data = fixtures(), node = data.nodes.find(n => n.id === 'n-4')!
   node.state = 'open'; node.fields.acceptance_criteria = '- [ ] The work satisfies the approved criteria'
   node.title = 'Freigaberegeln für lang beschriebene Arbeit vor Beginn, Qualitätsprüfung und Abschluss nachvollziehbar anzeigen'

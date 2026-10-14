@@ -98,8 +98,8 @@ async function move() {
   await run(async () => {
     try {
       const node = await updateNode(originId, { state, override_reason: value }, { ifUnmodifiedSince: revision })
-      rowStore.wrote(node, sent)
       if (!alive() || disposed) return
+      rowStore.wrote(node, sent)
       toast(`${props.row.key} is now ${statusMeta(node.state).label}`); emit('changed'); emit('close', true)
     } catch (e) {
       if (entryFailure(e) || e instanceof APIError && e.status === 412) await refresh()
@@ -112,7 +112,7 @@ async function add() {
   await run(async () => { const result = await queue.add(props.projectId, originId); if (result && alive() && !disposed) { emit('queued', result); emit('close', true) } })
 }
 function keys(event: KeyboardEvent) {
-  if (isSettingsSubmit(event)) { event.preventDefault(); event.stopPropagation(); if (anyway.value) void move(); else if (fixing.value) void saveFix() }
+  if (isSettingsSubmit(event)) { event.preventDefault(); event.stopPropagation(); if (fixing.value) void saveFix(); else if (anyway.value) void move() }
   else if (event.key === 'Escape' && isSettingsField(event.target)) { event.preventDefault(); event.stopPropagation(); (event.target as HTMLElement).blur(); reasonField.value?.closest<HTMLElement>('[role=dialog]')?.focus() }
 }
 </script>
@@ -142,7 +142,7 @@ function keys(event: KeyboardEvent) {
         <form v-if="anyway && person && canEdit && !readonly" class="nr-form" @submit.prevent="move"><div class="nr-form-actions"><button type="button" class="btn sm" :disabled="busy" @click="anyway = false">Cancel</button><button type="submit" class="btn sm primary desktop-submit" :disabled="busy || !reason.trim() || checks.loading.value">Move to {{ statusMeta(toStatus).label }} <KeyCap k="mod" /><KeyCap k="enter" /></button></div><label :for="`entry-reason-${row.id}`">Why move it now?</label><textarea :id="`entry-reason-${row.id}`" ref="reasonField" v-model="reason" class="field" rows="3" maxlength="500" :disabled="busy" /><p class="nr-hint">Required. It’s logged in {{ row.key }}’s activity with the missing checks: {{ failed.map(c => c.label).join(', ') }}.</p></form>
         <p v-if="error" role="alert" class="error">{{ error }}</p>
       </div>
-      <div v-if="!readonly" class="nr-phone-actions"><button type="button" class="btn" @click="emit('close', true)">Cancel</button><button v-if="mode === 'queue'" type="button" class="btn primary" :disabled="busy || checks.loading.value || !block || failed.length > 0 || !can('run.create', projectId)" @click="add">Queue</button><button v-else-if="person && canEdit" type="button" class="btn primary" :disabled="busy || !reason.trim() || checks.loading.value" @click="move">Move to {{ statusMeta(toStatus).label }}</button></div>
+      <div v-if="!readonly" class="nr-phone-actions"><button type="button" class="btn" @click="emit('close', true)">Cancel</button><button v-if="fixing" type="button" class="btn primary" :disabled="busy || (!text.trim() && fixing.id !== 'release_copy_set' && fixing.id !== 'pills_benefits_set')" @click="saveFix">Save <KeyCap k="mod" /><KeyCap k="enter" /></button><button v-else-if="mode === 'queue'" type="button" class="btn primary" :disabled="busy || checks.loading.value || !block || failed.length > 0 || !can('run.create', projectId)" @click="add">Queue</button><button v-else-if="person && canEdit" type="button" class="btn primary" :disabled="busy || !reason.trim() || checks.loading.value" @click="move">Move to {{ statusMeta(toStatus).label }}</button></div>
     </div>
   </FloatingPanel>
 </template>

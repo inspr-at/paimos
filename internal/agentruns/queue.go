@@ -266,10 +266,16 @@ func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (
 	t.Fields["estimate_by"] = p.ID
 	t.Fields["estimate_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	t.Fields["estimate_confirmed"] = p.Kind == tenant.Person
-	if err = queueUpdateTicket(r.Context(), tx, p, t, "queue.estimate_applied"); err != nil {
+	change, _, err := queueUpdateTicketDeferred(r.Context(), tx, t, "queue.estimate_applied")
+	if err != nil {
 		return nil, err
 	}
-	return entryReadiness(r.Context(), tx, p, t)
+	ready, err := entryReadiness(r.Context(), tx, p, t)
+	if err != nil {
+		return nil, err
+	}
+	_, err = events.Append(r.Context(), tx, p, change)
+	return ready, err
 }
 func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, event string, runID ...string) error {
 	change, _, err := queueUpdateTicketDeferred(ctx, tx, t, event, runID...)
