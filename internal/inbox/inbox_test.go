@@ -371,6 +371,9 @@ func TestMessages(t *testing.T) {
 func TestAgentScope(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
+	// The fixture middleware supplies the authenticated scope snapshot; the
+	// send handler must still check the live bearer key and final write grant.
+	w.agent.Scopes = []string{"inbox.send"}
 	srv, _ := serve(t, w.db, w.agent, w.recipient)
 	status, _ := do(t, srv, w.agent.ID, http.MethodPost, "/api/inbox/messages", sendJSON(w.recipient.ID, "x", "no-key", nil, nil), nil)
 	if status != 403 {

@@ -254,7 +254,10 @@
         "internal/inbox/routine_notice.go",
         "internal/hookbinding/**",
         "internal/cli/hook_binding.go",
-        "internal/cli/hook_binding_unix_test.go"
+        "internal/cli/hook_binding_unix_test.go",
+        "internal/cli/principal_inbox.go",
+        "internal/cli/principal_inbox_test.go",
+        "internal/inbox/messaging_only_test.go"
       ]
     },
     {
