@@ -14,6 +14,8 @@ func init() {
 		"PUT /api/nodes/{nodeId}/entry-checks/{checkId}":              "nodes.write",
 		"GET /api/projects/{projectId}/definitions":                   "nodes.read",
 		"PUT /api/projects/{projectId}/definitions":                   "nodes.write",
+		"DELETE /api/projects/{projectId}/definitions":                "nodes.write",
+		"GET /api/projects/{projectId}/definitions/context":           "nodes.read",
 		"GET /api/settings/definitions":                               "nodes.read",
 		"PUT /api/settings/definitions":                               "settings.manage",
 		"DELETE /api/kinds/{kindId}":                                  "kinds.manage",

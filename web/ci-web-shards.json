@@ -264,6 +264,8 @@
       ]
       ,
       "specs": [
+        {"file":"tests/definitions.spec.ts","listedTests":9,"weightSeconds":120,"weightSource":"AEON-1316 FIX4 estimate: original flows plus six verdict regressions at 390/1024/1440 in light/dark"}
+        ,
         {"file":"tests/entry-checks.spec.ts","weightSeconds":30}
         ,
         {"file":"tests/person-steps.spec.ts","weightSeconds":100}
@@ -2052,6 +2054,18 @@
         "seconds": 159.516
         ,
         "selectedTests": 22
+      }
+      ,
+      "tests/definitions.spec.ts": {
+        "basis": "Guarded remote-spec.sh complete file: 3 passed (14.5s); this is a pre-merge measurement, not a nightly run."
+        ,
+        "runner": "mbp2606"
+        ,
+        "seconds": 14.5
+        ,
+        "selectedTests": 3
+        ,
+        "sourceCommit": "e8377156b5508aa1c487913f83f3e33e9474570b"
       }
       ,
       "tests/delivery-arion-v5.spec.ts": {
