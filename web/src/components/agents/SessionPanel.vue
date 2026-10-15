@@ -241,7 +241,9 @@ watch([() => s.value?.id, owner], async () => {
   questionFocus.value = ''; why.value = ''
   const scope = projection.watchProjects({ project: selected.project_id })
   try {
-    await Promise.all([leads.loadLead(selected.project_id), leadPreference.ready, workerPreference.ready, nativeReady, ensurePermissions(selected.project_id), projection.refresh()])
+    // nativeReady owns the opening lead read too. A second loadLead here can
+    // discard that read before the fixed opening menu captures its Lead item.
+    await Promise.all([leadPreference.ready, workerPreference.ready, nativeReady, ensurePermissions(selected.project_id), projection.refresh()])
     if (mine !== opening || selected.id !== s.value?.id || who !== owner.value) return
     const ids = projection.workersOf(selected.project_id, selected.id)
     const workers = agents.views.filter(v => ids?.has(v.session.id))
@@ -809,6 +811,15 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .ticket-state { white-space: nowrap; }
 /* Touch: the inline link reaches 44 px through its block padding, which moves no text. */
 @media (max-width: 720px), (pointer: coarse) { .ticket-fact { padding-block: calc((44px - 1em) / 2); } }
+/* Keep the computer fact's 24 px row and surface, with separate 44 px touch
+   targets extending into its surrounding whitespace. */
+@media (max-width: 720px), (pointer: coarse) {
+  .host-fact { height: 24px; }
+  .host-fact.editable { padding-right: 48px; }
+  .host-fact :deep(.host-badge) { position: relative; isolation: isolate; min-width: 44px; height: 44px; margin-block: -10px; background: transparent; }
+  .host-fact :deep(.host-badge)::before { content: ''; position: absolute; z-index: -1; inset: 10px 0; height: 24px; border-radius: inherit; background: color-mix(in srgb, var(--ink-3) 8%, transparent); }
+  .host-fact :deep(.host-pencil) { top: -10px; width: 44px; height: 44px; opacity: 1; }
+}
 .block { margin-top: 24px; }
 .block.first { margin-top: 18px; }
 .block h3 { margin-bottom: 10px; }

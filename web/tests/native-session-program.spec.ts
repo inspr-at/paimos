@@ -69,6 +69,14 @@ async function setup(page: Page, theme = 'light') {
 async function refresh(page: Page) {
   await page.evaluate(async () => { const { useAgents } = await import('/src/stores/agents.ts'); await useAgents().loadAll() })
 }
+// Layout saves use a queued preference writer. Await each manual save's real
+// response before observing whether the later automatic layout sends a write.
+async function savedLayout(page: Page, layout: string, action: () => Promise<unknown>) {
+  const response = page.waitForResponse(response => response.ok() && response.request().method() === 'PUT' &&
+    decodeURIComponent(new URL(response.url()).pathname).startsWith('/api/preferences/agents:panel.layout.') && response.request().postDataJSON()?.value?.layout === layout)
+  await action()
+  await response
+}
 
 test('AEON-1309: fake-host mode changes stay read-only, preserve the menu and reject stale context', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -254,16 +262,16 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(link).toHaveAttribute('target', '_blank'); await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-terminal.png`) })
     if (width >= 1100) {
-      await panel.getByRole('button', { name: 'Sessions list', exact: true }).click()
+      await savedLayout(page, 'wide', () => panel.getByRole('button', { name: 'Sessions list', exact: true }).click())
       await expect(panel).toHaveAttribute('data-layout', 'wide')
       await expect(page.locator('.agents-list-pane')).toBeHidden()
       await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-wide.png`) })
-      await panel.getByRole('button', { name: 'Sessions list', exact: true }).click()
+      await savedLayout(page, 'side', () => panel.getByRole('button', { name: 'Sessions list', exact: true }).click())
       await expect(panel).toHaveAttribute('data-layout', 'side')
       await expect(page.locator('.agents-list-pane')).toBeVisible()
     }
     await panel.getByRole('button', { name: 'More session actions' }).click()
-    await page.getByRole('menuitem', { name: /^Full screen/ }).click()
+    await savedLayout(page, 'full', () => page.getByRole('menuitem', { name: /^Full screen/ }).click())
     await expect(panel).toHaveAttribute('data-layout', 'full')
     await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-full.png`) })
     if (width <= 720) {
@@ -277,7 +285,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.keyboard.press('Escape'); await page.keyboard.press('1'); await page.keyboard.press('Shift+E'); await page.keyboard.press('f')
     await expect(panel).toHaveAttribute('data-layout', 'full')
     await panel.getByRole('button', { name: 'Close session details' }).focus()
-    await page.keyboard.press('Escape')
+    await savedLayout(page, 'side', () => page.keyboard.press('Escape'))
     await expect(panel).toHaveAttribute('data-layout', 'side')
     await page.keyboard.press('2')
     await expect(panel.getByRole('tab', { name: 'Chat', exact: true })).toHaveAttribute('aria-selected', 'true')
