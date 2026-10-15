@@ -100,7 +100,7 @@ func TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead(t *testing.T) {
 			}
 			body = map[string]any{"ref": ref, "object": map[string]string{"type": "commit", "sha": sha}}
 		case r.Method == "GET" && strings.Contains(r.URL.Path, "/compare/"):
-			body = map[string]any{"total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
+			body = map[string]any{"merge_base_commit": map[string]string{"sha": base}, "files": []any{map[string]string{"filename": "docs/fixture.md", "status": "modified"}}, "total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
 		default:
 			t.Fatalf("unexpected GitHub operation: %s %s", r.Method, r.URL.Path)
 		}
@@ -182,6 +182,8 @@ func TestGitHubReaderConfirmsMissingPull(t *testing.T) {
 				status = 502
 				body = map[string]string{"message": "unavailable"}
 			}
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/compare/"):
+			body = map[string]any{"merge_base_commit": map[string]string{"sha": base}, "files": []any{}}
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/check-runs"):
 			body = map[string]any{"total_count": 0, "check_runs": []any{}}
 			if mode == "partial" {

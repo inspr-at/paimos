@@ -5886,6 +5886,14 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableQuestionDoesNotStarveAuthorizedQuestion","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionCIExcludesOwnContext","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionDiffReadsMergeBaseAndRenameSides","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionRules","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionStoreAuthenticatedApprovalsAndInvalidation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAppReaderMergeGroupKeepsRequiredChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAuthenticatedDeliveryEnvelope","tier":"ESSENTIAL"}
@@ -6203,6 +6211,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryIncludesCreatorProjectForWorkspaceAgent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestVisualAdmissionClassifier","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestWebhookBodyTimeoutDoesNotPoisonKeepAliveConnection","tier":"ESSENTIAL"}
     ,

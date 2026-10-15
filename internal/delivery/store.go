@@ -178,6 +178,9 @@ func saveTx(ctx context.Context, tx pgx.Tx, tid string, o Observation) (Item, *e
 	if o.HoldReason == nil {
 		o.HeldFrom = nil
 	}
+	if err := syncAdmissionBindingTx(ctx, tx, tid, o); err != nil {
+		return Item{}, nil, err
+	}
 	after := project(o, before)
 	raw, err := json.Marshal(o)
 	if err != nil {

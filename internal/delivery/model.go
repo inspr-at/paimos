@@ -77,28 +77,29 @@ type Check = evidence.Check
 // Observation is the replay source. It contains normalized platform facts at
 // observation time, not the raw webhook, PR title, body, author or review output.
 type Observation struct {
-	Target       string    `json:"target_branch"`
-	ID           string    `json:"id"`
-	Project      *string   `json:"project_id"`
-	Ticket       *string   `json:"ticket_node_id"`
-	Repository   string    `json:"repository"`
-	PR           *int64    `json:"pull_request"`
-	Branch       string    `json:"branch"`
-	Head         string    `json:"head_sha"`
-	Base         string    `json:"base_sha"`
-	LinkSource   *string   `json:"link_source"`
-	Open         bool      `json:"open"`
-	Merged       bool      `json:"merged"`
-	Queued       bool      `json:"queued"`
-	QueueHead    string    `json:"queue_head"`
-	QueueFailure bool      `json:"queue_failed"`
-	Built        bool      `json:"built"`
-	ReviewedHead string    `json:"reviewed_head"`
-	Checks       []Check   `json:"checks"`
-	HoldReason   *string   `json:"hold_reason"`
-	HeldFrom     *State    `json:"held_from_state,omitempty"`
-	Settings     Settings  `json:"settings"`
-	At           time.Time `json:"at"`
+	AdmissionDiff *AdmissionDiff `json:"admission_diff,omitempty"`
+	Target        string         `json:"target_branch"`
+	ID            string         `json:"id"`
+	Project       *string        `json:"project_id"`
+	Ticket        *string        `json:"ticket_node_id"`
+	Repository    string         `json:"repository"`
+	PR            *int64         `json:"pull_request"`
+	Branch        string         `json:"branch"`
+	Head          string         `json:"head_sha"`
+	Base          string         `json:"base_sha"`
+	LinkSource    *string        `json:"link_source"`
+	Open          bool           `json:"open"`
+	Merged        bool           `json:"merged"`
+	Queued        bool           `json:"queued"`
+	QueueHead     string         `json:"queue_head"`
+	QueueFailure  bool           `json:"queue_failed"`
+	Built         bool           `json:"built"`
+	ReviewedHead  string         `json:"reviewed_head"`
+	Checks        []Check        `json:"checks"`
+	HoldReason    *string        `json:"hold_reason"`
+	HeldFrom      *State         `json:"held_from_state,omitempty"`
+	Settings      Settings       `json:"settings"`
+	At            time.Time      `json:"at"`
 }
 type Item struct {
 	ID           string      `json:"id"`

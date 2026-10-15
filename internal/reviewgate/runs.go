@@ -127,8 +127,8 @@ func CreateRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket stri
 	if err := currentRunTargetTx(ctx, tx, r); err != nil {
 		return r, err
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO review_runs(tenant_id,ticket_node_id,project_id,repository,pull_request,target_branch,base_sha,head_sha,scope,kind,author_session_id,reviewer_session_id,reviewer_principal_id,author_family,reviewer_family,harness,model,reasoning_effort,created_by,created_at,expires_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id::text`, p.TenantID, ticket, r.Project, r.Repository, r.PR, r.Target, r.Base, r.Head, r.Scope, r.Kind, r.AuthorSession, r.ReviewerSession, r.Reviewer, r.AuthorFamily, r.ReviewerFamily, r.Harness, r.Model, r.Effort, r.CreatedBy, r.CreatedAt, r.ExpiresAt).Scan(&r.ID)
+	err = tx.QueryRow(ctx, `INSERT INTO review_runs(tenant_id,ticket_node_id,project_id,repository,pull_request,target_branch,base_sha,head_sha,scope,kind,author_session_id,reviewer_session_id,reviewer_principal_id,author_family,reviewer_family,harness,model,reasoning_effort,created_by,created_at,expires_at,admission_revision)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,(SELECT revision FROM delivery_admission_bindings WHERE repository=$4 AND pull_request=$5 AND target_branch=$6 AND base_sha=$7 AND head_sha=$8 AND scope=$9 AND project_id=$3 AND ticket_node_id=$2)) RETURNING id::text`, p.TenantID, ticket, r.Project, r.Repository, r.PR, r.Target, r.Base, r.Head, r.Scope, r.Kind, r.AuthorSession, r.ReviewerSession, r.Reviewer, r.AuthorFamily, r.ReviewerFamily, r.Harness, r.Model, r.Effort, r.CreatedBy, r.CreatedAt, r.ExpiresAt).Scan(&r.ID)
 	return r, err
 }
 
@@ -145,7 +145,9 @@ func currentRunTargetTx(ctx context.Context, tx pgx.Tx, r Run) error {
 	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT d.repository=$2 AND d.pull_request=$3 AND d.head_sha=$4 AND d.observation->>'base_sha'=$5 AND d.observation->>'target_branch'=$6 AND d.project_id=$7
  FROM delivery_items d JOIN delivery_metric_sources s ON s.tenant_id=d.tenant_id AND s.project_id=d.project_id AND s.repository=d.repository
  WHERE d.ticket_node_id=$1 ORDER BY d.updated_at DESC,d.id DESC LIMIT 1),false)
- AND EXISTS(SELECT 1 FROM nodes WHERE id=$1 AND project_id=$7 AND deleted_at IS NULL)`, r.Ticket, r.Repository, r.PR, r.Head, r.Base, r.Target, r.Project).Scan(&current)
+ AND EXISTS(SELECT 1 FROM nodes WHERE id=$1 AND project_id=$7 AND deleted_at IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM review_runs rr WHERE rr.id::text=$8 AND rr.admission_revision IS NOT NULL
+ AND NOT EXISTS(SELECT 1 FROM delivery_admission_bindings b WHERE b.repository=rr.repository AND b.pull_request=rr.pull_request AND b.revision=rr.admission_revision))`, r.Ticket, r.Repository, r.PR, r.Head, r.Base, r.Target, r.Project, r.ID).Scan(&current)
 	if err == nil && !current {
 		return ErrRunBinding
 	}
@@ -268,6 +270,18 @@ func SubmitRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, token s
 	r.VisualImpact = in.VisualImpact
 	r.Reason = in.Reason
 	_, err = tx.Exec(ctx, `UPDATE review_runs SET verdict=$2,visual_impact=$3,reason=$4,submitted_at=$5 WHERE id=$1`, id, r.Verdict, r.VisualImpact, r.Reason, now)
+	if err != nil {
+		return r, err
+	}
+	// Only this authenticated, run-bound submission path records admission
+	// approvals. Null revisions belong to pre-expansion runs and never admit.
+	_, err = tx.Exec(ctx, `INSERT INTO delivery_admission_approvals(tenant_id,repository,pull_request,binding_revision,target_branch,base_sha,head_sha,scope,review_run_id,visual_run_id)
+ SELECT r.tenant_id,r.repository,r.pull_request,r.admission_revision,r.target_branch,r.base_sha,r.head_sha,r.scope,
+ CASE WHEN r.kind='review' THEN r.id END,CASE WHEN r.kind='visual' THEN r.id END
+ FROM review_runs r JOIN delivery_admission_bindings b ON b.tenant_id=r.tenant_id AND b.repository=r.repository AND b.pull_request=r.pull_request AND b.revision=r.admission_revision
+ WHERE r.id=$1 AND r.submitted_at IS NOT NULL
+ ON CONFLICT(tenant_id,repository,pull_request,binding_revision) DO UPDATE SET
+ review_run_id=coalesce(EXCLUDED.review_run_id,delivery_admission_approvals.review_run_id),visual_run_id=coalesce(EXCLUDED.visual_run_id,delivery_admission_approvals.visual_run_id)`, id)
 	return r, err
 }
 
