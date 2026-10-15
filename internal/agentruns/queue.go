@@ -306,7 +306,8 @@ func queueUpdateTicketDeferred(ctx context.Context, tx pgx.Tx, t queueTicket, ev
 
 func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		NodeID string `json:"node_id"`
+		NodeID        string                     `json:"node_id"`
+		BuildDelivery *workorders.BuildCandidate `json:"build_delivery,omitempty"`
 		queueTarget
 	}
 	if err := workorders.Decode(r, &in); err != nil {
@@ -318,6 +319,9 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err := validateQueueTarget(in.queueTarget, false); err != nil {
 		return nil, err
 	}
+	if err := workorders.ValidateBuildCandidate(in.BuildDelivery); err != nil {
+		return nil, err
+	}
 	ctx := r.Context()
 	t, err := queueLoadTicket(ctx, tx, in.NodeID, true)
 	if err != nil {
@@ -326,7 +330,7 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err = queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return nil, err
 	}
-	prepared, err := m.queuePrepare(ctx, tx, p, t, in.queueTarget)
+	prepared, err := m.queuePrepare(ctx, tx, p, t, in.queueTarget, in.BuildDelivery)
 	if err != nil {
 		return nil, err
 	}
@@ -348,13 +352,23 @@ type queuePrepared struct {
 
 // queuePrepare shares single-leaf eligibility and creation with parent snapshots.
 // It does not acquire the event counter; composite callers flush audit last.
-func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, in queueTarget) (queuePrepared, error) {
+// candidate is the optional fix-round binding. Nil keeps the ordinary refusal
+// when a delivery is still pending. Only a leaf whose own pending delivery it
+// continues stores it; a leaf with nothing pending is queued unbound. Replay
+// compares that stored binding. Continuation audit stays with route, claim
+// and registration; enqueue only admits and stores the binding.
+func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, in queueTarget, candidate *workorders.BuildCandidate) (queuePrepared, error) {
 	if err := queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return queuePrepared{}, err
 	}
-	if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil); err != nil {
+	if err := workorders.ValidateBuildCandidate(candidate); err != nil {
 		return queuePrepared{}, err
 	}
+	admission := &workorders.BuildAdmission{Candidate: candidate}
+	if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil, admission); err != nil {
+		return queuePrepared{}, err
+	}
+	binding := admission.ContinuedBinding()
 	if err := escalation.CheckLaunchTx(ctx, tx, t.ID, "", "", nil); err != nil {
 		return queuePrepared{}, err
 	}
@@ -365,6 +379,9 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		}
 		if !sameTarget(existing, in) {
 			return queuePrepared{}, workorders.Fail(409, "ticket already queued with another target; remove it first")
+		}
+		if err = queuedDeliveryMatches(ctx, tx, existing.OrderID, binding); err != nil {
+			return queuePrepared{}, err
 		}
 		return queuePrepared{Run: existing}, nil
 	}
@@ -380,7 +397,7 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if !ready.Ready {
 		return queuePrepared{}, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
 	}
-	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
+	if err = requireWriterFree(ctx, tx, t.ID, "", binding); err != nil {
 		return queuePrepared{}, err
 	}
 	if in.Account != nil {
@@ -415,7 +432,7 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			return queuePrepared{}, workorders.Fail(409, "queue holder identity conflicts")
 		}
 	}
-	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields)})
+	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields), BuildDelivery: binding})
 	if err != nil {
 		return queuePrepared{}, err
 	}
@@ -477,6 +494,17 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		prepared.Undo = &queueUndoToken{RunID: v.ID, Revision: revision}
 	}
 	return prepared, nil
+}
+
+func queuedDeliveryMatches(ctx context.Context, tx pgx.Tx, order string, candidate *workorders.BuildCandidate) error {
+	stored, err := workorders.OrderBuildAdmissionTx(ctx, tx, order)
+	if err != nil {
+		return err
+	}
+	if !sameBuildDelivery(stored.Candidate, candidate) {
+		return workorders.Fail(409, "ticket already queued with another delivery binding; remove it first")
+	}
+	return nil
 }
 
 func sameTarget(v Run, in queueTarget) bool {

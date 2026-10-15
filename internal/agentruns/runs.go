@@ -583,7 +583,8 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
 	}
-	if err = queueClaimable(ctx, tx, p, v); err != nil {
+	admission := workorders.BuildAdmission{Candidate: o.BuildDelivery}
+	if err = queueClaimable(ctx, tx, p, v, &admission); err != nil {
 		return nil, err
 	}
 	if err = validatePickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {
@@ -803,10 +804,13 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return nil, err
 		}
 	}
-	return v, workorders.Record(ctx, tx, p, o.NodeID, "run.claimed", before, struct {
+	if err = workorders.Record(ctx, tx, p, o.NodeID, "run.claimed", before, struct {
 		Run          Run      `json:"run"`
 		Daemon       string   `json:"daemon_id"`
 		Generation   string   `json:"daemon_generation"`
 		Reservations []string `json:"reservation_ids"`
-	}{v, in.Daemon, in.Generation, in.Reservations})
+	}{v, in.Daemon, in.Generation, in.Reservations}); err != nil {
+		return nil, err
+	}
+	return v, admission.Record(ctx, tx, p, "", v.ID)
 }

@@ -70,6 +70,7 @@
   },
   "special": {
     "account.overview.read": "See all enrolled account capacity",
+    "agents.create": "Provision messaging assistants",
     "agents.plan.read": "See their agent start plan",
     "delivery.route": "Record and read shadow delivery routes",
     "engine.admission": "Evaluate shadow start admission",

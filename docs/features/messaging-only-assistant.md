@@ -12,7 +12,8 @@ aeon tell status <sent-message-uuid>
 ```
 
 Use the configured HTTPS origin and a protected runtime file through `AEON_URL`
-and `AEON_API_KEY_FILE`. Provisioning, expiry and rotation remain operator-owned;
+and `AEON_API_KEY_FILE`. [Messaging assistant provisioning](messaging-assistants.md)
+lets an authorized person or their bounded coordinator create and renew the key;
 the assistant cannot mint or manage keys. No additional scope, preset or
 principal kind is required.
 

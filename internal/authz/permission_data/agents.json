@@ -5,7 +5,8 @@
       "agents": "agents"
     },
     "special": {
-      "agents.plan.read": "See their agent start plan"
+      "agents.plan.read": "See their agent start plan",
+      "agents.create": "Provision messaging assistants"
     }
   }
 }
