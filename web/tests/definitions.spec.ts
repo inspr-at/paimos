@@ -226,7 +226,7 @@ test('AEON-1316 FIX4 feedback uses the origin toast and fixed form footer withou
     await shot(page,'form-error',width,theme)
     world.fail = false
     await save.click(); await expect(form).toHaveCount(0)
-    await expect(page.locator('.toast')).toContainText('Definition saved.')
+    await expect(page.locator('.toast.info')).toContainText('Definition saved.')
     await shot(page,'no-feedback-band',width,theme)
   })
 })
