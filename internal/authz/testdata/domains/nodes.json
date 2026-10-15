@@ -42,9 +42,11 @@
     "GET /api/nodes/tree": true,
     "GET /api/projects": true,
     "GET /api/projects/lookup": true,
+    "GET /api/settings/definitions": true,
     "GET /api/settings/work-vocabulary": true,
     "GET /api/status/help": true,
-    "GET /api/tickets/graph": true
+    "GET /api/tickets/graph": true,
+    "PUT /api/settings/definitions": true
   },
   "registry": [
     {
@@ -132,9 +134,12 @@
     "GET /api/nodes/lookup": "nodes.read",
     "GET /api/nodes/tree": "nodes.read",
     "GET /api/nodes/{nodeId}": "nodes.read",
+    "GET /api/nodes/{nodeId}/entry-checks": "nodes.read",
     "GET /api/nodes/{nodeId}/work-lifecycle": "nodes.read",
     "GET /api/projects": "nodes.read",
     "GET /api/projects/lookup": "nodes.read",
+    "GET /api/projects/{projectId}/definitions": "nodes.read",
+    "GET /api/settings/definitions": "nodes.read",
     "GET /api/settings/work-vocabulary": "nodes.read",
     "GET /api/status/help": "nodes.read",
     "GET /api/tickets/graph": "nodes.read",
@@ -145,10 +150,14 @@
     "POST /api/nodes": "nodes.write",
     "POST /api/nodes/bulk": "nodes.write",
     "POST /api/nodes/{nodeId}/convert": "nodes.write",
+    "POST /api/nodes/{nodeId}/entry-evidence": "nodes.write",
     "POST /api/nodes/{nodeId}/move": "nodes.move",
     "POST /api/nodes/{nodeId}/project-move": "nodes.move",
     "POST /api/nodes/{nodeId}/work-lifecycle": "nodes.write",
     "POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue": "nodes.write",
+    "PUT /api/nodes/{nodeId}/entry-checks/{checkId}": "nodes.write",
+    "PUT /api/projects/{projectId}/definitions": "nodes.write",
+    "PUT /api/settings/definitions": "settings.manage",
     "PUT /api/settings/work-vocabulary": "settings.manage"
   },
   "words": {
