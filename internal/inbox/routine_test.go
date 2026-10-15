@@ -124,6 +124,9 @@ func TestRoutineDispatcherSharesListenerAcrossTenants(t *testing.T) {
 	tracer := &routineQueryTracer{events: make(chan routineQueryEvent, 64)}
 	cfg := w.db.App.Config()
 	cfg.ConnConfig.Tracer = tracer
+	if _, err := db.ConfigurePool(cfg); err != nil {
+		t.Fatal(err)
+	}
 	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
 	if err != nil {
 		t.Fatal(err)

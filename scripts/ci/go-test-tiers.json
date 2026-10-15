@@ -414,6 +414,8 @@
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeChatEnabled","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon","name":"TestServeConnectionOriginBudget","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeShutdownAndBootstrap","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestStopServingDrainsBeforeClose","tier":"GATED-FULL"}
@@ -5688,11 +5690,15 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestNodeProjectRootFollowsMoves","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestNotificationFanoutOverflowAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestOpenTurnsJITOffUnlessTheURLSetsIt","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPairingReportAudienceMigrationBoundsLockWait","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPoolAcquireErrorCounters","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestPoolApplicationNameAttribution","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPoolRecycleDefaultsAndExplicitOverrides","tier":"ESSENTIAL"}
     ,
@@ -5727,6 +5733,10 @@
     {"kind":"go","package":"internal/db","name":"TestSessionThreadConcurrentMigrationRecovery","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestSessionThreadLookupIndexes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestSharedListenerAttributionAndFinalClose","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestSharedSubscriptionAdmissionReplicaLimitAndConnectionLoss","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestSplitCoreMigrations","tier":"GATED-FULL"}
     ,
@@ -6297,6 +6307,8 @@
     {"kind":"go","package":"internal/events","name":"TestSSELivePingPreservesResumeAndTenantCounter","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestSSEReplayLiveResumeAndPoolCapacity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestSharedSSEReplaySeamReconnectOverflowAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestSubscriptionHeartbeatPreservesCursorAndRevocation","tier":"ESSENTIAL"}
     ,
