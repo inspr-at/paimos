@@ -14,7 +14,7 @@ paths:
   /nodes/{nodeId}/entry-evidence:
     post:
       operationId: recordEntryCheckEvidence
-      description: 'Record a coordinator review verdict, or a person project-admin design/visual approval, for the exact current delivery head. Reviews derive both families from recorded sessions and require different known families. This observation grants no merge or release authority. Workers cannot submit coordinator verdicts.'
+      description: 'Record a person project-admin design attachment. Review and visual verdicts require authenticated reviewer runs; caller-supplied session IDs and ordinary coordinator credentials cannot produce approvals. Legacy request fields remain accepted for compatibility but review and visual submissions are refused.'
       security: [{session: []}, {agentKey: []}]
       parameters: [{$ref: '#/components/parameters/EntryNodeId'}]
       requestBody:

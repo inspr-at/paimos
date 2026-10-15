@@ -13,7 +13,7 @@ export interface StepupRequest {
   state: StepupState; revision: number; decided_by?: string; decided_by_name?: string
   decision?: 'approve' | 'decline' | 'withdraw' | 'expire'; method?: StepupMethod; auth_time?: string; applied_at?: string; decided_at?: string
 }
-interface StepupPage { items: StepupRequest[]; has_more: boolean; next_cursor?: string }
+interface StepupPage { items: StepupRequest[] | null; has_more: boolean; next_cursor?: string }
 type Options = { method: 'passkey'; challenge_id: string; publicKey: Parameters<typeof requestOptions>[0] } | { method: 'oidc_reauth'; authorize_url: string }
 export interface StepupRow { label: string; value: string; changed: boolean }
 
@@ -51,8 +51,10 @@ export async function readStepups(): Promise<{ items: StepupRequest[]; warnings:
   const items: StepupRequest[] = [], warnings: string[] = []
   for (const state of ['pending', 'decided'] as const) {
     const page = await stepupRequest<StepupPage>(`/stepup-requests?state=${state}&limit=100`)
-    if (!Array.isArray(page.items) || page.items.length > 100 || typeof page.has_more !== 'boolean') throw new Error('The step-up page is invalid.')
-    items.push(...page.items)
+    // An empty Go slice used to encode as null. Older servers still do; that is an empty page.
+    const listed = page.items == null ? [] : page.items
+    if (!Array.isArray(listed) || listed.length > 100 || typeof page.has_more !== 'boolean') throw new Error('The step-up page is invalid.')
+    items.push(...listed)
     if (page.has_more) warnings.push(state === 'pending' ? 'More step-up approvals are waiting; the first 100 are shown.' : 'Only the newest 100 decided step-up approvals are shown.')
   }
   return { items, warnings }

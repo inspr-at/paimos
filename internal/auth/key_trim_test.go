@@ -75,6 +75,13 @@ func trimHTTP(m *Module, p tenant.Principal, method, path string, body any) *htt
 }
 func TestKeyTrimApproveRestoreAuditAndExactIdempotency(t *testing.T) {
 	m, owner, key, in := trimFixture(t)
+	for _, state := range []string{"pending", "decided"} {
+		w := trimHTTP(m, owner, "GET", "/api/key-trim-proposals?state="+state+"&limit=100", nil)
+		body := strings.TrimSpace(w.Body.String())
+		if w.Code != 200 || !strings.Contains(body, `"items":[]`) || strings.Contains(body, `"items":null`) {
+			t.Fatalf("empty key trims %s %d %s", state, w.Code, w.Body.String())
+		}
+	}
 	_, startEvents := keyCounts(t, m, owner)
 	proposal := proposeTrim(t, m, owner, key.ID, in)
 	replay := proposeTrim(t, m, owner, key.ID, in)

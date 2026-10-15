@@ -34,6 +34,7 @@ type surface struct {
 }
 
 var surfaces = map[string]surface{
+	"review-run":     {ReviewRun, "ReviewRunContract", []operation{{"/nodes/{nodeId}/review-runs", "post", "201"}, {"/review-runs/{runId}/credential", "post", "200"}, {"/review-runs/{runId}/verdict", "post", "200"}, {"/nodes/{nodeId}/review-evidence", "get", "200"}}},
 	"stage-handoffs": {StageHandoffs, "StageHandoffsContract", []operation{{"/stage-handoffs", "post", "201"}, {"/stage-handoffs/{handoffId}", "get", "200"}}},
 	"stage-evidence": {StageEvidence, "StageEvidenceContract", []operation{{"/stage-handoffs/{handoffId}/evidence", "post", "201"}}},
 	"stage-result":   {StageResult, "StageResultContract", []operation{{"/stage-handoffs/{handoffId}/result", "post", "200"}}},

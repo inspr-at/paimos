@@ -200,3 +200,31 @@ func coordinatorAllows(p tenant.Principal, own grants, creator *grants, permissi
 		return false
 	}
 }
+
+// RequireIndependentReviewerTx excludes a live coordinator principal even when
+// it presents a narrowed key. Only the designated reviewer run can use its
+// capability; dispatchers cannot also be approval producers.
+func RequireIndependentReviewerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	var independent bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p WHERE p.id=$1 AND p.kind='agent' AND p.status='active'
+    AND NOT coalesce(p.messaging_only,false)
+    AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
+    AND NOT EXISTS(SELECT 1 FROM agent_pairing_computers c WHERE c.tenant_id=p.tenant_id AND c.principal_id=p.id))`, p.ID).Scan(&independent); err != nil {
+		return err
+	}
+	if !independent {
+		return ErrForbidden
+	}
+	g, err := readGrants(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	coordinator := g.workspaceRole != nil
+	for _, permission := range CoordinatorBaseScopes {
+		coordinator = coordinator && (g.allows(permission, "") || permission == "nodes.read" && contains(g.anyProject, permission))
+	}
+	if coordinator || IsCoordinatorKey(p.Scopes) {
+		return ErrForbidden
+	}
+	return RequireTx(ctx, tx, p, "nodes.read", Scope{ProjectID: project})
+}

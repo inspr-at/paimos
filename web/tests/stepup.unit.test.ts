@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { draftFor } from '../src/lib/decisionDesk'
+import { deskSourceLines, draftFor } from '../src/lib/decisionDesk'
 import { commitDesk, emptySources, loadDesk, stepupItem } from '../src/lib/decisionDeskApi'
-import { settledElsewhere, StepupNavigation, stepupRows, type StepupRequest } from '../src/lib/stepup'
+import { readStepups, settledElsewhere, StepupNavigation, stepupRows, type StepupRequest } from '../src/lib/stepup'
 
 export function stepupFixture(state: StepupRequest['state'] = 'pending'): StepupRequest {
   return { id: 'step-1', requested_by: 'agent-1', permission: 'settings.manage', payload: { kind: 'feature', key: 'workspace-summary', project_id: null, enabled: true, expected_revision: 0 },
@@ -133,4 +133,41 @@ it('a request settled elsewhere before /options shows the winning outcome and de
     await expect(commitDesk(item, { ...draftFor(item), optionId: 'decline' }, sources, 'unused', false)).rejects.toThrow('Request ended. Nothing changed.')
     expect(sources.stepups.get(item.id)?.state).toBe('pending')
   }
+})
+it('treats a null step-up page as empty', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (String(path).startsWith('/api/stepup-requests')) return Response.json({ items: null, has_more: false })
+    return Response.json(new URL(path, 'https://test.invalid').pathname === '/api/approvals' ? [] : { items: [], has_more: false })
+  }))
+  const read = await loadDesk()
+  expect(read.items.filter(item => item.kind === 'stepup')).toEqual([])
+  expect(read.warnings.some(warning => /step-up approvals could not be read/i.test(warning))).toBe(false)
+})
+it('rejects a step-up page whose items are not a list', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: {}, has_more: false })))
+  await expect(readStepups()).rejects.toThrow('The step-up page is invalid.')
+})
+it('labels a step-up read failure before the generic approval warning', () => {
+  const line = (warning: string) => deskSourceLines([warning])
+  expect(line('Step-up approvals could not be read.')).toEqual([{ text: 'Some step-up approvals couldn’t be loaded', retry: true }])
+  expect(line('Approvals could not be read.')).toEqual([{ text: 'Some approvals couldn’t be loaded', retry: true }])
+  expect(deskSourceLines(['Step-up approvals could not be read.', 'Approvals could not be read.'])).toEqual([
+    { text: 'Some step-up approvals couldn’t be loaded', retry: true },
+    { text: 'Some approvals couldn’t be loaded', retry: true },
+  ])
+  expect(line('Questions could not be read. They may be inaccessible; this is not an empty desk.')).toEqual([{ text: 'Some questions couldn’t be loaded', retry: true }])
+  expect(line('More questions could not be read. Try again or refresh.')).toEqual([{ text: 'More questions couldn’t be loaded', retry: true }])
+  expect(line('Rule changes could not be read.')).toEqual([{ text: 'Some rule changes couldn’t be loaded', retry: true }])
+  expect(line('The projects of some rule changes could not be read.')).toEqual([{ text: 'Some rule changes couldn’t be loaded', retry: true }])
+  expect(line('Key trim proposals could not be read; key management rights are required.')).toEqual([{ text: 'Some key trims couldn’t be loaded', retry: true }])
+  expect(line('Some action requests could not be read.')).toEqual([{ text: 'Some action requests couldn’t be loaded', retry: true }])
+  expect(line('Tier requests could not be read.')).toEqual([{ text: 'Some tier requests couldn’t be loaded', retry: true }])
+  expect(line('Some tier requests could not be read. Open Agents to inspect their source.')).toEqual([{ text: 'Some tier requests couldn’t be loaded', retry: true }])
+  expect(line('Project names unavailable; source access could not be confirmed.')).toEqual([{ text: 'Project names couldn’t be loaded', retry: true }])
+  expect(line('The desk could not be read. Try refreshing.')).toEqual([{ text: 'The desk couldn’t be loaded', retry: true }])
+  expect(line('The canonical desk could not be read. Retry before deciding; the count is unknown.')).toEqual([{ text: 'The desk couldn’t be loaded', retry: true }])
+  expect(line('Lessons could not be read. Retry before deciding.')).toEqual([{ text: 'Some items couldn’t be loaded', retry: true }])
+  expect(line('More step-up approvals are waiting; the first 100 are shown.')).toEqual([{ text: 'More step-up approvals are waiting; the first 100 are shown', retry: false }])
+  expect(line('Approvals may be incomplete: the source limit is 200 requests.')).toEqual([{ text: 'Approvals may be incomplete: the source limit is 200 requests', retry: false }])
+  expect(deskSourceLines([], true)).toEqual([{ text: 'This link’s item couldn’t be found', retry: true }])
 })

@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -69,6 +70,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes/{nodeId}/person-steps", m.handlePersonSteps)
 	mux.HandleFunc("PUT /api/nodes/{nodeId}/person-steps/{checkId}", m.handlePersonStepWrite)
 	mux.HandleFunc("PUT /api/nodes/{nodeId}/person-steps/{checkId}/owner", m.handlePersonStepWrite)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/review-runs", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleCreateReviewRun))
+	mux.HandleFunc("POST /api/review-runs/{runId}/credential", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleClaimReviewRun))
+	mux.HandleFunc("POST /api/review-runs/{runId}/verdict", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleSubmitReviewRun))
+	mux.HandleFunc("GET /api/nodes/{nodeId}/review-evidence", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleReviewEvidenceProvenance))
 	mux.HandleFunc("GET /api/nodes/{nodeId}/entry-checks", m.handleEntryChecks)
 	mux.HandleFunc("PUT /api/nodes/{nodeId}/entry-checks/{checkId}", m.handleEntryTick)
 	mux.HandleFunc("GET /api/projects/{projectId}/definitions", m.handleDefinition)

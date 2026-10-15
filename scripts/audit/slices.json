@@ -38,6 +38,7 @@
       "paths": [
         "internal/auth/**",
         "internal/authz/**",
+        "internal/db/migrations/1355_authenticated_review_runs.sql",
         "internal/identity/**",
         "internal/agentsecurity/**",
         "internal/credentialguard/**",

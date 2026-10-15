@@ -41608,6 +41608,317 @@
       }
     }
   },
+  "review-run": {
+    "version": "review-run/1.0",
+    "sha256": "8b8f224f345fcf14083c7901ffe25ec486be7fefa74cbf1a3077ca4e0ac8993e",
+    "shape": {
+      "GET /nodes/{nodeId}/review-evidence 200": {
+        "additionalProperties": false,
+        "properties": {
+          "review_legacy_unverified": {
+            "type": "boolean"
+          },
+          "visual_legacy_unverified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "review_legacy_unverified",
+          "visual_legacy_unverified"
+        ],
+        "type": "object"
+      },
+      "POST /nodes/{nodeId}/review-runs 201": {
+        "additionalProperties": false,
+        "properties": {
+          "author_family": {
+            "type": "string"
+          },
+          "author_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "base_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "head_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "review",
+              "visual"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "pull_request": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": "string"
+          },
+          "repository": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "reviewer_family": {
+            "type": "string"
+          },
+          "reviewer_principal_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reviewer_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "scope": {
+            "maxLength": 130,
+            "type": "string"
+          },
+          "target_branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ticket_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "",
+              "ok",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "visual_impact": {
+            "enum": [
+              "",
+              "yes",
+              "no",
+              "uncertain"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_node_id",
+          "repository",
+          "pull_request",
+          "target_branch",
+          "base_sha",
+          "head_sha",
+          "scope",
+          "id",
+          "project_id",
+          "author_session_id",
+          "reviewer_session_id",
+          "reviewer_principal_id",
+          "author_family",
+          "reviewer_family",
+          "harness",
+          "model",
+          "reasoning_effort",
+          "kind",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "verdict",
+          "visual_impact",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "POST /review-runs/{runId}/credential 200": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "POST /review-runs/{runId}/verdict 200": {
+        "additionalProperties": false,
+        "properties": {
+          "author_family": {
+            "type": "string"
+          },
+          "author_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "base_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "head_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "review",
+              "visual"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "pull_request": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": "string"
+          },
+          "repository": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "reviewer_family": {
+            "type": "string"
+          },
+          "reviewer_principal_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reviewer_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "scope": {
+            "maxLength": 130,
+            "type": "string"
+          },
+          "target_branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ticket_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "",
+              "ok",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "visual_impact": {
+            "enum": [
+              "",
+              "yes",
+              "no",
+              "uncertain"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_node_id",
+          "repository",
+          "pull_request",
+          "target_branch",
+          "base_sha",
+          "head_sha",
+          "scope",
+          "id",
+          "project_id",
+          "author_session_id",
+          "reviewer_session_id",
+          "reviewer_principal_id",
+          "author_family",
+          "reviewer_family",
+          "harness",
+          "model",
+          "reasoning_effort",
+          "kind",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "verdict",
+          "visual_impact",
+          "reason"
+        ],
+        "type": "object"
+      }
+    }
+  },
   "stage-evidence": {
     "version": "stage-evidence/1.0",
     "sha256": "ad8e9f46011757ba299727edc91f9d3e875eb8a6b4d8dd8c087bad82c6440f2b",

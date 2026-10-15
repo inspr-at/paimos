@@ -6,7 +6,7 @@ import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
-import { arrivals, deskItemID, deskLinkItem, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
+import { arrivals, deskItemID, deskLinkItem, deskSourceLines, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
@@ -235,26 +235,7 @@ function rowFormKeys(event: KeyboardEvent, item: DeskItem) {
   if (event.key === 'Enter' && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) { event.preventDefault(); void commitRow(item) }
 }
 // Failed sources say so in one calm line each, at the end of the card; truncation stays explicit.
-const sourceLines = computed(() => {
-  const lines = new Map<string, boolean>()
-  const failed = (text: string) => lines.set(text, true)
-  for (const warning of warnings.value) {
-    if (/could not be read|unavailable|could not be confirmed|could not be hydrated/i.test(warning) && !/limited|limit is|first \d|Only|outside this page|may be incomplete|more step-up/i.test(warning)) {
-      if (/^Approvals|approval/i.test(warning)) failed('Some approvals couldn’t be loaded')
-      else if (/step-up/i.test(warning)) failed('Some step-up approvals couldn’t be loaded')
-      else if (/Questions|question/i.test(warning)) failed(/More questions/.test(warning) ? 'More questions couldn’t be loaded' : 'Some questions couldn’t be loaded')
-      else if (/rule change/i.test(warning)) failed('Some rule changes couldn’t be loaded')
-      else if (/key trim/i.test(warning)) failed('Some key trims couldn’t be loaded')
-      else if (/action request/i.test(warning)) failed('Some action requests couldn’t be loaded')
-      else if (/tier/i.test(warning)) failed('Some tier requests couldn’t be loaded')
-      else if (/Project names/i.test(warning)) failed('Project names couldn’t be loaded')
-      else if (/desk could not be read/i.test(warning)) failed('The desk couldn’t be loaded')
-      else failed('Some items couldn’t be loaded')
-    } else lines.set(warning.replace(/\.$/, ''), false)
-  }
-  if (linkError.value) failed('This link’s item couldn’t be found')
-  return [...lines.entries()].map(([text, retry]) => ({ text, retry }))
-})
+const sourceLines = computed(() => deskSourceLines(warnings.value, linkError.value !== ''))
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
 async function refresh() {
   if (!session.authenticationCurrent()) return

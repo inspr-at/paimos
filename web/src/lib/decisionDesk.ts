@@ -188,6 +188,31 @@ export function deskLinkItem(value: unknown): string {
   return typeof value === 'string' && /^[qamrtksl]:[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/.test(value) ? value : ''
 }
 
+export interface DeskSourceLine { text: string; retry: boolean }
+
+// Step-up warnings contain the word "approval", so that pattern is tested first.
+// A later generic approval match would mislabel a step-up failure as an approval failure.
+export function deskSourceLines(warnings: readonly string[], linkMissing = false): DeskSourceLine[] {
+  const lines = new Map<string, boolean>()
+  const failed = (text: string) => lines.set(text, true)
+  for (const warning of warnings) {
+    if (/could not be read|unavailable|could not be confirmed|could not be hydrated/i.test(warning) && !/limited|limit is|first \d|Only|outside this page|may be incomplete|more step-up/i.test(warning)) {
+      if (/step-up/i.test(warning)) failed('Some step-up approvals couldn’t be loaded')
+      else if (/^Approvals|approval/i.test(warning)) failed('Some approvals couldn’t be loaded')
+      else if (/Questions|question/i.test(warning)) failed(/More questions/.test(warning) ? 'More questions couldn’t be loaded' : 'Some questions couldn’t be loaded')
+      else if (/rule change/i.test(warning)) failed('Some rule changes couldn’t be loaded')
+      else if (/key trim/i.test(warning)) failed('Some key trims couldn’t be loaded')
+      else if (/action request/i.test(warning)) failed('Some action requests couldn’t be loaded')
+      else if (/tier/i.test(warning)) failed('Some tier requests couldn’t be loaded')
+      else if (/Project names/i.test(warning)) failed('Project names couldn’t be loaded')
+      else if (/desk could not be read/i.test(warning)) failed('The desk couldn’t be loaded')
+      else failed('Some items couldn’t be loaded')
+    } else lines.set(warning.replace(/\.$/, ''), false)
+  }
+  if (linkMissing) failed('This link’s item couldn’t be found')
+  return [...lines.entries()].map(([text, retry]) => ({ text, retry }))
+}
+
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || (cursor?.length ?? 0) > 512) throw new Error('Invalid Decision Desk page.')
   const params = new URLSearchParams({ limit: String(limit), ...(cursor ? { cursor } : {}) })
