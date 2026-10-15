@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { graphLayout, glimpseCore, cloudStride, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
+import { graphLayout, glimpseCore, cloudStride, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, glimpseShotRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
 
 test('glimpse orbs stay 4–8px across every node weight', () => {
   for (const weight of [-1, 0, 1, 10, 1000, NaN, Infinity]) {
@@ -12,12 +12,19 @@ test('glimpse orbs stay 4–8px across every node weight', () => {
 
 test('porcelain glimpse orbs stay above the header shot threshold', () => {
   // A lit orb blown toward the ground moves no channel by more than the shot
-  // counts. That is the 1280 light miss: cloud width 0.743 of the header.
+  // counts. Software GL then measured the 1280 cloud at 971/1214 in the light
+  // and at 0.743 (the lit core) in the dark. Both grounds paint an unlit disc
+  // one pixel past the layout radius; dark keeps the glass shell as well.
   assert.ok(glimpseOrbDelta('#f6f5f3', '#f7f6f2', 0.35) <= GLIMPSE_SHOT_DELTA)
-  assert.deepEqual(glimpseOrbFinish('#f7f6f2'), { unlit: true, opacity: 0.92 })
-  assert.deepEqual(glimpseOrbFinish('rgb(247, 246, 242)'), { unlit: true, opacity: 0.92 })
-  assert.deepEqual(glimpseOrbFinish('#102327'), { unlit: false, opacity: 0.86 })
+  assert.deepEqual(glimpseOrbFinish('#f7f6f2'), { unlit: true, opacity: 1, glass: false })
+  assert.deepEqual(glimpseOrbFinish('rgb(247, 246, 242)'), { unlit: true, opacity: 1, glass: false })
+  assert.deepEqual(glimpseOrbFinish('#102327'), { unlit: true, opacity: 1, glass: true })
   assert.equal(glimpseOrbFinish('inherited').unlit, false)
+  assert.equal(glimpseOrbFinish('inherited').glass, true)
+  assert.equal(glimpseShotRadius(2), 3)
+  assert.equal(glimpseShotRadius(4), 5)
+  // Coverage 0.065 is the muted rim 0.92 left under the shot delta.
+  assert.ok(glimpseOrbDelta('#9aa8a9', '#f7f6f2', 0.35, 0.065) > GLIMPSE_SHOT_DELTA)
   for (const color of ['#d69b31', '#0e6f6c', '#9aa8a9']) {
     assert.ok(glimpseOrbDelta(color, '#f7f6f2', 0.35, 0.5) > GLIMPSE_SHOT_DELTA, color)
     assert.ok(glimpseOrbDelta(color, '#102327', 0.3, 0.5) > GLIMPSE_SHOT_DELTA, `${color} dark`)

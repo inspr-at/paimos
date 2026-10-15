@@ -31,7 +31,9 @@ func (g AppReader) MetricsRead(ctx context.Context, tenantID string, read func(f
 	if !g.App.Configured(tenantID, g.App.Config.Repository) {
 		return errRead
 	}
-	return g.App.ReadHistoryInstallation(ctx, read)
+	return g.observeGitHub(func(app *crossreview.GitHubApp) error {
+		return app.ReadHistoryInstallation(ctx, read)
+	})
 }
 
 var metricWorkflow = regexp.MustCompile(`^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$`)
