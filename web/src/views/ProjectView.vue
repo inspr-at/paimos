@@ -1831,7 +1831,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <div class="head-main">
           <div class="title-line">
             <span class="key-badge big">{{ project.routeKey }}</span>
-            <h1 id="project-title" v-clip-tip>{{ project.title }}</h1>
+            <h1 id="project-title" v-clip-tip="project.title" :title="project.title" :aria-label="project.title">{{ project.title }}</h1>
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
             <RouterLink v-if="can('nodes.write', project.id)" class="icon-btn sm head-edit" :to="`/p/${encodeURIComponent(project.routeKey)}/settings#f-name`" aria-label="Edit name and description in Settings" data-tip="Edit in Settings › General"><AppIcon name="edit" :size="14" /></RouterLink>
@@ -2037,11 +2037,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .head-stats { position: relative; z-index: 1; }
 .title-line { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .key-badge.big { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
-.title-line h1 { min-width: 0; font-size: 30px; white-space: normal; overflow-wrap: anywhere; }
+.title-line h1 { flex: 1 1 auto; min-width: 0; max-width: 100%; font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
 .title-line .key-badge, .state-chip { flex: none; margin-top: 4px; }
 .state-chip { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.description-measure { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.description-measure { position: absolute; width: 0; height: 0; overflow: clip; visibility: hidden; pointer-events: none; contain: paint; }
 .description-probe { width: min(320px, calc(100vw - 16px)); padding: 5px 10px; font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
 .description-block { position: relative; display: flex; flex-direction: column; min-width: 0; }
 .description-block:has(.description-full) { z-index: 6; }
@@ -2161,62 +2161,61 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .nav-divider { width: 1px; height: 20px; background: var(--line-2); flex: none; }
 .project-view-settings { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
 .project-page[class*="header-"] .project-head { padding: 0 0 4px; }
-.project-page[class*="header-"] .head-flex { position: relative; display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; }
-.project-page[class*="header-"] .head-main { display: contents; }
-.project-page[class*="header-"] .title-line { max-width: 34vw; }
-.project-page[class*="header-"] .title-line h1 { font-size: 22px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.project-page[class*="header-"] .description-block { min-width: 0; position: static; }
-.project-page[class*="header-"] .description { margin: 0; max-width: none; min-width: 0; }
+/* AEON-1425: one line for the name. Counts wrap below it before the name
+   column shrinks under 20rem. display:contents let that column fall to one glyph. */
+.project-page[class*="header-"] .head-flex { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-start; gap: 8px 16px; }
+.project-page[class*="header-"] .head-main { display: flex; flex-direction: column; flex: 0 0 auto; min-width: 0; max-width: 100%; }
+/* The 20rem basis belongs to the row layout only. In a stacked (column) header it would be a height and leave a band under the description. */
+@container projecthead (width > 760px) {
+  .project-page[class*="header-"] .head-main { flex: 1 1 20rem; min-width: min(100%, 20rem); }
+}
+.project-page[class*="header-"] .title-line { width: 100%; max-width: none; min-width: 0; }
+/* Don't grow: the edit control stays against the words, and the line still shrinks to an ellipsis. */
+.project-page[class*="header-"] .title-line h1 { flex: 0 1 auto; width: auto; max-width: 100%; font-size: 22px; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; overflow-wrap: normal; -webkit-line-clamp: unset; -webkit-box-orient: unset; }
 .project-page[class*="header-"] .description-block { min-width: 0; }
-.project-page[class*="header-"] .activity { white-space: nowrap; }
-.project-page[class*="header-"] .head-stats { display: flex; align-items: center; gap: 12px; }
+.project-page[class*="header-"] .description { margin: 0; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.project-page[class*="header-"] .activity { flex: 0 0 auto; white-space: nowrap; align-self: flex-start; }
+.project-page[class*="header-"] .head-stats { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 12px; max-width: 100%; }
 .project-page[class*="header-"] .stat-line { gap: 10px; }
-.project-page[class*="header-"] .head-work { width: 300px; }
-.project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto minmax(0, max-content); grid-template-areas: "title title activity stats" "description description description stats"; grid-template-rows: min-content 1fr; align-items: start; row-gap: 6px; }
-.project-page.header-comfortable .title-line { grid-area: title; max-width: none; }
+/* The bar keeps its 300px slot, and grows when the scope and total need more, so the row wraps instead of painting past the page. */
+.project-page[class*="header-"] .head-work { width: max(300px, max-content); max-width: 100%; min-width: 0; }
 .project-page.header-comfortable .title-line h1 { font-size: 34px; }
-.project-page.header-comfortable .description-block { grid-area: description; }
 .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.55; }
-.project-page.header-comfortable .activity { grid-area: activity; justify-self: end; align-self: center; }
-.project-page.header-comfortable .head-stats { grid-area: stats; display: grid; align-self: stretch; align-content: start; gap: 8px; }
+.project-page.header-comfortable .head-stats { display: grid; align-content: start; align-items: stretch; justify-items: stretch; gap: 8px; }
 .header-activity { display: flex; align-items: center; gap: 12px; }
-.project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: auto; }
+.project-page[class*="header-"] .head-stats > .project-status-counts { min-width: 0; }
 .project-page.header-comfortable .head-work { width: 100%; }
 .project-page.header-comfortable .project-navigation { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
 @media (min-width: 601px) and (max-width: 1100px) {
   .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
-  /* AEON-1358: the work bar takes its own full-width row under title and description; the counts keep the right column. */
-  .project-page[class*="header-"] .head-work { width: 230px; }
-  .project-page.header-comfortable .head-flex { grid-template-areas: "title title activity stats" "description description description stats" "work work work work"; }
-  .project-page.header-comfortable .head-stats { display: contents; }
-  .project-page.header-comfortable .head-stats > .project-status-counts { grid-area: stats; }
-  .project-page.header-comfortable .head-work { grid-area: work; width: 100%; margin-top: 4px; }
+  .project-page.header-comfortable .head-work { width: 100%; }
   .project-page[class*="header-"] .head-flex { column-gap: 8px; }
   .project-page[class*="header-"] .stat-line { gap: 8px; }
 }
 @media (max-width: 900px) { .project-view-settings { display: none; } }
 @container projecthead (max-width: 760px) {
-  .project-page.header-compact .head-flex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "stats" "work" "description" "activity"; }
-  .project-page.header-compact .title-line { grid-area: title; max-width: none; }
-  .project-page.header-compact .head-stats { display: contents; }
-  .project-page.header-compact .head-stats > .project-status-counts { grid-area: stats; }
-  .project-page.header-compact .head-work { grid-area: work; width: 100%; }
-  .project-page.header-compact .description-block { grid-area: description; }
-  .project-page.header-compact .activity { grid-area: activity; }
+  .project-page[class*="header-"] .head-flex { flex-direction: column; align-items: stretch; }
+  /* Stacked: the name column is as tall as its content, in every density and with the panel open. */
+  .project-page[class*="header-"] .head-main { flex: 0 0 auto; min-width: 0; width: 100%; }
+  .project-page.header-compact .title-line { width: 100%; max-width: none; }
+  .project-page.header-compact .head-stats { display: flex; flex-direction: column; align-items: stretch; width: 100%; max-width: 100%; }
+  .project-page.header-compact .head-work { width: 100%; }
 }
 @media (max-width: 600px) {
   .header-activity { display: none; }
   .header-activity:has(.q-stat) { display: flex; grid-area: activity; justify-self: start; }
   .header-activity:has(.q-stat) > span { display: none; }
   .header-activity .q-stat { min-height: 44px; margin: 0; }
+  .project-page[class*="header-"] .project-head .head-flex { display: grid; }
   .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "stats" "work" "description" "activity"; gap: 4px 10px; }
-  .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }
+  .project-page[class*="header-"] .head-main { display: contents; }
+  .project-page[class*="header-"] .title-line { grid-area: title; width: auto; max-width: none; }
   .project-page[class*="header-"] .title-line h1 { font-size: 24px; }
   .project-page.header-comfortable .title-line h1 { font-size: 28px; }
   .project-page[class*="header-"] .description-block { grid-area: description; }
   .project-page[class*="header-"] .description { white-space: nowrap; display: block; }
   .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .project-page[class*="header-"] .head-stats { display: contents; }
+  .project-page[class*="header-"] .project-head .head-stats { display: contents; }
   .project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: stats; }
   .project-page[class*="header-"] .head-work, .project-page.header-comfortable .head-work { grid-area: work; width: 100%; margin: 2px 0 4px; }
   .project-navigation { margin-top: 8px; min-height: 52px; gap: 6px; flex-wrap: wrap; }

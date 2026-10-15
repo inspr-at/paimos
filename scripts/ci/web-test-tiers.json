@@ -11672,6 +11672,22 @@
     ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"wide screens dock the side panel beside the list; narrow ones overlay it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 390px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 768px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-name-wrap.spec.ts","name":"long project name stays one line at 768px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"a legacy graph selection on a phone stays in Graph and Entries clears the selection","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"a linked ticket opened from an existing Knowledge entry keeps Knowledge behind it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
