@@ -107,6 +107,2283 @@
   "unitFiles": [
     "tests/webcore-views.unit.test.ts"
   ],
+  "cases": [
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: agents approve in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: agents approve in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: agents session panel in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: agents session panel in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: hours ticket picker in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: hours ticket picker in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: ticket full page in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/a11y.spec.ts",
+      "name": "axe: ticket full page in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/accounts-card-fit.spec.ts",
+      "name": "accounts and computers fit every width, panel open and closed"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/accounts-card-fit.spec.ts",
+      "name": "the capacity row and the accounts popover fit every width, panel open and closed"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/accounts-quota-bar.spec.ts",
+      "name": "1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/accounts-quota-bar.spec.ts",
+      "name": "1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/accounts-quota-bar.spec.ts",
+      "name": "390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/accounts-quota-bar.spec.ts",
+      "name": "390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/add-account.spec.ts",
+      "name": "a failed computer list offers Try again and then the steps"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/add-account.spec.ts",
+      "name": "the steps name the machine, the known sign-in, and a path-proof add-harness"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header dark 1024: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header dark 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header dark 390: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header dark 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header light 1024: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header light 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header light 390: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1062-qapolish.spec.ts",
+      "name": "chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1212-lead-panel.spec.ts",
+      "name": "AEON-1212 fix3: 1000 dark G3 results and G6 admission evidence stay honest and the owned worker row stays put"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1212-lead-panel.spec.ts",
+      "name": "AEON-1212 fix3: 1000 light G3 results and G6 admission evidence stay honest and the owned worker row stays put"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1212-lead-panel.spec.ts",
+      "name": "AEON-1212 fix3: 1440 dark G3 results and G6 admission evidence stay honest and the owned worker row stays put"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1212-lead-panel.spec.ts",
+      "name": "AEON-1212 fix3: 1440 light G3 results and G6 admission evidence stay honest and the owned worker row stays put"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1212-lead-panel.spec.ts",
+      "name": "AEON-1212 fix3: 400 dark G3 results and G6 admission evidence stay honest and the owned worker row stays put"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-1212-lead-panel.spec.ts",
+      "name": "AEON-1212 fix3: 400 light G3 results and G6 admission evidence stay honest and the owned worker row stays put"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-635.spec.ts",
+      "name": "approved releases keep their controls still at 1024 dark (AEON-635)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-635.spec.ts",
+      "name": "approved releases keep their controls still at 1024 light (AEON-635)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-635.spec.ts",
+      "name": "approved releases keep their controls still at 1440 dark (AEON-635)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-635.spec.ts",
+      "name": "approved releases keep their controls still at 1440 light (AEON-635)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-635.spec.ts",
+      "name": "approved releases keep their controls still at 390 dark (AEON-635)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-635.spec.ts",
+      "name": "approved releases keep their controls still at 390 light (AEON-635)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-908-polish.spec.ts",
+      "name": "tree, hours spacing and light switch thumbs 1024 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-908-polish.spec.ts",
+      "name": "tree, hours spacing and light switch thumbs 1024 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-908-polish.spec.ts",
+      "name": "verification progress and computer panel remain stable 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/aeon-908-polish.spec.ts",
+      "name": "verification progress and computer panel remain stable 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agent-done-state.spec.ts",
+      "name": "the ticket list keeps a silent 100% worker on its heartbeat warning and shows no avatar for a stopped one"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agent-pairing.spec.ts",
+      "name": "Agents links to Connect your machine"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agent-pause.spec.ts",
+      "name": "AEON-783: chosen agents keeps Done in, By, Cancel and Submit still"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agent-pause.spec.ts",
+      "name": "wind-down previews only owned work and a reloaded all-computer report leaves new agents untouched"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agent-rules-tldr.spec.ts",
+      "name": "the preview is an explanation ↔ exact rule table with search, harness filter, layer budget and the exact file"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agent-rules.spec.ts",
+      "name": "preview explains the session file for this project, you and the builder role"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agent-rules.spec.ts",
+      "name": "preview lists controlled agents first and disables the rest with a plain reason"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-cleanup.spec.ts",
+      "name": "account and capacity reads that started before computer Remove do not bring its account back"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "1024 dark: existing Agents layout shows the report source and stable capacity controls"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "1024 light: existing Agents layout shows the report source and stable capacity controls"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "1440 dark: existing Agents layout shows the report source and stable capacity controls"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "1440 light: existing Agents layout shows the report source and stable capacity controls"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "390 dark: existing Agents layout shows the report source and stable capacity controls"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "390 light: existing Agents layout shows the report source and stable capacity controls"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "another person’s visible account never becomes your full account or your capacity"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-display.spec.ts",
+      "name": "live families count all external workers, hide hundreds of ended siblings and retain counts when folded"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-harness-status.spec.ts",
+      "name": "offline and revoked computers do not present prior harness reports as live readiness"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-hierarchy.spec.ts",
+      "name": "returning to a visible tab refreshes immediately and failed reads keep the last success visible"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-hierarchy.spec.ts",
+      "name": "workers nest by session ID, display their label, harness and ticket, and expand with the keyboard"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-metadata.spec.ts",
+      "name": "an open panel refreshes metadata history after a heartbeat without an activity-note change"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-mission.spec.ts",
+      "name": "detail shows now, activity, ticket status and hides unreported fields"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-phone-rows.spec.ts",
+      "name": "phone session rows are compact and aligned at 375px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-phone-rows.spec.ts",
+      "name": "phone session rows are compact and aligned at 375px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-phone-rows.spec.ts",
+      "name": "phone session rows are compact and aligned at 390px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-phone-rows.spec.ts",
+      "name": "phone session rows are compact and aligned at 390px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-phone-rows.spec.ts",
+      "name": "phone session rows are compact and aligned at 430px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-phone-rows.spec.ts",
+      "name": "phone session rows are compact and aligned at 430px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-worker-tree.spec.ts",
+      "name": "a live-line count and the menu History open a folded Sessions section without a preference write"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents-worker-tree.spec.ts",
+      "name": "a live-line count keeps Sessions open when the section preference lands after the jump"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents.spec.ts",
+      "name": "closing a session panel goes back instead of adding history, like the ticket panel"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents.spec.ts",
+      "name": "on a phone the overview fits and a session opens full screen in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents.spec.ts",
+      "name": "on a phone the overview fits and a session opens full screen in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/agents.spec.ts",
+      "name": "the session panel shows the ticket, runs, telemetry and the thread, and sends messages"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/bulk.spec.ts",
+      "name": "checkbox and Shift-click select a range; one status change for all of them, undone at once"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/bulk.spec.ts",
+      "name": "keyboard: x toggles, Shift J grows, Cmd or Ctrl A selects all, s opens the bulk status menu, Esc clears"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/bulk.spec.ts",
+      "name": "the bulk bar and its menus have no axe violations in light and dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/capacity-learning.spec.ts",
+      "name": "learned evidence 1600 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/capacity-learning.spec.ts",
+      "name": "learned evidence 1600 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/capacity-learning.spec.ts",
+      "name": "learned evidence 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/capacity-learning.spec.ts",
+      "name": "learned evidence 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/connect-verification.spec.ts",
+      "name": "leaving unverifiable harnesses out preserves verification and requires Connect"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/connect-verification.spec.ts",
+      "name": "mixed harnesses keep Connect enabled and offer an explicit verification choice"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/crm.spec.ts",
+      "name": "at 1440 names get the room: the role drops out whole, and cut values show in full on hover"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/crm.spec.ts",
+      "name": "at 390 the meta line wraps without a separator at the start or end of a line; the internal key stays hidden"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "a managed session menu offers Interrupt, Stop, settings and Remove"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "a managed_control_v1 session with a failed run offers only controls the server accepts"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "a managed_control_v1 session with only the stop capability offers only controls the server accepts"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "a managed_control_v1 session without the stop capability offers only controls the server accepts"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "a project-only harness.control grant controls that project in the row and the panel alike"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "an unmanaged inbox session offers durable Pause/Stop, with one quiet line"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "dead sessions visual 1600 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "dead sessions visual 1600 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "dead sessions visual 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "dead sessions visual 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dead-sessions.spec.ts",
+      "name": "the panel of an outside inbox session offers durable Pause/Stop, one quiet line"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 1024 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 1024 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 1440 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 1440 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 768 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "approval and held request reveals 768 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 1024 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 1024 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 1440 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 1440 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 768 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "full Decision Desk context and stable series 768 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "reveal sizing 1024 coarse dark › approval and held controls fit both labels with disjoint stable targets"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "reveal sizing 1024 coarse light › approval and held controls fit both labels with disjoint stable targets"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "reveal sizing 1440 fine dark › approval and held controls fit both labels with disjoint stable targets"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "reveal sizing 1440 fine light › approval and held controls fit both labels with disjoint stable targets"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "reveal sizing 390 coarse dark › approval and held controls fit both labels with disjoint stable targets"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/decision-text.spec.ts",
+      "name": "reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/delivery-guarantee.spec.ts",
+      "name": "dark 1600: own posts read Sent, Delivered, Read or Not delivered, live"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/delivery-guarantee.spec.ts",
+      "name": "dark 390: own posts read Sent, Delivered, Read or Not delivered, live"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/delivery-guarantee.spec.ts",
+      "name": "light 1600: own posts read Sent, Delivered, Read or Not delivered, live"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/delivery-guarantee.spec.ts",
+      "name": "light 390: own posts read Sent, Delivered, Read or Not delivered, live"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/delivery-rating.spec.ts",
+      "name": "the session overview shows the same rework mark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/delivery-rating.spec.ts",
+      "name": "ticket rework fits 390 and 1600 in light and dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/delivery-rating.spec.ts",
+      "name": "usage shows the rework rate by harness"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/deploy-target.spec.ts",
+      "name": "Needs you names destinations and keeps target-less approvals usable"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dialog-full-text.spec.ts",
+      "name": "390 dark › touch full text before closing selection: epic"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dialog-full-text.spec.ts",
+      "name": "390 light › touch full text before closing selection: epic"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dialog-scale.spec.ts",
+      "name": "work, business and settings dialogs keep their scale step at 390px dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/dialog-scale.spec.ts",
+      "name": "work, business and settings dialogs keep their scale step at 390px light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "a conflict keeps the typed benefit and asks again (1600)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "a conflict keeps the typed benefit and asks again (390)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "bulk Done asks only for the ticket that is not ready (1600 dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "bulk Done asks only for the ticket that is not ready (1600 light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "bulk Done asks only for the ticket that is not ready (390 dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "bulk Done asks only for the ticket that is not ready (390 light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "bulk step-through ends with a summary (1600)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "bulk step-through ends with a summary (390)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "edit form focuses the first invalid benefit and says why (1600)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "edit form focuses the first invalid benefit and says why (390)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "invalid fields say why, and Cmd or Ctrl Enter submits (1600)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "invalid fields say why, and Cmd or Ctrl Enter submits (390)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "keyboard Done asks before the status changes (1600 dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "keyboard Done asks before the status changes (1600 light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "keyboard Done asks before the status changes (390 dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "keyboard Done asks before the status changes (390 light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "one ticket asks before Done (1600 dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "one ticket asks before Done (1600 light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "one ticket asks before Done (390 dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/done-gate.spec.ts",
+      "name": "one ticket asks before Done (390 light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/estimates.spec.ts",
+      "name": "an epic with open children and no hours shows coverage on the empty estimate"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/estimates.spec.ts",
+      "name": "estimate display and edit at 390 in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/estimates.spec.ts",
+      "name": "estimate display and edit at 390 in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "missing ETA and estimate hints remain quiet at 1600px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "missing ETA and estimate hints remain quiet at 1600px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "missing ETA and estimate hints remain quiet at 390px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "missing ETA and estimate hints remain quiet at 390px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "only the server completion evidence reads Done; a full percent with a session still on the ticket stays a quiet 100% (AEON-437)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "the ETA column shows fresh, overdue and stale estimates under its header and stays empty when none was reported"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "the sessions table carries the bound ticket's estimate without overflowing its columns at 1100px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "the sessions table carries the bound ticket's estimate without overflowing its columns at 390px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/eta-column.spec.ts",
+      "name": "with both forms chosen, the clock time shows on hover"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/first-run.spec.ts",
+      "name": "a queued run exposes its wait and a run-scoped override from the queue"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/first-run.spec.ts",
+      "name": "first run Start 1600 dark: schedule wait and run now once"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/first-run.spec.ts",
+      "name": "first run Start 1600 light: schedule wait and run now once"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/first-run.spec.ts",
+      "name": "first run Start 390 dark: schedule wait and run now once"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/first-run.spec.ts",
+      "name": "first run Start 390 light: schedule wait and run now once"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/footer-summary.spec.ts",
+      "name": "agents › say how many there are and the one exception, and the click goes to it"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/from-classic.spec.ts",
+      "name": "known and unknown classic links resolve through the API"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/groups.spec.ts",
+      "name": "remember for this ticket 1600 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/groups.spec.ts",
+      "name": "remember for this ticket 1600 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/groups.spec.ts",
+      "name": "remember for this ticket 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/groups.spec.ts",
+      "name": "remember for this ticket 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-desk-split.spec.ts",
+      "name": "from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse-context.spec.ts",
+      "name": "Hide closed and status use the Tickets context and Open graph retains it"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "eight linked tickets appear once the viewport reaches 1280"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "header shots dark › keeps AA contrast at 1280"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "header shots dark › keeps AA contrast at 1600"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "header shots dark › keeps AA contrast at 390"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "header shots light › keeps AA contrast at 1280"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "header shots light › keeps AA contrast at 1600"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "header shots light › keeps AA contrast at 390"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "hover shows Open graph and Pause; clicking the glimpse opens the graph"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "long title and description stay separate from the glimpse while resizing"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/header-glimpse.spec.ts",
+      "name": "the 2D fallback also frames the dense core with faded edges"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hide-states.spec.ts",
+      "name": "shared view membership › Graph and Outline use the chosen Hide membership"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hide-states.spec.ts",
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1024px dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hide-states.spec.ts",
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1024px light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hide-states.spec.ts",
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1440px dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hide-states.spec.ts",
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1440px light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hide-states.spec.ts",
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 390px dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hide-states.spec.ts",
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 390px light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hours.spec.ts",
+      "name": "a changed period refuses the approval and says so"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/hours.spec.ts",
+      "name": "a running period can be reviewed from the week strip"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/indicator-creative-gallery.spec.ts",
+      "name": "only new event counters glint, including consecutive events; stale cancels"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/indicator-gallery.spec.ts",
+      "name": "events glint once, restart on new evidence, and never replay on mount or state changes"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/list-columns.spec.ts",
+      "name": "assignee sort uses the live worker when nobody is stored, and progress and ETA stay compact"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/list-columns.spec.ts",
+      "name": "progress and ETA columns at 1600px dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/list-columns.spec.ts",
+      "name": "progress and ETA columns at 1600px light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/list-columns.spec.ts",
+      "name": "progress and ETA columns at 390px dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/list-columns.spec.ts",
+      "name": "progress and ETA columns at 390px light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/list-columns.spec.ts",
+      "name": "progress names a stale estimate when the ETA column is hidden"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents-layout.spec.ts",
+      "name": "chip content at 260–420px and list widths: dark, robot-1"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents-layout.spec.ts",
+      "name": "chip content at 260–420px and list widths: dark, robot-5"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents-layout.spec.ts",
+      "name": "chip content at 260–420px and list widths: light, robot-1"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents-layout.spec.ts",
+      "name": "chip content at 260–420px and list widths: light, robot-5"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "a card comes alive while its agents work, says who and on what, and idle cards stay still"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "a phone shows the live robots on cards and rows without scrolling sideways in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "a phone shows the live robots on cards and rows without scrolling sideways in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "event evidence (no-preference) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "event evidence (reduce) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "list rows carry a compact live chip: robots and the state word"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "long names stay on one line and a long popover still reaches its links"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "motion › only the activity ring moves continuously; the robot stays still on hover"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "stopped records that remain in the feed do not keep the project live"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "the UI audit lets a chip share its own link only in its slot"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "the pill counts sessions still in progress and keeps each state on its own row"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "without permission to know the agent the chip still says an agent works"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-agents.spec.ts",
+      "name": "working and lost-heartbeat agents: polls every 20 seconds and says what changed"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "Show brings a waiting change into a selected row"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "Show leaves the row under an open editor as it was: saving still meets the change as a conflict"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "a list read that fails is tried again"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "a selected row keeps the version A saw: a bulk change meets the newer one as a conflict"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "a ticket closed elsewhere dims in place, then leaves by itself when nothing is going on"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "changes by the same person in another tab reach the list; the tab’s own changes need no read"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "field changes patch in place; a regrouped row waits as moved until u"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "on a phone the marked row, the pill and the deleted selection fit 390 px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "the row under an open editor keeps its revision: saving meets the change as a conflict"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-list.spec.ts",
+      "name": "with a selection the update waits; Show applies it and keeps the rest of the selection"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-panel.spec.ts",
+      "name": "a DELETE answer that lands after the ticket was restored elsewhere keeps it open and listed"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-panel.spec.ts",
+      "name": "a change during an edit waits, meets the save as a conflict and keeps the draft"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-panel.spec.ts",
+      "name": "a change in one browser patches the open ticket in the other in place"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-panel.spec.ts",
+      "name": "a move answer that lands after a newer move elsewhere leaves the newer epic"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/live-panel.spec.ts",
+      "name": "a ticket deleted and restored elsewhere is here again"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/markdown-ticket-links.spec.ts",
+      "name": "a plain click follows the routed ticket and a modified click opens the URL"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/markdown-ticket-links.spec.ts",
+      "name": "the epic panel keeps the Updated line against the status chips"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/nav.spec.ts",
+      "name": "Business shows only while one of its parts is open"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/nav.spec.ts",
+      "name": "on phones the places are round buttons and nothing in the header is cut"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/nav.spec.ts",
+      "name": "three places in order of use; the active one is highlighted and the breadcrumb continues from it"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix1: Show keeps filtered siblings with field patches in place"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix1: Show keeps lazy siblings with field patches in place"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix1: a closed parent remains dimmed context and stays out of List matches"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix1: expanding a destination after a remote move keeps one row through Show"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix1: expanding a destination before a remote move keeps one row through Show"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix1: the phone updates pill floats without shifting rows (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix1: the phone updates pill floats without shifting rows (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone list chip clears controls for empty (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone list chip clears controls for empty (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone list chip clears controls for selected (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone list chip clears controls for selected (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone list chip clears controls for viewer (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone list chip clears controls for viewer (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone outline chip clears controls for empty (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone outline chip clears controls for empty (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone outline chip clears controls for selected (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone outline chip clears controls for selected (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone outline chip clears controls for viewer (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385 fix2: phone outline chip clears controls for viewer (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385: a child page is distrusted at stream loss, before reconnect"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385: an old parent page cannot restore the count after moving its last child"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385: bulk move relocates lazy Outline rows immediately and sends displayed revisions"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385: filtered ancestor values and ancestry follow events without reloading"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385: filtered field patches keep sibling order"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (dark)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (light)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "a created child moved away remotely and back locally remains expandable after reload"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "dragging a ticket onto an epic moves it there, guarded against newer copies"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "epics show subtree progress; children indent under their parents with guide lines"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "keyboard: arrows open and close, step in and out; Space toggles; Enter opens"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "n on an epic creates tickets inside it and stays open for the next"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "on a phone outline rows are two lines; the chevron expands and the row opens in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "on a phone outline rows are two lines; the chevron expands and the row opens in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/outline.spec.ts",
+      "name": "the List | Outline switch keeps the view in the URL and the same toolbar"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/palette.spec.ts",
+      "name": "knowledge keys open visible scoped entries and superseded responses stay discarded"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/phone-controls.spec.ts",
+      "name": "phone cards render saved column visibility and order at 390px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/phone-select.spec.ts",
+      "name": "on a phone, select two tickets, open Add to release, then cancel"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/pi-openrouter.spec.ts",
+      "name": "pi Start pins the Settings model 1600 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/pi-openrouter.spec.ts",
+      "name": "pi Start pins the Settings model 1600 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/pi-openrouter.spec.ts",
+      "name": "pi Start pins the Settings model 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/pi-openrouter.spec.ts",
+      "name": "pi Start pins the Settings model 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/profile-editor.spec.ts",
+      "name": "under the production CSP the fonts and the mark load from this origin"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-advanced.spec.ts",
+      "name": "AEON-1235: approved P4 reference states and check.mjs audit against the build"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-delivery-settings.spec.ts",
+      "name": "AEON-1226: approved repository reference states and check.mjs audit against the build"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-groups.spec.ts",
+      "name": "Open, Doing and Done cells: icons hold the left edge, numbers the right, three equal columns"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-groups.spec.ts",
+      "name": "a member sees shared groups, may not add to them, and has no Share or Delete"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-groups.spec.ts",
+      "name": "axe: grouped list, cards and the move dialog in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-groups.spec.ts",
+      "name": "axe: grouped list, cards and the move dialog in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-groups.spec.ts",
+      "name": "cards: the switch is remembered; a card shows its ring, aligned counts, people and last activity"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-header.spec.ts",
+      "name": "delayed epic labels stay frozen until the filter popover closes"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-header.spec.ts",
+      "name": "three densities preserve controls at 1024px dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-header.spec.ts",
+      "name": "three densities preserve controls at 1024px light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "a status menu is keyboard driven with digits"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "blocked is a status between backlog and in progress"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "density switches between 36 and 30 pixel rows"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "facet menus filter with counts, show chips, and closed statuses reveal closed work"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "grouping by status and by epic"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "keyboard opens the side panel; j and k follow; Esc and Back close it"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "project header shows the project summary counts, cancelled work out of scope"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "the list asks for open work in the project and shows every column"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-list.spec.ts",
+      "name": "wide screens dock the side panel beside the list; narrow ones overlay it"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-sections.spec.ts",
+      "name": "dark 1600px: SVG tabs, arrow keys, focus order and no horizontal page scroll"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-sections.spec.ts",
+      "name": "dark 390px: SVG tabs, arrow keys, focus order and no horizontal page scroll"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-sections.spec.ts",
+      "name": "light 1600px: SVG tabs, arrow keys, focus order and no horizontal page scroll"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-sections.spec.ts",
+      "name": "light 390px: SVG tabs, arrow keys, focus order and no horizontal page scroll"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/project-sort.spec.ts",
+      "name": "Alt and the arrow keys move a card, announced; the card menu moves it too; the list moves with Alt up and down"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/projects.spec.ts",
+      "name": "j, k and Enter open a project from the keyboard"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/quote-collaboration.spec.ts",
+      "name": "revision watch backs off after outages and rechecks immediately on focus"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/quote-public-page.spec.ts",
+      "name": "content security: the Quotes list and a docked quote run under the production policy"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/quote-public-page.spec.ts",
+      "name": "content security: the public page runs under the strict public policy without a violation"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/recurrence-marker.spec.ts",
+      "name": "option B has a stable 22 px slot and header at 1024px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/recurrence-marker.spec.ts",
+      "name": "option B has a stable 22 px slot and header at 1024px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/recurrence-marker.spec.ts",
+      "name": "option B has a stable 22 px slot and header at 1440px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/recurrence-marker.spec.ts",
+      "name": "option B has a stable 22 px slot and header at 1440px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/recurrence-marker.spec.ts",
+      "name": "option B has a stable 22 px slot and header at 390px in dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/recurrence-marker.spec.ts",
+      "name": "option B has a stable 22 px slot and header at 390px in light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-groups.spec.ts",
+      "name": "server groups stable100 into one benefit line per ticket at 1600"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-groups.spec.ts",
+      "name": "two bugs on one commit are both fixes, in the detail, the filters and compare (current)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-groups.spec.ts",
+      "name": "two bugs on one commit are both fixes, in the detail, the filters and compare (snapshot)"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-groups.spec.ts",
+      "name": "unannotated P0 commits stay under Other at 1600"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-groups.spec.ts",
+      "name": "unannotated P0 commits stay under Other at 390"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-historic-tenant.spec.ts",
+      "name": "historic notes in a non-PPM tenant: filters and views at 1600"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-historic-tenant.spec.ts",
+      "name": "historic notes in a non-PPM tenant: filters and views at 390"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-historic.spec.ts",
+      "name": "backfilled release 102 reads like release 105 at 1600 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-historic.spec.ts",
+      "name": "backfilled release 102 reads like release 105 at 1600 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-historic.spec.ts",
+      "name": "backfilled release 102 reads like release 105 at 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-historic.spec.ts",
+      "name": "backfilled release 102 reads like release 105 at 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-picker.spec.ts",
+      "name": "a replay after the project moved on names the tickets’ release, not the later one"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-picker.spec.ts",
+      "name": "a replay does not invent a count when membership no longer matches"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-picker.spec.ts",
+      "name": "existing parent picker counts leaves 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-picker.spec.ts",
+      "name": "existing parent picker counts leaves 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-picker.spec.ts",
+      "name": "new release rejects a building member and preserves the whole batch"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-picker.spec.ts",
+      "name": "new release rejects a released member and preserves the whole batch"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-picker.spec.ts",
+      "name": "parent replay with a backlog leaf does not claim full placement"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "a lost project access takes the link and the open ticket away at the next access check"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "a modified click keeps the link: the ticket opens in a new tab, not the panel"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "a ticket key opens the ticket beside the history, with one lookup for the release"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "a ticket still on its way when the person or workspace changes never shows"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "a toast raised in the panel stays visible and actionable after the history closes"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "another person or workspace starts without the earlier answers"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "axe: a ticket open beside the history 1440 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "axe: a ticket open beside the history 1440 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "axe: a ticket open beside the history 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "axe: a ticket open beside the history 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "keys this workspace does not have stay plain text"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "on a phone the ticket is a full-screen sheet over the history"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "the keyboard opens the panel, Esc closes it and returns focus to the key"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/release-ticket-links.spec.ts",
+      "name": "the status menu offers the project’s own states, as the project list does"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/reserved-versions.spec.ts",
+      "name": "comparison choices and result counts follow their separate scopes"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/reserved-versions.spec.ts",
+      "name": "rows toggle without changing counts, stats or controls at 1440px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/reserved-versions.spec.ts",
+      "name": "rows toggle without changing counts, stats or controls at 390px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/resilient-polling.spec.ts",
+      "name": "Agents retries a stalled session read and keeps the loaded table through three failed refreshes"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/resilient-polling.spec.ts",
+      "name": "Live Agents pauses in a hidden tab and refreshes when shown and back online"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/role-picker-layout.spec.ts",
+      "name": "epic floating choices scroll as one panel at 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/role-picker-layout.spec.ts",
+      "name": "epic floating choices scroll as one panel at 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/routines-editor.spec.ts",
+      "name": "an agent routine is created paused, then let run as the picked agent, with every control anchored"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/routines-editor.spec.ts",
+      "name": "the Routines box and editor render in dark at 1440px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/routines-editor.spec.ts",
+      "name": "the Routines box and editor render in light at 390px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/routines-editor.spec.ts",
+      "name": "the phone sheet scrolls under a pinned footer, and switching who moves nothing"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/run-kinds.spec.ts",
+      "name": "execution kinds and person-specific host names on the real agents table"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/service-tier.spec.ts",
+      "name": "320: phone Change tier menu opens and restores its actual trigger"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/service-tier.spec.ts",
+      "name": "390: phone Change tier menu opens and restores its actual trigger"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-attention.spec.ts",
+      "name": "dark 1440: shared replies leave five siblings working and Needs you empty"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-attention.spec.ts",
+      "name": "dark 390: shared replies leave five siblings working and Needs you empty"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-attention.spec.ts",
+      "name": "light 1440: shared replies leave five siblings working and Needs you empty"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-attention.spec.ts",
+      "name": "light 390: shared replies leave five siblings working and Needs you empty"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-chat.spec.ts",
+      "name": "375: no horizontal scroll with long URLs and IDs, in both tabs and while replying"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-chat.spec.ts",
+      "name": "430: no horizontal scroll with long URLs and IDs, in both tabs and while replying"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-chat.spec.ts",
+      "name": "an upward gesture on a thread that fits still follows the next post"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-ended.spec.ts",
+      "name": "at 1440px a save after the session ended keeps the draft and offers sign-in"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-ended.spec.ts",
+      "name": "at 390px a save after the session ended keeps the draft and offers sign-in"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-messages.spec.ts",
+      "name": "a reload keeps the hook wait for the one send that is still pending"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-messages.spec.ts",
+      "name": "an older delivered message does not hide the hook wait for a new pending send"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-messages.spec.ts",
+      "name": "an older read message does not hide the hook wait for a new pending send"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "Clear stale names the count, confirms once and repeats while the server reports more"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "overflow button is quiet until hover or focus and keeps the column width"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "panel Remove sits with the controls, closes the panel after confirmation, and Cancel keeps the record"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "project member can remove without force permissions"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "removal visual 1600 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "removal visual 1600 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "removal visual 390 dark"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-removal.spec.ts",
+      "name": "removal visual 390 light"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-requests.spec.ts",
+      "name": "dark 1600: request stays pending until session completion"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-requests.spec.ts",
+      "name": "dark 390: request stays pending until session completion"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-requests.spec.ts",
+      "name": "light 1600: request stays pending until session completion"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/session-requests.spec.ts",
+      "name": "light 390: request stays pending until session completion"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/settings-account-parts.spec.ts",
+      "name": "the new-account and Unassigned items lead to where they are decided"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/settings-accounts.spec.ts",
+      "name": "accounts are a list by vendor with how each is read, and no allowance form"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/settings-accounts.spec.ts",
+      "name": "an older rule shows as Set by you; Remove asks in place and removes it for good"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/settings.spec.ts",
+      "name": "settings layout evidence in light and dark at phone, tablet and desktop sizes"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/stability.spec.ts",
+      "name": "Policies unseeded registry stays honest and lazy tab responses cannot overwrite a later tab"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/stability.spec.ts",
+      "name": "at 1440px › an open session holds still while runs and messages land"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/stability.spec.ts",
+      "name": "at 1440px › the agents page holds still while its reads land"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/stability.spec.ts",
+      "name": "at 390px › an open session holds still while runs and messages land"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/stability.spec.ts",
+      "name": "at 390px › the agents page holds still while its reads land"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/stability.spec.ts",
+      "name": "the approval queue never says nothing waits before it knows"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/state-colours.spec.ts",
+      "name": "dark: all state words fit narrow cards and phone list rows"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/state-colours.spec.ts",
+      "name": "light: all state words fit narrow cards and phone list rows"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/state-colours.spec.ts",
+      "name": "saved theme palette/opacity and personal heartbeat thresholds persist across every surface"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/status-buckets.spec.ts",
+      "name": "card and header count open, blocked and unknown work at 390 and 1600"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1024px coarse dark comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1024px coarse dark compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1024px coarse light comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1024px coarse light compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1440px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1440px fine dark compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1440px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "1440px fine light compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "390px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "390px fine dark compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "390px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "390px fine light compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "700px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "700px fine dark compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "700px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "700px fine light compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "720px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "720px fine dark compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "720px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "720px fine light compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px coarse dark comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px coarse dark compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px coarse light comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px coarse light compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px fine dark compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/tap-targets.spec.ts",
+      "name": "768px fine light compact › ticket and tier controls keep their visuals, reach and position"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "backfilled notes say they were written after the release at 1600px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "backfilled notes say they were written after the release at 390px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "historical accepted ticket shows completed guidance in display and edit mode"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "historical delivered ticket shows completed guidance in display and edit mode"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "historical done ticket shows completed guidance in display and edit mode"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "internal-only releases show no tag title and a quiet detail at 390px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "regenerated missing-snapshot history keeps chips, filters and visible changes without a tag title"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-benefits.spec.ts",
+      "name": "v1 history keeps chips, filters and visible changes without a tag title"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-graph-view.spec.ts",
+      "name": "Hide closed reloads the graph projection; the legend and bounded-result notice are visible"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-graph-view.spec.ts",
+      "name": "mobile filters contain only supported dimensions and Hide closed"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-graph-view.spec.ts",
+      "name": "saved assignee, type, priority, status and body search match the header context"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-graph-view.spec.ts",
+      "name": "status, priority, type and search use the Tickets query"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-peek.spec.ts",
+      "name": "a session-row ticket and a panel ticket peek without covering the session text"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-peek.spec.ts",
+      "name": "a ticket from another project in the tickets graph opens the peek"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-peek.spec.ts",
+      "name": "a ticket pill on /agents opens the peek and stays on /agents"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-peek.spec.ts",
+      "name": "cmd-click on an agents ticket keeps the real link"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ticket-peek.spec.ts",
+      "name": "ticket peek screenshots"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/ui-audit-rules.spec.ts",
+      "name": "layout shift audit arms after navigation and resets startup movement"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/usage-accounts.spec.ts",
+      "name": "explicit pairing 403 keeps accessible accounts usable without a false service error"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/wide.spec.ts",
+      "name": "back trail › following links inside the panel builds a trail with Back and Alt+Left; list moves clear it"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/wide.spec.ts",
+      "name": "edit mode › Edit (or e) edits title, text and properties together with one Save"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/wide.spec.ts",
+      "name": "wide lists › columns grow with the width: Epic, Release, Tags and Created join from about 1800px"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/wide.spec.ts",
+      "name": "wide lists › columns resize by dragging the header edge and fit their content on double-click"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/wide.spec.ts",
+      "name": "wide lists › the Display menu shows, hides and reorders columns, saved per project on the server"
+    },
+    {
+      "kind": "browser",
+      "file": "tests/work-kinds.spec.ts",
+      "name": "the situations link on Models still lands on the limits, opening the fold"
+    },
+    {
+      "kind": "vitest",
+      "file": "tests/webcore-views.unit.test.ts",
+      "name": "S8-011: timing writes > disables pending writes and adopts the authoritative value without overlapping requests"
+    },
+    {
+      "kind": "vitest",
+      "file": "tests/webcore-views.unit.test.ts",
+      "name": "S8-011: timing writes > restores confirmed values and offers retry after 403"
+    },
+    {
+      "kind": "vitest",
+      "file": "tests/webcore-views.unit.test.ts",
+      "name": "S8-011: timing writes > restores confirmed values and offers retry after 500"
+    },
+    {
+      "kind": "vitest",
+      "file": "tests/webcore-views.unit.test.ts",
+      "name": "S8-011: timing writes > restores confirmed values and offers retry after network"
+    }
+  ],
   "goKeys": [
     "internal/db:TestWorkNodesMigrationPreservesRowsHistoryAndIdentities",
     "internal/db:TestWorkNodesUpgradeFromRelease122",
@@ -2771,12 +5048,15 @@
   },
   "cost": {
     "driftBrowserFiles": 102,
+    "recordedCases": 455,
+    "unresolvedRecordedCases": 24,
     "missingFromCurrentManifest": 0,
     "nightlyCasesInDriftFiles": 1523,
     "gatedCasesAlreadyInFull": 209,
-    "fullExtraNightlyCases": 1523,
-    "addedNightlySeconds": 6062,
-    "evenSplitWallSeconds": 505,
+    "fullExtraNightlyCases": 499,
+    "addedNightlySeconds": 2358,
+    "evenSplitWallSeconds": 197,
+    "projectedMaxShardSeconds": 1129,
     "shards": 12
   }
 }

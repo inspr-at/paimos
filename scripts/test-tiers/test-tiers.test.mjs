@@ -8,7 +8,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, browserScopeNoneAllowlist } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, driftCases, browserScopeNoneAllowlist } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -1206,6 +1206,45 @@ test('AEON-1334 shared principal, auth and schema changes run the appearance mig
   }
   const full=select(rows,{event:'pull_request',paths:['.github/workflows/ci.yml']})
   for(const name of names) assert.ok(full.tests.some(row=>row.name===name),name)
+})
+
+test('AEON-1334 the full gate runs the recorded drift cases, not their files, and fits the web job timeout',()=>{
+  // Whole drift files added 1,523 NIGHTLY browser cases to every full PR and
+  // merge group; eight of twelve web shards hit the 20-minute job cap (#695).
+  const full=fullGateTests(replayRows)
+  const selected=new Set(full.map(key))
+  const recorded=(row,names)=>names.some(name=>row.name===name||row.name.endsWith(` › ${name}`)||name.endsWith(` › ${row.name}`))
+  let siblings=0
+  for(const [owner,names] of driftCases) {
+    const rows=replayRows.filter(row=>row.kind!=='go'&&`${row.kind}:${row.file}`===owner)
+    for(const row of rows.filter(row=>recorded(row,names))) assert.ok(selected.has(key(row)),key(row))
+    // Every recorded title resolves here, so the file's other nightly cases stay deferred.
+    if(!names.every(name=>rows.some(row=>recorded(row,[name])))) continue
+    for(const row of rows.filter(row=>row.tier==='NIGHTLY'&&!recorded(row,names))) { siblings++; assert.ok(!selected.has(key(row)),key(row)) }
+  }
+  assert.ok(siblings>500,`unrecorded nightly siblings ${siblings}`)
+  const policy=loadWebPolicy()
+  const browser=rows=>rows.filter(row=>row.kind==='browser')
+  const established=webShardPlan(browser(replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL')),policy,{mode:'full'})
+  const plan=webShardPlan(browser(full),policy,{mode:'full'})
+  assert.deepEqual(plan.shards,[1,2,3,4,5,6,7,8,9,10,11,12])
+  assert.ok(plan.projectedMaxSeconds<plan.timeoutSeconds,`busiest full shard ${Math.round(plan.projectedMaxSeconds)}s`)
+  // Drift obligations may spend at most the planner's timeout headroom.
+  assert.ok(plan.projectedMaxSeconds-established.projectedMaxSeconds<=plan.timeoutSeconds*plan.headroom,
+    `drift adds ${Math.round(plan.projectedMaxSeconds-established.projectedMaxSeconds)}s to the busiest shard`)
+})
+
+test('AEON-1334 a recorded drift title resolves across describe prefixes and a renamed one widens to its file',()=>{
+  const [owner,names]=[...driftCases].find(([owner])=>owner.startsWith('browser:'))
+  const file=owner.slice('browser:'.length)
+  const row=(name,tier='NIGHTLY')=>({kind:'browser',file,name,tier,project:'',line:1})
+  const exact=row(names[0]),described=row(`outer › ${names[0]}`),sibling=row('an unrecorded sibling'),essential=row('an essential neighbour','ESSENTIAL')
+  const rest=names.slice(1).map(name=>row(name))
+  assert.deepEqual(fullGateTests([exact,sibling,essential,...rest]).map(key).sort(),[exact,essential,...rest].map(key).sort())
+  assert.deepEqual(fullGateTests([described,sibling,...rest]).map(key).sort(),[described,...rest].map(key).sort())
+  const renamed=row(`${names[0]} (renamed)`)
+  assert.deepEqual(fullGateTests([renamed,sibling,...rest]).map(key).sort(),[renamed,sibling,...rest].map(key).sort(),'an unresolved recorded title runs its whole file')
+  assert.deepEqual(fullGateTests([{...sibling,file:'tests/elsewhere.spec.ts'}]),[],'a nightly case outside the drift files stays deferred')
 })
 
 test('layout is static only when every path is docs, manifest, audit or always-on test material',()=>{

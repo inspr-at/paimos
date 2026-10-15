@@ -98,21 +98,52 @@ export const isDocsLike = path => !instructionPattern.test(path) && docsPattern.
 // comparison, never because their path is listed here.
 export const browserScopeNoneAllowlist = []
 const driftObligations = JSON.parse(readFileSync(new URL('./drift-obligations.json', import.meta.url), 'utf8'))
-const driftFiles = new Set([...(driftObligations.browserFiles ?? []), ...(driftObligations.unitFiles ?? [])])
 const driftGoKeys = new Set(driftObligations.goKeys ?? [])
 const componentSpecs = driftObligations.componentSpecs ?? {}
 const appearancePackage = 'internal/themes'
 const appearancePrefix = 'TestAppearanceMigration'
 const sharedSchemaPattern = /^(?:internal\/(?:auth|principallink|profile|themes|fieldschema)\/|api\/areas\/|api\/openapi|internal\/db\/(?:migrations|schema)(?:\/|$))/
+// The recorded titles that caught drift, by kind and file. The corpus replay
+// resolves a title the same way: exact, or across a describe prefix.
+export const driftCases = new Map()
+for (const { kind, file, name } of driftObligations.cases ?? []) {
+  if (!['browser', 'vitest', 'node'].includes(kind) || typeof file !== 'string' || typeof name !== 'string' || !name)
+    throw new Error('invalid drift obligation case')
+  const owner = `${kind}:${file}`
+  if (!driftCases.has(owner)) driftCases.set(owner, [])
+  driftCases.get(owner).push(name)
+}
+const sameCase = (name, recorded) => name === recorded || name.endsWith(` › ${recorded}`) || recorded.endsWith(` › ${name}`)
+
+// Recorded drift cases for the full gate. A recorded title that no current
+// case resolves (renamed or split) widens to its whole file, so a rename
+// cannot silently drop the obligation.
+function driftCaseKeys(tests) {
+  const rows = new Map()
+  for (const row of tests) if (row.kind !== 'go' && driftCases.has(`${row.kind}:${row.file}`)) {
+    const owner = `${row.kind}:${row.file}`
+    if (!rows.has(owner)) rows.set(owner, [])
+    rows.get(owner).push(row)
+  }
+  const wanted = new Set()
+  for (const [owner, names] of driftCases) {
+    const candidates = rows.get(owner) ?? []
+    for (const name of names) {
+      const found = candidates.filter(row => sameCase(row.name, name))
+      for (const row of found.length ? found : candidates) wanted.add(key(row))
+    }
+  }
+  return wanted
+}
 
 // Cases whose omission let real drift reach main. A full gate runs every
-// recorded behaviour file; a narrowed diff runs the component's specs and the
+// recorded behaviour case; a narrowed diff runs the component's specs and the
 // old-schema appearance fixtures when principal, auth or schema changes.
 export function behaviourObligation(tests, paths, { allDrift = false } = {}) {
-  const files = new Set(allDrift ? driftFiles : [])
+  const files = new Set()
   if (!allDrift && Array.isArray(paths)) for (const path of paths) for (const file of componentSpecs[path] ?? []) files.add(file)
   const shared = !allDrift && Array.isArray(paths) && paths.some(path => sharedSchemaPattern.test(path))
-  const wanted = new Set()
+  const wanted = allDrift ? driftCaseKeys(tests) : new Set()
   for (const row of tests) {
     if (row.kind !== 'go' && files.has(row.file)) wanted.add(key(row))
     else if (row.kind === 'go' && allDrift && driftGoKeys.has(key(row))) wanted.add(key(row))

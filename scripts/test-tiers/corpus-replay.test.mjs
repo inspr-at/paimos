@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { select, key, semanticRegistryPattern, registryImpact, browserScopeNoneAllowlist, webGraph } from './core.mjs'
+import { select, key, semanticRegistryPattern, registryImpact, browserScopeNoneAllowlist, webGraph, fullGateTests } from './core.mjs'
 import { schedulingDecision } from './diff.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -136,8 +136,12 @@ test('AEON-1334 historical corpus replay has zero proof misses', { timeout: 300_
       assert.ok(row[field] !== undefined && row[field] !== '', `${row.id} ${field}`)
     assert.ok(Array.isArray(row.paths), row.id)
   }
-  const missedFiles = new Set(rows.filter(row => !row.replay?.s2?.effectiveSelected && !staticRow(row)).map(row => fileOf(row.expectedFailureKey)).filter(Boolean))
+  const missed = rows.filter(row => !row.replay?.s2?.effectiveSelected && !staticRow(row))
+  const missedFiles = new Set(missed.map(row => fileOf(row.expectedFailureKey)).filter(Boolean))
   assert.deepEqual(new Set([...obligations.browserFiles, ...obligations.unitFiles]), missedFiles)
+  // The full gate carries the recorded cases themselves, not their files.
+  assert.deepEqual(new Set(obligations.cases.map(item => `${item.kind}:${item.file}:${item.name}`)),
+    new Set(missed.map(row => row.expectedFailureKey).filter(fileOf)))
   const trees = [...new Set(rows.filter(row => !staticRow(row)).map(row => row.treeBeforeFix))]
   assert.ok(trees.length > 0 && trees.length < 64, `historical trees ${trees.length}`)
   ensureTrees(trees)
@@ -206,7 +210,9 @@ test('AEON-1334 historical corpus replay has zero proof misses', { timeout: 300_
   const mapped = new Set(obligations.componentSpecs['web/src/components/work/TicketTable.vue'] ?? [])
   const extraFiles = new Set([...mapped].filter(file => !imported.has(file)))
   const extraCases = catalogue.filter(row => row.kind === 'browser' && row.tier === 'NIGHTLY' && extraFiles.has(row.file)).length
-  assert.equal(obligations.cost.fullExtraNightlyCases, catalogue.filter(row => row.kind === 'browser' && row.tier === 'NIGHTLY' && drift.has(row.file)).length)
+  assert.equal(obligations.cost.nightlyCasesInDriftFiles, catalogue.filter(row => row.kind === 'browser' && row.tier === 'NIGHTLY' && drift.has(row.file)).length)
+  assert.equal(obligations.cost.fullExtraNightlyCases, fullGateTests(catalogue).filter(row => row.kind === 'browser' && row.tier === 'NIGHTLY').length)
+  assert.ok(obligations.cost.fullExtraNightlyCases < obligations.cost.nightlyCasesInDriftFiles)
   assert.ok(extraCases < obligations.cost.fullExtraNightlyCases)
   obligations.cost.typicalComponent = 'web/src/components/work/TicketTable.vue'
   obligations.cost.typicalExtraNightlyCases = extraCases
