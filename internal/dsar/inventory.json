@@ -1929,7 +1929,8 @@
         "published_revision": "metadata",
         "confirmed_state": "metadata",
         "uncertain": "metadata",
-        "checked_at": "metadata"
+        "checked_at": "metadata",
+        "resolved": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"

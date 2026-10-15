@@ -8,6 +8,7 @@ CREATE TABLE delivery_admission_outbox (
  context text NOT NULL,
  kind text NOT NULL,
  members jsonb NOT NULL DEFAULT '[]',
+ resolved boolean NOT NULL DEFAULT false,
  active boolean NOT NULL DEFAULT true,
  invalidated boolean NOT NULL DEFAULT false,
  revision bigint NOT NULL DEFAULT 1,

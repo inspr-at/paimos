@@ -246,7 +246,15 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 			if err != nil {
 				return webhookFailed, err
 			}
-			pulls, err = m.github.Group(ctx, head, e.Group.Base, e.Group.Ref)
+			resolver := m.github.Group
+			if m.admissionGitHub != nil {
+				if g, ok := m.github.(interface {
+					AdmissionGroup(context.Context, string, string, string) ([]Pull, error)
+				}); ok {
+					resolver = g.AdmissionGroup
+				}
+			}
+			pulls, err = resolver(ctx, head, e.Group.Base, e.Group.Ref)
 		} else {
 			err = db.InTenant(db.AllProjects(ctx, "delivery queue destroy subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 				rows, err := tx.Query(ctx, `SELECT observation FROM delivery_items WHERE observation->>'queue_head'=$1 ORDER BY id LIMIT 101`, head)

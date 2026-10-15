@@ -5896,6 +5896,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableQuestionDoesNotStarveAuthorizedQuestion","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionCIExcludesOwnContext","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionDiffReadsMergeBaseAndRenameSides","tier":"ESSENTIAL"}

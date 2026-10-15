@@ -140,3 +140,72 @@ func (g *GitHubApp) AdmissionQueue(ctx context.Context, number int64, head strin
 		return nil
 	})
 }
+
+// AdmissionQueueMember is a live queue identity, not an approval assertion.
+type AdmissionQueueMember struct {
+	Number int64
+	Head   string
+}
+
+// AdmissionQueueMembers resolves the prefix through the synthetic head from
+// GitHub's queue inventory, including every preceding entry. A bounded missing,
+// null, ambiguous or changing inventory cannot prove group membership.
+func (g *GitHubApp) AdmissionQueueMembers(ctx context.Context, sha string) ([]AdmissionQueueMember, error) {
+	if !reviewgate.ValidSHA(sha) {
+		return nil, ErrUnavailable
+	}
+	var out []AdmissionQueueMember
+	err := g.admissionInstallation(ctx, map[string]string{"pull_requests": "read", "contents": "read", "metadata": "read"}, func(token string) error {
+		owner, name, _ := strings.Cut(g.Config.Repository, "/")
+		var response struct {
+			Data struct {
+				Repository struct {
+					Queue *struct {
+						Entries *struct {
+							Nodes []*struct {
+								Position int
+								Head     *struct{ OID string } `json:"headCommit"`
+								Pull     *struct {
+									Number int64
+									Head   string `json:"headRefOid"`
+								} `json:"pullRequest"`
+							}
+						}
+					} `json:"mergeQueue"`
+				}
+			}
+			Errors []json.RawMessage
+		}
+		query := `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue(branch:"main"){entries(first:100){nodes{position headCommit{oid} pullRequest{number headRefOid}}}}}}`
+		if err := g.request(ctx, token, "POST", "/graphql", map[string]any{"query": query, "variables": map[string]string{"owner": owner, "name": name}}, &response); err != nil {
+			return err
+		}
+		queue := response.Data.Repository.Queue
+		if len(response.Errors) > 0 || queue == nil || queue.Entries == nil || len(queue.Entries.Nodes) == 0 || len(queue.Entries.Nodes) > 100 {
+			return ErrUnavailable
+		}
+		through := -1
+		seenPositions := map[int]bool{}
+		seenPRs := map[int64]bool{}
+		for _, entry := range queue.Entries.Nodes {
+			if entry == nil || entry.Position < 0 || seenPositions[entry.Position] || entry.Pull == nil || entry.Pull.Number < 1 || seenPRs[entry.Pull.Number] || !reviewgate.ValidSHA(entry.Pull.Head) {
+				return ErrUnavailable
+			}
+			seenPositions[entry.Position] = true
+			seenPRs[entry.Pull.Number] = true
+			if entry.Head != nil && entry.Head.OID == sha && entry.Position > through {
+				through = entry.Position
+			}
+		}
+		if through < 0 {
+			return ErrUnavailable
+		}
+		for _, entry := range queue.Entries.Nodes {
+			if entry.Position <= through {
+				out = append(out, AdmissionQueueMember{Number: entry.Pull.Number, Head: entry.Pull.Head})
+			}
+		}
+		return nil
+	})
+	return out, err
+}

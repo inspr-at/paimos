@@ -34,10 +34,10 @@ type admissionMember struct {
 	Project  string `json:"project"`
 }
 type admissionPublication struct {
-	SHA, Kind                      string
-	Members                        []admissionMember
-	Revision                       int64
-	Invalidated, Active, Uncertain bool
+	SHA, Kind                                string
+	Members                                  []admissionMember
+	Revision                                 int64
+	Invalidated, Active, Uncertain, Resolved bool
 }
 
 // All writers hold the tenant fence. Group membership is immutable for this
@@ -61,27 +61,28 @@ func stageAdmissionGroupTx(ctx context.Context, tx pgx.Tx, tid, repository, sha 
 		members = append(members, member)
 	}
 	raw, _ := json.Marshal(members)
-	_, err := tx.Exec(ctx, `INSERT INTO delivery_admission_outbox(tenant_id,repository,sha,context,kind,members,active,invalidated)
- VALUES($1,$2,$3,$4,'group',$5,$6,$7)
+	_, err := tx.Exec(ctx, `INSERT INTO delivery_admission_outbox(tenant_id,repository,sha,context,kind,members,active,invalidated,resolved)
+ VALUES($1,$2,$3,$4,'group',$5,$6,$7,$8)
  ON CONFLICT(tenant_id,repository,sha,context) DO UPDATE SET
- members=CASE WHEN delivery_admission_outbox.members='[]'::jsonb THEN EXCLUDED.members ELSE delivery_admission_outbox.members END,
+ members=CASE WHEN NOT delivery_admission_outbox.resolved AND EXCLUDED.resolved THEN EXCLUDED.members ELSE delivery_admission_outbox.members END,
+ resolved=delivery_admission_outbox.resolved OR EXCLUDED.resolved,
  active=delivery_admission_outbox.active AND EXCLUDED.active,
  invalidated=delivery_admission_outbox.invalidated OR NOT EXCLUDED.active,
- revision=delivery_admission_outbox.revision+1`, tid, repository, sha, AdmissionContext, raw, active, !active)
+ revision=delivery_admission_outbox.revision+1`, tid, repository, sha, AdmissionContext, raw, active, !active, len(pulls) > 0)
 	return err
 }
 
 func (m *Module) admissionStateTx(ctx context.Context, tx pgx.Tx, sha string) (admissionPublication, string, error) {
 	p := admissionPublication{SHA: sha}
 	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT kind,members,revision,invalidated,active,uncertain FROM delivery_admission_outbox WHERE repository=$1 AND sha=$2 AND context=$3`, m.config.Repository, sha, AdmissionContext).Scan(&p.Kind, &raw, &p.Revision, &p.Invalidated, &p.Active, &p.Uncertain)
+	err := tx.QueryRow(ctx, `SELECT kind,members,revision,invalidated,active,uncertain,resolved FROM delivery_admission_outbox WHERE repository=$1 AND sha=$2 AND context=$3`, m.config.Repository, sha, AdmissionContext).Scan(&p.Kind, &raw, &p.Revision, &p.Invalidated, &p.Active, &p.Uncertain, &p.Resolved)
 	if err != nil {
 		return p, "", err
 	}
 	if err = json.Unmarshal(raw, &p.Members); err != nil {
 		return p, "", err
 	}
-	if p.Invalidated || !p.Active || len(p.Members) == 0 || len(p.Members) > 100 {
+	if p.Invalidated || !p.Active || !p.Resolved || len(p.Members) == 0 || len(p.Members) > 100 {
 		return p, "failure", nil
 	}
 	for _, member := range p.Members {
@@ -214,6 +215,9 @@ func (m *Module) RunAdmission(ctx context.Context) {
 
 func (m *Module) reconcileAdmission(ctx context.Context) error {
 	service := db.AllProjects(ctx, "admission outbox inventory")
+	if err := m.seedAdmission(service); err != nil {
+		return err
+	}
 	// Keyset pages bound memory; every row, including historical heads, converges.
 	cursor := ""
 	var failures []error

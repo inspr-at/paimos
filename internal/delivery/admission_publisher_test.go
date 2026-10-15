@@ -466,3 +466,52 @@ func TestAdmissionUnknownGroupMembershipFailsClosed(t *testing.T) {
 	}
 	requireAdmissionState(t, f, sha, "success")
 }
+
+func TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem(t *testing.T) {
+	// Risk: unchanged P2 rows never seed work after upgrade, or a queue-entry
+	// sighting is mistaken for complete membership and grants a synthetic SHA.
+	f := newAdmissionFixture(t)
+	ctx := t.Context()
+	p := f.gh.pulls[7]
+	group := strings.Repeat("c", 40)
+	f.tx(t, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM delivery_admission_outbox`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM delivery_admission_queue`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE delivery_items SET observation=jsonb_set(jsonb_set(observation,'{queued}','true'),'{queue_head}',to_jsonb($1::text)) WHERE pull_request=7`, group)
+		return err
+	})
+	service := db.AllProjects(ctx, "admission upgrade test")
+	if err := f.m.seedAdmission(service); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.m.publishAdmission(ctx, p.Head); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, f, p.Head, "success")
+	if err := f.m.publishAdmission(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, f, group, "failure")
+	f.tx(t, func(tx pgx.Tx) error {
+		var members int
+		var resolved bool
+		err := tx.QueryRow(ctx, `SELECT jsonb_array_length(members),resolved FROM delivery_admission_outbox WHERE sha=$1`, group).Scan(&members, &resolved)
+		if err == nil && (members != 1 || resolved) {
+			t.Fatal("partial queue identity lost or treated as complete")
+		}
+		return err
+	})
+	f.hold(t, true)
+	f.tx(t, func(tx pgx.Tx) error {
+		var invalidated bool
+		err := tx.QueryRow(ctx, `SELECT invalidated FROM delivery_admission_outbox WHERE sha=$1`, group).Scan(&invalidated)
+		if err == nil && !invalidated {
+			t.Fatal("hold missed queue-observed group")
+		}
+		return err
+	})
+}

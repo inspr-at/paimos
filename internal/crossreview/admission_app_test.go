@@ -33,6 +33,7 @@ func TestAdmissionAppPinsHeadContextAndRepository(t *testing.T) {
 	head := strings.Repeat("b", 40)
 	mutations, posts, revokes := 0, 0, 0
 	excess, wrongRepo, wrongHead, graphqlError := false, false, false, false
+	membershipUnknown := false
 	app := &GitHubApp{Config: AppConfig{ID: "1", InstallationID: "2", KeyFile: path, TenantID: testID(), Repository: "example/admission"}}
 	app.Client = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
 		var body any = map[string]any{}
@@ -66,7 +67,13 @@ func TestAdmissionAppPinsHeadContextAndRepository(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(in.Query, "query") {
+			if strings.Contains(in.Query, "mergeQueue(") {
+				nodes := []any{map[string]any{"position": 1, "headCommit": map[string]string{"oid": strings.Repeat("a", 40)}, "pullRequest": map[string]any{"number": 6, "headRefOid": strings.Repeat("d", 40)}}, map[string]any{"position": 2, "headCommit": map[string]string{"oid": head}, "pullRequest": map[string]any{"number": 7, "headRefOid": head}}}
+				if membershipUnknown {
+					nodes = nodes[:1]
+				}
+				body = map[string]any{"data": map[string]any{"repository": map[string]any{"mergeQueue": map[string]any{"entries": map[string]any{"nodes": nodes}}}}}
+			} else if strings.HasPrefix(in.Query, "query") {
 				actual := head
 				if wrongHead {
 					actual = strings.Repeat("c", 40)
@@ -137,6 +144,15 @@ func TestAdmissionAppPinsHeadContextAndRepository(t *testing.T) {
 		if err = app.AdmissionQueue(ctx, 7, head, true); err == nil {
 			t.Fatalf("accepted invalid %s", kind)
 		}
+	}
+	excess, wrongRepo, wrongHead, graphqlError = false, false, false, false
+	members, err := app.AdmissionQueueMembers(ctx, head)
+	if err != nil || len(members) != 2 || members[0].Number != 6 || members[1].Number != 7 {
+		t.Fatalf("lost preceding queue identity: %+v %v", members, err)
+	}
+	membershipUnknown = true
+	if _, err = app.AdmissionQueueMembers(ctx, head); err == nil {
+		t.Fatal("unknown group accepted")
 	}
 	if mutations != 3 || posts != 1 {
 		t.Fatal("refusal performed unauthorized writes")
