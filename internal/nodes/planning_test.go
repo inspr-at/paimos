@@ -340,6 +340,13 @@ func (w planningWorld) node(t *testing.T, key, kind, parent, state string, field
 	if fields == nil {
 		fields = map[string]any{}
 	}
+	// Preserve the estimate under test; Ready also requires criteria when this
+	// work starts, including after custom-category or session-first starts.
+	if kind == "work" {
+		if _, supplied := fields["acceptance_criteria"]; !supplied {
+			fields["acceptance_criteria"] = "The planning view preserves its estimate and rate basis"
+		}
+	}
 	if state == "done" && kind == "work" {
 		fields["pill_en"], fields["pill_de"], fields["benefit_en"], fields["benefit_de"] = "Planning works now", "Planung geht jetzt", "Planning shows real numbers.", "Die Planung zeigt echte Zahlen."
 	}

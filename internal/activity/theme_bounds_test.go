@@ -89,7 +89,7 @@ func TestLongTicketHistoryUsesBoundedSuccessivePages(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `EXPLAIN (FORMAT JSON) `+timelineCandidatesSQL, f.p.TenantID, f.node, decoded.Watermark, decoded.At, decoded.ID, 65).Scan(&plan); err != nil {
 			return err
 		}
-		if !strings.Contains(string(plan), `"Index Name": "events_activity_page"`) {
+		if !strings.Contains(string(plan), `"Index Name": "events_activity_page_v2"`) {
 			t.Fatal("activity candidate types cannot use the paging index")
 		}
 		return nil

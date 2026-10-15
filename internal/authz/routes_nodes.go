@@ -5,6 +5,13 @@ package authz
 // Route and scope declarations for nodes.
 func init() {
 	registerRoutes("nodes", map[string]string{
+		"POST /api/nodes/{nodeId}/entry-evidence":                     "nodes.write",
+		"GET /api/nodes/{nodeId}/entry-checks":                        "nodes.read",
+		"PUT /api/nodes/{nodeId}/entry-checks/{checkId}":              "nodes.write",
+		"GET /api/projects/{projectId}/definitions":                   "nodes.read",
+		"PUT /api/projects/{projectId}/definitions":                   "nodes.write",
+		"GET /api/settings/definitions":                               "nodes.read",
+		"PUT /api/settings/definitions":                               "settings.manage",
 		"DELETE /api/kinds/{kindId}":                                  "kinds.manage",
 		"DELETE /api/nodes/{nodeId}":                                  "nodes.delete",
 		"DELETE /api/nodes/{nodeId}/work-lifecycle/{actionId}":        "nodes.write",
@@ -37,6 +44,8 @@ func init() {
 		"PUT /api/settings/work-vocabulary":                           "settings.manage",
 	})
 	registerDeclarations("nodes", "project_filtered", ProjectFilteredRoutes, map[string]bool{
+		"GET /api/settings/definitions":     true,
+		"PUT /api/settings/definitions":     true,
 		"GET /api/kinds":                    true,
 		"GET /api/kinds/{kindId}":           true,
 		"GET /api/nodes":                    true,
