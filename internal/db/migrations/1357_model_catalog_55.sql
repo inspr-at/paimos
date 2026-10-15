@@ -11,6 +11,8 @@ DECLARE
     pin record;
     next_id uuid;
     next_enabled boolean;
+    pause_before jsonb;
+    pause_after jsonb;
     actor uuid;
     prior_tenant text := current_setting('aeon.tenant_id',true);
     prior_visible text := current_setting('aeon.visible_projects',true);
@@ -50,13 +52,24 @@ BEGIN
             RETURNING id,enabled INTO next_id,next_enabled;
             PERFORM set_config('aeon.model_activation_cause','',true);
             IF next_id IS NULL THEN CONTINUE; END IF;
+            SELECT to_jsonb(p) INTO pause_before FROM model_pauses p
+                WHERE tenant_id=tenant AND harness='pi' AND model=pin.model||'.5';
             INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by,set_at)
                 SELECT tenant_id,harness,pin.model||'.5',until_at,reason,set_by,set_at
                 FROM model_pauses WHERE tenant_id=tenant AND harness='pi' AND model=pin.model
                     AND NOT EXISTS(SELECT 1 FROM model_pauses WHERE tenant_id=tenant AND harness='pi' AND model=pin.model||'.5');
+            -- Match runtime successor acceptance: a stronger existing pause
+            -- wins, otherwise extend it. Retain its prior value in the audit.
+            UPDATE model_pauses successor SET until_at=old.until_at,reason=old.reason,set_by=old.set_by,set_at=old.set_at
+                FROM model_pauses old WHERE old.tenant_id=tenant AND old.harness='pi' AND old.model=pin.model
+                    AND successor.tenant_id=tenant AND successor.harness='pi' AND successor.model=pin.model||'.5'
+                    AND successor.until_at IS NOT NULL AND (old.until_at IS NULL OR old.until_at>successor.until_at);
+            SELECT to_jsonb(p) INTO pause_after FROM model_pauses p
+                WHERE tenant_id=tenant AND harness='pi' AND model=pin.model||'.5';
             SELECT aeon_authz_system_actor(tenant) INTO actor;
             changes := changes || jsonb_build_array(jsonb_build_object(
-                'tenant',tenant,'actor',actor,'from_profile',pin.id,'profile_id',next_id,'enabled',next_enabled));
+                'tenant',tenant,'actor',actor,'from_profile',pin.id,'profile_id',next_id,'enabled',next_enabled,
+                'pause_before',pause_before,'pause_after',pause_after));
         END LOOP;
     END LOOP;
     -- Finish all resource writes before the first event-counter lock.

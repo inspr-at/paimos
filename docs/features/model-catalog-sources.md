@@ -67,7 +67,9 @@ AEON-1409 updates the ID-only bootstrap to map the verified Claude `opus` and
 `sonnet` launch aliases to 5.5. Migration 1357 adds immutable `aeon-1409` pi pin
 revisions for `anthropic/claude-opus-5.5` and `anthropic/claude-sonnet-5.5`.
 Earlier profile IDs, displays and account grants remain intact. Successor grants,
-pauses and the owner's new-model activation policy still apply. Agent-triggered
+pauses and the owner's new-model activation policy still apply. A stricter pause
+on either old or successor route wins; any successor pause that is extended
+retains its previous value in the migration audit. Agent-triggered
 refresh permissions, cooldowns and enrolled-harness evidence requirements remain
 in force; no agent reporting authority is added.
 

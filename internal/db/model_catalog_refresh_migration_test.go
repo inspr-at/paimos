@@ -214,6 +214,11 @@ func TestAnthropic55MigrationKeepsHistoryAndActivationPolicy(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) SELECT $1,'pi','anthropic/claude-opus-5','Owner pause',aeon_authz_system_actor($1)`, id); err != nil {
 					return err
 				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by)
+ SELECT $1,'pi','anthropic/claude-opus-5.5',CASE WHEN $2 THEN now()+interval '1 hour' END,
+ CASE WHEN $2 THEN 'Weaker successor pause' ELSE 'Existing strict pause' END,aeon_authz_system_actor($1)`, id, i == 0); err != nil {
+					return err
+				}
 				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,allowed_model_profile_ids)
       SELECT $1,'pi','pi','fixture',aeon_authz_system_actor($1),'Pi',array_agg(id) FROM model_profiles WHERE slug='pi-anthropic-opus-xhigh'`, id); err != nil {
 					return err
@@ -263,7 +268,11 @@ func TestAnthropic55MigrationKeepsHistoryAndActivationPolicy(t *testing.T) {
 			if count != 3 || enabled != wantEnabled || display != 3 {
 				t.Fatalf("tenant %d: versions=%d enabled=%d display=%d", i, count, enabled, display)
 			}
-			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses WHERE model='anthropic/claude-opus-5.5' AND until_at IS NULL AND reason='Owner pause'`).Scan(&pauses); err != nil {
+			pauseReason := "Owner pause"
+			if i == 1 {
+				pauseReason = "Existing strict pause"
+			}
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses WHERE model='anthropic/claude-opus-5.5' AND until_at IS NULL AND reason=$1`, pauseReason).Scan(&pauses); err != nil {
 				return err
 			}
 			if pauses != 1 {
