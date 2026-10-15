@@ -195,6 +195,14 @@ function cutTrail(trail: HTMLElement) {
     else if (part.children.length) atoms = [...part.children].map(child => child.getBoundingClientRect()).filter(rect => rect.width > 1 && rect.height > 1)
     else { range.selectNodeContents(part); atoms = [range.getBoundingClientRect()] }
     if (atoms.some(atom => atom.left < left - 0.5 || atom.right > right + 0.5)) return true
+    // A key can be squeezed inside its own box (the border stays in the crumb
+    // while the letters clip). That is a cut chip, same rule as on a phone.
+    for (const key of part.querySelectorAll<HTMLElement>('.key-badge')) {
+      if (key.dataset.dropped !== undefined || getComputedStyle(key).display === 'none') continue
+      const rect = key.getBoundingClientRect()
+      if (rect.width <= 1 || rect.height <= 1) continue
+      if (key.scrollWidth > key.clientWidth) return true
+    }
   }
   return false
 }
@@ -486,6 +494,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (max-width: 1180px) { .crumbs:has(> .crumb ~ .crumb ~ .crumb) .settings-crumb .crumb-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
 .crumbs > .crumb:not(.current) { flex-shrink: 1; overflow: hidden; }
 .crumbs > .crumb.current, .crumbs > .sep, .crumbs > .crumb.fixed-crumb { flex-shrink: 0; }
+/* The key stays whole. The crumb may shrink; the chip does not, so its letters are never clipped inside the badge. */
+.crumbs .key-badge { flex-shrink: 0; }
 /* A long knowledge slug gives way first, with an ellipsis and the full slug as a tip. */
 .crumbs > .crumb.slug-crumb { display: block; flex-shrink: 1; min-width: 48px; overflow: hidden; text-overflow: ellipsis; line-height: 30px; }
 .crumb.current:hover { background: transparent; }
