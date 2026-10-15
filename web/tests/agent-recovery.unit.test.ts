@@ -90,40 +90,58 @@ test('switching the visible session discards a late recovery result', async () =
 test('changing diagnosis remains below every session control and tab', async () => {
   const { readFileSync } = await import('node:fs')
   const { parse } = await import('@vue/compiler-sfc')
-  const { compile } = await import('@vue/compiler-dom')
+  const { compile, baseParse } = await import('@vue/compiler-dom')
   const Vue = await import('vue')
   const { renderToString } = await import('@vue/server-renderer')
   const { descriptor } = parse(readFileSync(new URL('../src/components/agents/SessionPanel.vue', import.meta.url), 'utf8'))
   const template = descriptor.template!.content
-  const header = template.slice(template.indexOf('<header'), template.indexOf('</header>') + '</header>'.length)
-  const evidence = template.slice(template.indexOf('<ManagedSessionControls'), template.indexOf('<section class="block first"'))
+  // Select whole elements, including their conditional wrappers. Slicing from
+  // ManagedSessionControls to Facts crossed two unmatched template/div tags.
+  const tree = baseParse(template)
+  const elements = (node: typeof tree | (typeof tree.children)[number]): string[] => {
+    if (node.type === 1 && (node.tag === 'header' || node.tag === 'template' && node.loc.source.includes('<ManagedSessionControls') || node.tag === 'section' && node.loc.source.includes('class="recovery-evidence"'))) return [node.loc.source]
+    return 'children' in node ? node.children.flatMap(elements) : []
+  }
+  const fixture = `<div>${elements(tree).join('')}</div>`
   const ts = await import('typescript')
-  const code = ts.transpileModule(compile(header + evidence, { mode: 'function', prefixIdentifiers: true, expressionPlugins: ['typescript'] }).code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const code = ts.transpileModule(compile(fixture, { mode: 'function', prefixIdentifiers: true, expressionPlugins: ['typescript'] }).code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const render = new Function('Vue', code)(Vue)
+  const { default: SessionTabs } = await import('../src/components/agents/SessionTabs.vue')
+  const { PANEL_TAB_LABEL } = await import('../src/lib/leadPanel')
   for (const management_mode of ['managed', 'unmanaged']) for (const detail of ['Reporting is current.', 'The paired computer still reports, but this exact session heartbeat and inbox binding remain overdue. '.repeat(5)]) {
     const app = Vue.createSSRApp({ render, setup: () => ({
       view: { name: 'Worker', harness: 'Claude', status: { state: 'working', label: 'Working' }, session: { ...session, management_mode, advertised_capabilities: ['managed_control_v1'], agent_recovery: { ...session.agent_recovery, detail } } },
       loading: false, reported: undefined, brand: { short_name: 'Aeon' },
       agentRecovery: { action: () => 'restart', busy: {} }, pausingSession: () => false, works: () => false,
-      actionsAnchor: null, showRecover: false, showRemove: false, quick: true, tab: 'overview', unread: 0, now: 0,
+      actionsAnchor: {}, showRecover: false, showRemove: false, quick: true, tab: 'overview', unread: 0, now: 0,
       ticketState: '', selectTab: () => {}, serviceTiers: { unavailable: () => true },
       capability: 'native', capText: capabilityWords.en.native,
       isLead: false, pinned: null, hasQuestion: false, managed: null, s: session,
       interruptReason: '', pauseReason: '', stopReason: '', resumeOffered: false,
       modelLine: '', leads: { busy: {} }, interrupt: () => {}, pauseOrResume: () => {}, stopSession: () => {}, pinTab: () => {}, closeActions: () => {},
+      shortcutKeys: () => [], identityTitle: 'Worker · Working', menuReady: true, leadAtOpen: false, terminalAtOpen: true,
+      sidebarAvailable: true, panelLayout: 'side', fullScreenTip: 'Full screen', openedTab: 'overview', why: '',
+      nativeKnown: false, managedControls: management_mode === 'managed', viewerAtOpen: false,
+      availableTabs: ['overview', 'chat', 'events', 'terminal'], PANEL_TAB_LABEL,
+      settingReason: () => '', nativeAction: null,
     }) })
-    for (const name of ['ManagedSessionControls', 'SessionTabs']) app.component(name, { render: () => Vue.h('button', { 'data-control': name }, name) })
-    for (const name of ['AgentGlyph', 'AgentStateLabel', 'AppIcon', 'KeyCap', 'ServiceTierBlock', 'SessionRecovery', 'RemoveSessionDialog', 'FloatingPanel']) app.component(name, { render: () => Vue.h('span') })
+    app.component('SessionTabs', SessionTabs)
+    app.component('ManagedSessionControls', { render: () => Vue.h('span', { 'data-control': 'ManagedSessionControls' }) })
+    app.component('FloatingPanel', { setup: (_, { slots }) => () => Vue.h('div', slots.default?.()) })
+    for (const name of ['AgentGlyph', 'AppIcon', 'KeyCap', 'SessionRecovery', 'RemoveSessionDialog']) app.component(name, { render: () => Vue.h('span') })
     const html = await renderToString(app)
     const feedback = html.indexOf(detail)
     const chip = html.indexOf(capabilityWords.en.native[0])
     expect(feedback).toBeGreaterThan(0)
     expect(chip).toBeGreaterThan(0)
     expect(chip).toBeLessThan(feedback)
-    for (const selector of ['aria-label="Interrupt"', 'aria-label="Pause"', 'aria-label="Stop…"', 'aria-label="More session actions"', 'data-control="ManagedSessionControls"', 'data-control="SessionTabs"']) {
+    for (const selector of ['aria-label="Panel actions"', 'aria-label="More session actions"', 'aria-label="Close session details"', 'data-control="ManagedSessionControls"', 'role="tablist"', 'role="menuitem"']) {
       const control = html.indexOf(selector)
       expect(control).toBeGreaterThan(0)
       expect(control).toBeLessThan(feedback)
     }
+    for (const label of ['Details', 'Chat', 'Events', 'Terminal']) expect(html).toMatch(new RegExp(`role="tab"[^>]*aria-label="${label}"`))
+    for (const label of ['Interrupt', 'Pause', 'Stop…', 'Restart']) expect(html.slice(0, feedback)).toContain(`<span>${label}`)
+    if (management_mode === 'managed') for (const label of ['Name…', 'Model…', 'Effort…']) expect(html.slice(0, feedback)).toContain(`<span>${label}`)
   }
 })

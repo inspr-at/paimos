@@ -37,6 +37,12 @@ export const SHORTCUT_ENTRIES = [
   { id: 'agents.details.close', keys: ['Escape'], scope: 'agents page', ...transitionLabel('Close the details', 'List only') },
   { id: 'agents.session.pause', keys: ['p'], scope: 'a session row', label: 'Pause / resume' },
   { id: 'agents.session.resume', keys: ['r'], scope: 'a session row', label: 'Pause / resume' },
+  { id: 'agents.panel.fullscreen', keys: ['Shift+E'], scope: 'agents page', label: 'Enter / exit the session panel’s full screen' },
+  { id: 'agents.panel.tab.1', keys: ['1'], scope: 'agents page', label: 'Session panel item 1' },
+  { id: 'agents.panel.tab.2', keys: ['2'], scope: 'agents page', label: 'Session panel item 2' },
+  { id: 'agents.panel.tab.3', keys: ['3'], scope: 'agents page', label: 'Session panel item 3' },
+  { id: 'agents.panel.tab.4', keys: ['4'], scope: 'agents page', label: 'Session panel item 4' },
+  { id: 'agents.panel.tab.5', keys: ['5'], scope: 'agents page', label: 'Session panel item 5' },
   { id: 'agents.filter.add', keys: ['Shift+F'], scope: 'agents page', label: 'Add a filter' },
   { id: 'agents.divider.left', keys: ['ArrowLeft'], scope: 'the divider, when focused', label: 'Move the divider (the list’s width)', when: '16 px left' },
   { id: 'agents.divider.right', keys: ['ArrowRight'], scope: 'the divider, when focused', label: 'Move the divider (the list’s width)', when: '16 px right' },
@@ -118,6 +124,11 @@ export function createShortcutRegistry(context = browserContext, now = () => Dat
     if (capture) for (const registration of registrations.values()) {
       if (registration.entry.scope !== 'project settings' || !registration.options.when || !available(registration, event)) continue
       if (registration.entry.keys.some(binding => matches(binding, event)) && invoke(registration, event)) { cancelSequence(); return }
+    }
+    // Panel fields opt in to Escape only; open menus and holder terminals keep it.
+    if (capture && current.editing && !current.layers.length && event.key === 'Escape' && !event.metaKey && !event.ctrlKey) {
+      const close = registrations.get('agents.details.close')
+      if (close && available(close, event) && event.target instanceof HTMLElement && event.target.closest('.session-panel')) { invoke(close, event); return }
     }
     if (capture && pending && time - pending.started > SEQUENCE_MS) cancelSequence()
     // Only capture advances sequences; bubble must not process the prefix twice

@@ -10,6 +10,8 @@ import { managedControlSession, managedControlUnavailable } from '../../lib/mana
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
+import { isSettingsField, settingsSubmitKey } from '../../lib/settingsOverlays'
 import { pausingSession } from '../../lib/agentPause'
 import FloatingPanel from '../work/FloatingPanel.vue'
 
@@ -20,7 +22,7 @@ type Kind = 'steer' | 'interrupt' | 'stop' | Setting
 interface SettingModel { model: string; efforts: string[] }
 interface Control { id: string; session_id: string; kind: Kind; state: 'pending' | 'claimed' | 'completed'; outcome: 'applied' | 'rejected' | null; reason: string | null; expires_at: string }
 // runStatus: the bound run's status when the session read does not carry it.
-const props = defineProps<{ session: ManagedSession; now: number; runStatus?: string | null }>()
+const props = defineProps<{ session: ManagedSession; now: number; runStatus?: string | null; overflow?: boolean }>()
 const auth = useSession(), agents = useAgents(), uid = useId()
 const draft = ref(''), error = ref(''), busy = ref(false), composing = ref(false)
 // The session panel is a full-height sheet below 720px. Keep one action row
@@ -28,6 +30,7 @@ const draft = ref(''), error = ref(''), busy = ref(false), composing = ref(false
 const phoneMedia = window.matchMedia('(max-width: 720px)')
 const phone = ref(phoneMedia.matches)
 const moreAnchor = ref<HTMLElement | null>(null)
+const editorAnchor = ref<HTMLElement | null>(null)
 const sheetEl = ref<HTMLElement>()
 useVisualViewport(sheetEl)
 function syncPhone() { phone.value = phoneMedia.matches }
@@ -67,7 +70,17 @@ async function json<T>(answer: Promise<Response>): Promise<T> {
 }
 const sheetOpen = computed(() => phone.value && (composing.value || !!editing.value))
 const sheetTitle = computed(() => editing.value ? settingNames[editing.value] : 'Steer')
-function closeSheet() { composing.value = false; editing.value = null }
+function editorKeys(event: KeyboardEvent) {
+  if (!settingsSubmitKey(event)) return
+  event.preventDefault(); event.stopPropagation()
+  void submit(editing.value || 'steer')
+}
+function cancelSheet() {
+  const field = document.activeElement
+  if (isSettingsField(field)) { field.blur(); sheetEl.value?.focus({ preventScroll: true }); return }
+  closeSheet()
+}
+function closeSheet() { composing.value = false; editing.value = null; editorAnchor.value = null }
 function backdrop(event: MouseEvent) { if (event.target === sheetEl.value) closeSheet() }
 function toggleMore(event: MouseEvent) {
   const anchor = event.currentTarget as HTMLElement
@@ -92,8 +105,11 @@ watch(sheetOpen, async open => {
     dialog.querySelector<HTMLElement>('textarea, input, select')?.focus()
   } else if (!open && dialog.open) dialog.close()
 })
-defineExpose({ interrupt: () => submit('interrupt'), stop: () => submit('stop'), feedback, error, waiting })
-function reset() { epoch++; editing.value = null; settingValue.value = ''; models.value = []; loadingSettings.value = false; clearTimeout(timer); draft.value = ''; result.value = null; request = null; error.value = ''; busy.value = false; uncertain.value = false; composing.value = false; moreAnchor.value = null }
+function settingReason(kind: Setting | 'steer') { return unavailable.value || (waiting.value ? 'A control is pending.' : !available.value || !props.session.advertised_capabilities.includes(kind) ? 'This setting is not available for this session.' : '') }
+function openSetting(kind: Setting, anchor: HTMLElement) { if (settingReason(kind)) return; editorAnchor.value = anchor; void editSetting(kind) }
+function openSteer(anchor: HTMLElement) { if (settingReason('steer')) return; editorAnchor.value = anchor; composing.value = true; editing.value = null }
+defineExpose({ interrupt: () => submit('interrupt'), stop: () => submit('stop'), openSetting, openSteer, settingReason, feedback, error, waiting })
+function reset() { epoch++; editing.value = null; editorAnchor.value = null; settingValue.value = ''; models.value = []; loadingSettings.value = false; clearTimeout(timer); draft.value = ''; result.value = null; request = null; error.value = ''; busy.value = false; uncertain.value = false; composing.value = false; moreAnchor.value = null }
 watch(() => `${auth.identity?.tenant.id}/${auth.identity?.principal.id}/${props.session.project_id}/${props.session.id}`, reset, { flush: 'sync' })
 onBeforeUnmount(() => { epoch++; clearTimeout(timer); request = null; phoneMedia.removeEventListener('change', syncPhone) })
 async function check(turn = epoch) {
@@ -117,7 +133,7 @@ async function submit(kind: Kind) {
   await sendRequest()
 }
 async function editSetting(kind: Setting) {
-  if (unavailable.value || waiting.value) return
+  if (settingReason(kind)) return
   editing.value = kind; settingValue.value = currentSetting(kind); composing.value = false; error.value = ''
   if (kind === 'rename') return
   const turn = epoch
@@ -152,14 +168,14 @@ async function sendRequest() {
 </script>
 
 <template>
-  <section v-if="available" class="managed-controls" aria-label="Session controls">
-    <div v-if="!phone && settings.some(kind => session.advertised_capabilities.includes(kind))" class="settings-row" aria-label="Session settings">
+  <section v-if="available" class="managed-controls" :class="{ overflow }" aria-label="Session controls">
+    <div v-if="!overflow && !phone && settings.some(kind => session.advertised_capabilities.includes(kind))" class="settings-row" aria-label="Session settings">
       <span class="settings-title">Session settings</span>
       <button v-for="kind in settings" :key="kind" type="button" class="setting" :disabled="!!unavailable || waiting || !session.advertised_capabilities.includes(kind)" :aria-label="`Edit ${settingNames[kind].toLowerCase()}`" :title="currentSetting(kind)" @click="editSetting(kind)">
         <span>{{ settingNames[kind] }}</span><strong>{{ currentSetting(kind) || 'Set' }}</strong><AppIcon name="chevron-right" :size="12" />
       </button>
     </div>
-    <form v-if="!phone && editing" class="setting-form" @submit.prevent="submit(editing)">
+    <form v-if="!overflow && !phone && editing" class="setting-form" @submit.prevent="submit(editing)">
       <label :for="`${uid}-setting`">{{ settingNames[editing] }}</label>
       <input v-if="editing === 'rename'" :id="`${uid}-setting`" v-model="settingValue" maxlength="128" :disabled="waiting" autocomplete="off" />
       <select v-else :id="`${uid}-setting`" v-model="settingValue" :disabled="waiting || loadingSettings || !settingChoices.length">
@@ -169,7 +185,7 @@ async function sendRequest() {
       <p v-if="editing !== 'rename' && !loadingSettings && !settingChoices.length" class="hint">No compatible choices in this account’s catalog.</p>
       <div class="control-row"><button type="submit" class="btn sm primary" :disabled="!validValue || waiting || loadingSettings || !!unavailable">Save {{ settingNames[editing].toLowerCase() }}</button><button type="button" class="btn sm ghost" :disabled="waiting" @click="editing = null">Cancel</button></div>
     </form>
-    <div class="control-row">
+    <div v-if="!overflow" class="control-row">
       <button type="button" class="btn sm ghost" :disabled="!!unavailable || waiting || !session.advertised_capabilities.includes('steer')" @click="composing = !composing; editing = null"><AppIcon name="send" :size="14" /><span>Steer</span></button>
       <button type="button" class="icon-btn flat more" aria-label="More session controls" aria-haspopup="menu" :aria-expanded="!!moreAnchor" :disabled="waiting" @click="toggleMore"><AppIcon name="more" :size="16" /></button>
     </div>
@@ -187,20 +203,31 @@ async function sendRequest() {
         <p :id="`${uid}-limits`" class="menu-note">Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p>
       </div>
     </FloatingPanel>
-    <p v-if="unavailable" class="hint">{{ unavailable }}</p>
-    <form v-if="!phone && composing" class="steer-form" @submit.prevent="submit('steer')">
+    <p v-if="unavailable && !overflow" class="hint">{{ unavailable }}</p>
+    <form v-if="!overflow && !phone && composing" class="steer-form" @submit.prevent="submit('steer')">
       <label :for="`${uid}-steer`">What should change?</label>
       <textarea :id="`${uid}-steer`" v-model="draft" rows="3" maxlength="8192" :disabled="waiting" :aria-describedby="`${uid}-help`" placeholder="Describe the next step…" />
       <p :id="`${uid}-help`" class="hint">{{ session.harness === 'claude' ? 'Queues your message for the next turn and interrupts the current one.' : 'Adds your message to the running turn.' }}</p>
       <div class="control-row"><button type="submit" class="btn sm primary" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn sm ghost" :disabled="waiting" @click="composing = false">Cancel</button></div>
     </form>
     <!-- A modal sheet makes the page behind it inert, so a lost receipt stays in the sheet. -->
-    <p v-if="feedback && !sheetOpen" class="feedback" role="status">{{ feedback }}</p>
-    <p v-if="error && !sheetOpen" class="hint" role="alert">{{ error }}</p>
+    <p v-if="feedback && !sheetOpen && !overflow" class="feedback" role="status">{{ feedback }}</p>
+    <p v-if="error && !sheetOpen && !overflow" class="hint" role="alert">{{ error }}</p>
     <div v-if="uncertain && !sheetOpen" class="control-row"><button type="button" class="btn sm ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn sm ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
-    <details v-if="!phone"><summary><AppIcon name="chevron-right" :size="12" />Control limits</summary><p>Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p></details>
-    <dialog v-if="phone" ref="sheetEl" class="steer-sheet" :aria-labelledby="`${uid}-sheet-title`" @cancel.prevent="closeSheet" @click="backdrop">
-      <div class="sheet-card">
+    <details v-if="!phone && !overflow"><summary><AppIcon name="chevron-right" :size="12" />Control limits</summary><p>Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p></details>
+    <FloatingPanel v-if="overflow && !phone && editorAnchor && (editing || composing)" :anchor="editorAnchor" :label="sheetTitle" :width="360" settings-keys cycle @close="closeSheet">
+      <form class="setting-form overflow-editor" @keydown="editorKeys" @submit.prevent="editing ? submit(editing) : submit('steer')">
+        <div class="control-row"><button type="submit" class="btn sm primary" :disabled="waiting || loadingSettings || !!unavailable || (editing ? !validValue : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}<KeyCap k="mod" /><KeyCap k="enter" /></button><button type="button" class="btn sm ghost" @click="closeSheet">Cancel</button></div>
+        <label :for="`${uid}-overflow-setting`">{{ editing ? settingNames[editing] : 'What should change?' }}</label>
+        <input v-if="editing === 'rename'" :id="`${uid}-overflow-setting`" v-model="settingValue" maxlength="128" :disabled="waiting" autocomplete="off" />
+        <select v-else-if="editing" :id="`${uid}-overflow-setting`" v-model="settingValue" :disabled="waiting || loadingSettings || !settingChoices.length"><option value="" disabled>Choose {{ settingNames[editing].toLowerCase() }}</option><option v-for="value in settingChoices" :key="value" :value="value">{{ value }}</option></select>
+        <textarea v-else :id="`${uid}-overflow-setting`" v-model="draft" rows="3" maxlength="8192" :disabled="waiting" />
+        <p v-if="editing && editing !== 'rename' && !loadingSettings && !settingChoices.length" class="hint">No compatible choices in this account’s catalog.</p>
+        <p v-if="feedback" role="status" class="hint">{{ feedback }}</p><p v-if="error" role="alert" class="hint">{{ error }}</p>
+      </form>
+    </FloatingPanel>
+    <dialog v-if="phone" ref="sheetEl" class="steer-sheet" :aria-labelledby="`${uid}-sheet-title`" @cancel.prevent="cancelSheet" @click="backdrop">
+      <div class="sheet-card" @keydown="editorKeys">
         <span class="grabber" aria-hidden="true" />
         <header class="sheet-head">
           <h2 :id="`${uid}-sheet-title`">{{ sheetTitle }}</h2>
@@ -228,7 +255,7 @@ async function sendRequest() {
             <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
           </div>
           <div class="sheet-actions">
-            <button type="submit" :form="`${uid}-sheet-form`" class="btn primary" :disabled="!!unavailable || waiting || (editing ? !validValue || loadingSettings : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}</button>
+            <button type="submit" :form="`${uid}-sheet-form`" class="btn primary" :disabled="!!unavailable || waiting || (editing ? !validValue || loadingSettings : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
             <button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button>
           </div>
         </footer>
@@ -239,6 +266,8 @@ async function sendRequest() {
 
 <style scoped>
 .managed-controls{display:grid;gap:10px;padding-top:12px;min-width:0}
+.managed-controls.overflow{padding:0;gap:0}
+.overflow-editor{padding:12px}
 .settings-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 .settings-title{grid-column:1/-1;font-size:12px;color:var(--ink-3)}
 .setting{display:flex;align-items:center;gap:6px;min-width:0;text-align:left;border:1px solid var(--line);border-radius:var(--radius-row);padding:8px;background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}

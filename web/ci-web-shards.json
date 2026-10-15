@@ -283,6 +283,17 @@
       ]
       ,
       "specs": [
+        {"file":"tests/native-session-program-1024.spec.ts","listedTests":2,"weightSeconds":13.333333333333334,"weightSource":"AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"}
+        ,
+        {"file":"tests/native-session-program-1440.spec.ts","listedTests":2,"weightSeconds":13.333333333333334,"weightSource":"AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"}
+        ,
+        {"file":"tests/native-session-program-390.spec.ts","listedTests":2,"weightSeconds":13.333333333333334,"weightSource":"AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"}
+        ,
+        {"file":"tests/native-session-program-reader.spec.ts","listedTests":1,"weightSeconds":6.666666666666667,"weightSource":"AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"}
+        ,
+        {"file":"tests/native-session-program-validation.spec.ts","listedTests":1,"weightSeconds":6.666666666666667,"weightSource":"AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"}
+        ,
+        {"file":"tests/native-session-program.spec.ts","listedTests":1,"weightSeconds":6.666666666666667,"weightSource":"AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"}
       ]
     }
     ,
@@ -884,11 +895,49 @@
     ,
     "AEON-1327: nightly catalogue shards pack from nightlyTiming, measured on hosted run 38488051180. Completed batches contribute wall time apportioned by Playwright case duration. theme-agents (650s), clip-tip-touch (200s), ticket-graph-view (90s) and work-surfaces-fix4 (120s) were still running when the 20-minute step died, so those four keep a conservative full-file estimate. settings-shared and work-surfaces-fix2 were not in that run and keep their tierTiming estimate. PR and merge-group packing stays on tierTiming. The 24-shard estimate peaks near 14.9 minutes, so the nightly execution cap stays 20 minutes."
     ,
+    "AEON-1309: nine unchanged panel cases are split into six spec files. A split alone left the historical-budget comparison at 304.841982s, above 300s. Seven open/menu/Escape/no-shift cases remain ESSENTIAL; only malformed-response coverage and the reader negative control move to NIGHTLY. The original conservative 60s estimate is apportioned by case count for gate and nightly packing; no hosted measurement is claimed. Historical prior-gate weight excluding this slice remains 299.838842s and is still bounded below 300s."
+    ,
     "AEON-1400: nightlyTiming and tierTiming refresh from hosted nightly run 38732586462. Shards 1-10, 12-14, 16-20 and 22-24 are attempt 1; shards 11, 15 and 21 are attempt 2. Completed batches contribute wall time apportioned by Playwright case duration. agent-rules-shots, knowledge-shots and session-chat-cli recorded zero case duration and keep their one-second placeholder. PR and merge-group packing still reads tierTiming. The twelve-shard full-layout estimate peaks at 13.49 minutes; shard 7 estimates 13.48 minutes."
   ]
   ,
   "nightlyTiming": {
-    "files": {}
+    "files": {
+      "tests/native-session-program-1024.spec.ts": {
+        "seconds": 13.333333333333334
+        ,
+        "selectedTests": 2
+      }
+      ,
+      "tests/native-session-program-1440.spec.ts": {
+        "seconds": 13.333333333333334
+        ,
+        "selectedTests": 2
+      }
+      ,
+      "tests/native-session-program-390.spec.ts": {
+        "seconds": 13.333333333333334
+        ,
+        "selectedTests": 2
+      }
+      ,
+      "tests/native-session-program-reader.spec.ts": {
+        "seconds": 6.666666666666667
+        ,
+        "selectedTests": 1
+      }
+      ,
+      "tests/native-session-program-validation.spec.ts": {
+        "seconds": 6.666666666666667
+        ,
+        "selectedTests": 1
+      }
+      ,
+      "tests/native-session-program.spec.ts": {
+        "seconds": 6.666666666666667
+        ,
+        "selectedTests": 1
+      }
+    }
     ,
     "run": "38732586462"
   }
