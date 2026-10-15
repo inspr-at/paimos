@@ -160,17 +160,19 @@ func (e *Executor) Run(ctx context.Context) {
 
 func (e *Executor) listen(ctx context.Context, wakes chan<- struct{}) {
 	for ctx.Err() == nil {
-		step, cancel := context.WithTimeout(ctx, 5*time.Second)
-		conn, err := pgx.ConnectConfig(step, e.pool.Config().ConnConfig.Copy())
-		if err == nil {
-			_, err = conn.Exec(step, `LISTEN aeon_routine_intents`)
-		}
-		cancel()
+		conn, err := db.SubscribeNotifications(ctx, e.pool, "aeon_routine_intents", "")
 		if err == nil {
 			for ctx.Err() == nil {
 				n, waitErr := conn.WaitForNotification(ctx)
 				if waitErr != nil {
 					break
+				}
+				if db.IsResync(n) {
+					select {
+					case wakes <- struct{}{}:
+					default:
+					}
+					continue
 				}
 				if len(n.Payload) > 1024 {
 					continue
