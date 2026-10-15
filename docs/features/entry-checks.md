@@ -23,7 +23,8 @@ in a live Knowledge entry in the ticket's current project, or an explicit
 comment. Recommendations, dismissed learnings, blank reasons and deleted or
 edited-away notes do not count. Agents receive the standard refusal; people
 can override with a reason recorded in the status entry. Saved definitions
-retain their whole-copy replacement semantics.
+retain their whole-copy replacement semantics. Body and status changes, including
+Undo, evaluate the body that the mutation will write.
 
 `GET /api/nodes/{id}/entry-checks` returns current checks, the definition source,
 immutable entry records and the latest agent refusal. Status writes and queue
