@@ -8138,6 +8138,24 @@
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Add and row menus stay anchored at every width with the approved copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Applies to offers only All Code UI and keeps fixed conditions as text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 catalog SVG icons match rows Add menus and folded checks","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 condition and difference lines wrap without truncation at every width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 feedback uses the origin toast and fixed form footer without empty bands","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 phone origin and all block heads stay within 0.5px across first add copy and reset","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 definition states and folded left-out checks fit phone, tablet and desktop in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 failed and stale project definition writes never claim success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 project definitions copy, edit, undo, conditions and reset stay bound and stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -17409,6 +17427,8 @@
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > retains choice navigation outside the summary and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/definitions.unit.test.ts","name":"AEON-1316 describes complete copies, conditions, owners and their retained base","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"Live opens at 45 min with now at 65 % (20 on a phone) and presets zoom around now while following","tier":"ESSENTIAL"}
     ,

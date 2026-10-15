@@ -264,6 +264,8 @@
       ]
       ,
       "specs": [
+        {"file":"tests/definitions.spec.ts","listedTests":9,"weightSeconds":120,"weightSource":"AEON-1316 FIX4 estimate: original flows plus six verdict regressions at 390/1024/1440 in light/dark"}
+        ,
         {"file":"tests/entry-checks.spec.ts","weightSeconds":30}
         ,
         {"file":"tests/work-queue.spec.ts","listedTests":30,"tierTiming":{"caseSeconds":{"max":11.202,"median":1.5205,"min":1.024},"seconds":53.363,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
@@ -1697,6 +1699,8 @@
       "tests/decision-desk.spec.ts": {"seconds":377.254,"selectedTests":60}
       ,
       "tests/decision-text.spec.ts": {"seconds":159.516,"selectedTests":22}
+      ,
+      "tests/definitions.spec.ts": {"basis":"Guarded remote-spec.sh complete file: 3 passed (14.5s); this is a pre-merge measurement, not a nightly run.","runner":"mbp2606","seconds":14.5,"selectedTests":3,"sourceCommit":"e8377156b5508aa1c487913f83f3e33e9474570b"}
       ,
       "tests/delivery-arion-v5.spec.ts": {"seconds":45.05,"selectedTests":14}
       ,
