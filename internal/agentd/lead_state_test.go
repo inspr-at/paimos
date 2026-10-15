@@ -61,6 +61,16 @@ func TestAgentdStateDowngradeRoundTrip(t *testing.T) {
 			if err := s.Close(t.Context()); blocked && !errors.Is(err, ErrProcessesUnconfirmed) || !blocked && err != nil {
 				t.Fatal("close forgot retained ownership", err)
 			}
+			if blocked {
+				// Simulate process exit releasing descriptors, without turning
+				// the failed Close into permission to clean up retained state.
+				if err := s.lock.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.state.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
 			next, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: root, DaemonID: "daemon", Workspace: workspace, Adapters: []Adapter{&fakeAdapter{proc: proc}}})
 			if blocked {
 				if !errors.Is(err, ErrProcessesUnconfirmed) {
@@ -146,6 +156,28 @@ func TestAgentdStateDowngradeRoundTrip(t *testing.T) {
 		_, _, err := readLeadState(s.state, "lead-runtime-"+r.Pickup.Demand.ID+".json")
 		if !errors.Is(err, ErrProcessesUnconfirmed) || errors.Is(err, os.ErrNotExist) {
 			t.Fatal("missing sidecar became an absent claim", err)
+		}
+		// A crash after provenance but before settlement also keeps the
+		// conservative guard. Known fields in the two files must agree.
+		r.Version = leadRecordSchemaVersion
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.state.Write(nativeLeadStateName(r.Pickup.Demand.ID), raw, false); err != nil {
+			t.Fatal(err)
+		}
+		if !errors.Is(checkRetainedLeads(s.state), ErrProcessesUnconfirmed) || !errors.Is(release131CheckRetainedLeads(s.state), ErrProcessesUnconfirmed) {
+			t.Fatal("uncommitted settlement escaped the compatibility guard")
+		}
+		if err := s.writeLead(r, false); err != nil {
+			t.Fatal("current owner could not retry interrupted settlement", err)
+		}
+		if err := checkRetainedLeads(s.state); err != nil {
+			t.Fatal("committed retry did not restore the current reader", err)
+		}
+		if err := release131CheckRetainedLeads(s.state); err != nil {
+			t.Fatal("committed retry did not restore the released reader", err)
 		}
 	})
 }

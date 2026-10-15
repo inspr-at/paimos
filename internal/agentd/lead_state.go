@@ -109,9 +109,9 @@ func readLeadState(store *agentsetup.Store, name string) (leadRecord, int, error
 	record.Version = 1
 	// Minor revisions never change the major's interpretation of the fence.
 	want.MinorVersion = record.MinorVersion
-	wantRaw, _ := leadStateJSON(want)
-	gotRaw, _ := leadStateJSON(record)
-	if !bytes.Equal(wantRaw, gotRaw) {
+	wantRaw, wantErr := leadStateJSON(want)
+	gotRaw, gotErr := leadStateJSON(record)
+	if wantErr != nil || gotErr != nil || !bytes.Equal(wantRaw, gotRaw) {
 		return leadRecord{}, 0, ErrProcessesUnconfirmed
 	}
 	return native, header.Version, nil
