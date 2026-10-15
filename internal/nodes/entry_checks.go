@@ -240,6 +240,33 @@ type entryDefinitionInput struct {
 	Checks     map[string][]workqueue.EntryRule `json:"checks"`
 	Revision   *time.Time                       `json:"expected_revision"`
 	CopiedFrom *time.Time                       `json:"copied_from_revision"`
+	Workspace  *time.Time                       `json:"expected_workspace_revision"`
+}
+
+type entryDefinitionContext struct {
+	ProjectID  string                           `json:"project_id"`
+	Definition *workqueue.EntryDefinition       `json:"definition"`
+	Workspace  *workqueue.EntryDefinition       `json:"workspace_default"`
+	Base       map[string][]workqueue.EntryRule `json:"copied_from_checks"`
+	CanManage  bool                             `json:"can_manage"`
+}
+
+func entryCopyChecksTx(ctx context.Context, tx pgx.Tx, id string) (map[string][]workqueue.EntryRule, error) {
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT fields->'copied_from_checks' FROM nodes WHERE id=$1`, id).Scan(&raw); err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var checks map[string][]workqueue.EntryRule
+	if len(raw) > 65536 || json.Unmarshal(raw, &checks) != nil {
+		return nil, conflict("invalid definition copy base")
+	}
+	if err := workqueue.ValidateEntryRules(checks); err != nil {
+		return nil, conflict("invalid definition copy base")
+	}
+	return checks, nil
 }
 
 func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +282,8 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 		}
 		project = &id
 	}
-	write := r.Method == http.MethodPut
+	reset := r.Method == http.MethodDelete
+	write := r.Method == http.MethodPut || reset
 	var in entryDefinitionInput
 	if write {
 		body, ok := readBody(w, r)
@@ -266,12 +294,19 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
-		if err := workqueue.ValidateEntryRules(in.Checks); err != nil {
-			writeErr(w, err)
+		if reset && in.Revision == nil {
+			writeErr(w, badRequest("expected_revision is required"))
 			return
+		}
+		if !reset {
+			if err := workqueue.ValidateEntryRules(in.Checks); err != nil {
+				writeErr(w, err)
+				return
+			}
 		}
 	}
 	var out *workqueue.EntryDefinition
+	var editor *entryDefinitionContext
 	err := m.tx(r.Context(), p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := lockTree(ctx, tx); err != nil {
 			return err
@@ -303,19 +338,71 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 		}
 		out = current
 		if !write {
+			if project != nil && strings.HasSuffix(r.URL.Path, "/context") {
+				workspace, err := workqueue.EntryDefinitionTx(ctx, tx, nil, true)
+				if err != nil {
+					return err
+				}
+				editor = &entryDefinitionContext{ProjectID: *project, Definition: current, Workspace: workspace}
+				if p.Kind == tenant.Person {
+					err := authz.RequireProjectAdminTx(ctx, tx, p, *project)
+					if err != nil && !errors.Is(err, authz.ErrForbidden) {
+						return err
+					}
+					editor.CanManage = err == nil
+				}
+				if current != nil && current.Source == "project" {
+					editor.Base, err = entryCopyChecksTx(ctx, tx, current.ID)
+					if err != nil {
+						return err
+					}
+					if editor.Base == nil && current.CopiedFrom != nil && workspace != nil && current.CopiedFrom.Equal(workspace.Revision) {
+						editor.Base = workspace.Checks
+					}
+				}
+			}
 			return nil
 		}
 		if current == nil && in.Revision != nil || current != nil && (in.Revision == nil || !current.Revision.Equal(*in.Revision)) {
 			return conflict("definition has changed")
 		}
-		if in.CopiedFrom != nil {
-			base, err := workqueue.EntryDefinitionTx(ctx, tx, nil, false)
+		var baseChecks map[string][]workqueue.EntryRule
+		workspace, err := workqueue.EntryDefinitionTx(ctx, tx, nil, true)
+		if err != nil {
+			return err
+		}
+		if project != nil && (reset || in.Workspace != nil) && (workspace == nil && in.Workspace != nil || workspace != nil && (in.Workspace == nil || !workspace.Revision.Equal(*in.Workspace))) {
+			return conflict("workspace default has changed; reload before copying or resetting")
+		}
+		if reset {
+			if current == nil {
+				return conflict("project definition has changed")
+			}
+			if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=clock_timestamp(),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1`, current.ID); err != nil {
+				return err
+			}
+			out = workspace
+			return m.record(ctx, tx, p.ID, &current.ID, "definition.reset", current, workspace)
+		}
+		if current != nil {
+			// Ordinary edits preserve the server's original base, even after a
+			// later default change. Clients cannot silently rebase a copy.
+			if in.CopiedFrom != nil && (current.CopiedFrom == nil || !current.CopiedFrom.Equal(*in.CopiedFrom)) {
+				return badRequest("copy base cannot change during an edit")
+			}
+			in.CopiedFrom = current.CopiedFrom
+			baseChecks, err = entryCopyChecksTx(ctx, tx, current.ID)
 			if err != nil {
 				return err
 			}
-			if project == nil || base == nil || !base.Revision.Equal(*in.CopiedFrom) {
+			if baseChecks == nil && in.CopiedFrom != nil && workspace != nil && in.CopiedFrom.Equal(workspace.Revision) {
+				baseChecks = workspace.Checks
+			}
+		} else if in.CopiedFrom != nil {
+			if project == nil || workspace == nil || !workspace.Revision.Equal(*in.CopiedFrom) {
 				return badRequest("copied_from_revision must name the current workspace default")
 			}
+			baseChecks = workspace.Checks
 		}
 		for _, rules := range in.Checks {
 			for _, rule := range rules {
@@ -331,7 +418,10 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		fields := entryJSON(map[string]any{"checks": in.Checks, "copied_from_revision": in.CopiedFrom})
+		fields := entryJSON(map[string]any{"checks": in.Checks, "copied_from_revision": in.CopiedFrom, "copied_from_checks": baseChecks})
+		if len(fields) > 65536 {
+			return badRequest("definition and copy base exceed 64 KiB")
+		}
 		var id string
 		var revision time.Time
 		if current == nil {
@@ -351,12 +441,8 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 		if project != nil {
 			out.Source = "project"
 		}
-		if project != nil && in.CopiedFrom != nil {
-			base, err := workqueue.EntryDefinitionTx(ctx, tx, nil, false)
-			if err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'cites') ON CONFLICT DO NOTHING`, p.TenantID, id, base.ID); err != nil {
+		if project != nil && in.CopiedFrom != nil && workspace != nil && workspace.ID != "00000000-0000-0000-0000-000000000000" && workspace.Revision.Equal(*in.CopiedFrom) {
+			if _, err = tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'cites') ON CONFLICT DO NOTHING`, p.TenantID, id, workspace.ID); err != nil {
 				return err
 			}
 		}
@@ -369,7 +455,11 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, 200, out)
+	if editor != nil {
+		writeJSON(w, 200, editor)
+	} else {
+		writeJSON(w, 200, out)
+	}
 }
 
 func entryFailedLabels(f *workqueue.EntryFailure) string {

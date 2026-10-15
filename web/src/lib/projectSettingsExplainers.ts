@@ -6,6 +6,22 @@
 // {K} is the project key, {N} a ticket number of that project, {R} its repository, {O} its GitHub owner.
 // where: a real place to read the record ({ label, go }); null when no page shows it yet (an open point, never invented).
 const EXPL = {
+  definitions: { title: 'Definitions',
+    what: 'A definition lists the checks a ticket must pass before it enters a status: Ready before In progress, QA before QA, Done before Done. Other statuses have no checks.',
+    effect: 'A {K} ticket can enter In progress once its checks pass, for example an estimate and written acceptance criteria. Its next-status line shows how far it is, such as “Ready 1/2”.',
+    who: 'Admins set the workspace default in Settings › Policies. A project admin can give a project its own definition.' },
+  enforce: { title: 'Agents and people',
+    what: 'Agents and people meet the same checks. An agent is stopped when a check fails; a person can go ahead with a reason.',
+    effect: 'If a {K} ticket requires an estimate and none is set, PAIMOS refuses an agent’s start and names the missing check in the ticket’s activity. A person can choose “Move anyway”, write why, and the move is logged with the missing checks.',
+    who: 'People who may change a ticket’s status can move it anyway.' },
+  copy: { title: 'Workspace default or this project',
+    what: 'A project follows the workspace default until someone gives it its own definition. Then it keeps a full copy; nothing is merged.',
+    effect: 'While {K} uses the default, a workspace change applies at once. After “Change for this project”, {K} edits its copy and this page shows how it differs. Later workspace changes leave the copy intact. Reset drops the copy; tickets keep their status.',
+    who: 'Project admins change their project’s copy. Admins change the workspace default.' },
+  manual: { title: 'Items a person ticks',
+    what: 'A free-text item in a definition, such as “Release notes reviewed”. PAIMOS cannot check it; a person confirms it on each ticket.',
+    effect: 'A {K} ticket waits for its owner to confirm the item. The ticket’s person assignee is its owner, otherwise a current project admin. An agent can read the item but cannot tick it.',
+    who: 'Project admins add items. Only the item’s current owner or a project admin may tick it.' },
   shadow: { title: 'Shadow mode',
     what: 'Shadow runs one of the coordinator’s machines next to the lead, without any power. The machine makes its decision and PAIMOS stores it as a record; nothing is started, merged or shipped.',
     effect: 'With the delivery queue in Shadow, each finished round gets a record such as “{K}-{N}: second in line, waits for CI”. The lead still decides. People compare these records with what the lead really did, before any machine may act.',

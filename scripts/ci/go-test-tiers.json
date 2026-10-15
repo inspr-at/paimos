@@ -8420,6 +8420,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestProjectCountsWorkKindsAndStateGroups","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestProjectDefinitionsCopyEditAndReset","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","file":"internal/nodes/project_lookup_test.go","name":"TestProjectLookupAliasesVisibilityAndZeroAggregates","tier":"ESSENTIAL"}
