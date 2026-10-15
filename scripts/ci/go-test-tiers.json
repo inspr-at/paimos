@@ -5856,6 +5856,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestNotificationPointersAndNormalBriefingItem","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestPersonStepProjectionIgnoresIrrelevantCoverage","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPreparedLessonProjectionVisibilityAndDecision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestProjectionApprovalLabelRetainsScopeWithoutRationale","tier":"GATED-FULL"}
