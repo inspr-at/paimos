@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -165,6 +166,40 @@ func TestMessagingAssistantProvisioningBounds(t *testing.T) {
 			t.Fatal("30-day boundary rejected or changed")
 		}
 	})
+	t.Run("notice failure rolls back and withholds secret", func(t *testing.T) {
+		m, owner, now := assistantFixture(t)
+		beforeKeys, beforeEvents := keyCounts(t, m, owner)
+		failure := errors.New("notice unavailable")
+		m.AssistantNoticeTx = func(ctx context.Context, tx pgx.Tx, _ string, _ string, _ string, body string) error {
+			if strings.Contains(body, "aeon_") {
+				t.Fatal("notice includes credential")
+			}
+			if _, err := events.Append(ctx, tx, owner, events.Change{Type: "test.notice"}); err != nil {
+				return err
+			}
+			return failure
+		}
+		expires := now.Add(time.Hour)
+		rec, err := m.messagingAssistant(t.Context(), owner, "create", "", assistantInput{Name: "Rolled back", ExpiresAt: &expires})
+		if !errors.Is(err, failure) || rec.Token != "" {
+			t.Fatal("failed notice returned secret or wrong failure")
+		}
+		if keys, events := keyCounts(t, m, owner); keys != beforeKeys || events != beforeEvents {
+			t.Fatal("notice failure committed keys or events")
+		}
+		if err := m.inTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
+			var count int
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM principals WHERE name='Rolled back'`).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				t.Fatal("notice failure committed principal")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 // Risk: key metadata substitutes for current workspace/owner authority. Each
@@ -222,6 +257,12 @@ func TestMessagingAssistantLiveOwnerAndCallerBounds(t *testing.T) {
 			_, err := m.messagingAssistant(ctx, agent, "create", "", assistantInput{Name: "Denied", ExpiresAt: &expires})
 			if !errors.Is(err, authz.ErrForbidden) && !errors.Is(err, db.ErrKeyAuthorityChanged) {
 				t.Fatalf("missing %s allowed or wrong refusal: %v", missing, err)
+			}
+			if missing == "agents.create" || missing == "keys.manage" {
+				body, _ := json.Marshal(assistantInput{Name: "Denied person", ExpiresAt: &expires})
+				if out := assistantHTTP(m, owner, "POST", "/api/agents/assistants", string(body)); out.Code != 403 {
+					t.Fatalf("person without %s HTTP status %d", missing, out.Code)
+				}
 			}
 			if err := m.inTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
 				var n int
