@@ -571,7 +571,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <p v-if="isLead && why" class="sr-only">Opened on {{ PANEL_TAB_LABEL[openedTab] }}: {{ why.replace('Session is', 'Details is') }}</p>
       <ManagedSessionControls v-if="view && !loading && !reported?.watch && !nativeKnown" ref="managed" overflow :session="reported || view.session" :now="now" :run-status="view.run?.status" />
       <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
-      <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" :width="nativeKnown ? 400 : 360" @close="closeActions">
+      <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" :width="nativeKnown ? 440 : 360" @close="closeActions">
         <div class="panel-menu" :class="{ 'phone-full': panelLayout === 'full', 'native-menu': nativeKnown }" role="menu" aria-label="More session actions">
           <button type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full'); closeActions(true)"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="16" /><span>{{ panelLayout === 'full' ? 'Exit full screen' : 'Full screen' }}</span><KeyCap k="shift" /><KeyCap k="E" /></button>
           <button v-if="sidebarAvailable" type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side'); closeActions(true)"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="16" /><span>{{ panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list' }}</span></button>
@@ -907,8 +907,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .pane-bar > :deep(.session-tabs) { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   .pane-buttons { grid-column: 2; grid-row: 1; }
   .pane-layout { display: none; }
-  /* Let the plain reason use the icon's column on phones, too. */
-  .native-menu .panel-menu-item small { margin-left: -26px; }
+  /* The reason spans the menu below its label: icon 16 + gap 10 + inset 10. */
+  .native-menu .panel-menu-item small { margin-inline: -36px -10px; }
   .pane-icon { width: 44px; height: 44px; }
   .full .pane-bar { height: 48px; grid-template-rows: 48px; }
   .full .pane-bar > :deep(.session-tabs) { display: none; }
