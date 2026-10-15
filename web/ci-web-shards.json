@@ -1546,2063 +1546,691 @@
   ,
   "nightlyTiming": {
     "files": {
-      "tests/a11y.spec.ts": {
-        "seconds": 218.151
-        ,
-        "selectedTests": 82
-      }
-      ,
-      "tests/access.spec.ts": {
-        "seconds": 139.744
-        ,
-        "selectedTests": 42
-      }
-      ,
-      "tests/account-link.spec.ts": {
-        "seconds": 23.685
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/account-resets.spec.ts": {
-        "seconds": 26.6
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/account-use-matrix.spec.ts": {
-        "seconds": 45.26
-        ,
-        "selectedTests": 21
-      }
-      ,
-      "tests/accounts-card-fit.spec.ts": {
-        "seconds": 10.722
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/accounts-computers.spec.ts": {
-        "seconds": 48.969
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/accounts-quota-bar.spec.ts": {
-        "seconds": 52.879
-        ,
-        "selectedTests": 27
-      }
-      ,
-      "tests/activity-history.spec.ts": {
-        "seconds": 13.556
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/add-account.spec.ts": {
-        "seconds": 23.444
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/aeon-1028-projheader.spec.ts": {
-        "seconds": 107.492
-        ,
-        "selectedTests": 42
-      }
-      ,
-      "tests/aeon-1042-headergraph.spec.ts": {
-        "seconds": 100.585
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/aeon-1062-qapolish.spec.ts": {
-        "seconds": 50.619
-        ,
-        "selectedTests": 20
-      }
-      ,
-      "tests/aeon-1071-chat-live.spec.ts": {
-        "seconds": 60.351
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/aeon-1188-displayhome.spec.ts": {
-        "seconds": 20.034
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/aeon-1209-agents-head.spec.ts": {
-        "seconds": 161.204
-        ,
-        "selectedTests": 28
-      }
-      ,
-      "tests/aeon-1210-agents-tree.spec.ts": {
-        "seconds": 48.298
-        ,
-        "selectedTests": 19
-      }
-      ,
-      "tests/aeon-1211-agents-rows.spec.ts": {
-        "seconds": 108.399
-        ,
-        "selectedTests": 40
-      }
-      ,
-      "tests/aeon-1212-lead-panel.spec.ts": {
-        "seconds": 424.754
-        ,
-        "selectedTests": 56
-      }
-      ,
-      "tests/aeon-1213-agents-split.spec.ts": {
-        "seconds": 77.221
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/aeon-1279-touch-scroll.spec.ts": {
-        "seconds": 27.333
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/aeon-1285-agent-rows.spec.ts": {
-        "seconds": 28.355
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/aeon-1339-desk-polish.spec.ts": {
-        "seconds": 100.579
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/aeon-632b-clip-settings.spec.ts": {
-        "seconds": 194.118
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/aeon-632b-clip-touch.spec.ts": {
-        "seconds": 32.652
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/aeon-632b-clip.spec.ts": {
-        "seconds": 104.965
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/aeon-635.spec.ts": {
-        "seconds": 219.024
-        ,
-        "selectedTests": 21
-      }
-      ,
-      "tests/aeon-908-polish.spec.ts": {
-        "seconds": 97.268
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/aeon-974-typefilter.spec.ts": {
-        "seconds": 39.504
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/agent-activity.spec.ts": {
-        "seconds": 94.787
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/agent-done-state.spec.ts": {
-        "seconds": 9.204
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/agent-indicator.spec.ts": {
-        "seconds": 131.838
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/agent-names.spec.ts": {
-        "seconds": 5.967
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/agent-pairing.spec.ts": {
-        "seconds": 81.644
-        ,
-        "selectedTests": 35
-      }
-      ,
-      "tests/agent-pause.spec.ts": {
-        "seconds": 97.344
-        ,
-        "selectedTests": 25
-      }
-      ,
-      "tests/agent-recovery.spec.ts": {
-        "seconds": 65.667
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/agent-rules-budget-clients.spec.ts": {
-        "seconds": 22.291
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/agent-rules-doctrine.spec.ts": {
-        "seconds": 21.709
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/agent-rules-flow.spec.ts": {
-        "seconds": 13.562
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/agent-rules-import.spec.ts": {
-        "seconds": 15.786
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/agent-rules-shots.spec.ts": {
-        "seconds": 1
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/agent-rules-ticks.spec.ts": {
-        "seconds": 25.875
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/agent-rules-tldr.spec.ts": {
-        "seconds": 19.139
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/agent-rules.spec.ts": {
-        "seconds": 31.253
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/agents-cleanup.spec.ts": {
-        "seconds": 17.714
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/agents-dial-daily.spec.ts": {
-        "seconds": 225.41
-        ,
-        "selectedTests": 38
-      }
-      ,
-      "tests/agents-dial.spec.ts": {
-        "seconds": 203.659
-        ,
-        "selectedTests": 28
-      }
-      ,
-      "tests/agents-display.spec.ts": {
-        "seconds": 54.712
-        ,
-        "selectedTests": 17
-      }
-      ,
-      "tests/agents-handover.spec.ts": {
-        "seconds": 16.712
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/agents-harness-status.spec.ts": {
-        "seconds": 65.078
-        ,
-        "selectedTests": 25
-      }
-      ,
-      "tests/agents-head.spec.ts": {
-        "seconds": 6.526
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/agents-hierarchy.spec.ts": {
-        "seconds": 26.972
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/agents-metadata.spec.ts": {
-        "seconds": 37.391
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/agents-mission.spec.ts": {
-        "seconds": 37.073
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/agents-order.spec.ts": {
-        "seconds": 18.006
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/agents-phone-rows.spec.ts": {
-        "seconds": 21.034
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/agents-top.spec.ts": {
-        "seconds": 10.639
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/agents-worker-tree.spec.ts": {
-        "seconds": 70.177
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/agents.spec.ts": {
-        "seconds": 108.778
-        ,
-        "selectedTests": 36
-      }
-      ,
-      "tests/approval-feedback.spec.ts": {
-        "seconds": 88.484
-        ,
-        "selectedTests": 18
-      }
-      ,
-      "tests/attach-discoverable.spec.ts": {
-        "seconds": 181.26
-        ,
-        "selectedTests": 47
-      }
-      ,
-      "tests/attach-security.spec.ts": {
-        "seconds": 151.008
-        ,
-        "selectedTests": 50
-      }
-      ,
-      "tests/attach-watch.spec.ts": {
-        "seconds": 115.259
-        ,
-        "selectedTests": 31
-      }
-      ,
-      "tests/attachments.spec.ts": {
-        "seconds": 34.821
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/authz.spec.ts": {
-        "seconds": 3.996
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/avatar-upload-bounds.spec.ts": {
-        "seconds": 8.685
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/avatars.spec.ts": {
-        "seconds": 6.547
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/brand.spec.ts": {
-        "seconds": 2.528
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/bulk.spec.ts": {
-        "seconds": 53.689
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/business.spec.ts": {
-        "seconds": 16.673
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/capacity-learning.spec.ts": {
-        "seconds": 19.842
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/capacity-pace.spec.ts": {
-        "seconds": 37.666
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/classic-invite.spec.ts": {
-        "seconds": 11.962
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/clip-tip-disclosure.spec.ts": {
-        "seconds": 36.53
-        ,
-        "selectedTests": 24
-      }
-      ,
-      "tests/clip-tip-overflow.spec.ts": {
-        "seconds": 51.032
-        ,
-        "selectedTests": 24
-      }
-      ,
-      "tests/clip-tip-touch.spec.ts": {
-        "seconds": 111.536
-        ,
-        "selectedTests": 39
-      }
-      ,
-      "tests/clip-tip.spec.ts": {
-        "seconds": 185.614
-        ,
-        "selectedTests": 72
-      }
-      ,
-      "tests/coarse-hit-area.spec.ts": {
-        "seconds": 0.385
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/connect-verification.spec.ts": {
-        "seconds": 13.921
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/cost-units.spec.ts": {
-        "seconds": 5.807
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/crm.spec.ts": {
-        "seconds": 46.709
-        ,
-        "selectedTests": 25
-      }
-      ,
-      "tests/dead-screens.spec.ts": {
-        "seconds": 40.631
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/dead-sessions.spec.ts": {
-        "seconds": 69.972
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/decision-desk-fix2.spec.ts": {
-        "seconds": 108.457
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/decision-desk-fix3.spec.ts": {
-        "seconds": 43.085
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/decision-desk-lessons.spec.ts": {
-        "seconds": 123.974
-        ,
-        "selectedTests": 26
-      }
-      ,
-      "tests/decision-desk-project.spec.ts": {
-        "seconds": 42.455
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/decision-desk.spec.ts": {
-        "seconds": 422.154
-        ,
-        "selectedTests": 60
-      }
-      ,
-      "tests/decision-text.spec.ts": {
-        "seconds": 118.051
-        ,
-        "selectedTests": 22
-      }
-      ,
-      "tests/definitions.spec.ts": {
-        "seconds": 160.822
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/delivery-arion-v5.spec.ts": {
-        "seconds": 36.608
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/delivery-flow-lanes.spec.ts": {
-        "seconds": 37.106
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/delivery-flow-modes.spec.ts": {
-        "seconds": 144.785
-        ,
-        "selectedTests": 25
-      }
-      ,
-      "tests/delivery-guarantee.spec.ts": {
-        "seconds": 48.966
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/delivery-numbers.spec.ts": {
-        "seconds": 51.39
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/delivery-polish.spec.ts": {
-        "seconds": 153.594
-        ,
-        "selectedTests": 18
-      }
-      ,
-      "tests/delivery-rating.spec.ts": {
-        "seconds": 45.766
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/delivery-simple.spec.ts": {
-        "seconds": 56.773
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/delivery-tab-switch.spec.ts": {
-        "seconds": 26.435
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/delivery-ui.spec.ts": {
-        "seconds": 102.25
-        ,
-        "selectedTests": 17
-      }
-      ,
-      "tests/deploy-target.spec.ts": {
-        "seconds": 2.233
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/developer-settings.spec.ts": {
-        "seconds": 27.725
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/dialog-full-text.spec.ts": {
-        "seconds": 172.582
-        ,
-        "selectedTests": 52
-      }
-      ,
-      "tests/dialog-scale.spec.ts": {
-        "seconds": 168.563
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/dialog-widths.spec.ts": {
-        "seconds": 92.913
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/display-language.spec.ts": {
-        "seconds": 27.647
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/doctrine-inbox.spec.ts": {
-        "seconds": 27.283
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/done-gate.spec.ts": {
-        "seconds": 53.82
-        ,
-        "selectedTests": 20
-      }
-      ,
-      "tests/entry-checks.spec.ts": {
-        "seconds": 32.913
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/estimates.spec.ts": {
-        "seconds": 20.01
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/eta-column.spec.ts": {
-        "seconds": 61.635
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/features.spec.ts": {
-        "seconds": 15.009
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/first-impression.spec.ts": {
-        "seconds": 55.383
-        ,
-        "selectedTests": 38
-      }
-      ,
-      "tests/first-run.spec.ts": {
-        "seconds": 26.819
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/footer-release-pill.spec.ts": {
-        "seconds": 78.518
-        ,
-        "selectedTests": 39
-      }
-      ,
-      "tests/footer-summary.spec.ts": {
-        "seconds": 24.327
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/from-classic.spec.ts": {
-        "seconds": 4.851
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/graph-canvas.spec.ts": {
-        "seconds": 2.703
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/graph-focus.spec.ts": {
-        "seconds": 18.808
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/graph-hit.spec.ts": {
-        "seconds": 8.958
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/graph-motion.spec.ts": {
-        "seconds": 30.1
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/groups.spec.ts": {
-        "seconds": 31.338
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/guest.spec.ts": {
-        "seconds": 3.778
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/header-desk-split.spec.ts": {
-        "seconds": 323.713
-        ,
-        "selectedTests": 44
-      }
-      ,
-      "tests/header-glimpse-context.spec.ts": {
-        "seconds": 39.657
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/header-glimpse.spec.ts": {
-        "seconds": 316.649
-        ,
-        "selectedTests": 21
-      }
-      ,
-      "tests/header-menus.spec.ts": {
-        "seconds": 85.423
-        ,
-        "selectedTests": 92
-      }
-      ,
-      "tests/headings.spec.ts": {
-        "seconds": 217.494
-        ,
-        "selectedTests": 90
-      }
-      ,
-      "tests/hide-states.spec.ts": {
-        "seconds": 183.896
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/hours-edit.spec.ts": {
-        "seconds": 15.842
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/hours.spec.ts": {
-        "seconds": 18.316
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/html-sandbox.spec.ts": {
-        "seconds": 25.948
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/indicator-controls.spec.ts": {
-        "seconds": 66.116
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/indicator-creative-gallery.spec.ts": {
-        "seconds": 7.177
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/indicator-gallery.spec.ts": {
-        "seconds": 4.441
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/intake-extensions.spec.ts": {
-        "seconds": 24.962
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/key-dialog.spec.ts": {
-        "seconds": 44.332
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/key-expiry.spec.ts": {
-        "seconds": 49.6
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/key-full-access.spec.ts": {
-        "seconds": 131.769
-        ,
-        "selectedTests": 22
-      }
-      ,
-      "tests/key-layout.spec.ts": {
-        "seconds": 46.668
-        ,
-        "selectedTests": 24
-      }
-      ,
-      "tests/key-scopes.spec.ts": {
-        "seconds": 104.068
-        ,
-        "selectedTests": 23
-      }
-      ,
-      "tests/key-trim.spec.ts": {
-        "seconds": 21.058
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/kind-convert.spec.ts": {
-        "seconds": 13.753
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/knowledge-dock.spec.ts": {
-        "seconds": 52.809
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/knowledge-graph.spec.ts": {
-        "seconds": 110.023
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/knowledge-learnings.spec.ts": {
-        "seconds": 52.248
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/knowledge-shots.spec.ts": {
-        "seconds": 1
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/knowledge.spec.ts": {
-        "seconds": 73.594
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/lead-adoption.spec.ts": {
-        "seconds": 71.973
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/lead-card.spec.ts": {
-        "seconds": 52.868
-        ,
-        "selectedTests": 18
-      }
-      ,
-      "tests/lead-flow.spec.ts": {
-        "seconds": 117.063
-        ,
-        "selectedTests": 23
-      }
-      ,
-      "tests/lead-remove.spec.ts": {
-        "seconds": 46.201
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/lead-start.spec.ts": {
-        "seconds": 166.725
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/list-columns.spec.ts": {
-        "seconds": 53.433
-        ,
-        "selectedTests": 18
-      }
-      ,
-      "tests/live-agents-layout.spec.ts": {
-        "seconds": 17.004
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/live-agents.spec.ts": {
-        "seconds": 40.749
-        ,
-        "selectedTests": 36
-      }
-      ,
-      "tests/live-list-sessions.spec.ts": {
-        "seconds": 5.055
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/live-list.spec.ts": {
-        "seconds": 70.104
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/live-panel.spec.ts": {
-        "seconds": 32.313
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/managed-controls.spec.ts": {
-        "seconds": 85.369
-        ,
-        "selectedTests": 25
-      }
-      ,
-      "tests/markdown-ticket-links.spec.ts": {
-        "seconds": 18.553
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/model-prefs.spec.ts": {
-        "seconds": 12.089
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/model-provider.spec.ts": {
-        "seconds": 4.831
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/model-refresh.spec.ts": {
-        "seconds": 2.068
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/models-fallback.spec.ts": {
-        "seconds": 29.112
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/models-outdated.spec.ts": {
-        "seconds": 12.668
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/models-registry-shots.spec.ts": {
-        "seconds": 26.21
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/models-registry.spec.ts": {
-        "seconds": 40.122
-        ,
-        "selectedTests": 33
-      }
-      ,
-      "tests/models-simple-shots.spec.ts": {
-        "seconds": 21.551
-        ,
-        "selectedTests": 24
-      }
-      ,
-      "tests/models-simple.spec.ts": {
-        "seconds": 34.623
-        ,
-        "selectedTests": 27
-      }
-      ,
-      "tests/models-situations-shots.spec.ts": {
-        "seconds": 18.111
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/models-situations.spec.ts": {
-        "seconds": 4.79
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/multiple-account-pairing.spec.ts": {
-        "seconds": 11.758
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/native-expert-stream.spec.ts": {
-        "seconds": 40.545
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/native-expert-terminal.spec.ts": {
-        "seconds": 21.548
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/native-lead-pilot.spec.ts": {
-        "seconds": 24.739
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/native-session-program-1024.spec.ts": {
-        "seconds": 13.333333333333334
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/native-session-program-1440.spec.ts": {
-        "seconds": 13.333333333333334
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/native-session-program-390.spec.ts": {
-        "seconds": 13.333333333333334
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/native-session-program-reader.spec.ts": {
-        "seconds": 6.666666666666667
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/native-session-program-validation.spec.ts": {
-        "seconds": 6.666666666666667
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/native-session-program.spec.ts": {
-        "seconds": 6.666666666666667
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/native-session-requests.spec.ts": {
-        "seconds": 3.882
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/nav.spec.ts": {
-        "seconds": 51.474
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/needs-attention.spec.ts": {
-        "seconds": 221.917
-        ,
-        "selectedTests": 42
-      }
-      ,
-      "tests/new-agent.spec.ts": {
-        "seconds": 32.092
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/no-shift-agents.spec.ts": {
-        "seconds": 183.881
-        ,
-        "selectedTests": 29
-      }
-      ,
-      "tests/no-shift-dialogs.spec.ts": {
-        "seconds": 78.191
-        ,
-        "selectedTests": 22
-      }
-      ,
-      "tests/no-shift.spec.ts": {
-        "seconds": 60.824
-        ,
-        "selectedTests": 20
-      }
-      ,
-      "tests/outcome-proposals.spec.ts": {
-        "seconds": 13.488
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/outline.spec.ts": {
-        "seconds": 101.123
-        ,
-        "selectedTests": 42
-      }
-      ,
-      "tests/palette.spec.ts": {
-        "seconds": 43.278
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/parent-benefits.spec.ts": {
-        "seconds": 67.501
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/performance.spec.ts": {
-        "seconds": 50.397
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/phone-approvals.spec.ts": {
-        "seconds": 47.049
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/phone-controls.spec.ts": {
-        "seconds": 181.37
-        ,
-        "selectedTests": 27
-      }
-      ,
-      "tests/phone-select.spec.ts": {
-        "seconds": 4.965
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/pi-openrouter.spec.ts": {
-        "seconds": 21.615
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/planning-columns.spec.ts": {
-        "seconds": 61.322
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/policies-ladders-moved.spec.ts": {
-        "seconds": 3.187
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/policies-rules.spec.ts": {
-        "seconds": 17.968
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/polish-round-two.spec.ts": {
-        "seconds": 2.452
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/polish-round.spec.ts": {
-        "seconds": 10.06
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/portal-admin.spec.ts": {
-        "seconds": 8.237
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/portal-public.spec.ts": {
-        "seconds": 21.23
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/portal-releases.spec.ts": {
-        "seconds": 6.557
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/portal-roadmap.spec.ts": {
-        "seconds": 6.178
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/profile-editor.spec.ts": {
-        "seconds": 53.781
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/profile.spec.ts": {
-        "seconds": 40.741
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/project-advanced.spec.ts": {
-        "seconds": 77.516
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/project-delivery-settings.spec.ts": {
-        "seconds": 650.505
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/project-groups.spec.ts": {
-        "seconds": 38.654
-        ,
-        "selectedTests": 18
-      }
-      ,
-      "tests/project-header.spec.ts": {
-        "seconds": 57.834
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/project-list.spec.ts": {
-        "seconds": 81.591
-        ,
-        "selectedTests": 28
-      }
-      ,
-      "tests/project-sections.spec.ts": {
-        "seconds": 103.477
-        ,
-        "selectedTests": 23
-      }
-      ,
-      "tests/project-settings.spec.ts": {
-        "seconds": 101.771
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/project-sort.spec.ts": {
-        "seconds": 41.763
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/project-status-counts.spec.ts": {
-        "seconds": 65.062
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/projects.spec.ts": {
-        "seconds": 10.842
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/provenance.spec.ts": {
-        "seconds": 26.487
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/quota-warnings.spec.ts": {
-        "seconds": 13.34
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/quote-collaboration.spec.ts": {
-        "seconds": 12.026
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/quote-dock-layout.spec.ts": {
-        "seconds": 32.464
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/quote-editor-core.spec.ts": {
-        "seconds": 5.263
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/quote-editor-input.spec.ts": {
-        "seconds": 5.001
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/quote-editor-route.spec.ts": {
-        "seconds": 6.296
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/quote-inspector.spec.ts": {
-        "seconds": 50.66
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/quote-link-vault.spec.ts": {
-        "seconds": 3.369
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/quote-parity-gaps.spec.ts": {
-        "seconds": 34.389
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/quote-profile.spec.ts": {
-        "seconds": 3.008
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/quote-public-page.spec.ts": {
-        "seconds": 21.039
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/quote-public.spec.ts": {
-        "seconds": 3.265
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/quote-save-state.spec.ts": {
-        "seconds": 25.695
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/quote-showcase.spec.ts": {
-        "seconds": 12.342
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/quote-workspace.spec.ts": {
-        "seconds": 68.604
-        ,
-        "selectedTests": 21
-      }
-      ,
-      "tests/quotes-tab.spec.ts": {
-        "seconds": 27.661
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/quotes/parity-flow.spec.ts": {
-        "seconds": 8.345
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/quotes/print-receipt.spec.ts": {
-        "seconds": 2.597
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/quotes/two-user-presence.spec.ts": {
-        "seconds": 3.963
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/record-ownership.spec.ts": {
-        "seconds": 5.1
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/recurrence-marker.spec.ts": {
-        "seconds": 174.313
-        ,
-        "selectedTests": 37
-      }
-      ,
-      "tests/recurrences.spec.ts": {
-        "seconds": 148.874
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/relations.spec.ts": {
-        "seconds": 66.216
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/release-codenames.spec.ts": {
-        "seconds": 88.505
-        ,
-        "selectedTests": 24
-      }
-      ,
-      "tests/release-groups.spec.ts": {
-        "seconds": 21.893
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/release-header.spec.ts": {
-        "seconds": 69.138
-        ,
-        "selectedTests": 23
-      }
-      ,
-      "tests/release-historic-tenant.spec.ts": {
-        "seconds": 8.237
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/release-historic.spec.ts": {
-        "seconds": 12.805
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/release-own-tenant.spec.ts": {
-        "seconds": 7.236
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/release-picker.spec.ts": {
-        "seconds": 118.962
-        ,
-        "selectedTests": 19
-      }
-      ,
-      "tests/release-presentation.spec.ts": {
-        "seconds": 15.076
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/release-switches.spec.ts": {
-        "seconds": 46.55
-        ,
-        "selectedTests": 17
-      }
-      ,
-      "tests/release-tenant-notes.spec.ts": {
-        "seconds": 78.874
-        ,
-        "selectedTests": 20
-      }
-      ,
-      "tests/release-ticket-links.spec.ts": {
-        "seconds": 58.573
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/release-update-notice.spec.ts": {
-        "seconds": 17.983
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/releases.spec.ts": {
-        "seconds": 41.131
-        ,
-        "selectedTests": 22
-      }
-      ,
-      "tests/reserved-versions.spec.ts": {
-        "seconds": 21.422
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/resilient-polling.spec.ts": {
-        "seconds": 6.731
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/role-picker-layout.spec.ts": {
-        "seconds": 288.909
-        ,
-        "selectedTests": 83
-      }
-      ,
-      "tests/routines-editor.spec.ts": {
-        "seconds": 28.818
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/routines-tab.spec.ts": {
-        "seconds": 26.745
-        ,
-        "selectedTests": 17
-      }
-      ,
-      "tests/row-actions.spec.ts": {
-        "seconds": 30.387
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/run-kinds.spec.ts": {
-        "seconds": 19.795
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/scope-codes.spec.ts": {
-        "seconds": 40.911
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/service-tier.spec.ts": {
-        "seconds": 118.564
-        ,
-        "selectedTests": 44
-      }
-      ,
-      "tests/session-attention.spec.ts": {
-        "seconds": 33.357
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/session-chat-cli.spec.ts": {
-        "seconds": 1
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/session-chat.spec.ts": {
-        "seconds": 312.279
-        ,
-        "selectedTests": 84
-      }
-      ,
-      "tests/session-ended.spec.ts": {
-        "seconds": 9.292
-        ,
-        "selectedTests": 3
-      }
-      ,
-      "tests/session-inbox.spec.ts": {
-        "seconds": 27.194
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/session-messages.spec.ts": {
-        "seconds": 49.555
-        ,
-        "selectedTests": 17
-      }
-      ,
-      "tests/session-recovery.spec.ts": {
-        "seconds": 49.309
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/session-removal.spec.ts": {
-        "seconds": 58.281
-        ,
-        "selectedTests": 17
-      }
-      ,
-      "tests/session-requests.spec.ts": {
-        "seconds": 26.166
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/session-rows.spec.ts": {
-        "seconds": 34.325
-        ,
-        "selectedTests": 16
-      }
-      ,
-      "tests/settings-account-pacing.spec.ts": {
-        "seconds": 22.652
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/settings-account-parts.spec.ts": {
-        "seconds": 45.742
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/settings-accounts.spec.ts": {
-        "seconds": 44.289
-        ,
-        "selectedTests": 30
-      }
-      ,
-      "tests/settings-agents.spec.ts": {
-        "seconds": 29.637
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/settings-computers-table.spec.ts": {
-        "seconds": 8.702
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/settings-host-capacity.spec.ts": {
-        "seconds": 63.614
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/settings-shared.spec.ts": {
-        "seconds": 30.244
-        ,
-        "selectedTests": 23
-      }
-      ,
-      "tests/settings.spec.ts": {
-        "seconds": 171.614
-        ,
-        "selectedTests": 25
-      }
-      ,
-      "tests/shell.spec.ts": {
-        "seconds": 51.105
-        ,
-        "selectedTests": 38
-      }
-      ,
-      "tests/stability.spec.ts": {
-        "seconds": 42.982
-        ,
-        "selectedTests": 13
-      }
-      ,
-      "tests/start-agent.spec.ts": {
-        "seconds": 82.266
-        ,
-        "selectedTests": 27
-      }
-      ,
-      "tests/state-colours.spec.ts": {
-        "seconds": 67.212
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/status-autopilot.spec.ts": {
-        "seconds": 27.447
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/status-buckets.spec.ts": {
-        "seconds": 8.013
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/status-help.spec.ts": {
-        "seconds": 20.829
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/status-icons.spec.ts": {
-        "seconds": 49.414
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/status-time.spec.ts": {
-        "seconds": 72.375
-        ,
-        "selectedTests": 18
-      }
-      ,
-      "tests/stepup-desk.spec.ts": {
-        "seconds": 29.233
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/tap-targets.spec.ts": {
-        "seconds": 224.614
-        ,
-        "selectedTests": 28
-      }
-      ,
-      "tests/tenant-brand.spec.ts": {
-        "seconds": 18.254
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/theme-agents.spec.ts": {
-        "seconds": 313.335
-        ,
-        "selectedTests": 14
-      }
-      ,
-      "tests/theme-apply.spec.ts": {
-        "seconds": 71.895
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/theme-control-geometry.spec.ts": {
-        "seconds": 0.405
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/theme-settings.spec.ts": {
-        "seconds": 180.698
-        ,
-        "selectedTests": 49
-      }
-      ,
-      "tests/theme.spec.ts": {
-        "seconds": 2.892
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ticket-agent-work.spec.ts": {
-        "seconds": 15.486
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/ticket-benefits.spec.ts": {
-        "seconds": 33.394
-        ,
-        "selectedTests": 15
-      }
-      ,
-      "tests/ticket-graph-view.spec.ts": {
-        "seconds": 64.53
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/ticket-outcomes.spec.ts": {
-        "seconds": 7.686
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/ticket-panel.spec.ts": {
-        "seconds": 200.84
-        ,
-        "selectedTests": 46
-      }
-      ,
-      "tests/ticket-peek.spec.ts": {
-        "seconds": 61.943
-        ,
-        "selectedTests": 7
-      }
-      ,
-      "tests/ticket-placement.spec.ts": {
-        "seconds": 7.207
-        ,
-        "selectedTests": 2
-      }
-      ,
-      "tests/ticket-reviews.spec.ts": {
-        "seconds": 14.141
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/ticket-workers.spec.ts": {
-        "seconds": 63.505
-        ,
-        "selectedTests": 11
-      }
-      ,
-      "tests/title-divider.spec.ts": {
-        "seconds": 14.95
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/ui-audit-dark-1024.spec.ts": {
-        "seconds": 258.922
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-dark-1280.spec.ts": {
-        "seconds": 194.97
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-dark-1440.spec.ts": {
-        "seconds": 246.932
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-dark-1920.spec.ts": {
-        "seconds": 209.556
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-dark-390.spec.ts": {
-        "seconds": 253.418
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-light-1024.spec.ts": {
-        "seconds": 265.937
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-light-1280.spec.ts": {
-        "seconds": 223.771
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-light-1440.spec.ts": {
-        "seconds": 261.149
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-light-1920.spec.ts": {
-        "seconds": 186.063
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/ui-audit-rules.spec.ts": {
-        "seconds": 1.219
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/ui-audit.spec.ts": {
-        "seconds": 195.021
-        ,
-        "selectedTests": 1
-      }
-      ,
-      "tests/usage-accounts.spec.ts": {
-        "seconds": 18.235
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/usage-dashboard.spec.ts": {
-        "seconds": 18.674
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/vendor-signals.spec.ts": {
-        "seconds": 15.28
-        ,
-        "selectedTests": 5
-      }
-      ,
-      "tests/version-reveal.spec.ts": {
-        "seconds": 8.344
-        ,
-        "selectedTests": 4
-      }
-      ,
-      "tests/views-filters.spec.ts": {
-        "seconds": 127.461
-        ,
-        "selectedTests": 32
-      }
-      ,
-      "tests/webcore-recovery.spec.ts": {
-        "seconds": 34.315
-        ,
-        "selectedTests": 9
-      }
-      ,
-      "tests/wide.spec.ts": {
-        "seconds": 30.744
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/work-aggregates.spec.ts": {
-        "seconds": 178.299
-        ,
-        "selectedTests": 29
-      }
-      ,
-      "tests/work-figures.spec.ts": {
-        "seconds": 120.542
-        ,
-        "selectedTests": 29
-      }
-      ,
-      "tests/work-history-fix5.spec.ts": {
-        "seconds": 27.02
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/work-integration.spec.ts": {
-        "seconds": 37.995
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/work-kinds.spec.ts": {
-        "seconds": 41.152
-        ,
-        "selectedTests": 23
-      }
-      ,
-      "tests/work-lifecycle-header.spec.ts": {
-        "seconds": 41.877
-        ,
-        "selectedTests": 10
-      }
-      ,
-      "tests/work-lifecycle.spec.ts": {
-        "seconds": 82.517
-        ,
-        "selectedTests": 8
-      }
-      ,
-      "tests/work-parent-releases.spec.ts": {
-        "seconds": 85.31
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/work-parent-status.spec.ts": {
-        "seconds": 21.072
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/work-queue.spec.ts": {
-        "seconds": 94.66
-        ,
-        "selectedTests": 30
-      }
-      ,
-      "tests/work-surfaces-fix2.spec.ts": {
-        "seconds": 33.512
-        ,
-        "selectedTests": 12
-      }
-      ,
-      "tests/work-surfaces-fix3.spec.ts": {
-        "seconds": 24.409
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/work-surfaces-fix4.spec.ts": {
-        "seconds": 56.642
-        ,
-        "selectedTests": 6
-      }
-      ,
-      "tests/work-vocabulary.spec.ts": {
-        "seconds": 179.923
-        ,
-        "selectedTests": 24
-      }
-      ,
-      "tests/workspace-activity.spec.ts": {
-        "seconds": 33.599
-        ,
-        "selectedTests": 13
-      }
+      "tests/a11y.spec.ts": {"seconds":218.151,"selectedTests":82}
+      ,
+      "tests/access.spec.ts": {"seconds":139.744,"selectedTests":42}
+      ,
+      "tests/account-link.spec.ts": {"seconds":23.685,"selectedTests":10}
+      ,
+      "tests/account-resets.spec.ts": {"seconds":26.6,"selectedTests":6}
+      ,
+      "tests/account-use-matrix.spec.ts": {"seconds":45.26,"selectedTests":21}
+      ,
+      "tests/accounts-card-fit.spec.ts": {"seconds":10.722,"selectedTests":1}
+      ,
+      "tests/accounts-computers.spec.ts": {"seconds":48.969,"selectedTests":13}
+      ,
+      "tests/accounts-quota-bar.spec.ts": {"seconds":52.879,"selectedTests":27}
+      ,
+      "tests/activity-history.spec.ts": {"seconds":13.556,"selectedTests":2}
+      ,
+      "tests/add-account.spec.ts": {"seconds":23.444,"selectedTests":9}
+      ,
+      "tests/aeon-1028-projheader.spec.ts": {"seconds":107.492,"selectedTests":42}
+      ,
+      "tests/aeon-1042-headergraph.spec.ts": {"seconds":100.585,"selectedTests":4}
+      ,
+      "tests/aeon-1062-qapolish.spec.ts": {"seconds":50.619,"selectedTests":20}
+      ,
+      "tests/aeon-1071-chat-live.spec.ts": {"seconds":60.351,"selectedTests":16}
+      ,
+      "tests/aeon-1188-displayhome.spec.ts": {"seconds":20.034,"selectedTests":8}
+      ,
+      "tests/aeon-1209-agents-head.spec.ts": {"seconds":161.204,"selectedTests":28}
+      ,
+      "tests/aeon-1210-agents-tree.spec.ts": {"seconds":48.298,"selectedTests":19}
+      ,
+      "tests/aeon-1211-agents-rows.spec.ts": {"seconds":108.399,"selectedTests":40}
+      ,
+      "tests/aeon-1212-lead-panel.spec.ts": {"seconds":424.754,"selectedTests":56}
+      ,
+      "tests/aeon-1213-agents-split.spec.ts": {"seconds":77.221,"selectedTests":15}
+      ,
+      "tests/aeon-1279-touch-scroll.spec.ts": {"seconds":27.333,"selectedTests":6}
+      ,
+      "tests/aeon-1285-agent-rows.spec.ts": {"seconds":28.355,"selectedTests":5}
+      ,
+      "tests/aeon-1339-desk-polish.spec.ts": {"seconds":100.579,"selectedTests":5}
+      ,
+      "tests/aeon-632b-clip-settings.spec.ts": {"seconds":194.118,"selectedTests":12}
+      ,
+      "tests/aeon-632b-clip-touch.spec.ts": {"seconds":32.652,"selectedTests":6}
+      ,
+      "tests/aeon-632b-clip.spec.ts": {"seconds":104.965,"selectedTests":6}
+      ,
+      "tests/aeon-635.spec.ts": {"seconds":219.024,"selectedTests":21}
+      ,
+      "tests/aeon-908-polish.spec.ts": {"seconds":97.268,"selectedTests":13}
+      ,
+      "tests/aeon-974-typefilter.spec.ts": {"seconds":39.504,"selectedTests":15}
+      ,
+      "tests/agent-activity.spec.ts": {"seconds":94.787,"selectedTests":11}
+      ,
+      "tests/agent-done-state.spec.ts": {"seconds":9.204,"selectedTests":3}
+      ,
+      "tests/agent-indicator.spec.ts": {"seconds":131.838,"selectedTests":15}
+      ,
+      "tests/agent-names.spec.ts": {"seconds":5.967,"selectedTests":3}
+      ,
+      "tests/agent-pairing.spec.ts": {"seconds":81.644,"selectedTests":35}
+      ,
+      "tests/agent-pause.spec.ts": {"seconds":97.344,"selectedTests":25}
+      ,
+      "tests/agent-recovery.spec.ts": {"seconds":65.667,"selectedTests":9}
+      ,
+      "tests/agent-rules-budget-clients.spec.ts": {"seconds":22.291,"selectedTests":10}
+      ,
+      "tests/agent-rules-doctrine.spec.ts": {"seconds":21.709,"selectedTests":11}
+      ,
+      "tests/agent-rules-flow.spec.ts": {"seconds":13.562,"selectedTests":11}
+      ,
+      "tests/agent-rules-import.spec.ts": {"seconds":15.786,"selectedTests":9}
+      ,
+      "tests/agent-rules-shots.spec.ts": {"seconds":1,"selectedTests":16}
+      ,
+      "tests/agent-rules-ticks.spec.ts": {"seconds":25.875,"selectedTests":13}
+      ,
+      "tests/agent-rules-tldr.spec.ts": {"seconds":19.139,"selectedTests":11}
+      ,
+      "tests/agent-rules.spec.ts": {"seconds":31.253,"selectedTests":14}
+      ,
+      "tests/agents-cleanup.spec.ts": {"seconds":17.714,"selectedTests":5}
+      ,
+      "tests/agents-dial-daily.spec.ts": {"seconds":225.41,"selectedTests":38}
+      ,
+      "tests/agents-dial.spec.ts": {"seconds":203.659,"selectedTests":28}
+      ,
+      "tests/agents-display.spec.ts": {"seconds":54.712,"selectedTests":17}
+      ,
+      "tests/agents-handover.spec.ts": {"seconds":16.712,"selectedTests":7}
+      ,
+      "tests/agents-harness-status.spec.ts": {"seconds":65.078,"selectedTests":25}
+      ,
+      "tests/agents-head.spec.ts": {"seconds":6.526,"selectedTests":3}
+      ,
+      "tests/agents-hierarchy.spec.ts": {"seconds":26.972,"selectedTests":6}
+      ,
+      "tests/agents-metadata.spec.ts": {"seconds":37.391,"selectedTests":10}
+      ,
+      "tests/agents-mission.spec.ts": {"seconds":37.073,"selectedTests":11}
+      ,
+      "tests/agents-order.spec.ts": {"seconds":18.006,"selectedTests":5}
+      ,
+      "tests/agents-phone-rows.spec.ts": {"seconds":21.034,"selectedTests":8}
+      ,
+      "tests/agents-top.spec.ts": {"seconds":10.639,"selectedTests":4}
+      ,
+      "tests/agents-worker-tree.spec.ts": {"seconds":70.177,"selectedTests":12}
+      ,
+      "tests/agents.spec.ts": {"seconds":108.778,"selectedTests":36}
+      ,
+      "tests/approval-feedback.spec.ts": {"seconds":88.484,"selectedTests":18}
+      ,
+      "tests/attach-discoverable.spec.ts": {"seconds":181.26,"selectedTests":47}
+      ,
+      "tests/attach-security.spec.ts": {"seconds":151.008,"selectedTests":50}
+      ,
+      "tests/attach-watch.spec.ts": {"seconds":115.259,"selectedTests":31}
+      ,
+      "tests/attachments.spec.ts": {"seconds":34.821,"selectedTests":12}
+      ,
+      "tests/authz.spec.ts": {"seconds":3.996,"selectedTests":2}
+      ,
+      "tests/avatar-upload-bounds.spec.ts": {"seconds":8.685,"selectedTests":5}
+      ,
+      "tests/avatars.spec.ts": {"seconds":6.547,"selectedTests":2}
+      ,
+      "tests/brand.spec.ts": {"seconds":2.528,"selectedTests":2}
+      ,
+      "tests/bulk.spec.ts": {"seconds":53.689,"selectedTests":7}
+      ,
+      "tests/business.spec.ts": {"seconds":16.673,"selectedTests":10}
+      ,
+      "tests/capacity-learning.spec.ts": {"seconds":19.842,"selectedTests":5}
+      ,
+      "tests/capacity-pace.spec.ts": {"seconds":37.666,"selectedTests":15}
+      ,
+      "tests/classic-invite.spec.ts": {"seconds":11.962,"selectedTests":6}
+      ,
+      "tests/clip-tip-disclosure.spec.ts": {"seconds":36.53,"selectedTests":24}
+      ,
+      "tests/clip-tip-overflow.spec.ts": {"seconds":51.032,"selectedTests":24}
+      ,
+      "tests/clip-tip-touch.spec.ts": {"seconds":111.536,"selectedTests":39}
+      ,
+      "tests/clip-tip.spec.ts": {"seconds":185.614,"selectedTests":72}
+      ,
+      "tests/coarse-hit-area.spec.ts": {"seconds":0.385,"selectedTests":3}
+      ,
+      "tests/connect-verification.spec.ts": {"seconds":13.921,"selectedTests":8}
+      ,
+      "tests/cost-units.spec.ts": {"seconds":5.807,"selectedTests":5}
+      ,
+      "tests/crm.spec.ts": {"seconds":46.709,"selectedTests":25}
+      ,
+      "tests/dead-screens.spec.ts": {"seconds":40.631,"selectedTests":12}
+      ,
+      "tests/dead-sessions.spec.ts": {"seconds":69.972,"selectedTests":16}
+      ,
+      "tests/decision-desk-fix2.spec.ts": {"seconds":108.457,"selectedTests":8}
+      ,
+      "tests/decision-desk-fix3.spec.ts": {"seconds":43.085,"selectedTests":9}
+      ,
+      "tests/decision-desk-lessons.spec.ts": {"seconds":123.974,"selectedTests":26}
+      ,
+      "tests/decision-desk-project.spec.ts": {"seconds":42.455,"selectedTests":14}
+      ,
+      "tests/decision-desk.spec.ts": {"seconds":422.154,"selectedTests":60}
+      ,
+      "tests/decision-text.spec.ts": {"seconds":118.051,"selectedTests":22}
+      ,
+      "tests/definitions.spec.ts": {"seconds":160.822,"selectedTests":9}
+      ,
+      "tests/delivery-arion-v5.spec.ts": {"seconds":36.608,"selectedTests":14}
+      ,
+      "tests/delivery-flow-lanes.spec.ts": {"seconds":37.106,"selectedTests":11}
+      ,
+      "tests/delivery-flow-modes.spec.ts": {"seconds":144.785,"selectedTests":25}
+      ,
+      "tests/delivery-guarantee.spec.ts": {"seconds":48.966,"selectedTests":8}
+      ,
+      "tests/delivery-numbers.spec.ts": {"seconds":51.39,"selectedTests":14}
+      ,
+      "tests/delivery-polish.spec.ts": {"seconds":153.594,"selectedTests":18}
+      ,
+      "tests/delivery-rating.spec.ts": {"seconds":45.766,"selectedTests":5}
+      ,
+      "tests/delivery-simple.spec.ts": {"seconds":56.773,"selectedTests":11}
+      ,
+      "tests/delivery-tab-switch.spec.ts": {"seconds":26.435,"selectedTests":2}
+      ,
+      "tests/delivery-ui.spec.ts": {"seconds":102.25,"selectedTests":17}
+      ,
+      "tests/deploy-target.spec.ts": {"seconds":2.233,"selectedTests":1}
+      ,
+      "tests/developer-settings.spec.ts": {"seconds":27.725,"selectedTests":7}
+      ,
+      "tests/dialog-full-text.spec.ts": {"seconds":172.582,"selectedTests":52}
+      ,
+      "tests/dialog-scale.spec.ts": {"seconds":168.563,"selectedTests":9}
+      ,
+      "tests/dialog-widths.spec.ts": {"seconds":92.913,"selectedTests":9}
+      ,
+      "tests/display-language.spec.ts": {"seconds":27.647,"selectedTests":5}
+      ,
+      "tests/doctrine-inbox.spec.ts": {"seconds":27.283,"selectedTests":7}
+      ,
+      "tests/done-gate.spec.ts": {"seconds":53.82,"selectedTests":20}
+      ,
+      "tests/entry-checks.spec.ts": {"seconds":32.913,"selectedTests":3}
+      ,
+      "tests/estimates.spec.ts": {"seconds":20.01,"selectedTests":7}
+      ,
+      "tests/eta-column.spec.ts": {"seconds":61.635,"selectedTests":14}
+      ,
+      "tests/features.spec.ts": {"seconds":15.009,"selectedTests":7}
+      ,
+      "tests/first-impression.spec.ts": {"seconds":55.383,"selectedTests":38}
+      ,
+      "tests/first-run.spec.ts": {"seconds":26.819,"selectedTests":16}
+      ,
+      "tests/footer-release-pill.spec.ts": {"seconds":78.518,"selectedTests":39}
+      ,
+      "tests/footer-summary.spec.ts": {"seconds":24.327,"selectedTests":16}
+      ,
+      "tests/from-classic.spec.ts": {"seconds":4.851,"selectedTests":2}
+      ,
+      "tests/graph-canvas.spec.ts": {"seconds":2.703,"selectedTests":2}
+      ,
+      "tests/graph-focus.spec.ts": {"seconds":18.808,"selectedTests":8}
+      ,
+      "tests/graph-hit.spec.ts": {"seconds":8.958,"selectedTests":5}
+      ,
+      "tests/graph-motion.spec.ts": {"seconds":30.1,"selectedTests":2}
+      ,
+      "tests/groups.spec.ts": {"seconds":31.338,"selectedTests":12}
+      ,
+      "tests/guest.spec.ts": {"seconds":3.778,"selectedTests":2}
+      ,
+      "tests/header-desk-split.spec.ts": {"seconds":323.713,"selectedTests":44}
+      ,
+      "tests/header-glimpse-context.spec.ts": {"seconds":39.657,"selectedTests":5}
+      ,
+      "tests/header-glimpse.spec.ts": {"seconds":316.649,"selectedTests":21}
+      ,
+      "tests/header-menus.spec.ts": {"seconds":85.423,"selectedTests":92}
+      ,
+      "tests/headings.spec.ts": {"seconds":217.494,"selectedTests":90}
+      ,
+      "tests/hide-states.spec.ts": {"seconds":183.896,"selectedTests":15}
+      ,
+      "tests/hours-edit.spec.ts": {"seconds":15.842,"selectedTests":11}
+      ,
+      "tests/hours.spec.ts": {"seconds":18.316,"selectedTests":12}
+      ,
+      "tests/html-sandbox.spec.ts": {"seconds":25.948,"selectedTests":10}
+      ,
+      "tests/indicator-controls.spec.ts": {"seconds":66.116,"selectedTests":15}
+      ,
+      "tests/indicator-creative-gallery.spec.ts": {"seconds":7.177,"selectedTests":5}
+      ,
+      "tests/indicator-gallery.spec.ts": {"seconds":4.441,"selectedTests":5}
+      ,
+      "tests/intake-extensions.spec.ts": {"seconds":24.962,"selectedTests":12}
+      ,
+      "tests/key-dialog.spec.ts": {"seconds":44.332,"selectedTests":9}
+      ,
+      "tests/key-expiry.spec.ts": {"seconds":49.6,"selectedTests":13}
+      ,
+      "tests/key-full-access.spec.ts": {"seconds":131.769,"selectedTests":22}
+      ,
+      "tests/key-layout.spec.ts": {"seconds":46.668,"selectedTests":24}
+      ,
+      "tests/key-scopes.spec.ts": {"seconds":104.068,"selectedTests":23}
+      ,
+      "tests/key-trim.spec.ts": {"seconds":21.058,"selectedTests":7}
+      ,
+      "tests/kind-convert.spec.ts": {"seconds":13.753,"selectedTests":5}
+      ,
+      "tests/knowledge-dock.spec.ts": {"seconds":52.809,"selectedTests":11}
+      ,
+      "tests/knowledge-graph.spec.ts": {"seconds":110.023,"selectedTests":16}
+      ,
+      "tests/knowledge-learnings.spec.ts": {"seconds":52.248,"selectedTests":16}
+      ,
+      "tests/knowledge-shots.spec.ts": {"seconds":1,"selectedTests":15}
+      ,
+      "tests/knowledge.spec.ts": {"seconds":73.594,"selectedTests":16}
+      ,
+      "tests/lead-adoption.spec.ts": {"seconds":71.973,"selectedTests":10}
+      ,
+      "tests/lead-card.spec.ts": {"seconds":52.868,"selectedTests":18}
+      ,
+      "tests/lead-flow.spec.ts": {"seconds":117.063,"selectedTests":23}
+      ,
+      "tests/lead-remove.spec.ts": {"seconds":46.201,"selectedTests":7}
+      ,
+      "tests/lead-start.spec.ts": {"seconds":166.725,"selectedTests":7}
+      ,
+      "tests/list-columns.spec.ts": {"seconds":53.433,"selectedTests":18}
+      ,
+      "tests/live-agents-layout.spec.ts": {"seconds":17.004,"selectedTests":4}
+      ,
+      "tests/live-agents.spec.ts": {"seconds":40.749,"selectedTests":36}
+      ,
+      "tests/live-list-sessions.spec.ts": {"seconds":5.055,"selectedTests":3}
+      ,
+      "tests/live-list.spec.ts": {"seconds":70.104,"selectedTests":13}
+      ,
+      "tests/live-panel.spec.ts": {"seconds":32.313,"selectedTests":7}
+      ,
+      "tests/managed-controls.spec.ts": {"seconds":85.369,"selectedTests":25}
+      ,
+      "tests/markdown-ticket-links.spec.ts": {"seconds":18.553,"selectedTests":6}
+      ,
+      "tests/model-prefs.spec.ts": {"seconds":12.089,"selectedTests":3}
+      ,
+      "tests/model-provider.spec.ts": {"seconds":4.831,"selectedTests":3}
+      ,
+      "tests/model-refresh.spec.ts": {"seconds":2.068,"selectedTests":1}
+      ,
+      "tests/models-fallback.spec.ts": {"seconds":29.112,"selectedTests":15}
+      ,
+      "tests/models-outdated.spec.ts": {"seconds":12.668,"selectedTests":10}
+      ,
+      "tests/models-registry-shots.spec.ts": {"seconds":26.21,"selectedTests":3}
+      ,
+      "tests/models-registry.spec.ts": {"seconds":40.122,"selectedTests":33}
+      ,
+      "tests/models-simple-shots.spec.ts": {"seconds":21.551,"selectedTests":24}
+      ,
+      "tests/models-simple.spec.ts": {"seconds":34.623,"selectedTests":27}
+      ,
+      "tests/models-situations-shots.spec.ts": {"seconds":18.111,"selectedTests":12}
+      ,
+      "tests/models-situations.spec.ts": {"seconds":4.79,"selectedTests":4}
+      ,
+      "tests/multiple-account-pairing.spec.ts": {"seconds":11.758,"selectedTests":6}
+      ,
+      "tests/native-expert-stream.spec.ts": {"seconds":40.545,"selectedTests":12}
+      ,
+      "tests/native-expert-terminal.spec.ts": {"seconds":21.548,"selectedTests":5}
+      ,
+      "tests/native-lead-pilot.spec.ts": {"seconds":24.739,"selectedTests":6}
+      ,
+      "tests/native-session-program-1024.spec.ts": {"seconds":13.333333333333334,"selectedTests":2}
+      ,
+      "tests/native-session-program-1440.spec.ts": {"seconds":13.333333333333334,"selectedTests":2}
+      ,
+      "tests/native-session-program-390.spec.ts": {"seconds":13.333333333333334,"selectedTests":2}
+      ,
+      "tests/native-session-program-reader.spec.ts": {"seconds":6.666666666666667,"selectedTests":1}
+      ,
+      "tests/native-session-program-validation.spec.ts": {"seconds":6.666666666666667,"selectedTests":1}
+      ,
+      "tests/native-session-program.spec.ts": {"seconds":6.666666666666667,"selectedTests":1}
+      ,
+      "tests/native-session-requests.spec.ts": {"seconds":3.882,"selectedTests":7}
+      ,
+      "tests/nav.spec.ts": {"seconds":51.474,"selectedTests":11}
+      ,
+      "tests/needs-attention.spec.ts": {"seconds":221.917,"selectedTests":42}
+      ,
+      "tests/new-agent.spec.ts": {"seconds":32.092,"selectedTests":13}
+      ,
+      "tests/no-shift-agents.spec.ts": {"seconds":183.881,"selectedTests":29}
+      ,
+      "tests/no-shift-dialogs.spec.ts": {"seconds":78.191,"selectedTests":22}
+      ,
+      "tests/no-shift.spec.ts": {"seconds":60.824,"selectedTests":20}
+      ,
+      "tests/outcome-proposals.spec.ts": {"seconds":13.488,"selectedTests":6}
+      ,
+      "tests/outline.spec.ts": {"seconds":101.123,"selectedTests":42}
+      ,
+      "tests/palette.spec.ts": {"seconds":43.278,"selectedTests":16}
+      ,
+      "tests/parent-benefits.spec.ts": {"seconds":67.501,"selectedTests":16}
+      ,
+      "tests/performance.spec.ts": {"seconds":50.397,"selectedTests":2}
+      ,
+      "tests/phone-approvals.spec.ts": {"seconds":47.049,"selectedTests":11}
+      ,
+      "tests/phone-controls.spec.ts": {"seconds":181.37,"selectedTests":27}
+      ,
+      "tests/phone-select.spec.ts": {"seconds":4.965,"selectedTests":2}
+      ,
+      "tests/pi-openrouter.spec.ts": {"seconds":21.615,"selectedTests":9}
+      ,
+      "tests/planning-columns.spec.ts": {"seconds":61.322,"selectedTests":14}
+      ,
+      "tests/policies-ladders-moved.spec.ts": {"seconds":3.187,"selectedTests":2}
+      ,
+      "tests/policies-rules.spec.ts": {"seconds":17.968,"selectedTests":9}
+      ,
+      "tests/polish-round-two.spec.ts": {"seconds":2.452,"selectedTests":2}
+      ,
+      "tests/polish-round.spec.ts": {"seconds":10.06,"selectedTests":4}
+      ,
+      "tests/portal-admin.spec.ts": {"seconds":8.237,"selectedTests":3}
+      ,
+      "tests/portal-public.spec.ts": {"seconds":21.23,"selectedTests":13}
+      ,
+      "tests/portal-releases.spec.ts": {"seconds":6.557,"selectedTests":5}
+      ,
+      "tests/portal-roadmap.spec.ts": {"seconds":6.178,"selectedTests":3}
+      ,
+      "tests/profile-editor.spec.ts": {"seconds":53.781,"selectedTests":16}
+      ,
+      "tests/profile.spec.ts": {"seconds":40.741,"selectedTests":14}
+      ,
+      "tests/project-advanced.spec.ts": {"seconds":77.516,"selectedTests":11}
+      ,
+      "tests/project-delivery-settings.spec.ts": {"seconds":650.505,"selectedTests":12}
+      ,
+      "tests/project-groups.spec.ts": {"seconds":38.654,"selectedTests":18}
+      ,
+      "tests/project-header.spec.ts": {"seconds":57.834,"selectedTests":15}
+      ,
+      "tests/project-list.spec.ts": {"seconds":81.591,"selectedTests":28}
+      ,
+      "tests/project-sections.spec.ts": {"seconds":103.477,"selectedTests":23}
+      ,
+      "tests/project-settings.spec.ts": {"seconds":101.771,"selectedTests":4}
+      ,
+      "tests/project-sort.spec.ts": {"seconds":41.763,"selectedTests":15}
+      ,
+      "tests/project-status-counts.spec.ts": {"seconds":65.062,"selectedTests":12}
+      ,
+      "tests/projects.spec.ts": {"seconds":10.842,"selectedTests":9}
+      ,
+      "tests/provenance.spec.ts": {"seconds":26.487,"selectedTests":13}
+      ,
+      "tests/quota-warnings.spec.ts": {"seconds":13.34,"selectedTests":2}
+      ,
+      "tests/quote-collaboration.spec.ts": {"seconds":12.026,"selectedTests":7}
+      ,
+      "tests/quote-dock-layout.spec.ts": {"seconds":32.464,"selectedTests":8}
+      ,
+      "tests/quote-editor-core.spec.ts": {"seconds":5.263,"selectedTests":4}
+      ,
+      "tests/quote-editor-input.spec.ts": {"seconds":5.001,"selectedTests":3}
+      ,
+      "tests/quote-editor-route.spec.ts": {"seconds":6.296,"selectedTests":3}
+      ,
+      "tests/quote-inspector.spec.ts": {"seconds":50.66,"selectedTests":15}
+      ,
+      "tests/quote-link-vault.spec.ts": {"seconds":3.369,"selectedTests":2}
+      ,
+      "tests/quote-parity-gaps.spec.ts": {"seconds":34.389,"selectedTests":9}
+      ,
+      "tests/quote-profile.spec.ts": {"seconds":3.008,"selectedTests":3}
+      ,
+      "tests/quote-public-page.spec.ts": {"seconds":21.039,"selectedTests":10}
+      ,
+      "tests/quote-public.spec.ts": {"seconds":3.265,"selectedTests":2}
+      ,
+      "tests/quote-save-state.spec.ts": {"seconds":25.695,"selectedTests":7}
+      ,
+      "tests/quote-showcase.spec.ts": {"seconds":12.342,"selectedTests":7}
+      ,
+      "tests/quote-workspace.spec.ts": {"seconds":68.604,"selectedTests":21}
+      ,
+      "tests/quotes-tab.spec.ts": {"seconds":27.661,"selectedTests":14}
+      ,
+      "tests/quotes/parity-flow.spec.ts": {"seconds":8.345,"selectedTests":1}
+      ,
+      "tests/quotes/print-receipt.spec.ts": {"seconds":2.597,"selectedTests":3}
+      ,
+      "tests/quotes/two-user-presence.spec.ts": {"seconds":3.963,"selectedTests":1}
+      ,
+      "tests/record-ownership.spec.ts": {"seconds":5.1,"selectedTests":2}
+      ,
+      "tests/recurrence-marker.spec.ts": {"seconds":174.313,"selectedTests":37}
+      ,
+      "tests/recurrences.spec.ts": {"seconds":148.874,"selectedTests":15}
+      ,
+      "tests/relations.spec.ts": {"seconds":66.216,"selectedTests":7}
+      ,
+      "tests/release-codenames.spec.ts": {"seconds":88.505,"selectedTests":24}
+      ,
+      "tests/release-groups.spec.ts": {"seconds":21.893,"selectedTests":10}
+      ,
+      "tests/release-header.spec.ts": {"seconds":69.138,"selectedTests":23}
+      ,
+      "tests/release-historic-tenant.spec.ts": {"seconds":8.237,"selectedTests":2}
+      ,
+      "tests/release-historic.spec.ts": {"seconds":12.805,"selectedTests":7}
+      ,
+      "tests/release-own-tenant.spec.ts": {"seconds":7.236,"selectedTests":4}
+      ,
+      "tests/release-picker.spec.ts": {"seconds":118.962,"selectedTests":19}
+      ,
+      "tests/release-presentation.spec.ts": {"seconds":15.076,"selectedTests":7}
+      ,
+      "tests/release-switches.spec.ts": {"seconds":46.55,"selectedTests":17}
+      ,
+      "tests/release-tenant-notes.spec.ts": {"seconds":78.874,"selectedTests":20}
+      ,
+      "tests/release-ticket-links.spec.ts": {"seconds":58.573,"selectedTests":15}
+      ,
+      "tests/release-update-notice.spec.ts": {"seconds":17.983,"selectedTests":16}
+      ,
+      "tests/releases.spec.ts": {"seconds":41.131,"selectedTests":22}
+      ,
+      "tests/reserved-versions.spec.ts": {"seconds":21.422,"selectedTests":12}
+      ,
+      "tests/resilient-polling.spec.ts": {"seconds":6.731,"selectedTests":2}
+      ,
+      "tests/role-picker-layout.spec.ts": {"seconds":288.909,"selectedTests":83}
+      ,
+      "tests/routines-editor.spec.ts": {"seconds":28.818,"selectedTests":7}
+      ,
+      "tests/routines-tab.spec.ts": {"seconds":26.745,"selectedTests":17}
+      ,
+      "tests/row-actions.spec.ts": {"seconds":30.387,"selectedTests":12}
+      ,
+      "tests/run-kinds.spec.ts": {"seconds":19.795,"selectedTests":5}
+      ,
+      "tests/scope-codes.spec.ts": {"seconds":40.911,"selectedTests":12}
+      ,
+      "tests/service-tier.spec.ts": {"seconds":118.564,"selectedTests":44}
+      ,
+      "tests/session-attention.spec.ts": {"seconds":33.357,"selectedTests":4}
+      ,
+      "tests/session-chat-cli.spec.ts": {"seconds":1,"selectedTests":4}
+      ,
+      "tests/session-chat.spec.ts": {"seconds":312.279,"selectedTests":84}
+      ,
+      "tests/session-ended.spec.ts": {"seconds":9.292,"selectedTests":3}
+      ,
+      "tests/session-inbox.spec.ts": {"seconds":27.194,"selectedTests":4}
+      ,
+      "tests/session-messages.spec.ts": {"seconds":49.555,"selectedTests":17}
+      ,
+      "tests/session-recovery.spec.ts": {"seconds":49.309,"selectedTests":15}
+      ,
+      "tests/session-removal.spec.ts": {"seconds":58.281,"selectedTests":17}
+      ,
+      "tests/session-requests.spec.ts": {"seconds":26.166,"selectedTests":7}
+      ,
+      "tests/session-rows.spec.ts": {"seconds":34.325,"selectedTests":16}
+      ,
+      "tests/settings-account-pacing.spec.ts": {"seconds":22.652,"selectedTests":12}
+      ,
+      "tests/settings-account-parts.spec.ts": {"seconds":45.742,"selectedTests":14}
+      ,
+      "tests/settings-accounts.spec.ts": {"seconds":44.289,"selectedTests":30}
+      ,
+      "tests/settings-agents.spec.ts": {"seconds":29.637,"selectedTests":14}
+      ,
+      "tests/settings-computers-table.spec.ts": {"seconds":8.702,"selectedTests":8}
+      ,
+      "tests/settings-host-capacity.spec.ts": {"seconds":63.614,"selectedTests":12}
+      ,
+      "tests/settings-shared.spec.ts": {"seconds":30.244,"selectedTests":23}
+      ,
+      "tests/settings.spec.ts": {"seconds":171.614,"selectedTests":25}
+      ,
+      "tests/shell.spec.ts": {"seconds":51.105,"selectedTests":38}
+      ,
+      "tests/stability.spec.ts": {"seconds":42.982,"selectedTests":13}
+      ,
+      "tests/start-agent.spec.ts": {"seconds":82.266,"selectedTests":27}
+      ,
+      "tests/state-colours.spec.ts": {"seconds":67.212,"selectedTests":14}
+      ,
+      "tests/status-autopilot.spec.ts": {"seconds":27.447,"selectedTests":11}
+      ,
+      "tests/status-buckets.spec.ts": {"seconds":8.013,"selectedTests":1}
+      ,
+      "tests/status-help.spec.ts": {"seconds":20.829,"selectedTests":7}
+      ,
+      "tests/status-icons.spec.ts": {"seconds":49.414,"selectedTests":12}
+      ,
+      "tests/status-time.spec.ts": {"seconds":72.375,"selectedTests":18}
+      ,
+      "tests/stepup-desk.spec.ts": {"seconds":29.233,"selectedTests":11}
+      ,
+      "tests/tap-targets.spec.ts": {"seconds":224.614,"selectedTests":28}
+      ,
+      "tests/tenant-brand.spec.ts": {"seconds":18.254,"selectedTests":15}
+      ,
+      "tests/theme-agents.spec.ts": {"seconds":313.335,"selectedTests":14}
+      ,
+      "tests/theme-apply.spec.ts": {"seconds":71.895,"selectedTests":10}
+      ,
+      "tests/theme-control-geometry.spec.ts": {"seconds":0.405,"selectedTests":2}
+      ,
+      "tests/theme-settings.spec.ts": {"seconds":180.698,"selectedTests":49}
+      ,
+      "tests/theme.spec.ts": {"seconds":2.892,"selectedTests":1}
+      ,
+      "tests/ticket-agent-work.spec.ts": {"seconds":15.486,"selectedTests":8}
+      ,
+      "tests/ticket-benefits.spec.ts": {"seconds":33.394,"selectedTests":15}
+      ,
+      "tests/ticket-graph-view.spec.ts": {"seconds":64.53,"selectedTests":8}
+      ,
+      "tests/ticket-outcomes.spec.ts": {"seconds":7.686,"selectedTests":2}
+      ,
+      "tests/ticket-panel.spec.ts": {"seconds":200.84,"selectedTests":46}
+      ,
+      "tests/ticket-peek.spec.ts": {"seconds":61.943,"selectedTests":7}
+      ,
+      "tests/ticket-placement.spec.ts": {"seconds":7.207,"selectedTests":2}
+      ,
+      "tests/ticket-reviews.spec.ts": {"seconds":14.141,"selectedTests":4}
+      ,
+      "tests/ticket-workers.spec.ts": {"seconds":63.505,"selectedTests":11}
+      ,
+      "tests/title-divider.spec.ts": {"seconds":14.95,"selectedTests":4}
+      ,
+      "tests/ui-audit-dark-1024.spec.ts": {"seconds":258.922,"selectedTests":1}
+      ,
+      "tests/ui-audit-dark-1280.spec.ts": {"seconds":194.97,"selectedTests":1}
+      ,
+      "tests/ui-audit-dark-1440.spec.ts": {"seconds":246.932,"selectedTests":1}
+      ,
+      "tests/ui-audit-dark-1920.spec.ts": {"seconds":209.556,"selectedTests":1}
+      ,
+      "tests/ui-audit-dark-390.spec.ts": {"seconds":253.418,"selectedTests":1}
+      ,
+      "tests/ui-audit-light-1024.spec.ts": {"seconds":265.937,"selectedTests":1}
+      ,
+      "tests/ui-audit-light-1280.spec.ts": {"seconds":223.771,"selectedTests":1}
+      ,
+      "tests/ui-audit-light-1440.spec.ts": {"seconds":261.149,"selectedTests":1}
+      ,
+      "tests/ui-audit-light-1920.spec.ts": {"seconds":186.063,"selectedTests":1}
+      ,
+      "tests/ui-audit-rules.spec.ts": {"seconds":1.219,"selectedTests":8}
+      ,
+      "tests/ui-audit.spec.ts": {"seconds":195.021,"selectedTests":1}
+      ,
+      "tests/usage-accounts.spec.ts": {"seconds":18.235,"selectedTests":9}
+      ,
+      "tests/usage-dashboard.spec.ts": {"seconds":18.674,"selectedTests":10}
+      ,
+      "tests/vendor-signals.spec.ts": {"seconds":15.28,"selectedTests":5}
+      ,
+      "tests/version-reveal.spec.ts": {"seconds":8.344,"selectedTests":4}
+      ,
+      "tests/views-filters.spec.ts": {"seconds":127.461,"selectedTests":32}
+      ,
+      "tests/webcore-recovery.spec.ts": {"seconds":34.315,"selectedTests":9}
+      ,
+      "tests/wide.spec.ts": {"seconds":30.744,"selectedTests":8}
+      ,
+      "tests/work-aggregates.spec.ts": {"seconds":178.299,"selectedTests":29}
+      ,
+      "tests/work-figures.spec.ts": {"seconds":120.542,"selectedTests":29}
+      ,
+      "tests/work-history-fix5.spec.ts": {"seconds":27.02,"selectedTests":6}
+      ,
+      "tests/work-integration.spec.ts": {"seconds":37.995,"selectedTests":12}
+      ,
+      "tests/work-kinds.spec.ts": {"seconds":41.152,"selectedTests":23}
+      ,
+      "tests/work-lifecycle-header.spec.ts": {"seconds":41.877,"selectedTests":10}
+      ,
+      "tests/work-lifecycle.spec.ts": {"seconds":82.517,"selectedTests":8}
+      ,
+      "tests/work-parent-releases.spec.ts": {"seconds":85.31,"selectedTests":6}
+      ,
+      "tests/work-parent-status.spec.ts": {"seconds":21.072,"selectedTests":6}
+      ,
+      "tests/work-queue.spec.ts": {"seconds":94.66,"selectedTests":30}
+      ,
+      "tests/work-surfaces-fix2.spec.ts": {"seconds":33.512,"selectedTests":12}
+      ,
+      "tests/work-surfaces-fix3.spec.ts": {"seconds":24.409,"selectedTests":6}
+      ,
+      "tests/work-surfaces-fix4.spec.ts": {"seconds":56.642,"selectedTests":6}
+      ,
+      "tests/work-vocabulary.spec.ts": {"seconds":179.923,"selectedTests":24}
+      ,
+      "tests/workspace-activity.spec.ts": {"seconds":33.599,"selectedTests":13}
     }
     ,
     "run": "38732586462"
