@@ -3,11 +3,11 @@
 // Created → live chart show, worked out from the server's status timing so it is tested without a browser. Nothing is
 // extrapolated: a step without samples is "No data yet", a missing window before is "no data", never 0.
 import type { DeliveryLanguage } from './delivery'
-import { bucketOf, durationTop, num, shortDate, type BucketUnit, type ChartBucket, type ChartModel, type Delta, type Part, type TileModel, type WindowDays } from './deliveryNumbers'
+import { bucketOf, durationTop, num, type BucketUnit, type ChartBucket, type ChartModel, type Delta, type Part, type TileModel, type WindowDays } from './deliveryNumbers'
 import { deliveryText, fill } from './deliveryNumbersText'
 import { simpleText } from './deliverySimpleText'
 import { stepOf, type StatusTimingStep, type StatusTimingStepKey, type TicketStatusTiming } from './statusTiming'
-import { durationParts, fmtDuration, statusFill } from './workFigures'
+import { durationParts, fmtDuration, shortDay, statusFill } from './workFigures'
 
 export type Final = 'delivered' | 'done'
 export const TOTAL_STEP: Record<Final, StatusTimingStepKey> = { delivered: 'created_to_live', done: 'created_to_done' }
@@ -65,7 +65,7 @@ export function ticketsModel(timing: TicketStatusTiming | null, days: WindowDays
   const final: Final = timing?.final_status ?? finalHint
   const fmt = (seconds: number) => fmtDuration(seconds, lang)
   const totalKey = TOTAL_STEP[final], total = stepOf(timing, totalKey)
-  const since = timing?.coverage.since ? shortDate(timing.coverage.since.slice(0, 10), lang) : ''
+  const since = timing?.coverage.since ? shortDay(timing.coverage.since, lang) : ''
   const partial = !!timing?.coverage.partial
   const foot = partial && since ? `${text.foot} · ${fill(text.history, { d: since })}` : text.foot
   const n = total?.n ?? 0, rework = timing?.rework ?? 0
@@ -137,10 +137,10 @@ export function ticketChart(timing: TicketStatusTiming | null, days: WindowDays,
     const last = index === raw.length - 1, back = raw.length - 1 - index, from = bucket.from.slice(0, 10)
     const status = bucket.state === 'no_data' ? 'no_data' : bucket.state === 'partial' ? 'partial' : bucket.n > 0 ? 'ok' : 'empty'
     if (unit === 'day') {
-      const label = last ? words.today : shortDate(from, lang)
+      const label = last ? words.today : shortDay(from, lang)
       return { from, to: bucket.to.slice(0, 10), unit, status, label, long: label, show: days === 7 || back % 7 === 0 }
     }
-    if (unit === 'week') return { from, to: bucket.to.slice(0, 10), unit, status, label: last ? words.thisWk : shortDate(from, lang), long: last ? words.thisWeek : `${words.weekOf} ${shortDate(from, lang)}`, show: back % (days === 90 ? 4 : 8) === 0 }
+    if (unit === 'week') return { from, to: bucket.to.slice(0, 10), unit, status, label: last ? words.thisWk : shortDay(from, lang), long: last ? words.thisWeek : `${words.weekOf} ${shortDay(from, lang)}`, show: back % (days === 90 ? 4 : 8) === 0 }
     const month = new Intl.DateTimeFormat(lang === 'de' ? 'de-AT' : 'en-GB', { month: 'short', timeZone: 'UTC' }).format(new Date(`${from}T00:00:00Z`))
     return { from, to: bucket.to.slice(0, 10), unit, status, label: month, long: last ? `${month} (${words.soFar})` : month, show: back % 3 === 0 }
   })

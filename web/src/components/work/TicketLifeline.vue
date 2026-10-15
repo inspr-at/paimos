@@ -47,9 +47,6 @@ function load() {
     status.value = error instanceof APIError && error.status === 403 ? 'forbidden' : 'error'
   } })
 }
-watch(() => [props.nodeId, props.revision, scope.owner.value], () => { hideTip(); load() }, { immediate: true })
-// A permission reset drops the read in flight with the scope; ask again in the new one.
-onBeforeUnmount(onAccessRevalidate({ reset: () => { if (status.value === 'loading') load() } }))
 const view = computed<LifelineView | null>(() => answer.value ? lifelineView(answer.value.lifeline, typicalsOf(answer.value.timing?.steps), lang.value) : null)
 
 // ---------- Layout: widths from the strip's measured width, markers on whole-pixel notches ----------
@@ -185,6 +182,11 @@ function rowDown(event: PointerEvent) {
 
 const live = computed(() => tip.value?.kind === 'strip' ? tip.value.lines.map(line => line.text).join('. ') : '')
 const lineId = `${uid}-line`
+
+// Last, so the first run finds every ref it touches. Another ticket, revision or person closes the tip and reads again.
+watch(() => [props.nodeId, props.revision, scope.owner.value], () => { hideTip(); load() }, { immediate: true })
+// A permission reset drops the read in flight with the scope; ask again in the new one.
+onBeforeUnmount(onAccessRevalidate({ reset: () => { if (status.value === 'loading') load() } }))
 </script>
 
 <script lang="ts">

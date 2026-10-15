@@ -35,6 +35,7 @@ import { repositoryState } from '../../lib/projectDeliverySettings'
 import { ticketsModel, type TicketTileModel } from '../../lib/deliveryTickets'
 import { NO_FILTERS, type TimingFilters } from '../../lib/statusTiming'
 import { useTicketTiming } from '../../lib/useTicketTiming'
+import { shortDay } from '../../lib/workFigures'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
 // The project page hands over a new object on every render. Everything here follows the id and
@@ -179,7 +180,7 @@ const chips = computed(() => {
 const history = computed<[string, string] | null>(() => {
   const t = text.value, since = tickets.data.value?.coverage.since
   if (tickets.status.value === 'loading') return null
-  return since ? [t.srcHistory[0], fill(t.srcHistory[1], { d: shortDate(since.slice(0, 10), lang.value) })] : [t.srcHistoryNone[0], t.srcHistoryNone[1]]
+  return since ? [t.srcHistory[0], fill(t.srcHistory[1], { d: shortDay(since, lang.value) })] : [t.srcHistoryNone[0], t.srcHistoryNone[1]]
 })
 const chipsReady = computed(() => tickets.status.value !== 'loading')
 const unit = computed(() => bucketOf(prefs.value.window))

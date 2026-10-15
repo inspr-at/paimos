@@ -47,6 +47,11 @@ export function dayMonth(ms: number, lang: DeliveryLanguage = 'en'): string {
   const d = new Date(ms)
   return lang === 'de' ? `${d.getDate()}. ${MONTHS.de[d.getMonth()]}` : `${d.getDate()} ${MONTHS.en[d.getMonth()]}`
 }
+/** A calendar day from an ISO date or timestamp (its UTC date, like the Delivery charts): "7 Sep", never "7 Sept". */
+export function shortDay(iso: string, lang: DeliveryLanguage = 'en'): string {
+  const [, month, day] = iso.slice(0, 10).split('-').map(Number)
+  return lang === 'de' ? `${day}. ${MONTHS.de[month - 1]}` : `${day} ${MONTHS.en[month - 1]}`
+}
 export function whenFull(ms: number, lang: DeliveryLanguage = 'en'): string {
   return `${WEEKDAYS[lang][new Date(ms).getDay()]} ${dayMonth(ms, lang)} ${clock(ms)}`
 }
