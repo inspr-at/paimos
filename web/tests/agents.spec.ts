@@ -228,7 +228,8 @@ test('members can decide lower risk requests but not high risk requests', async 
   const { calls, data } = await setup(page, { member: true })
   const high = data.approvals.find(a => a.scope === 'harness.control' && !a.decision)!
   await openDesk(page, `a:${high.id}`)
-  await expect(page.getByRole('region', { name: 'Permission request', exact: true })).toContainText('High risk')
+  // AEON-1339: risk is said once, in the memo's head line.
+  await expect(page.getByTestId('desk-line')).toContainText('High risk.')
   await expect(page.getByTestId('desk-decide')).toBeDisabled()
   for (const [index, scope] of ['run.claim', 'nodes.read'].entries()) {
     const lower = data.approvals.find(a => a.scope === scope && !a.decision)!
