@@ -336,6 +336,54 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
   const defaultTheme = { id: 'fixture-default-theme', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '', values: structuredClone(PORCELAIN) }
   const started = Date.now()
   const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
+  // The list's filter semantics (B1), shared by GET /api/nodes and the view figures, which ignore Hide closed.
+  const matching = (query: URLSearchParams, hide = true): MockNode[] => {
+    const kinds = listParam(query, 'kind')
+    const parentFilter = query.get('parent_id')
+    const within = query.get('within'), states = listParam(query, 'state'), priorities = listParam(query, 'priority'), assignees = listParam(query, 'assignee'), q = (query.get('q') ?? '').toLowerCase()
+    // within: a project, or any node's subtree; parent_id: direct children only.
+    const inside = (n: MockNode) => {
+      if (!within) return true
+      if (data.projects.some(p => p.id === within)) return n.project === within
+      for (let parent = n.parent_id; parent; parent = data.nodes.find(x => x.id === parent)?.parent_id ?? null) if (parent === within) return true
+      return false
+    }
+    const tags = listParam(query, 'tag').map(v => v.toLowerCase()), epics = listParam(query, 'epic'), costs = listParam(query, 'cost_unit').map(v => v.toLowerCase()), releases = listParam(query, 'release').map(v => v.toLowerCase())
+    const dateField = query.get('date_field'), dateFrom = query.get('date_from'), dateTo = query.get('date_to')
+    const dateOf = (n: MockNode): number | null => {
+      const raw = dateField === 'created' ? n.created_at : dateField === 'updated' ? n.updated_at : dateField === 'start' ? n.fields.start_date : dateField === 'end' ? n.fields.end_date : n.fields.accepted_at
+      return typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? Date.parse(raw) : null
+    }
+    // ids (AEON-326): only those nodes, every other filter still applied.
+    const onlyIds = listParam(query, 'ids')
+    // Shape is canonical even for old payloads that omit is_leaf. Count only
+    // work children, and retain explicit shape for fixtures with hidden work.
+    const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
+    const levelOf = (n: MockNode) => (n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : String(n.depth ?? 1)
+    return data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
+      .filter(n => passes(listParam(query, 'shape'), v => v === ((n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : 'parent')))
+      .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
+      // AEON-974: Type levels are the leaf, else a parent's depth.
+      .filter(n => passes(listParam(query, 'level'), v => v === levelOf(n)))
+      .filter(n => !onlyIds.length || onlyIds.includes(n.id))
+      .filter(n => passes(states, v => v === n.state))
+      .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
+      .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(bucketOf(n)))
+      .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
+      .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
+      .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
+      .filter(n => passes(tags, v => v === 'none' ? !tagNames(n).length : tagNames(n).some(t => t.name.toLowerCase() === v)))
+      .filter(n => passes(epics, v => v === 'none' ? n.kind_slug !== 'epic' && !epicAbove(n, data) : epicAbove(n, data)?.id === v))
+      .filter(n => passes(costs, v => v === (costUnit(n).toLowerCase() || 'none')))
+      .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
+      .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
+      .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
+      .filter(n => {
+        if (!hide || query.get('hide_closed') !== 'true') return true
+        const choice = hideChoice(n.state, bucketOf(n))
+        return !choice || !hiddenStates(listParam(query, 'hide_states')).includes(choice)
+      })
+  }
   await page.route('**/api/**', async arrived => {
     const request = arrived.request(), url = new URL(request.url()), method = request.method(), query = url.searchParams
     // Preferences use an encoded path segment; model the server's decoded key
@@ -620,56 +668,22 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         return { id: p.id, key: p.key, title: p.title, state: p.state, ...counts, archived_count: archivedCount, status_counts: [...statusCounts.values()], status_counts_truncated: false, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
+    // ---------- View figures (AEON-1368): every matching row, Hide closed, sort and paging ignored ----------
+    const figuresFor = /^\/api\/projects\/([^/]+)\/figures$/.exec(path)
+    if (figuresFor && method === 'GET') {
+      if (!data.projects.some(p => p.id === figuresFor[1])) return route.fulfill({ status: 404, json: { error: 'project not found' } })
+      const within = new URLSearchParams(query)
+      if (!within.get('within')) within.set('within', figuresFor[1])
+      if (!within.get('kind')) within.set('kind', 'work,ticket,task,epic')
+      return route.fulfill({ json: mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf) })
+    }
     if (path === '/api/nodes' && method === 'GET') {
       const kinds = listParam(query, 'kind')
       if (kinds.length === 1 && kinds[0] === 'project') return route.fulfill({ json: { items: data.projects.map(projectItem), next_cursor: null } })
       if (options.failList) return route.fulfill({ status: 503, json: { error: 'The list is resting' } })
       if (options.delayList) await new Promise(resolve => setTimeout(resolve, options.delayList))
       if (options.delayChildren && query.get('parent_id') && !data.projects.some(p => p.id === query.get('parent_id'))) await new Promise(resolve => setTimeout(resolve, options.delayChildren))
-      const parentFilter = query.get('parent_id')
-      const within = query.get('within'), states = listParam(query, 'state'), priorities = listParam(query, 'priority'), assignees = listParam(query, 'assignee'), q = (query.get('q') ?? '').toLowerCase()
-      // within: a project, or any node's subtree; parent_id: direct children only.
-      const inside = (n: MockNode) => {
-        if (!within) return true
-        if (data.projects.some(p => p.id === within)) return n.project === within
-        for (let parent = n.parent_id; parent; parent = data.nodes.find(x => x.id === parent)?.parent_id ?? null) if (parent === within) return true
-        return false
-      }
-      const tags = listParam(query, 'tag').map(v => v.toLowerCase()), epics = listParam(query, 'epic'), costs = listParam(query, 'cost_unit').map(v => v.toLowerCase()), releases = listParam(query, 'release').map(v => v.toLowerCase())
-      const dateField = query.get('date_field'), dateFrom = query.get('date_from'), dateTo = query.get('date_to')
-      const dateOf = (n: MockNode): number | null => {
-        const raw = dateField === 'created' ? n.created_at : dateField === 'updated' ? n.updated_at : dateField === 'start' ? n.fields.start_date : dateField === 'end' ? n.fields.end_date : n.fields.accepted_at
-        return typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? Date.parse(raw) : null
-      }
-      // ids (AEON-326): only those nodes, every other filter still applied.
-      const onlyIds = listParam(query, 'ids')
-      // Shape is canonical even for old payloads that omit is_leaf. Count only
-      // work children, and retain explicit shape for fixtures with hidden work.
-      const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
-      const levelOf = (n: MockNode) => (n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : String(n.depth ?? 1)
-      let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
-        .filter(n => passes(listParam(query, 'shape'), v => v === ((n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : 'parent')))
-        .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
-        // AEON-974: Type levels are the leaf, else a parent's depth.
-        .filter(n => passes(listParam(query, 'level'), v => v === levelOf(n)))
-        .filter(n => !onlyIds.length || onlyIds.includes(n.id))
-        .filter(n => passes(states, v => v === n.state))
-        .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
-        .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(bucketOf(n)))
-        .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
-        .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
-        .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
-        .filter(n => passes(tags, v => v === 'none' ? !tagNames(n).length : tagNames(n).some(t => t.name.toLowerCase() === v)))
-        .filter(n => passes(epics, v => v === 'none' ? n.kind_slug !== 'epic' && !epicAbove(n, data) : epicAbove(n, data)?.id === v))
-        .filter(n => passes(costs, v => v === (costUnit(n).toLowerCase() || 'none')))
-        .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
-        .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
-        .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-        .filter(n => {
-          if (query.get('hide_closed') !== 'true') return true
-          const choice = hideChoice(n.state, bucketOf(n))
-          return !choice || !hiddenStates(listParam(query, 'hide_states')).includes(choice)
-        })
+      let rows = matching(query)
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
@@ -817,6 +831,76 @@ function loopPath(relations: { source_node_id: string; target_node_id: string; t
 }
 
 // A route whose answer waits: computed now, fulfilled once the hold settles.
+// GET /api/projects/{id}/figures over the fixture (the AEON-1368 shape): leaves only, Closed out of the hours, parents never
+// counted twice. Fixtures have no event log, so "marks releases" means a ticket in the project is Delivered or Accepted.
+const FILTER_PARAMS = ['q', 'state', 'work_state', 'work_bucket', 'priority', 'assignee', 'tag', 'epic', 'cost_unit', 'release', 'human_check', 'shape', 'depth', 'level', 'date_field', 'ids', 'parent_id']
+function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: URLSearchParams, bucketOf: (node: MockNode) => ReturnType<typeof workBucket>) {
+  const isWork = (n: MockNode) => ['work', 'ticket', 'task', 'epic'].includes(n.kind_slug)
+  const parents = new Set(data.nodes.filter(isWork).map(n => n.parent_id))
+  const isLeaf = (n: MockNode) => isWork(n) && (n.is_leaf ?? !parents.has(n.id))
+  const hoursOf = (n: MockNode) => typeof n.fields.estimate_hours === 'number' && n.fields.estimate_hours > 0 && n.fields.estimate_hours <= 200 ? n.fields.estimate_hours : null
+  const leaves = rows.filter(isLeaf)
+  const closed = (n: MockNode) => ['cancelled', 'archived'].includes(bucketOf(n))
+  const marks = data.nodes.some(n => n.project === project && ['delivered', 'accepted'].includes(canonicalWorkStatus(n.state)))
+  const group = () => ({ hours: 0, tickets: 0, statuses: {} as Record<string, number> })
+  const groups = { completed: group(), done_not_live: group(), in_progress: group(), open: group() }
+  let total = 0, without = 0, openEstimated = 0
+  const est: number[] = []
+  for (const n of leaves.filter(n => !closed(n))) {
+    const status = canonicalWorkStatus(n.state), bucket = bucketOf(n)
+    const g = bucket === 'done' ? (['delivered', 'accepted'].includes(status) || !marks ? groups.completed : groups.done_not_live) : bucket === 'in_progress' ? groups.in_progress : groups.open
+    g.tickets++; g.statuses[status] = (g.statuses[status] ?? 0) + 1
+    const h = hoursOf(n)
+    if (h == null) without++
+    else { g.hours += h; total += h; est.push(h); if (bucket === 'open' || bucket === 'in_progress') openEstimated++ }
+  }
+  const stats = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b), mid = Math.floor(sorted.length / 2)
+    return { count: values.length, total: values.reduce((a, b) => a + b, 0), median: sorted.length ? (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) : null, average: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null }
+  }
+  const counted = (label: (n: MockNode) => string, top = 0) => {
+    const counts = new Map<string, number>()
+    let missing = 0
+    for (const n of leaves) { const v = label(n); if (!v || v === 'none') missing++; else counts.set(v, (counts.get(v) ?? 0) + 1) }
+    const values = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value, count]) => ({ value, count, hours: 0 }))
+    const shown = top ? values.slice(0, top) : values
+    return { rows: leaves.length, included: leaves.length, without_value: missing, others: values.slice(shown.length).reduce((a, v) => a + v.count, 0), partial: false, values: shown }
+  }
+  const all = { rows: rows.length, included: rows.length, without_value: 0, others: 0, partial: false }
+  const dates = (field: 'created_at' | 'updated_at', staleDays: number) => {
+    const times = rows.map(n => Date.parse(n[field])).sort((a, b) => a - b)
+    const clock = Date.now()
+    return { ...all, from: times.length ? new Date(times[0]).toISOString() : undefined, to: times.length ? new Date(times[times.length - 1]).toISOString() : undefined,
+      median_age_seconds: stats(times.map(t => (clock - t) / 1000)).median ?? undefined,
+      stale: rows.filter(n => ['open', 'in_progress'].includes(bucketOf(n)) && clock - Date.parse(n[field]) >= staleDays * 86_400_000).length }
+  }
+  const keys = rows.map(n => n.key).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()))
+  const work = leaves.filter(n => !closed(n))
+  const narrowed = FILTER_PARAMS.some(name => (query.get(name) ?? '').trim() !== '')
+  return {
+    view_key: [...query].filter(([name]) => FILTER_PARAMS.includes(name)).map(([name, value]) => `${name}=${value}`).sort().join('&'), computed_at: new Date().toISOString(),
+    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length },
+    marks_releases: marks, total_hours: total, approximate: total > 0, without_estimate: without, open_estimated_leaves: openEstimated, groups,
+    columns: {
+      key: { ...all, parents: rows.length - leaves.length, leaves: leaves.length, first_key: keys[0], last_key: keys[keys.length - 1] },
+      status: counted(n => canonicalWorkStatus(n.state)),
+      priority: counted(n => typeof n.fields.priority === 'string' ? n.fields.priority : ''),
+      assignee: { ...counted(n => personName(data, n.fields.assignee), 3), values: counted(n => personName(data, n.fields.assignee), 3).values.map(v => ({ ...v, kind: 'person' })) },
+      epic: counted(n => epicAbove(n, data)?.key ?? '', 2),
+      release: counted(release, 2),
+      suggested_release: counted(n => labelOf(n.fields.suggested_release), 2),
+      tag: counted(n => tagNames(n)[0]?.name ?? '', 5),
+      cost_unit: counted(costUnit, 3),
+      model: counted(() => '', 3),
+      estimate: { rows: leaves.length, included: work.length, without_value: without, others: 0, partial: false, numbers: stats(est) },
+      tokens: { rows: leaves.length, included: leaves.length, without_value: leaves.length, others: 0, partial: false, measured: stats([]), estimated: stats([]), typical: { count: 0, median: null, average: null, approximate: false } },
+      eta_ready: { rows: leaves.length, included: leaves.length, without_value: leaves.filter(n => !n.eta?.eta_ready_at).length, others: 0, partial: false, running: 0 },
+      progress: (() => { const readings = work.map(n => n.eta?.progress_pct).filter((v): v is number => typeof v === 'number'); return { rows: leaves.length, included: work.length, without_value: work.length - readings.length, others: 0, partial: false, numbers: stats(readings), reading_count: readings.length } })(),
+      created_at: dates('created_at', 14),
+      updated_at: dates('updated_at', 7),
+    },
+  }
+}
 function heldRoute(route: Route, held: { until: Promise<unknown>; computed?: () => void }): Route {
   return {
     request: () => route.request(),
