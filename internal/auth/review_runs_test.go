@@ -55,10 +55,10 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 	var project, ticket, authorSession, reviewerSession, otherSession, sameSession string
 	base, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	txdo(func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'RR','Reviewer runs' FROM node_kinds WHERE slug='project' RETURNING id::text`, tid).Scan(&project); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'RR-1','Reviewer runs' FROM node_kinds WHERE slug='project' RETURNING id::text`, tid).Scan(&project); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,parent_id,key,title,fields) SELECT $1,id,$2,'RR-1','Bound approval','{"code":true,"ui":true,"hide_from_release_notes":true}' FROM node_kinds WHERE slug='work' RETURNING id::text`, tid, project).Scan(&ticket); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,parent_id,key,title,fields) SELECT $1,id,$2,'RR-2','Bound approval','{"code":true,"ui":true,"hide_from_release_notes":true}' FROM node_kinds WHERE slug='work' RETURNING id::text`, tid, project).Scan(&ticket); err != nil {
 			return err
 		}
 		for _, s := range []struct {
