@@ -9,14 +9,85 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+var list6000Fixture struct {
+	sync.Once
+	db        *dbtest.DB
+	err       error
+	principal tenant.Principal
+	root      nodeJSON
+}
+
+// Seed once per test binary, then clone the connection-free database. Every
+// case owns its data, planner statistics and role bindings, even under shuffle
+// or -count. The ordinary package reset never touches this source database.
+func useList6000Fixture(t *testing.T) (tenant.Principal, nodeJSON) {
+	t.Helper()
+	useDB(t)
+	priorDB, priorAdmin, priorApp := testDB, adminPool, appPool
+	t.Cleanup(func() { testDB, adminPool, appPool = priorDB, priorAdmin, priorApp })
+	list6000Fixture.Do(func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+		defer cancel()
+		list6000Fixture.db, list6000Fixture.err = dbtest.New(ctx)
+		if list6000Fixture.err != nil {
+			return
+		}
+		testDB = list6000Fixture.db
+		adminPool, appPool = testDB.Admin, testDB.App
+		list6000Fixture.err = fmt.Errorf("large list fixture did not finish")
+		// Preserve the stale-kind-statistics regression: statistics belong to
+		// a previous tenant after TRUNCATE, not to the fixture being queried.
+		newPrincipal(t, "previous-list-kind-statistics")
+		if _, err := appPool.Exec(ctx, `ANALYZE node_kinds; ALTER TABLE nodes SET (autovacuum_enabled=false); ALTER TABLE node_kinds SET (autovacuum_enabled=false)`); err != nil {
+			t.Fatal(err)
+		}
+		p := newPrincipal(t, "large-list")
+		project, work := kindBySlug(t, p, "project"), kindBySlug(t, p, "work")
+		root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
+		if err := db.InTenant(dbtest.Seed(ctx), appPool, p.TenantID, func(tx pgx.Tx) error {
+			return explainListSeed(t, tx, `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
+ SELECT $1::uuid,'PERF-'||g,$2::uuid,'Item '||g,
+  jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END,
+   'tags',CASE g%5 WHEN 0 THEN '[]'::jsonb ELSE jsonb_build_array(jsonb_build_object('name','T'||(g%7)),'bug') END,
+   'cost_unit',jsonb_build_object('label','CU '||(g%4))),
+  CASE g%4 WHEN 0 THEN 'new' WHEN 1 THEN 'active' WHEN 2 THEN 'qa' ELSE 'done' END,
+  $3::uuid,g FROM generate_series(1,6000) AS g`, p.TenantID, work.ID, root.ID)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		list6000Fixture.principal, list6000Fixture.root = p, root
+		list6000Fixture.db.App.Close()
+		list6000Fixture.db.Admin.Close()
+		list6000Fixture.err = nil
+	})
+	if list6000Fixture.err != nil {
+		t.Fatal(list6000Fixture.err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	cloned, err := dbtest.Clone(ctx, list6000Fixture.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cloned.Close(); err != nil {
+			t.Errorf("large list fixture cleanup: %v", err)
+		}
+	})
+	testDB, adminPool, appPool = cloned, cloned.Admin, cloned.App
+	return list6000Fixture.principal, list6000Fixture.root
+}
 
 // EXPLAIN executes the synthetic insert once, retaining the real app role,
 // RLS and triggers. Its numeric trigger table makes fixture cost visible.

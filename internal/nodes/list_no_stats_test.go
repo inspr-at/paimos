@@ -2,7 +2,6 @@
 package nodes
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,34 +18,7 @@ import (
 // The first list after a bulk import must finish with no table statistics.
 // This uses the same NOBYPASSRLS owner and principal visibility as requests.
 func TestListWithoutStatistics(t *testing.T) {
-	p := newPrincipal(t, "no-list-stats")
-	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "work")
-	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
-	if _, err := testDB.Admin.Exec(t.Context(), `ALTER TABLE nodes SET (autovacuum_enabled=false)`); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := testDB.Admin.Exec(ctx, `ALTER TABLE nodes RESET (autovacuum_enabled)`); err != nil {
-			t.Error(err)
-		}
-		if _, err := appPool.Exec(ctx, `ANALYZE nodes`); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
-   SELECT $1::uuid,'PERF-'||g,$2::uuid,'Item '||g,
-    jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END,
-     'tags',CASE g%5 WHEN 0 THEN '[]'::jsonb ELSE jsonb_build_array(jsonb_build_object('name','T'||(g%7)),'bug') END,
-     'cost_unit',jsonb_build_object('label','CU '||(g%4))),
-    CASE g%4 WHEN 0 THEN 'new' WHEN 1 THEN 'active' WHEN 2 THEN 'qa' ELSE 'done' END,
-    $3::uuid,g FROM generate_series(1,6000) AS g`, p.TenantID, ticket.ID, root.ID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
+	p, root := useList6000Fixture(t)
 	if _, err := testDB.Admin.Exec(t.Context(), `DELETE FROM pg_statistic WHERE starelid='nodes'::regclass`); err != nil {
 		t.Fatal(err)
 	}
