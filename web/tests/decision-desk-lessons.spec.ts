@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Risk: the person cannot see the exact prepared write, decides another
 // recommendation, or loses the native Undo while controls move on a phone.
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
@@ -106,7 +106,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: testInfo.outputPath('pending.png') })
     await page.getByTestId('desk-close').click(); state.crowded = true; await page.goto('/p/AEON/knowledge')
     await expect(page.getByRole('heading', { name: 'Method learnings' })).toHaveCount(0)
-    const link = page.getByRole('link', { name: '1 lessons wait on the Decision Desk', exact: true })
+    const link = page.getByRole('link', { name: '1 lesson waits on the Decision Desk', exact: true })
     await expect(link.locator('svg')).toHaveCount(1)
     await expect(link).toHaveAttribute('href', '/decision-desk?kind=lesson&project=p-aeon')
     const search = page.getByRole('searchbox', { name: 'Search knowledge in Paimos Aeon' })
@@ -121,8 +121,44 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.setViewportSize({ width, height: 1000 }); await mockLessons(page, { theme, empty: true })
     await page.goto('/p/AEON/knowledge'); await expect(page.locator('.k-frame')).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Method learnings' })).toHaveCount(0)
-    await expect(page.getByRole('link', { name: /lessons wait on the Decision Desk/ })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /on the Decision Desk/ })).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath('knowledge-without-lessons.png') })
+  })
+}
+// Tick at 33f0a013 read "1 lessons wait on the Decision Desk" with its chevron alone on a
+// second line: base.css renders every SVG as a block. Fails on e27c019ac at every width.
+async function lessonLine(link: Locator) {
+  return link.evaluate(el => {
+    const icon = el.querySelector('svg')!, word = document.createRange(); word.selectNodeContents(icon.previousSibling!)
+    const last = [...word.getClientRects()].at(-1)!, chevron = icon.getBoundingClientRect()
+    return {
+      lines: new Set([...el.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => Math.round(rect.top))).size,
+      withWord: chevron.top < last.bottom && chevron.bottom > last.top && chevron.left >= last.right - 0.5,
+    }
+  })
+}
+for (const width of [1440, 960, 390]) {
+  test(`AEON-1363 Knowledge lesson line counts and keeps its chevron with the last word at ${width}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 }); await mockLessons(page)
+    let waiting = 1
+    await page.route('**/api/decision-desk/projection*', route => route.fulfill({ json: {
+      items: [], counts: { open: waiting, held: 0, chores: 0, lessons: { 'p-aeon': waiting } }, has_more: false, as_of: '2026-10-14T10:00:00Z',
+    } }))
+    for (const [count, name] of [[1, '1 lesson waits on the Decision Desk'], [3, '3 lessons wait on the Decision Desk']] as const) {
+      waiting = count; await page.goto('/p/AEON/knowledge')
+      const link = page.getByRole('link', { name, exact: true })
+      await expect(link).toBeVisible(); await expect(link.locator('svg')).toHaveCount(1)
+      expect(await lessonLine(link)).toEqual({ lines: 1, withWord: true })
+      await page.screenshot({ path: testInfo.outputPath(`knowledge-${count}-lessons.png`) })
+    }
+    // A column that ends just past "Desk" wraps the last word together with the chevron.
+    const link = page.getByRole('link', { name: '3 lessons wait on the Decision Desk', exact: true })
+    await link.evaluate(el => {
+      const icon = el.querySelector('svg')!, word = document.createRange(); word.selectNodeContents(icon.previousSibling!)
+      const line = el.parentElement!; line.style.width = `${[...word.getClientRects()].at(-1)!.right - line.getBoundingClientRect().left + 1}px`
+    })
+    expect(await lessonLine(link)).toEqual({ lines: 2, withWord: true })
+    await page.screenshot({ path: testInfo.outputPath('knowledge-narrow-column.png') })
   })
 }
 test('AEON-1331 rule draft, omitted source and keyboard use the native decision', async ({ page }) => {

@@ -7940,6 +7940,12 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 rule draft, omitted source and keyboard use the native decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1363 Knowledge lesson line counts and keeps its chevron with the last word at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1363 Knowledge lesson line counts and keeps its chevron with the last word at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1363 Knowledge lesson line counts and keeps its chevron with the last word at 960","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"every kind names its project with a new-tab link; P opens it, but not while typing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"revisiting a question after Decide & next retains its project link, colour and P action","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
