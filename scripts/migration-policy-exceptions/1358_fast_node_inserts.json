@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1358_fast_node_inserts.sql",
+      "sha256": "7d255d1e48fc2cd4bce3835b8840aa9d31acc9a58d8dccba19217cafa6ecfe92",
+      "ticket": "AEON-1422",
+      "reason": "CREATE OR REPLACE FUNCTION is conservatively outside the expand-safe allowlist. Only the released tree-validator and release-inheritance function bodies change; signatures, invoker rights, FORCE RLS, advisory fences, parent-kind/deletion/restore/cycle checks and all stored rows remain unchanged. Recursive ancestry uses parameterized point lookups. INSERT skips reconciliation only when neither membership nor retained parent intent is visible in its tenant; UPDATE and every nonempty projection retain the released reconciliation. The new counted-call regression covers empty/backlog/update/tenant paths; existing nodes, work-status and release lifecycle tests retain their invariants. This exact-byte artifact is for coordinator review and grants no merge, push, deployment or release authority."
+    }
+  ]
+}
