@@ -6,7 +6,8 @@ import type { TicketGraphState } from '../../lib/ticketGraphRenderer'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { knowledge, knowledgeTab, knowledgeWide, shownEntry, learningAccepted, learningReverted, updateKnowledge, openKey, session, ticketKey, filters, now, activeTicketView, knowledgeActive, knowledgeEntryOpen, knowledgeFilters, settingsActive, deliveryActive, graphState, ticketGraphView, me, knowledgeWritable } = useProjectPageContext()
 const ProjectSettings = defineAsyncComponent(() => import('../../components/settings/ProjectSettings.vue'))
 // Knowledge loads with its tab, not with every project page.

@@ -7,7 +7,8 @@ import LiveUpdatesChip from '../../components/work/LiveUpdatesChip.vue'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { openAssignee, copyKey, openStatus, openEpic, quickCreate, closeCreate, moveRow, tablePrefs, tableLayout, usageVisible, saveWidths, list, outline, activeLive, liveActive, liveDataStale, rowsById, groups, total, showAssignee, expectedRows, knownStates, filtered, manualShowClosed, clearFilters, sortBy, toggleGroup, showUpdates, panelItem, nativeReleases, openRow, newTab, selectable, selected, phonePicking, selectRow, selectAll, openRelease, routeKey, filters, density, now, outlineActive, table, scrollRoot, cursorId, collapsed, creating, writable, columnFigures, focusFirst } = useProjectPageContext()
 const bindTable = bindProjectRef(table)
 </script>

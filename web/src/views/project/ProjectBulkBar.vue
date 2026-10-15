@@ -6,7 +6,8 @@ import BulkBar from '../../components/work/BulkBar.vue'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { sequence, total, selectable, selected, clearSelection, selectAllMatching, selectedDeleted, liveSelection, listFrame, bulkBusy, openBulk, bulkArchive, openRelease, bulkQueue, queue, mayQueue, writable, bulkBar } = useProjectPageContext()
 const bindBulkBar = bindProjectRef(bulkBar)
 </script>

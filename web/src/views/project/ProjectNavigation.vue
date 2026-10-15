@@ -7,7 +7,8 @@ import ViewBar from '../../components/work/ViewBar.vue'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { setSection, projectSections, section, ticketsHeader, me, views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, viewBar, startSave, startRename, saveActive, duplicate, setDefaultView, share, copyViewLink, remove } = useProjectPageContext()
 const bindViewBar = bindProjectRef(viewBar)
 </script>

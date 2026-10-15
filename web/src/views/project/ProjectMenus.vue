@@ -14,7 +14,8 @@ import ReleasePicker from '../../components/work/ReleasePicker.vue'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { closeAssignee, assignPerson, closeStatus, chooseStatus, list, total, knownStates, options, sheetLoading, sheetOpened, setHideStates, manualShowClosed, toggleValue, excludeValue, clearFilters, setDate, openKey, selected, selectedRows, bulkBusy, bulkMenu, releaseIds, closeBulk, bulkPeople, bulkPriorities, bulkLabels, bulkStatus, bulkAssign, bulkPriority, bulkLabelsApply, bulkMove, chooseRelease, projectId, queueAnchor, assigneeMenu, closeQueue, ticketsHeader, filters, graphActive, outlineActive, toolbar, filterSheet, statusMenu, writable, canSaveView, savePanel, saveBusy, saveError, viewBar, startSave, closeSave, submitSave } = useProjectPageContext()
 const bindFilterSheet = bindProjectRef(filterSheet)
 </script>

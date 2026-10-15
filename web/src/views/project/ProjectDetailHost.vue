@@ -8,14 +8,11 @@ import { DOCK_LIST_RESERVE } from '../../lib/knowledge'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { openStatus, childCreated, childMoved, removed, list, move, knowledgeListQuery, knowledge, knowledgeEntry, knowledgeDocked, shownEntry, closeKnowledgeDock, closeKnowledgeEntry, panelError, panelLoading, panelItem, panelPosition, resolvePanel, nativeReleases, refreshMemberships, loadProjectPeople, people, closePanel, expand, collapse, trail, trailBack, openRelated, newTab, ticketKey, now, panel, fullView, me, workspaceOwner, workspacePerson, writable, nodeDeletable, nodeMovable, relationLinkable, relationUnlinkable, commentable, commentDeletable, attachable, knowledgeWritable, knowledgeDeletable } = useProjectPageContext()
 
-// Knowledge loads with its tab, not with every project page.
-
 const KnowledgeEntryPage = defineAsyncComponent(() => import('../../components/knowledge/KnowledgeEntryPage.vue'))
-// Delivery (AEON-994) loads with its tab.
-
 const bindKnowledgeEntry = bindProjectRef(knowledgeEntry)
 const bindPanel = bindProjectRef(panel)
 </script>

@@ -15,7 +15,8 @@ import HeaderGlimpse from '../../components/work/HeaderGlimpse.vue'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { counts, selectCountGroup, selectCountStatus, projectId, queueAnchor, queueSnapshot, queueError, headerDensity, ticketsHeader, filters, headerGraph, glimpseShown, glimpseActive, now, graphActive, showViewBar, figuresBusy, figuresFailed, figuresNarrowed, retryFigures, workHead, workBarSlots, workHideLabel } = useProjectPageContext()
 const descriptionExpanded = ref(false)
 const descriptionClipped = ref(false)

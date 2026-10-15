@@ -6,7 +6,8 @@ import HeaderNavMenu from '../../components/work/HeaderNavMenu.vue'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
-const { project } = toRefs(defineProps<{ project: Project }>())
+const props = defineProps<{ project: Project }>()
+const { project } = toRefs(props)
 const { startCreate, toolbarColumns, saveColumns, resetColumns, list, outline, sequence, total, options, chipLabel, facetLoading, needOptions, update, setHideStates, manualShowClosed, setSection, setView, toggleValue, excludeValue, clearFilters, setDate, setSort, setGroup, setAllGroups, selectable, selected, phonePicking, picking, clearSelection, selectedDeleted, projectSections, section, headerDensity, ticketsHeader, filters, density, setDensity, knowledgeView, viewMode, settingsActive, deliveryActive, graphActive, graphState, toolbarWrap, stickMark, toolbar, filterSheet, stuck, me, views, activeView, viewDirty, canSaveView, defaultViewId, hrefFor, openView, viewBar, startSave } = useProjectPageContext()
 const bindStickMark = bindProjectRef(stickMark)
 const bindToolbar = bindProjectRef(toolbar)
