@@ -332,14 +332,14 @@ function steer() { const anchor = actionsAnchor.value; closeActions(false); if (
 function settingReason(kind: 'rename' | 'model' | 'effort' | 'steer') { return nativeKnown.value ? 'Owned session settings are not available in this panel yet.' : managed.value?.settingReason(kind) ?? 'This setting is not available for this session.' }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0
-const positiveInteger = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0
+const nonnegativeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
 const nullableText = (value: unknown): value is string | null => value === null || typeof value === 'string'
 function isNativeBinding(value: unknown): value is NativeBinding {
-  return record(value) && ['tenant_id', 'project_id', 'owned_session_id', 'harness_session_id', 'runtime_epoch', 'daemon_id', 'daemon_generation'].every(key => nonempty(value[key])) && positiveInteger(value.binding_revision) && nullableText(value.run_id)
+  return record(value) && ['tenant_id', 'project_id', 'owned_session_id', 'harness_session_id', 'runtime_epoch', 'daemon_id', 'daemon_generation'].every(key => nonempty(value[key])) && nonnegativeInteger(value.binding_revision) && nullableText(value.run_id)
 }
 function isNativeContext(value: unknown): value is NativeSessionView {
   if (!record(value) || !nonempty(value.owned_session_id) || !nonempty(value.owner_person_id) || value.profile !== 'native' ||
-    !positiveInteger(value.generation) || !positiveInteger(value.revision) ||
+    !nonnegativeInteger(value.generation) || !nonnegativeInteger(value.revision) ||
     !['coordinator', 'worker'].includes(String(value.role)) || !['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode'].includes(String(value.harness)) ||
     !['accepted', 'waiting_for_exit', 'starting', 'idle', 'running', 'requires_action', 'quiescing', 'taken', 'returning', 'recovering', 'ownership_lost', 'stopping', 'stopped', 'failed'].includes(String(value.state)) ||
     !['structured', 'terminal', 'none'].includes(String(value.mode)) || typeof value.conversation_ref !== 'string' ||
@@ -353,7 +353,7 @@ function isNativeContext(value: unknown): value is NativeSessionView {
 // Check the untrusted envelope before the existing event validator checks its
 // kind-specific payload, privacy, binding, generation, sequence and byte bounds.
 function isNativeEnvelope(value: unknown): value is NativeStreamEvent {
-  return record(value) && isNativeBinding(value.binding) && positiveInteger(value.generation) &&
+  return record(value) && isNativeBinding(value.binding) && nonnegativeInteger(value.generation) &&
     typeof value.seq === 'string' && typeof value.sequence === 'string' && typeof value.dropped_frames === 'string' &&
     typeof value.observed_at === 'string' && value.source === 'native' && typeof value.kind === 'string' &&
     Object.hasOwn(nativeSessionPayloadSchemas, value.kind) && record(value.payload)
@@ -365,7 +365,7 @@ function readNativeEvent(value: unknown, request: ExpertRequest): NativeStreamEv
   return event
 }
 function readNativePage(value: unknown, request: ExpertRequest, before: string | null): NativeEventPage {
-  if (!record(value) || !positiveInteger(value.generation) || !Array.isArray(value.items) || value.items.length > nativeSessionBounds.event_page_items ||
+  if (!record(value) || !nonnegativeInteger(value.generation) || !Array.isArray(value.items) || value.items.length > nativeSessionBounds.event_page_items ||
     !nullableText(value.next_before) || typeof value.truncated !== 'boolean') throw new Error('Invalid event page')
   const page = { generation: value.generation, items: value.items.map(item => readNativeEvent(item, request)), next_before: value.next_before, truncated: value.truncated }
   if (!boundedPage(page, request, before)) throw new Error('Invalid event page')
@@ -401,7 +401,7 @@ const eventTransport: NativeExpertTransport = {
     const attached = await boundedJSON(`${path}/attach`, AbortSignal.any([signal, AbortSignal.timeout(3000)]),
       { request_id: crypto.randomUUID(), expected_binding: request.binding, client_id: crypto.randomUUID(), mode: 'view', view: 'structured', consent_id: null })
     if (!record(attached) || attached.mode !== 'view' || attached.control_capability !== null || !nonempty(attached.viewer_id) || !isNativeBinding(attached.binding) ||
-      bindingKey(attached.binding) !== bindingKey(request.binding) || !positiveInteger(attached.expires_in_ms)) throw new Error('Invalid viewer grant')
+      bindingKey(attached.binding) !== bindingKey(request.binding) || !nonnegativeInteger(attached.expires_in_ms) || attached.expires_in_ms === 0) throw new Error('Invalid viewer grant')
     const lease = AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, Math.min(attached.expires_in_ms, 30_000)))])
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
     try {
