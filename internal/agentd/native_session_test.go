@@ -167,7 +167,7 @@ func TestNativeStartupReconcilesPostForkFailuresBeforeRunning(t *testing.T) {
 			if err != nil || len(data.Groups) != 1 || data.Groups[entry.record.Group].State != "running" || data.Groups[entry.record.Group].PID != identity.RootPID {
 				t.Fatal("running startup lacks ledger ownership", data.Groups, err)
 			}
-			raw, err := originalState.Read("lead-runtime-"+request.RequestID+".json", 32768)
+			raw, err := originalState.Read(nativeLeadStateName(request.RequestID), 32768)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -350,7 +350,7 @@ func TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts(t *testing.T) 
 	if err != nil || len(data.Groups) != 1 {
 		t.Fatal("idle turn freed root occupancy", data, err)
 	}
-	raw, err := s.state.Read("lead-runtime-"+request.RequestID+".json", 32768)
+	raw, err := s.state.Read(nativeLeadStateName(request.RequestID), 32768)
 	if err != nil || strings.Contains(string(raw), input.Message.Body) || !strings.Contains(string(raw), input.Message.ID) {
 		t.Fatal("receipt lost provenance or persisted person content", err)
 	}
