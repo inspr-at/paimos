@@ -93,6 +93,7 @@ test('AEON-1316 project definitions copy, edit, undo, conditions and reset stay 
 // Risk: the empty and inherited states imply enforcement that is absent,
 // read-only viewers get edit controls, or folded Add back moves its own row.
 test('AEON-1316 definition states and folded left-out checks fit phone, tablet and desktop in both themes', async ({ browser }) => {
+  test.setTimeout(90_000)
   for (const width of [390,1024,1440]) {
     const context = await browser.newContext({ viewport:{width,height:1000},isMobile:width === 390,hasTouch:width === 390 }), page = await context.newPage()
     try {
@@ -106,9 +107,44 @@ test('AEON-1316 definition states and folded left-out checks fit phone, tablet a
       const folded = await controlStability(page,{row,header:card.locator('.fold-head')})
       await folded.check(async () => { await row.getByRole('button',{name:'Add back',exact:true}).click(); await expect(row).toContainText('Added back to Ready') })
       folded.done()
+      await expect(card.locator('[data-block="in_progress"]')).toContainText('1 check')
+      await expect(card.locator('[data-block="in_progress"]')).not.toContainText('Tickets enter In progress freely.')
       for (const theme of ['light','dark']) {
         await page.evaluate(theme => document.documentElement.dataset.theme = theme,theme)
         await page.screenshot({path:test.info().outputPath(`definitions-own-${width}-${theme}.png`),fullPage:true})
+      }
+      await card.locator('[data-check="manual:review"]').getByRole('button',{name:/^More for/}).click()
+      await page.getByRole('menuitem',{name:'Applies to…',exact:true}).click()
+      const form = page.getByRole('dialog',{name:/applies to$/}), radio = form.getByRole('radio',{name:'Code tickets',exact:true})
+      await expect(form).toBeInViewport()
+      const formStable = await controlStability(page,{frame:form,radio,group:form.locator('fieldset'),save:form.getByRole('button',{name:/^Save/}),cancel:form.getByRole('button',{name:'Cancel',exact:true})})
+      await formStable.check(() => radio.check()); formStable.done()
+      for (const theme of ['light','dark']) {
+        await page.evaluate(theme => document.documentElement.dataset.theme = theme,theme)
+        await page.screenshot({path:test.info().outputPath(`definitions-conditions-${width}-${theme}.png`)})
+      }
+      await form.getByRole('button',{name:'Cancel',exact:true}).click()
+      await card.getByRole('button',{name:'Reset to workspace default…',exact:true}).click()
+      const reset = page.getByRole('dialog',{name:'Reset PHAROS’s definition',exact:true})
+      await expect(reset).toBeInViewport()
+      for (const theme of ['light','dark']) {
+        await page.evaluate(theme => document.documentElement.dataset.theme = theme,theme)
+        await page.screenshot({path:test.info().outputPath(`definitions-reset-${width}-${theme}.png`)})
+      }
+      await reset.getByRole('button',{name:'Cancel',exact:true}).click()
+      const ws = world.context.workspace_default
+      for (const state of ['default','empty','readonly','none'] as const) {
+        world.context = {project_id:'p-pharos',definition:state === 'default' ? ws : state === 'none' ? null : definition(state === 'empty' ? {} : structuredClone(baseline),'project'),workspace_default:state === 'none' ? null : ws,copied_from_checks:null,can_manage:state !== 'readonly'}
+        await page.reload()
+        await expect(card.getByRole('heading',{name:'Definitions',exact:true})).toBeVisible()
+        await expect(card.locator('.origin')).toBeVisible()
+        if (state === 'default') await expect(card.getByText('Uses the workspace default',{exact:true})).toBeVisible()
+        if (state === 'empty' || state === 'none') await expect(card.locator('.enforce')).toHaveCount(0)
+        if (state === 'readonly') await expect(card.getByRole('button',{name:/Add check|More for|Reset to/})).toHaveCount(0)
+        for (const theme of ['light','dark']) {
+          await page.evaluate(theme => document.documentElement.dataset.theme = theme,theme)
+          await page.screenshot({path:test.info().outputPath(`definitions-${state}-${width}-${theme}.png`)})
+        }
       }
       expect(world.errors).toEqual([])
     } finally { await context.close() }
