@@ -7,7 +7,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false })
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false })
 defineOptions({ inheritAttrs: false })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
@@ -16,6 +16,7 @@ const y = ref(-9999)
 // Until placed (off-screen), the content may take its full height so place() measures it.
 const maxHeight = ref(props.tallest)
 const placedHeight = ref<number>()
+const compactWidth = ref(props.width)
 const above = ref(false)
 let placedAnchor: DOMRect | null = null
 
@@ -29,7 +30,8 @@ function place(keepSide = false) {
   // pinned actions. Its location never depends on the selected role's preview.
   if (props.sheet) {
     const phone = innerWidth <= 600
-    const width = phone ? innerWidth : Math.min(960, Math.max(480, innerWidth * .64), innerWidth - 32)
+    const width = phone ? innerWidth : props.compactSheet ? Math.min(props.width, innerWidth - 32) : Math.min(960, Math.max(480, innerWidth * .64), innerWidth - 32)
+    compactWidth.value = width
     x.value = Math.round((innerWidth - width) / 2)
     y.value = phone ? 0 : Math.min(64, Math.round(innerHeight * .08))
     maxHeight.value = phone ? innerHeight : Math.min(props.tallest, innerHeight - y.value - 16)
@@ -151,7 +153,7 @@ defineExpose({ place })
 
 <template>
   <Teleport :to="layer">
-    <div ref="panel" v-bind="$attrs" class="floating pop" :class="{ above, sheet }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? undefined : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" v-bind="$attrs" class="floating pop" :class="{ above, sheet }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>

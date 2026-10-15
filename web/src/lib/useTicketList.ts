@@ -5,7 +5,8 @@ import { rowStore } from './rowStore'
 import type { ListRead } from './useLiveList'
 import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
 import { askDoneGate } from './doneGateAsk'
-import { benefitGateError, benefitRetryFields, completionFields, needsBenefitPrompt } from './doneGate'
+import { entryFailure, requestEntryPanel } from './entryChecks'
+import { benefitGateError, benefitRetryFields, completionFields } from './doneGate'
 import { toast } from './toast'
 import { normaliseState, statusMeta } from './work'
 
@@ -240,11 +241,6 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const before = { state: shown.state, updated_at: shown.updated_at, fields: shown.fields }
     if (normaliseState(target.state) === normaliseState(state)) return false
     let fields = options.fields
-    if (!fields && needsBenefitPrompt({ ...target, fields: before.fields }, state)) {
-      const text = await askDoneGate({ key: target.key, title: target.title, state, fields: before.fields ?? {} })
-      if (!text) return false
-      fields = completionFields(before.fields, text)
-    }
     // Optimistic: the row shows the choice at once; the store's copy is the fallback.
     rowStore.optimistic(target.id, fields ? { state, fields } : { state })
     shiftFacet(before.state, state, !!shown.estimate?.is_parent)
@@ -285,6 +281,11 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       // Gone meanwhile: the store learns it (a restore after the change was sent keeps it).
       if (e instanceof APIError && (e.status === 404 || e.status === 410)) rowStore.gone(target.id, sent)
       rowStore.reshow(target.id)
+      const refused = entryFailure(e)
+      if (refused) {
+        if ((rowStore.latest(target.id)?.updated_at ?? target.updated_at) === before.updated_at) requestEntryPanel({ row: { ...target, state: before.state, updated_at: before.updated_at }, toStatus: state, refusal: refused })
+        return false
+      }
       if (!options.fields && benefitGateError(e)) {
         const text = await askDoneGate({ key: target.key, title: target.title, state, fields: before.fields ?? {} })
         if (!text) return false

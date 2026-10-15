@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -107,13 +108,39 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if len(issues) > 0 {
 		return events.Change{}, events.ErrConflict
 	}
+	var entry *workqueue.EntryRecord
+	if current.State != before.State {
+		target, err := workqueue.EntryTicketTx(ctx, tx, current.ID)
+		if err != nil {
+			return events.Change{}, err
+		}
+		target.Fields = workqueue.Fields(fields)
+		to, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, before.State)
+		if err != nil {
+			return events.Change{}, err
+		}
+		prior, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, current.State)
+		if err != nil {
+			return events.Change{}, err
+		}
+		if prior != to {
+			entry, err = workqueue.RequireEntryTx(ctx, tx, p, target, to, nil)
+			if err != nil {
+				var failed *workqueue.EntryFailure
+				if errors.As(err, &failed) {
+					return events.Change{}, events.ErrConflict
+				}
+				return events.Change{}, err
+			}
+		}
+	}
 	restored, err := scanNode(tx.QueryRow(ctx, `UPDATE nodes SET title=$2,body=$3,fields=$4::jsonb,state=$5,human_check=$6,deleted_at=$7,
  updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1::uuid RETURNING `+nodeReturning,
 		current.ID, before.Title, before.Body, fields, before.State, before.HumanCheck, before.DeletedAt))
 	if err != nil {
 		return events.Change{}, undoWriteErr(err)
 	}
-	return events.Change{NodeID: e.NodeID, Type: evNodeUpdated, Before: current, After: restored}, nil
+	return events.Change{NodeID: e.NodeID, Type: evNodeUpdated, Before: current, After: restored, Metadata: entryJSON(map[string]any{"entry_checks": entry})}, nil
 }
 
 func sameTime(a, b *time.Time) bool {

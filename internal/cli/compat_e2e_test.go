@@ -129,6 +129,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	peer := mintAgent(t, srv.URL, "peer")
 	seedProject(t, srv.URL, worker.Token)
 	seedKnowledgeKinds(t, srv.URL)
+	seedCompletionDefinition(t, srv.URL)
 	t.Setenv("PAIMOS_API_KEY", worker.Token)
 
 	code, out, errOut := runCLI([]string{"paimos", "--config", missing, "whoami"}, "")
@@ -201,9 +202,10 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("json get %+v", got)
 	}
 
-	// AEON-256/655: the ticket alias creates work; hiding it cannot bypass the server gate.
-	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--hide-from-release-notes", "true"}, "")
-	if code == 0 || !strings.Contains(errOut, "benefit_de") {
+	// Q1 (AEON-1248): visible work keeps the bilingual entry check; hiding is
+	// explicitly exempt. The agent cannot override a failing configured check.
+	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--hide-from-release-notes", "false"}, "")
+	if code == 0 || !strings.Contains(errOut, "entry_checks_failed") || !strings.Contains(errOut, "benefit_de") {
 		t.Fatalf("missing benefits accepted: %d %s", code, errOut)
 	}
 	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--pill-en", "Clear release notes", "--pill-de", "Verständliche Release Notes", "--benefit-en", "Tickets explain what you gain.", "--benefit-de", "Tickets erklären den Nutzen.", "--hide-from-release-notes", "true"}, "")
@@ -644,6 +646,25 @@ func seedKnowledgeKinds(t *testing.T, base string) {
 		if status != http.StatusCreated {
 			t.Fatalf("schema kind %s: %d %s", spec.slug, status, raw)
 		}
+	}
+}
+
+// Definitions are person-admin work. The CLI's agent exercises the configured
+// check without receiving authority to change it.
+func seedCompletionDefinition(t *testing.T, base string) {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc := &http.Client{Jar: jar}
+	status, raw := doJSON(t, hc, http.MethodPost, base+"/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, nil)
+	if status != http.StatusOK {
+		t.Fatalf("definition admin login: %d", status)
+	}
+	status, raw = doJSON(t, hc, http.MethodPut, base+"/api/settings/definitions", `{"expected_revision":null,"checks":{"done":[{"id":"release_copy_set"}]}}`, nil)
+	if status != http.StatusOK {
+		t.Fatalf("completion definition: %d %s", status, raw)
 	}
 }
 

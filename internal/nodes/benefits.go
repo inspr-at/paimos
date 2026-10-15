@@ -38,7 +38,9 @@ func benefitTransition(ctx context.Context, tx pgx.Tx, kindID, slug, before, aft
 			return nil, nil
 		}
 	}
-	issues := ticketbenefits.Transition(slug, priorCategory, nextCategory, fields)
+	// Markus approved Q1: completion copy is an overridable definition check.
+	// Structural pill validity remains the write validator.
+	issues := ticketbenefits.PillIssues(fields)
 	if len(issues) > 0 && (ticketbenefits.Completed(priorCategory) || !ticketbenefits.Completed(nextCategory)) {
 		return nil, unprocessable(strings.Join(issues, "; "))
 	}

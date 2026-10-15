@@ -584,7 +584,7 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	admission := workorders.BuildAdmission{Candidate: o.BuildDelivery}
-	if err = queueClaimable(ctx, tx, v, &admission); err != nil {
+	if err = queueClaimable(ctx, tx, p, v, &admission); err != nil {
 		return nil, err
 	}
 	if err = validatePickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {

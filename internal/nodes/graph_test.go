@@ -37,7 +37,7 @@ func TestTicketGraphShapeClosedFilterAndIsolation(t *testing.T) {
 	elsewhere := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Glint"}`, projectKind.ID))
 	epic := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Fleet","parent_id":%q,"state":"backlog"}`, epicKind.ID, project.ID))
 	open := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Rotate keys","parent_id":%q,"state":"new","fields":{"priority":"high"},"body":"BODY-SHOULD-NOT-LEAK"}`, ticketKind.ID, epic.ID))
-	doing := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"In progress","parent_id":%q,"state":"in_progress"}`, ticketKind.ID, epic.ID))
+	doing := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"In progress","parent_id":%q,"state":"in_progress","fields":%s}`, ticketKind.ID, epic.ID, workStatusFieldsTest(t)))
 	qa := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"In QA","parent_id":%q,"state":"qa"}`, ticketKind.ID, project.ID))
 	done := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Shipped","parent_id":%q,"state":"done","fields":%s}`, ticketKind.ID, epic.ID, benefitFields))
 	cancelled := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Cancelled","parent_id":%q,"state":"cancelled"}`, ticketKind.ID, project.ID))
