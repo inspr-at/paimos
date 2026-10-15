@@ -8190,6 +8190,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestEntryChecksEnforcementOverrideAndOwnership","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestEntryChecksLessonRecorded","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestEstimateComplexityBucketsAndHints","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestEstimateOnlyPatchPreservesFieldsAndRevision","tier":"GATED-FULL"}
