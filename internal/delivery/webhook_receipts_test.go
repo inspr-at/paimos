@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -743,5 +744,260 @@ func TestDeliveryWebhookReceiptIntegrityAndClaims(t *testing.T) {
 	}
 	if f.fanouts != 1 {
 		t.Fatalf("claim duplicated fanout: %d", f.fanouts)
+	}
+}
+
+func TestDeliveryWebhookGitHubStatusPolicy(t *testing.T) {
+	// Risk: hidden upstream refusals consume the receipt budget, bypass reset
+	// hints, spam notices, or persist credentials from a failed GitHub read.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(t.TempDir(), "synthetic-app.pem")
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, class         string
+		status              int
+		limited, permission bool
+		retry, remaining    string
+		reset               bool
+	}{
+		{name: "unauthorized", status: 401, class: "http_401", permission: true},
+		{name: "forbidden", status: 403, class: "http_403", permission: true},
+		{name: "missing", status: 404, class: "http_404"},
+		{name: "rate", status: 429, class: "http_429", limited: true, retry: "300"},
+		{name: "rate reset", status: 429, class: "http_429", limited: true, reset: true},
+		{name: "secondary retry", status: 403, class: "secondary_limit", limited: true, retry: "300"},
+		{name: "secondary marker", status: 403, class: "secondary_limit", limited: true, remaining: "0", reset: true},
+		{name: "server", status: 503, class: "http_5xx"},
+		{name: "network", status: 0, class: "network"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _ := newMetricsFixture(t)
+			saveAlertObservation(t, f, alertObservation(f))
+			f.tx(t, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.person.TenantID, f.project, f.person.ID)
+				return err
+			})
+			const private = "ghs_SYNTHETIC_PRIVATE_RECEIPT_VALUE"
+			head := strings.Repeat("d", 40)
+			at := f.at
+			var status, reads atomic.Int32
+			status.Store(int32(tc.status))
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodDelete:
+					// Cleanup failure must not replace the read's diagnostic/hint.
+					w.Header().Set("Retry-After", "3599")
+					w.WriteHeader(503)
+				case r.Method == http.MethodPost && r.URL.Path == "/app/installations/456/access_tokens":
+					var in struct {
+						Permissions map[string]string `json:"permissions"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+						t.Error("invalid mint request")
+						return
+					}
+					for _, level := range in.Permissions {
+						if level != "read" {
+							t.Error("receipt widened read authority")
+						}
+					}
+					w.WriteHeader(201)
+					_ = json.NewEncoder(w).Encode(map[string]any{"token": private, "permissions": in.Permissions, "repositories": []any{map[string]string{"full_name": f.m.config.Repository}}})
+				case r.Method == http.MethodGet && r.URL.Path == "/app/installations/456":
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": 456, "app_id": 123, "permissions": map[string]string{"checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read", "actions": "read"}})
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/example/delivery/actions/runs":
+					reads.Add(1)
+					if status.Load() == 0 {
+						conn, _, err := w.(http.Hijacker).Hijack()
+						if err != nil {
+							t.Error("hijack failed")
+							return
+						}
+						_ = conn.Close()
+						return
+					}
+					if status.Load() != 200 {
+						w.Header().Set("Retry-After", tc.retry)
+						w.Header().Set("X-RateLimit-Remaining", tc.remaining)
+						if tc.reset {
+							w.Header().Set("X-RateLimit-Reset", fmt.Sprint(at.Add(5*time.Minute).Unix()))
+						}
+						w.Header().Set("X-GitHub-Request-Id", private)
+						w.Header().Set("X-Accepted-GitHub-Permissions", private)
+						w.WriteHeader(int(status.Load()))
+						_, _ = io.WriteString(w, private)
+						return
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 1, "workflow_runs": []any{githubRunBody(91, 1, defaultCIWorkflow, "push", "main", head, at.Add(-time.Hour), time.Minute, "success", 81)}})
+				default:
+					t.Error("unexpected GitHub stub endpoint")
+					w.WriteHeader(500)
+				}
+			}))
+			defer server.Close()
+			client := server.Client()
+			client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				request := r.Clone(r.Context())
+				request.URL.Scheme, request.URL.Host = "http", strings.TrimPrefix(server.URL, "http://")
+				query := request.URL.Query()
+				query.Set("private", private)
+				request.URL.RawQuery = query.Encode()
+				return http.DefaultTransport.RoundTrip(request)
+			})
+			f.m.config.KeyFile = keyFile
+			reader := AppReader{App: &crossreview.GitHubApp{Config: f.m.config, Client: client}}
+			f.m.github = reader
+			var logs bytes.Buffer
+			f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			raw := receiptBody(t, f, map[string]any{"action": "completed", "check_suite": map[string]any{"id": 81, "head_sha": head, "head_branch": "main", "status": "completed", "app": map[string]string{"slug": "github-actions"}}})
+			if w := receiptSend(f, "check_suite", "classified", raw); w.Code != 502 {
+				t.Fatalf("failed read status %d", w.Code)
+			}
+			attempts, next, finished, checkpoints, step, class := receiptState(t, f, "classified")
+			wantAttempts := int64(1)
+			if tc.limited {
+				wantAttempts = 0
+			}
+			if attempts != wantAttempts || finished != nil || checkpoints["merge_audit"] != webhookNothingToRecord || checkpoints["metrics"] != "" || step == nil || *step != "metrics" || class == nil || *class != tc.class {
+				t.Fatalf("wrong receipt diagnostic: attempts=%d finished=%v checkpoints=%v step=%v class=%v", attempts, finished, checkpoints, step, class)
+			}
+			if tc.limited && !next.Equal(at.Add(5*time.Minute)) {
+				t.Fatalf("reset hint ignored: %v", next)
+			}
+			if !strings.Contains(logs.String(), `"error_class":"`+tc.class+`"`) {
+				t.Fatal("receipt log hid the upstream class")
+			}
+			assertPrivateAbsent := func() {
+				t.Helper()
+				f.tx(t, func(tx pgx.Tx) error {
+					var receipt, messages, events []byte
+					if err := tx.QueryRow(t.Context(), `SELECT (SELECT to_jsonb(r)::text FROM delivery_webhook_receipts r WHERE delivery_id='classified'),(SELECT coalesce(jsonb_agg(m),'[]')::text FROM inbox_messages m),(SELECT coalesce(jsonb_agg(e),'[]')::text FROM events e)`).Scan(&receipt, &messages, &events); err != nil {
+						return err
+					}
+					for _, stored := range [][]byte{receipt, messages, events, logs.Bytes()} {
+						if bytes.Contains(stored, []byte(private)) || bytes.Contains(stored, []byte("Retry-After")) || bytes.Contains(stored, []byte("X-RateLimit")) || bytes.Contains(stored, []byte("private=")) {
+							t.Fatal("upstream secret/header/query entered storage or logs")
+						}
+					}
+					return nil
+				})
+			}
+			assertPrivateAbsent()
+			before := reads.Load()
+			restarted := New(f.d.App, f.m.config, f.m.secret, reader, f.m.fanout)
+			restarted.now = f.m.now
+			if tc.limited {
+				if w := receiptSend(f, "check_suite", "classified", raw); w.Code != 204 || reads.Load() != before {
+					t.Fatal("redelivery bypassed reset hint")
+				}
+				f.at = next.Add(-time.Nanosecond)
+				if err := restarted.retryWebhooks(t.Context()); err != nil || reads.Load() != before {
+					t.Fatal("worker bypassed reset hint")
+				}
+				// At the final ordinary attempt, limits still refund the reservation.
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE delivery_webhook_receipts SET attempts=$1 WHERE delivery_id='classified'`, webhookMaxAttempts-1)
+					return err
+				})
+				for range webhookMaxAttempts + 1 {
+					f.at = next
+					if err := restarted.retryWebhooks(t.Context()); webhookErrorClass(err) != tc.class {
+						t.Fatalf("rate wait reported wrong result: %v", err)
+					}
+					attempts, next, finished, _, _, class = receiptState(t, f, "classified")
+					if attempts != webhookMaxAttempts-1 || finished != nil || class == nil || *class != tc.class {
+						t.Fatal("rate wait exhausted ordinary attempt budget")
+					}
+				}
+			} else if tc.permission {
+				for range 3 {
+					f.at = f.at.Add(2 * time.Hour)
+					if err := restarted.retryWebhooks(t.Context()); err != nil || reads.Load() != before {
+						t.Fatal("permission pause blindly reread GitHub")
+					}
+				}
+				f.tx(t, func(tx pgx.Tx) error {
+					var count int
+					var body string
+					if err := tx.QueryRow(t.Context(), `SELECT count(*),coalesce(min(body),'') FROM inbox_messages WHERE sender_label='Delivery'`).Scan(&count, &body); err != nil {
+						return err
+					}
+					if count != 1 || !strings.Contains(body, "permission: "+tc.class) {
+						t.Fatal("permission notice missing or duplicated")
+					}
+					return nil
+				})
+			} else {
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE delivery_webhook_receipts SET attempts=$1 WHERE delivery_id='classified'`, webhookMaxAttempts-1)
+					return err
+				})
+				f.at = next
+				if err := restarted.retryWebhooks(t.Context()); webhookErrorClass(err) != tc.class {
+					t.Fatalf("bounded retry hid class: %v", err)
+				}
+				attempts, _, finished, checkpoints, _, class = receiptState(t, f, "classified")
+				if attempts != webhookMaxAttempts || finished == nil || checkpoints["metrics"] != webhookGaveUp || class == nil || *class != tc.class {
+					t.Fatal("bounded retry lost upstream class or exceeded cap")
+				}
+				before = reads.Load()
+				f.at = f.at.Add(2 * time.Hour)
+				if err := restarted.retryWebhooks(t.Context()); err != nil || reads.Load() != before {
+					t.Fatal("exhausted receipt reread GitHub")
+				}
+				assertPrivateAbsent()
+				return
+			}
+			// Repair uses the same verified receipt and committed checkpoints.
+			status.Store(200)
+			if tc.permission {
+				if w := receiptSend(f, "check_suite", "classified", raw); w.Code != 204 {
+					t.Fatalf("verified permission recovery: %d", w.Code)
+				}
+			} else {
+				f.at = next
+				if err := restarted.retryWebhooks(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, _, finished, checkpoints, step, class = receiptState(t, f, "classified")
+			if finished == nil || len(checkpoints) != len(webhookSteps) || step != nil || class != nil {
+				t.Fatal("repaired receipt did not drain and clear diagnostic")
+			}
+			assertPrivateAbsent()
+		})
+	}
+}
+
+func TestDeliveryWebhookRateHintBounds(t *testing.T) {
+	// Risk: malformed or distant hints cause tight retry loops or overflow.
+	now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		retry, reset string
+		want         time.Duration
+	}{
+		{"", "", time.Minute}, {"invalid", "invalid", time.Minute}, {"-10", "-10", time.Minute},
+		{"999999999999999999999999", "999999999999999999999999", time.Minute},
+		{"9223372036854775807", "", time.Hour}, {"120", "", 2 * time.Minute},
+		{now.Add(10 * time.Minute).Format(http.TimeFormat), "", 10 * time.Minute},
+		{"", fmt.Sprint(now.Add(24 * time.Hour).Unix()), time.Hour},
+		{"1", fmt.Sprint(now.Add(5 * time.Minute).Unix()), 5 * time.Minute},
+	} {
+		transport := &webhookStatusTransport{base: transportFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": {tc.retry}, "X-Ratelimit-Reset": {tc.reset}}, Body: io.NopCloser(strings.NewReader("private-body"))}, nil
+		})}
+		r, err := transport.RoundTrip(httptest.NewRequest("GET", "https://api.github.com/private?token=private", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		if got := webhookLimitBackoff(transport.failure, now); got != tc.want {
+			t.Fatalf("hint backoff %v, want %v", got, tc.want)
+		}
 	}
 }

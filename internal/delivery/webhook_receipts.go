@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -37,6 +39,7 @@ type webhookReceipt struct {
 	attempts                                          int64
 	next                                              time.Time
 	finished                                          *time.Time
+	lastStep, lastClass                               *string
 }
 
 // receiveWebhook is the only HTTP acceptance boundary. Signatures and headers
@@ -219,13 +222,13 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 	receipt.id = id
 	var checkpoints, runs []byte
 	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT event,action,repository,installation_id,payload_sha256,payload,checkpoints,flow_runs,attempts,next_attempt_at,finished_at FROM delivery_webhook_receipts
-			WHERE delivery_id=$1 AND repository=$2 AND installation_id=$3`, id, m.config.Repository, m.config.InstallationID).Scan(&receipt.event, &receipt.action, &receipt.repository, &receipt.installation, &receipt.hash, &receipt.raw, &checkpoints, &runs, &receipt.attempts, &receipt.next, &receipt.finished)
+		return tx.QueryRow(ctx, `SELECT event,action,repository,installation_id,payload_sha256,payload,checkpoints,flow_runs,attempts,next_attempt_at,finished_at,last_step,last_error_class FROM delivery_webhook_receipts
+			WHERE delivery_id=$1 AND repository=$2 AND installation_id=$3`, id, m.config.Repository, m.config.InstallationID).Scan(&receipt.event, &receipt.action, &receipt.repository, &receipt.installation, &receipt.hash, &receipt.raw, &checkpoints, &runs, &receipt.attempts, &receipt.next, &receipt.finished, &receipt.lastStep, &receipt.lastClass)
 	})
 	if err != nil {
 		return err
 	}
-	if receipt.finished != nil || !immediate && receipt.next.After(m.now()) {
+	if receipt.finished != nil || receipt.next.After(m.now()) && (!immediate || receipt.lastClass != nil && webhookLimited(*receipt.lastClass)) {
 		return nil
 	}
 	if len(receipt.raw) > 2<<20 || len(checkpoints) > 4096 || len(runs) > 2<<20 || digest(receipt.raw) != receipt.hash || json.Unmarshal(checkpoints, &receipt.checkpoints) != nil || json.Unmarshal(runs, &receipt.runs) != nil || len(receipt.runs) > 2000 {
@@ -234,6 +237,11 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 	var e envelope
 	if json.Unmarshal(receipt.raw, &e) != nil || e.Repository.Name != receipt.repository || strconv.FormatInt(e.Installation.ID, 10) != receipt.installation || e.Action != receipt.action || !validAction(receipt.event, receipt.action) {
 		return webhookClass("invalid_receipt")
+	}
+	// Permission waits only retry notice routing, never GitHub. An authenticated
+	// redelivery of this exact payload explicitly resumes the unfinished step.
+	if !immediate && receipt.lastClass != nil && webhookPermission(*receipt.lastClass) && receipt.lastStep != nil {
+		return m.deferWebhook(ctx, &receipt, *receipt.lastStep, *receipt.lastStep, webhookClass(*receipt.lastClass))
 	}
 	// A crash after reserving the last attempt must not buy another network
 	// attempt on restart. Fully checkpointed receipts can still finish safely.
@@ -296,31 +304,92 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 }
 
 func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step, failedStep string, cause error) error {
-	exhausted := receipt.attempts >= webhookMaxAttempts
 	var class *string
 	if cause != nil {
 		value := webhookErrorClass(cause)
 		class = &value
 	}
-	if exhausted {
+	limited := class != nil && webhookLimited(*class)
+	permission := class != nil && webhookPermission(*class)
+	if limited {
+		// Reservation still fences crashes; a confirmed rate-limit wait refunds
+		// it atomically with the due time and never exhausts the retry budget.
+		receipt.attempts = max(0, receipt.attempts-1)
+	}
+	exhausted := receipt.attempts >= webhookMaxAttempts && !permission
+	if exhausted && (class == nil || *class != "http_5xx" && *class != "network" && *class != "http_404") {
 		value := "retry_exhausted"
 		class = &value
 	}
 	at := m.now()
+	delay := webhookErrorBackoff(receipt.attempts, cause)
+	if limited {
+		delay = webhookLimitBackoff(cause, at)
+	} else if permission {
+		delay = time.Hour
+	}
+	var actor tenant.Principal
+	if permission {
+		var err error
+		actor, err = m.auditActor(ctx, m.config.TenantID)
+		if err != nil {
+			return err
+		}
+	}
 	err := db.InTenant(db.AllProjects(ctx, "delivery receipt retry schedule"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+		// Notice routing rechecks the current linked project and lead under the
+		// same tenant/tree access fence as the final receipt mutation.
+		if permission {
+			if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
+				return err
+			}
+		} else if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET next_attempt_at=$2,last_step=$3,last_error_class=$4,
 			finished_at=CASE WHEN $5 THEN $6 ELSE finished_at END,
-			checkpoints=CASE WHEN $5 THEN jsonb_set(checkpoints,ARRAY[$7::text],to_jsonb($8::text)) ELSE checkpoints END
-			WHERE delivery_id=$1`, receipt.id, at.Add(webhookErrorBackoff(receipt.attempts, cause)), failedStep, class, exhausted, at, step, string(webhookGaveUp))
-		return err
+			checkpoints=CASE WHEN $5 THEN jsonb_set(checkpoints,ARRAY[$7::text],to_jsonb($8::text)) ELSE checkpoints END,attempts=$9
+			WHERE delivery_id=$1`, receipt.id, at.Add(delay), failedStep, class, exhausted, at, step, string(webhookGaveUp), receipt.attempts)
+		if err != nil || !permission {
+			return err
+		}
+		return m.webhookPermissionNoticeTx(ctx, tx, actor, receipt, failedStep, *class)
 	})
 	if err == nil && exhausted {
 		m.logWebhookGaveUp(ctx, receipt, failedStep, cause)
 	}
 	return err
+}
+
+func (m *Module) webhookPermissionNoticeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, receipt *webhookReceipt, step, class string) error {
+	var e envelope
+	if err := json.Unmarshal(receipt.raw, &e); err != nil {
+		return err
+	}
+	fact := MergeFact{Head: e.SHA}
+	switch receipt.event {
+	case "pull_request":
+		fact.PR, fact.Head, fact.Title, fact.Branch = &e.Pull.Number, e.Pull.Head.SHA, e.Pull.Title, e.Pull.Head.Ref
+	case "check_run":
+		fact.Head = e.CheckRun.Head
+	case "check_suite":
+		fact.Head = e.CheckSuite.Head
+	case "merge_group":
+		fact.Head = e.Group.Head
+	case "push":
+		fact.Head = e.After
+	}
+	o, err := auditLink(ctx, tx, receipt.repository, fact)
+	if err != nil {
+		return err
+	}
+	to, err := auditRecipientTx(ctx, tx, actor.TenantID, MergeAudit{Project: o.Project, Ticket: o.Ticket})
+	if err != nil {
+		return err
+	}
+	key := digest([]byte(actor.TenantID + "|" + receipt.repository + "|" + receipt.id + "|permission"))
+	body := fmt.Sprintf("Delivery receipt permission: %s at %s. Automatic GitHub reads are paused. Check the GitHub App installation access, then redeliver the verified webhook to resume.", class, step)
+	return deliveryNoticeTx(ctx, tx, actor, o.Project, to, key, body)
 }
 
 func (m *Module) checkpointWebhook(ctx context.Context, step string, outcome webhookOutcome, receipt *webhookReceipt) error {
