@@ -700,6 +700,10 @@ func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
 			ids = append(ids, fact.ModelID)
 		}
 	}
+	// Catalog pages preserve their facts; compare the distinct IDs rather than
+	// relying on the retired adapter to deduplicate and sort them.
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
 	if err != nil || !reflect.DeepEqual(ids, []string{"claude-new", "claude-other"}) {
 		t.Fatalf("%v %v", ids, err)
 	}
