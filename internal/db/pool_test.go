@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,8 +273,14 @@ func TestSharedSubscriptionAdmissionReplicaLimitAndConnectionLoss(t *testing.T) 
 	third.Close()
 	replacement.Close()
 	first.Close()
-	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&sessions); err != nil {
-		t.Fatal(err)
+	for ctx.Err() == nil {
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&sessions); err != nil {
+			t.Fatal(err)
+		}
+		if sessions == 0 {
+			break
+		}
+		runtime.Gosched()
 	}
 	if sessions != 0 {
 		t.Fatal("admission session leaked after final lease close")
@@ -299,7 +307,7 @@ func TestSharedListenerAttributionAndFinalClose(t *testing.T) {
 			if tc.param != "" {
 				query := u.Query()
 				query.Set(tc.param, tc.value)
-				u.RawQuery = query.Encode()
+				u.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
 			}
 			cfg, err := db.ParsePoolConfig(u.String())
 			if err != nil {
@@ -335,8 +343,14 @@ func TestSharedListenerAttributionAndFinalClose(t *testing.T) {
 			if err := second.Close(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN aeon_events'`).Scan(&count); err != nil {
-				t.Fatal(err)
+			for ctx.Err() == nil {
+				if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN aeon_events'`).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count == 0 {
+					break
+				}
+				runtime.Gosched()
 			}
 			if count != 0 {
 				t.Fatal("last subscriber leaked its backend")

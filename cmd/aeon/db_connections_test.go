@@ -258,8 +258,14 @@ func TestServeConnectionOriginBudget(t *testing.T) {
 	cleanupCtx, stop := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stop()
 	var dedicated int
-	if err := d.Admin.QueryRow(cleanupCtx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND usename=$1 AND application_name LIKE 'aeon-%' AND application_name<>'aeon-main'`, pool.Config().ConnConfig.User).Scan(&dedicated); err != nil {
-		t.Fatal(err)
+	for cleanupCtx.Err() == nil {
+		if err := d.Admin.QueryRow(cleanupCtx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND usename=$1 AND application_name LIKE 'aeon-%' AND application_name<>'aeon-main'`, pool.Config().ConnConfig.User).Scan(&dedicated); err != nil {
+			t.Fatal(err)
+		}
+		if dedicated == 0 {
+			break
+		}
+		runtime.Gosched()
 	}
 	if dedicated != 0 {
 		t.Fatal(fmt.Sprintf("%d dedicated sessions survived server shutdown", dedicated))
