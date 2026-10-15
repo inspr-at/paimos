@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -49,7 +50,7 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 		return k
 	}
 	coordinator := key("dispatcher", append(append([]string{}, authz.CoordinatorKeyScopes...), "nodes.write"))
-	author := key("author", []string{"nodes.read"})
+	author := key("author", []string{"nodes.read", "nodes.write"})
 	reviewer := key("reviewer", []string{"nodes.read"})
 	other := key("other-reviewer", []string{"nodes.read"})
 	var project, ticket, authorSession, reviewerSession, otherSession, sameSession string
@@ -80,6 +81,15 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 	})
 	mux := http.NewServeMux()
 	nodes.New(appPool, nil).Mount(mux)
+	// Governance setup uses the actual definition handler; subsequent reads
+	// and status writes pass through real bearer authentication.
+	definition := httptest.NewRequest("PUT", "/api/projects/"+project+"/definitions", strings.NewReader(`{"expected_revision":null,"checks":{"done":[{"id":"review_ok_cross_family","condition":"all"},{"id":"visual_ok","condition":"all"}]}}`))
+	definition = definition.WithContext(tenant.WithPrincipal(ctx, owner))
+	definitionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(definitionResponse, definition)
+	if definitionResponse.Code != 200 {
+		t.Fatalf("definition setup: %d", definitionResponse.Code)
+	}
 	secured := m.Middleware(mux)
 	request := func(token, capability, method, path string, body any, want int) []byte {
 		t.Helper()
@@ -101,6 +111,31 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 			t.Fatalf("%s %s: got %d want %d (credential response omitted)", method, path, w.Code, want)
 		}
 		return w.Body.Bytes()
+	}
+	checkDone := func(want int, legacy bool) {
+		t.Helper()
+		raw := request(reviewer.Token, "", "GET", "/api/nodes/"+ticket+"/entry-checks", nil, 200)
+		var checks workorders.EntryChecks
+		if json.Unmarshal(raw, &checks) != nil {
+			t.Fatal("invalid entry checks")
+		}
+		for _, block := range checks.Blocks {
+			if block.ToStatus != "done" {
+				continue
+			}
+			if block.Total != 2 || block.Passed != want {
+				t.Fatalf("Done checks = %d/%d, want %d/2", block.Passed, block.Total, want)
+			}
+			if legacy {
+				for _, check := range block.Checks {
+					if !strings.Contains(check.Reason, "legacy_unverified") {
+						t.Fatal("Done did not flag legacy evidence")
+					}
+				}
+			}
+			return
+		}
+		t.Fatal("Done block missing")
 	}
 	input := reviewgate.RunCreate{Repository: "owner/repo", PR: 7, Target: "main", Base: base, Head: head, Scope: base + ".." + head, AuthorSession: authorSession, ReviewerSession: reviewerSession, Kind: "review"}
 	create := func(in reviewgate.RunCreate) reviewgate.Run {
@@ -177,6 +212,8 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 		t.Fatal("verdict was not attributed from the immutable run")
 	}
 	check("review", true)
+	checkDone(1, false)
+	request(author.Token, "", "PATCH", "/api/nodes/"+ticket, map[string]any{"state": "done"}, 409)
 	request("", capability, "POST", "/api/review-runs/"+run.ID+"/verdict", inputVerdict(run), 401)
 	// Store boundary and injected clock prove expiry without sleeps or editing
 	// the immutable binding. The same capability remains usable at real time.
@@ -249,6 +286,8 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 	})
 	request("", visualCap, "POST", "/api/review-runs/"+visual.ID+"/verdict", inputVerdict(visual), 200)
 	check("visual", true)
+	checkDone(2, false)
+	request(author.Token, "", "PATCH", "/api/nodes/"+ticket, map[string]any{"state": "done"}, 200)
 	// Existing rows are retained and visibly flagged; a latest legacy approval
 	// cannot replace an authenticated run in either evidence consumer.
 	txdo(func(tx pgx.Tx) error {
@@ -262,6 +301,7 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 	})
 	check("review", false)
 	check("visual", false)
+	checkDone(0, true)
 	raw = request(reviewer.Token, "", "GET", "/api/nodes/"+ticket+"/review-evidence", nil, 200)
 	var provenance reviewgate.EvidenceProvenance
 	if json.Unmarshal(raw, &provenance) != nil || !provenance.ReviewLegacy || !provenance.VisualLegacy {
