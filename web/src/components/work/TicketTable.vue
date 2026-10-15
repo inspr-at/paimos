@@ -29,7 +29,8 @@ import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useWorkQueue } from '../../stores/workQueue'
 import { can } from '../../lib/authz'
 import { queueable } from '../../lib/workQueue'
-import { PLANNING_COLUMNS, planningPresent, planningTip, type PlanningColumn } from '../../lib/planning'
+import { PLANNING_COLUMNS, planningPresent, planningTip, shownModelNames, type PlanningColumn } from '../../lib/planning'
+import { useModelDisplay } from '../../lib/prefs'
 import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 import { useReaderAnchor } from '../../lib/readerAnchor'
 import { cancelFigureTip, closeFigureTip, figureTip, focusOpensTip, hoverFigureTip, openFigureTip } from '../../lib/figureTip'
@@ -207,6 +208,9 @@ const tipWidth = computed(() => {
   const def = tipColumn.value ? figureColumn(tipColumn.value.id, props.columnFigures?.figures ?? null) : null
   return def ? def.wide ? 'wide' : 'fig' : 'auto'
 })
+// The Model popup names each model as the Model cells do.
+const { modelDisplay } = useModelDisplay()
+const tipModelName = computed(() => tipColumn.value?.id === 'model' ? shownModelNames(props.rowsById.values(), modelDisplay.value) : undefined)
 const headFigures = (id: string) => !!props.columnFigures && !phone.value && (!!figureColumn(id, props.columnFigures.figures) || id === 'title')
 function headEnter(event: PointerEvent, id: string) {
   if (event.pointerType === 'mouse') hoverFigureTip(event.currentTarget as HTMLElement, `${COLUMN_TIP}${id}`, 'above', COLUMN_TIP)
@@ -1037,7 +1041,7 @@ defineExpose({
     <FigureTip v-if="tipColumn && columnFigures" :width="tipWidth">
       <ColumnFigureTip
         :column-id="tipColumn.id" :label="tipColumn.label" :sortable="!!tipColumn.field && !sortDisabled" :figures="columnFigures.figures" :failed="columnFigures.failed"
-        :hidden-rows="columnFigures.hiddenRows" :now="now"
+        :hidden-rows="columnFigures.hiddenRows" :now="now" :model-name="tipModelName"
       />
     </FigureTip>
 

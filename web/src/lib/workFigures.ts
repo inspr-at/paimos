@@ -192,6 +192,8 @@ export interface ColumnContext {
   hiddenRows: boolean
   now: number
   text?: WorkFiguresText
+  // The Model column's name for a model id (planning shownModelNames); without it the popup shows the id.
+  modelName?: (id: string) => string
 }
 
 const L = (label: string, value: string, extra: Partial<FigureLine> = {}): FigureLine => ({ label, value, ...extra })
@@ -210,12 +212,13 @@ export function columnTip(id: ColumnId, f: ProjectFigures, ctx: ColumnContext): 
   const allRowsFoot = (col: ColumnFigures) => `${fmtInt(col.rows)} ${shown} · ${t.allRows}`
   const without = (template: string, n: number) => n ? ` · ${fill(template, { n: fmtInt(n) })}` : ''
   const values = c.values ?? []
-  const top = (n: number, note?: (v: FigureValue) => string | undefined) => {
-    const lines: (FigureLine | null)[] = values.slice(0, n).map(v => L(v.value, fmtInt(v.count), { note: note?.(v) }))
-    while (lines.length < n) lines.push(L('—', '', { sub: true }))
+  // Top-N lines without a value stay reserved and blank, and so does Others while the tail is empty.
+  const top = (n: number, note?: (v: FigureValue) => string | undefined, name: (value: string) => string = value => value) => {
+    const lines: (FigureLine | null)[] = values.slice(0, n).map(v => L(name(v.value), fmtInt(v.count), { note: note?.(v) }))
+    while (lines.length < n) lines.push(null)
     return lines
   }
-  const others = () => L(t.lines.others, fmtInt(c.others), { sub: true })
+  const others = () => c.others > 0 ? L(t.lines.others, fmtInt(c.others), { sub: true }) : null
   const lowerBound = (s: string) => c.partial && s !== '—' ? `≥${s}` : s
   const tickets = (n: number) => `${fmtInt(n)} ${n === 1 ? t.lines.ticket : t.lines.tickets}`
   let lines: (FigureLine | null)[]
@@ -268,13 +271,13 @@ export function columnTip(id: ColumnId, f: ProjectFigures, ctx: ColumnContext): 
       foot = leavesFoot(c.rows, without(t.unassigned, c.without_value))
       break
     case 'model':
-      lines = [...top(3), others()]
+      lines = [...top(3, undefined, ctx.modelName), others()]
       foot = leavesFoot(c.rows, without(t.withoutModel, c.without_value))
       break
     case 'cost': {
       const money = (v: FigureValue) => v.measured_cost == null && v.estimated_cost == null ? '' : ` · ${formatDollars((v.measured_cost ?? 0) + (v.estimated_cost ?? 0))}`
       lines = values.slice(0, 3).map(v => L(v.value, `${fmtHours(v.hours)}${money(v)}`))
-      while (lines.length < 3) lines.push(L('—', '', { sub: true }))
+      while (lines.length < 3) lines.push(null)
       lines.push(others())
       foot = leavesFoot(c.rows, without(t.withoutCostUnit, c.without_value))
       break
@@ -284,8 +287,8 @@ export function columnTip(id: ColumnId, f: ProjectFigures, ctx: ColumnContext): 
       foot = leavesFoot(c.rows)
       break
     case 'tags': {
-      const joined = (from: number, to: number) => values.slice(from, to).map(v => `${v.value} ${fmtInt(v.count)}`).join(' · ')
-      lines = [L(joined(0, 3) || '—', '', { sub: !values.length }), L(joined(3, 5) || '—', '', { sub: values.length <= 3 }), others(), L(t.lines.untagged, fmtInt(c.without_value), { sub: true })]
+      const joined = (from: number, to: number) => { const tags = values.slice(from, to).map(v => `${v.value} ${fmtInt(v.count)}`).join(' · '); return tags ? L(tags, '') : null }
+      lines = [joined(0, 3), joined(3, 5), others(), L(t.lines.untagged, fmtInt(c.without_value), { sub: true })]
       foot = leavesFoot(c.rows)
       break
     }

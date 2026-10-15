@@ -7,6 +7,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
 import { viewFigures, wholeFigures } from './work-figures-fixture'
+import type { ProjectFigures } from '../src/lib/api'
 import { statusFill } from '../src/lib/statusMotion'
 
 const bar = (page: Page) => page.locator('.head-work')
@@ -19,7 +20,7 @@ const density = (page: Page, name: string) => page.getByRole('radio', { name: `$
 
 // The design's figures: the whole project, or "This view · 10 of 166 tickets" for any narrowed view. A gate holds the
 // narrowed answers until the test releases them, so "Counting…" is a state the test controls rather than a race.
-async function serveFigures(page: Page, options: { marksReleases?: boolean } = {}) {
+async function serveFigures(page: Page, options: { marksReleases?: boolean; figures?: ProjectFigures } = {}) {
   const requests: URL[] = []
   let gate: Promise<void> | null = null
   await page.route('**/api/projects/*/figures**', async route => {
@@ -27,7 +28,7 @@ async function serveFigures(page: Page, options: { marksReleases?: boolean } = {
     requests.push(url)
     const narrowed = ['q', 'state', 'work_state', 'work_bucket', 'priority', 'assignee', 'tag'].some(name => url.searchParams.get(name))
     if (narrowed && gate) await gate
-    await route.fulfill({ json: narrowed ? viewFigures() : wholeFigures(options) })
+    await route.fulfill({ json: narrowed ? viewFigures() : options.figures ?? wholeFigures(options) })
   })
   return {
     requests,
@@ -35,14 +36,27 @@ async function serveFigures(page: Page, options: { marksReleases?: boolean } = {
   }
 }
 
-async function open(page: Page, options: { width?: number; theme?: string; marksReleases?: boolean; comfortable?: boolean; automaticColumns?: boolean } = {}) {
+// The rows behind the figures' three models (claude-opus-5-5 · gpt-6.1-sol · grok-4.7), each measured, with registry
+// names, so the Model cells show "Opus 5.5 · Sol 6.1 · Grok 4.7" and never the ids.
+const MODELS = [
+  { key: 'PHAROS-11', id: 'n-1', model: { label: 'Claude Opus 5.5', harness: 'claude', provider: 'anthropic', model: 'claude-opus-5-5', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' } },
+  { key: 'PHAROS-12', id: 'n-2', model: { label: 'Codex Sol', harness: 'codex', provider: 'openai', model: 'gpt-6.1-sol', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6.1' } },
+  { key: 'PHAROS-13', id: 'n-3', model: { label: 'Grok 4.7', harness: 'grok', provider: 'xai', model: 'grok-4.7', display_name: 'Grok', model_version: '4.7' } },
+]
+async function open(page: Page, options: { width?: number; theme?: string; marksReleases?: boolean; comfortable?: boolean; automaticColumns?: boolean; visible?: string[]; models?: boolean; figures?: ProjectFigures } = {}) {
   const width = options.width ?? 1440
   await page.setViewportSize({ width, height: width <= 600 ? 844 : 900 })
   const data = fixtures()
   data.preferences.theme = { choice: options.theme ?? 'light' }
   data.preferences['list:display'] = { headerGraph: false }
   // A saved column choice, so Estimate shows at every desktop width and filtering never changes the columns.
-  if (!options.automaticColumns) data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'priority', 'assignee', 'estimate', 'updated'] }
+  if (!options.automaticColumns) data.preferences['list:p-pharos'] = { visible: options.visible ?? ['key', 'title', 'status', 'priority', 'assignee', 'estimate', 'updated'] }
+  if (options.models) for (const { key, model } of MODELS) {
+    data.nodes.find(node => node.key === key)!.planning = {
+      route: null, models: [{ ...model, sessions: [{ id: `s-${key}`, effort: 'high', effort_level: 3, role: 'build', running: false, tokens: 1000 }] }],
+      tokens: { spent: 1000, input: 800, output: 200, cached: 0, sessions: 1, running: 0, unreported: 0, estimated: null },
+    }
+  }
   const errors = watchErrors(page)
   await mockWork(page, data)
   await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: 0, warning: false } } }))
@@ -330,6 +344,72 @@ for (const width of [390, 960, 1440]) for (const theme of ['light', 'dark']) {
       await expect(bar(page).locator('.wk-short')).toBeVisible()
       await settled(page)
       await page.screenshot({ path: info.outputPath(`work-bar-${width}-${theme}-compact.png`) })
+    }
+  })
+}
+
+// Tick's fix round 6 (2026-10-15): the Model popup names each model exactly as its Model cells do, and every top-N
+// popup keeps its empty lines reserved but blank, with Others only above 0. Phones have no header row and so no column
+// popups; there the cases prove that no popup can open. The Model and Cost unit shots are for Tick's confirm.
+const lineTexts = (page: Page) => tip(page).locator('.wf-line').evaluateAll(rows => rows.map(row => ({ text: row.textContent!.replace(/\s+/g, ' ').trim(), height: row.getBoundingClientRect().height })))
+async function closeTip(page: Page) { await page.mouse.move(5, 5); await expect(tip(page)).toHaveCount(0) }
+// One value or none in each top-N column and nothing in the tail: Model, Epic, Release, Suggested, Tags and Cost unit.
+function sparseFigures(): ProjectFigures {
+  const whole = wholeFigures(), c = whole.columns
+  const one = (value: string, count: number) => [{ value, count, hours: 0 }]
+  return { ...whole, columns: { ...c,
+    model: { ...c.model, values: one('gpt-6.1-sol', 41), others: 0 }, epic: { ...c.epic, values: one('AIT-12', 40), others: 0 },
+    release: { ...c.release, values: [], others: 0 }, suggested_release: { ...c.suggested_release, values: [], others: 0 },
+    tag: { ...c.tag, values: one('bug', 19), others: 0 }, cost_unit: { ...c.cost_unit, others: 0 },
+  } }
+}
+const TOP_N: [string, number][] = [['Model', 3], ['Epic', 2], ['Release', 3], ['Suggested release', 3], ['Tags', 2], ['Cost unit', 3]]
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`AEON-1358 the Model popup names each model as its Model cells do (${width} ${theme})`, async ({ page }, info) => {
+    const { errors } = await open(page, { width, theme, comfortable: true, models: true, visible: ['key', 'title', 'status', 'model', 'cost'] })
+    if (width <= 720) {
+      await expect(page.getByRole('grid', { name: 'Tickets' }).locator('thead')).toBeHidden()
+      await expect(tip(page)).toHaveCount(0)
+      return
+    }
+    const cells: string[] = []
+    for (const { id } of MODELS) cells.push((await page.locator(`#row-${id} [data-column-id="model"] .model-name`).textContent())!.trim())
+    expect(cells, 'the cells show registry names').toEqual(['Opus 5.5', 'Sol 6.1', 'Grok 4.7'])
+    await hoverOpen(page, header(page, 'Model'))
+    const names = await tip(page).locator('.wf-line > :first-child').evaluateAll(rows => rows.map(row => row.textContent!.trim()))
+    expect(names.slice(0, 3), 'each popup name equals its cell text').toEqual(cells)
+    for (const name of names) expect(name).not.toMatch(/claude-opus|gpt-6|grok-4\.7/)
+    expect((await lineTexts(page))[3].text, 'Others shows while the tail has rows').toBe('Others3')
+    await expectNothingClipped(page)
+    await page.screenshot({ path: info.outputPath(`model-popup-${width}-${theme}.png`) })
+    await closeTip(page)
+    // The whole project has one cost unit: the other three lines are reserved and blank.
+    await hoverOpen(page, header(page, 'Cost unit'))
+    expect((await lineTexts(page)).map(line => line.text)).toEqual(['AIT core412h · $1.9k', '', '', ''])
+    await page.screenshot({ path: info.outputPath(`cost-unit-popup-${width}-${theme}.png`) })
+    expect(errors).toEqual([])
+  })
+
+  test(`AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (${width} ${theme})`, async ({ page }) => {
+    await open(page, { width, theme, comfortable: true, models: true, figures: sparseFigures(), visible: ['key', 'title', 'model', 'epic', 'release', 'suggested', 'tags', 'cost'] })
+    if (width <= 720) {
+      await expect(page.getByRole('grid', { name: 'Tickets' }).locator('thead')).toBeHidden()
+      await expect(tip(page)).toHaveCount(0)
+      return
+    }
+    for (const [label, blanks] of TOP_N) {
+      await hoverOpen(page, header(page, label))
+      const lines = await lineTexts(page)
+      expect(lines, `${label} keeps its four lines`).toHaveLength(4)
+      // Every line keeps its 20 px slot, so the popup never changes size with the figures.
+      for (const line of lines) expect(Math.abs(line.height - 20), `${label} line height`).toBeLessThanOrEqual(.5)
+      expect(lines.filter(line => line.text === '').length, `${label} blank lines`).toBe(blanks)
+      for (const line of lines) {
+        expect(line.text, label).not.toContain('—')
+        expect(line.text, label).not.toMatch(/^Others/)
+      }
+      await closeTip(page)
     }
   })
 }

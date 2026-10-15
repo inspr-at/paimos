@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { columnTip, fmtDuration, fmtHours, fmtTokens, FIGURE_COLUMNS, hidesRows, largestRemainder, validFigures, workHeader, workSlots, workTipFoot } from '../src/lib/workFigures.ts'
 import { FIGURES_NOW, viewFigures, wholeFigures } from './work-figures-fixture.ts'
+import { DEFAULT_MODEL_DISPLAY, modelCell, shownModelNames } from '../src/lib/planning.ts'
 
 test('durations and hours use the one format table', () => {
   const minutes: [number, string][] = [[0.2, '1m'], [40, '40m'], [59.4, '59m'], [144, '2.4h'], [300, '5h'], [14 * 60, '14h'], [23.4 * 60, '23h'], [1.5 * 1440, '1.5d'], [2 * 1440, '2d'], [12 * 1440, '12d']]
@@ -75,12 +76,46 @@ test('column popups have a fixed shape and the design\'s words', () => {
   assert.deepEqual(show('tokens'), { lines: ['Median ~18M', 'Average ~29M', 'Measured 1.06B 48 tickets', 'Estimated ~3.14B 96 tickets'], foot: '166 shown · 22 without tokens · leaves only' })
   assert.deepEqual(show('created'), { lines: ['Range 7 Sep – today', 'Median age 5.7d', 'Open, created 14d+ ago 1'], foot: '168 shown · all rows' })
   assert.deepEqual(show('updated'), { lines: ['Range 12 Sep – 8m ago', 'Median since update 2.8d', 'Open, untouched 7d+ 0'], foot: '168 shown · all rows' })
-  assert.deepEqual(show('cost').lines, ['AIT core 412h · $1.9k', '—', '—', 'Others 0'])
+  // Reserved top-N lines without a value are blank, and Others shows only with a tail (Tick, fix round 6).
+  assert.deepEqual(show('cost').lines, ['AIT core 412h · $1.9k', null, null, null])
+  assert.deepEqual(show('suggested').lines, [null, null, null, 'None 166'])
+  assert.deepEqual(show('epic').lines, ['AIT-12 40', 'AIT-3 22', 'Others 9', 'No epic 95'])
   // With Hide closed hiding rows of the view, "shown" becomes "incl. hidden rows".
   assert.equal(show('estimate', { ...ctx, hiddenRows: true }).foot, '139 of 166 incl. hidden rows · closed left out')
   // The Estimate total is the header total.
   assert.equal(columnTip('estimate', figures, ctx)!.lines[0]!.value, workHeader(figures).total)
   assert.equal(columnTip('title', figures, ctx), null)
+})
+
+test('top-N popups keep their lines reserved but blank, and name models as the Model column does', () => {
+  const figures = wholeFigures(), ctx = { hiddenRows: false, now: FIGURES_NOW }
+  const sparse = { ...figures, columns: { ...figures.columns,
+    model: { ...figures.columns.model, values: [{ value: 'gpt-6.1-sol', count: 4, hours: 0 }], others: 0 },
+    epic: { ...figures.columns.epic, values: [{ value: 'AIT-12', count: 3, hours: 0 }], others: 0 },
+    release: { ...figures.columns.release, values: [], others: 0 },
+    tag: { ...figures.columns.tag, values: [{ value: 'bug', count: 2, hours: 0 }], others: 0 },
+    assignee: { ...figures.columns.assignee, values: [{ value: 'AIT lead', kind: 'agent' as const, count: 7, hours: 0 }], others: 0 },
+  } }
+  const lines = (id: Parameters<typeof columnTip>[0], context: Parameters<typeof columnTip>[2] = ctx) => columnTip(id, sparse, context)!.lines.map(l => l && [l.label, l.value, l.note ?? ''].filter(Boolean).join(' '))
+  assert.deepEqual(lines('model'), ['gpt-6.1-sol 4', null, null, null])
+  assert.deepEqual(lines('epic'), ['AIT-12 3', null, null, 'No epic 95'])
+  assert.deepEqual(lines('release'), [null, null, null, 'No release 58'])
+  assert.deepEqual(lines('tags'), ['bug 2', null, null, 'Untagged 101'])
+  assert.deepEqual(lines('assignee'), ['AIT lead 7 agent', null, null, null])
+  for (const id of ['model', 'epic', 'release', 'suggested', 'tags', 'cost', 'assignee'] as const) {
+    const shown = columnTip(id, sparse, ctx)!.lines.filter(l => l !== null).map(l => l!.label)
+    assert.ok(!shown.includes('—') && !shown.includes('Others'), `${id} shows no placeholder and no empty Others`)
+  }
+  // The Model popup's names come from the Model column's own formatter; unknown ids keep their id.
+  const rows = [
+    { kind_slug: 'ticket', fields: {}, planning: { route: null, models: [{ label: 'Claude Opus', harness: 'claude', model: 'claude-opus-5-5', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', sessions: [] }], tokens: { spent: null, input: 0, output: 0, cached: 0, sessions: 1, unreported: 0, estimated: null } } },
+    { kind_slug: 'ticket', fields: {}, planning: { route: { label: 'Codex Sol', profile: 'model-codex-high', harness: 'codex', model: 'gpt-6.1-sol', effort: 'high', revision: '1', display_name: 'GPT', short_name: 'Sol', model_version: '6.1' }, tokens: { spent: null, input: 0, output: 0, cached: 0, sessions: 0, unreported: 0, estimated: null } } },
+  ]
+  for (const prefs of [DEFAULT_MODEL_DISPLAY, { ...DEFAULT_MODEL_DISPLAY, modelNames: 'full' as const, modelVersion: 'hide' as const }]) {
+    const named = columnTip('model', figures, { ...ctx, modelName: shownModelNames(rows, prefs) })!.lines.slice(0, 3).map(l => l!.label)
+    assert.deepEqual(named, [...rows.map(row => modelCell(row, prefs).text), 'grok-4.7'])
+  }
+  assert.deepEqual(columnTip('model', figures, { ...ctx, modelName: shownModelNames(rows) })!.lines.slice(0, 2).map(l => l!.label), ['Opus 5.5', 'Sol 6.1'])
 })
 
 test('Hide closed hides rows only when the view has rows in the hidden statuses', () => {

@@ -11,10 +11,10 @@ import { fill, workFiguresText } from '../../lib/workFiguresText'
 import MeasuredMark from './MeasuredMark.vue'
 import PriorityIcon from './PriorityIcon.vue'
 
-const props = defineProps<{ columnId: string; label: string; sortable: boolean; figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean; now: number }>()
+const props = defineProps<{ columnId: string; label: string; sortable: boolean; figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean; now: number; modelName?: (id: string) => string }>()
 const text = workFiguresText()
 const def = computed(() => figureColumn(props.columnId, props.figures))
-const tip = computed(() => props.figures && def.value ? columnTip(props.columnId as ColumnId, props.figures, { hiddenRows: props.hiddenRows, now: props.now, text }) : null)
+const tip = computed(() => props.figures && def.value ? columnTip(props.columnId as ColumnId, props.figures, { hiddenRows: props.hiddenRows, now: props.now, text, modelName: props.modelName }) : null)
 const hint = computed(() => `${fill(text.sortBy, { column: props.label.toLowerCase() })}\n${text.shiftSort}`)
 </script>
 
