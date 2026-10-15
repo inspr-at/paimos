@@ -32,16 +32,24 @@ async function setup(page: Page, theme = 'light') {
     if (!route.request().url().includes(WORKER) || state.unavailable) return route.fulfill({ status: 503, json: { reason: 'feature_disabled' } })
     return route.fulfill({ json: state.native })
   })
-  await page.route(`**/api/projects/p-pharos/harness-sessions/${WORKER}`, route => route.fulfill({ json: {
-    id: WORKER, project_id: 'p-pharos', agent_principal_id: worker.principal_id, parent_harness_session_id: LEAD_SESSION,
-    work_order_id: null, run_id: null, ticket_node_id: 'n-1', ticket: worker.ticket, project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' },
-    harness: 'codex', host: 'fixture-host', management_mode: 'managed', role: 'worker', model: worker.model, reasoning_effort: 'xhigh',
-    advertised_capabilities: ['inbox', 'status'], phase: 'working', activity: 'busy', activity_note: state.note, agent_activity_mode: 'agent_summary', current_activity: { text: state.note, source: 'agent', at: '2026-10-06T10:00:00Z' },
-    heartbeat_at: worker.heartbeat_at, created_at: worker.since, stopped_at: null, display_label: worker.name,
-    activity_sequence: state.native.revision, revision: state.native.revision, work_shape: 'ship',
-    activity_history: Array.from({ length: 6 }, (_, index) => ({ at: `2026-10-06T09:${50 + index}:00Z`, note: `Step ${index + 1}: checking the assigned session and preserving its current owner and permission boundary.` })),
-    brief: 'Validate the session panel, keep the controls stable and preserve the reader’s position. '.repeat(15),
-  } }))
+  // List and detail are the same complete row. A newer list must preserve
+  // the history/brief asserted by the reader test, rather than deleting them.
+  const sessionRow = (agent: typeof worker) => ({
+    id: agent.session_id, project_id: agent.project_id, agent_principal_id: agent.principal_id,
+    parent_harness_session_id: agent.role === 'worker' ? LEAD_SESSION : null, work_order_id: null, run_id: null,
+    ticket_node_id: agent.ticket?.id ?? null, ticket: agent.ticket ?? null, project: { id: agent.project_id, key: 'PHAROS', title: 'Pharos' },
+    harness: agent.harness, host: 'fixture-host', management_mode: agent.management_mode, role: agent.role,
+    model: agent.model, reasoning_effort: agent.reasoning_effort, advertised_capabilities: ['inbox', 'status'],
+    phase: agent.phase, activity: agent.activity, heartbeat_at: agent.heartbeat_at, created_at: agent.since,
+    stopped_at: null, display_label: agent.name, activity_sequence: state.native.revision, revision: state.native.revision, work_shape: 'ship',
+    ...(agent.session_id === WORKER ? {
+      activity_note: state.note, agent_activity_mode: 'agent_summary', current_activity: { text: state.note, source: 'agent', at: '2026-10-06T10:00:00Z' },
+      activity_history: Array.from({ length: 6 }, (_, index) => ({ at: `2026-10-06T09:${50 + index}:00Z`, note: `Step ${index + 1}: checking the assigned session and preserving its current owner and permission boundary.` })),
+      brief: 'Validate the session panel, keep the controls stable and preserve the reader’s position. '.repeat(15),
+    } : {}),
+  })
+  await page.route('**/api/harness-sessions?*', route => route.fulfill({ json: { items: world.data.live.map(sessionRow), next_cursor: null } }))
+  await page.route(`**/api/projects/p-pharos/harness-sessions/${WORKER}`, route => route.fulfill({ json: sessionRow(worker) }))
   await page.route('**/api/projects/p-pharos/native-sessions/**', async route => {
     const request = route.request(), url = new URL(request.url())
     state.calls.push({ path: url.pathname, method: request.method(), body: request.postData() ? request.postDataJSON() : null })

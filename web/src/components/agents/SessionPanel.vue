@@ -676,7 +676,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <p v-else class="live-unavailable" role="status">{{ nativeReason }}</p>
     </div>
     <div v-if="view && !loading && terminalAtOpen" v-show="tab === 'terminal'" id="session-panel-terminal" class="live-pane" role="tabpanel" aria-labelledby="session-tab-terminal">
-      <SessionTerminal v-if="native && native.mode !== 'terminal' && viewerAtOpen" :session="native" :viewer="viewer" :consent="null" :transport="eventTransport" :active="tab === 'terminal'" :name="view.name" :host="view.session.host || ''" />
+      <SessionTerminal v-if="native && native.mode === 'structured' && viewerAtOpen" :session="native" :viewer="viewer" :consent="null" :transport="eventTransport" :active="tab === 'terminal'" :name="view.name" :host="view.session.host || ''" />
       <NativeTerminal v-else-if="native" :session="native" :viewer="viewer" :consent="null" :transport="{ stream: async () => { throw { reason: 'qualification_missing' } } }" :renderer-factory="null" :active="tab === 'terminal'" :model-name="modelLine" :host="view.session.host || ''" :layout="panelLayout" :action="nativeAction" />
       <p v-else class="live-unavailable" role="status">The live terminal is no longer available.</p>
     </div>
