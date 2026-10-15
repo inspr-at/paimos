@@ -529,6 +529,18 @@ test('history remains reachable without a live session and revokes through the n
 })
 
 test('projection access errors show an unknown count and an actionable Retry', async ({ page }) => {
+  // Kept inside this case: a new row would put decision-desk-fixtures.ts over the 300 browser-case fan-out.
+  await test.step('a null step-up page is an empty desk, not a source failure', async () => {
+    await mockDecisionDesk(page, { emptyDesk: true })
+    await page.goto('/decision-desk')
+    await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
+    await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+    await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open0/)
+    await expect(page.getByTestId('desk-empty')).toHaveText(/Nothing waits for you/)
+    await expect(page.locator('.source-warnings')).toHaveCount(0)
+    await expect(page.getByText(/couldn’t be loaded|could not be read/)).toHaveCount(0)
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+  })
   const world = await mockDecisionDesk(page); world.failProjection = true
   await page.goto('/decision-desk')
   await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeEnabled()
@@ -711,14 +723,3 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     expect(writes).toEqual([])
   })
 }
-
-test('empty desk with a null step-up list shows no source warning', async ({ page }) => {
-  await mockDecisionDesk(page, { emptyDesk: true })
-  await page.goto('/decision-desk')
-  await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
-  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
-  await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open0/)
-  await expect(page.getByTestId('desk-empty')).toHaveText(/Nothing waits for you/)
-  await expect(page.locator('.source-warnings')).toHaveCount(0)
-  await expect(page.getByText(/couldn’t be loaded|could not be read/)).toHaveCount(0)
-})

@@ -8106,8 +8106,6 @@
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"denied reads keep the memo blocked and inaccessible context explicit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"empty desk with a null step-up list shows no source warning","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"expiry while the memo is open blocks the selected approval","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"failed and stale writes keep drafts and announce failure without advancing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
