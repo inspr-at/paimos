@@ -14,13 +14,22 @@ export function panelModelLine(session: Pick<HarnessSession, 'harness' | 'model'
 }
 
 export type LeadTab = 'lead' | 'session' | 'chat'
-export type PanelTab = LeadTab | 'overview'
-export const TAB_LABEL: Record<PanelTab, string> = { lead: 'Lead', session: 'Session', chat: 'Chat', overview: 'Overview' }
+export type PanelTab = LeadTab | 'overview' | 'events' | 'terminal'
+// Keep stored preferences and legacy link names readable during the panel transition.
+export const TAB_LABEL: Record<PanelTab, string> = { lead: 'Lead', session: 'Session', chat: 'Chat', overview: 'Overview', events: 'Events', terminal: 'Terminal' }
+export const PANEL_TAB_LABEL: Record<PanelTab, string> = { ...TAB_LABEL, session: 'Details', overview: 'Details' }
+export type PanelLayout = 'side' | 'wide' | 'full'
+// r5: labels fit only while the header leaves this much room for its title.
+export const PANEL_HEAD_TITLE_MIN = 200
+export function panelTabs(lead: boolean, terminal: boolean, watch = false): PanelTab[] {
+  return [...(lead ? ['lead' as const] : []), lead ? 'session' : 'overview', ...(!watch ? ['chat' as const] : []), 'events', ...(terminal ? ['terminal' as const] : [])]
+}
 export function leadTab(value: unknown): LeadTab | null { return value === 'lead' || value === 'session' || value === 'chat' ? value : null }
 export function panelQueryTab(value: unknown, lead: boolean): PanelTab | null {
   const tab = Array.isArray(value) ? value[0] : value
   if (tab === 'messages' || tab === 'chat') return 'chat'
-  if (tab === 'overview' || tab === 'session') return lead ? 'session' : 'overview'
+  if (tab === 'overview' || tab === 'session' || tab === 'details') return lead ? 'session' : 'overview'
+  if (tab === 'events' || tab === 'terminal') return tab
   return lead && tab === 'lead' ? 'lead' : null
 }
 export function openingTab(input: { forced?: PanelTab | null; lead: boolean; asksYou: boolean; held: boolean; ended: boolean; workerProblem: boolean; workerLost: boolean; pinned?: LeadTab | null; last?: PanelTab | null }): { tab: PanelTab; why: string } {

@@ -306,6 +306,35 @@ export const listNodes = async (params: ListQuery, options: { signal?: AbortSign
   learnPictures(page.items.map(item => item.assignee))
   return stampAt(page, { position, start }, 2)
 }
+// AEON-1368/1358 view figures (api/areas/project-figures.yaml): the header work bar and the column hover figures of
+// one list view, over every matching row. The server ignores Hide closed, sort, facets and paging; they are left out
+// here too, so the request and its key depend on the view's filters only.
+export interface FigureNumbers { count: number; total: number; median: number | null; average: number | null }
+export interface FigureValue { value: string; kind?: 'person' | 'agent'; count: number; hours: number; measured_cost?: number; estimated_cost?: number }
+export interface ColumnFigures {
+  rows: number; included: number; without_value: number; others: number; partial: boolean
+  values?: FigureValue[]; numbers?: FigureNumbers; measured?: FigureNumbers; estimated?: FigureNumbers
+  typical?: { count: number; median: number | null; average: number | null; approximate: boolean }
+  weighted_percent?: number; reading_count?: number; from?: string; to?: string; median_age_seconds?: number; stale?: number
+  running?: number; next_finish?: { at: string; key: string }; last_finish?: { at: string; key: string }
+  parents?: number; leaves?: number; first_key?: string; last_key?: string
+}
+export interface WorkFigureGroup { hours: number; tickets: number; statuses: Record<string, number> }
+export interface ProjectFigures {
+  view_key: string; computed_at: string
+  scope: { kind: 'whole_project' | 'this_view'; rows: number; parents: number; leaves: number; project_leaves: number; closed: number }
+  marks_releases: boolean; total_hours: number; approximate: boolean; without_estimate: number; open_estimated_leaves: number
+  groups: { completed: WorkFigureGroup; done_not_live: WorkFigureGroup; in_progress: WorkFigureGroup; open: WorkFigureGroup }
+  columns: Record<string, ColumnFigures>
+}
+const PRESENTATION: (keyof ListQuery)[] = ['hide_closed', 'hide_states', 'facets', 'sort', 'limit', 'cursor']
+export function figuresQuery(params: ListQuery): ListQuery {
+  const out = { ...params }
+  for (const key of PRESENTATION) delete out[key]
+  return out
+}
+export const figuresPath = (projectId: string, params: ListQuery) => `/projects/${idPath(projectId)}/figures${listQuery(figuresQuery(params))}`
+export const getProjectFigures = (projectId: string, params: ListQuery, signal?: AbortSignal) => json<ProjectFigures>(figuresPath(projectId, params), 'GET', undefined, {}, signal)
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
 export type SavedViewMode = 'list' | 'outline' | 'graph'
 export interface SavedView {

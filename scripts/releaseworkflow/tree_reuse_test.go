@@ -210,12 +210,23 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 	}
 }
 
-// scenarioEnviron runs an aggregate gate under the caller's scenario.
-// CI_IMPACT, CI_AFFECTED_LANE, CI_MG_REUSE and CI_TREE_REUSE are workflow
-// env on the job that executes the test. They belong to the scenario only
-// when the scenario sets them. AEON-1387: CI_IMPACT=off in that job otherwise
-// rejects verified merge-group and confirmed pull-request reuse. An explicit
-// scenario value still wins, so the kill switch stays testable.
+// planningEnabledEnv clears the AEON-1333 kill switch for one gate simulation.
+// CI publishes CI_IMPACT=off on the test process. Reuse proof is a planning-
+// enabled path; kill-switch scenarios set CI_IMPACT=off to reject reuse.
+func planningEnabledEnv(t *testing.T, values map[string]string) []string {
+	t.Helper()
+	assigned := make(map[string]string, len(values)+2)
+	for name, value := range values {
+		assigned[name] = value
+	}
+	assigned["CI_IMPACT"] = ""
+	assigned["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+	return scenarioEnviron(assigned)
+}
+
+// scenarioEnviron isolates workflow switches from the caller's scenario.
+// Explicit scenario values replace inherited entries, including CI_IMPACT=off,
+// so ambient workflow settings cannot mask a lane or disable its kill switch.
 func scenarioEnviron(scenario map[string]string) []string {
 	blocked := map[string]struct{}{
 		"CI_IMPACT":        {},
@@ -229,15 +240,26 @@ func scenarioEnviron(scenario map[string]string) []string {
 		if _, drop := blocked[key]; drop {
 			continue
 		}
+		if _, replaced := scenario[key]; replaced {
+			continue
+		}
 		env = append(env, entry)
 	}
-	for key, value := range scenario {
-		env = append(env, key+"="+value)
+	names := make([]string, 0, len(scenario))
+	for name := range scenario {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+scenario[name])
 	}
 	return env
 }
 
 func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
+	// 2ffd1aee rejected verified merge-group reuse when the test process
+	// inherited CI_IMPACT=off from the workflow env.
+	t.Setenv("CI_IMPACT", "off")
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		steps := reuseSteps(treeMap(jobs[id]))
@@ -263,15 +285,15 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 		execute := func(changed, result string) error {
 			cmd := exec.Command("bash", "-c", s["run"].(string))
 			cmd.Dir = root(t)
-			scenario := make(map[string]string, len(values)+1)
-			scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
-			for key, value := range values {
-				if key == changed {
-					value = result
+			current := values
+			if changed != "" {
+				current = make(map[string]string, len(values))
+				for key, value := range values {
+					current[key] = value
 				}
-				scenario[key] = value
+				current[changed] = result
 			}
-			cmd.Env = scenarioEnviron(scenario)
+			cmd.Env = planningEnabledEnv(t, current)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("%w: %s", err, out)
@@ -634,15 +656,15 @@ func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 					v = strings.Replace(v, guard, "needs.tier-plan.outputs.layout != 'static'", 1)
 				}
 				if key == "shard" {
-					// AEON-1322: essential PRs run four web shards. Assert that
-					// width, then project the historical two-shard pin.
+					// AEON-1389: PR widths come from the budgeted planner. Validate
+					// that exact wiring and full-event fallback before projecting
+					// onto the immutable historical two-shard execution pin.
 					if id == "web-shard" {
-						const widened = "needs.tier-plan.outputs.mode == 'essential' && '[1, 2, 3, 4]'"
-						const historical = "needs.tier-plan.outputs.mode == 'essential' && '[1, 2]'"
-						if !strings.Contains(v, widened) {
-							t.Fatal("essential PR web shards must be four rows")
+						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}`
+						if v != planned {
+							t.Fatal("PR web shards must consume the planned list and retain twelve full-event rows")
 						}
-						v = strings.Replace(v, widened, historical, 1)
+						v = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}`
 					}
 					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential'`, 1)
 					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only'", "needs.tier-plan.outputs.lane == 'spec-only'", 1)
@@ -1001,6 +1023,8 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 }
 
 func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
+	// 2ffd1aee rejected confirmed PR reuse when CI_IMPACT=off leaked in.
+	t.Setenv("CI_IMPACT", "off")
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		j := treeMap(jobs[id])
@@ -1025,15 +1049,15 @@ func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
 		}
 		execute := func(key, value string) error {
 			cmd := exec.Command("bash", "-c", gate["run"].(string))
-			scenario := make(map[string]string, len(values)+1)
-			scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
-			for name, result := range values {
-				if name == key {
-					result = value
+			current := values
+			if key != "" {
+				current = make(map[string]string, len(values))
+				for name, result := range values {
+					current[name] = result
 				}
-				scenario[name] = result
+				current[key] = value
 			}
-			cmd.Env = scenarioEnviron(scenario)
+			cmd.Env = planningEnabledEnv(t, current)
 			return cmd.Run()
 		}
 		if err := execute("", ""); err != nil {

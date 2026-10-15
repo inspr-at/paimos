@@ -1,0 +1,22 @@
+{
+  "group": "theme-agents",
+  "nightlyTiming": {
+    "seconds": 313.335,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/theme-agents.spec.ts",
+    "listedTests": 14,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 47.876,
+        "median": 19.565,
+        "min": 1.39
+      },
+      "seconds": 313.335,
+      "selectedTests": 14
+    },
+    "weightSeconds": 31.073171,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

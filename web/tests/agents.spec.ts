@@ -115,7 +115,7 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText(/^\d+working$/)
   await lead.locator('.agent-link').click()
   await expect(panel(page)).toContainText('Claude Max')
-  await expect(panel(page)).toContainText('claude-fable-high')
+  await expect(panel(page)).toContainText('Fable · high')
   expect(errors).toEqual([])
 })
 
@@ -302,7 +302,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   })
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
-  await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
+  await expect(details.getByRole('heading', { name: /^PHAROS-11 · Connect Hetzner Cloud for managed provisioning/ })).toBeVisible()
   await expect(details).toContainText('coordinator · owned by AEON')
   const ticketFact = details.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Ticket$/ }) })
   await expect(ticketFact.locator('.key')).toHaveText('PHAROS-11')
@@ -389,7 +389,7 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   expect(order).toContain(nova)
   await row(page, camy).locator('.c-time').click()
   await expect(page).toHaveURL(`/agents/${camy}`)
-  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
+  await expect(panel(page).getByRole('heading', { name: /^PHAROS-11 · Connect Hetzner Cloud for managed provisioning/ })).toBeVisible()
   await panel(page).focus()
   await page.keyboard.press('j')
   await expect(page).toHaveURL(`/agents/${order[1]}`)
@@ -608,7 +608,7 @@ test('the ticket panel shows the bound agent’s attention state and links to it
   await expect(chip).toBeVisible()
   await chip.click()
   await expect(page).toHaveURL(`/agents/${camy}`)
-  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
+  await expect(panel(page).getByRole('heading', { name: /^PHAROS-11 · Connect Hetzner Cloud for managed provisioning/ })).toBeVisible()
 })
 
 test('old approvals land on Decision Desk; runs and pacing land on Agents', async ({ page }) => {
@@ -689,7 +689,7 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
     if (width === 390) expect((await ticket.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     await expectStableControls({
-      controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Session actions' }), tabs: details.getByRole('tablist'), ticket },
+      controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Panel actions' }), tabs: details.getByRole('tablist'), ticket },
       scrollAreas: { details: details.locator('.scroll') },
       interactions: [
         { name: 'hover the ticket title', run: async () => {

@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 28.355,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/aeon-1285-agent-rows.spec.ts",
+    "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 13.47,
+        "median": 3.926,
+        "min": 3.346
+      },
+      "seconds": 28.355,
+      "selectedTests": 5
+    },
+    "weightSeconds": 30,
+    "weightSource": "local-single-worker-AEON-1285-14s-plus-margin"
+  }
+}

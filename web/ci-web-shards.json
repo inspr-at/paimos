@@ -111,19 +111,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/brand.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":3.453,"median":2.247,"min":1.041},"seconds":4.494,"selectedTests":2},"weightSeconds":2.552486,"weightSource":"web-4"}
-        ,
-        {"file":"tests/header-menus.spec.ts","listedTests":92,"tierTiming":{"caseSeconds":{"max":3.984,"median":0,"min":0},"seconds":63.63,"selectedTests":92},"weightSeconds":114.861878,"weightSource":"web-4"}
-        ,
-        {"file":"tests/release-codenames.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":5.118,"median":1.502,"min":1.213},"seconds":65.286,"selectedTests":24},"weightSeconds":30.62983392,"weightSource":"web-4"}
-        ,
-        {"file":"tests/release-header.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.367,"median":2.435,"min":1.321},"seconds":55.21,"selectedTests":23},"weightSeconds":29.35359084,"weightSource":"web-4"}
-        ,
-        {"file":"tests/release-presentation.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":1.26,"median":1.094,"min":0.968},"seconds":7.779,"selectedTests":7},"weightSeconds":8.933702,"weightSource":"web-4"}
-        ,
-        {"file":"tests/releases.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":2.668,"median":1.619,"min":1.125},"seconds":38.636,"selectedTests":22},"weightSeconds":28.077347692,"weightSource":"web-4"}
-        ,
-        {"file":"tests/version-reveal.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":2.569,"median":1.564,"min":1.48},"seconds":7.177,"selectedTests":4},"weightSeconds":7.657459,"weightSource":"web-4"}
       ]
     }
     ,
@@ -147,7 +134,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/service-tier.spec.ts","listedTests":44,"tierTiming":{"caseSeconds":{"max":3.609,"median":2.166,"min":1.137},"seconds":92.286,"selectedTests":41},"weightSeconds":91,"weightSource":"web-6"}
       ]
     }
     ,
@@ -181,19 +167,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/access.spec.ts","listedTests":42,"tierTiming":{"caseSeconds":{"max":19.208,"median":2.4125,"min":1.344},"seconds":170.844,"selectedTests":42},"weightSeconds":111.435484,"weightSource":"web-8"}
-        ,
-        {"file":"tests/key-dialog.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":5.057,"median":2.641,"min":1.75},"seconds":30.902,"selectedTests":9},"weightSeconds":23.879032,"weightSource":"web-8"}
-        ,
-        {"file":"tests/key-expiry.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":7.646,"median":2.268,"min":1.755},"seconds":42.265,"selectedTests":13},"weightSeconds":34.491935,"weightSource":"web-8"}
-        ,
-        {"file":"tests/key-full-access.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":13.044,"median":3.41,"min":2.097},"seconds":135.007,"selectedTests":22},"weightSeconds":53.064516,"weightSource":"web-8"}
-        ,
-        {"file":"tests/key-scopes.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.698,"median":3.012,"min":0.911},"seconds":71.382,"selectedTests":23},"weightSeconds":42.451613,"weightSource":"web-8"}
-        ,
-        {"file":"tests/new-agent.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":5.551,"median":1.817,"min":1.352},"seconds":34.567,"selectedTests":13},"weightSeconds":31.83871,"weightSource":"web-8"}
-        ,
-        {"file":"tests/scope-codes.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":2.848,"median":1.736,"min":1.436},"seconds":24.067,"selectedTests":12},"weightSeconds":31.83871,"weightSource":"web-8"}
       ]
     }
     ,
@@ -216,7 +189,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/key-layout.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.942,"median":1.918,"min":1.44},"seconds":44.965,"selectedTests":24},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -240,7 +212,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/planning-columns.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":6.882,"median":2.756,"min":1.257},"seconds":44.309,"selectedTests":14},"weightSeconds":31,"weightSource":"web-9"}
       ]
     }
     ,
@@ -264,13 +235,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/definitions.spec.ts","listedTests":9,"weightSeconds":120,"weightSource":"AEON-1316 FIX4 estimate: original flows plus six verdict regressions at 390/1024/1440 in light/dark"}
-        ,
-        {"file":"tests/entry-checks.spec.ts","weightSeconds":30}
-        ,
-        {"file":"tests/person-steps.spec.ts","listedTests":5,"weightSeconds":39.557,"weightSource":"AEON-1318 fix8: guarded mbp2606 single-worker complete file, 5 passed in 39.3s (supervisor wall 39.557s), source c839b3bd7"}
-        ,
-        {"file":"tests/work-queue.spec.ts","listedTests":30,"tierTiming":{"caseSeconds":{"max":11.202,"median":1.5205,"min":1.024},"seconds":53.363,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
       ]
     }
     ,
@@ -294,11 +258,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/start-agent.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.051,"median":2.213,"min":1.746},"seconds":49.674,"selectedTests":21},"weightSeconds":36.078431,"weightSource":"web-11"}
-        ,
-        {"file":"tests/ticket-panel.spec.ts","listedTests":46,"tierTiming":{"caseSeconds":{"max":94.816,"median":2.067,"min":1.65},"seconds":156.256,"selectedTests":23},"weightSeconds":34.509803565,"weightSource":"web-11"}
-        ,
-        {"file":"tests/ticket-workers.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":13.203,"median":2.236,"min":1.812},"seconds":44.561,"selectedTests":11},"weightSeconds":19.843137,"weightSource":"web-11"}
       ]
     }
     ,
@@ -324,39 +283,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/accounts-computers.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":17.351,"median":4.669,"min":2.259},"seconds":145.906,"selectedTests":23},"weightSeconds":32.233918,"weightSource":"web-13"}
-        ,
-        {"file":"tests/agent-recovery.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":6.14,"median":5.111,"min":2.547},"seconds":43.118,"selectedTests":9},"weightSeconds":20}
-        ,
-        {"file":"tests/agents-top.spec.ts","listedTests":4,"tierTiming":{"caseSeconds":{"max":3.545,"median":2.2135,"min":1.709},"seconds":9.681,"selectedTests":4},"weightSeconds":81.824561,"weightSource":"web-13"}
-        ,
-        {"file":"tests/approval-feedback.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":7.05,"median":5.43,"min":2.155},"seconds":86.557,"selectedTests":18},"weightSeconds":32.233918,"weightSource":"web-13"}
-        ,
-        {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.896,"median":2.507,"min":2.352},"seconds":65.324,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
-        ,
-        {"file":"tests/native-expert-stream.spec.ts","listedTests":12,"weightSeconds":10,"weightSource":"aeon-1270-guarded-serial-wall"}
-        ,
-        {"file":"tests/native-expert-terminal.spec.ts","listedTests":5,"weightSeconds":10,"weightSource":"aeon-1289-guarded-serial-wall-5.3s-with-headroom"}
-        ,
-        {"file":"tests/native-lead-pilot.spec.ts","listedTests":6,"weightSeconds":30,"weightSource":"AEON-1287: conservative estimate for six unmeasured conversation/stability cases"}
-        ,
-        {"file":"tests/native-session-requests.spec.ts","listedTests":7,"weightSeconds":4.219,"weightSource":"AEON-1304: guarded remote serial Playwright wall 4219ms for seven cases at 8362dbbfc"}
-        ,
-        {"file":"tests/no-shift-agents.spec.ts","listedTests":29,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimateReason":"AEON-1211: six added cases estimated at the existing median; measured cases retained.","estimatedTests":9,"measuredTests":20,"seconds":234.6792,"selectedTests":29},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":5.68,"median":3.5155,"min":2.121},"seconds":81.696,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/no-shift.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.067,"median":2.9725,"min":0.116},"seconds":55.7,"selectedTests":20},"weightSeconds":40.171603,"weightSource":"tierTiming:37377299349 plus conservative AEON-569 estimate for twelve new cases"}
-        ,
-        {"file":"tests/record-ownership.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/relations.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":24.542,"median":3.351,"min":2.416},"seconds":64.983,"selectedTests":7},"weightSeconds":17.356725,"weightSource":"web-13"}
-        ,
-        {"file":"tests/session-recovery.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":5.064,"median":3.02,"min":2.316},"seconds":45.607,"selectedTests":15},"weightSeconds":37.192982,"weightSource":"web-13"}
-        ,
-        {"file":"tests/ticket-outcomes.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":4.524,"median":3.3355,"min":2.147},"seconds":6.671,"selectedTests":2},"weightSeconds":4.959064,"weightSource":"web-13"}
-        ,
-        {"file":"tests/views-filters.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":9.619,"median":2.1505,"min":1.266},"seconds":94.87,"selectedTests":32},"weightSeconds":42.152047,"weightSource":"web-13"}
       ]
     }
     ,
@@ -384,9 +310,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/recurrence-marker.spec.ts","listedTests":37,"tierTiming":{"caseSeconds":{"max":10.554,"median":9.7945,"min":9.035},"seconds":19.589,"selectedTests":2},"weightSeconds":45,"weightSource":"estimate"}
-        ,
-        {"file":"tests/recurrences.spec.ts","tierTiming":{"caseSeconds":{"max":17.297,"median":17.297,"min":17.297},"seconds":17.297,"selectedTests":1},"weightSeconds":45,"weightSource":"estimate"}
       ]
     }
     ,
@@ -414,15 +337,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/decision-desk-fix2.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":14.157,"median":13.709,"min":1.981},"seconds":86.743,"selectedTests":8},"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
-        ,
-        {"file":"tests/decision-desk-fix3.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":5.193,"median":5.007,"min":1.858},"seconds":38.466,"selectedTests":9},"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
-        ,
-        {"file":"tests/decision-desk-lessons.spec.ts","listedTests":26,"weightSeconds":29.944,"weightSource":"AEON-1331 remote-spec 4625de40f: upper bound from 38 registrations (22 lesson + 16 legacy), wall_ms 29944"}
-        ,
-        {"file":"tests/decision-desk-project.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":18.858,"median":4.248,"min":2.151},"seconds":81.17,"selectedTests":14},"weightSeconds":40,"weightSource":"AEON-1057 project and refresh regressions; conservative initial estimate"}
-        ,
-        {"file":"tests/decision-desk.spec.ts","listedTests":60,"tierTiming":{"caseSeconds":{"max":15.827,"median":2.739,"min":1.449},"seconds":324.203,"selectedTests":60},"weightSeconds":128,"weightSource":"web-14"}
       ]
     }
     ,
@@ -450,15 +364,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/account-link.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.555,"median":1.797,"min":0.966},"seconds":18.322,"selectedTests":10},"weightSeconds":19.833333,"weightSource":"web-15"}
-        ,
-        {"file":"tests/attach-discoverable.spec.ts","listedTests":47,"tierTiming":{"caseSeconds":{"max":9.469,"median":2.55,"min":1.31},"seconds":124.966,"selectedTests":41},"weightSeconds":81.316667,"weightSource":"web-15"}
-        ,
-        {"file":"tests/attach-security.spec.ts","listedTests":50,"tierTiming":{"caseSeconds":{"max":5.834,"median":1.4985,"min":0.929},"seconds":92.195,"selectedTests":50},"weightSeconds":99.166667,"weightSource":"web-15"}
-        ,
-        {"file":"tests/attach-watch.spec.ts","listedTests":31,"tierTiming":{"caseSeconds":{"max":4.499,"median":3.228,"min":1.315},"seconds":87.304,"selectedTests":31},"weightSeconds":61.483333,"weightSource":"web-15"}
-        ,
-        {"file":"tests/classic-invite.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":1.972,"median":1.648,"min":1.016},"seconds":9.483,"selectedTests":6},"weightSeconds":11.9,"weightSource":"web-15"}
       ]
     }
     ,
@@ -484,13 +389,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/developer-settings.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":7.522,"median":3.431,"min":3.076},"seconds":27.406,"selectedTests":7},"weightSeconds":5.593496,"weightSource":"footer-ui-2"}
-        ,
-        {"file":"tests/footer-release-pill.spec.ts","listedTests":40,"tierTiming":{"caseSeconds":{"max":4.265,"median":2.105,"min":1.002},"seconds":78.761,"selectedTests":39},"weightSeconds":27.96748,"weightSource":"footer-ui-2"}
-        ,
-        {"file":"tests/shell.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":3.35,"median":1.211,"min":0.909},"seconds":49.2,"selectedTests":38},"weightSeconds":22.373984,"weightSource":"footer-ui-2"}
-        ,
-        {"file":"tests/tenant-brand.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":3.305,"median":1.193,"min":0},"seconds":19.711,"selectedTests":15},"weightSeconds":10.487805,"weightSource":"footer-ui-2"}
       ]
     }
     ,
@@ -516,7 +414,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/status-help.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":4.09,"median":2.346,"min":1.75},"seconds":19.356,"selectedTests":7},"weightSeconds":24,"weightSource":"status-help-ui-2"}
       ]
     }
     ,
@@ -540,25 +437,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/account-resets.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.046,"median":2.0435,"min":1.869},"seconds":13.596,"selectedTests":6},"weightSeconds":12,"weightSource":"local-single-worker-AEON-1037-6.2s-plus-margin"}
-        ,
-        {"file":"tests/model-provider.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.247,"median":1.538,"min":0.88},"seconds":4.665,"selectedTests":3},"weightSeconds":10.5,"weightSource":"e2e-4"}
-        ,
-        {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":1.449,"median":1.449,"min":1.449},"seconds":1.449,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
-        ,
-        {"file":"tests/models-registry-shots.spec.ts","listedTests":3,"weightSeconds":20,"weightSource":"AEON-1163 mbp2606 single worker 12.8s for 3 cases plus margin"}
-        ,
-        {"file":"tests/models-registry.spec.ts","listedTests":33,"tierTiming":{"caseSeconds":{"max":5.706,"median":0.594,"min":0.244},"seconds":23.353,"selectedTests":26},"weightSeconds":30,"weightSource":"AEON-1163 mbp2606 single worker 23.8s for 31 cases; the two pause stability guards add about 3s, within the margin"}
-        ,
-        {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":1.402,"median":0.8975,"min":0.644},"seconds":16.304,"selectedTests":18},"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
-        ,
-        {"file":"tests/models-simple.spec.ts","listedTests":21,"tierTiming":{"caseSeconds":{"max":2.142,"median":0.68,"min":0.466},"seconds":17.886,"selectedTests":22},"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
-        ,
-        {"file":"tests/models-situations.spec.ts","listedTests":4,"weightSeconds":3,"weightSource":"AEON-1162 mbp2606 single-worker 1.9s plus margin"}
-        ,
-        {"file":"tests/policies-ladders-moved.spec.ts","listedTests":2,"weightSeconds":4,"weightSource":"AEON-1204 local-single-worker-2.1s-plus-margin"}
-        ,
-        {"file":"tests/policies-rules.spec.ts","listedTests":9,"weightSeconds":20,"weightSource":"AEON-1165 estimate, 9 cases replacing the ladder editor spec"}
       ]
     }
     ,
@@ -586,15 +464,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/agent-activity.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":14.914,"median":6.647,"min":1.436},"seconds":71.61,"selectedTests":11},"weightSeconds":35.820513,"weightSource":"status-autopilot-ui-2"}
-        ,
-        {"file":"tests/features.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/settings.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":2.921,"median":1.626,"min":1.177},"seconds":32.619,"selectedTests":19},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
-        ,
-        {"file":"tests/status-autopilot.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":7.551,"median":1.728,"min":0.662},"seconds":23.425,"selectedTests":11},"weightSeconds":35.820513,"weightSource":"AEON-696 proportional estimate from status-autopilot-ui-2"}
-        ,
-        {"file":"tests/workspace-activity.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":4.384,"median":1.489,"min":1.145},"seconds":33.579,"selectedTests":13},"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -617,7 +486,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/performance.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":6.723,"median":5.768,"min":4.813},"seconds":11.536,"selectedTests":2},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -644,23 +512,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/aeon-632b-clip-settings.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":23.697,"median":13.7615,"min":8.947},"seconds":177.682,"selectedTests":12},"weightSeconds":41.277104,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/aeon-632b-clip-touch.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":5.596,"median":4.431,"min":4.102},"seconds":27.409,"selectedTests":6},"weightSeconds":8.023393,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/aeon-632b-clip.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":17.04,"median":16.233,"min":15.69},"seconds":97.79,"selectedTests":6},"weightSeconds":37.260479,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/clip-tip-disclosure.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.064,"median":1.3915,"min":1.216},"seconds":35.93,"selectedTests":24},"weightSeconds":22.425751,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/clip-tip-overflow.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.852,"median":1.7365,"min":1.094},"seconds":44.254,"selectedTests":24},"weightSeconds":29.032436,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/clip-tip-touch.spec.ts","listedTests":39,"tierTiming":{"caseSeconds":{"max":20.545,"median":1.098,"min":0.652},"seconds":82.904,"selectedTests":39},"weightSeconds":58.070907,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/clip-tip.spec.ts","listedTests":72,"tierTiming":{"caseSeconds":{"max":7.578,"median":1.591,"min":0.693},"seconds":141.108,"selectedTests":72},"weightSeconds":89.470907,"weightSource":"tierTiming:37377299349"}
-        ,
-        {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":4.65,"median":3.616,"min":1.756},"seconds":22.35,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/model-prefs.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.43,"median":2.263,"min":1.997},"seconds":6.69,"selectedTests":3},"weightEvidence":{"attempt":1,"collectionPlanningSeconds":0.231546,"launchOverheadSeconds":0.112131,"marginFactor":1.2,"nativeSeconds":5.222,"runId":"37948687065","sha":"63841419452e1bfb206e6505b8051b8083527654"},"weightSeconds":7,"weightSource":"hosted-CI-37948687065-with-20-percent-margin"}
       ]
     }
     ,
@@ -687,7 +538,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/project-header.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -709,7 +559,6 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/needs-attention.spec.ts","listedTests":42,"tierTiming":{"caseSeconds":{"max":69.995,"median":2.738,"min":1.315},"seconds":203.936,"selectedTests":41},"weightSeconds":46.609756,"weightSource":"estimate"}
       ]
     }
     ,
@@ -734,447 +583,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/a11y.spec.ts","listedTests":80,"tierTiming":{"caseSeconds":{"max":4.081,"median":2.519,"min":2.225},"seconds":21.242,"selectedTests":8},"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/account-use-matrix.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":6.707,"median":1.8485,"min":1.243},"seconds":36.472,"selectedTests":14},"weightSeconds":40,"weightSource":"AEON-1054 estimate: thirteen mocked matrix flows, one skipped evidence run"}
-        ,
-        {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/accounts-quota-bar.spec.ts","listedTests":25,"weightSeconds":62.5,"weightSource":"AEON-1172 estimate: twenty-five mocked account list and panel flows, most at three widths, two themes"}
-        ,
-        {"file":"tests/activity-history.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/add-account.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/aeon-1028-projheader.spec.ts","listedTests":42,"weightSeconds":93.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/aeon-1042-headergraph.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/aeon-1062-qapolish.spec.ts","listedTests":20,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1062-18.8s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1071-chat-live.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":4.333,"median":1.9425,"min":1.631},"seconds":38.567,"selectedTests":16},"weightSeconds":14,"weightSource":"local-single-worker-AEON-1071-9s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1188-displayhome.spec.ts","listedTests":8,"weightSeconds":20,"weightSource":"local-single-worker-AEON-1188-15s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1209-agents-head.spec.ts","listedTests":19,"weightSeconds":75,"weightSource":"remote-one-worker-AEON-1209-60s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1210-agents-tree.spec.ts","listedTests":19,"weightSeconds":54,"weightSource":"remote-one-worker-AEON-1210-24s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1211-agents-rows.spec.ts","listedTests":33,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1211-15s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1212-lead-panel.spec.ts","listedTests":32,"weightSeconds":240,"weightSource":"AEON-1212 fix4 estimate: viewport acceptance, G3/G6 evidence, bounded wide worker metadata and the original approved check"}
-        ,
-        {"file":"tests/aeon-1213-agents-split.spec.ts","listedTests":13,"weightSeconds":40,"weightSource":"unmeasured-P5-one-worker-budget"}
-        ,
-        {"file":"tests/aeon-1279-touch-scroll.spec.ts","listedTests":6,"weightSeconds":60,"weightSource":"remote-one-worker-AEON-1279-30s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1285-agent-rows.spec.ts","listedTests":5,"weightSeconds":30,"weightSource":"local-single-worker-AEON-1285-14s-plus-margin"}
-        ,
-        {"file":"tests/aeon-1339-desk-polish.spec.ts","listedTests":5,"weightSeconds":150,"weightSource":"AEON-1339 fix7 estimate: fix4 weight plus a four-pass run-approval step, with margin"}
-        ,
-        {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
-        ,
-        {"file":"tests/aeon-974-typefilter.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":4.712,"median":2.639,"min":2.002},"seconds":26.386,"selectedTests":9},"weightSeconds":24,"weightSource":"local-single-worker-AEON-974-11.8s-plus-margin"}
-        ,
-        {"file":"tests/agent-done-state.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-indicator.spec.ts","listedTests":15,"weightSeconds":33.292682647,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-names.spec.ts","listedTests":3,"weightSeconds":6.658536,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-pairing.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":1.507,"median":1.507,"min":1.507},"seconds":1.507,"selectedTests":1},"weightSeconds":77.682927,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules-budget-clients.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules-doctrine.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":8.943,"median":5.0845,"min":1.226},"seconds":10.169,"selectedTests":2},"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules-flow.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules-import.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":3.521,"median":3.521,"min":3.521},"seconds":3.521,"selectedTests":1},"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules-shots.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules-ticks.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules-tldr.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agent-rules.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-cleanup.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-dial-daily.spec.ts","listedTests":34,"weightSeconds":120,"weightSource":"AEON-1036 targeted run, 86 seconds for 30 tests plus the 1024 captures"}
-        ,
-        {"file":"tests/agents-dial.spec.ts","listedTests":23,"weightSeconds":66.585366,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-display.spec.ts","listedTests":9,"weightSeconds":19.975609755,"weightSource":"unmeasured-test-count"}
-        ,
-        {"file":"tests/agents-handover.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-harness-status.spec.ts","listedTests":26,"weightSeconds":57.707317,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-head.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-hierarchy.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-metadata.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-mission.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-order.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-phone-rows.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/agents-worker-tree.spec.ts","listedTests":12,"weightSeconds":80,"weightSource":"nightly-38452339044-first-nine-cases-53.9s-plus-remaining-cases-margin"}
-        ,
-        {"file":"tests/agents.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":3.636,"median":2.408,"min":1.583},"seconds":25.679,"selectedTests":11},"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/attachments.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":8.552,"median":5.434,"min":2.316},"seconds":10.868,"selectedTests":2},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/authz.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":2.167,"median":1.979,"min":1.791},"seconds":3.958,"selectedTests":2},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/avatar-upload-bounds.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/avatars.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/bulk.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":27.042,"median":14.592,"min":2.142},"seconds":29.184,"selectedTests":2},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/business.spec.ts","listedTests":7,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/capacity-learning.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/capacity-pace.spec.ts","listedTests":13,"weightSeconds":39,"weightSource":"AEON-1175 estimate: thirteen mocked Capacity and dial flows, six at three widths and two themes with the pacing editors"}
-        ,
-        {"file":"tests/connect-verification.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/cost-units.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/crm.spec.ts","listedTests":25,"weightSeconds":55.487805,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/dead-screens.spec.ts","listedTests":12,"weightSeconds":30,"weightSource":"unmeasured-estimate"}
-        ,
-        {"file":"tests/dead-sessions.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/decision-text.spec.ts","listedTests":36,"weightSeconds":79.902439,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/delivery-arion-v5.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":5.802,"median":2.516,"min":1.903},"seconds":37.889,"selectedTests":14},"weightSeconds":20,"weightSource":"aeon-1016-estimate"}
-        ,
-        {"file":"tests/delivery-flow-lanes.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":4.57,"median":2.643,"min":1.953},"seconds":29.219,"selectedTests":11},"weightSeconds":12,"weightSource":"aeon-1005-estimate"}
-        ,
-        {"file":"tests/delivery-flow-modes.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":14.787,"median":6.68,"min":1.787},"seconds":124.329,"selectedTests":19},"weightSeconds":20,"weightSource":"aeon-1006-estimate"}
-        ,
-        {"file":"tests/delivery-guarantee.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/delivery-numbers.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":5.977,"median":2.8905,"min":1.378},"seconds":41.343,"selectedTests":14},"weightSeconds":30,"weightSource":"aeon-1002-estimate"}
-        ,
-        {"file":"tests/delivery-polish.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":14.382,"median":5.915,"min":1.697},"seconds":74.446,"selectedTests":12},"weightSeconds":45,"weightSource":"aeon-1007-estimate"}
-        ,
-        {"file":"tests/delivery-rating.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/delivery-simple.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":16.364,"median":2.53,"min":1.627},"seconds":46.322,"selectedTests":11},"weightSeconds":26,"weightSource":"aeon-1003-estimate"}
-        ,
-        {"file":"tests/delivery-tab-switch.spec.ts","listedTests":2,"weightSeconds":30,"weightSource":"remote-one-worker-AEON-1352-estimate"}
-        ,
-        {"file":"tests/delivery-ui.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":6.349,"median":5.584,"min":1.96},"seconds":81.395,"selectedTests":17},"weightSeconds":25,"weightSource":"aeon-853-estimate"}
-        ,
-        {"file":"tests/deploy-target.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/display-language.spec.ts","listedTests":5,"tierTiming":{"caseSeconds":{"max":5.094,"median":3.496,"min":2.679},"seconds":18.086,"selectedTests":5},"weightSeconds":35,"weightSource":"AEON-998 targeted spot checks, five views with six sizes/themes each"}
-        ,
-        {"file":"tests/doctrine-inbox.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":8.195,"median":3.575,"min":3.161},"seconds":28.941,"selectedTests":7},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/done-gate.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/estimates.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/eta-column.spec.ts","listedTests":14,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/first-impression.spec.ts","listedTests":38,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/first-run.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/footer-summary.spec.ts","listedTests":13,"weightSeconds":20,"weightSource":"estimate"}
-        ,
-        {"file":"tests/from-classic.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/graph-canvas.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/graph-focus.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/graph-hit.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/graph-motion.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/groups.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/guest.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/header-desk-split.spec.ts","listedTests":23,"weightSeconds":46,"weightSource":"local-single-worker-AEON-1214-22s-plus-margin-and-fix3-cases"}
-        ,
-        {"file":"tests/header-glimpse-context.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/header-glimpse.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/headings.spec.ts","listedTests":90,"weightSeconds":199.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/hide-states.spec.ts","weightSeconds":60,"weightSource":"unmeasured-estimate"}
-        ,
-        {"file":"tests/hours-edit.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/hours.spec.ts","listedTests":12,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/html-sandbox.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":1.967,"median":1.967,"min":1.967},"seconds":1.967,"selectedTests":1},"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/indicator-controls.spec.ts","listedTests":15,"weightSeconds":33.292683158,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/indicator-creative-gallery.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/indicator-gallery.spec.ts","listedTests":5,"weightSeconds":11.097560833,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/intake-extensions.spec.ts","listedTests":12,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/kind-convert.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/knowledge-dock.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/knowledge-graph.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/knowledge-learnings.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/knowledge-shots.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/list-columns.spec.ts","listedTests":18,"weightSeconds":39.951219,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/live-agents-layout.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/live-agents.spec.ts","listedTests":36,"weightSeconds":79.902439,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/live-list-sessions.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/live-list.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/live-panel.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/markdown-ticket-links.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/models-fallback.spec.ts","listedTests":13,"weightSeconds":14,"weightSource":"AEON-1161 mbp2606 single worker: with models-simple and its shots (20s weight) the three specs ran in 30.1s; plus margin"}
-        ,
-        {"file":"tests/models-outdated.spec.ts","listedTests":10,"weightSeconds":11,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin; AEON-1163 adds the phone tray case"}
-        ,
-        {"file":"tests/models-situations-shots.spec.ts","listedTests":12,"weightSeconds":8,"weightSource":"AEON-1162 evidence screenshots, mbp2606 single-worker 6.5s plus margin"}
-        ,
-        {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":1.722,"median":1.5945,"min":1.491},"seconds":9.596,"selectedTests":6},"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/nav.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/outcome-proposals.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/outline.spec.ts","listedTests":42,"weightSeconds":93.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/palette.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/phone-controls.spec.ts","listedTests":27,"weightSeconds":59.926829,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/phone-select.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/pi-openrouter.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/polish-round-two.spec.ts","listedTests":2,"weightSeconds":4.439024375,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/polish-round.spec.ts","listedTests":4,"weightSeconds":8.87804875,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/portal-admin.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/portal-public.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/portal-releases.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/portal-roadmap.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/profile-editor.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/profile.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/project-advanced.spec.ts","listedTests":11,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
-        ,
-        {"file":"tests/project-delivery-settings.spec.ts","listedTests":12,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
-        ,
-        {"file":"tests/project-groups.spec.ts","listedTests":18,"weightSeconds":39.95122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/project-list.spec.ts","listedTests":28,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/project-sections.spec.ts","listedTests":24,"weightSeconds":53.268293,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/project-settings.spec.ts","listedTests":4,"weightSeconds":120,"weightSource":"unmeasured-estimate"}
-        ,
-        {"file":"tests/project-sort.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/project-status-counts.spec.ts","weightSeconds":60,"weightSource":"unmeasured-estimate"}
-        ,
-        {"file":"tests/projects.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/provenance.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quota-warnings.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-collaboration.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-dock-layout.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-editor-core.spec.ts","listedTests":4,"tierTiming":{"caseSeconds":{"max":0.926,"median":0.926,"min":0.926},"seconds":0.926,"selectedTests":1},"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-editor-input.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-editor-route.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-inspector.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-link-vault.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-parity-gaps.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-profile.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-public-page.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-public.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-save-state.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.646,"median":3.646,"min":3.646},"seconds":3.646,"selectedTests":1},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-showcase.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quote-workspace.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quotes-tab.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quotes/parity-flow.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quotes/print-receipt.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/quotes/two-user-presence.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-groups.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-historic-tenant.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-historic.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-own-tenant.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-picker.spec.ts","listedTests":26,"weightSeconds":57.707317,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-switches.spec.ts","listedTests":17,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-tenant-notes.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-ticket-links.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":7.074,"median":7.074,"min":7.074},"seconds":7.074,"selectedTests":1},"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/release-update-notice.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":1.545,"median":1.545,"min":1.545},"seconds":1.545,"selectedTests":1},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/reserved-versions.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/resilient-polling.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/routines-editor.spec.ts","listedTests":5,"weightSeconds":40,"weightSource":"AEON-1182 estimate: five mocked routine editor flows, one worker"}
-        ,
-        {"file":"tests/routines-tab.spec.ts","listedTests":11,"weightSeconds":22,"weightSource":"AEON-1192 estimate: eleven mocked Routines page flows (seven measured in 12 s), one worker"}
-        ,
-        {"file":"tests/row-actions.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/run-kinds.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-attention.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-chat-cli.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-chat.spec.ts","listedTests":55,"tierTiming":{"caseSeconds":{"max":4.661,"median":2.728,"min":1.828},"seconds":109.865,"selectedTests":38},"weightSeconds":95.439023,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-ended.spec.ts","listedTests":3,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-inbox.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-messages.spec.ts","listedTests":17,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-removal.spec.ts","listedTests":17,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-requests.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/session-rows.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":2.345,"median":2.061,"min":1.777},"seconds":4.122,"selectedTests":2},"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/settings-account-parts.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":9.733,"median":9.733,"min":9.733},"seconds":9.733,"selectedTests":1},"weightSeconds":30,"weightSource":"AEON-1171 estimate: eleven mocked flows (14.5s on mbp2606 with two workers, plus margin), two skipped evidence runs"}
-        ,
-        {"file":"tests/settings-accounts.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":4.134,"median":2.057,"min":1.675},"seconds":9.923,"selectedTests":4},"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/settings-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/settings-computers-table.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":2.244,"median":1.456,"min":1.325},"seconds":11.264,"selectedTests":7},"weightSeconds":24,"weightSource":"AEON-1174 estimate: seven mocked flows, one skipped evidence run"}
-        ,
-        {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/state-colours.spec.ts","listedTests":14,"weightSeconds":31.073170333333337,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/status-buckets.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/status-icons.spec.ts","listedTests":12,"weightSeconds":20.84,"weightSource":"AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"}
-        ,
-        {"file":"tests/status-time.spec.ts","listedTests":18,"weightSeconds":26.27,"weightSource":"AEON-1359 remote-spec 7f01b0b9f: 18 cases, one worker on mbp2606, wall_ms 26265"}
-        ,
-        {"file":"tests/stepup-desk.spec.ts","listedTests":9,"weightSeconds":12,"weightSource":"local-single-worker-AEON-1048-9.1s-plus-margin"}
-        ,
-        {"file":"tests/tap-targets.spec.ts","listedTests":28,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/theme-settings.spec.ts","listedTests":45,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/theme.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ticket-agent-work.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ticket-benefits.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ticket-graph-view.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ticket-peek.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ticket-placement.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ticket-reviews.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/title-divider.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ui-audit-dark-1024.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-dark-1280.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-dark-1440.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-dark-1920.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-dark-390.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-light-1024.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-light-1280.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-light-1440.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-light-1920.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/ui-audit-rules.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/ui-audit.spec.ts","listedTests":1,"weightSeconds":240,"weightSource":"aeon-1326-nightly-progress-estimate"}
-        ,
-        {"file":"tests/usage-accounts.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/vendor-signals.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/wide.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/work-integration.spec.ts","weightSeconds":70,"weightSource":"estimate"}
-        ,
-        {"file":"tests/work-kinds.spec.ts","listedTests":22,"weightSeconds":22.1,"weightSource":"AEON-997 fix2 local Chromium: 22 cases, one worker, wall 22.1 s"}
       ]
     }
     ,
@@ -1197,13 +605,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/dialog-full-text.spec.ts","listedTests":52,"weightSeconds":115.414634,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/dialog-scale.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":14.73,"median":12.795,"min":0.003},"seconds":27.528,"selectedTests":3},"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/dialog-widths.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/role-picker-layout.spec.ts","listedTests":83,"weightSeconds":184.219512,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1225,11 +626,6 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/theme-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/theme-apply.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":9.252,"median":8.152,"min":1.804},"seconds":60.268,"selectedTests":10},"weightSeconds":19.5,"weightSource":"local-serial-runtime-estimate"}
-        ,
-        {"file":"tests/theme-control-geometry.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":0.198,"median":0.163,"min":0.128},"seconds":0.326,"selectedTests":2},"weightSeconds":2,"weightSource":"local-serial-runtime-estimate"}
       ]
     }
     ,
@@ -1253,7 +649,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/phone-approvals.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":9.112,"median":3.941,"min":1.441},"seconds":31.381,"selectedTests":7},"weightSeconds":7.48,"weightSource":"aeon-903-local-serial-wall"}
       ]
     }
     ,
@@ -1273,7 +668,6 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/agent-pause.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":4.524,"median":4.119,"min":3.983},"seconds":25.033,"selectedTests":6},"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1299,7 +693,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/knowledge.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":13.848,"median":2.828,"min":2.052},"seconds":67.127,"selectedTests":15},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1324,7 +717,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/webcore-recovery.spec.ts","listedTests":4,"weightSeconds":12,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
     ,
@@ -1346,27 +738,6 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/parent-benefits.spec.ts","tierTiming":{"caseSeconds":{"max":19.653,"median":3.7325,"min":2.193},"seconds":70.659,"selectedTests":16},"weightSeconds":60}
-        ,
-        {"file":"tests/work-aggregates.spec.ts","tierTiming":{"caseSeconds":{"max":5.889,"median":4.003,"min":2.43},"seconds":115.25,"selectedTests":29},"weightSeconds":60}
-        ,
-        {"file":"tests/work-history-fix5.spec.ts","tierTiming":{"caseSeconds":{"max":4.5,"median":4.244,"min":4.099},"seconds":25.598,"selectedTests":6},"weightSeconds":30.961454,"weightSource":"hosted-tier-timing"}
-        ,
-        {"file":"tests/work-lifecycle-header.spec.ts","tierTiming":{"caseSeconds":{"max":5.09,"median":4.1575,"min":3.316},"seconds":41.967,"selectedTests":10},"weightSeconds":60}
-        ,
-        {"file":"tests/work-lifecycle.spec.ts","tierTiming":{"caseSeconds":{"max":9.826,"median":8.776,"min":2.269},"seconds":59.398,"selectedTests":8},"weightSeconds":60}
-        ,
-        {"file":"tests/work-parent-releases.spec.ts","tierTiming":{"caseSeconds":{"max":8.826,"median":7.77,"min":7.269},"seconds":47.145,"selectedTests":6},"weightSeconds":60}
-        ,
-        {"file":"tests/work-parent-status.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.15,"median":2.755,"min":2.27},"seconds":16.488,"selectedTests":6},"weightSeconds":16.082,"weightSource":"hosted-CI-37321154870"}
-        ,
-        {"file":"tests/work-surfaces-fix2.spec.ts","tierTiming":{"caseSeconds":{"max":4.891,"median":3.191,"min":2.09},"seconds":41.304,"selectedTests":12},"weightSeconds":60}
-        ,
-        {"file":"tests/work-surfaces-fix3.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":2.607,"median":2.3345,"min":2.106},"seconds":13.949,"selectedTests":6},"weightSeconds":16.211,"weightSource":"hosted-CI-37321154870"}
-        ,
-        {"file":"tests/work-surfaces-fix4.spec.ts","tierTiming":{"caseSeconds":{"max":6.877,"median":6.2805,"min":5.226},"seconds":36.508,"selectedTests":6},"weightSeconds":60}
-        ,
-        {"file":"tests/work-vocabulary.spec.ts","tierTiming":{"caseSeconds":{"max":15.964,"median":5.4775,"min":3.015},"seconds":177.673,"selectedTests":24},"weightSeconds":60}
       ]
     }
     ,
@@ -1391,9 +762,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/settings-host-capacity.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":5.532,"median":4.6885,"min":2.007},"seconds":49.642,"selectedTests":12},"weightSeconds":24,"weightSource":"unmeasured-test-count-estimate"}
-        ,
-        {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.609,"median":0.685,"min":0.399},"seconds":32.482,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
     ,
@@ -1421,7 +789,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":0.367,"median":0.243,"min":0.23},"seconds":0.84,"selectedTests":3},"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1447,15 +814,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/lead-adoption.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":7.551,"median":6.173,"min":2.09},"seconds":57.464,"selectedTests":10},"weightSeconds":24,"weightSource":"local-targeted-run"}
-        ,
-        {"file":"tests/lead-card.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":8.89,"median":2.779,"min":1.873},"seconds":59.253,"selectedTests":18},"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
-        ,
-        {"file":"tests/lead-flow.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":7.984,"median":2.943,"min":1.468},"seconds":66.038,"selectedTests":19},"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
-        ,
-        {"file":"tests/lead-remove.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":8.918,"median":8.41,"min":2.178},"seconds":51.715,"selectedTests":7},"weightSeconds":25.5,"weightSource":"measured-local-targeted"}
-        ,
-        {"file":"tests/lead-start.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":18.801,"median":17.205,"min":5.636},"seconds":111.049,"selectedTests":7},"weightSeconds":10,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
     ,
@@ -1479,7 +837,6 @@
       ]
       ,
       "specs": [
-        {"file":"tests/usage-dashboard.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":1.727,"median":0.9265,"min":0.793},"seconds":10.234,"selectedTests":10},"weightSeconds":14.8,"weightSource":"web-2"}
       ]
     }
   ]
@@ -1526,686 +883,16 @@
     "AEON-1270: native-expert-stream has twelve cases in stable-controls. The prior guarded one-worker run passed all twelve in 7.3 seconds including startup; the ten-second weight is a conservative scheduling estimate from that observation, not a hosted-runtime promise. Six authority/replay/terminal behavior cases are ESSENTIAL; six viewport/theme cases are newly classified NIGHTLY."
     ,
     "AEON-1327: nightly catalogue shards pack from nightlyTiming, measured on hosted run 38488051180. Completed batches contribute wall time apportioned by Playwright case duration. theme-agents (650s), clip-tip-touch (200s), ticket-graph-view (90s) and work-surfaces-fix4 (120s) were still running when the 20-minute step died, so those four keep a conservative full-file estimate. settings-shared and work-surfaces-fix2 were not in that run and keep their tierTiming estimate. PR and merge-group packing stays on tierTiming. The 24-shard estimate peaks near 14.9 minutes, so the nightly execution cap stays 20 minutes."
+    ,
+    "AEON-1309: nine unchanged panel cases are split into six spec files. A split alone left the historical-budget comparison at 304.841982s, above 300s. Seven open/menu/Escape/no-shift cases remain ESSENTIAL; only malformed-response coverage and the reader negative control move to NIGHTLY. The original conservative 60s estimate is apportioned by case count for gate and nightly packing; no hosted measurement is claimed. Historical prior-gate weight excluding this slice remains 299.838842s and is still bounded below 300s."
+    ,
+    "AEON-1400: nightlyTiming and tierTiming refresh from hosted nightly run 38732586462. Shards 1-10, 12-14, 16-20 and 22-24 are attempt 1; shards 11, 15 and 21 are attempt 2. Completed batches contribute wall time apportioned by Playwright case duration. agent-rules-shots, knowledge-shots and session-chat-cli recorded zero case duration and keep their one-second placeholder. PR and merge-group packing still reads tierTiming. The twelve-shard full-layout estimate peaks at 13.49 minutes; shard 7 estimates 13.48 minutes."
   ]
   ,
   "nightlyTiming": {
-    "files": {
-      "tests/a11y.spec.ts": {"seconds":279.626,"selectedTests":82}
-      ,
-      "tests/access.spec.ts": {"seconds":147.907,"selectedTests":42}
-      ,
-      "tests/account-link.spec.ts": {"seconds":18.831,"selectedTests":10}
-      ,
-      "tests/account-resets.spec.ts": {"seconds":25.843,"selectedTests":6}
-      ,
-      "tests/account-use-matrix.spec.ts": {"seconds":62.045,"selectedTests":21}
-      ,
-      "tests/accounts-card-fit.spec.ts": {"seconds":12.9,"selectedTests":1}
-      ,
-      "tests/accounts-computers.spec.ts": {"seconds":57.531,"selectedTests":13}
-      ,
-      "tests/accounts-quota-bar.spec.ts": {"seconds":68.572,"selectedTests":27}
-      ,
-      "tests/activity-history.spec.ts": {"seconds":14.714,"selectedTests":2}
-      ,
-      "tests/add-account.spec.ts": {"seconds":21.158,"selectedTests":9}
-      ,
-      "tests/aeon-1028-projheader.spec.ts": {"seconds":115.817,"selectedTests":42}
-      ,
-      "tests/aeon-1042-headergraph.spec.ts": {"seconds":48.196,"selectedTests":4}
-      ,
-      "tests/aeon-1062-qapolish.spec.ts": {"seconds":51.676,"selectedTests":20}
-      ,
-      "tests/aeon-1071-chat-live.spec.ts": {"seconds":39.299,"selectedTests":16}
-      ,
-      "tests/aeon-1188-displayhome.spec.ts": {"seconds":27.08,"selectedTests":8}
-      ,
-      "tests/aeon-1209-agents-head.spec.ts": {"seconds":122.217,"selectedTests":28}
-      ,
-      "tests/aeon-1210-agents-tree.spec.ts": {"seconds":51.5,"selectedTests":19}
-      ,
-      "tests/aeon-1211-agents-rows.spec.ts": {"seconds":142.397,"selectedTests":40}
-      ,
-      "tests/aeon-1212-lead-panel.spec.ts": {"seconds":491.1,"selectedTests":56}
-      ,
-      "tests/aeon-1213-agents-split.spec.ts": {"seconds":76.689,"selectedTests":15}
-      ,
-      "tests/aeon-1279-touch-scroll.spec.ts": {"seconds":28.546,"selectedTests":6}
-      ,
-      "tests/aeon-1285-agent-rows.spec.ts": {"seconds":14.3,"selectedTests":5}
-      ,
-      "tests/aeon-1339-desk-polish.spec.ts": {"seconds":90,"selectedTests":5}
-      ,
-      "tests/aeon-632b-clip-settings.spec.ts": {"seconds":187.653,"selectedTests":12}
-      ,
-      "tests/aeon-632b-clip-touch.spec.ts": {"seconds":25.085,"selectedTests":6}
-      ,
-      "tests/aeon-632b-clip.spec.ts": {"seconds":117.599,"selectedTests":6}
-      ,
-      "tests/aeon-635.spec.ts": {"seconds":219.882,"selectedTests":21}
-      ,
-      "tests/aeon-908-polish.spec.ts": {"seconds":65.77,"selectedTests":13}
-      ,
-      "tests/aeon-974-typefilter.spec.ts": {"seconds":34.289,"selectedTests":15}
-      ,
-      "tests/agent-activity.spec.ts": {"seconds":90,"selectedTests":11}
-      ,
-      "tests/agent-done-state.spec.ts": {"seconds":16.014,"selectedTests":3}
-      ,
-      "tests/agent-indicator.spec.ts": {"seconds":124.717,"selectedTests":15}
-      ,
-      "tests/agent-names.spec.ts": {"seconds":6.99,"selectedTests":3}
-      ,
-      "tests/agent-pairing.spec.ts": {"seconds":83.036,"selectedTests":35}
-      ,
-      "tests/agent-pause.spec.ts": {"seconds":122.003,"selectedTests":25}
-      ,
-      "tests/agent-recovery.spec.ts": {"seconds":65.317,"selectedTests":9}
-      ,
-      "tests/agent-rules-budget-clients.spec.ts": {"seconds":20.789,"selectedTests":10}
-      ,
-      "tests/agent-rules-doctrine.spec.ts": {"seconds":18.757,"selectedTests":11}
-      ,
-      "tests/agent-rules-flow.spec.ts": {"seconds":20.933,"selectedTests":11}
-      ,
-      "tests/agent-rules-import.spec.ts": {"seconds":14.73,"selectedTests":9}
-      ,
-      "tests/agent-rules-shots.spec.ts": {"seconds":1,"selectedTests":16}
-      ,
-      "tests/agent-rules-ticks.spec.ts": {"seconds":16.199,"selectedTests":13}
-      ,
-      "tests/agent-rules-tldr.spec.ts": {"seconds":13.527,"selectedTests":11}
-      ,
-      "tests/agent-rules.spec.ts": {"seconds":30.291,"selectedTests":14}
-      ,
-      "tests/agents-cleanup.spec.ts": {"seconds":18.585,"selectedTests":5}
-      ,
-      "tests/agents-dial-daily.spec.ts": {"seconds":231.5,"selectedTests":38}
-      ,
-      "tests/agents-dial.spec.ts": {"seconds":199.053,"selectedTests":28}
-      ,
-      "tests/agents-display.spec.ts": {"seconds":44.311,"selectedTests":17}
-      ,
-      "tests/agents-handover.spec.ts": {"seconds":21.822,"selectedTests":7}
-      ,
-      "tests/agents-harness-status.spec.ts": {"seconds":57.471,"selectedTests":25}
-      ,
-      "tests/agents-head.spec.ts": {"seconds":6.59,"selectedTests":3}
-      ,
-      "tests/agents-hierarchy.spec.ts": {"seconds":29.51,"selectedTests":6}
-      ,
-      "tests/agents-metadata.spec.ts": {"seconds":31.75,"selectedTests":10}
-      ,
-      "tests/agents-mission.spec.ts": {"seconds":18.434,"selectedTests":11}
-      ,
-      "tests/agents-order.spec.ts": {"seconds":13.443,"selectedTests":5}
-      ,
-      "tests/agents-phone-rows.spec.ts": {"seconds":23.147,"selectedTests":8}
-      ,
-      "tests/agents-top.spec.ts": {"seconds":11.433,"selectedTests":4}
-      ,
-      "tests/agents-worker-tree.spec.ts": {"seconds":67.121,"selectedTests":12}
-      ,
-      "tests/agents.spec.ts": {"seconds":111.858,"selectedTests":36}
-      ,
-      "tests/approval-feedback.spec.ts": {"seconds":98.812,"selectedTests":18}
-      ,
-      "tests/attach-discoverable.spec.ts": {"seconds":168.963,"selectedTests":47}
-      ,
-      "tests/attach-security.spec.ts": {"seconds":138.152,"selectedTests":50}
-      ,
-      "tests/attach-watch.spec.ts": {"seconds":111.75,"selectedTests":31}
-      ,
-      "tests/attachments.spec.ts": {"seconds":34.674,"selectedTests":12}
-      ,
-      "tests/authz.spec.ts": {"seconds":4.8,"selectedTests":2}
-      ,
-      "tests/avatar-upload-bounds.spec.ts": {"seconds":12.5,"selectedTests":5}
-      ,
-      "tests/avatars.spec.ts": {"seconds":5.349,"selectedTests":2}
-      ,
-      "tests/brand.spec.ts": {"seconds":3.284,"selectedTests":2}
-      ,
-      "tests/bulk.spec.ts": {"seconds":56.319,"selectedTests":7}
-      ,
-      "tests/business.spec.ts": {"seconds":15.911,"selectedTests":10}
-      ,
-      "tests/capacity-learning.spec.ts": {"seconds":25.157,"selectedTests":5}
-      ,
-      "tests/capacity-pace.spec.ts": {"seconds":21.915,"selectedTests":15}
-      ,
-      "tests/classic-invite.spec.ts": {"seconds":11.357,"selectedTests":6}
-      ,
-      "tests/clip-tip-disclosure.spec.ts": {"seconds":37.192,"selectedTests":24}
-      ,
-      "tests/clip-tip-overflow.spec.ts": {"seconds":55.32,"selectedTests":24}
-      ,
-      "tests/clip-tip-touch.spec.ts": {"seconds":200,"selectedTests":39}
-      ,
-      "tests/clip-tip.spec.ts": {"seconds":183.371,"selectedTests":72}
-      ,
-      "tests/coarse-hit-area.spec.ts": {"seconds":1.097,"selectedTests":3}
-      ,
-      "tests/connect-verification.spec.ts": {"seconds":12.83,"selectedTests":8}
-      ,
-      "tests/cost-units.spec.ts": {"seconds":7.856,"selectedTests":5}
-      ,
-      "tests/crm.spec.ts": {"seconds":71.337,"selectedTests":25}
-      ,
-      "tests/dead-screens.spec.ts": {"seconds":38.412,"selectedTests":12}
-      ,
-      "tests/dead-sessions.spec.ts": {"seconds":65.626,"selectedTests":16}
-      ,
-      "tests/decision-desk-fix2.spec.ts": {"seconds":67.927,"selectedTests":8}
-      ,
-      "tests/decision-desk-fix3.spec.ts": {"seconds":47.556,"selectedTests":9}
-      ,
-      "tests/decision-desk-lessons.spec.ts": {"seconds":29.944,"selectedTests":22,"source":"AEON-1331 remote-spec 4625de40f: upper bound from 38 registrations (22 lesson + 16 legacy), wall_ms 29944"}
-      ,
-      "tests/decision-desk-project.spec.ts": {"seconds":60.895,"selectedTests":14}
-      ,
-      "tests/decision-desk.spec.ts": {"seconds":377.254,"selectedTests":60}
-      ,
-      "tests/decision-text.spec.ts": {"seconds":159.516,"selectedTests":22}
-      ,
-      "tests/definitions.spec.ts": {"basis":"Guarded remote-spec.sh complete file: 3 passed (14.5s); this is a pre-merge measurement, not a nightly run.","runner":"mbp2606","seconds":14.5,"selectedTests":3,"sourceCommit":"e8377156b5508aa1c487913f83f3e33e9474570b"}
-      ,
-      "tests/delivery-arion-v5.spec.ts": {"seconds":45.05,"selectedTests":14}
-      ,
-      "tests/delivery-flow-lanes.spec.ts": {"seconds":30.156,"selectedTests":11}
-      ,
-      "tests/delivery-flow-modes.spec.ts": {"seconds":163.649,"selectedTests":25}
-      ,
-      "tests/delivery-guarantee.spec.ts": {"seconds":33.972,"selectedTests":8}
-      ,
-      "tests/delivery-numbers.spec.ts": {"seconds":49.257,"selectedTests":14}
-      ,
-      "tests/delivery-polish.spec.ts": {"seconds":181.158,"selectedTests":18}
-      ,
-      "tests/delivery-rating.spec.ts": {"seconds":42.816,"selectedTests":5}
-      ,
-      "tests/delivery-simple.spec.ts": {"seconds":51.216,"selectedTests":11}
-      ,
-      "tests/delivery-tab-switch.spec.ts": {"seconds":20,"selectedTests":2}
-      ,
-      "tests/delivery-ui.spec.ts": {"seconds":72.927,"selectedTests":17}
-      ,
-      "tests/deploy-target.spec.ts": {"seconds":2.266,"selectedTests":1}
-      ,
-      "tests/developer-settings.spec.ts": {"seconds":32.383,"selectedTests":7}
-      ,
-      "tests/dialog-full-text.spec.ts": {"seconds":134.121,"selectedTests":52}
-      ,
-      "tests/dialog-scale.spec.ts": {"seconds":159.569,"selectedTests":9}
-      ,
-      "tests/dialog-widths.spec.ts": {"seconds":67.656,"selectedTests":9}
-      ,
-      "tests/display-language.spec.ts": {"seconds":27.397,"selectedTests":5}
-      ,
-      "tests/doctrine-inbox.spec.ts": {"seconds":25.846,"selectedTests":7}
-      ,
-      "tests/done-gate.spec.ts": {"seconds":54.425,"selectedTests":20}
-      ,
-      "tests/entry-checks.spec.ts": {"seconds":30,"selectedTests":1}
-      ,
-      "tests/estimates.spec.ts": {"seconds":21.506,"selectedTests":7}
-      ,
-      "tests/eta-column.spec.ts": {"seconds":102.21,"selectedTests":14}
-      ,
-      "tests/features.spec.ts": {"seconds":14.903,"selectedTests":7}
-      ,
-      "tests/first-impression.spec.ts": {"seconds":52.756,"selectedTests":38}
-      ,
-      "tests/first-run.spec.ts": {"seconds":22.256,"selectedTests":16}
-      ,
-      "tests/footer-release-pill.spec.ts": {"seconds":66.491,"selectedTests":39}
-      ,
-      "tests/footer-summary.spec.ts": {"seconds":20.589,"selectedTests":16}
-      ,
-      "tests/from-classic.spec.ts": {"seconds":2.579,"selectedTests":2}
-      ,
-      "tests/graph-canvas.spec.ts": {"seconds":1.549,"selectedTests":1}
-      ,
-      "tests/graph-focus.spec.ts": {"seconds":19.287,"selectedTests":8}
-      ,
-      "tests/graph-hit.spec.ts": {"seconds":6.381,"selectedTests":5}
-      ,
-      "tests/graph-motion.spec.ts": {"seconds":29.177,"selectedTests":2}
-      ,
-      "tests/groups.spec.ts": {"seconds":37.265,"selectedTests":12}
-      ,
-      "tests/guest.spec.ts": {"seconds":2.626,"selectedTests":2}
-      ,
-      "tests/header-desk-split.spec.ts": {"seconds":194.498,"selectedTests":44}
-      ,
-      "tests/header-glimpse-context.spec.ts": {"seconds":30.965,"selectedTests":5}
-      ,
-      "tests/header-glimpse.spec.ts": {"seconds":165.947,"selectedTests":21}
-      ,
-      "tests/header-menus.spec.ts": {"seconds":79.161,"selectedTests":92}
-      ,
-      "tests/headings.spec.ts": {"seconds":306.632,"selectedTests":90}
-      ,
-      "tests/hide-states.spec.ts": {"seconds":182.1,"selectedTests":15}
-      ,
-      "tests/hours-edit.spec.ts": {"seconds":18.572,"selectedTests":11}
-      ,
-      "tests/hours.spec.ts": {"seconds":16.357,"selectedTests":12}
-      ,
-      "tests/html-sandbox.spec.ts": {"seconds":19.034,"selectedTests":10}
-      ,
-      "tests/indicator-controls.spec.ts": {"seconds":50.762,"selectedTests":15}
-      ,
-      "tests/indicator-creative-gallery.spec.ts": {"seconds":7.241,"selectedTests":5}
-      ,
-      "tests/indicator-gallery.spec.ts": {"seconds":4.572,"selectedTests":5}
-      ,
-      "tests/intake-extensions.spec.ts": {"seconds":28.143,"selectedTests":12}
-      ,
-      "tests/key-dialog.spec.ts": {"seconds":36.785,"selectedTests":9}
-      ,
-      "tests/key-expiry.spec.ts": {"seconds":52.592,"selectedTests":13}
-      ,
-      "tests/key-full-access.spec.ts": {"seconds":166.082,"selectedTests":22}
-      ,
-      "tests/key-layout.spec.ts": {"seconds":56.1,"selectedTests":24}
-      ,
-      "tests/key-scopes.spec.ts": {"seconds":65.054,"selectedTests":23}
-      ,
-      "tests/key-trim.spec.ts": {"seconds":19.333,"selectedTests":7}
-      ,
-      "tests/kind-convert.spec.ts": {"seconds":7.661,"selectedTests":5}
-      ,
-      "tests/knowledge-dock.spec.ts": {"seconds":35.015,"selectedTests":11}
-      ,
-      "tests/knowledge-graph.spec.ts": {"seconds":75.63,"selectedTests":16}
-      ,
-      "tests/knowledge-learnings.spec.ts": {"seconds":48.61,"selectedTests":16}
-      ,
-      "tests/knowledge-shots.spec.ts": {"seconds":1,"selectedTests":15}
-      ,
-      "tests/knowledge.spec.ts": {"seconds":94.583,"selectedTests":16}
-      ,
-      "tests/lead-adoption.spec.ts": {"seconds":58.951,"selectedTests":10}
-      ,
-      "tests/lead-card.spec.ts": {"seconds":73.552,"selectedTests":18}
-      ,
-      "tests/lead-flow.spec.ts": {"seconds":133.046,"selectedTests":23}
-      ,
-      "tests/lead-remove.spec.ts": {"seconds":65.325,"selectedTests":7}
-      ,
-      "tests/lead-start.spec.ts": {"seconds":154.101,"selectedTests":7}
-      ,
-      "tests/list-columns.spec.ts": {"seconds":26.812,"selectedTests":18}
-      ,
-      "tests/live-agents-layout.spec.ts": {"seconds":11.163,"selectedTests":4}
-      ,
-      "tests/live-agents.spec.ts": {"seconds":31.685,"selectedTests":36}
-      ,
-      "tests/live-list-sessions.spec.ts": {"seconds":5.347,"selectedTests":3}
-      ,
-      "tests/live-list.spec.ts": {"seconds":81.482,"selectedTests":13}
-      ,
-      "tests/live-panel.spec.ts": {"seconds":26.935,"selectedTests":7}
-      ,
-      "tests/managed-controls.spec.ts": {"seconds":82.843,"selectedTests":25}
-      ,
-      "tests/markdown-ticket-links.spec.ts": {"seconds":19.539,"selectedTests":6}
-      ,
-      "tests/model-prefs.spec.ts": {"seconds":8.409,"selectedTests":3}
-      ,
-      "tests/model-provider.spec.ts": {"seconds":4.547,"selectedTests":3}
-      ,
-      "tests/model-refresh.spec.ts": {"seconds":1.883,"selectedTests":1}
-      ,
-      "tests/models-fallback.spec.ts": {"seconds":23.584,"selectedTests":15}
-      ,
-      "tests/models-outdated.spec.ts": {"seconds":15.389,"selectedTests":10}
-      ,
-      "tests/models-registry-shots.spec.ts": {"seconds":24.99,"selectedTests":3}
-      ,
-      "tests/models-registry.spec.ts": {"seconds":45.201,"selectedTests":33}
-      ,
-      "tests/models-simple-shots.spec.ts": {"seconds":22.02,"selectedTests":24}
-      ,
-      "tests/models-simple.spec.ts": {"seconds":33.873,"selectedTests":27}
-      ,
-      "tests/models-situations-shots.spec.ts": {"seconds":16.932,"selectedTests":12}
-      ,
-      "tests/models-situations.spec.ts": {"seconds":4.378,"selectedTests":4}
-      ,
-      "tests/multiple-account-pairing.spec.ts": {"seconds":9.646,"selectedTests":6}
-      ,
-      "tests/native-expert-stream.spec.ts": {"seconds":40.214,"selectedTests":12}
-      ,
-      "tests/native-expert-terminal.spec.ts": {"seconds":19.889,"selectedTests":5}
-      ,
-      "tests/native-lead-pilot.spec.ts": {"seconds":23.029,"selectedTests":6}
-      ,
-      "tests/native-session-requests.spec.ts": {"seconds":3.796,"selectedTests":7}
-      ,
-      "tests/nav.spec.ts": {"seconds":58.741,"selectedTests":11}
-      ,
-      "tests/needs-attention.spec.ts": {"seconds":319.755,"selectedTests":42}
-      ,
-      "tests/new-agent.spec.ts": {"seconds":39.101,"selectedTests":13}
-      ,
-      "tests/no-shift-agents.spec.ts": {"seconds":168.544,"selectedTests":29}
-      ,
-      "tests/no-shift-dialogs.spec.ts": {"seconds":72.632,"selectedTests":22}
-      ,
-      "tests/no-shift.spec.ts": {"seconds":50.911,"selectedTests":20}
-      ,
-      "tests/outcome-proposals.spec.ts": {"seconds":7.991,"selectedTests":6}
-      ,
-      "tests/outline.spec.ts": {"seconds":80.17,"selectedTests":42}
-      ,
-      "tests/palette.spec.ts": {"seconds":64.733,"selectedTests":16}
-      ,
-      "tests/parent-benefits.spec.ts": {"seconds":61.42,"selectedTests":16}
-      ,
-      "tests/performance.spec.ts": {"seconds":60.334,"selectedTests":2}
-      ,
-      "tests/person-steps.spec.ts": {"basis":"Guarded remote-spec.sh complete file: 5 passed (39.3s), supervisor wall 39.557s. This is a pre-merge measurement, not a nightly run.","runner":"mbp2606","seconds":39.557,"selectedTests":5,"sourceCommit":"c839b3bd7b641d6f022c696b7ebfbd41d3601638"}
-      ,
-      "tests/phone-approvals.spec.ts": {"seconds":44.204,"selectedTests":11}
-      ,
-      "tests/phone-controls.spec.ts": {"seconds":175.893,"selectedTests":27}
-      ,
-      "tests/phone-select.spec.ts": {"seconds":2.92,"selectedTests":2}
-      ,
-      "tests/pi-openrouter.spec.ts": {"seconds":20.4,"selectedTests":9}
-      ,
-      "tests/planning-columns.spec.ts": {"seconds":48.472,"selectedTests":14}
-      ,
-      "tests/policies-ladders-moved.spec.ts": {"seconds":2.062,"selectedTests":2}
-      ,
-      "tests/policies-rules.spec.ts": {"seconds":18.352,"selectedTests":9}
-      ,
-      "tests/polish-round-two.spec.ts": {"seconds":2.74,"selectedTests":2}
-      ,
-      "tests/polish-round.spec.ts": {"seconds":9.406,"selectedTests":4}
-      ,
-      "tests/portal-admin.spec.ts": {"seconds":8.916,"selectedTests":3}
-      ,
-      "tests/portal-public.spec.ts": {"seconds":19.553,"selectedTests":13}
-      ,
-      "tests/portal-releases.spec.ts": {"seconds":6.957,"selectedTests":5}
-      ,
-      "tests/portal-roadmap.spec.ts": {"seconds":8.212,"selectedTests":3}
-      ,
-      "tests/profile-editor.spec.ts": {"seconds":68.651,"selectedTests":16}
-      ,
-      "tests/profile.spec.ts": {"seconds":27.847,"selectedTests":14}
-      ,
-      "tests/project-advanced.spec.ts": {"seconds":64.372,"selectedTests":11}
-      ,
-      "tests/project-delivery-settings.spec.ts": {"seconds":599.262,"selectedTests":12}
-      ,
-      "tests/project-groups.spec.ts": {"seconds":35.531,"selectedTests":18}
-      ,
-      "tests/project-header.spec.ts": {"seconds":52.285,"selectedTests":15}
-      ,
-      "tests/project-list.spec.ts": {"seconds":53.921,"selectedTests":28}
-      ,
-      "tests/project-sections.spec.ts": {"seconds":89.623,"selectedTests":23}
-      ,
-      "tests/project-settings.spec.ts": {"seconds":102.389,"selectedTests":4}
-      ,
-      "tests/project-sort.spec.ts": {"seconds":39.632,"selectedTests":15}
-      ,
-      "tests/project-status-counts.spec.ts": {"seconds":62.694,"selectedTests":12}
-      ,
-      "tests/projects.spec.ts": {"seconds":14.281,"selectedTests":9}
-      ,
-      "tests/provenance.spec.ts": {"seconds":24.551,"selectedTests":13}
-      ,
-      "tests/quota-warnings.spec.ts": {"seconds":8.456,"selectedTests":2}
-      ,
-      "tests/quote-collaboration.spec.ts": {"seconds":14.825,"selectedTests":7}
-      ,
-      "tests/quote-dock-layout.spec.ts": {"seconds":31.965,"selectedTests":8}
-      ,
-      "tests/quote-editor-core.spec.ts": {"seconds":3.179,"selectedTests":4}
-      ,
-      "tests/quote-editor-input.spec.ts": {"seconds":4.425,"selectedTests":3}
-      ,
-      "tests/quote-editor-route.spec.ts": {"seconds":7.458,"selectedTests":3}
-      ,
-      "tests/quote-inspector.spec.ts": {"seconds":48.82,"selectedTests":15}
-      ,
-      "tests/quote-link-vault.spec.ts": {"seconds":3.2,"selectedTests":2}
-      ,
-      "tests/quote-parity-gaps.spec.ts": {"seconds":35.47,"selectedTests":9}
-      ,
-      "tests/quote-profile.spec.ts": {"seconds":3.198,"selectedTests":3}
-      ,
-      "tests/quote-public-page.spec.ts": {"seconds":13.018,"selectedTests":10}
-      ,
-      "tests/quote-public.spec.ts": {"seconds":3.193,"selectedTests":2}
-      ,
-      "tests/quote-save-state.spec.ts": {"seconds":32.761,"selectedTests":7}
-      ,
-      "tests/quote-showcase.spec.ts": {"seconds":13.472,"selectedTests":7}
-      ,
-      "tests/quote-workspace.spec.ts": {"seconds":63.434,"selectedTests":21}
-      ,
-      "tests/quotes-tab.spec.ts": {"seconds":26.064,"selectedTests":14}
-      ,
-      "tests/quotes/parity-flow.spec.ts": {"seconds":6.386,"selectedTests":1}
-      ,
-      "tests/quotes/print-receipt.spec.ts": {"seconds":2.944,"selectedTests":3}
-      ,
-      "tests/quotes/two-user-presence.spec.ts": {"seconds":4.895,"selectedTests":1}
-      ,
-      "tests/record-ownership.spec.ts": {"seconds":11.234,"selectedTests":2}
-      ,
-      "tests/recurrence-marker.spec.ts": {"seconds":130.516,"selectedTests":37}
-      ,
-      "tests/recurrences.spec.ts": {"seconds":159.688,"selectedTests":15}
-      ,
-      "tests/relations.spec.ts": {"seconds":76.535,"selectedTests":7}
-      ,
-      "tests/release-codenames.spec.ts": {"seconds":60.228,"selectedTests":24}
-      ,
-      "tests/release-groups.spec.ts": {"seconds":20.476,"selectedTests":10}
-      ,
-      "tests/release-header.spec.ts": {"seconds":66.015,"selectedTests":23}
-      ,
-      "tests/release-historic-tenant.spec.ts": {"seconds":7.671,"selectedTests":2}
-      ,
-      "tests/release-historic.spec.ts": {"seconds":12.558,"selectedTests":7}
-      ,
-      "tests/release-own-tenant.spec.ts": {"seconds":9.241,"selectedTests":4}
-      ,
-      "tests/release-picker.spec.ts": {"seconds":108.482,"selectedTests":19}
-      ,
-      "tests/release-presentation.spec.ts": {"seconds":13.519,"selectedTests":7}
-      ,
-      "tests/release-switches.spec.ts": {"seconds":56.309,"selectedTests":17}
-      ,
-      "tests/release-tenant-notes.spec.ts": {"seconds":93.844,"selectedTests":20}
-      ,
-      "tests/release-ticket-links.spec.ts": {"seconds":35.019,"selectedTests":15}
-      ,
-      "tests/release-update-notice.spec.ts": {"seconds":17.619,"selectedTests":16}
-      ,
-      "tests/releases.spec.ts": {"seconds":45.046,"selectedTests":22}
-      ,
-      "tests/reserved-versions.spec.ts": {"seconds":33.409,"selectedTests":12}
-      ,
-      "tests/resilient-polling.spec.ts": {"seconds":6.673,"selectedTests":2}
-      ,
-      "tests/role-picker-layout.spec.ts": {"seconds":275.315,"selectedTests":83}
-      ,
-      "tests/routines-editor.spec.ts": {"seconds":31.985,"selectedTests":7}
-      ,
-      "tests/routines-tab.spec.ts": {"seconds":41.799,"selectedTests":17}
-      ,
-      "tests/row-actions.spec.ts": {"seconds":41.319,"selectedTests":12}
-      ,
-      "tests/run-kinds.spec.ts": {"seconds":20.209,"selectedTests":5}
-      ,
-      "tests/scope-codes.spec.ts": {"seconds":24.547,"selectedTests":12}
-      ,
-      "tests/service-tier.spec.ts": {"seconds":148.146,"selectedTests":44}
-      ,
-      "tests/session-attention.spec.ts": {"seconds":27.144,"selectedTests":4}
-      ,
-      "tests/session-chat-cli.spec.ts": {"seconds":1,"selectedTests":4}
-      ,
-      "tests/session-chat.spec.ts": {"seconds":232.189,"selectedTests":84}
-      ,
-      "tests/session-ended.spec.ts": {"seconds":10.039,"selectedTests":3}
-      ,
-      "tests/session-inbox.spec.ts": {"seconds":35.021,"selectedTests":4}
-      ,
-      "tests/session-messages.spec.ts": {"seconds":48.252,"selectedTests":17}
-      ,
-      "tests/session-recovery.spec.ts": {"seconds":61.069,"selectedTests":15}
-      ,
-      "tests/session-removal.spec.ts": {"seconds":55.289,"selectedTests":17}
-      ,
-      "tests/session-requests.spec.ts": {"seconds":24.46,"selectedTests":7}
-      ,
-      "tests/session-rows.spec.ts": {"seconds":25.114,"selectedTests":16}
-      ,
-      "tests/settings-account-pacing.spec.ts": {"seconds":28.342,"selectedTests":12}
-      ,
-      "tests/settings-account-parts.spec.ts": {"seconds":58.695,"selectedTests":14}
-      ,
-      "tests/settings-accounts.spec.ts": {"seconds":43.776,"selectedTests":30}
-      ,
-      "tests/settings-agents.spec.ts": {"seconds":39.324,"selectedTests":14}
-      ,
-      "tests/settings-computers-table.spec.ts": {"seconds":16.552,"selectedTests":8}
-      ,
-      "tests/settings-host-capacity.spec.ts": {"seconds":58.583,"selectedTests":12}
-      ,
-      "tests/settings-shared.spec.ts": {"seconds":32.482,"selectedTests":23}
-      ,
-      "tests/settings.spec.ts": {"seconds":132.24,"selectedTests":25}
-      ,
-      "tests/shell.spec.ts": {"seconds":61.64,"selectedTests":38}
-      ,
-      "tests/stability.spec.ts": {"seconds":42.9,"selectedTests":13}
-      ,
-      "tests/start-agent.spec.ts": {"seconds":78.606,"selectedTests":27}
-      ,
-      "tests/state-colours.spec.ts": {"seconds":60.879,"selectedTests":14}
-      ,
-      "tests/status-autopilot.spec.ts": {"seconds":35.905,"selectedTests":11}
-      ,
-      "tests/status-buckets.spec.ts": {"seconds":5.175,"selectedTests":1}
-      ,
-      "tests/status-help.spec.ts": {"seconds":24.446,"selectedTests":7}
-      ,
-      "tests/status-icons.spec.ts": {"seconds":20.84,"selectedTests":12,"source":"AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"}
-      ,
-      "tests/status-time.spec.ts": {"seconds":26.27,"selectedTests":18,"source":"AEON-1359 remote-spec 7f01b0b9f: 18 cases, one worker on mbp2606, wall_ms 26265"}
-      ,
-      "tests/stepup-desk.spec.ts": {"seconds":21.993,"selectedTests":11}
-      ,
-      "tests/tap-targets.spec.ts": {"seconds":232.797,"selectedTests":28}
-      ,
-      "tests/tenant-brand.spec.ts": {"seconds":16.124,"selectedTests":15}
-      ,
-      "tests/theme-agents.spec.ts": {"seconds":650,"selectedTests":14}
-      ,
-      "tests/theme-apply.spec.ts": {"seconds":65.938,"selectedTests":10}
-      ,
-      "tests/theme-control-geometry.spec.ts": {"seconds":0.337,"selectedTests":2}
-      ,
-      "tests/theme-settings.spec.ts": {"seconds":193.743,"selectedTests":49}
-      ,
-      "tests/theme.spec.ts": {"seconds":1.66,"selectedTests":1}
-      ,
-      "tests/ticket-agent-work.spec.ts": {"seconds":13.817,"selectedTests":8}
-      ,
-      "tests/ticket-benefits.spec.ts": {"seconds":35.599,"selectedTests":15}
-      ,
-      "tests/ticket-graph-view.spec.ts": {"seconds":90,"selectedTests":8}
-      ,
-      "tests/ticket-outcomes.spec.ts": {"seconds":8.108,"selectedTests":2}
-      ,
-      "tests/ticket-panel.spec.ts": {"seconds":137.415,"selectedTests":46}
-      ,
-      "tests/ticket-peek.spec.ts": {"seconds":74.643,"selectedTests":7}
-      ,
-      "tests/ticket-placement.spec.ts": {"seconds":5.752,"selectedTests":2}
-      ,
-      "tests/ticket-reviews.spec.ts": {"seconds":11.786,"selectedTests":4}
-      ,
-      "tests/ticket-workers.spec.ts": {"seconds":43.824,"selectedTests":11}
-      ,
-      "tests/title-divider.spec.ts": {"seconds":9.595,"selectedTests":4}
-      ,
-      "tests/ui-audit-dark-1024.spec.ts": {"seconds":259.546,"selectedTests":1}
-      ,
-      "tests/ui-audit-dark-1280.spec.ts": {"seconds":207.354,"selectedTests":1}
-      ,
-      "tests/ui-audit-dark-1440.spec.ts": {"seconds":174.249,"selectedTests":1}
-      ,
-      "tests/ui-audit-dark-1920.spec.ts": {"seconds":255.944,"selectedTests":1}
-      ,
-      "tests/ui-audit-dark-390.spec.ts": {"seconds":231.958,"selectedTests":1}
-      ,
-      "tests/ui-audit-light-1024.spec.ts": {"seconds":172.516,"selectedTests":1}
-      ,
-      "tests/ui-audit-light-1280.spec.ts": {"seconds":258.317,"selectedTests":1}
-      ,
-      "tests/ui-audit-light-1440.spec.ts": {"seconds":250.194,"selectedTests":1}
-      ,
-      "tests/ui-audit-light-1920.spec.ts": {"seconds":263.671,"selectedTests":1}
-      ,
-      "tests/ui-audit-rules.spec.ts": {"seconds":1.433,"selectedTests":8}
-      ,
-      "tests/ui-audit.spec.ts": {"seconds":238.781,"selectedTests":1}
-      ,
-      "tests/usage-accounts.spec.ts": {"seconds":16.299,"selectedTests":9}
-      ,
-      "tests/usage-dashboard.spec.ts": {"seconds":12.291,"selectedTests":10}
-      ,
-      "tests/vendor-signals.spec.ts": {"seconds":22.1,"selectedTests":5}
-      ,
-      "tests/version-reveal.spec.ts": {"seconds":9.485,"selectedTests":4}
-      ,
-      "tests/views-filters.spec.ts": {"seconds":106.031,"selectedTests":32}
-      ,
-      "tests/webcore-recovery.spec.ts": {"seconds":32.297,"selectedTests":9}
-      ,
-      "tests/wide.spec.ts": {"seconds":30.072,"selectedTests":8}
-      ,
-      "tests/work-aggregates.spec.ts": {"seconds":112.751,"selectedTests":29}
-      ,
-      "tests/work-history-fix5.spec.ts": {"seconds":19.752,"selectedTests":6}
-      ,
-      "tests/work-integration.spec.ts": {"seconds":49.526,"selectedTests":12}
-      ,
-      "tests/work-kinds.spec.ts": {"seconds":57.726,"selectedTests":22}
-      ,
-      "tests/work-lifecycle-header.spec.ts": {"seconds":51.21,"selectedTests":10}
-      ,
-      "tests/work-lifecycle.spec.ts": {"seconds":53.968,"selectedTests":8}
-      ,
-      "tests/work-parent-releases.spec.ts": {"seconds":57.008,"selectedTests":6}
-      ,
-      "tests/work-parent-status.spec.ts": {"seconds":23.574,"selectedTests":6}
-      ,
-      "tests/work-queue.spec.ts": {"seconds":110.116,"selectedTests":30}
-      ,
-      "tests/work-surfaces-fix2.spec.ts": {"seconds":41.304,"selectedTests":12}
-      ,
-      "tests/work-surfaces-fix3.spec.ts": {"seconds":22.876,"selectedTests":6}
-      ,
-      "tests/work-surfaces-fix4.spec.ts": {"seconds":120,"selectedTests":6}
-      ,
-      "tests/work-vocabulary.spec.ts": {"seconds":178.535,"selectedTests":24}
-      ,
-      "tests/workspace-activity.spec.ts": {"seconds":43.015,"selectedTests":13}
-    }
+    "files": {}
     ,
-    "run": "38488051180"
+    "run": "38732586462"
   }
   ,
   "originalNpmScripts": {
@@ -2243,6 +930,8 @@
   "specDirectories": [
     "tests"
   ]
+  ,
+  "specSource": "scripts/ci-web-shard-specs"
   ,
   "ticket": "OPS-257"
   ,

@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 161.204,
+    "selectedTests": 28
+  },
+  "spec": {
+    "file": "tests/aeon-1209-agents-head.spec.ts",
+    "listedTests": 19,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 35.365,
+        "median": 3.94,
+        "min": 2.48
+      },
+      "seconds": 161.204,
+      "selectedTests": 28
+    },
+    "weightSeconds": 75,
+    "weightSource": "remote-one-worker-AEON-1209-60s-plus-margin"
+  }
+}

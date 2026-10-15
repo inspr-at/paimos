@@ -7,7 +7,7 @@ import { bucketOf, durationTop, num, type BucketUnit, type ChartBucket, type Cha
 import { deliveryText, fill } from './deliveryNumbersText'
 import { simpleText } from './deliverySimpleText'
 import { stepOf, type StatusTimingStep, type StatusTimingStepKey, type TicketStatusTiming } from './statusTiming'
-import { durationParts, fmtDuration, shortDay, statusFill } from './workFigures'
+import { durationParts, fmtDurationSeconds as fmtDuration, shortDay, statusFill } from './workFigures'
 
 export type Final = 'delivered' | 'done'
 export const TOTAL_STEP: Record<Final, StatusTimingStepKey> = { delivered: 'created_to_live', done: 'created_to_done' }

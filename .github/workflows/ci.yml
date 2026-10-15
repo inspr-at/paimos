@@ -220,6 +220,7 @@ jobs:
       # full: the mode's shard layout. static (affected PR lane only): static,
       # unit, release and migration jobs; no Go shards, timing, browsers or e2e.
       layout: ${{ steps.tiers.outputs.layout }}
+      web_shards: ${{ steps.tiers.outputs.web_shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: contains(fromJSON('["pull_request","merge_group"]'), github.event_name)
@@ -233,17 +234,17 @@ jobs:
           CI_PLAN_LANE: ${{ needs.ci-plan.outputs.lane }}
         run: |
           if [ "${CI_IMPACT:-}" = off ]; then
-            printf 'mode=full\nlayout=full\nlane=full\n' >> "$GITHUB_OUTPUT"
+            printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12]\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           case "$GITHUB_EVENT_NAME" in
             pull_request) node scripts/test-tiers/diff.mjs ;;
             # Enforce full merge-group coverage here: the candidate planner can be edited by a PR.
-            merge_group) printf 'mode=full\nlayout=full\nlane=full\n' >> "$GITHUB_OUTPUT" ;;
+            merge_group) printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12]\n' >> "$GITHUB_OUTPUT" ;;
             *)
               lane=full
               if [ "$CI_AFFECTED_LANE" != on ]; then lane="$CI_PLAN_LANE"; fi
-              printf 'mode=full\nlayout=full\nlane=%s\n' "$lane" >> "$GITHUB_OUTPUT" ;;
+              printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12]\n' "$lane" >> "$GITHUB_OUTPUT" ;;
           esac
 
 
@@ -843,7 +844,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
+        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
     env:
       PW_RETRIES: '0'
     steps:

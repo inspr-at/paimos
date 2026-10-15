@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "pr": 684,
+  "base": "90f5087e57c5dfb97563e39a55147ea067013b5b",
+  "head": "e61b1b6dfdd42c316d3a7616279a77a297b0da5f",
+  "paths": [
+    "web/tests/dead-screens.unit.test.ts",
+    "web/tests/done-gate.spec.ts",
+    "web/tests/project-groups.spec.ts",
+    "web/tests/tap-targets.spec.ts",
+    "web/tests/ticket-benefits.spec.ts"
+  ]
+}

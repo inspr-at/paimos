@@ -87,10 +87,14 @@ test('Reconnect waits for reporting confirmation and rejected recovery stays an 
 
 test('offline and unauthorized sessions offer no Restart or Reconnect', async ({ page }) => {
   await setup(page, '')
-  await expect(page.getByRole('button', { name: /^(Restart|Reconnect)$/ })).toHaveCount(0)
+  await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions' }).click()
+  await expect(page.getByRole('menuitem', { name: /^(Restart|Reconnect)$/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('process state is unknown')
   await setup(page, 'restart', false)
-  await expect(page.getByRole('button', { name: /^(Restart|Reconnect)$/ })).toHaveCount(0)
+  await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions' }).click()
+  await expect(page.getByRole('menuitem', { name: /^(Restart|Reconnect)$/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
 })
 
 for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
@@ -113,7 +117,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       // remain on screen throughout the request and result transitions.
       const requestControls = await controlStability(page, {
         more, close,
-        overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
+        overview: panel.getByRole('tab', { name: 'Details', exact: true }),
         messages: panel.getByRole('tab', { name: /Chat/ }),
       })
       await requestControls.check(() => restart.click())
@@ -126,9 +130,9 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     }
     const controls = await controlStability(page, {
       close,
-      overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
+      overview: panel.getByRole('tab', { name: 'Details', exact: true }),
       messages: panel.getByRole('tab', { name: /Chat/ }),
-      managed: panel.locator('.managed-controls'),
+      actions: panel.getByRole('group', { name: 'Panel actions' }),
     })
     await controls.check(() => fixture.diagnosis('Reporting is current.'))
     await controls.check(() => fixture.diagnosis('The paired host is reporting, but this exact attached session has not supplied current heartbeat and inbox evidence. Reconnect waits for the daemon to verify the existing live hook binding without changing any external process or credential.'))

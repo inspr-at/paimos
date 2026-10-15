@@ -57,7 +57,8 @@ button:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
 .status-items, .counts-note { display: none; }
 .comfortable .group-counts { display: grid; grid-template-columns: repeat(4, max-content); column-gap: clamp(8px, 1.4vw, 24px); }
 .comfortable .status-group { display: grid; align-content: start; gap: 2px; }
-.comfortable .status-group.quiet { opacity: .8; }
+/* Closed stays quieter than the work groups by its ink, never by opacity, so its text keeps 4.5:1 (AEON-1358). */
+.comfortable .status-group.quiet .group-count b, .comfortable .status-group.quiet .status-count b { color: var(--ink-2); }
 .comfortable .status-items { display: grid; grid-template-columns: repeat(2, max-content); gap: 0 6px; }
 .status-count { min-height: 24px; padding: 0 4px; font-size: 11px; }
 .status-count b { margin-left: auto; inline-size: var(--count-digits); text-align: right; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; }

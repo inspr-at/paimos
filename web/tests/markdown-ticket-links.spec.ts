@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-206: ticket keys in Markdown open the app peek; a modified click follows
 // the real URL. Keys this workspace does not have stay plain text. Code and
-// existing links are left alone. The epic panel does not reserve an empty band
-// under the status chips.
+// existing links are left alone. The epic panel keeps the status chips against
+// the lifeline and the lifeline against Updated: the reserved strip (AEON-1359,
+// r4b) sits between them, and neither gap is an empty band.
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
@@ -94,16 +95,29 @@ test('the epic panel keeps the Updated line against the status chips', async ({ 
   const ws = page.locator('.ticket-ws')
   await expect(ws.getByRole('heading', { name: 'Guarded multi-cloud provisioning' })).toBeVisible()
   await expect(ws.getByRole('button', { name: /Status:/ })).toBeVisible()
-  const gap = await ws.evaluate(root => {
+  // AEON-1359: the lifeline is a reserved strip between the chips and Updated
+  // (its one current visit in this fixture, or the same height while loading).
+  // AEON-206 still holds: neither side of that strip is an empty band.
+  const life = ws.getByTestId('ticket-lifeline')
+  await expect(life).toBeVisible()
+  await expect(life).not.toHaveAttribute('aria-busy')
+  const gaps = await ws.evaluate(root => {
     const props = root.querySelector('.ws-props')
-    const meta = root.querySelector('.meta')
-    if (!props || !meta) return -1
+    const strip = root.querySelector('[data-testid="ticket-lifeline"]')
+    const meta = [...root.querySelectorAll('.meta')].find(el => el.textContent?.includes('Updated'))
+    if (!props || !strip || !meta) return null
     const chips = [...props.querySelectorAll('.prop-btn, .prop-static, .hours-chip')]
+    if (!chips.length) return null
     const bottom = Math.max(...chips.map(el => el.getBoundingClientRect().bottom))
-    return meta.getBoundingClientRect().top - bottom
+    const stripBox = strip.getBoundingClientRect()
+    const metaBox = meta.getBoundingClientRect()
+    return { chipsToLifeline: stripBox.top - bottom, lifelineToUpdated: metaBox.top - stripBox.bottom }
   })
-  expect(gap).toBeGreaterThan(0)
-  expect(gap).toBeLessThan(24)
+  if (!gaps) throw new Error('the lifeline or the Updated line is missing')
+  expect(gaps.chipsToLifeline).toBeGreaterThan(0)
+  expect(gaps.chipsToLifeline).toBeLessThan(24)
+  expect(gaps.lifelineToUpdated).toBeGreaterThan(0)
+  expect(gaps.lifelineToUpdated).toBeLessThan(24)
 })
 
 test('markdown ticket links and the epic panel, light and dark', async ({ page }) => {

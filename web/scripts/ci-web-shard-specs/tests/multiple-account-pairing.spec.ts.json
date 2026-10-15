@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 11.758,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/multiple-account-pairing.spec.ts",
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.042,
+        "median": 1.944,
+        "min": 1.874
+      },
+      "seconds": 11.758,
+      "selectedTests": 6
+    },
+    "weightSeconds": 13.317072,
+    "weightSource": "unmeasured-test-rate"
+  }
+}
