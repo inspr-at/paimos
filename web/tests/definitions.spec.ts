@@ -57,7 +57,8 @@ test('AEON-1316 project definitions copy, edit, undo, conditions and reset stay 
   stable.done()
   await more.click(); await page.getByRole('menuitem',{name:'Applies to…',exact:true}).click()
   const form = page.getByRole('dialog',{name:'Estimate set applies to',exact:true}), code = form.getByRole('radio',{name:'Code tickets',exact:true}), label = form.getByRole('textbox',{name:'Required labels (comma-separated)'})
-  const conditions = await controlStability(page,{form,code,label,save:form.getByRole('button',{name:/^Save/})})
+  await expect(form).toBeInViewport()
+  const conditions = await controlStability(page,{code,label,save:form.getByRole('button',{name:/^Save/})})
   await conditions.check(() => code.check())
   await conditions.check(() => label.fill('ui, security'))
   conditions.done()
@@ -97,7 +98,7 @@ test('AEON-1316 definition states and folded left-out checks fit phone, tablet a
     try {
       const world = await setup(page,'fold')
       await page.goto('/p/PHAROS/settings/definitions')
-      const card = page.locator('#definitions'), show = card.getByRole('button',{name:'Show',exact:true})
+      const card = page.locator('#definitions'), show = card.locator('.fold-head button')
       await expect(show).toBeVisible()
       const stable = await controlStability(page,{show})
       await stable.check(() => show.click()); stable.done()
