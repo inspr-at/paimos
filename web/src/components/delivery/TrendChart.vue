@@ -203,8 +203,9 @@ const id = computed(() => `dl-chart-${props.model.key}`)
 <style scoped>
 .chart-card { position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 14px 10px 16px; border-radius: 16px; background: var(--glass); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -22px color-mix(in srgb, var(--primary-line) 35%, transparent); }
 .chart-card.wide { grid-column: 1 / -1; }
-/* Embedded in a tile: the tile is the card. */
+/* Embedded in a tile: the tile is the card. Its region labels sit on the tile's glass, so they take --ink-2 (4.5:1). */
 .chart-card.bare { padding: 0; border-radius: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+.chart-card.bare .g-rlabel:not(.p) { fill: var(--ink-2); }
 .c-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .c-head h4 { flex: 1; min-width: 0; margin: 0; font: 600 13.5px/1.3 var(--font); color: var(--ink); overflow-wrap: anywhere; }
 .c-unit { font: 500 11px/1 var(--mono); color: var(--ink-3); white-space: nowrap; }

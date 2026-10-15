@@ -124,7 +124,7 @@ test('a failed refresh keeps Learn still through the error and the retry', async
     await guard.check(async () => {
       await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
       await expect(page.getByRole('alert')).toContainText(text.failed)
-      await expect(simple.locator('.s-val.empty').first()).toHaveText(text.notLoaded)
+      await expect(simple.locator('.s-grid .s-val.empty').first()).toHaveText(text.notLoaded)
       await expect(summary).toContainText(text.failed)
     })
     world.metrics({})
@@ -235,6 +235,8 @@ test('a refused save and a failed read together keep both alerts and both retrie
     reject = false
     await guard.check(async () => { await saveRetry.click(); await expect(saveAlert).toHaveCount(0) })
     guard.done()
+    // The warning clears when the retry starts: wait for the stored choice, or it lands in the next round's fixtures.
+    await expect.poll(() => world.preferences['delivery:numbers']).toEqual({ level: 'simple', window: 90 })
     await page.unroute('**/api/preferences/delivery*', refuseSave)
   }
 })
@@ -247,7 +249,7 @@ test('Simple explains each number in plain words, and its controls stay still th
   await expect(summary).toContainText('1 of 13 numbers are on target.')
   await expect(summary).toContainText('Closest: how long a review takes (1.6× the target). Biggest gap: waiting for a runner (about 6× the target).')
   await expect(page.getByRole('heading', { name: 'Making a change ready', level: 3 })).toBeVisible()
-  await expect(page.getByTestId('delivery-simple').getByRole('listitem').filter({ has: page.locator('.s-name') })).toHaveCount(18)
+  await expect(page.getByTestId('delivery-simple').locator('.s-grid').getByRole('listitem').filter({ has: page.locator('.s-name') })).toHaveCount(18)
   const checks = simpleTile(page, 'How long the PR checks take')
   await expect(checks.locator('.s-val')).toHaveText('16min')
   await expect(checks.getByTestId('verdict')).toHaveText('Far off · about 2× the target')

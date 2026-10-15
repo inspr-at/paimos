@@ -215,6 +215,9 @@ const ready = computed(() => props.state === 'ready')
   .tk-filters .seg { width: 100%; }
   .tk-filters .seg button { flex: 1; height: 44px; min-width: 0; padding: 0 6px; }
   .tk-hero { padding: 12px 12px 10px 14px; }
+  /* The source line wraps into three reserved lines rather than clipping, so no window moves anything below (AEON-541). */
+  .s-foot { align-items: flex-start; height: auto; min-height: calc(16px * 3 + 8px + 1px); line-height: 16px; white-space: normal; }
+  .s-foot > span:last-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
   .s-val { font-size: 34px; }
   .tk-steps, .tk-steps.three { grid-template-columns: minmax(0, 1fr); }
   .tiles.tk, .tiles.tk.four { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

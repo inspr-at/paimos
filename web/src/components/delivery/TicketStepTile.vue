@@ -87,5 +87,7 @@ defineProps<{ tile: StepTile; state: 'loading' | 'error' | 'ready'; busy: boolea
   .s-tile { padding: 12px 12px 10px 14px; }
   .s-val { font-size: 28px; }
   .s-say { min-height: calc(13px * 1.45 * 4); }
+  .s-foot { align-items: flex-start; height: auto; min-height: calc(16px * 3 + 8px + 1px); line-height: 16px; white-space: normal; }
+  .s-foot > span:last-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 }
 </style>

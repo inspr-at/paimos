@@ -193,10 +193,14 @@ const trendCaption = computed(() => {
 const tip = ref<{ tile: TileModel | TicketTileModel; x: number; y: number; pinned: boolean; placed: boolean } | null>(null)
 const tipEl = ref<HTMLElement>()
 let tipAnchor: HTMLElement | null = null
+// Where the anchor sat when the tip was placed: a scroll only matters once it has moved it (as Learn does), so focusing
+// a tile that the browser first brings into view keeps its definition open.
+let anchoredAt: { x: number; y: number } | null = null
 function openTip(tile: TileModel | TicketTileModel, anchor: HTMLElement, pin: boolean) {
   if (!pin && tip.value?.pinned) return
   if (pin && tip.value?.pinned && tipAnchor === anchor) { closeTip(); return }
   tipAnchor = anchor
+  anchoredAt = null
   const rect = anchor.getBoundingClientRect()
   tip.value = { tile, x: rect.left, y: rect.bottom + 8, pinned: pin, placed: false }
   requestAnimationFrame(place)
@@ -208,20 +212,26 @@ function place() {
   let y = rect.bottom + 8
   if (y + height > window.innerHeight - 12) y = Math.max(12, rect.top - height - 8)
   tip.value = { ...current, x: Math.max(12, Math.min(window.innerWidth - width - 12, rect.left + rect.width / 2 - width / 2)), y, placed: true }
+  anchoredAt = { x: rect.left, y: rect.top }
+}
+function onScroll() {
+  if (!tip.value || !tipAnchor || !anchoredAt) return
+  const rect = tipAnchor.getBoundingClientRect()
+  if (Math.abs(rect.left - anchoredAt.x) >= 1 || Math.abs(rect.top - anchoredAt.y) >= 1) closeTip()
 }
 function leaveTip() { if (!tip.value?.pinned) closeTip() }
-function closeTip() { tip.value = null; tipAnchor = null }
+function closeTip() { tip.value = null; tipAnchor = null; anchoredAt = null }
 function onKey(event: KeyboardEvent) { if (event.key === 'Escape' && tip.value) { const anchor = tipAnchor; closeTip(); anchor?.focus({ preventScroll: true }) } }
 function onPointer(event: PointerEvent) { if (tip.value?.pinned && !tipEl.value?.contains(event.target as Node) && !tipAnchor?.contains(event.target as Node)) closeTip() }
 onMounted(() => {
   document.addEventListener('keydown', onKey)
   document.addEventListener('pointerdown', onPointer, true)
-  window.addEventListener('scroll', closeTip, { passive: true, capture: true })
+  window.addEventListener('scroll', onScroll, { passive: true, capture: true })
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
   document.removeEventListener('pointerdown', onPointer, true)
-  window.removeEventListener('scroll', closeTip, { capture: true })
+  window.removeEventListener('scroll', onScroll, { capture: true })
 })
 // The tile behind an open popover belongs to this window and this answer.
 watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
