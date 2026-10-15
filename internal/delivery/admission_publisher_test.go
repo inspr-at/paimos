@@ -226,6 +226,23 @@ func TestAdmissionPublisherSerializesStalledSuccessAndCurrentFailure(t *testing.
 		t.Fatal(err)
 	}
 	requireAdmissionState(t, f, head, "failure")
+	var revision int64
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT revision FROM delivery_admission_outbox WHERE sha=$1`, head).Scan(&revision)
+	})
+	observed := f.gh.pulls[7]
+	observed.Checks = append(append([]Check{}, observed.Checks...), Check{Name: AdmissionContext, Status: "completed", Conclusion: "failure"})
+	f.gh.pulls[7] = observed
+	f.webhook(t, "status", "", "admission-own-status", 204)
+	f.tx(t, func(tx pgx.Tx) error {
+		var after int64
+		err := tx.QueryRow(t.Context(), `SELECT revision FROM delivery_admission_outbox WHERE sha=$1`, head).Scan(&after)
+		if err == nil && after != revision {
+			t.Fatal("publisher's own webhook invalidated its acknowledged revision")
+		}
+		return err
+	})
+
 }
 
 func TestAdmissionPublisherResumesUncertainPublicationAfterRestart(t *testing.T) {

@@ -51,6 +51,20 @@ BEGIN
  IF TG_OP='DELETE' THEN fact=to_jsonb(OLD); ELSE fact=to_jsonb(NEW); END IF;
  IF TG_OP='UPDATE' THEN
   old_fact=to_jsonb(OLD);
+  IF TG_TABLE_NAME='delivery_items' THEN
+   -- Publication's own status webhook and observation timestamps are not a
+   -- new prerequisite. Otherwise every POST would dirty itself indefinitely.
+   fact=jsonb_set(fact-'updated_at','{observation}',
+    (fact->'observation'-'at'-'checks') || jsonb_build_object('checks',
+     (SELECT coalesce(jsonb_agg(c ORDER BY c->>'name',c),'[]'::jsonb)
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(fact->'observation'->'checks')='array' THEN fact->'observation'->'checks' ELSE '[]'::jsonb END) c
+      WHERE c->>'name'<>'aeon/admission')));
+   old_fact=jsonb_set(old_fact-'updated_at','{observation}',
+    (old_fact->'observation'-'at'-'checks') || jsonb_build_object('checks',
+     (SELECT coalesce(jsonb_agg(c ORDER BY c->>'name',c),'[]'::jsonb)
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(old_fact->'observation'->'checks')='array' THEN old_fact->'observation'->'checks' ELSE '[]'::jsonb END) c
+      WHERE c->>'name'<>'aeon/admission')));
+  END IF;
   IF fact=old_fact THEN RETURN NEW; END IF;
  END IF;
  repo=fact->>'repository'; pr=fact->>'pull_request'; project=fact->>'project_id';
