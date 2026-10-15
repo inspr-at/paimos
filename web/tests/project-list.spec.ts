@@ -355,8 +355,10 @@ test('project header shows the project summary counts, cancelled work out of sco
   await expect(stats).toHaveAttribute('aria-label', /2 in progress/)
   await expect(stats.getByRole('button', { name: 'Filter doing tickets: 2', exact: true })).toHaveAttribute('data-tip', 'Show only doing tickets; click again to clear')
   await expect(stats.getByRole('button', { name: 'Filter done tickets: 1', exact: true })).toBeVisible()
-  await expect(stats).toContainText('17%')
-  await expect(stats.locator('.progress-line')).toHaveAttribute('data-tip', '1 of 6 done · 1 cancelled')
+  // AEON-1358: the work bar replaced the count-based percent; it counts hours, leaves only, Closed out.
+  await expect(stats.locator('.head-work .wk-scope')).toContainText('Whole project')
+  await expect(stats.locator('.head-work .wk-total')).toHaveText('Total 0h')
+  await expect(stats.locator('.head-work .wk-line')).toContainText('4 without estimate')
 })
 
 test('wide screens dock the side panel beside the list; narrow ones overlay it', async ({ page }) => {

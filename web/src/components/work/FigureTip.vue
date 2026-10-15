@@ -7,7 +7,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { closeFigureTip, FIGURE_TIP_ID, figureTip } from '../../lib/figureTip'
 import '../../styles/work-figures.css'
 
-const props = withDefaults(defineProps<{ width?: 'auto' | 'fig' | 'wide' }>(), { width: 'auto' })
+// fig 300 px and wide 330 px (the design's popups); xwide fits the work bar's longest footer line (no-release projects).
+const props = withDefaults(defineProps<{ width?: 'auto' | 'fig' | 'wide' | 'xwide' }>(), { width: 'auto' })
 const tip = ref<HTMLElement>()
 const x = ref(0)
 const y = ref(0)
@@ -71,7 +72,8 @@ defineExpose({ place })
   box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent);
 }
 .figure-tip.pinned { pointer-events: auto; }
-.figure-tip.w-fig, .figure-tip.w-wide { padding: 6px 12px 7px; }
+.figure-tip.w-fig, .figure-tip.w-wide, .figure-tip.w-xwide { padding: 6px 12px 7px; }
 .figure-tip.w-fig { width: min(300px, calc(100vw - 16px)); max-width: none; }
 .figure-tip.w-wide { width: min(330px, calc(100vw - 16px)); max-width: none; }
+.figure-tip.w-xwide { width: min(372px, calc(100vw - 16px)); max-width: none; }
 </style>

@@ -77,7 +77,7 @@ function click(event: MouseEvent) {
         <span class="wk-short"><b>{{ label.short }}</b></span>
         <span class="wk-probe" aria-hidden="true"><b>{{ text.wholeProject }}</b></span>
       </span>
-      <span class="wk-total"><span class="wk-total-l">{{ text.total }} </span><b>{{ shown ? shown.total : '–' }}</b></span>
+      <span class="wk-total"><span class="wk-total-l">{{ `${text.total} ` }}</span><b>{{ shown ? shown.total : '–' }}</b></span>
     </div>
     <button
       type="button" class="wk-bar f-slide-hover" :aria-label="text.workByHours" :aria-describedby="open ? `${srId} ${FIGURE_TIP_ID}` : srId" :aria-expanded="open && figureTip.pinned"
@@ -96,7 +96,7 @@ function click(event: MouseEvent) {
       <span v-if="failure" class="wk-failure" role="status">{{ failure }} <button type="button" class="wk-retry" @click="emit('retry')">{{ text.retry }}</button></span>
     </p>
     <span :id="srId" class="sr-only">{{ shown ? shown.accessible : label.label }}</span>
-    <FigureTip v-if="open" width="wide">
+    <FigureTip v-if="open" :width="header && !header.marksReleases ? 'xwide' : 'wide'">
       <p class="wf-ttl">{{ label.label }}</p>
       <div class="wf-rule" aria-hidden="true" />
       <div class="wf-tbl">
@@ -130,7 +130,7 @@ function click(event: MouseEvent) {
 .narrowed .wk-scope b { font-weight: 650; color: var(--ink); }
 .wk-short, .wk-probe { display: none; }
 .wk-total { flex: none; white-space: nowrap; color: var(--ink-3); }
-.wk-total b { font: 600 12px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.wk-total b { display: inline-block; min-width: var(--wk-total); font: 600 12px/1 var(--mono); color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 /* The bar is one control: hover, keyboard focus or a tap shows the counts behind it. */
 .wk-bar { position: relative; display: block; width: 100%; height: 20px; margin: 0; padding: 6px 0; border: 0; border-radius: 6px; background: transparent; cursor: default; }
 .wk-bar:focus-visible { outline: 2px solid var(--primary-line); outline-offset: 1px; box-shadow: none; }
@@ -167,7 +167,6 @@ function click(event: MouseEvent) {
 .d-compact .wk-track { height: 6px; }
 .d-compact .wk-total { order: 3; }
 .d-compact .wk-total-l { display: none; }
-.d-compact .wk-total b { display: inline-block; min-width: var(--wk-total); text-align: right; }
 .d-compact .wk-line { display: none; }
 .d-compact.failed .wk-line { display: none; }
 
@@ -180,7 +179,6 @@ function click(event: MouseEvent) {
   .d-compact .wk-long { display: block; }
   .d-compact .wk-short, .d-compact .wk-probe { display: none; }
   .d-compact .wk-total-l { display: inline; }
-  .d-compact .wk-total b { min-width: 0; }
   .d-compact .wk-line { display: flex; }
   .d-compact .wk-track { height: 8px; }
   .wk-bar { height: 44px; margin: -12px 0; padding: 18px 0; }

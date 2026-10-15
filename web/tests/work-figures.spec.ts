@@ -34,14 +34,14 @@ async function serveFigures(page: Page, options: { marksReleases?: boolean } = {
   }
 }
 
-async function open(page: Page, options: { width?: number; theme?: string; marksReleases?: boolean; comfortable?: boolean } = {}) {
+async function open(page: Page, options: { width?: number; theme?: string; marksReleases?: boolean; comfortable?: boolean; automaticColumns?: boolean } = {}) {
   const width = options.width ?? 1440
   await page.setViewportSize({ width, height: width <= 600 ? 844 : 900 })
   const data = fixtures()
   data.preferences.theme = { choice: options.theme ?? 'light' }
   data.preferences['list:display'] = { headerGraph: false }
   // A saved column choice, so Estimate shows at every desktop width and filtering never changes the columns.
-  data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'priority', 'assignee', 'estimate', 'updated'] }
+  if (!options.automaticColumns) data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'priority', 'assignee', 'estimate', 'updated'] }
   const errors = watchErrors(page)
   await mockWork(page, data)
   await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: 0, warning: false } } }))
@@ -314,7 +314,7 @@ for (const theme of ['light', 'dark']) {
 // with the counts and a column popup open on desktop.
 for (const width of [390, 960, 1440]) for (const theme of ['light', 'dark']) {
   test(`AEON-1358 evidence ${width} ${theme}`, async ({ page }, info) => {
-    await open(page, { width, theme, comfortable: true })
+    await open(page, { width, theme, comfortable: true, automaticColumns: true })
     await settled(page)
     await page.screenshot({ path: info.outputPath(`work-bar-${width}-${theme}-comfortable.png`) })
     if (width > 600) {
