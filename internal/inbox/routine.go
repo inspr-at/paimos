@@ -195,6 +195,10 @@ func (d *RoutineDispatcher) runRoutineListener(ctx context.Context, ready, done 
 				if err != nil {
 					break
 				}
+				if db.IsResync(n) {
+					d.wakeRoutine("", nil)
+					continue
+				}
 				if n.Channel == routineChannel {
 					if id := notificationTenant(n.Payload); id != "" {
 						d.wakeRoutine(id, n)
@@ -267,33 +271,12 @@ func runRoutine(ctx context.Context, tenantID string,
 	return nil
 }
 
-type routinePGListener struct {
-	*pgx.Conn
-	expires time.Time
-}
-
-func (l *routinePGListener) WaitForNotification(ctx context.Context) (*pgconn.Notification, error) {
-	waitCtx, cancel := context.WithDeadline(ctx, l.expires)
-	defer cancel()
-	n, err := l.Conn.WaitForNotification(waitCtx)
-	if err != nil && !time.Now().Before(l.expires) {
-		return nil, errors.New("routine listener lifetime elapsed")
-	}
-	return n, err
-}
-
 func (d *RoutineDispatcher) listenRoutine(ctx context.Context) (routineListener, error) {
-	connectCtx, cancel := context.WithTimeout(ctx, routineFallback)
-	defer cancel()
-	conn, err := listenConn(connectCtx, d.m.base.pool)
+	conn, err := db.SubscribeNotifications(ctx, d.m.base.pool, routineChannel, "")
 	if err != nil {
 		return nil, err
 	}
-	if _, err := conn.Exec(connectCtx, "LISTEN "+routineChannel); err != nil {
-		closeListen(conn)
-		return nil, err
-	}
-	return &routinePGListener{Conn: conn, expires: time.Now().Add(db.ListenerMaxLifetime)}, nil
+	return conn, nil
 }
 
 func waitRoutine(ctx context.Context, listener routineListener, tenantID string, delay time.Duration) error {

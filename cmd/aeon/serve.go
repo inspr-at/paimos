@@ -155,6 +155,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		}
 	}
 	ctx, cancelWorkers := context.WithCancel(ctx)
+	defer db.CloseNotificationConnections(pool)
 	defer cancelWorkers()
 	workerCtx := db.Background(ctx)
 	startPoolStats := db.Stats(pool)

@@ -32,7 +32,7 @@ type module struct {
 	attached   *attachedmsg.Service
 	pool       *pgxpool.Pool
 	heartbeat  time.Duration
-	waitNotify func(context.Context, *pgx.Conn, string, time.Time) error
+	waitNotify func(context.Context, db.NotificationListener, string, time.Time) error
 }
 
 // New returns the inbox HTTP module. See the package doc for coordinator wiring.

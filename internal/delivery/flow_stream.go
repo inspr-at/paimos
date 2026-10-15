@@ -88,23 +88,12 @@ func (m *Module) flowStream(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(429, "too many flow streams; retry later"))
 		return
 	}
-	// LISTEN is session state on its own connection, never a pool slot.
-	connectCtx, stop := context.WithTimeout(ctx, 10*time.Second)
-	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
-	stop()
+	conn, err := db.SubscribeNotifications(ctx, m.pool, "aeon_events", p.TenantID)
 	if err != nil {
 		respondError(w, err)
 		return
 	}
-	defer func() {
-		closeCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stop()
-		_ = conn.Close(closeCtx)
-	}()
-	if _, err = conn.Exec(ctx, "LISTEN aeon_events"); err != nil {
-		respondError(w, err)
-		return
-	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	// Subscribed before the boundary read, so nothing committed later is missed.
 	newest, err := m.flowNewest(ctx, p, project)
 	if err != nil {
@@ -227,7 +216,7 @@ func (m *Module) flowHints(ctx context.Context, p tenant.Principal, project stri
 
 // waitFlowNotify returns nil on a commit in this tenant and
 // context.DeadlineExceeded at the heartbeat.
-func waitFlowNotify(ctx context.Context, conn *pgx.Conn, tid string, deadline time.Time) error {
+func waitFlowNotify(ctx context.Context, conn db.NotificationListener, tid string, deadline time.Time) error {
 	for {
 		waitCtx, cancel := context.WithDeadline(ctx, deadline)
 		n, err := conn.WaitForNotification(waitCtx)
