@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -49,8 +51,12 @@ func (m *Module) handleMessagingAssistant(w http.ResponseWriter, r *http.Request
 	}
 	var body assistantInput
 	if operation != "revoke" {
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		dec := json.NewDecoder(r.Body)
+		raw, err := httpapi.ReadRequestBody(w, r, 4096, 10*time.Second)
+		if err != nil {
+			writeBadRequest(w, "invalid assistant request")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
 		var extra any
 		if err := dec.Decode(&body); err != nil {

@@ -42,7 +42,7 @@ func assistantHTTP(m *Module, p tenant.Principal, method, path, body string) *ht
 
 func assistantAgent(t *testing.T, m *Module, owner tenant.Principal, full bool) tenant.Principal {
 	t.Helper()
-	rec, err := m.createAgentKey(t.Context(), owner, "Coordinator", "", authz.CoordinatorKeyScopes, nil)
+	rec, err := m.createAgentKey(tenant.WithPrincipal(t.Context(), owner), owner, "Coordinator", "", authz.CoordinatorKeyScopes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

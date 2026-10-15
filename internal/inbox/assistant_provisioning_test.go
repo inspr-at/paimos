@@ -64,8 +64,27 @@ func TestMessagingAssistantProvisionedThroughProductionAuth(t *testing.T) {
 	}
 	// Existing Agents/key UI gets the metadata without any new presentation.
 	status, data = receiptRequest(t, srv, owner, "GET", "/api/agent-keys", "")
-	if status != 200 || !bytes.Contains(data, []byte(created.ID)) || !bytes.Contains(data, []byte("inbox.receipt")) || !bytes.Contains(data, []byte(expires.Format(time.RFC3339Nano))) || bytes.Contains(data, []byte(created.Token)) {
+	if status != 200 || bytes.Contains(data, []byte(created.Token)) {
 		t.Fatal("owner metadata lacks scope/expiry or repeats token")
+	}
+	var listed struct {
+		Keys []struct {
+			ID        string    `json:"id"`
+			Scopes    []string  `json:"scopes"`
+			ExpiresAt time.Time `json:"expires_at"`
+		} `json:"keys"`
+	}
+	if json.Unmarshal(data, &listed) != nil {
+		t.Fatal("invalid owner key metadata")
+	}
+	found := false
+	for _, key := range listed.Keys {
+		if key.ID == created.ID {
+			found = slices.Equal(key.Scopes, authz.MessagingAssistantScopes()) && key.ExpiresAt.Equal(expires)
+		}
+	}
+	if !found {
+		t.Fatal("owner metadata lacks assistant scope/expiry")
 	}
 	status, data = receiptRequest(t, srv, owner, "GET", "/api/members", "")
 	if status != 200 || !bytes.Contains(data, []byte(created.PrincipalID)) {
