@@ -3,14 +3,22 @@ import { coverageSource } from './browser-impact.mjs'
 
 // The automatic fixture installs this before test-scoped contexts/pages are
 // created. Unknown targets never certify a complete dependency observation.
-export function captureBrowser(browser) {
+export function captureBrowser(browser, { bundleSources } = {}) {
   const sources = new Set(), sessions = []
   let complete = browser.browserType().name() === 'chromium' && browser.contexts().length === 0
   const add = url => {
     if (typeof url !== 'string' || url.length > 4096 || sources.size >= 20_000) { complete = false; return }
     const source = coverageSource(url)
     if (source) sources.add(source)
-    if (/\/assets\/.*\.js(?:\?|$)|\/@fs\/.*\/src\//.test(url)) complete = false
+    if (/\/assets\/.*\.js(?:\?|$)/.test(url)) {
+      // Production performance tests execute the complete frontend bundle.
+      // All source modules are conservative owners; this does not certify
+      // failed channels, workers, popups or other incomplete observations.
+      if (!Array.isArray(bundleSources) || !bundleSources.length || bundleSources.length > 20_000 ||
+          bundleSources.some(file => coverageSource(`http://bundle/${file}`) !== file)) complete = false
+      else for (const file of bundleSources) sources.add(file)
+    }
+    if (/\/@fs\/.*\/src\//.test(url)) complete = false
   }
   const observe = async (context, page) => {
     if (sessions.length >= 64) { complete = false; return page }
