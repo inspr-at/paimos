@@ -54,11 +54,14 @@ func (l *webhookFailureLog) admit(at time.Time, key webhookFailureKey) (bool, ui
 func webhookErrorClass(err error) string {
 	var class webhookClass
 	var github *crossreview.GitHubHTTPError
+	var upstream *webhookGitHubError
 	var postgres *pgconn.PgError
 	var refusal *apiError
 	var syntax *json.SyntaxError
 	var field *json.UnmarshalTypeError
 	switch {
+	case errors.As(err, &upstream):
+		return upstream.class
 	case errors.As(err, &class):
 		return string(class)
 	case errors.Is(err, context.DeadlineExceeded):
@@ -66,7 +69,9 @@ func webhookErrorClass(err error) string {
 	case errors.Is(err, context.Canceled):
 		return "canceled"
 	case errors.As(err, &github):
-		return "github_http"
+		return githubStatusClass(github.StatusCode)
+	case errors.Is(err, crossreview.ErrTransient):
+		return "network"
 	case errors.Is(err, crossreview.ErrNotFound):
 		return "github_not_found"
 	case errors.Is(err, crossreview.ErrUnavailable):
@@ -122,9 +127,6 @@ func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, s
 		var github *crossreview.GitHubHTTPError
 		if errors.As(err, &github) {
 			attrs = append(attrs, "github_status", github.StatusCode)
-			if github.RequestID != "" {
-				attrs = append(attrs, "github_request_id", github.RequestID)
-			}
 		}
 		logger := m.webhookFailures.logger
 		if logger == nil {

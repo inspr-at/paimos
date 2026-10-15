@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,15 +16,24 @@ import (
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 const (
 	webhookAttemptTimeout = 4 * time.Minute
 	webhookMaxAttempts    = 12
+	webhookProbeTimeout   = 30 * time.Second
 )
+
+// installationProber is optional. Readers without it keep the per-receipt
+// permission defer and do not call GitHub on the hourly pass.
+type installationProber interface {
+	ProbeAccess(context.Context) error
+}
 
 var webhookSteps = []string{"projection", "fanout", "check_audit", "merge_audit", "metrics", "flow", "completion"}
 
@@ -37,6 +47,7 @@ type webhookReceipt struct {
 	attempts                                          int64
 	next                                              time.Time
 	finished                                          *time.Time
+	lastStep, lastClass                               *string
 }
 
 // receiveWebhook is the only HTTP acceptance boundary. Signatures and headers
@@ -219,13 +230,13 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 	receipt.id = id
 	var checkpoints, runs []byte
 	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT event,action,repository,installation_id,payload_sha256,payload,checkpoints,flow_runs,attempts,next_attempt_at,finished_at FROM delivery_webhook_receipts
-			WHERE delivery_id=$1 AND repository=$2 AND installation_id=$3`, id, m.config.Repository, m.config.InstallationID).Scan(&receipt.event, &receipt.action, &receipt.repository, &receipt.installation, &receipt.hash, &receipt.raw, &checkpoints, &runs, &receipt.attempts, &receipt.next, &receipt.finished)
+		return tx.QueryRow(ctx, `SELECT event,action,repository,installation_id,payload_sha256,payload,checkpoints,flow_runs,attempts,next_attempt_at,finished_at,last_step,last_error_class FROM delivery_webhook_receipts
+			WHERE delivery_id=$1 AND repository=$2 AND installation_id=$3`, id, m.config.Repository, m.config.InstallationID).Scan(&receipt.event, &receipt.action, &receipt.repository, &receipt.installation, &receipt.hash, &receipt.raw, &checkpoints, &runs, &receipt.attempts, &receipt.next, &receipt.finished, &receipt.lastStep, &receipt.lastClass)
 	})
 	if err != nil {
 		return err
 	}
-	if receipt.finished != nil || !immediate && receipt.next.After(m.now()) {
+	if receipt.finished != nil || receipt.next.After(m.now()) && (!immediate || receipt.lastClass != nil && webhookLimited(*receipt.lastClass)) {
 		return nil
 	}
 	if len(receipt.raw) > 2<<20 || len(checkpoints) > 4096 || len(runs) > 2<<20 || digest(receipt.raw) != receipt.hash || json.Unmarshal(checkpoints, &receipt.checkpoints) != nil || json.Unmarshal(runs, &receipt.runs) != nil || len(receipt.runs) > 2000 {
@@ -234,6 +245,11 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 	var e envelope
 	if json.Unmarshal(receipt.raw, &e) != nil || e.Repository.Name != receipt.repository || strconv.FormatInt(e.Installation.ID, 10) != receipt.installation || e.Action != receipt.action || !validAction(receipt.event, receipt.action) {
 		return webhookClass("invalid_receipt")
+	}
+	// Permission waits only retry notice routing, never GitHub. An authenticated
+	// redelivery of this exact payload explicitly resumes the unfinished step.
+	if !immediate && receipt.lastClass != nil && webhookPermission(*receipt.lastClass) && receipt.lastStep != nil {
+		return m.deferWebhook(ctx, &receipt, *receipt.lastStep, *receipt.lastStep, webhookClass(*receipt.lastClass))
 	}
 	// A crash after reserving the last attempt must not buy another network
 	// attempt on restart. Fully checkpointed receipts can still finish safely.
@@ -290,37 +306,135 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET finished_at=$2,last_step=NULL,last_error_class=NULL WHERE delivery_id=$1`, id, m.now())
+		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET finished_at=$2,last_step=NULL,last_error_class=NULL,permission_paused_at=NULL WHERE delivery_id=$1`, id, m.now())
 		return err
 	})
 }
 
 func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step, failedStep string, cause error) error {
-	exhausted := receipt.attempts >= webhookMaxAttempts
 	var class *string
 	if cause != nil {
 		value := webhookErrorClass(cause)
 		class = &value
 	}
-	if exhausted {
+	limited := class != nil && webhookLimited(*class)
+	permission := class != nil && webhookPermission(*class)
+	if limited || permission && receipt.attempts >= webhookMaxAttempts {
+		// Reservation still fences crashes; a confirmed rate-limit wait refunds
+		// it atomically with the due time and never exhausts the retry budget.
+		// A permission pause at the cap retains one explicit repair attempt.
+		receipt.attempts = max(0, receipt.attempts-1)
+	}
+	exhausted := receipt.attempts >= webhookMaxAttempts && !permission
+	if exhausted && (class == nil || *class != "http_5xx" && *class != "network" && *class != "http_404") {
 		value := "retry_exhausted"
 		class = &value
 	}
 	at := m.now()
-	err := db.InTenant(db.AllProjects(ctx, "delivery receipt retry schedule"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+	delay := webhookErrorBackoff(receipt.attempts, cause)
+	if limited {
+		delay = webhookLimitBackoff(cause, at)
+	} else if permission {
+		delay = time.Hour
+	}
+	var actor tenant.Principal
+	if permission {
+		var err error
+		actor, err = m.auditActor(ctx, m.config.TenantID)
+		if err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET next_attempt_at=$2,last_step=$3,last_error_class=$4,
+	}
+	err := db.InTenant(db.AllProjects(ctx, "delivery receipt retry schedule"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		// Notice routing rechecks the current linked project and lead under the
+		// same tenant/tree access fence as the final receipt mutation.
+		if permission {
+			if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
+				return err
+			}
+		} else if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		var epoch *time.Time
+		err := tx.QueryRow(ctx, `UPDATE delivery_webhook_receipts AS current SET next_attempt_at=$2,last_step=$3,last_error_class=$4,
 			finished_at=CASE WHEN $5 THEN $6 ELSE finished_at END,
-			checkpoints=CASE WHEN $5 THEN jsonb_set(checkpoints,ARRAY[$7::text],to_jsonb($8::text)) ELSE checkpoints END
-			WHERE delivery_id=$1`, receipt.id, at.Add(webhookErrorBackoff(receipt.attempts, cause)), failedStep, class, exhausted, at, step, string(webhookGaveUp))
-		return err
+			checkpoints=CASE WHEN $5 THEN jsonb_set(checkpoints,ARRAY[$7::text],to_jsonb($8::text)) ELSE checkpoints END,attempts=$9,
+			permission_paused_at=CASE WHEN $10 THEN COALESCE(current.permission_paused_at,(
+				SELECT min(paused.permission_paused_at) FROM delivery_webhook_receipts paused
+				WHERE paused.tenant_id=current.tenant_id AND paused.repository=current.repository
+				  AND paused.installation_id=current.installation_id AND paused.last_error_class=$4
+				  AND paused.finished_at IS NULL AND paused.delivery_id<>current.delivery_id
+			),$6) ELSE NULL END
+			WHERE current.delivery_id=$1
+			RETURNING permission_paused_at`, receipt.id, at.Add(delay), failedStep, class, exhausted, at, step, string(webhookGaveUp), receipt.attempts, permission).Scan(&epoch)
+		if err != nil || !permission {
+			return err
+		}
+		if epoch == nil || epoch.IsZero() {
+			return errRead
+		}
+		return m.webhookPermissionNoticeTx(ctx, tx, actor, receipt, *class, epoch.UTC())
 	})
 	if err == nil && exhausted {
 		m.logWebhookGaveUp(ctx, receipt, failedStep, cause)
 	}
 	return err
+}
+
+func (m *Module) webhookPermissionNoticeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, receipt *webhookReceipt, class string, epoch time.Time) error {
+	var e envelope
+	if err := json.Unmarshal(receipt.raw, &e); err != nil {
+		return err
+	}
+	fact := MergeFact{Head: e.SHA}
+	switch receipt.event {
+	case "pull_request":
+		fact.PR, fact.Head, fact.Title, fact.Branch = &e.Pull.Number, e.Pull.Head.SHA, e.Pull.Title, e.Pull.Head.Ref
+	case "check_run":
+		fact.Head = e.CheckRun.Head
+	case "check_suite":
+		fact.Head = e.CheckSuite.Head
+	case "merge_group":
+		fact.Head = e.Group.Head
+	case "push":
+		fact.Head = e.After
+	}
+	o, err := auditLink(ctx, tx, receipt.repository, fact)
+	if err != nil {
+		return err
+	}
+	to, err := auditRecipientTx(ctx, tx, actor.TenantID, MergeAudit{Project: o.Project, Ticket: o.Ticket})
+	if err != nil || to == nil {
+		return err
+	}
+	var count int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM delivery_webhook_receipts
+		WHERE repository=$1 AND installation_id=$2 AND finished_at IS NULL AND last_error_class=$3 AND permission_paused_at=$4`,
+		receipt.repository, receipt.installation, class, epoch).Scan(&count); err != nil {
+		return err
+	}
+	if count < 1 {
+		count = 1
+	}
+	label := "receipts"
+	if count == 1 {
+		label = "receipt"
+	}
+	key := digest([]byte(actor.TenantID + "|" + receipt.repository + "|" + receipt.installation + "|" + class + "|" + epoch.UTC().Format(time.RFC3339Nano)))
+	body := fmt.Sprintf("Delivery receipt permission: %s for %d %s. Automatic GitHub reads are paused. Check the GitHub App installation access. Paused receipts resume on their own once reads work again; redelivering one verified webhook resumes that delivery.", class, count, label)
+	var existing string
+	err = tx.QueryRow(ctx, `SELECT body FROM inbox_messages WHERE sender_principal_id=$1 AND idempotency_key=$2 FOR NO KEY UPDATE`, actor.ID, key).Scan(&existing)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		if existing == body {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `UPDATE inbox_messages SET body=$3 WHERE sender_principal_id=$1 AND idempotency_key=$2`, actor.ID, key, body)
+		return err
+	}
+	return deliveryNoticeTx(ctx, tx, actor, o.Project, to, key, body)
 }
 
 func (m *Module) checkpointWebhook(ctx context.Context, step string, outcome webhookOutcome, receipt *webhookReceipt) error {
@@ -384,33 +498,165 @@ func (m *Module) retryWebhooks(ctx context.Context) error {
 	defer stop()
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	ids := []string{}
+	type dueReceipt struct {
+		id    string
+		class *string
+	}
+	dues := []dueReceipt{}
 	err := db.InTenant(db.AllProjects(queryCtx, "delivery receipt due page"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(queryCtx, `SELECT delivery_id FROM delivery_webhook_receipts WHERE repository=$1 AND installation_id=$2 AND finished_at IS NULL AND next_attempt_at<=$3 ORDER BY next_attempt_at,delivery_id LIMIT 20`, m.config.Repository, m.config.InstallationID, m.now())
+		rows, err := tx.Query(queryCtx, `SELECT delivery_id,last_error_class FROM delivery_webhook_receipts WHERE repository=$1 AND installation_id=$2 AND finished_at IS NULL AND next_attempt_at<=$3 ORDER BY next_attempt_at,delivery_id LIMIT 20`, m.config.Repository, m.config.InstallationID, m.now())
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
+			var due dueReceipt
+			if err := rows.Scan(&due.id, &due.class); err != nil {
 				return err
 			}
-			ids = append(ids, id)
+			dues = append(dues, due)
 		}
 		return rows.Err()
 	})
 	if err != nil {
 		return err
 	}
-	var failures []error
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	permissionIDs := []string{}
+	for _, due := range dues {
+		if due.class != nil && webhookPermission(*due.class) {
+			permissionIDs = append(permissionIDs, due.id)
 		}
-		if err := m.processWebhook(ctx, id, false); err != nil && !errors.Is(err, errWebhookBusy) {
+	}
+	skip := map[string]bool{}
+	var failures []error
+	if len(permissionIDs) > 0 {
+		if prober, ok := m.github.(installationProber); ok {
+			held, probeErr := m.probePausedReceipts(ctx, prober, permissionIDs)
+			if probeErr != nil {
+				failures = append(failures, probeErr)
+			}
+			for _, id := range held {
+				skip[id] = true
+			}
+		}
+	}
+	for _, due := range dues {
+		if skip[due.id] || ctx.Err() != nil {
+			if ctx.Err() != nil {
+				return errors.Join(append(failures, ctx.Err())...)
+			}
+			continue
+		}
+		if err := m.processWebhook(ctx, due.id, false); err != nil && !errors.Is(err, errWebhookBusy) {
 			failures = append(failures, err)
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// probePausedReceipts makes one installation read for every due permission
+// pause. The session lock covers that read and the schedule change. A successful
+// probe returns no skip list so the caller performs the real attempts after the
+// lock is released. Those attempts are what increment the receipt counter.
+func (m *Module) probePausedReceipts(ctx context.Context, prober installationProber, permissionIDs []string) ([]string, error) {
+	conn, release, err := db.Acquire(ctx, m.pool)
+	if err != nil {
+		return permissionIDs, err
+	}
+	defer release()
+	key := "aeon-delivery-permission-probe:" + m.config.TenantID + ":" + m.config.InstallationID
+	var locked bool
+	if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,0))`, key).Scan(&locked); err != nil {
+		return permissionIDs, err
+	}
+	if !locked {
+		return permissionIDs, nil
+	}
+	defer unlock(conn, key)
+	bound, cancel := context.WithTimeout(ctx, webhookProbeTimeout)
+	probeErr := prober.ProbeAccess(bound)
+	cancel()
+	held := db.WithConnection(ctx, m.pool, conn)
+	switch {
+	case probeErr == nil:
+		if err = m.resumePausedReceipts(held); err != nil {
+			return permissionIDs, err
+		}
+		return nil, nil
+	case webhookPermission(webhookErrorClass(probeErr)):
+		var failures []error
+		for _, id := range permissionIDs {
+			if held.Err() != nil {
+				return permissionIDs, errors.Join(append(failures, held.Err())...)
+			}
+			if err = m.processWebhook(held, id, false); err != nil && !errors.Is(err, errWebhookBusy) {
+				failures = append(failures, err)
+			}
+		}
+		return permissionIDs, errors.Join(failures...)
+	default:
+		if ctx.Err() != nil {
+			return permissionIDs, ctx.Err()
+		}
+		delay := webhookProbeHold(probeErr)
+		if webhookLimited(webhookErrorClass(probeErr)) {
+			delay = webhookLimitBackoff(probeErr, m.now())
+		}
+		if err = m.holdPausedReceipts(held, delay); err != nil {
+			return permissionIDs, err
+		}
+		return permissionIDs, nil
+	}
+}
+
+func webhookProbeHold(cause error) time.Duration {
+	delay := webhookErrorBackoff(1, cause)
+	if delay < time.Minute {
+		delay = time.Minute
+	}
+	return min(delay, time.Hour)
+}
+
+func (m *Module) holdPausedReceipts(ctx context.Context, delay time.Duration) error {
+	at := m.now()
+	return db.InTenant(db.AllProjects(ctx, "delivery receipt permission hold"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET next_attempt_at=$3
+			WHERE repository=$1 AND installation_id=$2 AND finished_at IS NULL
+			  AND last_error_class IN ('http_401','http_403') AND next_attempt_at<=$4`,
+			m.config.Repository, m.config.InstallationID, at.Add(delay), at)
+		return err
+	})
+}
+
+func (m *Module) resumePausedReceipts(ctx context.Context) error {
+	actor, err := m.auditActor(ctx, m.config.TenantID)
+	if err != nil {
+		return err
+	}
+	at := m.now()
+	return db.InTenant(db.AllProjects(ctx, "delivery receipt pause resume"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.QueryRow(ctx, `WITH resumed AS (
+			UPDATE delivery_webhook_receipts SET next_attempt_at=$3,last_error_class=NULL,permission_paused_at=NULL
+			WHERE repository=$1 AND installation_id=$2 AND finished_at IS NULL AND last_error_class IN ('http_401','http_403')
+			RETURNING delivery_id
+		) SELECT count(*) FROM resumed`, m.config.Repository, m.config.InstallationID, at).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			return nil
+		}
+		_, err := events.Append(ctx, tx, actor, events.Change{
+			Type:  "delivery.receipt_pause_resumed",
+			After: map[string]any{"repository": m.config.Repository, "resumed_receipts": count},
+			At:    &at,
+		})
+		return err
+	})
 }
