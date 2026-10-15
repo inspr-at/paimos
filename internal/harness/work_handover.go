@@ -68,14 +68,7 @@ func PrepareWorkHandover(ctx context.Context, tx pgx.Tx, p tenant.Principal, nod
 		}
 	}
 	return func() error {
-		for _, batch := range batches {
-			for _, e := range batch.events {
-				if err := workorders.Record(ctx, tx, e.principal, e.project, "harness."+e.kind, e.before, e.after); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		return flushControlEvents(ctx, tx, batches...)
 	}, nil
 }
 

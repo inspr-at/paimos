@@ -87,7 +87,10 @@ away shows "Viewing HH:MM" and **Back to now** returns.
 the recorded runs (`GET /api/projects/{projectId}/delivery/flow` and
 `/delivery/flow/runs/{itemId}`, see [Delivery Flow data](delivery-flow-data.md)) and
 follows the server-sent hints `delivery.step`, `delivery.item` and `delivery.incident`
-by reading again; Live also reads every minute. New data for the same view keeps the
+by reading again; Live also reads every minute. Flow holds one hint stream while it is
+shown and closes it, with any read in flight, when Flow or the page is left; an answer
+that arrives later is dropped, and a render of the project page neither reads again nor
+reopens the stream (AEON-1352). New data for the same view keeps the
 person's window, time and selected step; a failed read shows an error with **Retry**,
 never an old answer. Steps carry facts only, so their labels are built from the step
 key, kind, round, outcome and wait reason. Without any recorded run, all three modes

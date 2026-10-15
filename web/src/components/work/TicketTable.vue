@@ -29,9 +29,15 @@ import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useWorkQueue } from '../../stores/workQueue'
 import { can } from '../../lib/authz'
 import { queueable } from '../../lib/workQueue'
-import { PLANNING_COLUMNS, planningPresent, planningTip, type PlanningColumn } from '../../lib/planning'
+import { PLANNING_COLUMNS, planningPresent, planningTip, shownModelNames, type PlanningColumn } from '../../lib/planning'
+import { useModelDisplay } from '../../lib/prefs'
 import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 import { useReaderAnchor } from '../../lib/readerAnchor'
+import { cancelFigureTip, closeFigureTip, figureTip, focusOpensTip, hoverFigureTip, openFigureTip } from '../../lib/figureTip'
+import { figureColumn } from '../../lib/workFigures'
+import type { ProjectFigures } from '../../lib/api'
+import FigureTip from './FigureTip.vue'
+import ColumnFigureTip from './ColumnFigureTip.vue'
 
 const NO_WORKERS: LiveAgent[] = []
 
@@ -94,6 +100,9 @@ const props = defineProps<{
   liveStale?: boolean
   // "3 updates · Show": in the Title header, so it never covers a row.
   livePill?: { text: string; overflow: boolean } | null
+  // Column header figures (AEON-1358): the view's figures object (null while it is counted), why it could not be
+  // counted, and whether Hide closed hides rows of this view. Without it, headers show the plain sort hint.
+  columnFigures?: { figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean } | null
 }>()
 // Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
 const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
@@ -191,6 +200,35 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   if (row.eta?.leaf_count && row.eta.leaf_count > 1) label += `; ${row.eta.estimated_leaves ?? 0} of ${row.eta.leaf_count} leaves estimated${row.eta.progress_basis === 'leaves' ? '; progress counts leaves' : ''}`
   return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
+// ---------- Column header figures (AEON-1358): the sort hint, then the column's figures, in the one figure tip ----------
+// Mouse hover after 380 ms (moving along the header row switches at once), keyboard focus at once; never on touch.
+const COLUMN_TIP = 'col:'
+const tipColumn = computed(() => props.columnFigures && figureTip.anchor && figureTip.owner.startsWith(COLUMN_TIP) ? columns.value.find(column => column.id === figureTip.owner.slice(COLUMN_TIP.length)) ?? null : null)
+const tipWidth = computed(() => {
+  const def = tipColumn.value ? figureColumn(tipColumn.value.id, props.columnFigures?.figures ?? null) : null
+  return def ? def.wide ? 'wide' : 'fig' : 'auto'
+})
+// The Model popup names each model as the Model cells do.
+const { modelDisplay } = useModelDisplay()
+const tipModelName = computed(() => tipColumn.value?.id === 'model' ? shownModelNames(props.rowsById.values(), modelDisplay.value) : undefined)
+const headFigures = (id: string) => !!props.columnFigures && !phone.value && (!!figureColumn(id, props.columnFigures.figures) || id === 'title')
+function headEnter(event: PointerEvent, id: string) {
+  if (event.pointerType === 'mouse') hoverFigureTip(event.currentTarget as HTMLElement, `${COLUMN_TIP}${id}`, 'above', COLUMN_TIP)
+}
+function headLeave(event: PointerEvent) {
+  const head = event.currentTarget as HTMLElement
+  // A keyboard-opened popup stays until blur; one the pointer opened (or a sort click left focused) goes with it.
+  if (event.pointerType !== 'mouse' || head.matches(':focus-visible')) return
+  cancelFigureTip(); closeFigureTip(head)
+}
+function headFocus(event: FocusEvent, id: string) {
+  const head = event.currentTarget as HTMLElement
+  if (focusOpensTip(head)) openFigureTip(head, `${COLUMN_TIP}${id}`, 'above')
+}
+function headBlur(event: FocusEvent) { closeFigureTip(event.currentTarget as HTMLElement) }
+const sortHint = (label: string) => 'Sort by ' + label.toLowerCase() + '\nShift-click adds a secondary sort'
+onBeforeUnmount(() => { if (figureTip.owner.startsWith(COLUMN_TIP)) closeFigureTip() })
+
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
 const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({
   ...def,
@@ -660,7 +698,11 @@ defineExpose({
               :indeterminate="!!selected?.size && !allChecked" :disabled="selectionDisabled" :aria-label="allChecked ? 'Clear the selection' : 'Select all loaded tickets'" aria-keyshortcuts="Control+A Meta+A"
               @change="emit('selectAll', ($event.target as HTMLInputElement).checked)"
             />
-            <button v-if="column.field && !sortDisabled" type="button" class="th-sort" :class="{ on: sortOf(column.field) }" :data-tip="'Sort by ' + column.label.toLowerCase() + '\nShift-click adds a secondary sort'" @click="event => emit('sort', column.field!, event.shiftKey)">
+            <button
+              v-if="column.field && !sortDisabled" type="button" class="th-sort" :class="{ on: sortOf(column.field) }" :data-tip="headFigures(column.id) ? undefined : sortHint(column.label)"
+              :aria-describedby="tipColumn?.id === column.id ? 'figure-tip' : undefined" @click="event => emit('sort', column.field!, event.shiftKey)"
+              @pointerenter="event => headFigures(column.id) && headEnter(event, column.id)" @pointerleave="headLeave" @focus="event => headFigures(column.id) && headFocus(event, column.id)" @blur="headBlur"
+            >
               <span>{{ column.label }}</span>
               <span class="sort-mark" aria-hidden="true">
                 <template v-if="sortOf(column.field)">
@@ -670,6 +712,10 @@ defineExpose({
                 <AppIcon v-else-if="!sort.length && column.field === 'updated_at'" name="arrow-down" :size="11" class="default-sort" />
               </span>
             </button>
+            <span
+              v-else-if="headFigures(column.id) && column.id !== 'title'" class="th-label figures" tabindex="0" :aria-describedby="tipColumn?.id === column.id ? 'figure-tip' : undefined"
+              @pointerenter="event => headEnter(event, column.id)" @pointerleave="headLeave" @focus="event => headFocus(event, column.id)" @blur="headBlur"
+            >{{ column.label }}</span>
             <span v-else class="th-label">{{ column.label }}</span>
             <button
               v-if="column.id === 'title' && livePill" type="button" class="live-pill" :aria-label="livePill.text" aria-keyshortcuts="u"
@@ -992,6 +1038,12 @@ defineExpose({
         </template>
       </tbody>
     </table>
+    <FigureTip v-if="tipColumn && columnFigures" :width="tipWidth">
+      <ColumnFigureTip
+        :column-id="tipColumn.id" :label="tipColumn.label" :sortable="!!tipColumn.field && !sortDisabled" :figures="columnFigures.figures" :failed="columnFigures.failed"
+        :hidden-rows="columnFigures.hiddenRows" :now="now" :model-name="tipModelName"
+      />
+    </FigureTip>
 
     <div v-if="error" class="state" role="alert">
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
@@ -1062,7 +1114,9 @@ thead th:first-child { padding-left: 18px; }
 .th-sort:hover { color: var(--ink); background: var(--row-hover); }
 .th-sort:active { background: var(--row-selected); }
 .th-sort.on { color: var(--teal-ink); }
-.th-sort:focus-visible { box-shadow: var(--focus-ring); }
+.th-sort:focus-visible, .th-label.figures:focus-visible { box-shadow: var(--focus-ring); }
+.th-label.figures { cursor: default; }
+.th-label.figures:hover { color: var(--ink); background: var(--row-hover); }
 .sort-mark { display: inline-flex; align-items: center; gap: 1px; min-width: 11px; }
 .sort-index { font-size: 9px; letter-spacing: 0; }
 .default-sort { opacity: .55; }

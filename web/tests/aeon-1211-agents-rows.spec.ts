@@ -71,6 +71,11 @@ async function rowGuard(page: Page) {
 
 // The design check's probes (design/ag-approved/check.mjs), limited to the Sessions card.
 async function probe(page: Page) {
+  // Rows appear before LiveBot's async artwork; sample only once every visible
+  // avatar has its state badge. Keep the normal assertion timeout.
+  await expect.poll(() => page.locator('.sessions .row .ava:visible').evaluateAll(avatars =>
+    avatars.length > 3 && avatars.every(avatar => avatar.querySelectorAll('svg.agent-state-mark').length === 1),
+  ), { message: 'visible session avatars have mounted their state badges' }).toBe(true)
   return page.locator('.sessions').evaluate(card => {
     const visible = (el: Element) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' }
     const edges: string[] = []
@@ -131,6 +136,9 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(lead.locator('.c-time')).toHaveAttribute('data-tip', 'Running 1 h 12 min')
       // Wide rows name the model in Execution; no opener mark, no harness twice.
       await expect(lead.locator('.op-mark')).toBeHidden()
+      // Indicator art is an async component. Wait until each avatar has its badge; the probe still requires exactly one.
+      const avatars = page.locator('.sessions .row .ava')
+      for (let i = 0; i < await avatars.count(); i++) await expect(avatars.nth(i).locator('svg.agent-state-mark')).toHaveCount(1)
       const p = await probe(page)
       expectAvatars(p.avatars)
       expect(p.marks.every(n => n === 1), 'one harness mark per row').toBe(true)

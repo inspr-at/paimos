@@ -79,7 +79,7 @@ for (const state of ['done', 'accepted', 'delivered']) {
     await expect(benefits).not.toContainText('Before Done')
     await ws.getByRole('button', { name: 'Edit', exact: true }).click()
     await expect(benefits).toContainText('Each non-empty pill needs 2–4 words to save.')
-    await expect(benefits).toContainText('Completing it again needs both languages and benefits.')
+    await expect(benefits).toContainText('The project’s entry checks determine what is needed before Done.')
     await expect(benefits).not.toContainText('Before Done')
   })
 }

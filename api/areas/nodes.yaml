@@ -114,6 +114,7 @@ paths:
               properties:
                 ids: {type: array, minItems: 1, maxItems: 500, items: {type: string, format: uuid}}
                 state: {type: string, minLength: 1, maxLength: 64}
+                override_reason: {type: string, minLength: 1, maxLength: 500, description: 'People only; recorded with the missing entry checks for each transition.'}
                 priority: {type: [string, 'null'], maxLength: 32}
                 assignee: {type: [string, 'null'], format: uuid}
                 tags_add:
@@ -155,6 +156,8 @@ paths:
                         id: {type: string, format: uuid}
                         key: {type: string}
                         reason: {type: string}
+                        to_status: {type: string, description: 'Target status when entry checks refused the change.'}
+                        failed: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckResult'}}
                         code:
                           type: string
                           description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
@@ -280,7 +283,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodeError'
+                oneOf:
+                  - {$ref: '#/components/schemas/NodeError'}
+                  - {$ref: '#/components/schemas/EntryChecksFailed'}
         '412':
           $ref: '#/components/responses/Error'
         '422':
@@ -777,6 +782,15 @@ components:
       type: object
       required: [id, at, type, author]
       properties:
+        entry_checks:
+          type: object
+          required: [type, to_status, failed, reason, count]
+          properties:
+            type: {type: string, enum: [refused, override]}
+            to_status: {type: string}
+            failed: {type: array, maxItems: 32, items: {type: string}}
+            reason: {type: [string, 'null']}
+            count: {type: integer, minimum: 1}
         automatic_change: {$ref: '#/components/schemas/StatusAutopilotChange'}
         id: {type: string, description: "Stable tenant-local event ID, represented as a decimal string"}
         at: {type: string, format: date-time}
@@ -955,6 +969,7 @@ components:
       type: object
       minProperties: 1
       properties:
+        override_reason: {type: string, minLength: 1, maxLength: 500, description: 'People may override failing entry checks with a nonblank reason. Agents cannot override. The reason, missing checks and status change are recorded together.'}
         human_check: {type: [string, 'null'], maxLength: 500, description: 'Set a pending human check. Null marks it checked; only a person can clear a pending check. Server authors completion provenance; only a person can set a new pending check when it clears stored completion provenance. Writers, including agents, may set or edit a pending check without stored completion provenance. Existing revision preconditions apply.'}
         estimate_hours:
           type: [number, 'null']

@@ -162,7 +162,7 @@ func PrepareRoutineWorkTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 		}
 		// Existing live assignment, person pickup or uncertain exit holds this
 		// leaf. A lost heartbeat never supplies permission for a second writer.
-		if err := requireWriterFree(ctx, tx, t.ID, c.work.QueueRunID); err != nil {
+		if err := requireWriterFree(ctx, tx, t.ID, c.work.QueueRunID, nil); err != nil {
 			var refusal *workorders.Error
 			if errors.As(err, &refusal) && refusal.Status == 409 {
 				out.WaitReason = "writer_unconfirmed"
@@ -182,7 +182,10 @@ func PrepareRoutineWorkTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 			}
 			continue
 		}
-		ready := readiness(t)
+		ready, err := entryReadiness(ctx, tx, p, t)
+		if err != nil {
+			return out, err
+		}
 		if workqueue.State(t.State) == "blocked" || !ready.Queueable || t.Stale {
 			out.WaitReason = "work_not_eligible"
 			continue

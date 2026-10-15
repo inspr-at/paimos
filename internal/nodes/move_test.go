@@ -4,9 +4,11 @@ package nodes
 
 import (
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +96,51 @@ func TestMovePreconditions(t *testing.T) {
 	}
 }
 
+func TestSiblingRanksPastTenChildren(t *testing.T) {
+	// Risk: sibling ranks compared as text put every child after the tenth at
+	// rank 10, so their order (and a parent queue cursor) falls back to random
+	// IDs, and placing before a later sibling picks the wrong neighbours.
+	p := newPrincipal(t, "sibling-ranks")
+	project := kindBySlug(t, p, "project")
+	work := kindBySlug(t, p, "work")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
+	rank := func(n nodeJSON) *big.Rat {
+		t.Helper()
+		r, ok := parseDecimal(n.Position)
+		if !ok {
+			t.Fatalf("position %q", n.Position)
+		}
+		return r
+	}
+	var kids []nodeJSON
+	for i := range 12 {
+		kid := mustNode(t, p, `{"kind_id":"`+work.ID+`","title":"Child `+strconv.Itoa(i)+`","parent_id":"`+root.ID+`"}`)
+		if i > 0 && rank(kid).Cmp(rank(kids[i-1])) <= 0 {
+			t.Fatalf("child %d appended at %s, not after %s", i, kid.Position, kids[i-1].Position)
+		}
+		kids = append(kids, kid)
+	}
+	w := moveRequest(p, kids[1].ID, `{"parent_id":"`+root.ID+`","before_id":"`+kids[11].ID+`"}`)
+	moved := decode[nodeJSON](t, w.Code, w.Body.Bytes(), http.StatusOK)
+	if rank(moved).Cmp(rank(kids[10])) <= 0 || rank(moved).Cmp(rank(kids[11])) >= 0 {
+		t.Fatalf("moved to %s, want between %s and %s", moved.Position, kids[10].Position, kids[11].Position)
+	}
+	want := []string{kids[0].ID}
+	for _, kid := range kids[2:11] {
+		want = append(want, kid.ID)
+	}
+	want = append(want, kids[1].ID, kids[11].ID)
+	status, body := call(t, &p, http.MethodGet, "/api/nodes?parent_id="+root.ID, "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	var got []string
+	for _, item := range page.Items {
+		got = append(got, item.ID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sibling order %v, want %v", got, want)
+	}
+}
+
 func TestConcurrentMovesPrecondition(t *testing.T) {
 	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, http.TimeFormat} {
 		t.Run(layout, func(t *testing.T) {
@@ -168,5 +215,43 @@ func TestMovePreconditionCycleAndTenantIsolation(t *testing.T) {
 	current := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if !reflect.DeepEqual(root, current) {
 		t.Fatal("refused move changed root")
+	}
+}
+
+func TestSiblingPlacementOrdersPositionsNumerically(t *testing.T) {
+	// Risk: placement read sibling positions in text order ("10" before "9"),
+	// so every append from the eleventh child on tied at 10 and fell back to
+	// UUID order, and before_id and moves picked the wrong neighbours.
+	p := newPrincipal(t, "sibling-order")
+	project := kindBySlug(t, p, "project")
+	work := kindBySlug(t, p, "work")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
+	var want []string
+	for range 12 {
+		want = append(want, mustNode(t, p, `{"kind_id":"`+work.ID+`","title":"Child","parent_id":"`+root.ID+`"}`).ID)
+	}
+	// The eleventh child holds position 10, which sorts first as text.
+	inserted := mustNode(t, p, `{"kind_id":"`+work.ID+`","title":"Inserted","parent_id":"`+root.ID+`","before_id":"`+want[10]+`"}`)
+	want = append(want[:10:10], append([]string{inserted.ID}, want[10:]...)...)
+	status, body := call(t, &p, http.MethodPost, "/api/nodes/"+want[0]+"/move", `{"parent_id":"`+root.ID+`"}`)
+	decode[nodeJSON](t, status, body, http.StatusOK)
+	want = append(want[1:], want[0])
+
+	status, body = call(t, &p, http.MethodGet, "/api/nodes?parent_id="+root.ID, "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	got := make([]string, len(page.Items))
+	for i, n := range page.Items {
+		got[i] = n.ID
+		if i == 0 {
+			continue
+		}
+		previous, okPrevious := parseDecimal(page.Items[i-1].Position)
+		current, okCurrent := parseDecimal(n.Position)
+		if !okPrevious || !okCurrent || previous.Cmp(current) >= 0 {
+			t.Fatalf("positions not strictly increasing at %d: %s then %s", i, page.Items[i-1].Position, n.Position)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sibling order %v, want %v", got, want)
 	}
 }

@@ -108,7 +108,11 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		if err = queuePermission(r.Context(), tx, p, t.ProjectID, true); err != nil {
 			return nil, err
 		}
-		if err = workqueue.RequireBuildAdmissionTx(r.Context(), tx, p, t.ID, "", nil); err != nil {
+		admission, err := workorders.OrderBuildAdmissionTx(r.Context(), tx, e.Run.OrderID)
+		if err != nil {
+			return nil, err
+		}
+		if err = workqueue.RequireBuildAdmissionTx(r.Context(), tx, p, t.ID, "", nil, &admission); err != nil {
 			var conflict *workqueue.BuildConflict
 			if errors.As(err, &conflict) {
 				reason := "build_in_flight"
@@ -120,7 +124,11 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 			return nil, err
 		}
-		if workqueue.State(t.State) == "blocked" || !readiness(t).Ready {
+		ready, err := entryReadiness(r.Context(), tx, p, t)
+		if err != nil {
+			return nil, err
+		}
+		if workqueue.State(t.State) == "blocked" || !ready.Ready {
 			continue
 		}
 		// A queue entry cannot mint a retry lineage or an unbounded cost hold.
@@ -256,6 +264,13 @@ func queueTryRouteWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, t que
 		return false, err
 	}
 	defer func() { _ = attempt.Rollback(ctx) }()
+	admission, err := workorders.OrderBuildAdmissionTx(ctx, attempt, v.OrderID)
+	if err != nil {
+		return false, err
+	}
+	if err = workqueue.RequireBuildAdmissionTx(ctx, attempt, p, t.ID, "", nil, &admission); err != nil {
+		return false, err
+	}
 	if err = freezeHandoff(ctx, attempt, t, v, target.Agent, lead); err != nil {
 		return false, err
 	}
@@ -308,9 +323,12 @@ func queueTryRouteWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, t que
 	if err = workorders.Record(ctx, attempt, p, t.ID, "queue.routed", v, target); err != nil {
 		return false, err
 	}
+	if err = admission.Record(ctx, attempt, p, "", v.ID); err != nil {
+		return false, err
+	}
 	return true, attempt.Commit(ctx)
 }
-func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
+func queueClaimable(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, admission ...*workorders.BuildAdmission) error {
 	if v.QueueNodeID == nil || v.Status != "queued" {
 		return nil
 	}
@@ -318,13 +336,17 @@ func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
 	if err != nil {
 		return err
 	}
-	if err = workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, t.ID, "", nil); err != nil {
+	if err = workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, t.ID, "", nil, admission...); err != nil {
 		return err
 	}
 	if v.QueueTargetAgentID == nil && v.QueueRoutedAt == nil {
 		return workorders.Fail(409, "coordinator routing required")
 	}
-	if workqueue.State(t.State) != "open" || !readiness(t).Ready {
+	ready, err := entryReadiness(ctx, tx, p, t)
+	if err != nil {
+		return err
+	}
+	if workqueue.State(t.State) != "open" || !ready.Ready {
 		return workorders.Fail(409, "ticket is not ready for pickup")
 	}
 	var earlier bool
@@ -441,10 +463,14 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		out.Routed, out.Replay = true, true
 		return out, nil
 	}
-	if !readiness(t).Ready || workqueue.State(t.State) != "open" {
+	ready, err := entryReadiness(ctx, tx, p, t)
+	if err != nil {
+		return out, err
+	}
+	if !ready.Ready || workqueue.State(t.State) != "open" {
 		return out, workorders.Fail(409, "work_not_eligible")
 	}
-	if err = requireWriterFree(ctx, tx, t.ID, v.ID); err != nil {
+	if err = requireWriterFree(ctx, tx, t.ID, v.ID, nil); err != nil {
 		return out, err
 	}
 	wait, err := workqueue.BlockingTx(ctx, tx, t.ID)

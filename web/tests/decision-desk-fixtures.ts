@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 import type { Question } from '../src/lib/decisionDeskApi'
 import { fixtures, mockWork, PNG } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -16,7 +16,7 @@ export function sampleQuestion(id = 'question-1', input: Partial<Question['input
     askers: [{ id: 'asker-1', principal_id: 'agent-1', reply_root_id: 'root-1', comment_node_id: 'n-a1', input: { request_id: id, question: 'Which index?', options: [], meanwhile: 'parked' } }], pending: [],
   }
 }
-export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; short?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean; html?: boolean; projectedSources?: () => DeskProjectionItem[] } = {}) {
+export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; short?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean; html?: boolean; emptyDesk?: boolean; projectedSources?: () => DeskProjectionItem[] } = {}) {
   const data = fixtures()
   data.projects.find(project => project.id === 'p-aeon')!.title = 'Paimos Aeon'
   if (options.theme) data.preferences.theme = { choice: options.theme }
@@ -41,6 +41,16 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method()
     if (method === 'GET') reads.push(new URL(request.url()).pathname + new URL(request.url()).search)
+    if (options.emptyDesk) {
+      if (path === '/api/decision-desk/projection') return route.fulfill({ json: { items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: new Date().toISOString() } })
+      if (path === '/api/decision-desk') return route.fulfill({ json: { items: [], has_more: false } })
+      if (path === '/api/approvals') return route.fulfill({ json: [] })
+      if (path === '/api/rules/doctrine/inbox') return route.fulfill({ json: { items: [], pending: 0 } })
+      if (path === '/api/stepup-requests' && method === 'GET') return route.fulfill({ json: { items: null, has_more: false } })
+      if (path === '/api/key-trim-proposals' && method === 'GET') return route.fulfill({ json: { items: [], has_more: false } })
+      if (path === '/api/harness-sessions') return route.fulfill({ json: { items: [], next_cursor: null } })
+      if (path.endsWith('/messages') && method === 'GET') return route.fulfill({ json: { items: [], next_after: 0 } })
+    }
     if (path === '/api/decision-desk/projection') {
       if (control.failProjection) return route.fulfill({ status: 403, json: { error: 'Access changed' } })
       const rows: DeskProjectionItem[] = questions.filter(q => q.state === 'open').map(q => ({ id: q.id, kind: 'question', project_id: q.project_id, revision: q.revision, title: q.input.question, created_at: q.created_at, held: q.input.meanwhile !== 'carries_on', href: `/decision-desk?item=q:${q.id}`, source: `/api/questions/${q.id}` }))
@@ -127,4 +137,16 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
     return route.fallback()
   })
   return control
+}
+
+/** AEON-1339: the Desk has no Refresh link; it reads again on window focus. Wait until that
+ * read of the open questions has landed and the list is no longer busy. */
+export async function refreshDesk(page: Page, world: { reads: string[] }) {
+  const reads = () => world.reads.filter(path => path.startsWith('/api/decision-desk?state=open')).length
+  // A read already in flight would swallow the focus event.
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+  const before = reads()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(reads).toBeGreaterThan(before)
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
 }

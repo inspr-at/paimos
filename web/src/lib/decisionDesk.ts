@@ -20,15 +20,33 @@ export interface DeskOutcomeEffect {
   receipt_state?: 'queued' | 'handed_off' | 'failed'; receipt_failure?: string; error_code?: string; error_message?: string; effect_ref?: string; doctrine_state?: string
   effect_data?: { retryable?: boolean; review_required?: DeskEffectReview[]; ticket_id?: string; criterion?: string; knowledge_id?: string; doctrine_id?: string; supersedes?: string; superseded_by?: string }
 }
+/** What the asking agent does meanwhile, as the question set it. */
+export type DeskMeanwhile = 'carries_on' | 'parked' | 'paused' | 'stopped'
+/** Who asked: the principal and, when known, the exact session; names resolve at render time. */
+export interface DeskAsker { principalId: string; sessionId?: string; name?: string }
+/** The answer's own delivery as the server reports it (AEON-1339; the read receipt follows with AEON-1340). */
+export type DeskDeliveryState = 'pending' | 'delivered' | 'failed'
 export interface DeskItem {
   id: string; kind: DeskKind; projectId: string; projectName: string; projectKey?: string; ticketId?: string; ticketKey?: string
+  askers?: DeskAsker[]; meanwhileKind?: DeskMeanwhile; suggested?: DeskOutcome; suggestedBy?: 'agent' | 'ticket' | 'project'
+  decidedAt?: string; deliverAfter?: string; deliveryState?: DeskDeliveryState
   title: string; context: string; findings: string; meanwhile: string; destination: string
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
   outcomes?: DeskOutcomeAvailability[]; doctrine?: DeskDoctrineTarget; outcomeEffects?: DeskOutcomeEffect[]
   unavailable?: string; prUrl?: string; source?: string; linkOut?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest; lesson?: { learning: MethodLearning; outdated: boolean }; undoEvent?: number
+  /** A run-scoped approval's run, and the work order (ticket) it runs when a read named it (AEON-1339). */
+  runId?: string; workOrderId?: string
 }
+/** A run as the desk names it everywhere: the run-id convention of the agents pages, the full id in the tip. */
+export const runRef = (id: string) => `Run ${id.slice(0, 8)}`
+/** The asking agent as the memo names it: its session's name, harness mark and model. */
+export interface DeskWho { name: string; harness?: string; model?: string }
+/** The ticket an item is about, as one bounded lookup names it. */
+export interface DeskTicket { key: string; title: string }
+/** How the memo closed; after the last decision it names the item decided last. */
+export interface DeskClose { afterLast: boolean; last?: DeskItem; skipped?: boolean }
 export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
 export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
 export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval', account_matrix: 'Account matrix', lesson: 'Lesson to adopt' }
@@ -36,16 +54,54 @@ export function draftFor(item: DeskItem): DeskDraft {
   const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim' || item.kind === 'stepup'
   return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: initialOutcome(item), dirty: false }
 }
-/** A recorded answer stays. An unavailable suggestion never starts selected; Once does. */
+/** A recorded answer stays. The draft never starts on an unavailable stamp: the
+ * suggestion, then the scope default, then the first usable stamp (AEON-1339). */
 export function initialOutcome(item: DeskItem): DeskOutcome {
   if (item.decided || !outcomeUnavailable(item, item.outcome)) return item.outcome
-  return 'once'
+  const scope: DeskOutcome = item.ticketId || item.ticketKey ? 'once' : 'always'
+  const order: DeskOutcome[] = [scope, 'once', 'always', 'requirement', 'doctrine']
+  return order.find(outcome => !outcomeUnavailable(item, outcome)) ?? 'once'
 }
 /** Quiet hint when the asker's stamp cannot be selected. Empty when that stamp is usable. */
 export function suggestedUnavailableNote(item: DeskItem): string {
   if (item.decided || (item.kind !== 'question' && item.kind !== 'handover')) return ''
   if (!outcomeUnavailable(item, item.outcome) || item.outcome === 'once') return ''
   return `Suggested: ${outcomeLabels[item.outcome]} · not available for this question`
+}
+const PLAIN_WHY: Record<string, (project: string) => string> = {
+  'Requirement needs a linked editable ticket.': () => 'Not available: this question has no ticket, so there are no acceptance criteria to add to.',
+  'The linked ticket is no longer editable.': () => 'Not available: the ticket can’t be edited any more.',
+  'Requirement needs text acceptance criteria; review the ticket\'s list or structured criteria first.': () => 'Not available: the ticket’s acceptance criteria aren’t plain text. Review them on the ticket first.',
+  'Doctrine needs an authorized source, rule and exact base mapping.': () => 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
+  'Doctrine needs a confirmed source, rule and exact base mapping.': () => 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
+  'This outcome requires knowledge.write permission.': project => `Not available: you can’t write decisions to ${project}’s Knowledge.`,
+  'This outcome requires nodes.write permission.': project => `Not available: you can’t edit tickets in ${project}.`,
+  'Doctrine requires workspace rules.write permission.': () => 'Not available: you can’t propose rule changes.',
+  'The doctrine inbox adapter is unavailable.': () => 'Not available: this server can’t propose rule changes yet.',
+  'Question decision permission is required.': project => `Not available: you can’t decide questions in ${project}.`,
+}
+/** The reason a stamp is off, in plain words for the memo (the server sentence stays the authority). */
+export function stampWhy(item: DeskItem, outcome: DeskOutcome): string {
+  const why = outcomeUnavailable(item, outcome)
+  if (!why) return ''
+  const plain = PLAIN_WHY[why]
+  if (plain) return plain(item.projectName)
+  if (why.endsWith('availability could not be confirmed.')) return `Couldn’t check whether ${outcomeLabels[outcome]} is available. Try again in a moment.`
+  return why
+}
+/** One line under the stamps: what the chosen stamp does with the answer. */
+export function stampDescription(item: DeskItem, outcome: DeskOutcome): string {
+  const project = item.projectId ? item.projectName : 'the workspace'
+  const base = {
+    once: 'For this question only. The agent gets it; it stays in Decided.',
+    always: `From now on. When an agent asks the same again, ${project} answers with this and does not ask you.`,
+    requirement: `Adds an acceptance criterion to ${item.ticketKey || 'the ticket'}.`,
+    doctrine: `Proposes a rule for ${project}; you approve it in Rules, as today.`,
+  }[outcome]
+  if (item.decided) return base
+  if (item.suggestedBy === 'agent' && item.suggested === outcome) return `${base} Suggested by the agent.`
+  if (item.suggestedBy !== 'agent' && item.suggested === outcome) return `${base} ${item.suggestedBy === 'ticket' ? 'Preselected: the question is about one ticket.' : `Preselected: the question applies across ${project}.`}`
+  return base
 }
 export function answerFor(item: DeskItem, draft: DeskDraft): string {
   const choice = item.choices.find(option => option.id === draft.optionId)
@@ -126,6 +182,31 @@ export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): st
 // Compatibility links are data, never a selector or a destination to execute.
 export function deskLinkItem(value: unknown): string {
   return typeof value === 'string' && /^[qamrtksl]:[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/.test(value) ? value : ''
+}
+
+export interface DeskSourceLine { text: string; retry: boolean }
+
+// Step-up warnings contain the word "approval", so that pattern is tested first.
+// A later generic approval match would mislabel a step-up failure as an approval failure.
+export function deskSourceLines(warnings: readonly string[], linkMissing = false): DeskSourceLine[] {
+  const lines = new Map<string, boolean>()
+  const failed = (text: string) => lines.set(text, true)
+  for (const warning of warnings) {
+    if (/could not be read|unavailable|could not be confirmed|could not be hydrated/i.test(warning) && !/limited|limit is|first \d|Only|outside this page|may be incomplete|more step-up/i.test(warning)) {
+      if (/step-up/i.test(warning)) failed('Some step-up approvals couldn’t be loaded')
+      else if (/^Approvals|approval/i.test(warning)) failed('Some approvals couldn’t be loaded')
+      else if (/Questions|question/i.test(warning)) failed(/More questions/.test(warning) ? 'More questions couldn’t be loaded' : 'Some questions couldn’t be loaded')
+      else if (/rule change/i.test(warning)) failed('Some rule changes couldn’t be loaded')
+      else if (/key trim/i.test(warning)) failed('Some key trims couldn’t be loaded')
+      else if (/action request/i.test(warning)) failed('Some action requests couldn’t be loaded')
+      else if (/tier/i.test(warning)) failed('Some tier requests couldn’t be loaded')
+      else if (/Project names/i.test(warning)) failed('Project names couldn’t be loaded')
+      else if (/desk could not be read/i.test(warning)) failed('The desk couldn’t be loaded')
+      else failed('Some items couldn’t be loaded')
+    } else lines.set(warning.replace(/\.$/, ''), false)
+  }
+  if (linkMissing) failed('This link’s item couldn’t be found')
+  return [...lines.entries()].map(([text, retry]) => ({ text, retry }))
 }
 
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {

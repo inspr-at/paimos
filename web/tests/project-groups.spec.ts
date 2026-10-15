@@ -43,7 +43,10 @@ test('Open, Doing and Done cells: icons hold the left edge, numbers the right, t
     await expect(cells).toHaveCount(3)
     const lefts = new Set<number>(), rights = new Set<number>()
     for (const cell of await cells.all()) {
-      const outer = await box(cell), icon = await box(cell.locator('svg')), number = await box(cell.locator('.stat-num'))
+      // AEON-1362's in-progress stripes use an HTML shape; every status keeps
+      // the shared icon box, regardless of its rendering element.
+      await expect(cell.locator('.status-icon')).toHaveCount(1)
+      const outer = await box(cell), icon = await box(cell.locator('.status-icon')), number = await box(cell.locator('.stat-num'))
       // Icon at the cell's left edge, number at its right edge.
       expect(Math.abs(icon.x - outer.x)).toBeLessThanOrEqual(1)
       expect(Math.abs(number.x + number.width - (outer.x + outer.width))).toBeLessThanOrEqual(1)

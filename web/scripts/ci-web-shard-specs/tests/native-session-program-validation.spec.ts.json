@@ -1,0 +1,13 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 6.666666666666667,
+    "selectedTests": 1
+  },
+  "spec": {
+    "file": "tests/native-session-program-validation.spec.ts",
+    "listedTests": 1,
+    "weightSeconds": 6.666666666666667,
+    "weightSource": "AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"
+  }
+}

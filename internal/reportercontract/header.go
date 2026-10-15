@@ -15,6 +15,7 @@ import "net/http"
 const Header = "Aeon-Contract"
 
 const (
+	ReviewRun       = "review-run/1.0"
 	StageHandoffs   = "stage-handoffs/1.0"
 	StageEvidence   = "stage-evidence/1.0"
 	StageResult     = "stage-result/1.0"
@@ -23,7 +24,7 @@ const (
 	Me              = "me/1.4"
 	BaselineBatches = "baseline-batches/1.0"
 	Approvals       = "approvals/1.1"
-	HarnessSession  = "harness-session/3.2"
+	HarnessSession  = "harness-session/3.3"
 	ProjectLead     = "project-lead/1.1"
 )
 

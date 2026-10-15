@@ -15,7 +15,7 @@ import (
 func (g AppReader) QueueChecks(ctx context.Context, suite queueSuite, run *queueRun) (string, []queueRun, error) {
 	var workflow string
 	var out []queueRun
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+	err := g.readInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
 		var err error
 		workflow, out, err = readQueueChecks(get, suite, run)
 		return err

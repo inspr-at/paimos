@@ -1,0 +1,22 @@
+{
+  "group": "agent-pause",
+  "nightlyTiming": {
+    "seconds": 97.344,
+    "selectedTests": 25
+  },
+  "spec": {
+    "file": "tests/agent-pause.spec.ts",
+    "listedTests": 15,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.531,
+        "median": 3.866,
+        "min": 1.773
+      },
+      "seconds": 97.344,
+      "selectedTests": 25
+    },
+    "weightSeconds": 19.97561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

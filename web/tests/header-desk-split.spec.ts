@@ -120,7 +120,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: join(dir, `preview-${width}-${theme}.png`) })
     // A row opens its item on the Desk, and the preview steps away.
     await firstRow.click()
-    await expect(page).toHaveURL('/decision-desk?item=a:approval-1')
+    await expect(page).toHaveURL('/decision-desk?from=preview&item=a:approval-1')
     await expect(preview(page)).toBeHidden()
     await expect(page.locator('.places .place.split')).toHaveClass(/active/)
     await page.screenshot({ path: join(dir, `desk-active-${width}-${theme}.png`), clip: { x: 0, y: 0, width, height: 120 } })
@@ -173,10 +173,11 @@ test('the preview says when it shows part of the Desk, nothing, or could not rea
   await page.reload()
   await chevron(page).click()
   await expect(preview(page)).toContainText('Count unavailable')
-  await expect(preview(page).getByRole('alert')).toContainText('Decision Desk could not be read (403).')
+  // One calm line with its action inline (AEON-1339), never the raw server sentence.
+  await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
   await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, count unavailable')
   control.failProjection = false
-  await preview(page).getByRole('button', { name: 'Retry', exact: true }).click()
+  await preview(page).getByRole('button', { name: 'Try again', exact: true }).click()
   await expect(preview(page)).toContainText('20 things for you')
   await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, 20 open')
 })
@@ -309,7 +310,30 @@ const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => 
 })
 // The trail element itself, whatever it shows; the probe judges only what is in sight.
 const trailOf = (page: Page) => page.locator('.app-header .crumbs')
-const settle = (page: Page) => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+// The header fits in the resize callback and once more on the next frame: dropping
+// a segment changes the row, and a key can be clipped for that one frame. Two
+// animation frames can land between those passes (nightly: 'chip PHAROS' at a
+// single width). Wait until the chips agree across two frames, after fonts.
+const settle = (page: Page) => page.evaluate(async () => {
+  await document.fonts.ready
+  const signature = () => {
+    const trail = document.querySelector<HTMLElement>('.app-header .crumbs')
+    if (!trail) return 'none'
+    const chips = [...trail.querySelectorAll<HTMLElement>('.sep, .key-badge, .crumb-name, .mono-crumb')].map(el => {
+      const box = el.getBoundingClientRect()
+      return `${el.className}:${el.dataset.dropped ?? ''}:${Math.round(box.width * 2)}:${el.scrollWidth}:${el.clientWidth}`
+    }).join('|')
+    return `${trail.scrollWidth}:${trail.clientWidth}:${chips}`
+  }
+  let previous = ''
+  for (let frame = 0; frame < 40; frame++) {
+    await new Promise<void>(done => requestAnimationFrame(() => done()))
+    const next = signature()
+    if (frame > 0 && next === previous) return
+    previous = next
+  }
+  throw new Error('header trail did not settle')
+})
 const TRAILS = [
   { slug: 'tickets', path: '/p/PHAROS/tickets', ready: (page: Page) => expect(page.locator('.app-header .app-density')).toBeVisible() },
   { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full', ready: (page: Page) => expect(trailOf(page).locator('.crumb.current')).toHaveText('PHAROS-11') },
@@ -517,11 +541,12 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
       { name: 'a poll fails', run: async () => {
         control.failProjection = true
         await page.clock.runFor(30_000)
-        await expect(preview(page).getByRole('alert')).toContainText('Decision Desk could not be read (403).')
+        // One calm line with its action inline (AEON-1339), never the raw server sentence.
+        await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
       } },
       { name: 'Retry reads it again', run: async () => {
         control.failProjection = false
-        await preview(page).getByRole('button', { name: 'Retry', exact: true }).click()
+        await preview(page).getByRole('button', { name: 'Try again', exact: true }).click()
         await expect(preview(page)).toContainText('5 things for you')
       } },
     ],
@@ -586,7 +611,7 @@ for (const [width, where, path, away] of [[375, 'home', '/', true], [375, 'a tic
     await avatar.click()
     await entry.click()
     await preview(page).getByRole('link', { name: /^Approval · nodes\.read, / }).click()
-    await expect(page).toHaveURL('/decision-desk?item=a:approval-1')
+    await expect(page).toHaveURL('/decision-desk?from=preview&item=a:approval-1')
     await expect(preview(page)).toBeHidden()
   })
 }

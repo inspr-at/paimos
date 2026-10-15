@@ -127,27 +127,20 @@ func (m *Module) listenDelivery(ctx context.Context, wakes chan<- struct{}, wait
 func (m *Module) listenDeliveryConnection(ctx context.Context, wakes chan<- struct{}) error {
 	ctx, stop := context.WithTimeout(ctx, db.ListenerMaxLifetime)
 	defer stop()
-	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
-	if conn != nil {
-		defer func() {
-			closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			_ = conn.Close(closeCtx)
-		}()
-	}
-	if err == nil {
-		_, err = conn.Exec(connectCtx, "LISTEN aeon_events")
-	}
-	cancel()
+	conn, err := db.SubscribeNotifications(ctx, m.pool, "aeon_events", "")
 	if err != nil {
 		return err
 	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	wakeDelivery(wakes)
 	for {
 		n, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			return err
+		}
+		if db.IsResync(n) {
+			wakeDelivery(wakes)
+			continue
 		}
 		var hint struct {
 			Tenant string `json:"tenant_id"`

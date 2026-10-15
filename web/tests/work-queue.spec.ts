@@ -9,6 +9,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
+import type { EntryBlock, EntryCheck } from '../src/lib/entryChecks'
 const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
 const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
@@ -48,6 +49,18 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
     const req = route.request(), url = new URL(req.url()), path = url.pathname, method = req.method()
     const body = req.postData() ? req.postDataJSON() as Record<string, unknown> : null
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
+    const entryNode = /^\/api\/nodes\/([^/]+)\/entry-checks$/.exec(path)
+    if (entryNode) {
+      const node = data.nodes.find(n => n.id === entryNode[1])!
+      const gaps = gapsFor(node)
+      const checks: EntryCheck[] = [
+        { id: 'estimate_set', label: 'Estimate set', applicable: true, passed: !gaps.includes('estimate'), reason: 'Set an estimate', can_tick: false },
+        { id: 'acceptance_present', label: 'Acceptance criteria written', applicable: true, passed: !gaps.includes('criteria'), reason: 'Write acceptance criteria', can_tick: false },
+        { id: 'blocker_named', label: 'Blocker named', condition: 'blocked', applicable: node.state === 'blocked', passed: !gaps.includes('blocker'), reason: 'Name the blocker', can_tick: false },
+      ]
+      const block: EntryBlock = { to_status: 'in_progress', checks, total: checks.filter(c => c.applicable).length, passed: checks.filter(c => c.applicable && c.passed).length }
+      return json({ node_id: node.id, revision: node.updated_at, definition: { id: 'definition', revision: now, source: 'workspace', checks: {} }, blocks: [block], entries: [], latest_refusal: null })
+    }
     if (path === '/api/me/permissions') {
       const permissions = mockEffectivePermissions(options.viewer ? 'viewer' : 'admin', url.searchParams.get('project_id') ?? undefined)
       if (!options.viewer) permissions.workspace.permissions.push('run.create', 'models.read', 'account.read')
@@ -217,21 +230,21 @@ test('not-ready fixes apply server estimate and explicitly save criteria/blocker
   const { data, state } = await world(page, { missing: true })
   await row(page, 'PHAROS-14').hover()
   await row(page, 'PHAROS-14').getByRole('button', { name: /Queue PHAROS-14/ }).click()
-  const panel = page.getByRole('dialog', { name: /PHAROS-14: what is missing/ })
+  const panel = page.getByRole('dialog', { name: 'PHAROS-14: Ready checks' })
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeDisabled()
-  await expect(panel.getByRole('button', { name: 'Apply ~3 h' })).toBeVisible()
-  await expect(panel.getByRole('status')).toHaveText('Still missing: estimate, acceptance criteria, a named blocker.')
+  await expect(panel.getByRole('button', { name: 'Suggest estimate' })).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'Ready 0 of 3' })).toBeVisible()
   for (const theme of ['light', 'dark']) { await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme); await page.screenshot({ path: join(shots, `not-ready-${theme}.png`) }) }
-  await panel.getByRole('button', { name: 'Apply ~3 h' }).click()
-  await expect(panel.getByRole('status')).toHaveText('Still missing: acceptance criteria, a named blocker.')
-  await panel.getByRole('button', { name: 'Draft criteria' }).click()
-  await panel.getByRole('textbox', { name: 'Draft acceptance criteria' }).fill('- [ ] Verified in both themes')
-  await panel.getByRole('button', { name: 'Save criteria' }).click()
+  await panel.getByRole('button', { name: 'Suggest estimate' }).click()
+  await expect(panel.getByRole('heading', { name: 'Ready 1 of 3' })).toBeVisible()
+  await panel.getByRole('button', { name: 'Write criteria' }).click()
+  await panel.getByRole('textbox', { name: 'Acceptance criteria', exact: true }).fill('- [ ] Verified in both themes')
+  await panel.getByRole('button', { name: /^Save/ }).click()
   await panel.getByRole('button', { name: 'Name it' }).click()
   await panel.getByRole('textbox', { name: 'Name the blocker' }).fill('PHAROS-11')
-  await panel.getByRole('button', { name: 'Save blocker' }).click()
+  await panel.getByRole('button', { name: /^Save/ }).click()
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeEnabled()
-  await expect(panel.getByRole('status')).toHaveText('Queued work meets the definition of ready.')
+  await expect(panel.getByRole('heading', { name: 'Ready 3 of 3' })).toBeVisible()
   await panel.getByRole('button', { name: 'Queue', exact: true }).click()
   await expect.poll(() => state.ids.includes('n-4')).toBe(true)
   const node = data.nodes.find(n => n.id === 'n-4')!
@@ -628,10 +641,10 @@ test('stale progress queued through readiness fixes also offers Undo', async ({ 
   const { data, state } = await world(page, { stale: true, staleMissing: true })
   const ticket = row(page, 'PHAROS-12')
   await ticket.hover(); await ticket.locator('.q-btn').click()
-  const panel = page.getByRole('dialog', { name: 'PHAROS-12: what is missing to queue it' })
-  await panel.getByRole('button', { name: 'Draft criteria' }).click()
-  await panel.getByRole('textbox', { name: 'Draft acceptance criteria' }).fill('- [ ] Recovery verified')
-  await panel.getByRole('button', { name: 'Save criteria' }).click()
+  const panel = page.getByRole('dialog', { name: 'PHAROS-12: Ready checks' })
+  await panel.getByRole('button', { name: 'Write criteria' }).click()
+  await panel.getByRole('textbox', { name: 'Acceptance criteria', exact: true }).fill('- [ ] Recovery verified')
+  await panel.getByRole('button', { name: /^Save/ }).click()
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeEnabled()
   await panel.getByRole('button', { name: 'Queue', exact: true }).click()
   await expect(ticket.locator('.c-status')).toContainText('Open')

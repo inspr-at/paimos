@@ -3,6 +3,7 @@
 package agentaccounts
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,19 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+type admissionGrant struct {
+	actor  nativecontract.Actor
+	policy nativecontract.Policy
+}
+
+func (a admissionGrant) RequireNativeGrantTx(_ context.Context, _ pgx.Tx, actor nativecontract.Actor, _ nativecontract.StartIntent, policy nativecontract.Policy) error {
+	if actor.PrincipalID != a.actor.PrincipalID || actor.GrantID != a.actor.GrantID ||
+		actor.GrantRevision != a.actor.GrantRevision || policy != a.policy {
+		return nativeDenial(nativecontract.ReasonIdentityMismatch)
+	}
+	return nil
+}
 
 // Risk: an advisory route becomes launch authority after account/context/model
 // revocation, or identity changes silently reuse a native conversation.
@@ -93,18 +107,34 @@ func TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity(t *testin
 	dbtest.BindRole(t, d, person.TenantID, person.ID, "admin")
 	dbtest.BindRole(t, d, person.TenantID, paired.ID, "member")
 	var binding NativeAccountBinding
+	policy := nativecontract.Policy{GrantID: uid(18), GrantRevision: 1, ExpiresAt: now.Add(time.Hour)}
+	authority := admissionGrant{actor: nativecontract.Actor{PrincipalID: person.ID, GrantID: policy.GrantID, GrantRevision: policy.GrantRevision}, policy: policy}
 	seed(func(tx pgx.Tx) error {
 		if err := agentpairing.Lock(seedCtx, tx); err != nil {
 			return err
 		}
 		var err error
 		binding, err = BindNativeAccountTx(seedCtx, tx, in)
+		if err != nil {
+			return err
+		}
+		actorRaw, _ := json.Marshal(map[string]any{"principal": person, "key_id": "", "auth_key_id": "", "actor_owner_id": person.ID, "grant_id": policy.GrantID, "grant_revision": policy.GrantRevision})
+		intentRaw, _ := json.Marshal(nativecontract.StartIntent{RequestID: uid(19), Role: "coordinator", Profile: "native", Harness: in.Harness, AccountID: in.AccountID, ComputerID: in.ComputerID, ModelProfileID: in.ModelProfileID})
+		policyRaw, _ := json.Marshal(policy)
+		if _, err := tx.Exec(seedCtx, `INSERT INTO native_session_bindings(tenant_id,id,project_id,owner_person_id,actor_principal_id,role,harness,account_id,computer_id,paired_principal_id,workspace_id,model_profile_id,policy_id,daemon_id,view)
+ VALUES($1,$2,$3,$4,$4,'coordinator',$5,$6,$7,$8,'fixture',$9,$10,$11,'{}')`, person.TenantID, in.OwnedSessionID, in.ProjectID, person.ID, in.Harness, in.AccountID, in.ComputerID, paired.ID, in.ModelProfileID, uid(20), in.DaemonID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(seedCtx, `INSERT INTO native_session_intents(tenant_id,id,request_id,owned_session_id,project_id,owner_person_id,actor_principal_id,actor_kind,actor_key_ceiling,actor_authority,actor_grant_id,actor_grant_revision,request_digest,intent,policy,launch_config)
+ VALUES($1,$2,$3,$4,$5,$6,$6,'person','{}',$7,$8,1,$9,$10,$11,'{}')`, person.TenantID, uid(21), uid(19), in.OwnedSessionID, in.ProjectID, person.ID, actorRaw, policy.GrantID, []byte(strings.Repeat("d", 32)), intentRaw, policyRaw)
 		return err
 	})
 	finalCtx := tenant.WithPrincipal(dbtest.Seed(t.Context()), paired)
 	check := func(want nativecontract.Reason) {
 		t.Helper()
-		err := db.InTenant(finalCtx, d.App, person.TenantID, func(tx pgx.Tx) error { return RequireNativeSessionTx(finalCtx, tx, paired, in, binding, "", now) })
+		err := db.InTenant(finalCtx, d.App, person.TenantID, func(tx pgx.Tx) error {
+			return RequireNativeSessionTx(finalCtx, tx, paired, in, binding, "", now, authority)
+		})
 		if want == "" {
 			if err != nil {
 				t.Fatal(err)

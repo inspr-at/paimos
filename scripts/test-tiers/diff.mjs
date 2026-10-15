@@ -6,8 +6,9 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
 import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
-import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, semanticRegistryPattern, registryImpact } from './core.mjs'
+import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, semanticRegistryPattern, registryImpact, select, webShardPlan } from './core.mjs'
 import { browserImpact, nightlyBrowserMap } from './browser-impact.mjs'
+import { loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
 
 // Shared bounded diff reader for Actions event bases and offline merge bases.
 export function pathsBetween(base, { exec=command }={}) {
@@ -139,9 +140,10 @@ export function registryChangesBetween(base, paths, { cwd = root, exec = command
   return changes
 }
 
-export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,registryChanges,readFile,tests:suppliedTests,imports,browserMap,baseTree}={}) {
+export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph,checkout=root,base,tree,registryChanges,readFile,tests:suppliedTests,imports,browserMap,baseTree,fingerprint}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
+  if(impact==='off')return full('CI_IMPACT=off')
   if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
   if(!validImpactPaths(paths))return full('invalid or oversized impact diff')
   const browserData=paths.find(browserDataInput)
@@ -175,7 +177,7 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     graph??=webGraph(resolve(root,'web'))
     if(graph[graphIncomplete])return full(`incomplete web dependency graph: ${graph[graphIncomplete]}`)
     const changed=[...webChanges.filter(file=>!risk.handled.has(`web/${file}`)),...webSeeds]
-    const coverage=browserImpact(changed,graph,browserMap,baseTree)
+    const coverage=browserImpact(changed,graph,browserMap,baseTree,fingerprint)
     if(coverage.full)return full(coverage.reason)
     const impacted=new Set([...reverseDependants(new Set(changed),graph),...coverage.specs])
     if(webChanges.some(file=>!risk.handled.has(`web/${file}`)&&!Object.hasOwn(graph,file)))return full('missing trusted web dependency metadata')
@@ -190,7 +192,8 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
 // One precedence rule for every workflow consumer. Only matching trusted
 // exemptions can keep a narrow PR lane. Essential/static are wider layouts.
 // Off returns the frozen classifier value unchanged, regardless of mode/event.
-export function effectiveLane(lane,{mode,event,affectedLane}={}) {
+export function effectiveLane(lane,{mode,event,affectedLane,impact}={}) {
+  if(impact==='off')return 'full'
   if(affectedLane!=='on')return lane
   if(event!=='pull_request')return 'full'
   if(lane==='spec-only'&&mode==='spec-only')return lane
@@ -202,13 +205,30 @@ export function schedulingMode(event,paths,exists,options) {
   return schedulingDecision(event,paths,exists,options).mode
 }
 
+// Reuse the execution selector on the catalogue, without native discovery or
+// browsers. In trusted mode policy/graph come from the base, and the candidate
+// catalogue is data only; unknown/new owners fail wide.
+export function sizeWebDecision(decision, paths, { event='pull_request', affectedLane, impact, checkout=root,
+  graph, tree, registryChanges, browserMap, baseTree, fingerprint, tests, policy }={}) {
+  if (decision.mode !== 'essential' || decision.layout === 'static') return decision
+  tests ??= JSON.parse(boundedText(checkout,'scripts/ci/web-test-tiers.json',4*1024*1024)).tests
+  policy ??= loadPolicy(resolve(root,'web/ci-web-shards.json'))
+  graph ??= webGraph(resolve(root,'web'))
+  const selection=select(tests,{event,paths,affectedLane,impact,webImports:graph,tree:tree??sourceTree(checkout),registryChanges,
+    browserMap,baseTree,fingerprint,readFile:path=>boundedText(checkout,path)})
+  if(selection.full) return {mode:'full',layout:'full',reason:selection.reason}
+  const webShardSizing=webShardPlan(selection.tests,policy)
+  return {...decision,...(!webShardSizing.fitsBudget?{mode:'full',layout:'full',reason:'essential web shard projection exceeds budget; full gate required'}:{}),
+    webShards:webShardSizing.shards,webShardSizing}
+}
+
 // Snapshot the trusted planner AND graph inputs. An incomplete/old base copy
 // fails closed; never import candidate classifier code to enable narrowing.
 export function trustedSchedulingDecision(base, paths, env=process.env, {cwd=root}={}) {
   if(!/^[a-f0-9]{40}$/.test(base??''))throw new Error('Invalid trusted planner base')
   if(!validImpactPaths(paths))throw new Error('Invalid trusted paths')
   const directory=realpathSync(mkdtempSync(resolve(tmpdir(),'aeon-trusted-tier-')))
-  const archive=execFileSync('git',['archive',base,'scripts/test-tiers','scripts/ci','scripts/ci-pr-plan.mjs','scripts/playwright-safe.mjs','scripts/playwright-global-setup.mjs','scripts/playwright-lock.mjs','scripts/playwright-processes.mjs','web/scripts/ci-web-shard.mjs','web/ci-web-shards.json','web/src','web/tests','web/e2e'],
+  const archive=execFileSync('git',['archive',base,'scripts/test-tiers','scripts/ci','scripts/ci-pr-plan.mjs','scripts/playwright-safe.mjs','scripts/playwright-global-setup.mjs','scripts/playwright-lock.mjs','scripts/playwright-processes.mjs','web/src','web/tests','web/e2e','web/scripts','web/ci-web-shards.json'],
     {cwd,timeout:30_000,maxBuffer:64*1024*1024})
   execFileSync('tar',['-x','-C',directory],{input:archive,timeout:30_000,maxBuffer:2*1024*1024})
   const output=execFileSync(process.execPath,[resolve(directory,'scripts/test-tiers/diff.mjs'),'--trusted-paths'],
@@ -226,22 +246,26 @@ export function main(env=process.env) {
   const paths=env.GITHUB_EVENT_NAME==='pull_request'?changedPaths(env.GITHUB_EVENT_NAME,env,{fetchBase:true}):undefined
   let decision
   try {
-    if(env.GITHUB_EVENT_NAME==='pull_request'&&env.CI_AFFECTED_LANE==='on'&&Array.isArray(paths)) {
+    if(env.CI_IMPACT==='off')decision={mode:'full',layout:'full',reason:'CI_IMPACT=off'}
+    else if(env.GITHUB_EVENT_NAME==='pull_request'&&env.CI_AFFECTED_LANE==='on'&&Array.isArray(paths)) {
       const payload=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8'))
       decision=trustedSchedulingDecision(payload.pull_request?.base?.sha,paths,env)
     } else {
       const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
       const coverage=paths?.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(root,eventBase(env),catalogue):{}
-      decision=schedulingDecision(env.GITHUB_EVENT_NAME,paths,undefined,coverage)
+      decision=sizeWebDecision(schedulingDecision(env.GITHUB_EVENT_NAME,paths,undefined,coverage),paths,{event:env.GITHUB_EVENT_NAME,...coverage})
     }
   } catch { decision={mode:'full',layout:'full',reason:'trusted affected classification unavailable'} }
   const {mode,reason}=decision
   const layout=mode==='full'?'full':decision.layout??'full'
   if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
-  const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE})
-  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\n`,{flag:'a'})
-  console.log(`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}; changed paths ${paths?.length??'unavailable'}`)
-  if(env.GITHUB_STEP_SUMMARY)writeFileSync(env.GITHUB_STEP_SUMMARY,`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}\n`,{flag:'a'})
+  const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE,impact:env.CI_IMPACT})
+  const webShards=lane==='spec-only'&&env.GITHUB_EVENT_NAME==='pull_request'?[1]:decision.webShards??Array.from({length:12},(_,i)=>i+1)
+  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\nweb_shards=${JSON.stringify(webShards)}\n`,{flag:'a'})
+  const sizing=decision.webShardSizing
+  const note=`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}; web shards ${webShards.length}${sizing?`; projected max ${sizing.projectedMaxSeconds.toFixed(1)}s / ${sizing.budgetSeconds}s budget (25% timeout headroom, setup included)`:''}`
+  console.log(`${note}; changed paths ${paths?.length??'unavailable'}`)
+  if(env.GITHUB_STEP_SUMMARY)writeFileSync(env.GITHUB_STEP_SUMMARY,`${note}\n`,{flag:'a'})
   return 0
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
@@ -255,8 +279,9 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
       const registryChanges=registryChangesBetween(undefined,paths,{cwd:checkout,baseDirectory:root})
       const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
       const coverage=paths.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue):{}
-      console.log(JSON.stringify(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,
-        path=>existsSync(resolve(checkout,path)),{affectedLane:process.env.CI_AFFECTED_LANE,checkout,registryChanges,...coverage})))
+      const options={event:process.env.GITHUB_EVENT_NAME,affectedLane:process.env.CI_AFFECTED_LANE,impact:process.env.CI_IMPACT,checkout,registryChanges,...coverage}
+      console.log(JSON.stringify(sizeWebDecision(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,
+        path=>existsSync(resolve(checkout,path)),options),paths,options)))
     } else process.exitCode=main()
   } catch(error) { console.error(error.message);process.exitCode=1 }
 }

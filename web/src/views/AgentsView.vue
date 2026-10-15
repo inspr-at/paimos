@@ -50,8 +50,10 @@ import { agentsFooter } from '../lib/footerProviders'
 import { countedLive, jumpTarget } from '../components/agents/sessionTree'
 import { useFooterSummary } from '../lib/footerSummary'
 import { clockTime, liveSession } from '../lib/agentPause'
-import { onAction, shortcutCaps, shortcutKeys, type ShortcutAction } from '../lib/shortcuts'
+import { onAction, shortcutCaps, shortcutKeys, shortcutTyping, type ShortcutAction } from '../lib/shortcuts'
 import { usePreference, preferenceSaves } from '../lib/preferences'
+import type { PanelLayout } from '../lib/leadPanel'
+import { isHolderTerminalTarget } from '../lib/nativeTerminal/ports'
 
 // Markus's desk for agents (AEON-1209, design AEON-1196): the head line whose counts filter
 // Sessions; the capacity row (the dial and the accounts chip) that scrolls with the page;
@@ -183,12 +185,45 @@ const person = computed(() => session.identity ? `${session.identity.tenant.id}/
 const work = ref<HTMLElement>(), divider = ref<HTMLElement>(), listPane = ref<HTMLElement>()
 const workWidth = ref(0), paneHeight = ref(0)
 const canSplit = computed(() => workWidth.value >= FORM_AT + DIVIDER + OVERVIEW_DETAILS)
-const split = computed(() => !!sessionId.value && agents.loaded && !ticketPeekOpen.value && canSplit.value)
+const panelLayout = ref<PanelLayout>('side'), previousPanelLayout = ref<PanelLayout>('side')
+const panelMedia = window.matchMedia('(max-width: 720px), (max-height: 480px)')
+const smallPanel = ref(panelMedia.matches)
+const syncPanelClass = () => { smallPanel.value = panelMedia.matches }
+const largePanelPreference = usePreference<{ layout?: PanelLayout }>('agents:panel.layout.large')
+const smallPanelPreference = usePreference<{ layout?: PanelLayout }>('agents:panel.layout.phone')
+const panelPreference = computed(() => smallPanel.value ? smallPanelPreference : largePanelPreference)
+const localPanelLayout = ref<PanelLayout | null>(null)
+let panelLayoutWrite = 0
+watch([person, smallPanel], async () => {
+  const write = ++panelLayoutWrite, who = person.value
+  localPanelLayout.value = null; panelLayout.value = 'side'; previousPanelLayout.value = 'side'
+  await panelPreference.value.ready
+  if (write !== panelLayoutWrite || who !== person.value) return
+  const saved = panelPreference.value.value.value?.layout
+  if (saved === 'side' || saved === 'wide' || saved === 'full') panelLayout.value = saved
+}, { immediate: true })
+async function setPanelLayout(next: PanelLayout, persist = true) {
+  if (next === 'full') previousPanelLayout.value = panelLayout.value === 'full' ? previousPanelLayout.value : panelLayout.value
+  else if (panelLayout.value === 'full' && next === 'side') next = previousPanelLayout.value
+  const write = ++panelLayoutWrite, who = person.value, device = smallPanel.value, pref = panelPreference.value
+  panelLayout.value = next; localPanelLayout.value = persist ? next : null
+  drag = null; dragWidth.value = null
+  await nextTick()
+  if (next !== 'full') { ensureWorkTop(); placeRow() }
+  if (!persist || !await pref.ensureLoaded()) return
+  if (write !== panelLayoutWrite || who !== person.value || device !== smallPanel.value) return
+  pref.save({ ...pref.value.value, layout: next }, 0)
+  localPanelLayout.value = null
+}
+const panelOpen = computed(() => !!sessionId.value && agents.loaded && !ticketPeekOpen.value)
+const split = computed(() => panelOpen.value && canSplit.value && panelLayout.value === 'side')
+const panelOnly = computed(() => panelOpen.value && panelLayout.value === 'wide')
 const maxHandle = computed(() => workWidth.value - DIVIDER - DETAILS_MIN)
 const clampHandle = (width: number) => Math.round(Math.max(LIST_MIN, Math.min(maxHandle.value, width)))
 const savedHandle = computed(() => {
   const width = layoutPref.value.value?.handle
-  return typeof width === 'number' && Number.isFinite(width) ? width : workWidth.value - DIVIDER - OVERVIEW_DETAILS
+  // Sessions open in Focus; a width the person saved always takes precedence.
+  return typeof width === 'number' && Number.isFinite(width) ? width : FOCUS_WIDTH
 })
 const dragWidth = ref<number | null>(null)
 const pendingHandle = ref<number | null>(null)
@@ -234,6 +269,7 @@ function finishLayout(event: TransitionEvent) {
 }
 async function cycleLayout() {
   if (!layoutEnabled.value) return false
+  if (panelLayout.value !== 'side') void setPanelLayout('side')
   const owner = person.value
   const next = nextPreset.value
   if (next === 'list') { await closePanel(); return }
@@ -459,7 +495,7 @@ function move(step: number) {
 const serviceTiers = useServiceTiers()
 const pageActionScope = {
   enabled: () => !!session.identity,
-  when: (event: KeyboardEvent) => !(event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)),
+  when: (event: KeyboardEvent) => !isHolderTerminalTarget(event.target) && !isHolderTerminalTarget(document.activeElement) && !(event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)),
 }
 const actionScope = {
   ...pageActionScope,
@@ -496,9 +532,11 @@ const shortcutDisposers = [
   }, actionScope),
   onAction('agents.session.pause', () => pauseSelected('pause'), actionScope),
   onAction('agents.session.resume', () => pauseSelected('resume'), actionScope),
-  onAction('agents.details.close', () => {
+  onAction('agents.details.close', event => {
     if (ticketPeekOpen.value) return false
-    if (sessionId.value) void closePanel()
+    if (shortcutTyping(event.target)) { (event.target as HTMLElement).blur(); (event.target as HTMLElement).closest<HTMLElement>('.session-panel')?.focus({ preventScroll: true }); return }
+    if (sessionId.value && panelLayout.value === 'full') void setPanelLayout('side')
+    else if (sessionId.value) void closePanel()
     else if (filter.value) filter.value = null
     else return false
   }, pageActionScope),
@@ -538,6 +576,7 @@ function changed(event?: string, identity?: AgentEventIdentity) {
 }
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
+  panelMedia.addEventListener('change', syncPanelClass)
   const main = work.value?.closest('main')
   const measureWidth = () => { workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0) }
   const measureHeight = () => { paneHeight.value = Math.max(0, (main?.clientHeight ?? 0) - 8) }
@@ -569,6 +608,7 @@ onMounted(() => {
   clock = setInterval(() => agents.tick(), 1000)
 })
 onBeforeUnmount(() => {
+  panelLayoutWrite++; panelMedia.removeEventListener('change', syncPanelClass)
   layoutResize?.disconnect(); drag = null; dragWidth.value = null
   if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
@@ -580,7 +620,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 </script>
 
 <template>
-  <section class="agents-page" :class="{ split, dragging: dragWidth !== null, 'will-close': willClose }" :style="{ '--list-w': `${handle}px`, '--pane-h': `${paneHeight}px` }" aria-labelledby="agents-title">
+  <section class="agents-page" :class="{ split, 'panel-only': panelOnly, dragging: dragWidth !== null, 'will-close': willClose }" :style="{ '--list-w': `${handle}px`, '--pane-h': `${paneHeight}px` }" aria-labelledby="agents-title">
     <!-- One line (AEON-780): title, the counts as filters, then the controls. -->
     <header class="page-head">
       <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
@@ -640,11 +680,11 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
     </div>
     <div ref="work" class="agents-work" :data-layout="preset">
       <!-- One sticky dock. Both heads reserve its box; it never changes parents. -->
-      <div v-show="canSplit" class="layout-dock">
+      <div v-show="canSplit && !panelOpen" class="layout-dock">
         <button type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button>
       </div>
       <div class="agents-split">
-        <div ref="listPane" class="agents-list-pane" @transitionend="finishLayout">
+        <div v-show="!panelOnly" ref="listPane" class="agents-list-pane" @transitionend="finishLayout">
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
@@ -661,10 +701,11 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
         </div>
         <div ref="divider" class="agents-divider" :role="split ? 'separator' : undefined" :aria-hidden="split ? undefined : true" :aria-orientation="split ? 'vertical' : undefined" :tabindex="split ? 0 : undefined" :aria-label="split ? 'Resize the session list' : undefined" :aria-valuemin="split ? LIST_MIN : undefined" :aria-valuemax="split ? maxHandle : undefined" :aria-valuenow="split ? handle : undefined" :aria-valuetext="split ? `List width ${handle} pixels` : undefined" :data-tip="split ? 'Drag to resize the session list' : undefined" @pointerdown="startDrag" @pointermove="moveDivider" @pointerup="endDrag" @pointercancel="endDrag"><span class="grip" /></div>
         <SessionPanel
-          v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock" :docked="split" :sheet="!canSplit"
-          @close="closePanel" @control="control" @review="review"
+          v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock" :docked="split || panelOnly" :sheet="!canSplit" :layout="panelLayout" :sidebar-available="canSplit"
+          @close="closePanel" @control="control" @review="review" @layout="setPanelLayout" @auto-layout="setPanelLayout($event, false)"
         />
       </div>
+      <p v-if="panelOpen && (localPanelLayout || preferenceSaves.failed.has(`${person}/agents:panel.layout.${smallPanel ? 'phone' : 'large'}`))" class="layout-error" role="status">The panel layout lasts for this visit until it can be saved.</p>
       <p v-if="layoutSaveFailed" class="layout-error" role="status">The layout could not be saved. It lasts for this visit.</p>
     </div>
     <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
@@ -727,7 +768,11 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
    Cap the pane at the row and let the divider yield so that frame cannot widen main. */
 .agents-list-pane { flex: 0 0 100%; min-width: 0; max-width: 100%; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
-.split { padding-bottom: 8px; }
+.split, .panel-only { padding-bottom: 8px; }
+/* The pane toolbar is already below the app header. Page-anchor clearance
+   would scroll its focused controls away from the pane's top. */
+:global(main:has(.agents-page.split)), :global(main:has(.agents-page.panel-only)) { scroll-padding-top: 0; }
+.panel-only .agents-divider { display: none; }
 .agents-divider { position: relative; flex: 0 0 0; align-self: stretch; transition: flex-basis 240ms ease; }
 .split .agents-divider { flex-basis: 16px; flex-shrink: 1; min-width: 0; cursor: col-resize; touch-action: none; }
 .split .agents-divider::before { content: ''; position: absolute; top: 8px; bottom: 8px; left: 7.5px; width: 1px; background: var(--line); }

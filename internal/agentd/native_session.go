@@ -2,11 +2,9 @@
 package agentd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -67,6 +66,11 @@ type NativeLeadPlan struct {
 // Authorize reserves the server root before return. Revalidate fences current
 // rights immediately before fork/input. ReportExit settles only observed exits.
 type NativeSessionConfig struct {
+	// StartLocal resolves the exact persisted PERSON-issued C0 intent and
+	// revalidates its original actor/current grant before using the owning
+	// supervisor. Socket possession and wire selectors grant no authority.
+	// Nil leaves C0 start unavailable; it never falls back to the P1a DTO.
+	StartLocal    func(context.Context, nativecontract.LocalStart) (nativecontract.OperationResult, error)
 	Authorize     func(context.Context, NativeSessionStartRequest) (NativeLeadPlan, error)
 	Revalidate    func(context.Context, NativeLeadGrant) error
 	Register      func(context.Context, NativeLeadPlan) (HarnessSession, error)
@@ -114,9 +118,9 @@ type nativeSessions struct {
 	entries map[string]*nativeLeadEntry
 }
 
-// Version 2 adds native root provenance and input attempt digests. Version 1
-// migrates without gaining native authority. Older daemons reject version 2 in
-// their retained-lead fence before dispatch; future versions refuse explicitly.
+// Version is a major; additive fields use minor_version and are ignored by
+// older readers. Native major 2 is stored beside the released major-1 fence.
+// Future breaking majors must likewise retain the previous reader's fence.
 const leadRecordSchemaVersion = 2
 
 func decodeLeadRecord(raw []byte) (leadRecord, error) {
@@ -130,9 +134,7 @@ func decodeLeadRecord(raw []byte) (leadRecord, error) {
 		return leadRecord{}, &localjournal.SchemaVersionError{Stored: header.Version, Supported: leadRecordSchemaVersion}
 	}
 	var r leadRecord
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&r) != nil || decoder.Decode(&struct{}{}) != io.EOF || header.Version == 1 && r.Native != nil {
+	if json.Unmarshal(raw, &r) != nil || r.MinorVersion < 0 || header.Version == 1 && r.Native != nil {
 		return leadRecord{}, ErrProcessesUnconfirmed
 	}
 	r.Version = leadRecordSchemaVersion

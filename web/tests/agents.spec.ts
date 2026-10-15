@@ -115,7 +115,7 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText(/^\d+working$/)
   await lead.locator('.agent-link').click()
   await expect(panel(page)).toContainText('Claude Max')
-  await expect(panel(page)).toContainText('claude-fable-high')
+  await expect(panel(page)).toContainText('Fable · high')
   expect(errors).toEqual([])
 })
 
@@ -175,10 +175,11 @@ test('an approval from an agent with no session and no address shows its name', 
   })
   await openDesk(page, `a:${data.approvals[0].id}`)
   const facts = page.getByRole('region', { name: 'Permission request', exact: true })
-  await expect(facts).toContainText('Asked by Harbor Clerk')
-  await expect(facts.locator('time')).toHaveAttribute('datetime', data.approvals[0].expires_at)
-  await expect(facts).not.toContainText(`Agent ${principal.slice(0, 8)}`)
-  await expect(facts.getByText('The whole workspace', { exact: true })).toHaveCount(1)
+  // AEON-1339: the requester and expiry are in the memo head; What it runs shows only what runs.
+  await expect(page.getByTestId('desk-from')).toHaveText('Harbor Clerk')
+  await expect(page.getByTestId('desk-line')).toContainText(/Harbor Clerk waits for this\. Expires in \d+ min/)
+  await expect(page.getByRole('dialog')).not.toContainText(`Agent ${principal.slice(0, 8)}`)
+  await expect(facts.getByText('Across the whole workspace', { exact: true })).toHaveCount(1)
 })
 
 test('an approval without agent_name falls back to the short agent id', async ({ page }) => {
@@ -202,9 +203,8 @@ test('an approval without agent_name falls back to the short agent id', async ({
   })
   delete (data.approvals[0] as { agent_name?: string | null }).agent_name
   await openDesk(page, `a:${data.approvals[0].id}`)
-  const facts = page.getByRole('region', { name: 'Permission request', exact: true })
-  await expect(facts).toContainText(`Asked by Agent ${principal.slice(0, 8)}`)
-  await expect(facts).not.toContainText('Harbor Clerk')
+  await expect(page.getByTestId('desk-from')).toHaveText(`Agent ${principal.slice(0, 8)}`)
+  await expect(page.getByRole('dialog')).not.toContainText('Harbor Clerk')
 })
 
 test('native approval choices and field shortcuts record the exact source and retain history', async ({ page }) => {
@@ -220,7 +220,7 @@ test('native approval choices and field shortcuts record the exact source and re
   expect(calls.find(c => c.path.endsWith('/decision'))).toMatchObject({ path: `/api/approvals/${approval.id}/decision`, body: { decision: 'approved', reason: 'Fine for this run.' } })
   expect(approval.decision).toBe('approved')
   await page.getByTestId('desk-close').click()
-  await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.getByRole('radio', { name: /^Decided/ }).click()
   await expect(page.getByTestId(`desk-row-a:${approval.id}`)).toBeVisible()
 })
 
@@ -228,7 +228,8 @@ test('members can decide lower risk requests but not high risk requests', async 
   const { calls, data } = await setup(page, { member: true })
   const high = data.approvals.find(a => a.scope === 'harness.control' && !a.decision)!
   await openDesk(page, `a:${high.id}`)
-  await expect(page.getByRole('region', { name: 'Permission request', exact: true })).toContainText('High risk')
+  // AEON-1339: risk is said once, in the memo's head line.
+  await expect(page.getByTestId('desk-line')).toContainText('High risk.')
   await expect(page.getByTestId('desk-decide')).toBeDisabled()
   for (const [index, scope] of ['run.claim', 'nodes.read'].entries()) {
     const lower = data.approvals.find(a => a.scope === scope && !a.decision)!
@@ -301,7 +302,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   })
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
-  await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
+  await expect(details.getByRole('heading', { name: /^PHAROS-11 · Connect Hetzner Cloud for managed provisioning/ })).toBeVisible()
   await expect(details).toContainText('coordinator · owned by AEON')
   const ticketFact = details.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Ticket$/ }) })
   await expect(ticketFact.locator('.key')).toHaveText('PHAROS-11')
@@ -388,7 +389,7 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   expect(order).toContain(nova)
   await row(page, camy).locator('.c-time').click()
   await expect(page).toHaveURL(`/agents/${camy}`)
-  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
+  await expect(panel(page).getByRole('heading', { name: /^PHAROS-11 · Connect Hetzner Cloud for managed provisioning/ })).toBeVisible()
   await panel(page).focus()
   await page.keyboard.press('j')
   await expect(page).toHaveURL(`/agents/${order[1]}`)
@@ -515,8 +516,9 @@ test('a held action request opens the exact native desk memo', async ({ page }) 
   const held = data.messages.find(m => m.is_action_request)!
   await page.goto(`/agents?needs=m:${held.id}`)
   await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
-  await expect(page.getByTestId('desk-body')).toContainText('Please merge the release fix once CI is green')
-  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', `/agents?needs=m:${held.id}`)
+  // AEON-1339: a short request is the memo's heading, as the artifact draws it.
+  await expect(page.getByTestId('desk-paper')).toContainText('Please merge the release fix once CI is green')
+  await expect(page.getByRole('link', { name: 'Source', exact: true })).toHaveAttribute('href', `/agents?needs=m:${held.id}`)
 })
 
 test('held action requests resolve with an optional note through their original endpoint', async ({ page }) => {
@@ -606,7 +608,7 @@ test('the ticket panel shows the bound agent’s attention state and links to it
   await expect(chip).toBeVisible()
   await chip.click()
   await expect(page).toHaveURL(`/agents/${camy}`)
-  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
+  await expect(panel(page).getByRole('heading', { name: /^PHAROS-11 · Connect Hetzner Cloud for managed provisioning/ })).toBeVisible()
 })
 
 test('old approvals land on Decision Desk; runs and pacing land on Agents', async ({ page }) => {
@@ -687,7 +689,7 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
     if (width === 390) expect((await ticket.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     await expectStableControls({
-      controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Session actions' }), tabs: details.getByRole('tablist'), ticket },
+      controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Panel actions' }), tabs: details.getByRole('tablist'), ticket },
       scrollAreas: { details: details.locator('.scroll') },
       interactions: [
         { name: 'hover the ticket title', run: async () => {

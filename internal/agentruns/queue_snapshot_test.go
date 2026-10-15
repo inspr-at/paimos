@@ -675,6 +675,12 @@ func (f *fixture) continueParent(t *testing.T, parent string, previous parentSna
 
 func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
 	f := setup(t)
+	// Risk: a full page must preserve membership across continuation and replay.
+	// Runner load must not consume the server's five-second budget while this
+	// behaviour is asserted; the deadline test expires it at a write barrier.
+	clock := &snapshotClock{}
+	f.mux = http.NewServeMux()
+	agentruns.NewWithQueueClock(f.d.App, clock.withTimeout).Mount(f.mux)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	parent := f.apiQueueTicket(t, nil)
 	leaves := make(map[string]bool)
@@ -685,7 +691,15 @@ func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
 	if len(first.Items) != 100 || !first.Truncated || !first.ContinuationAvailable {
 		t.Fatalf("first page: %+v", first)
 	}
-	f.applyParent(t, first)
+	firstApplied := f.applyParent(t, first)
+	if firstApplied.State != "applied" || len(firstApplied.Items) != 100 || !firstApplied.Truncated || !firstApplied.Partial || f.queuePage(t).Count != 100 {
+		t.Fatalf("first apply: %+v", firstApplied)
+	}
+	for _, item := range firstApplied.Items {
+		if item.Outcome != "queued" || item.RunID == "" || !leaves[item.NodeID] {
+			t.Fatalf("first page lost captured membership: %+v", item)
+		}
+	}
 	second := f.continueParent(t, parent, first)
 	if len(second.Items) != 1 || second.Truncated || second.Partial || second.ContinuationAvailable {
 		t.Fatalf("remaining page: %+v", second)
@@ -696,16 +710,34 @@ func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
 	if !leaves[second.Items[0].NodeID] {
 		t.Fatal("continuation repeated a visited leaf")
 	}
-	// Work arriving after this page was captured stays outside its membership.
+	// Work arriving after this page was captured stays outside its membership,
+	// although it is appended inside the page's traversal range.
 	arrival := f.apiQueueTicket(t, &parent)
 	out := f.applyParent(t, second)
-	if snapshotOutcomes(out)[second.Items[0].NodeID] != "queued" || snapshotOutcomes(out)[arrival] != "" || f.queuePage(t).Count != 101 {
+	if out.State != "applied" || out.Partial || out.Truncated || snapshotOutcomes(out)[second.Items[0].NodeID] != "queued" || snapshotOutcomes(out)[arrival] != "" || f.queuePage(t).Count != 101 {
 		t.Fatalf("continued apply: %+v", out)
 	}
+	// A replay is a fresh capture from the same server-held cursor: it never
+	// revisits the first page, replays the remaining leaf onto its existing run
+	// and admits only the work appended beyond the cursor since.
 	replay := f.continueParent(t, parent, first)
-	if snapshotOutcomes(f.applyParent(t, replay))[second.Items[0].NodeID] != "already_queued" {
-		t.Fatal("replayed continuation lost identical membership")
+	if len(replay.Items) != 2 || snapshotOutcomes(replay)[second.Items[0].NodeID] != "pending" || snapshotOutcomes(replay)[arrival] != "pending" {
+		t.Fatalf("replayed continuation membership: %+v", replay)
 	}
+	replayed := f.applyParent(t, replay)
+	run := snapshotRun(out, second.Items[0].NodeID)
+	if run == "" || snapshotOutcomes(replayed)[second.Items[0].NodeID] != "already_queued" || snapshotRun(replayed, second.Items[0].NodeID) != run || snapshotOutcomes(replayed)[arrival] != "queued" || f.queuePage(t).Count != 102 {
+		t.Fatalf("replayed continuation lost identical membership: %+v", replayed)
+	}
+}
+
+func snapshotRun(s parentSnapshot, node string) string {
+	for _, item := range s.Items {
+		if item.NodeID == node {
+			return item.RunID
+		}
+	}
+	return ""
 }
 
 func TestParentQueueSnapshotNodeContinuation(t *testing.T) {

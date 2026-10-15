@@ -17,6 +17,35 @@ session. Related ticket records use permission-checked node relations; specialis
 Always/doctrine publishing and its context projection remain upstream package
 integration work. The unavailable stamps explain their restrictions in the memo.
 
+The memo follows the approved rev 11 artifact (AEON-1339). One SVG path draws the
+folder tab, its concave shoulder and the sheet, with one hairline. The tab carries
+the project key; the meta names the project with the Projects folder icon, then
+From, Re and Received. A run approval's Re names the ticket its run works on (the
+run's work order) and the run as "Run 1a2b3c4d", its full id in the tip; while that
+read runs, or when it fails, the run alone names the target with "Reading its
+ticket…" or "Ticket not resolved". Desk and Decided rows carry the same run label.
+One line under the meta says what the agent does meanwhile
+and, once decided, the answer's delivery. Until the read receipt exists (AEON-1340),
+that line ends at "waiting for it to read". The draft never starts on an unavailable
+stamp: the agent's suggestion, then the scope default (Once for a ticket, Always
+across a project), then the first usable stamp. Decide stays clickable while it
+cannot decide: a click names what is missing beside the button and moves focus there.
+After the last open decision the sheet reads "All decided" for 1.2 seconds, then
+closes back to where the round was opened (`from=preview|agents` returns there).
+Skipped items are taken up again before that. Undo, inside the ten-second grace and
+in the toast after closing, acts as Change: it reopens the recorded answer so a new
+decision replaces it before it goes out. The legend under the sheet never wraps; when
+it does not fit it folds into a Keys button. The Desk list shows rev 11 rows with
+inline Approve, Deny, Resolve and Dismiss, which commit through the memo's path, and
+one calm line per source that could not be read, with Try again.
+The chosen stamp takes its outcome's colour. Rows resolve their ticket as the memo
+does, and action requests are named "Action request" on the Desk, in the header
+preview and in the Agents panel. On narrow desks the bar is pinned at the foot:
+Revoke, Edit or Undo appears as a row above Skip and Decide only when the item has
+one, and the folder tab is sized once per round to fit its longest kind label. On a
+390 px phone the close button sits beside the tab's shoulder, so a six-character key,
+"Handover question" and the pager fit in full, also in wider system fonts.
+
 Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
 --option '["Title","Description","Answer"]' "Question"` stores a bounded,
 project-scoped question and returns immediately. Add `--ticket KEY`,

@@ -12,6 +12,19 @@ const now = Date.parse('2026-09-29T06:00:00Z')
 const conversation = '7c000000-0000-4000-8000-000000001071'
 const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 
+async function expectInterrupt(page: Page, enabled: boolean) {
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  const action = page.getByRole('menuitem', { name: /^Interrupt/ })
+  await expect(action).toBeVisible()
+  if (enabled) await expect(action).toBeEnabled()
+  else await expect(action).toBeDisabled()
+  await page.keyboard.press('Escape')
+}
+async function interruptTurn(page: Page) {
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: /^Interrupt/ }).click()
+}
+
 async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; bound?: boolean } = {}) {
   // A scripted EventSource: the agents feed opens quietly, and the chat-live
   // stream takes frames from the test.
@@ -79,7 +92,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     await page.goto(`/agents/${worker.id}?tab=messages`)
     const panel = panelOf(page)
     const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
-    const send = panel.locator('.compose .send'), steer = panel.locator('.steer-send'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
+    const send = panel.locator('.compose .send'), steer = panel.locator('.steer-send'), stop = panel.getByRole('button', { name: 'More session actions', exact: true })
     await expect(composer).toBeVisible()
     await expect.poll(() => lookups.length).toBe(1)
     expect(lookups[0]).toBe(`/api/chat-sessions/${worker.id}/thread`)
@@ -87,7 +100,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     // Idle: every send action is already in place, the turn-bound ones disabled.
     await expect(send).toContainText('Send')
     await expect(steer).toBeDisabled()
-    await expect(stop).toBeDisabled()
+    await expectInterrupt(page, false)
     await composer.fill('Bitte die vollständige Freigabeprüfung im Bericht berücksichtigen.')
     await composer.blur()
     const guard = await controlStability(page, { composer, send, steer, stop })
@@ -102,7 +115,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       await expect(send).toContainText('After this turn')
       await expect(steer).toBeEnabled()
       await expect(steer).toContainText('Send now')
-      await expect(stop).toBeEnabled()
+      await expectInterrupt(page, true)
     })
     await page.screenshot({ path: testInfo.outputPath(`aeon-1071-streaming-${theme}-${width}.png`) })
     await guard.check(async () => {
@@ -110,11 +123,12 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       for (let i = 0; i < 24; i++) await chunk(page, 5 + i, `Paragraph ${i + 1}: the gate stays green and the counts match the staging build.\n\n`)
       const last = panel.getByText('Paragraph 24: the gate stays green', { exact: false })
       await expect(last).toBeVisible()
-      await expect(last).toBeInViewport()
+      const geometry = await panel.locator('.thread-scroll').evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop }))
+      await expect(last, JSON.stringify(geometry)).toBeInViewport()
     })
     // Interrupt works mid-stream from the pinned session header.
     await guard.check(async () => {
-      await panel.getByRole('button', { name: 'Interrupt', exact: true }).click()
+      await interruptTurn(page)
       await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/controls/interrupt')).length).toBe(1)
       await expect(panel.locator('.live-turn')).toContainText('Stopping…')
     })
@@ -181,9 +195,9 @@ for (const item of cases) test(`AEON-1071 composer offers sends per capability: 
   await expect(panel.getByRole('button', { name: 'Send now', exact: true })).toHaveCount(item.steer === 'Send now' ? 1 : 0)
   await expect(panel.locator('.compose .send')).toContainText(item.primary)
   // Interrupt stays in the header; it works wherever the session allows it.
-  await expect(panel.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible()
-  if (item.stop) await expect(panel.getByRole('button', { name: 'Interrupt', exact: true })).toBeEnabled()
-  else await expect(panel.getByRole('button', { name: 'Interrupt', exact: true })).toBeDisabled()
+  await expect(panel.getByRole('button', { name: 'More session actions', exact: true })).toBeVisible()
+  if (item.stop) await expectInterrupt(page, true)
+  else await expectInterrupt(page, false)
   // An unbound session simply has no live stream.
   expect(await page.evaluate(() => (window as unknown as { __live?: unknown[] }).__live?.length ?? 0)).toBe(0)
 })
@@ -211,7 +225,7 @@ test('AEON-1071 a refused stop after the turn ended claims nothing', async ({ pa
   await update(page, 1, { sessionUpdate: 'state', state: 'running' })
   await chunk(page, 2, 'Checking the gate.')
   await expect(panel.locator('.live-turn')).toContainText('Checking the gate.')
-  await panel.getByRole('button', { name: 'Interrupt', exact: true }).click()
+  await interruptTurn(page)
   await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/controls/interrupt')).length).toBe(1)
   await expect(panel.locator('.live-turn')).toContainText('Stopping…')
   await update(page, 3, { sessionUpdate: 'state', state: 'idle' })
@@ -343,16 +357,15 @@ test('AEON-1071 a late history read never dismisses the live turn', async ({ pag
   await page.setViewportSize({ width: 1440, height: 860 })
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = panelOf(page)
-  const stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
   await expect.poll(() => page.evaluate(() => (window as unknown as { __live?: unknown[] }).__live?.length ?? 0)).toBe(1)
   await update(page, 1, { sessionUpdate: 'state', state: 'running' })
   await chunk(page, 2, 'Thinking about the next step.')
   await expect(panel.locator('.live-turn')).toContainText('Thinking about the next step.')
-  await expect(stop).toBeEnabled()
+  await expectInterrupt(page, true)
   release()
   await expect(panel.getByText('Earlier saved reply.', { exact: true })).toBeVisible()
   await update(page, 3, { sessionUpdate: 'state', state: 'idle' })
-  await expect(stop).toBeDisabled()
+  await expectInterrupt(page, false)
   await expect(panel.locator('.live-turn')).toContainText('Thinking about the next step.')
   // Its own final, announced by the stream, replaces it.
   chat.push(nativeFinal(worker, '3e000000-0000-4000-8000-000000000950', 950, 'Final: next step planned.'))
@@ -383,7 +396,7 @@ test('AEON-1071 a cached watermark on a chat-native final never reaches the sess
   await expect.poll(marks).toEqual([{ last_read_message_id: data.messages[2]!.id, last_read_event_id: 202 }])
   // Re-entering Chat re-observes the same rows after acknowledgement. This
   // establishes the duplicate-write trigger without depending on refresh timing.
-  await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
+  await panel.getByRole('tab', { name: 'Details', exact: true }).click()
   await panel.getByRole('tab', { name: /Chat/ }).click()
   await expect(panel.locator('.msg', { hasText: 'Final: the release checks pass.' })).toBeVisible()
   await page.clock.runFor(4_000)
@@ -438,7 +451,7 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = panelOf(page)
   const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
-  const send = panel.locator('.compose .send'), steer = panel.locator('.steer-send'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true }), note = panel.locator('.steer-note')
+  const send = panel.locator('.compose .send'), steer = panel.locator('.steer-send'), stop = panel.getByRole('button', { name: 'More session actions', exact: true }), note = panel.locator('.steer-note')
   const row = panel.locator('.msg', { hasText: 'Final: the release checks pass.' })
   await expect(row).toBeVisible()
   await composer.fill('Ship it after the smoke test.')
@@ -457,7 +470,7 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     await expect(steer).toHaveCount(0)
     await expect(note).toHaveText('Chat replies arrive between turns')
     await expect(send).toContainText('After this turn')
-    await expect(stop).toBeEnabled()
+    await expectInterrupt(page, true)
   })
   await guard.check(async () => {
     await panel.getByRole('button', { name: 'Cancel the reply', exact: true }).click()

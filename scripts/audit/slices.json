@@ -38,6 +38,7 @@
       "paths": [
         "internal/auth/**",
         "internal/authz/**",
+        "internal/db/migrations/1355_authenticated_review_runs.sql",
         "internal/identity/**",
         "internal/agentsecurity/**",
         "internal/credentialguard/**",
@@ -431,7 +432,9 @@
         "web/src/components/settings/ProjectRepositorySettings.vue",
         "web/src/components/settings/ProjectDeliveryChecks.vue",
         "web/src/components/settings/models/ModelLineRow.vue",
-        "web/src/components/settings/models/ModelDiscovery.vue"
+        "web/src/components/settings/models/ModelDiscovery.vue",
+        "web/src/components/settings/DefinitionEditor.vue",
+        "web/src/components/settings/ProjectDefinitionsSettings.vue"
       ]
     },
     {
@@ -442,6 +445,7 @@
         "web/src/**",
         "web/tests/**",
         "web/e2e/**",
+        "web/perf/**",
         "web/*",
         "web/.vscode/**",
         "web/public/**",
@@ -464,7 +468,8 @@
         "web/src/lib/projectAdvanced.ts",
         "web/src/lib/projectDeliverySettings.ts",
         "web/tests/project-delivery-settings.spec.ts",
-        "web/tests/project-delivery-settings.unit.test.ts"
+        "web/tests/project-delivery-settings.unit.test.ts",
+        "web/src/lib/definitions.ts"
       ],
       "exclude": [
         "web/src/views/**",

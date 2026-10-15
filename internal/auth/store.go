@@ -489,6 +489,9 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			SELECT id::text, tenant_id::text, kind, name, roles
 			FROM principals WHERE id = $1::uuid
 		`, principalID))
+		if err == nil {
+			err = tx.QueryRow(ctx, `SELECT coalesce(messaging_only,false) FROM principals WHERE id=$1::uuid`, principalID).Scan(&p.MessagingOnly)
+		}
 		p.FullAccess = fullAccess
 		p.Scopes = authz.ResolveKeyScopes([]string(scopes), p.FullAccess)
 		p.KeyID, p.OwnerWorkstation = keyID, marked
@@ -664,6 +667,9 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 			if err != nil {
 				return err
 			}
+		}
+		if err := refuseMessagingAssistantKeyTx(ctx, tx, principalID); err != nil {
+			return err
 		}
 		if err := pairedIdentity(ctx, tx, principalID); err != nil {
 			return err

@@ -159,6 +159,14 @@ func disconnectTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer s
 			return fail(409, "conflict", "computer enrollments changed; review disconnect scope again")
 		}
 	}
+	// Immediate revocation would remove the daemon's reconciliation/final
+	// authority. A root remains owned until verified release, even while idle
+	// or queued. Drain instead retains the enrollment below until that release.
+	if in.Mode == "revoke_now" {
+		if err := requireNativeRootsReleased(ctx, tx, computer, in.AccountID); err != nil {
+			return err
+		}
+	}
 	// Monotonic transitions: a repeated drain cannot undo immediate revocation.
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments SET state=$3 WHERE computer_id=$1 AND ($2='' OR account_id=nullif($2,'')::uuid) AND state<>'revoked' AND state<>$3`, computer, in.AccountID, target)
 	if err != nil {
@@ -229,6 +237,9 @@ func cancelQueued(ctx context.Context, tx pgx.Tx, computer, account string, all 
 	return nil
 }
 func revokeComputer(ctx context.Context, tx pgx.Tx, id string, pending ...*[]events.Change) error {
+	if err := requireNativeRootsReleased(ctx, tx, id, ""); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, id); err != nil {
 		return err
 	}
@@ -248,7 +259,9 @@ func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string, pending ...*
 	// its authenticated exit report clears the retained process hold.
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments e SET state='revoked' WHERE computer_id=$1 AND state='draining'
   AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.account_id=e.account_id AND (r.status IN ('starting','running','waiting')
-   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, computer)
+   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
+  AND NOT EXISTS(SELECT 1 FROM native_session_roots r WHERE r.tenant_id=e.tenant_id
+   AND r.account_id=e.account_id AND r.run_id IS NULL AND r.released_at IS NULL)`, computer)
 	if err != nil {
 		return err
 	}
@@ -261,7 +274,10 @@ func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string, pending ...*
 		}
 	}
 	var ready bool
-	if err = tx.QueryRow(ctx, `SELECT state='draining' AND NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE computer_id=$1 AND state<>'revoked') FROM agent_pairing_computers WHERE id=$1`, computer).Scan(&ready); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT state='draining'
+ AND NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE computer_id=$1 AND state<>'revoked')
+ AND NOT EXISTS(SELECT 1 FROM native_session_roots WHERE computer_id=$1 AND run_id IS NULL AND released_at IS NULL)
+ FROM agent_pairing_computers WHERE id=$1`, computer).Scan(&ready); err != nil {
 		return err
 	}
 	if ready {
@@ -272,6 +288,18 @@ func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string, pending ...*
 func disconnectRequest(ctx context.Context, tx pgx.Tx, rec record) error {
 	if rec.ComputerID == nil {
 		return nil
+	}
+	// Lifecycle-secret cleanup cannot revoke an enrollment that still owns a
+	// native root. Check before any state change, including partial pairings.
+	var roots bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_session_roots r
+ WHERE r.run_id IS NULL AND r.released_at IS NULL AND
+ (($2 AND r.computer_id=$1) OR EXISTS(SELECT 1 FROM agent_pairing_enrollments e
+  WHERE e.tenant_id=r.tenant_id AND e.account_id=r.account_id AND e.request_id=$3)))`, *rec.ComputerID, rec.Details.ExistingComputerID == "", rec.ID).Scan(&roots); err != nil {
+		return err
+	}
+	if roots {
+		return ErrNativeRootsUnreleased
 	}
 	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments SET state='revoked' WHERE request_id=$1`, rec.ID); err != nil {
 		return err

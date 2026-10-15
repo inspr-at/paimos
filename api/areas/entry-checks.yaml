@@ -1,0 +1,251 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /nodes/{nodeId}/entry-checks:
+    get:
+      operationId: getNodeEntryChecks
+      description: 'The effective whole workspace or project definition, live checks for Ready, QA and Done, immutable entry records, and the latest agent refusal. No definition means no checks. Reads require nodes.read in the current project. Advice is rechecked inside every final status or queue mutation.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryNodeId'}]
+      responses:
+        '200': {description: 'Checks and entry history', content: {application/json: {schema: {$ref: '#/components/schemas/EntryChecks'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/entry-evidence:
+    post:
+      operationId: recordEntryCheckEvidence
+      description: 'Record a person project-admin design attachment. Review and visual verdicts require authenticated reviewer runs; caller-supplied session IDs and ordinary coordinator credentials cannot produce approvals. Legacy request fields remain accepted for compatibility but review and visual submissions are refused.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryNodeId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [check_id, ok, expected_revision]
+              properties:
+                check_id: {type: string, enum: [review_ok_cross_family, design_attached, visual_ok]}
+                ok: {type: boolean}
+                expected_revision: {type: string, format: date-time}
+                head_sha: {type: string, pattern: '^[0-9a-f]{40}$'}
+                base_sha: {type: string, pattern: '^[0-9a-f]{40}$'}
+                author_session_id: {type: string, format: uuid}
+                reviewer_session_id: {type: string, format: uuid}
+                attachment_id: {type: string, format: uuid}
+      responses:
+        '204': {description: 'Evidence recorded'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '412': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/entry-checks/{checkId}:
+    put:
+      operationId: markNodeEntryCheck
+      description: 'Tick or undo a manual item in the effective definition. Only its current person owner or a project admin may tick; agents are refused. Completion is an event bound to the definition revision and ticket revision. A missing owner falls back to a current project admin. The server authors provenance.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/EntryNodeId'}
+        - {name: checkId, in: path, required: true, schema: {type: string, maxLength: 80}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [checked, expected_revision]
+              properties:
+                checked: {type: boolean}
+                expected_revision: {type: string, format: date-time}
+      responses:
+        '200': {description: 'Refreshed checks', content: {application/json: {schema: {$ref: '#/components/schemas/EntryChecks'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '412': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/definitions:
+    get:
+      operationId: getProjectEntryDefinition
+      description: 'Read the whole effective definition. A project copy replaces all workspace checks, including an empty copy. When neither scope has a saved definition, the built-in workspace default requires estimate, criteria and blocker checks before In progress, and release copy and lesson_recorded before Done. No epic or ticket definitions. Uses nodes.read.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
+      responses:
+        '200': {description: 'Effective definition or null', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putProjectEntryDefinition
+      description: 'Save a complete project copy as a definition node. Requires a person with current project admin authority under the tenant and tree fence. A revision precondition prevents lost updates. This does not grant transition, merge or release authority.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
+      requestBody: {$ref: '#/components/requestBodies/EntryDefinitionWrite'}
+      responses:
+        '200': {description: 'Saved copy', content: {application/json: {schema: {$ref: '#/components/schemas/EntryDefinition'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetProjectEntryDefinition
+      description: 'Remove the project copy and follow the current workspace default. Requires a person project admin under the tenant and tree fence. Both the project copy and the displayed workspace revision must still match. Tickets keep their status and entry history.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, expected_workspace_revision]
+              properties:
+                expected_revision: {type: string, format: date-time}
+                expected_workspace_revision: {type: [string, 'null'], format: date-time}
+      responses:
+        '200': {description: 'Effective workspace default after reset', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/definitions/context:
+    get:
+      operationId: getProjectEntryDefinitionContext
+      description: 'Read the effective definition, the current workspace default, the server-retained copied checks and current edit authority for the project settings editor. Uses nodes.read in this project; it grants no workspace edit access. The copy base never changes during ordinary edits.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
+      responses:
+        '200': {description: 'Project definition editor context', content: {application/json: {schema: {$ref: '#/components/schemas/EntryDefinitionContext'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /settings/definitions:
+    get:
+      operationId: getWorkspaceEntryDefinition
+      description: 'Read the workspace default definition node. Uses nodes.read at workspace scope.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Workspace default or null', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putWorkspaceEntryDefinition
+      description: 'Save the whole workspace default as a definition node. Requires a person with settings.manage under the tenant and tree fence. Existing project copies retain their own checks and copied_from_revision.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {$ref: '#/components/requestBodies/EntryDefinitionWrite'}
+      responses:
+        '200': {description: 'Saved workspace default', content: {application/json: {schema: {$ref: '#/components/schemas/EntryDefinition'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  parameters:
+    EntryNodeId: {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    EntryProjectId: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+  requestBodies:
+    EntryDefinitionWrite:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [checks, expected_revision]
+            properties:
+              expected_revision: {type: [string, 'null'], format: date-time, description: 'Null creates the first definition at this scope; otherwise its current revision is required.'}
+              copied_from_revision: {type: [string, 'null'], format: date-time}
+              expected_workspace_revision: {type: [string, 'null'], format: date-time, description: 'Optional precondition for copying the displayed workspace default; also supports the built-in default revision.'}
+              checks: {$ref: '#/components/schemas/EntryDefinitionBlocks'}
+  schemas:
+    EntryDefinitionContext:
+      type: object
+      required: [project_id, definition, workspace_default, copied_from_checks, can_manage]
+      properties:
+        project_id: {type: string, format: uuid}
+        definition: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
+        workspace_default: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
+        copied_from_checks: {oneOf: [{$ref: '#/components/schemas/EntryDefinitionBlocks'}, {type: 'null'}], description: 'Checks retained by the server when this project copied the default; null for a definition created without a copy base.'}
+        can_manage: {type: boolean, description: 'The current principal is a person project admin. The server rechecks this inside every write.'}
+    EntryDefinitionBlocks:
+      type: object
+      additionalProperties: false
+      properties:
+        in_progress: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckRule'}}
+        qa: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckRule'}}
+        done: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckRule'}}
+    EntryCheckRule:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, maxLength: 80, description: 'estimate_set, acceptance_present, design_attached, blocker_named, no_active_build, ci_green_latest_main, review_ok_cross_family, visual_ok, pills_benefits_set, release_copy_set, lesson_recorded, merged, released, or manual:<slug>. lesson_recorded applies only before Done to incident/regression tags or labels, the non-obvious-fix label, or non_obvious_fix true; it passes with an accepted project Knowledge changelog line linked to the ticket or its comment, or an explicit No lesson: <reason> line in the body, description or a current comment.'}
+        label: {type: string, maxLength: 200, description: 'Required for manual items.'}
+        label_de: {type: string, maxLength: 200}
+        condition: {type: string, enum: [all, ui, code, blocked, release_notes, releases]}
+        kinds: {type: array, maxItems: 16, items: {type: string, maxLength: 64}}
+        labels: {type: array, maxItems: 16, items: {type: string, maxLength: 100}, description: 'All listed labels must be present, case-insensitively.'}
+        owner_id: {type: [string, 'null'], format: uuid, description: 'A named person; otherwise the person assignee, then a current project admin.'}
+    EntryDefinition:
+      type: object
+      required: [id, revision, source, checks]
+      properties:
+        id: {type: string, format: uuid, description: 'The all-zero UUID identifies the built-in workspace default, which is not a saved node. Saving the first definition uses expected_revision null.'}
+        revision: {type: string, format: date-time}
+        source: {type: string, enum: [project, workspace]}
+        copied_from_revision: {type: [string, 'null'], format: date-time}
+        checks: {$ref: '#/components/schemas/EntryDefinitionBlocks'}
+    EntryCheckResult:
+      allOf:
+        - {$ref: '#/components/schemas/EntryCheckRule'}
+        - type: object
+          required: [label, applicable, passed, reason, can_tick]
+          properties:
+            applicable: {type: boolean}
+            passed: {type: boolean}
+            reason: {type: string}
+            owner: {type: [object, 'null'], properties: {id: {type: string, format: uuid}, name: {type: string}}}
+            checked_by: {type: [object, 'null'], properties: {id: {type: string, format: uuid}, name: {type: string}}}
+            checked_at: {type: [string, 'null'], format: date-time}
+            can_tick: {type: boolean}
+    EntryCheckBlock:
+      type: object
+      required: [to_status, passed, total, checks]
+      properties:
+        to_status: {type: string}
+        passed: {type: integer, minimum: 0}
+        total: {type: integer, minimum: 0}
+        checks: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckResult'}}
+    EntryRecord:
+      allOf:
+        - {$ref: '#/components/schemas/EntryCheckBlock'}
+        - type: object
+          required: [at, by, override_reason, definition_id, definition_revision]
+          properties:
+            at: {type: string, format: date-time}
+            by: {type: object, required: [id, name], properties: {id: {type: string, format: uuid}, name: {type: string}}}
+            override_reason: {type: [string, 'null']}
+            definition_id: {type: string, format: uuid}
+            definition_revision: {type: string, format: date-time}
+    EntryRefusal:
+      type: object
+      required: [to_status, failed, at, by, count]
+      properties:
+        to_status: {type: string}
+        failed: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckResult'}}
+        at: {type: string, format: date-time}
+        by: {type: object, properties: {id: {type: string, format: uuid}, name: {type: string}}}
+        count: {type: integer, minimum: 1}
+    EntryChecks:
+      type: object
+      required: [node_id, revision, definition, blocks, entries, latest_refusal]
+      properties:
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        definition: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
+        blocks: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/EntryCheckBlock'}}
+        entries: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/EntryRecord'}}
+        latest_refusal: {oneOf: [{$ref: '#/components/schemas/EntryRefusal'}, {type: 'null'}]}
+    EntryChecksFailed:
+      type: object
+      required: [error, code, to_status, failed]
+      properties:
+        error: {type: string, const: entry_checks_failed}
+        code: {type: string, const: entry_checks_failed}
+        to_status: {type: string}
+        failed: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckResult'}}
+        override_allowed: {type: boolean}

@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/3.2",
-    "sha256": "6b84c52f684b709be930b55744a963dceb8178daf88248b8343cfa4f62ba0dee",
+    "version": "harness-session/3.3",
+    "sha256": "7f2dd47614a2c7b04edb57abcc6e7ce88cd40150bfb5eea5a7b331a5b82c5110",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -882,6 +882,29 @@
               "string",
               "null"
             ]
+          },
+          "build_continuation": {
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "pull_request": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "repository": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "pull_request",
+              "branch"
+            ],
+            "type": "object"
           },
           "command": {
             "maxLength": 120,
@@ -2252,6 +2275,29 @@
               "string",
               "null"
             ]
+          },
+          "build_continuation": {
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "pull_request": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "repository": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "pull_request",
+              "branch"
+            ],
+            "type": "object"
           },
           "command": {
             "maxLength": 120,
@@ -41557,6 +41603,317 @@
           "state",
           "reason",
           "process_active"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "review-run": {
+    "version": "review-run/1.0",
+    "sha256": "8b8f224f345fcf14083c7901ffe25ec486be7fefa74cbf1a3077ca4e0ac8993e",
+    "shape": {
+      "GET /nodes/{nodeId}/review-evidence 200": {
+        "additionalProperties": false,
+        "properties": {
+          "review_legacy_unverified": {
+            "type": "boolean"
+          },
+          "visual_legacy_unverified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "review_legacy_unverified",
+          "visual_legacy_unverified"
+        ],
+        "type": "object"
+      },
+      "POST /nodes/{nodeId}/review-runs 201": {
+        "additionalProperties": false,
+        "properties": {
+          "author_family": {
+            "type": "string"
+          },
+          "author_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "base_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "head_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "review",
+              "visual"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "pull_request": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": "string"
+          },
+          "repository": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "reviewer_family": {
+            "type": "string"
+          },
+          "reviewer_principal_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reviewer_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "scope": {
+            "maxLength": 130,
+            "type": "string"
+          },
+          "target_branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ticket_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "",
+              "ok",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "visual_impact": {
+            "enum": [
+              "",
+              "yes",
+              "no",
+              "uncertain"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_node_id",
+          "repository",
+          "pull_request",
+          "target_branch",
+          "base_sha",
+          "head_sha",
+          "scope",
+          "id",
+          "project_id",
+          "author_session_id",
+          "reviewer_session_id",
+          "reviewer_principal_id",
+          "author_family",
+          "reviewer_family",
+          "harness",
+          "model",
+          "reasoning_effort",
+          "kind",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "verdict",
+          "visual_impact",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "POST /review-runs/{runId}/credential 200": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "POST /review-runs/{runId}/verdict 200": {
+        "additionalProperties": false,
+        "properties": {
+          "author_family": {
+            "type": "string"
+          },
+          "author_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "base_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "head_sha": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "review",
+              "visual"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "pull_request": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": "string"
+          },
+          "repository": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "reviewer_family": {
+            "type": "string"
+          },
+          "reviewer_principal_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reviewer_session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "scope": {
+            "maxLength": 130,
+            "type": "string"
+          },
+          "target_branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ticket_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "",
+              "ok",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "visual_impact": {
+            "enum": [
+              "",
+              "yes",
+              "no",
+              "uncertain"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_node_id",
+          "repository",
+          "pull_request",
+          "target_branch",
+          "base_sha",
+          "head_sha",
+          "scope",
+          "id",
+          "project_id",
+          "author_session_id",
+          "reviewer_session_id",
+          "reviewer_principal_id",
+          "author_family",
+          "reviewer_family",
+          "harness",
+          "model",
+          "reasoning_effort",
+          "kind",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "verdict",
+          "visual_impact",
+          "reason"
         ],
         "type": "object"
       }

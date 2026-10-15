@@ -1,0 +1,151 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /projects/{projectId}/figures:
+    get:
+      operationId: getProjectFigures
+      description: "Read figures for the entire matching view, independently of list pagination. Call after the list's first paint; hovers read the returned object. Send the same resolved node-list query used by the list, including the active saved view's filters and search. Hide closed, hide_states, sort, facets, limit and cursor do not affect figures or their cache key. The project path confines every query. Cached per tenant, viewer authority and effective query; tenant events invalidate entries, with a 30-second maximum age for live telemetry and time-based figures. Computation is bounded to 50000 matching rows and 20 seconds; an over-budget read fails explicitly and never returns partial totals."
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: kind_id, in: query, schema: {type: string, format: uuid}}
+        - {name: kind, in: query, description: "Node-list kind filter; defaults to work, ticket, task and epic.", schema: {type: array, items: {type: string}}}
+        - {name: state, in: query, description: "Exact node-list states, including ! exclusions.", schema: {type: array, items: {type: string}}}
+        - {name: work_state, in: query, description: "Canonical node-list statuses, including ! exclusions.", schema: {type: array, items: {type: string}}}
+        - {name: work_bucket, in: query, schema: {type: array, items: {type: string, enum: [open, in_progress, done, cancelled, archived]}}}
+        - {name: priority, in: query, schema: {type: array, items: {type: string}}}
+        - {name: assignee, in: query, schema: {type: array, items: {type: string}}}
+        - {name: tag, in: query, schema: {type: array, items: {type: string}}}
+        - {name: epic, in: query, schema: {type: array, items: {type: string}}}
+        - {name: cost_unit, in: query, schema: {type: array, items: {type: string}}}
+        - {name: release, in: query, schema: {type: array, items: {type: string}}}
+        - {name: human_check, in: query, schema: {type: array, items: {type: string}}}
+        - {name: shape, in: query, schema: {type: array, items: {type: string}}}
+        - {name: depth, in: query, schema: {type: array, items: {type: string}}}
+        - {name: level, in: query, schema: {type: array, items: {type: string}}}
+        - {name: q, in: query, schema: {type: string, maxLength: 300}}
+        - {name: parent_id, in: query, schema: {type: string, format: uuid}}
+        - {name: include_descendants, in: query, schema: {type: boolean}}
+        - {name: ids, in: query, schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
+        - {name: date_field, in: query, schema: {type: string, enum: [created, updated, start, end, accepted]}}
+        - {name: date_from, in: query, schema: {type: string, format: date-time}}
+        - {name: date_to, in: query, schema: {type: string, format: date-time}}
+        - {name: within, in: query, description: "Optional narrower subtree inside this project.", schema: {type: string, format: uuid}}
+        - {name: hide_closed, in: query, description: "Ignored; only hides list rows.", schema: {type: boolean}}
+        - {name: hide_states, in: query, description: "Ignored; only hides list rows.", schema: {type: string}}
+      responses:
+        '200':
+          description: "Complete figures for one consistent authorized snapshot."
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectFigures'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422':
+          description: "The matching view exceeds the 50000-row budget; narrow the view."
+        '503':
+          description: "Figures could not be completed within the read budget; retry."
+components:
+  schemas:
+    ProjectFigures:
+      type: object
+      required: [view_key, computed_at, scope, marks_releases, total_hours, approximate, without_estimate, open_estimated_leaves, groups, columns]
+      properties:
+        view_key: {type: string, description: "Opaque effective-query key; independent of paging, sort and Hide closed."}
+        computed_at: {type: string, format: date-time}
+        scope:
+          type: object
+          required: [kind, rows, parents, leaves, project_leaves, closed]
+          properties:
+            kind: {type: string, enum: [whole_project, this_view]}
+            rows: {type: integer}
+            parents: {type: integer}
+            leaves: {type: integer, description: "Matching leaves including Closed."}
+            project_leaves: {type: integer, description: "All project work leaves including Closed, before view filters."}
+            closed: {type: integer, description: "Matching Cancelled and Archived leaves."}
+        marks_releases: {type: boolean, description: "A visible work item reached Delivered or Accepted in the project in the last 90 days. Otherwise Done is the final step and joins completed."}
+        total_hours: {type: number, description: "Sum of valid positive leaf estimates at most 200 hours each; Closed and all parent hours excluded."}
+        approximate: {type: boolean, description: "A nonzero total uses estimated hours and carries ~ in the UI; never put ~ on individual groups."}
+        without_estimate: {type: integer, description: "Non-Closed leaves with no valid estimate; they contribute zero hours."}
+        open_estimated_leaves: {type: integer, description: "Estimated leaves still Open or In progress, including QA."}
+        groups:
+          type: object
+          required: [completed, done_not_live, in_progress, open]
+          additionalProperties: {$ref: '#/components/schemas/WorkFigureGroup'}
+          properties:
+            completed: {$ref: '#/components/schemas/WorkFigureGroup'}
+            done_not_live: {$ref: '#/components/schemas/WorkFigureGroup'}
+            in_progress: {$ref: '#/components/schemas/WorkFigureGroup'}
+            open: {$ref: '#/components/schemas/WorkFigureGroup'}
+        columns:
+          type: object
+          description: "key, status, priority, assignee, epic, release, suggested_release, tag, cost_unit, model, estimate, tokens, cost, created_at, updated_at, eta_ready and progress. Title has no figures. Key and dates count all rows; other columns count leaves. Estimate and Progress exclude Closed; Tokens and Cost retain it. Cost is omitted without harness.read."
+          additionalProperties: {$ref: '#/components/schemas/ColumnFigures'}
+    WorkFigureGroup:
+      type: object
+      required: [hours, tickets, statuses]
+      properties:
+        hours: {type: number}
+        tickets: {type: integer}
+        statuses: {type: object, additionalProperties: {type: integer}}
+    FigureNumbers:
+      type: object
+      required: [count, total, median, average]
+      properties:
+        count: {type: integer}
+        total: {type: number}
+        median: {type: [number, 'null']}
+        average: {type: [number, 'null']}
+    FigureValue:
+      type: object
+      required: [value, count, hours]
+      properties:
+        value: {type: string}
+        kind: {type: string, enum: [person, agent], description: "Assignee principal kind when available."}
+        count: {type: integer}
+        hours: {type: number}
+        measured_cost: {type: number, description: "API list-price USD, only with harness.read."}
+        estimated_cost: {type: number, description: "Estimated API list-price USD, separate from measured cost."}
+    FigureFinish:
+      type: object
+      required: [at, key]
+      properties:
+        at: {type: string, format: date-time}
+        key: {type: string}
+    FigureTypical:
+      type: object
+      required: [count, median, average, approximate]
+      properties:
+        count: {type: integer}
+        median: {type: [number, 'null']}
+        average: {type: [number, 'null']}
+        approximate: {type: boolean, description: "At least one displayed value in the sample is estimated; total is intentionally absent."}
+    ColumnFigures:
+      type: object
+      required: [rows, included, without_value, others, partial]
+      properties:
+        rows: {type: integer, description: "All matching rows for Key/dates; matching leaves otherwise."}
+        included: {type: integer, description: "Eligible rows after this column's Closed policy."}
+        without_value: {type: integer}
+        others: {type: integer, description: "Rows in nonempty values outside the top N; missing values are separate."}
+        partial: {type: boolean, description: "Usage has unreported sessions, unknown pricing, or truncated planning evidence. Totals are lower bounds when true."}
+        values: {type: array, items: {$ref: '#/components/schemas/FigureValue'}}
+        numbers: {$ref: '#/components/schemas/FigureNumbers'}
+        measured: {$ref: '#/components/schemas/FigureNumbers'}
+        estimated: {$ref: '#/components/schemas/FigureNumbers'}
+        typical: {$ref: '#/components/schemas/FigureTypical'}
+        weighted_percent: {type: number}
+        reading_count: {type: integer}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        median_age_seconds: {type: number}
+        stale: {type: integer}
+        running: {type: integer}
+        next_finish: {$ref: '#/components/schemas/FigureFinish'}
+        last_finish: {$ref: '#/components/schemas/FigureFinish'}
+        parents: {type: integer}
+        leaves: {type: integer}
+        first_key: {type: string}
+        last_key: {type: string}

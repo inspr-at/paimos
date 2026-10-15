@@ -566,9 +566,12 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			return fmt.Errorf("required CI job %q must use the reviewed PR classification gate", id)
 		}
 	}
+	if mapping(tiers["outputs"])["web_shards"] != "${{ steps.tiers.outputs.web_shards }}" {
+		return fmt.Errorf("tier-plan must publish the planned web shard list")
+	}
 	webMatrix := mapping(mapping(mapping(jobs["web-shard"])["strategy"])["matrix"])["shard"]
-	if webMatrix != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
-		return fmt.Errorf("web shard matrix must retain 12 full rows, four essential PR rows and one changed-spec row")
+	if webMatrix != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
+		return fmt.Errorf("web shard matrix must retain 12 full rows outside PRs and consume the planned PR shard list")
 	}
 	unit := mapping(jobs["web-unit"])
 	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {

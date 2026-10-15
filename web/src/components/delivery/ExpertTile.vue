@@ -8,7 +8,8 @@ import { vClipTip } from '../../directives/clipTip'
 import type { TileModel } from '../../lib/deliveryNumbers'
 import type { DeliveryText } from '../../lib/deliveryNumbersText'
 
-const props = defineProps<{ tile: TileModel; state: 'loading' | 'error' | 'ready'; text: DeliveryText; infoOpen: boolean }>()
+// Ticket step tiles (AEON-1359) carry their step as the key instead of an Arion metric.
+const props = defineProps<{ tile: Omit<TileModel, 'def'> & { def: { key: string } }; state: 'loading' | 'error' | 'ready'; text: DeliveryText; infoOpen: boolean }>()
 const emit = defineEmits<{ info: [anchor: HTMLElement, pin: boolean]; 'info-leave': [] }>()
 const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
 </script>

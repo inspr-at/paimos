@@ -667,6 +667,7 @@
         "next_attempt_at": "metadata",
         "payload": "review",
         "payload_sha256": "metadata",
+        "permission_paused_at": "metadata",
         "received_at": "metadata",
         "repository": "metadata",
         "tenant_id": "metadata"
@@ -1339,6 +1340,18 @@
     {
       "classification": "personal",
       "columns": {
+        "messaging_only": "metadata",
+        "messaging_owner_id": "personal"
+      },
+      "locator": {
+        "person_column": "id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "principals"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "automatic_launch_enabled": "personal",
         "project_id": "metadata",
         "qualification_id": "metadata",
@@ -1803,6 +1816,44 @@
         "tenant_column": "tenant_id"
       },
       "table": "work_kinds"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "author_family": "metadata",
+        "author_session_id": "metadata",
+        "base_sha": "metadata",
+        "created_at": "personal",
+        "created_by": "personal",
+        "credential_digest": "secret",
+        "credential_key_id": "personal",
+        "expires_at": "metadata",
+        "harness": "metadata",
+        "head_sha": "metadata",
+        "id": "metadata",
+        "kind": "metadata",
+        "model": "metadata",
+        "project_id": "metadata",
+        "pull_request": "metadata",
+        "reason": "review",
+        "reasoning_effort": "metadata",
+        "repository": "metadata",
+        "reviewer_family": "metadata",
+        "reviewer_principal_id": "personal",
+        "reviewer_session_id": "metadata",
+        "scope": "metadata",
+        "submitted_at": "personal",
+        "target_branch": "metadata",
+        "tenant_id": "metadata",
+        "ticket_node_id": "metadata",
+        "verdict": "metadata",
+        "visual_impact": "metadata"
+      },
+      "locator": {
+        "person_column": "reviewer_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "review_runs"
     }
   ],
   "version": 1

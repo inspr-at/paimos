@@ -1,0 +1,22 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 111.536,
+    "selectedTests": 39
+  },
+  "spec": {
+    "file": "tests/clip-tip-touch.spec.ts",
+    "listedTests": 39,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 25.719,
+        "median": 1.348,
+        "min": 0.813
+      },
+      "seconds": 111.536,
+      "selectedTests": 39
+    },
+    "weightSeconds": 58.070907,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

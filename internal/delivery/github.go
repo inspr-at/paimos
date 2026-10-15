@@ -14,11 +14,11 @@ import (
 )
 
 type Pull struct {
-	QueueHead                 string
-	Number                    int64
-	Title, Branch, Head, Base string
-	Open, Merged, Queued      bool
-	Checks                    []Check
+	QueueHead                         string
+	Number                            int64
+	Title, Branch, Head, Base, Target string
+	Open, Merged, Queued              bool
+	Checks                            []Check
 }
 
 // GitHub is deliberately read-only. Partial inventories are errors, never green.
@@ -39,7 +39,7 @@ func readPull(p crossreview.GitHubPull, repo string) (Pull, error) {
 	if p.Number < 1 || !reviewgate.ValidSHA(p.Head.SHA) || !reviewgate.ValidSHA(p.Base.SHA) || p.Base.Repo.FullName != repo || len(p.Title) > 4096 || len(p.Head.Ref) > 255 {
 		return Pull{}, errRead
 	}
-	return Pull{Number: p.Number, Title: p.Title, Branch: p.Head.Ref, Head: p.Head.SHA, Base: p.Base.SHA, Open: p.State == "open", Merged: p.Merged}, nil
+	return Pull{Number: p.Number, Title: p.Title, Branch: p.Head.Ref, Head: p.Head.SHA, Base: p.Base.SHA, Target: p.Base.Ref, Open: p.State == "open", Merged: p.Merged}, nil
 }
 func checks(get func(string, any) error, head string) ([]Check, error) {
 	// Filter latest attempts. Every configured context must independently succeed.
@@ -114,7 +114,7 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 		return out, errRead
 	}
 	missing := false
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
+	err := g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
 		var p crossreview.GitHubPull
 		if err := get("/pulls/"+strconv.FormatInt(n, 10), &p); err != nil {
 			// Only the pull document's 404 is absence. A 404 on checks is a partial read.
@@ -140,7 +140,9 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 		return err
 	})
 	if missing {
-		return Pull{}, errMissing
+		// Reconciliation still recognizes confirmed absence while receipts keep
+		// the content-free HTTP class of the failed pull read.
+		return Pull{}, errors.Join(errMissing, err)
 	}
 	return out, err
 }
@@ -166,7 +168,7 @@ func openPulls(get func(string, any) error, repo string) ([]Pull, error) {
 }
 func (g AppReader) OpenPulls(ctx context.Context) ([]Pull, error) {
 	var out []Pull
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
+	err := g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
 		var err error
 		out, err = openPulls(get, g.App.Config.Repository)
 		if err != nil {
@@ -190,7 +192,7 @@ func (g AppReader) Group(ctx context.Context, head, base, ref string) ([]Pull, e
 		return nil, errRead
 	}
 	var out []Pull
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
+	err := g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
 		var live struct {
 			Ref    string `json:"ref"`
 			Object struct {

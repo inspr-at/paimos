@@ -98,6 +98,6 @@ defineExpose({ startAdd })
   .child-row { height: auto; min-height: 44px; padding-block: 6px; align-items: flex-start; }
   .key { width: 76px; }
   .child-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
-  .child-row > svg { flex-shrink: 0; margin-top: 2px; }
+  .child-row > svg, .child-row > .status-icon { flex-shrink: 0; margin-top: 2px; }
 }
 </style>

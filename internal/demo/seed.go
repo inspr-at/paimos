@@ -201,6 +201,12 @@ func (s *seeder) tree() error {
 					body = richBody()
 				}
 				fields := map[string]any{}
+				// Active screenshot examples enter through the ordinary Ready
+				// checks, with explicitly fictional planning inputs.
+				if ticket.state == "in_progress" {
+					fields["estimate_hours"] = 2
+					fields["acceptance_criteria"] = []string{fmt.Sprintf("The fictional result for %q is reviewed in the demo tenant.", ticket.title)}
+				}
 				// Authored fictional examples for newly seeded completed tickets.
 				// Completed demo tenants return before this path; no backfill.
 				if ticket.pillEN != "" {

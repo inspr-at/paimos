@@ -8,7 +8,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 
-const props = defineProps<{ id: string; name: string; body: string; expert: string; target: string; labels: { learn: string; expertName: string; arion: string } }>()
+// `facts` (Delivery › Tickets) replaces the Expert name and target lines with the step's own figures and source.
+const props = defineProps<{ id: string; name: string; body: string; expert: string; target: string; labels: { learn: string; expertName: string; arion: string }; facts?: string[] }>()
 const button = ref<HTMLButtonElement>()
 const tip = ref<HTMLElement>()
 const open = ref(false)
@@ -96,7 +97,8 @@ const pinnedAnywhere = moduleRef(false)
     <div v-if="open" :id="tipId" ref="tip" class="dl-learn" role="tooltip" :style="{ left: `${at.x}px`, top: `${at.y}px`, visibility: placed ? undefined : 'hidden' }" @mouseleave="onLeave">
       <b>{{ name }}</b>
       <p>{{ body }}</p>
-      <p class="meta">{{ labels.expertName }}: {{ expert }}<br>{{ target }} · {{ labels.arion }}</p>
+      <p v-if="facts" class="meta"><template v-for="(fact, index) in facts" :key="index"><br v-if="index">{{ fact }}</template></p>
+      <p v-else class="meta">{{ labels.expertName }}: {{ expert }}<br>{{ target }} · {{ labels.arion }}</p>
     </div>
   </Teleport>
 </template>

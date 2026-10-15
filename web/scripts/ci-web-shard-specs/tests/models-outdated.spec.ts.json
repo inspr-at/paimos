@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 12.668,
+    "selectedTests": 10
+  },
+  "spec": {
+    "file": "tests/models-outdated.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.202,
+        "median": 0.849,
+        "min": 0.479
+      },
+      "seconds": 12.668,
+      "selectedTests": 10
+    },
+    "weightSeconds": 11,
+    "weightSource": "AEON-1164 local-single-worker-7.5s-plus-margin; AEON-1163 adds the phone tray case"
+  }
+}

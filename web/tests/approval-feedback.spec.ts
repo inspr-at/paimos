@@ -56,7 +56,7 @@ for (const width of [1440, 1024, 390]) for (const motion of ['no-preference', 'r
     await expect(page.getByTestId('choice-0')).toBeDisabled()
     await expect(page.getByTestId('desk-revoke')).toBeVisible({ visible: decision === 'approved' })
     await page.getByTestId('desk-close').click()
-    await page.getByRole('button', { name: /^Decided/ }).click()
+    await page.getByRole('radio', { name: /^Decided/ }).click()
     await expect(page.getByTestId('desk-row-a:approval-1')).toBeVisible()
   })
 }

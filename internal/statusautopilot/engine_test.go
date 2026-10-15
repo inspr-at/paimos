@@ -173,8 +173,14 @@ func (f *fixture) add(key, kind, state string, days int, human *string) string {
 		project = f.project
 	}
 	at := f.now.Add(-time.Duration(days) * 24 * time.Hour)
+	fields := `{}`
+	if kind == "work" {
+		// Pickup/undo tests use ready work so the default entry policy does not
+		// hide the evidence, lifecycle and authority boundary under test.
+		fields = `{"estimate_hours":1,"acceptance_criteria":"The automatic status follows recorded work evidence"}`
+	}
 	f.tx(func(tx pgx.Tx) error {
-		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id,created_at,updated_at,human_check) SELECT $1,id,$2,'Ticket',$3,$4,$5,$5,$6 FROM node_kinds WHERE tenant_id=$1 AND slug=$7 RETURNING id::text`, f.p.TenantID, key, state, project, at, human, kind).Scan(&id)
+		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id,created_at,updated_at,human_check,fields) SELECT $1,id,$2,'Ticket',$3,$4,$5,$5,$6,$8::jsonb FROM node_kinds WHERE tenant_id=$1 AND slug=$7 RETURNING id::text`, f.p.TenantID, key, state, project, at, human, kind, fields).Scan(&id)
 	})
 	return id
 }

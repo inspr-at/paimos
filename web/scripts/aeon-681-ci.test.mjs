@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { loadManifest as loadWebPolicy } from './ci-web-shard.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
@@ -100,7 +101,7 @@ export const collectWeb = () => { if (!inventory) { collections++; inventory = n
   }})
   t.after(()=>hook.deregister())
   const {plan,main}=await import(entry)
-  const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
+  const policy=loadWebPolicy()
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
   const selection=plan('web',options)
@@ -154,7 +155,7 @@ export const collectWeb = () => (${JSON.stringify(snapshot)});`
   }})
   try {
     const {plan,main}=await import('../../scripts/test-tiers/cli.mjs?native-planning-snapshot')
-    const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
+    const policy=loadWebPolicy()
     const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
     const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
     const selection=plan('web',options)
@@ -255,7 +256,7 @@ test('native browser selectors cover reconciled essentials and every collected f
   const tiers=new Map(reconciled.map(row=>[key(row),row.tier]))
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
-  const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
+  const groups=loadWebPolicy().groups
   // Full and catalogue modes often produce identical inputs. Collect each
   // distinct native selector once, while retaining every per-mode assertion.
   // Several groups select exactly the same cases in full and all modes.
@@ -283,6 +284,32 @@ test('native browser selectors cover reconciled essentials and every collected f
       total+=listed.length
     }
     assert.equal(total,mode==='all'?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL'||(mode==='full'&&row.tier==='GATED-FULL')).length)
+  }
+})
+
+// AEON-1359: a title that contains the list separator must still be one real title path.
+// A partial run (the essential/full lanes, and any shard that does not take the whole file)
+// selects by that path. Selecting the file instead would hide a missed case.
+test('AEON-1359 a partial status-time run selects each Delivery case whose title contains the list separator',()=>{
+  const config='playwright.ui.config.ts', file='tests/status-time.spec.ts'
+  const names=[
+    'Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted',
+    'Delivery › Tickets in Expert: six tiles and Created → live as the first trend',
+  ]
+  const collected=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',config,file,
+    '--workers=1','--retries=0','--list','--reporter=json'],{cwd:web})),config)
+  mkdirSync(evidence,{recursive:true})
+  for(const [index,name] of names.entries()) {
+    const row=collected.find(item=>item.file===file&&item.name===name)
+    assert.ok(row,name)
+    const selectors=browserList([row],collected)
+    assert.equal(selectors.length,1,name)
+    assert.match(selectors[0],/status-time\.spec\.ts:\d+ › Delivery › Tickets/,name)
+    const list=resolve(evidence,`aeon-1359-status-time-partial-${index}.txt`)
+    writeFileSync(list,`${selectors[0]}\n`)
+    const selected=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',config,
+      '--workers=1','--retries=0','--test-list',list,'--list','--reporter=json'],{cwd:web})),config)
+    assert.deepEqual(selected.map(item=>item.id).sort(),[row.id],name)
   }
 })
 

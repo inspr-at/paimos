@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import EntryChecklistHost from './components/work/EntryChecklistHost.vue'
 import { displayLanguage } from './lib/displayLanguage'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
@@ -29,12 +30,15 @@ import { updateToast } from './lib/codenames'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
+import { useStatusMotion } from './lib/statusMotion'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const ticketPeek = provideTicketPeek()
+// Status icons play their one-off on hover or keyboard focus and pause in hidden tabs (AEON-1362).
+useStatusMotion()
 const main = ref<HTMLElement>()
 const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const retrying = ref(false)
@@ -209,6 +213,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 </script>
 
 <template>
+  <EntryChecklistHost />
   <div class="app-shell" :class="{ bare, 'footer-hidden': footerHidden && !bare, 'header-folded': folded }">
     <a class="skip-link" href="#main">Skip to content</a>
     <AppHeader v-if="!bare && !folded" />

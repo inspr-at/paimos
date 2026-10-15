@@ -1,0 +1,22 @@
+{
+  "group": "work-node-integration",
+  "nightlyTiming": {
+    "seconds": 24.409,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/work-surfaces-fix3.spec.ts",
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.297,
+        "median": 3.97,
+        "min": 3.812
+      },
+      "seconds": 24.409,
+      "selectedTests": 6
+    },
+    "weightSeconds": 16.211,
+    "weightSource": "hosted-CI-37321154870"
+  }
+}

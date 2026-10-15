@@ -45,6 +45,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountShipping(mux)
 	m.mountMetrics(mux)
 	m.mountFlow(mux)
+	m.mountStatusTiming(mux)
 	// Every authenticated delivery is durable before projection/audit/flow work.
 	mux.HandleFunc("POST /api/github/webhook", m.mergeWebhook)
 	mux.HandleFunc("POST /api/projects/{projectId}/delivery/merge-backfill", m.mergeBackfill)
@@ -90,7 +91,7 @@ func (m *Module) mountWorkQueue(mux *http.ServeMux) {
 }
 func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.Time) (Observation, error) {
 	pr := p.Number
-	o := Observation{Repository: m.config.Repository, PR: &pr, Branch: p.Branch, Head: p.Head, Base: p.Base, Open: p.Open, Merged: p.Merged, Queued: p.Queued, QueueHead: p.QueueHead, Checks: p.Checks, At: at}
+	o := Observation{Repository: m.config.Repository, PR: &pr, Branch: p.Branch, Head: p.Head, Base: p.Base, Target: p.Target, Open: p.Open, Merged: p.Merged, Queued: p.Queued, QueueHead: p.QueueHead, Checks: p.Checks, At: at}
 	o.ID = stableID(m.config.TenantID, o.Repository, subject(o.PR, nil))
 	before, err := load(ctx, tx, o.ID)
 	if err != nil {

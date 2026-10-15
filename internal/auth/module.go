@@ -30,6 +30,11 @@ import (
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	// AssistantNoticeTx uses the existing receipt-free System inbox notice path.
+	// Missing wiring fails provisioning closed.
+	AssistantNoticeTx func(context.Context, pgx.Tx, string, string, string, string) error
+	assistantNow      func() time.Time
+
 	StepUp   *stepup.Module   // native requests, using the existing OIDC callback
 	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
@@ -111,6 +116,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/logout", m.handleLogout)
 	mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
+	mux.HandleFunc("POST /api/agents/assistants", m.handleMessagingAssistant)
+	mux.HandleFunc("POST /api/agents/assistants/{principalId}/rotate", m.handleMessagingAssistant)
+	mux.HandleFunc("DELETE /api/agents/assistants/{principalId}", m.handleMessagingAssistant)
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
 	mux.HandleFunc("POST /api/agent-keys/{id}/adopt", m.handleAdoptAgentKey)
@@ -172,6 +180,10 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			} else {
 				writeUnauthorized(w)
 			}
+			return
+		}
+		if kind == credAgent && p.MessagingOnly && !authz.MessagingAssistantInboxRoute(r.Pattern) {
+			writeForbidden(w)
 			return
 		}
 		if kind == credAgent {
@@ -351,6 +363,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	// Native routes use an exact matched allowlist. Existing role/key scopes
 	// are only the outer ceiling; future handlers must also fence actor grants.
 	switch r.Pattern {
+	case "POST /api/nodes/{nodeId}/review-runs", "POST /api/review-runs/{runId}/credential":
+		return "nodes.read", true
+	case "GET /api/nodes/{nodeId}/review-evidence":
+		return "nodes.read", true
+	case "POST /api/review-runs/{runId}/verdict":
+		return "", false
+	case "POST /api/agents/assistants", "POST /api/agents/assistants/{principalId}/rotate", "DELETE /api/agents/assistants/{principalId}":
+		return "agents.create", true
 	case "POST /api/agentd/native-sessions/claim", "POST /api/agentd/native-sessions/receipts",
 		"POST /api/agentd/native-sessions/events", "POST /api/agentd/native-sessions/finals",
 		"GET /api/agentd/native-sessions/commands":

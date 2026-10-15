@@ -617,25 +617,48 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   // AEON-1289 adds its terminal regressions after the prior baseline; charge the spec's weight separately.
   const expertTerminal = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/native-expert-terminal.spec.ts')
   assert.ok(expertTerminal && gated.some(spec => spec.file === expertTerminal.file), 'Expert terminal regressions must remain in the gate')
+  // AEON-1315 adds the entry-check regression; keep the historical gate budget
+  // unchanged and charge this new spec's explicit scheduling weight.
+  const entryChecks = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/entry-checks.spec.ts')
+  assert.ok(entryChecks && gated.some(spec => spec.file === entryChecks.file), 'Entry-check regressions must remain in the gate')
   // AEON-1331 adds lesson decisions after the prior baseline. Preserve that
   // baseline and charge only this slice's independently bounded spec budget.
+  // AEON-1363 adds three Knowledge lesson-line cases to the same spec.
   const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
-  assert.ok(deskLessons && deskLessons.listedTests === 23, 'Lesson decision regressions must remain in the gate')
+  assert.ok(deskLessons && deskLessons.listedTests === 26, 'Lesson decision regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
+  // AEON-1309 splits its nine unchanged panel cases so files can be packed
+  // independently. Charge only this slice's declared weights, like the other
+  // additions above; the historical <300s bound and twelve shards stay intact.
+  const panelFiles = new Set(['tests/native-session-program.spec.ts',
+    'tests/native-session-program-390.spec.ts', 'tests/native-session-program-1024.spec.ts',
+    'tests/native-session-program-1440.spec.ts', 'tests/native-session-program-reader.spec.ts',
+    'tests/native-session-program-validation.spec.ts'])
+  const panelAdded = real.groups.flatMap(group => group.specs).filter(spec => panelFiles.has(spec.file))
+  assert.equal(panelAdded.length, 6, 'All six balanced panel files must remain declared')
+  assert.equal(panelAdded.reduce((sum, spec) => sum + spec.listedTests, 0), 9, 'The split must retain every panel case')
+  for (const spec of panelAdded) assert.ok(gated.some(candidate => candidate.file === spec.file), 'Panel specs must remain in the declared gate')
+  const panelGrowth = panelAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  // AEON-1316 adds its project Definitions spec after the historical budget.
+  // Keep the old budget and charge only this independently bounded addition.
+  // FIX4 adds six verdict regressions alongside the original three flows.
+  const projectDefinitions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions.spec.ts')
+  assert.ok(projectDefinitions && projectDefinitions.listedTests === 9, 'Project Definitions regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== deskLessons).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + deskLessons.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal and lesson decision specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel and project Definitions specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

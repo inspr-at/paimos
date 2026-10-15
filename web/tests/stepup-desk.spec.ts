@@ -74,8 +74,10 @@ for (const width of [390, 1440]) {
     await expect(page.getByTestId('stepup-method')).toHaveText('Passkey')
     await expect(page.getByTestId('desk-skip')).toHaveText('Decline')
     await capture(page, testInfo, `stepup-memo-${width}`)
+    // AEON-1339 fix round 4: at 390 an item's Revoke, Edit or Undo is a row above Skip and Decide, so the group grows
+    // upward while the buttons themselves stay put; the whole group is measured where it is one fixed row.
     await expectStableControls({ controls: {
-      actions: page.getByTestId('desk-actions').locator('.action-buttons'), primary: page.getByTestId('desk-decide'), secondary: page.getByTestId('desk-skip'), pager: page.getByTestId('desk-pager'), close: page.getByTestId('desk-close'), stamps: page.getByTestId('desk-stamps'),
+      ...(width === 1440 ? { actions: page.getByTestId('desk-actions').locator('.action-buttons') } : {}), primary: page.getByTestId('desk-decide'), secondary: page.getByTestId('desk-skip'), pager: page.getByTestId('desk-pager'), close: page.getByTestId('desk-close'),
     }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'previous memo', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('stepup-change')).toHaveCount(0) } },
       { name: 'back to the step-up', run: async () => { await page.getByTestId('desk-paper').press('ArrowRight'); await expect(page.getByTestId('stepup-method')).toBeVisible() } },
@@ -96,12 +98,13 @@ test('Decline needs no step-up; the Decided view names who and how, and a first 
   await expect(page.getByTestId('desk-status')).toHaveText('Decided by Anna first: Approved · Anna · passkey. Nothing for you to do.')
   await expect(page.getByTestId('stepup-answer')).toHaveText('Approved · Anna · passkey')
   await page.getByTestId('desk-close').click()
-  await page.getByRole('button', { name: /^Decided / }).click()
+  await page.getByRole('radio', { name: /^Decided / }).click()
   await expect(page.getByTestId('desk-row-s:step-1')).toContainText('Declined · Markus Barta')
   await expect(page.getByTestId('desk-row-s:step-2')).toContainText(/Approved · Anna · fresh sign-in at /)
   await page.getByTestId('desk-row-s:step-2').click()
   await expect(page.getByTestId('stepup-answer')).toHaveText(/Approved · Anna · fresh sign-in at /)
-  await expect(page.getByTestId('desk-decide')).toHaveText(/Next/)
+  // Nothing in this round of history is open, so the primary reads Close (AEON-1339).
+  await expect(page.getByTestId('desk-decide')).toHaveText(/Close/)
 })
 test('without a passkey Approve leaves for a fresh sign-in and the return opens the decided memo', async ({ page }) => {
   const control = await mockStepups(page, { passkeys: false })
@@ -110,7 +113,7 @@ test('without a passkey Approve leaves for a fresh sign-in and the return opens 
   await page.getByTestId('desk-decide').click()
   await page.waitForURL(/needs=s:step-1/)
   await expect(page.getByTestId('stepup-answer')).toHaveText(/Approved · Markus Barta · fresh sign-in at /)
-  await expect(page.getByRole('button', { name: /^Decided / })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('radio', { name: /^Decided / })).toHaveAttribute('aria-checked', 'true')
   expect(control.calls.map(call => call.path)).toEqual(['/api/stepup-requests/step-1/options'])
 })
 test('closing the memo while Approve waits cancels the step-up, so a late answer starts no sign-in', async ({ page }) => {
@@ -157,9 +160,11 @@ for (const theme of ['light', 'dark'] as const) {
       const css = (selector: string, property: string) => getComputedStyle(frame.querySelector(selector)!).getPropertyValue(property)
       return {
         heading: [css('[data-testid="stepup-before"] h3', 'color'), css('.context-column h3', 'color'), probe('color', 'var(--ink-3)')],
-        hairline: [css('[data-testid="stepup-before"] dl > div', 'border-bottom-color'), probe('border-bottom-color', 'var(--line)')],
+        // AEON-1339: hairlines on the memo's paper, and the brass primary of the approved artifact.
+        hairline: [css('[data-testid="stepup-before"] dl > div', 'border-bottom-color'), probe('border-bottom-color', 'var(--paper-line)')],
         changed: [css('[data-testid="stepup-after"] .changed', 'background-color'), probe('background-color', 'var(--row-hover)')],
-        primary: [css('[data-testid="desk-decide"]', 'background-color'), probe('background-color', 'var(--primary)')],
+        primary: [css('[data-testid="desk-decide"]', 'background-image').replace(/, none$/, ''), probe('background-image', 'var(--brass)')],
+        primaryFill: [css('[data-testid="desk-decide"]', 'background-color'), probe('background-color', 'var(--brass-solid)')],
         type: [css('[data-testid="stepup-after"] dd', 'font-family'), css('.context-column p', 'font-family')],
       }
     })
@@ -182,7 +187,7 @@ for (const [width, theme] of [[390, 'light'], [1440, 'light'], [1440, 'dark']] a
     control.rows.push(request('step-2', { state: 'applied', revision: 2, ...anna }), request('step-4', { state: 'declined', revision: 2, ...anna, decision: 'decline' }))
     await page.reload(); await page.getByTestId('desk-row-a:approval-1').click()
     await expect(page.getByRole('heading', { name: 'Allow nodes.read?' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Decided 2/ })).toBeAttached()
+    await expect(page.getByRole('radio', { name: /^Decided 2/ })).toBeAttached()
     const withStepups = await capture(page, testInfo, `approval-memo-with-stepups-${width}-${theme}`)
     expect(withStepups.equals(without), 'approval memo pixels changed').toBe(true)
   })

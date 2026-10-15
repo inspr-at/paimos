@@ -17,8 +17,23 @@ import (
 // must append these changes after all remaining writes. No event counter is
 // taken here. The same readiness, typed orders and rank helpers serve manual
 // queue entry; inert runs cannot be picked up before coordinator routing.
-func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string) ([]events.Change, error) {
-	if err := RequireBuildAdmissionTx(ctx, tx, p, nodeID, "", nil); err != nil {
+// An optional candidate binds the order only when it continues this ticket's
+// own pending delivery; a ticket with nothing pending is queued unbound.
+// Recurrence occurrence creation supplies none: a new ticket has nothing pending.
+func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, candidate ...*BuildCandidate) ([]events.Change, error) {
+	var binding *BuildCandidate
+	switch len(candidate) {
+	case 0:
+	case 1:
+		binding = candidate[0]
+	default:
+		return nil, fmt.Errorf("enqueue accepts at most one build delivery binding")
+	}
+	if err := workorders.ValidateBuildCandidate(binding); err != nil {
+		return nil, err
+	}
+	admission := &BuildAdmission{Candidate: binding}
+	if err := RequireBuildAdmissionTx(ctx, tx, p, nodeID, "", nil, admission); err != nil {
 		return nil, err
 	}
 	var title, body, kind, state string
@@ -42,6 +57,14 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 		readyKind = "ticket"
 	}
 	ready := Check(readyKind, state, title, body, Fields(fields), false)
+	ticket, err := EntryTicketTx(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	ready, err = DefinitionReadinessTx(ctx, tx, p, ticket, ready)
+	if err != nil {
+		return nil, err
+	}
 	if !ready.Ready {
 		return nil, fmt.Errorf("recurrence ticket is not ready for the queue")
 	}
@@ -53,7 +76,7 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 	if !inert {
 		return nil, fmt.Errorf("queue holder identity conflicts")
 	}
-	order, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: title, Body: body, Parent: &nodeID, Criteria: Criteria(Fields(fields))})
+	order, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: title, Body: body, Parent: &nodeID, Criteria: Criteria(Fields(fields)), BuildDelivery: admission.ContinuedBinding()})
 	if err != nil {
 		return nil, err
 	}

@@ -127,7 +127,7 @@ func TestMessagingOnlyAgentThroughProductionAuth(t *testing.T) {
 
 	// LISTEN has completed and the empty page was read before the peer sends.
 	waiting := make(chan struct{}, 1)
-	m.base.waitNotify = func(ctx context.Context, conn *pgx.Conn, tenantID string, deadline time.Time) error {
+	m.base.waitNotify = func(ctx context.Context, conn db.NotificationListener, tenantID string, deadline time.Time) error {
 		select {
 		case waiting <- struct{}{}:
 		default:

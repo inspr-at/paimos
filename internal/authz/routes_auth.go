@@ -5,6 +5,9 @@ package authz
 // Route and scope declarations for auth.
 func init() {
 	registerRoutes("auth", map[string]string{
+		"POST /api/agents/assistants":                        "agents.create",
+		"POST /api/agents/assistants/{principalId}/rotate":   "agents.create",
+		"DELETE /api/agents/assistants/{principalId}":        "agents.create",
 		"DELETE /api/agent-keys/{id}":                        "keys.manage",
 		"GET /api/agent-keys":                                "keys.read",
 		"GET /api/agent-keys/{id}/scopes":                    "keys.manage",

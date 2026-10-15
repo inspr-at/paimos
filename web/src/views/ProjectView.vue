@@ -6,6 +6,7 @@ import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMo
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
+import { entryStatus, requestEntryPanel, type EntryChecks } from '../lib/entryChecks'
 import { benefitGateError, benefitSkip, benefitStepSummary, completionFields, needsBenefitPrompt, skippedStatusLabel } from '../lib/doneGate'
 import { can, ensurePermissions } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
@@ -15,7 +16,7 @@ import { planningPresent } from '../lib/planning'
 import { useDensity } from '../lib/prefs'
 import { useDeveloperSettings } from '../lib/developerSettings'
 import { useProjectHeader } from '../lib/useProjectHeader'
-import { selectionHiddenByPolicy, type HideState } from '../lib/hideStates'
+import { hideLabel, selectionHiddenByPolicy, type HideState } from '../lib/hideStates'
 import { groupStates, reconcileStatusHide, type HeaderStatusGroup } from '../lib/projectStatusCounts'
 import ProjectStatusCounts from '../components/work/ProjectStatusCounts.vue'
 import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
@@ -33,7 +34,9 @@ import { rowStore } from '../lib/rowStore'
 import { TICKET_PEEK } from '../lib/ticketPeek'
 import { ticketRef } from '../lib/ticketLinks'
 import { scopeOwner } from '../lib/identityScope'
-import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
+import { PROJECT_COLUMN_BY_ID } from '../lib/projectColumns'
+import { useViewFigures } from '../lib/useViewFigures'
+import { hidesRows, workHeader, workSlots, type WorkSlots } from '../lib/workFigures'
 import { absoluteTime, cycleSort, normaliseState, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects, type Project } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
@@ -42,7 +45,6 @@ import { useFooterSummary } from '../lib/footerSummary'
 import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
 import { useWorkVocabulary } from '../stores/workVocabulary'
-import { workNoun } from '../lib/workVocabulary'
 import { useReleases } from '../stores/releases'
 import { usePoller } from '../lib/usePolledData'
 import { queueable, queueHours } from '../lib/workQueue'
@@ -58,6 +60,7 @@ import ProjectTabs from '../components/work/ProjectTabs.vue'
 import { PROJECT_SECTIONS, projectSection, ticketView, type ProjectSection, type TicketView } from '../components/work/projectNavigation'
 import StatusIcon from '../components/work/StatusIcon.vue'
 import StatusMenu from '../components/work/StatusMenu.vue'
+import WorkBar from '../components/work/WorkBar.vue'
 import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import ViewBar from '../components/work/ViewBar.vue'
@@ -697,6 +700,26 @@ watch(projectId, async id => {
 }, { immediate: true })
 
 const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
+
+// ---------- Work at a glance (AEON-1358): the view's work in hours, and the column figures ----------
+// Counted in the background after the list paints, per scope (never Hide closed); the project's summary changing
+// (a status, an estimate, a new ticket) counts the shown scope again quietly.
+const { figures: viewFigures, whole: wholeFigures, busy: figuresBusy, failed: figuresFailed, narrowed: figuresNarrowed, retry: retryFigures } = useViewFigures({
+  owner: computed(() => scopeOwner(session.identity)), projectId, filters, ready: entryResolved, listLoading: list.loading,
+  freshness: computed(() => project.value ? [project.value.last_activity, project.value.open, project.value.in_progress, project.value.done, project.value.total].join('|') : ''),
+})
+const workHead = computed(() => viewFigures.value ? workHeader(viewFigures.value) : null)
+// The value slots are fixed from the whole project when it opens, like the status counts' digits.
+const workBarSlots = shallowRef<WorkSlots | null>(null)
+watch(projectId, () => { workBarSlots.value = null })
+watch(wholeFigures, value => { if (value && !workBarSlots.value) workBarSlots.value = workSlots(workHeader(value)) }, { immediate: true })
+const hideOn = computed(() => ticketsHeader.value && !filters.value.showClosed)
+const workHideLabel = computed(() => hideOn.value ? hideLabel(filters.value.hideStates) : null)
+const columnFigures = computed(() => ({
+  figures: figuresBusy.value || figuresFailed.value ? null : viewFigures.value,
+  failed: figuresFailed.value,
+  hiddenRows: hidesRows(viewFigures.value, hideOn.value, filters.value.hideStates),
+}))
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
 const listLoadMode = computed(() => graphActive.value ? 'graph' : knowledgeActive.value || settingsActive.value || deliveryActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
@@ -1016,10 +1039,18 @@ function closeStatus(restore: boolean) {
   statusMenu.value = null
   if (restore) menu?.anchor.focus()
 }
-function chooseStatus(state: string) {
+function chooseStatus(state: string, checks: EntryChecks | null = null) {
   const menu = statusMenu.value
   statusMenu.value = null
   if (!menu) return
+  const current = rowStore.latest(menu.row.id) ?? menu.row
+  const block = checks?.blocks.find(b => b.to_status === entryStatus(state))
+  // Use the menu's current advisory snapshot to open the one checklist before
+  // changing the row. The mutation still enforces the live definition.
+  if (checks?.node_id === current.id && checks.revision === current.updated_at && block?.checks.some(c => c.applicable && !c.passed)) {
+    requestEntryPanel({ row: current, toStatus: state, anchor: menu.anchor })
+    return
+  }
   void list.setStatus(menu.row, state).then(changed => { if (changed) { void projects.load(true); outline.refreshStatsFor(menu.row.id) } })
   if (menu.from === 'panel') menu.anchor.focus()
   else table.value?.focusGrid()
@@ -1052,12 +1083,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     const catalog = await kinds()
     const kind = catalog.find(candidate => candidate.slug === 'work') ?? catalog.find(candidate => candidate.slug === draft.kind || candidate.slug === 'ticket')
     if (!kind) throw new Error('this workspace has no such type')
-    let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
-    if (needsBenefitPrompt({ kind_id: kind.id, kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
-      const text = await askDoneGate({ key: `New ${workNoun(vocabulary.leaf.name)}`, title: draft.title, state: draft.state, fields })
-      if (!text) return false
-      fields = completionFields(fields, text)
-    }
+    const fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
     const node = await createNode({
       kind_id: kind.id, title: draft.title, state: draft.state, fields,
       parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
@@ -1507,19 +1533,7 @@ const count = (n: number) => plural(n, 'ticket')
 async function bulkStatus(state: string) {
   if (bulkBusy.value) return
   closeBulk(false)
-  const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
-  const gatedIds = new Set(gated.map(row => row.id))
-  const ready = [...selected.value].filter(id => !gatedIds.has(id))
-  if (ready.length) await runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`, ready)
-  if (!gated.length) return
-  bulkBusy.value = true
-  try {
-    const outcome = await stepBenefitGate(gated, state)
-    announceBenefitStep(outcome.done, outcome.skipped)
-  } finally {
-    bulkBusy.value = false
-    table.value?.focusGrid()
-  }
+  await runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`)
 }
 function bulkArchive() { void runBulk({ state: 'archived' }, n => `Archived ${count(n)}`) }
 function bulkAssign(value: string) {
@@ -1842,11 +1856,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
           </div>
           <p v-if="!ticketsHeader && queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
-          <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">
-            <span v-if="ticketsHeader && headerDensity === 'comfortable'" class="progress-label">Progress</span>
-            <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
-            <span class="mono pct">{{ counts.percent }}%</span>
-          </div>
+          <WorkBar
+            class="head-work" :header="workHead" :busy="figuresBusy" :failure="figuresFailed" :narrowed="figuresNarrowed" :slots="workBarSlots" :fallback-leaves="counts.total"
+            :density="ticketsHeader && headerDensity === 'comfortable' ? 'comfortable' : 'compact'" :hide-label="workHideLabel" @retry="retryFigures"
+          />
           <p v-if="!ticketsHeader" class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
         </div>
         <div v-else class="head-stats head-stats-skeleton" aria-hidden="true">
@@ -1922,7 +1935,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
         :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs" :cost-allowed="usageVisible"
-        :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
+        :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll" :column-figures="columnFigures"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
@@ -1961,7 +1974,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :node-id="statusMenu.row.id" :revision="statusMenu.row.updated_at" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :summary="project" :filters="filters" :options="options" :loading="sheetLoading" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         :project-header="ticketsHeader"
@@ -2048,16 +2061,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .project-page[class*="header-"] .header-activity > span { display: none; }
   .project-page[class*="header-"] .header-activity { display: flex; grid-area: activity; justify-self: start; }
   .project-page[class*="header-"] .header-activity .q-stat { margin: 0; min-width: 44px; min-height: 44px; }
-  .project-page[class*="header-"] .project-head .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "activity activity" "stats stats" "description description"; }
+  .project-page[class*="header-"] .project-head .head-flex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "activity" "stats" "work" "description"; }
 }
 .q-warn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
 .q-warn.on { color: var(--queue-wait-ink); }
 .stat-line { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
 .stat { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .stat b { font: 600 13px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
-.progress-line { display: flex; align-items: center; gap: 10px; width: 280px; }
-.progress-line .bar { flex: 1; }
-.pct { width: 34px; font-size: 12px; color: var(--ink-2); text-align: right; }
+.head-work { width: 280px; }
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
@@ -2117,7 +2128,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .page-state .btn { margin-top: 8px; }
 .head-skeleton { display: grid; gap: 12px; padding: 12px 0; }
 .sk-a { width: 320px; height: 26px; border-radius: 8px; } .sk-b { width: 520px; } .sk-c { width: 100%; height: 44px; border-radius: 12px; margin-top: 18px; }
-@media (max-width: 1080px) { .progress-line { width: 200px; } .stat-line { gap: 12px; } }
+@media (max-width: 1080px) { .head-work { width: 240px; } .stat-line { gap: 12px; } }
 @container projecthead (max-width: 760px) {
   .head-flex.with-glimpse { display: flex; }
   .head-flex.with-glimpse .head-main, .head-flex.with-glimpse .head-stats { align-self: stretch; }
@@ -2126,7 +2137,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .head-flex { flex-direction: column; align-items: stretch; gap: 12px; }
   .head-stats { justify-items: start; }
   .head-stats-skeleton { width: 100%; min-height: 103px; }
-  .progress-line { width: 100%; }
+  .head-work { width: 100%; }
   .title-line h1 { font-size: 24px; }
   .stat-line { flex-wrap: wrap; gap: 4px 14px; }
 }
@@ -2160,33 +2171,36 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-page[class*="header-"] .activity { white-space: nowrap; }
 .project-page[class*="header-"] .head-stats { display: flex; align-items: center; gap: 12px; }
 .project-page[class*="header-"] .stat-line { gap: 10px; }
-.project-page[class*="header-"] .progress-line { width: 130px; }
+.project-page[class*="header-"] .head-work { width: 300px; }
 .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto minmax(0, max-content); grid-template-areas: "title title activity stats" "description description description stats"; grid-template-rows: min-content 1fr; align-items: start; row-gap: 6px; }
 .project-page.header-comfortable .title-line { grid-area: title; max-width: none; }
 .project-page.header-comfortable .title-line h1 { font-size: 34px; }
 .project-page.header-comfortable .description-block { grid-area: description; }
 .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.55; }
 .project-page.header-comfortable .activity { grid-area: activity; justify-self: end; align-self: center; }
-.project-page.header-comfortable .head-stats { grid-area: stats; display: grid; align-self: stretch; align-content: start; gap: 6px; }
+.project-page.header-comfortable .head-stats { grid-area: stats; display: grid; align-self: stretch; align-content: start; gap: 8px; }
 .header-activity { display: flex; align-items: center; gap: 12px; }
 .project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: auto; }
-.project-page.header-comfortable .progress-line { width: 100%; }
-.progress-label { font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.project-page.header-comfortable .head-work { width: 100%; }
 .project-page.header-comfortable .project-navigation { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
 @media (min-width: 601px) and (max-width: 1100px) {
   .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
-  .project-page[class*="header-"] .progress-line { width: 88px; }
-  .project-page.header-comfortable .progress-line { width: 100%; }
+  /* AEON-1358: the work bar takes its own full-width row under title and description; the counts keep the right column. */
+  .project-page[class*="header-"] .head-work { width: 230px; }
+  .project-page.header-comfortable .head-flex { grid-template-areas: "title title activity stats" "description description description stats" "work work work work"; }
+  .project-page.header-comfortable .head-stats { display: contents; }
+  .project-page.header-comfortable .head-stats > .project-status-counts { grid-area: stats; }
+  .project-page.header-comfortable .head-work { grid-area: work; width: 100%; margin-top: 4px; }
   .project-page[class*="header-"] .head-flex { column-gap: 8px; }
   .project-page[class*="header-"] .stat-line { gap: 8px; }
 }
 @media (max-width: 900px) { .project-view-settings { display: none; } }
 @container projecthead (max-width: 760px) {
-  .project-page.header-compact .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; }
+  .project-page.header-compact .head-flex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "stats" "work" "description" "activity"; }
   .project-page.header-compact .title-line { grid-area: title; max-width: none; }
   .project-page.header-compact .head-stats { display: contents; }
   .project-page.header-compact .head-stats > .project-status-counts { grid-area: stats; }
-  .project-page.header-compact .progress-line { grid-area: progress; }
+  .project-page.header-compact .head-work { grid-area: work; width: 100%; }
   .project-page.header-compact .description-block { grid-area: description; }
   .project-page.header-compact .activity { grid-area: activity; }
 }
@@ -2195,7 +2209,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .header-activity:has(.q-stat) { display: flex; grid-area: activity; justify-self: start; }
   .header-activity:has(.q-stat) > span { display: none; }
   .header-activity .q-stat { min-height: 44px; margin: 0; }
-  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; gap: 4px 10px; }
+  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "stats" "work" "description" "activity"; gap: 4px 10px; }
   .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }
   .project-page[class*="header-"] .title-line h1 { font-size: 24px; }
   .project-page.header-comfortable .title-line h1 { font-size: 28px; }
@@ -2204,8 +2218,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .project-page[class*="header-"] .head-stats { display: contents; }
   .project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: stats; }
-  .project-page[class*="header-"] .progress-line { grid-area: progress; width: 96px; }
-  .progress-label { display: none; }
+  .project-page[class*="header-"] .head-work, .project-page.header-comfortable .head-work { grid-area: work; width: 100%; margin: 2px 0 4px; }
   .project-navigation { margin-top: 8px; min-height: 52px; gap: 6px; flex-wrap: wrap; }
   .attention-view-link { flex: none; min-height: 44px; }
   /* Saved views keep their own scrollable row below the project navigation. */

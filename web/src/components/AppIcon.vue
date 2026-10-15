@@ -24,7 +24,7 @@ export type IconName =
   | 'sticky-note' | 'scroll-text' | 'presentation' | 'palette' | 'pen-tool' | 'brush' | 'shapes' | 'puzzle' | 'beaker' | 'flask-conical'
   | 'telescope' | 'lightbulb' | 'triangle-alert' | 'siren' | 'flame' | 'shield-alert' | 'messages-square' | 'handshake' | 'megaphone'
   | 'gavel' | 'scale' | 'vote' | 'calendar-check' | 'timer' | 'hourglass' | 'trending-up' | 'sprout'
-  | 'wait' | 'hand' | 'route'
+  | 'wait' | 'hand' | 'route' | 'park' | 'req' | 'skip'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -34,6 +34,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
     <template v-if="name === 'repo'"><path d="M2.8 12.3V3.7c0-.7.6-1.3 1.3-1.3h9.1v9.6H4.1c-.7 0-1.3.6-1.3 1.3s.6 1.3 1.3 1.3h1.5" /><path d="M5.6 2.4V12M7.6 12.7v2.1l1.2-.8 1.2.8v-2.1" /></template>
     <circle v-else-if="name === 'circle'" cx="8" cy="8" r="6" />
+    <path v-else-if="name === 'skip'" d="M3.6 3.6 9 8l-5.4 4.4zM12.2 3.6v8.8" />
     <path v-else-if="name === 'signal-off'" d="M8 12.6h.01M5.6 10.2a3.4 3.4 0 0 1 4.8 0M3.2 7.8a6.8 6.8 0 0 1 5.6-2.1M12.8 7.8a6.8 6.8 0 0 0-1.4-1.1M2 2l12 12" />
     <path v-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
     <rect v-else-if="name === 'square'" x="2.2" y="2.2" width="11.6" height="11.6" rx="2" />
@@ -85,6 +86,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'sliders'"><path d="M2.4 4.6h6.6M12.6 4.6h1M2.4 11.4h1M7 11.4h6.6" /><circle cx="10.8" cy="4.6" r="1.7" /><circle cx="5.2" cy="11.4" r="1.7" /></template>
     <path v-else-if="name === 'enter'" d="M13 3.4v4.4c0 .9-.7 1.6-1.6 1.6H3.2M6 6.6 3.2 9.4 6 12.2" />
     <template v-else-if="name === 'inbox'"><path d="M2 9.4 4.2 3.6h7.6L14 9.4v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1Z" /><path d="M2 9.4h3.3l1 1.5h3.4l1-1.5H14" /></template>
+    <template v-else-if="name === 'park'"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2.6" /><path d="M6.4 11.4V4.8h2.2a1.9 1.9 0 0 1 0 3.8H6.4" /></template>
+    <template v-else-if="name === 'req'"><rect x="2.6" y="2.4" width="10.8" height="11.2" rx="2" /><path d="m5.4 8.2 1.8 1.8 3.4-3.6" /></template>
     <path v-else-if="name === 'folder'" d="M2 4.6c0-.6.4-1 1-1h3.2l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1Z" />
     <path v-else-if="name === 'layers'" d="M8 2 14 5 8 8 2 5ZM2 8.2l6 3 6-3M2 11.2l6 3 6-3" />
     <template v-else-if="name === 'cards'"><rect x="2" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="2" y="8.8" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.4" /></template>

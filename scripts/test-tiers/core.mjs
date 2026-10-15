@@ -78,21 +78,53 @@ export function validImpactPaths(paths) {
 // tests, module/package manifests and build/test configuration. A PR can edit
 // its own workflow anyway, so the merge queue's full gate is the protection;
 // keeping these full just avoids debugging a lane change through a lane change.
-export const machineryPattern = /^(?:\.github\/|scripts\/ci-[^/]*$|scripts\/ci-[^/]+\/|scripts\/ci\/static-checks\.json$|scripts\/test-tiers\/|scripts\/test-tier-go\/|scripts\/releaseworkflow\/|go\.(?:mod|sum)$|go\.work(?:\.sum)?$|web\/package[^/]*\.json$|web\/(?:tsconfig|vite|playwright)[^/]*\.(?:json|ts|js|mjs)$|web\/scripts\/(?!(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs$))/
+// Per-spec shard records are weight manifests, not the planner (AEON-1389).
+export const specShardRecordPattern = /^web\/scripts\/ci-web-shard-specs\/.+\.spec\.ts\.json$/
+export const machineryPattern = /^(?:\.github\/|scripts\/ci-[^/]*$|scripts\/ci-[^/]+\/|scripts\/ci\/static-checks\.json$|scripts\/test-tiers\/|scripts\/test-tier-go\/|scripts\/releaseworkflow\/|go\.(?:mod|sum)$|go\.work(?:\.sum)?$|web\/package[^/]*\.json$|web\/(?:tsconfig|vite|playwright)[^/]*\.(?:json|ts|js|mjs)$|web\/scripts\/(?!(?:(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs|ci-web-shard-specs\/.+\.spec\.ts\.json)$))/
 const generatedPattern = /(?:^|[/.])(?:generated|codegen)(?:\/|\.)|\.(?:gen|pb)\.|(?:^|\/)package[^/]*\.json$|(?:^|\/)(?:tsconfig|vite|playwright)[^/]*\.(?:json|ts|js|mjs)$/
 // R1: tier/shard/weight/policy manifests plus the regression tests that pin
 // them; every lane that reaches web-unit shard 1 and go-static re-validates them.
-const manifestPattern = /^(?:scripts\/ci\/(?!static-checks\.json$)[^/]+\.(?:json|txt)|web\/ci-web-shards\.json|scripts\/migration-policy[^/]*\.json|scripts\/audit\/[^/]+\.json|web\/scripts\/(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs)$/
+const manifestPattern = /^(?:scripts\/ci\/(?!static-checks\.json$)[^/]+\.(?:json|txt)|web\/ci-web-shards\.json|web\/scripts\/ci-web-shard-specs\/.+\.spec\.ts\.json|scripts\/migration-policy[^/]*\.json|scripts\/audit\/[^/]+\.json|web\/scripts\/(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs)$/
 export const tierManifestPattern = /^scripts\/ci\/(?:go|web)-test-tiers\.json$/
 export const semanticRegistryPattern = /^(?:scripts\/ci\/(?:go|web)-test-tiers\.json|web\/ci-web-shards\.json)$/
 // R9: regression tests of the unconditional migration-compat job.
 const alwaysOnTestPattern = /^scripts\/(?:check-migrations\.test\.mjs|migration_compat_probe_test\.py)$/
-const docsPattern = /^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$))/
-// AEON-766: instruction files are test inputs (web/tests/no-shift-rules.test.ts
-// pins AGENTS.md through the rules rollout manifest), never docs-like.
+// Established documentation only. Fixture, testdata, server-delivered and
+// test-pinned Markdown widen; AGENTS.md and CLAUDE.md are instruction inputs.
+const docsPattern = /^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$)|web\/README(?:\.|$))/
 const instructionPattern = /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i
-export const isDocsLike = path => !instructionPattern.test(path) &&
-  (docsPattern.test(path) || (/\.md$/i.test(path) && !/(?:^|\/)testdata\//.test(path) && !/^(?:internal|cmd)\//.test(path)))
+export const isDocsLike = path => !instructionPattern.test(path) && docsPattern.test(path)
+// Research allowlist stays empty. Timing-only registry edits narrow by content
+// comparison, never because their path is listed here.
+export const browserScopeNoneAllowlist = []
+const driftObligations = JSON.parse(readFileSync(new URL('./drift-obligations.json', import.meta.url), 'utf8'))
+const driftFiles = new Set([...(driftObligations.browserFiles ?? []), ...(driftObligations.unitFiles ?? [])])
+const driftGoKeys = new Set(driftObligations.goKeys ?? [])
+const componentSpecs = driftObligations.componentSpecs ?? {}
+const appearancePackage = 'internal/themes'
+const appearancePrefix = 'TestAppearanceMigration'
+const sharedSchemaPattern = /^(?:internal\/(?:auth|principallink|profile|themes|fieldschema)\/|api\/areas\/|api\/openapi|internal\/db\/(?:migrations|schema)(?:\/|$))/
+
+// Cases whose omission let real drift reach main. A full gate runs every
+// recorded behaviour file; a narrowed diff runs the component's specs and the
+// old-schema appearance fixtures when principal, auth or schema changes.
+export function behaviourObligation(tests, paths, { allDrift = false } = {}) {
+  const files = new Set(allDrift ? driftFiles : [])
+  if (!allDrift && Array.isArray(paths)) for (const path of paths) for (const file of componentSpecs[path] ?? []) files.add(file)
+  const shared = !allDrift && Array.isArray(paths) && paths.some(path => sharedSchemaPattern.test(path))
+  const wanted = new Set()
+  for (const row of tests) {
+    if (row.kind !== 'go' && files.has(row.file)) wanted.add(key(row))
+    else if (row.kind === 'go' && allDrift && driftGoKeys.has(key(row))) wanted.add(key(row))
+    else if (row.kind === 'go' && row.package === appearancePackage && row.name.startsWith(appearancePrefix) && (allDrift || shared)) wanted.add(key(row))
+  }
+  return wanted
+}
+
+export function fullGateTests(tests, paths) {
+  const extra = behaviourObligation(tests, paths, { allDrift: true })
+  return tests.filter(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL' || extra.has(key(row)))
+}
 export const tierRank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
 // Two essential Go shards carry about one full hosted shard each; wider
 // consumer sets are cheaper in the seven-shard full layout.
@@ -126,17 +158,23 @@ const timingEntry = (entry, positive = false) => {
       throw new Error('invalid case timings')
   }
   if (split !== undefined) {
-    if (!registryObject(split) || split.count !== 2 || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
+    // Two remains the AEON-1024 balancer fixture. Three is the recorded
+    // AEON-1338 measurement. Any other count, or a field beside the
+    // measurements, is policy and fails wide.
+    if (!registryObject(split) || ![2, 3].includes(split.count) || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
         !registryObject(split.caseSeconds) || Object.values(split.caseSeconds).some(seconds => !Number.isFinite(seconds) || seconds < 0))
       throw new Error('invalid split timing')
-    const { overheadSeconds, caseSeconds, ...splitPolicy } = split
-    policy.split = splitPolicy
+    const { overheadSeconds, caseSeconds, count, ...splitPolicy } = split
+    if (Object.keys(splitPolicy).length) policy.split = splitPolicy
   }
-  return policy
+  return Object.keys(policy).length ? policy : undefined
 }
 const timingMap = entries => {
   if (!registryObject(entries)) throw new Error('invalid timing owners')
-  return Object.fromEntries(Object.entries(entries).map(([owner, entry]) => [owner, timingEntry(entry)]))
+  return Object.fromEntries(Object.entries(entries).flatMap(([owner, entry]) => {
+    const policy = timingEntry(entry)
+    return policy ? [[owner, policy]] : []
+  }))
 }
 
 // Strip only known scheduling measurements at their schema locations. A flag
@@ -151,13 +189,24 @@ function registryPolicy(file, registry) {
       // These bind measurements, not execution. Unknown provenance stays policy.
       delete result.timingWeights.runId
       delete result.timingWeights.sha
+      if (!Object.keys(result.timingWeights.owners ?? {}).length) delete result.timingWeights.owners
+      if (!Object.keys(result.timingWeights).length) delete result.timingWeights
     }
   } else {
-    for (const group of result.groups) for (const spec of group.specs) {
-      if (spec.tierTiming !== undefined) spec.tierTiming = timingEntry(spec.tierTiming, true)
+    for (const group of result.groups ?? []) for (const spec of group.specs ?? []) {
+      if (spec.tierTiming !== undefined) {
+        const policy = timingEntry(spec.tierTiming, true)
+        if (policy) spec.tierTiming = policy
+        else delete spec.tierTiming
+      }
       delete spec.weightSeconds
     }
-    if (result.nightlyTiming !== undefined) result.nightlyTiming.files = timingMap(result.nightlyTiming.files)
+    if (result.nightlyTiming !== undefined) {
+      if (result.nightlyTiming.files !== undefined) {
+        result.nightlyTiming.files = timingMap(result.nightlyTiming.files)
+        if (!Object.keys(result.nightlyTiming.files).length) delete result.nightlyTiming.files
+      }
+    }
   }
   return result
 }
@@ -180,6 +229,11 @@ export function registryImpact(file, before, after) {
       if (demoted) return full('tier demotion requires explicit person approval and full validation', true)
       if (before.tests.length !== after.tests.length || after.tests.some(row => !previous.has(key(row))))
         return full('catalogue membership changed')
+    } else if (before.specSource !== undefined || after.specSource !== undefined) {
+      // Per-spec records hold membership. The source document keeps empty spec
+      // lists, so the assembled nonempty-specs check does not apply here.
+      if (before.specSource !== after.specSource || typeof before.specSource !== 'string')
+        return full('registry ownership, exclusions, configuration or execution policy changed')
     } else {
       validateBrowserPolicy(before); validateBrowserPolicy(after)
     }
@@ -217,8 +271,8 @@ export function affectedRisk(path, webImports = {}) {
   if (isDocsLike(path)) return { full: false, rule: 'docs', layout: 'static', skip: true, reason: `docs-like: ${path}` }
   if (manifestPattern.test(path)) {
     if (semanticRegistryPattern.test(path)) return { full: false, rule: 'R1', layout: 'static', skip: true, registry: true, reason: `R1: semantic registry checks: ${path}` }
-    if (/\.(?:json|txt)$/.test(path)) return { full: true, reason: `unclassified registry or execution policy stays full: ${path}` }
-    return { full: false, rule: 'R1', layout: 'static', skip: true, reason: `R1: manifest/static checks: ${path}` }
+    if (specShardRecordPattern.test(path) || !/\.(?:json|txt)$/.test(path)) return { full: false, rule: 'R1', layout: 'static', skip: true, reason: `R1: manifest/static checks: ${path}` }
+    return { full: true, reason: `unclassified registry or execution policy stays full: ${path}` }
   }
   if (/^scripts\/audit\//.test(path)) return { full: false, rule: 'R5', layout: 'static', skip: true, reason: `R5: audit static checks: ${path}` }
   if (alwaysOnTestPattern.test(path)) return { full: false, rule: 'R9', layout: 'static', skip: true, reason: `R9: migration-compat regression test: ${path}` }
@@ -365,15 +419,16 @@ export function goImpact(tests, paths, imports = {}, seeds = new Set()) {
 
 // A missing diff, unmapped source, or shared input widens selection. The merge
 // queue always proves the full gate, independently of the affected PR switch.
-export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, affectedLane, forceFull = false, forceAll = false, tree, registryChanges, readFile }) {
+export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, fingerprint, impact, affectedLane, forceFull = false, forceAll = false, tree, registryChanges, readFile }) {
   const full = reason => {
-    // Full CI retains the established gate. Only nightly/--all widens to the
-    // entire catalogue; missing impact data must not promote ungated cases.
+    // Full CI retains the established gate plus the behaviour cases that caught
+    // real drift. Only nightly/--all widens to the entire catalogue.
     const catalogue = forceAll || event === 'schedule'
-    const selected = catalogue ? tests : tests.filter(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL')
+    const selected = catalogue ? tests : fullGateTests(tests, paths)
     return { full: true, reason, scope: catalogue ? 'catalogue' : 'gated-full',
       deferredBrowserCases: tests.filter(row => row.kind === 'browser').length - selected.filter(row => row.kind === 'browser').length, tests: selected }
   }
+  if (impact === 'off') return full('CI_IMPACT=off')
   if (forceAll || forceFull || event !== 'pull_request' || !Array.isArray(paths)) {
     return full('full event or uncertain impact')
   }
@@ -405,14 +460,15 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
   // Deleted/unknown files cannot be analysed using only the candidate graph.
   if ([...changedWeb].some(file => !Object.hasOwn(webImports, file))) return full('missing web dependency metadata')
   if (hasWeb) for (const file of risk.webSeeds) if (Object.hasOwn(webImports, file)) changedWeb.add(file)
-  const impact = browserImpact([...changedWeb], webImports, browserMap, baseTree)
-  if (tests.some(row => row.kind === 'browser') && impact.full) return full(impact.reason)
-  const web = new Set([...reverseDependants(changedWeb, webImports), ...impact.specs])
+  const coverage = browserImpact([...changedWeb], webImports, browserMap, baseTree, fingerprint)
+  if (tests.some(row => row.kind === 'browser') && coverage.full) return full(coverage.reason)
+  const web = new Set([...reverseDependants(changedWeb, webImports), ...coverage.specs])
   if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return full('web module has no mapped test importer')
   if (tests.filter(t => t.kind === 'browser' && web.has(t.file)).length > 300) return full('browser fan-out exceeds 300 cases')
   const reason = 'essential plus changed area and reverse dependencies'
+  const extra = affectedLane === 'on' ? behaviourObligation(tests, paths) : new Set()
   return { full: false, reason: risk.reasons.length ? `${reason}; ${risk.reasons.join('; ')}` : reason,
-    tests: tests.filter(t => t.tier === 'ESSENTIAL' || risk.promoted.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
+    tests: tests.filter(t => t.tier === 'ESSENTIAL' || risk.promoted.has(key(t)) || extra.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
 }
 
 export function measuredWeights(manifest, rows) {
@@ -427,10 +483,12 @@ export function measuredWeights(manifest, rows) {
 
 // Split only explicitly measured Go owners. Unknown/new cases retain an
 // average-case estimate and still execute; overhead is charged to each launch.
+// AEON-1338 (LEAD 2026-10-15): a recorded count of three is legal. Two stays
+// legal for the AEON-1024 balancer fixture. Any other count is still invalid.
 export function splitOwner(rows, timing, limit) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw new Error('Invalid split shard limit')
   const split = timing?.split
-  if (!split || split.count !== 2 || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
+  if (!split || ![2, 3].includes(split.count) || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
       !split.caseSeconds || typeof split.caseSeconds !== 'object' || Array.isArray(split.caseSeconds) ||
       !Number.isFinite(timing.seconds) || timing.seconds <= 0 || !Number.isSafeInteger(timing.selectedTests) || timing.selectedTests < 1 ||
       Object.entries(split.caseSeconds).some(([name, seconds]) => !/^(?:Test|Fuzz)\w+$/.test(name) || !Number.isFinite(seconds) || seconds < 0))
@@ -468,8 +526,8 @@ export function shard(rows, index, count, weights = {}, { firstShardLast = false
   for (const { owner, rows: entries, weight, part } of batches.sort((a, b) => b.weight - a.weight || a.owner.localeCompare(b.owner) || a.part - b.part)) {
     // Zero-duration owners still need a shard. On equal loads prefer fewer
     // owners, then retain shard order for a deterministic final tie-break.
-    // Two halves of a package must use different shards, even if one bin is
-    // still cheapest after placing the first half.
+    // Parts of one package must use different shards, even if one bin is
+    // still cheapest after placing the first part.
     const used = assigned.get(owner) ?? new Set()
     const bin = preference.filter(bin => !used.has(bin)).reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
     used.add(bin); assigned.set(owner, used)
@@ -524,4 +582,53 @@ export function webGraph(root, { bounds = inputBounds, read = readInput } = {}) 
 
 export function counts(rows) {
   return Object.fromEntries(tiers.map(tier => [tier, rows.filter(row => row.tier === tier).length]))
+}
+
+// The tier runner executes with one worker, while some historical measured
+// steps used two. Convert those file allocations to serial scheduling estimates
+// without changing the original weights used by the exact-spec runner. Local
+// serial timings and unmeasured/test-count estimates already use a serial basis.
+export function tierWeights(manifest, rows) {
+  const sources = new Map((manifest.ciInventory ?? []).map(source => [source.id, source]))
+  return Object.fromEntries(manifest.groups.flatMap(group => group.specs.map(spec => {
+    if (spec.tierTiming) {
+      const { seconds, selectedTests } = spec.tierTiming
+      if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isSafeInteger(selectedTests) || selectedTests < 1) throw new Error(`Invalid tier timing: ${spec.file}`)
+      // Hosted reports measure the gated slice. Other selections are estimates
+      // proportional to that slice, without pretending nightly was measured.
+      const selected = rows ? rows.filter(row => row.file === spec.file).length : selectedTests
+      return [spec.file, seconds * selected / selectedTests]
+    }
+    const source = sources.get(spec.weightSource)
+    const workers = source?.flags?.map(flag => /^--workers=(\d+)$/.exec(flag)).find(Boolean)
+    const factor = source?.kind === 'browser-test' && source.measuredSeconds > 0 && workers ? Number(workers[1]) : 1
+    if (!Number.isSafeInteger(factor) || factor < 1 || factor > 64) throw new Error(`Invalid measured worker count: ${spec.file}`)
+    return [spec.file, spec.weightSeconds * factor]
+  })))
+}
+
+// Size the same whole-file LPT packing used by the runner. Reserve 25% of
+// the 20-minute job cap, including two minutes for setup and collection.
+// An indivisible heavy file cannot be fixed by adding bins: fail wide to the
+// established full gate and expose its projection rather than dropping cases.
+export function webShardPlan(rows, policy, { mode = 'essential', timeoutSeconds = 1200,
+  headroom = 0.25, overheadSeconds = 120, minimum = 4, maximum = 12 } = {}) {
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || !Number.isFinite(headroom) || headroom < 0 || headroom >= 1 ||
+      !Number.isFinite(overheadSeconds) || overheadSeconds < 0 || !Number.isInteger(minimum) || minimum < 1 ||
+      !Number.isInteger(maximum) || maximum < minimum || maximum > 64) throw new Error('Invalid web shard budget')
+  const selected = rows.filter(row => row.kind === 'browser')
+  const weights = tierWeights(policy, selected)
+  const files = new Set(selected.map(row => row.file))
+  for (const file of files) if (!Number.isFinite(weights[file]) || weights[file] <= 0) throw new Error(`Missing web shard weight: ${file}`)
+  const budgetSeconds = timeoutSeconds * (1 - headroom)
+  const project = count => Array.from({ length: count }, (_, i) => {
+    const tests = shard(selected, i + 1, count, weights)
+    return { shard: i + 1, cases: tests.length,
+      seconds: overheadSeconds + [...new Set(tests.map(row => row.file))].reduce((sum, file) => sum + weights[file], 0) }
+  })
+  let count = mode === 'essential' ? minimum : maximum, projections = project(count)
+  while (mode === 'essential' && count < maximum && Math.max(...projections.map(bin => bin.seconds)) > budgetSeconds) projections = project(++count)
+  const projectedMaxSeconds = Math.max(...projections.map(bin => bin.seconds))
+  return { shards: projections.map(bin => bin.shard), projections, projectedMaxSeconds, budgetSeconds, timeoutSeconds,
+    headroom, overheadSeconds, fitsBudget: projectedMaxSeconds <= budgetSeconds }
 }

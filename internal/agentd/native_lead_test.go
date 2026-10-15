@@ -235,8 +235,8 @@ func TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	final := waitNativeEvent(t, events, func(event AdapterEvent) bool { return event.Chat != nil && event.Chat.SessionUpdate == "final" })
-	if final.Chat.Content.Text != "sdk:person message" {
-		t.Fatal("streamed input did not reach the same SDK Query", final.Chat)
+	if final.Chat.Content.Text != "sdk:person message" || final.InputID != id {
+		t.Fatal("explicit final did not name the input consumed by the same SDK Query", final.Chat, final.InputID)
 	}
 	waitNativeEvent(t, events, func(event AdapterEvent) bool {
 		return event.InputID == id && event.Chat != nil && event.Chat.State == "idle"
@@ -523,7 +523,7 @@ func TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion(t *t
 	if err := s.writeLead(migrated, true); err != nil {
 		t.Fatal(err)
 	}
-	raw, err = s.state.Read("lead-runtime-"+old.Pickup.Demand.ID+".json", 32768)
+	raw, err = s.state.Read(nativeLeadStateName(old.Pickup.Demand.ID), 32768)
 	if err != nil {
 		t.Fatal(err)
 	}

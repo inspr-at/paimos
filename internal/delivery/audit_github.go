@@ -73,7 +73,7 @@ func auditDefault(get func(string, any) error, repo string) (string, error) {
 
 func (g AppReader) AuditCommits(ctx context.Context) ([]string, error) {
 	out := []string{}
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+	err := g.readInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
 		branch, err := auditDefault(get, g.App.Config.Repository)
 		if err != nil {
 			return err
@@ -135,7 +135,7 @@ func (g AppReader) AuditCommit(ctx context.Context, sha string) (*MergeFact, err
 		return nil, errRead
 	}
 	var out *MergeFact
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+	err := g.readInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
 		branch, err := auditDefault(get, g.App.Config.Repository)
 		if err != nil {
 			return err
@@ -207,7 +207,7 @@ func (g AppReader) AuditChecks(ctx context.Context, sha string) ([]Check, error)
 		return nil, errRead
 	}
 	var out []Check
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+	err := g.readInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
 		var err error
 		out, err = checks(get, sha)
 		return err

@@ -1,0 +1,45 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* The status icons' bar form (design r4b §5.1, §6.3; AEON-1359): one fill per status, read from its icon, for the
+   lifeline strip, its swatches and Delivery's step bar. statusFill(state) in lib/workFigures.ts returns
+   `f-<pattern> fc-<status>`. Only transform animates (the in-progress stripes), so nothing here can shift layout.
+   AEON-1362 ships the same rules with the status icons; once it is on main, this file folds into its stylesheet. */
+
+/* Fills that draw pseudo-elements need a positioned box; consumers may position it themselves (zero specificity). */
+:where(.f-diag, .f-cancel) { position: relative; }
+.f-ring { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.f-tint { background: color-mix(in srgb, currentColor 20%, transparent); box-shadow: inset 0 0 0 1.5px currentColor; }
+/* In progress: 45° stripes (2 px on, 2.5 px off across them = 6.364 px along x) in a clipped shape under a 1.5 px ring. */
+.f-diag { background: transparent; overflow: hidden; }
+.f-diag::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -6.364px; right: 0;
+  background: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 4.5px);
+  will-change: transform; animation: diag-slide 1.8s linear infinite paused;
+}
+.f-diag::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1.5px currentColor; pointer-events: none; }
+@keyframes diag-slide { from { transform: translateX(0); } to { transform: translateX(6.364px); } }
+/* A live segment always slides; others slide while the pointer is over their container. Swatches never slide. */
+.f-diag.f-now::before, .f-slide-hover:hover .f-diag::before { animation-play-state: running; }
+/* Too short for its pattern: the stripes fall back to the ring. */
+.f-diag.f-short::before { display: none; }
+.f-solid, .f-deep { background: currentColor; }
+.f-dotted { background: transparent; border: 1.5px dotted currentColor; }
+.f-dashed { background: transparent; border: 1.5px dashed currentColor; }
+.f-halo { background: color-mix(in srgb, var(--st-qa-fill) 70%, transparent); box-shadow: inset 0 0 0 1.5px currentColor, 0 0 5px 1px color-mix(in srgb, var(--st-qa-ring) 45%, transparent); }
+/* Cancelled: a grey tint with one centred slash, so it never reads as the in-progress stripes. */
+.f-cancel { background: color-mix(in srgb, currentColor 14%, transparent); box-shadow: inset 0 0 0 1px currentColor; overflow: hidden; }
+.f-cancel::after { content: ''; position: absolute; left: 50%; top: 50%; width: 1.5px; height: 20px; background: currentColor; transform: translate(-50%, -50%) rotate(45deg); }
+.f-square { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; border-radius: 1px; }
+/* Fill colours: at least 3:1 against the surface and the track, so New and QA use their inks rather than the icon colours. */
+.fc-new { color: var(--gold-ink); }
+.fc-open, .fc-progress { color: var(--st-progress); }
+.fc-backlog, .fc-cancelled, .fc-archived, .fc-other { color: var(--ink-3); }
+.fc-blocked { color: var(--st-blocked); }
+.fc-qa { color: var(--st-qa-ring); }
+.fc-done, .fc-delivered { color: var(--st-ok); }
+.fc-accepted { color: var(--st-ok-deep); }
+
+/* Paused off-screen and in hidden tabs. */
+.f-diag.offscreen::before, .tab-hidden .f-diag::before { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .f-diag::before { animation: none; }
+}

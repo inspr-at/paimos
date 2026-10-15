@@ -186,41 +186,11 @@ func requireNativeCapacityTx(ctx context.Context, tx pgx.Tx, in NativeAdmission,
 	}
 	// Account occupancy must include sibling projects, even for project-scoped
 	// actors. These counts return no private account/session facts.
-	used, err := occupancyExcept(ctx, tx, run.ID)
+	used, err := occupancyExceptNative(ctx, tx, valueOrEmpty(in.RunID), exceptSession)
 	if err != nil {
 		return err
 	}
-	quotaUsed, err := quotaOccupancyExcept(ctx, tx, run.ID)
-	if err != nil {
-		return err
-	}
-	rows, err := tx.Query(ctx, `SELECT r.account_id::text,a.harness||':'||coalesce(a.quota_pool_fingerprint,''),count(*)
- FROM native_session_roots r JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
- WHERE r.run_id IS NULL AND r.released_at IS NULL AND r.owned_session_id::text<>$1
-	 GROUP BY r.account_id,a.harness,a.quota_pool_fingerprint LIMIT 1025`, exceptSession)
-	if err != nil {
-		return err
-	}
-	n := 0
-	for rows.Next() {
-		var id, pool string
-		var count int
-		if err = rows.Scan(&id, &pool, &count); err != nil {
-			rows.Close()
-			return err
-		}
-		n++
-		if n > 1024 {
-			rows.Close()
-			return nativeDenial(nativecontract.ReasonBufferFull)
-		}
-		used[id] += count
-		if pool != "" {
-			quotaUsed[pool] += count
-		}
-	}
-	err = rows.Err()
-	rows.Close()
+	quotaUsed, err := quotaOccupancyExceptNative(ctx, tx, valueOrEmpty(in.RunID), exceptSession)
 	if err != nil {
 		return err
 	}
