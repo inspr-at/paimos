@@ -244,7 +244,13 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
   test(`AEON-1235: approved P4 reference states and check.mjs audit against the build at ${width}px ${theme}`, async ({ browser }, testInfo) => {
     test.setTimeout(240_000)
     const lines = [`AEON-1235 P4 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit is adapted to the real P4 build and existing application shell. Full P2/P3 repository states are integration dependencies.', 'Design/API difference: Delivered needs release_id and frozen published membership, so maintenance includes a published-release selector. Actions precede growing preview/refusal content to preserve the control-stability rule.', 'Chat-v1 is a deployment opt-in with no readable workspace feature flag. The row describes its real dependency without asserting an invented enabled/disabled value.', 'The mock’s sample PR placeholder is omitted. All rendered records in these screenshots are test fixtures only.']
-    expect(Object.keys(PROJECT_SETTINGS_EXPLAINERS)).toHaveLength(21)
+    // Pin every existing explainer and the four added by Definitions P2.
+    expect(Object.keys(PROJECT_SETTINGS_EXPLAINERS).sort()).toEqual([
+      'actions', 'admission', 'autopilot', 'backfill', 'changekey', 'chat', 'checks',
+      'copy', 'deadlines', 'definitions', 'enforce', 'events', 'inherit', 'key',
+      'lead', 'lifecycle', 'manual', 'mbf', 'queue', 'review', 'reviews', 'roles',
+      'routing', 'shadow', 'shipping',
+    ])
     for (const [id, explanation] of Object.entries(PROJECT_SETTINGS_EXPLAINERS)) {
       const parts = [explanation.what, explanation.effect, explanation.who, 'where' in explanation && explanation.where ? explanation.where.label : '']
       for (const projectKey of ['PHAROS', 'AEON', 'PRJ-26']) {
