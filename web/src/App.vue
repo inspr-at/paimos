@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import EntryChecklistHost from './components/work/EntryChecklistHost.vue'
 import { displayLanguage } from './lib/displayLanguage'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
@@ -212,6 +213,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 </script>
 
 <template>
+  <EntryChecklistHost />
   <div class="app-shell" :class="{ bare, 'footer-hidden': footerHidden && !bare, 'header-folded': folded }">
     <a class="skip-link" href="#main">Skip to content</a>
     <AppHeader v-if="!bare && !folded" />

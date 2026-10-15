@@ -8608,6 +8608,12 @@
     ,
     {"kind":"browser","file":"tests/done-gate.spec.ts","name":"one ticket asks before Done (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1315 defined entry row reserves space before reads and keeps the ticket stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1315 entry checklist preserves controls and refuses or audits status moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1315 entry row stays absent without a definition during reads and saves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"an epic with open children and no hours shows coverage on the empty estimate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"estimate display and edit at 1600 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -17587,6 +17593,8 @@
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"names the creator ceiling when a custom project role grants recurrence alongside built-in Admin","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"retains the other unavailable reasons and their precedence","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/entry-checks-layout.unit.test.ts","name":"keeps bounded empty-project layout hints only for the current person and tenant","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/features.unit.test.ts","name":"discards old tenant and revoked-session responses","tier":"NIGHTLY"}
     ,

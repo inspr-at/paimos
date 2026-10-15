@@ -257,7 +257,7 @@ func (m *Module) mergeBackfill(w http.ResponseWriter, r *http.Request) {
 		}
 		changes := []events.Change{}
 		for i := range out.Items {
-			c, err := prepareMergeTx(ctx, tx, p.TenantID, m.config.Repository, &out.Items[i])
+			c, err := prepareMergeTx(ctx, tx, p, m.config.Repository, &out.Items[i])
 			if err != nil {
 				return err
 			}

@@ -32,6 +32,7 @@ func TestMigratedWorkCLICompletionGate(t *testing.T) {
 	t.Cleanup(srv.Close)
 	worker := mintAgent(t, srv.URL, "completion-worker")
 	seedProject(t, srv.URL, worker.Token)
+	seedCompletionDefinition(t, srv.URL)
 	t.Setenv("PAIMOS_URL", srv.URL)
 	t.Setenv("PAIMOS_API_KEY", worker.Token)
 	missing := filepath.Join(t.TempDir(), "no-config.yaml")
@@ -60,13 +61,21 @@ func TestMigratedWorkCLICompletionGate(t *testing.T) {
 				if before.Type != "work" || before.Status != "open" {
 					t.Fatalf("alias did not create an open work item: type %s, state %s", before.Type, before.Status)
 				}
-				code, _, stderr = invoke("update", created.IssueKey, "--status", state, "--hide-from-release-notes", "true")
-				if code == 0 || !strings.Contains(stderr, "before done:") || !strings.Contains(stderr, "benefit_de is required") {
+				code, _, stderr = invoke("update", created.IssueKey, "--status", state, "--hide-from-release-notes", "false")
+				if code == 0 || !strings.Contains(stderr, "entry_checks_failed") || !strings.Contains(stderr, "benefit_de is required") {
 					t.Fatalf("missing benefits were not refused: code %d, %s", code, stderr)
 				}
 				after := read(t, created.IssueKey)
 				if after.Status != before.Status || after.Hide != before.Hide {
 					t.Fatal("rejected completion partially changed the work item")
+				}
+				// The approved hidden exemption needs no filler release copy.
+				code, _, stderr = invoke("update", created.IssueKey, "--status", state, "--hide-from-release-notes", "true")
+				if code != 0 {
+					t.Fatalf("hidden exemption refused: code %d, %s", code, stderr)
+				}
+				if hidden := read(t, created.IssueKey); hidden.Status != state || !hidden.Hide || hidden.BenefitDE != "" {
+					t.Fatal("hidden completion added filler copy or lost its state")
 				}
 				code, _, stderr = invoke("update", created.IssueKey, "--status", state, "--pill-en", "Clear release notes", "--pill-de", "Klare Release Notes", "--benefit-en", "Work explains its benefit.", "--benefit-de", "Arbeit erklärt ihren Nutzen.", "--hide-from-release-notes", "true")
 				if code != 0 {

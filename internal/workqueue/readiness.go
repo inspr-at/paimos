@@ -3,11 +3,9 @@ package workqueue
 
 import (
 	"context"
-	"encoding/json"
-	"math"
 	"regexp"
-	"strings"
 
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -68,39 +66,10 @@ type Readiness struct {
 	SecurityReviewRequired bool     `json:"security_review_required"`
 }
 
-func State(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), " ", "_"), "-", "_")
-}
-func Hours(fields map[string]any) float64 {
-	h, ok := fields["estimate_hours"].(float64)
-	if !ok || math.IsNaN(h) || math.IsInf(h, 0) || h <= 0 || h > 200 {
-		return 0
-	}
-	return h
-}
-func Criteria(fields map[string]any) []string {
-	out := []string{}
-	switch value := fields["acceptance_criteria"].(type) {
-	case string:
-		for _, line := range strings.Split(value, "\n") {
-			if line = strings.TrimSpace(line); strings.Trim(line, "- *#[]xX\t") != "" {
-				out = append(out, line)
-			}
-		}
-	case []any:
-		for _, v := range value {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				out = append(out, strings.TrimSpace(s))
-			}
-		}
-	}
-	return out
-}
-func Fields(raw []byte) map[string]any {
-	out := map[string]any{}
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
+func State(s string) string                   { return workorders.EntryState(s) }
+func Hours(fields map[string]any) float64     { return workorders.EntryHours(fields) }
+func Criteria(fields map[string]any) []string { return workorders.EntryCriteria(fields) }
+func Fields(raw []byte) map[string]any        { return workorders.EntryFields(raw) }
 
 var securityWords = regexp.MustCompile(`(?i)\b(security|permissions?|authorization|authentication|auth|rls|credentials?)\b`)
 

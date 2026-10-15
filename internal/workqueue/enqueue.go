@@ -42,6 +42,14 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 		readyKind = "ticket"
 	}
 	ready := Check(readyKind, state, title, body, Fields(fields), false)
+	ticket, err := EntryTicketTx(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	ready, err = DefinitionReadinessTx(ctx, tx, p, ticket, ready)
+	if err != nil {
+		return nil, err
+	}
 	if !ready.Ready {
 		return nil, fmt.Errorf("recurrence ticket is not ready for the queue")
 	}

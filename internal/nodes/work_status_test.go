@@ -94,11 +94,28 @@ func TestWorkStatusEntryFencesTenantBeforeTree(t *testing.T) {
 func workNodeTest(t *testing.T, p tenant.Principal, parent string, state string) nodeJSON {
 	t.Helper()
 	k := kindBySlug(t, p, "work")
-	body := fmt.Sprintf(`{"kind_id":%q,"title":"Work child","state":%q,"fields":%s}`, k.ID, state, benefitFields)
+	body := fmt.Sprintf(`{"kind_id":%q,"title":"Work child","state":%q,"fields":%s}`, k.ID, state, workStatusFieldsTest(t))
 	if parent != "" {
 		body = strings.TrimSuffix(body, "}") + fmt.Sprintf(`,"parent_id":%q}`, parent)
 	}
 	return mustNode(t, p, body)
+}
+
+// Status/read-model fixtures must pass the default Ready and Done checks so
+// their assertions reach the lifecycle, counts, ordering and undo boundaries.
+func workStatusFieldsTest(t *testing.T) json.RawMessage {
+	t.Helper()
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(benefitFields), &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["estimate_hours"] = 1
+	fields["acceptance_criteria"] = "The work preserves its status and audit guarantees"
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 func currentWorkTest(t *testing.T, p tenant.Principal, id string) nodeJSON {
 	t.Helper()
@@ -707,8 +724,8 @@ func TestWorkCausalUndoProtectedTransitions(t *testing.T) {
 	for _, tc := range []struct {
 		name, initial, patch string
 	}{
-		{"unpublish", `{"fields":{"roadmap_public":true}}`, `{"fields":{"roadmap_public":false},"state":"in_progress"}`},
-		{"publish", ``, `{"fields":{"roadmap_public":true},"state":"in_progress"}`},
+		{"unpublish", `{"fields":{"roadmap_public":true}}`, `{"fields":{"roadmap_public":false,"estimate_hours":1,"acceptance_criteria":"The work preserves publication authority"},"state":"in_progress"}`},
+		{"publish", ``, `{"fields":{"roadmap_public":true,"estimate_hours":1,"acceptance_criteria":"The work preserves publication authority"},"state":"in_progress"}`},
 		{"complete_check", `{"human_check":"Inspect the release"}`, `{"human_check":null,"state":"in_progress"}`},
 		{"reopen_check", `{"human_check":"Inspect the release"}`, `{"human_check":"Inspect again","state":"in_progress"}`},
 	} {
@@ -761,7 +778,7 @@ func TestWorkCausalUndoAgentOrdinaryEditPreservesProtectedFields(t *testing.T) {
 	p := newPrincipal(t, "causal-ordinary")
 	parent := workNodeTest(t, p, "", "open")
 	child := workNodeTest(t, p, parent.ID, "open")
-	status, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"fields":{"roadmap_public":true},"human_check":"Inspect the release"}`)
+	status, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"fields":{"roadmap_public":true,"estimate_hours":1,"acceptance_criteria":"The work preserves protected fields"},"human_check":"Inspect the release"}`)
 	child = decode[nodeJSON](t, status, raw, 200)
 	enableWorkStatusTest(t, p)
 	agent := estimateAgent(t, p)
