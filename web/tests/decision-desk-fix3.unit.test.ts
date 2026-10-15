@@ -67,7 +67,7 @@ it('turns an account_matrix projection row into a settings link-out without a so
   expect(deskLinkOut(row)).toBe('/settings/accounts#account-use')
   for (const href of ['//evil.example/settings', 'https://evil.example/', '/settings/accounts?x=1', '/decision-desk?item=u:x']) expect(deskLinkOut({ ...row, href })).toBe('')
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:any(.*)*', component: { render: () => null } }] })
-  const desk = { projection: { items: [row], counts: { open: 1, held: 0, chores: 0 }, has_more: false, as_of: '', truncated: false }, count: 1, error: '', loading: false, refresh: vi.fn() }
+  const desk = { projection: { items: [row], counts: { open: 1, held: 0, chores: 0 }, has_more: false, as_of: '', truncated: false }, count: 1, error: '', loading: false, refresh: vi.fn(), ruleProjects: new Map(), ruleProjectError: '', resolveRuleProjects: vi.fn(async () => {}) }
   vi.mocked(useDecisionDesk).mockReturnValue(desk as never)
   const html = await renderToString(createSSRApp(DecisionDeskPanel).use(router))
   expect(html).toContain('href="/settings/accounts#account-use"')

@@ -1,51 +1,20 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
-import { useSession } from '../../stores/session'
 import { deskItemID, deskLinkOut, deskProject, type DeskProjectionItem } from '../../lib/decisionDesk'
-import { getDoctrineInbox } from '../../lib/doctrine'
-import { readDoctrineProjects } from '../../lib/decisionDeskApi'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import { relativeTime } from '../../lib/work'
 
-const desk = useDecisionDesk(), projects = useProjects(), session = useSession()
-const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
+const desk = useDecisionDesk(), projects = useProjects()
 onMounted(() => { void projects.load() })
-const doctrineProjects = ref(new Map<string, string>()), projectError = ref('')
-let projectGeneration = 0
-watch([() => desk.projection, owner], async ([projection, identity], [, previousOwner]) => {
-  const turn = ++projectGeneration
-  // Polls replace the projection object. Keep resolved links under the pointer,
-  // but discard the previous person's cache and any late lookup on invalidation.
-  if (!projection || identity !== previousOwner) { doctrineProjects.value = new Map(); projectError.value = '' }
-  const ids = new Set(projection?.items.filter(item => item.kind === 'doctrine' && !item.project_id && !doctrineProjects.value.has(item.id)).map(item => item.id))
-  if (!ids.size) return
-  projectError.value = ''
-  const current = () => turn === projectGeneration && desk.projection === projection && identity === owner.value && session.authenticationCurrent()
-  try {
-    const inbox = await getDoctrineInbox()
-    if (!current()) return
-    const rules = inbox.items.filter(rule => ids.has(rule.id))
-    const tickets = await readDoctrineProjects(rules)
-    if (!current()) return
-    const resolved = new Map(doctrineProjects.value)
-    for (const rule of rules) {
-      const project = rule.ticket ? tickets.get(rule.ticket) : undefined
-      if (project) resolved.set(rule.id, project)
-      else if (!rule.ticket) resolved.set(rule.id, '') // A workspace rule is resolved without a project.
-    }
-    doctrineProjects.value = resolved
-  } catch {
-    if (current()) projectError.value = 'The projects of some rule changes could not be read.'
-  }
-}, { immediate: true, flush: 'sync' })
-onBeforeUnmount(() => { projectGeneration++ })
-const panelError = computed(() => desk.error || projectError.value)
+// Rule changes name their project through their ticket; the store keeps one cache for this panel and the header preview.
+watch(() => desk.projection, () => { void desk.resolveRuleProjects() }, { immediate: true })
+const panelError = computed(() => desk.error || desk.ruleProjectError)
 // AEON-1057: each row names its project; the link opens it in a new tab.
 function rowProject(item: DeskProjectionItem) {
-  const id = item.project_id || (item.kind === 'doctrine' ? doctrineProjects.value.get(item.id) : undefined)
+  const id = item.project_id || (item.kind === 'doctrine' ? desk.ruleProjects.get(item.id) : undefined)
   const project = id ? projects.byId(id) : undefined
   return project ? deskProject({ projectId: project.id, projectName: project.title, projectKey: project.key }) : undefined
 }
@@ -59,6 +28,8 @@ const groups = computed(() => {
 // AEON-1339: the Desk row anatomy, compact: a kind mark per row, the title, the project with the Projects folder icon.
 const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat', lesson: 'book' }
 const now = computed(() => Date.parse(desk.projection?.as_of ?? '') || Date.now())
+// One name for action requests on the panel, the preview and the Desk (AEON-1339); the source title stays for other readers.
+const rowTitle = (item: DeskProjectionItem) => item.kind === 'action_request' ? 'Action request' : item.title
 // The Desk returns here after the last decision of a round opened from this panel.
 const itemLink = (item: DeskProjectionItem) => deskLinkOut(item) || { path: '/decision-desk', query: { from: 'agents', item: deskItemID(item) } }
 const incomplete = computed(() => !!desk.projection && (desk.projection.has_more || desk.projection.items.length !== desk.count))
@@ -78,7 +49,7 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
         <li v-for="item in group.items" :key="deskItemID(item)" class="desk-line" :class="{ held: item.held }">
           <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="15" /></span>
           <span class="dl-body">
-            <RouterLink :to="itemLink(item)" class="desk-item" :data-testid="`agents-desk-item-${deskItemID(item)}`">{{ item.title }}</RouterLink>
+            <RouterLink :to="itemLink(item)" class="desk-item" :data-testid="`agents-desk-item-${deskItemID(item)}`">{{ rowTitle(item) }}</RouterLink>
             <span class="dl-meta"><a v-if="item.project?.href" class="row-project" :href="item.project.href" target="_blank" rel="noopener" :data-tip="`Open ${item.project.name} in a new tab`" data-testid="agents-desk-project"><AppIcon name="folder" :size="13" /><span>{{ item.project.name }}</span></a><span v-else-if="item.project" class="row-project quiet"><AppIcon name="folder" :size="13" /><span>{{ item.project.name }}</span></span><span v-if="item.created_at" class="dl-age">{{ relativeTime(item.created_at, { now }) }}</span></span>
           </span>
         </li>

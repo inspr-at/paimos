@@ -175,10 +175,11 @@ test('an approval from an agent with no session and no address shows its name', 
   })
   await openDesk(page, `a:${data.approvals[0].id}`)
   const facts = page.getByRole('region', { name: 'Permission request', exact: true })
-  await expect(facts).toContainText('Asked by Harbor Clerk')
-  await expect(facts.locator('time')).toHaveAttribute('datetime', data.approvals[0].expires_at)
-  await expect(facts).not.toContainText(`Agent ${principal.slice(0, 8)}`)
-  await expect(facts.getByText('The whole workspace', { exact: true })).toHaveCount(1)
+  // AEON-1339: the requester and expiry are in the memo head; What it runs shows only what runs.
+  await expect(page.getByTestId('desk-from')).toHaveText('Harbor Clerk')
+  await expect(page.getByTestId('desk-line')).toContainText(/Harbor Clerk waits for this\. Expires in \d+ min/)
+  await expect(page.getByRole('dialog')).not.toContainText(`Agent ${principal.slice(0, 8)}`)
+  await expect(facts.getByText('Across the whole workspace', { exact: true })).toHaveCount(1)
 })
 
 test('an approval without agent_name falls back to the short agent id', async ({ page }) => {
@@ -202,9 +203,8 @@ test('an approval without agent_name falls back to the short agent id', async ({
   })
   delete (data.approvals[0] as { agent_name?: string | null }).agent_name
   await openDesk(page, `a:${data.approvals[0].id}`)
-  const facts = page.getByRole('region', { name: 'Permission request', exact: true })
-  await expect(facts).toContainText(`Asked by Agent ${principal.slice(0, 8)}`)
-  await expect(facts).not.toContainText('Harbor Clerk')
+  await expect(page.getByTestId('desk-from')).toHaveText(`Agent ${principal.slice(0, 8)}`)
+  await expect(page.getByRole('dialog')).not.toContainText('Harbor Clerk')
 })
 
 test('native approval choices and field shortcuts record the exact source and retain history', async ({ page }) => {

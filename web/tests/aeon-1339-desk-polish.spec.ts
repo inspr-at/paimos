@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1339 risk: the shipped Decision Desk drifts from the approved rev 11 artifact: Decide does
 // nothing on a click, the round stays open after the last decision, the legend wraps, the project
-// shows twice with a dot, or the folder tab's shoulder draws a kinked or uneven hairline.
+// shows twice with a dot, or the folder tab's shoulder draws a kinked or uneven hairline; and, from
+// Tick's fix round 4, the details below that the approved file draws (stamp colour, narrow bar, names).
 import { expect, test, type Page } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import { mockDecisionDesk } from './decision-desk-fixtures'
@@ -141,6 +142,7 @@ test('panel and preview rows name the kind and project, and link back', async ({
   await expect(panel.getByTestId('agents-desk-item-q:question-1')).toHaveAttribute('href', '/decision-desk?from=agents&item=q:question-1')
   await expect(panel.locator('.mark.k-question').first()).toBeVisible()
   await expect(panel.locator('.row-project i, .project-dot')).toHaveCount(0)
+  await expect(panel.getByTestId('agents-desk-item-m:action-1')).toHaveText('Action request')
   await panel.screenshot({ path: testInfo.outputPath(`panel-${width}-${theme}.png`) })
   await page.goto('/agents')
   await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
@@ -148,6 +150,10 @@ test('panel and preview rows name the kind and project, and link back', async ({
   await expect(row).toHaveAttribute('href', '/decision-desk?from=preview&item=q:question-1')
   await expect(row.locator('.dp-ic.k-question')).toBeVisible()
   await expect(row.locator('.dp-project')).toHaveText('Paimos Aeon')
+  // Fix round 4: the preview's rule row names its project, and action requests have one name everywhere.
+  await expect(page.getByTestId('desk-preview-item-r:rule-1').locator('.dp-project')).toHaveText('Paimos Aeon')
+  await expect(page.getByTestId('desk-preview-item-m:action-1')).toContainText('Action request')
+  await expect(page.getByTestId('desk-preview-item-m:action-1')).not.toContainText(/Human request|Action request · Action request/)
   await page.screenshot({ path: testInfo.outputPath(`preview-${width}-${theme}.png`) })
   }
   await page.unrouteAll({ behavior: 'ignoreErrors' })
@@ -164,6 +170,140 @@ test('panel and preview rows name the kind and project, and link back', async ({
   await expect(page.locator('[data-place="desk"] .place-main')).toBeFocused()
   expect(world.calls.filter(call => call.path.endsWith('/decision'))).toHaveLength(1)
   await expect(page.getByText(/^Decided\. It goes to .+ in a few seconds\.$/)).toBeVisible()
+})
+
+// Tick's visual check at c2e307d (fix round 4). Risk: the chosen stamp stays neutral, list rows lose the ticket
+// the memo names, approvals repeat raw ids, risk, asker and expiry, action requests carry three names, and the
+// stamp line runs two sentences together.
+// One test with steps: a row per case would push the shared desk fixture's browser fan-out past 300 cases.
+test('fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow bar and the Decided filter', async ({ page }, testInfo) => {
+  test.setTimeout(420_000)
+  await test.step('outcome-coloured stamps, the memo ticket on rows, one name and no raw ids', async () => {
+    const tone = (id: string) => page.getByTestId(id).evaluate(element => getComputedStyle(element).borderTopColor)
+    // A token as the memo resolves it, in the current theme.
+    const token = (name: string) => page.evaluate(variable => {
+      const probe = document.createElement('span'); probe.style.color = `var(${variable})`
+      document.querySelector('.desk-dlg')!.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color
+    }, name)
+    for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      const world = await mockDecisionDesk(page, { theme })
+      world.questions[0]!.suggested_outcome = 'doctrine'; world.questions[0]!.suggestion_reason = 'agent_suggestion'
+      await page.goto('/decision-desk')
+      // The rows carry the ticket the memo names: the chip, its title and "Parked AEON-1".
+      const question = page.getByTestId('desk-row-q:question-1')
+      await expect(question.locator('.res-key')).toHaveText('AEON-1')
+      await expect(question.locator('.status-line')).toContainText('Parked AEON-1')
+      const rule = page.getByTestId('desk-row-r:rule-1')
+      await expect(rule).toContainText('An agent proposes a rule change for')
+      await expect(rule.locator('.res-key')).toHaveText('AEON-1')
+      const action = page.getByTestId('desk-row-m:action-1')
+      await expect(action.locator('.what')).toHaveText('Action request')
+      await expect(action).toContainText(world.action.body)
+      await expect(page.getByTestId('desk-row-a:approval-1')).not.toContainText('n-a1')
+      await expect(page.getByTestId('desk-list')).not.toContainText(/needs your steer|Human request/)
+      await page.screenshot({ path: testInfo.outputPath(`fix4-list-${width}-${theme}.png`), fullPage: true })
+
+      await page.getByTestId('desk-one-by-one').click()
+      await expect(heading(page)).toHaveText('Allow nodes.read?')
+      // What it runs shows only what runs; the ticket is the Re chip, risk, asker and expiry are in the head.
+      await expect(page.getByTestId('desk-re')).toContainText('AEON-1')
+      await expect(page.getByTestId('desk-line')).toContainText(/waits for this\. Expires in \d+ min · Low risk\./)
+      await expect(page.getByTestId('desk-runs')).toContainText('What it runs')
+      await expect(page.getByTestId('desk-runs')).not.toContainText(/Ticket n-a1|n-a1|\brisk\b|Asked by|expires/i)
+      await page.screenshot({ path: testInfo.outputPath(`fix4-approval-${width}-${theme}.png`) })
+
+      await page.keyboard.press('j')
+      await expect(heading(page)).toHaveText('Which migration should carry the index?')
+      // The chosen stamp takes its outcome's colour; the others stay ink-3.
+      await expect(page.getByTestId('stamp-once')).toHaveAttribute('aria-checked', 'true')
+      await expect(page.getByTestId('stamp-once')).toHaveClass(/\bt-ok\b/)
+      await expect.poll(() => tone('stamp-once')).toBe(await token('--ok'))
+      await expect.poll(() => tone('stamp-always')).toBe(await token('--ink-3'))
+      await expect(page.getByTestId('desk-stamp-desc')).toContainText('it stays in Decided. Suggested: Doctrine · not available for this question')
+      await page.screenshot({ path: testInfo.outputPath(`fix4-stamp-once-${width}-${theme}.png`) })
+      await page.getByTestId('stamp-always').click()
+      await expect(page.getByTestId('stamp-always')).toHaveClass(/\bt-teal\b/)
+      await expect.poll(() => tone('stamp-always')).toBe(await token('--teal-ink'))
+      await expect.poll(() => tone('stamp-once')).toBe(await token('--ink-3'))
+      await page.getByTestId('stamp-requirement').click()
+      await expect.poll(() => tone('stamp-requirement')).toBe(await token('--gold-ink'))
+      await page.screenshot({ path: testInfo.outputPath(`fix4-stamp-requirement-${width}-${theme}.png`) })
+
+      await page.keyboard.press('j'); await page.keyboard.press('j')
+      await expect(page.getByTestId('desk-tab-kind')).toHaveText('Action request')
+      await expect(heading(page)).toHaveText(world.action.body)
+      await expect(page.getByRole('dialog')).not.toContainText(/needs your steer|Human request/)
+    }
+  })
+
+  // Risk: on narrow desks a reserved native-action row leaves an empty band under Skip and Decide, the tab cuts
+  // the kind, or Edit appearing for the next item moves the buttons under the pointer (AEON-541).
+  await test.step('the narrow bar has no empty band, the tab reads the kind, Edit appears above a pinned bar', async () => {
+    for (const [width, height] of [[390, 844], [688, 1000]] as const) for (const theme of ['light', 'dark'] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await page.setViewportSize({ width, height })
+      await mockDecisionDesk(page, { theme })
+      await page.goto('/decision-desk')
+      await page.getByTestId('desk-one-by-one').click()
+      await expect(heading(page)).toHaveText('Allow nodes.read?')
+      await expect(page.getByTestId('desk-native')).toBeHidden()
+      const frame = (await page.getByTestId('desk-frame').boundingBox())!, decide = (await page.getByTestId('desk-decide').boundingBox())!
+      expect(frame.y + frame.height - (decide.y + decide.height), 'Decide sits at the foot of the sheet').toBeLessThanOrEqual(16)
+      await page.screenshot({ path: testInfo.outputPath(`fix4-bar-${width}-${theme}.png`) })
+      const kinds: string[] = []
+      const fits = async () => {
+        const kind = page.getByTestId('desk-tab-kind')
+        expect(await kind.evaluate(element => element.scrollWidth <= element.clientWidth + 0.5), `the tab reads "${await kind.innerText()}" in full`).toBe(true)
+        kinds.push(await kind.innerText())
+      }
+      await fits()
+      const next = (title: string) => ({ name: `next item: ${title}`, run: async () => { await page.keyboard.press('j'); await expect(heading(page)).toHaveText(title); await fits() } })
+      await expectStableControls({
+        controls: { decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), tab: page.getByTestId('desk-tab'), pager: page.getByTestId('desk-pager') },
+        interactions: [next('Which migration should carry the index?'), next('Should the successor continue the review?'), next('The reviewer needs guidance before trying again.'), next('Keep mutation checks in the transaction')],
+      })
+      expect(kinds).toEqual(['Approval', 'Question', 'Handover question', 'Action request', 'Rule change'])
+      // The rule offers Edit: a compact row above Skip and Decide, inside the sheet.
+      const edit = (await page.getByTestId('desk-edit-rule').boundingBox())!, after = (await page.getByTestId('desk-decide').boundingBox())!
+      await expect(page.getByTestId('desk-edit-rule')).toBeVisible()
+      expect(edit.y + edit.height, 'Edit sits above Decide').toBeLessThanOrEqual(after.y)
+      expect(edit.y, 'Edit stays inside the sheet').toBeGreaterThan(frame.y)
+      await page.screenshot({ path: testInfo.outputPath(`fix4-bar-edit-${width}-${theme}.png`) })
+    }
+  })
+
+  // Risk: the Decided stamp filter wraps "Approvals" to a second row on a phone and pushes the list.
+  await test.step('the Decided stamp filter stays one line and scrolls sideways', async () => {
+    for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      const world = await mockDecisionDesk(page, { theme })
+      world.approval.decision = 'approved'
+      await page.goto('/decision-desk')
+      await page.getByTestId('desk-tab-decided').click()
+      const filter = page.getByRole('radiogroup', { name: 'Stamp' })
+      await expect(filter).toBeVisible()
+      const line = () => filter.evaluate(element => ({ rows: new Set([...element.querySelectorAll('button')].map(button => Math.round(button.getBoundingClientRect().top))).size, height: element.getBoundingClientRect().height, overflow: element.scrollWidth - element.clientWidth, room: element.clientWidth }))
+      const before = await line()
+      expect(before.rows, 'one line of stamps').toBe(1)
+      expect(before.height).toBeLessThan(50)
+      if (width === 390) expect(before.overflow, 'the filter scrolls sideways at 390').toBeGreaterThan(0)
+      const listTop = async () => (await page.getByTestId('desk-list').boundingBox())!.y
+      const top = await listTop()
+      await expectStableControls({
+        controls: { open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), filter },
+        interactions: [
+          { name: 'choose Approvals', run: async () => { await filter.getByRole('radio', { name: 'Approvals' }).click(); await expect(filter.getByRole('radio', { name: 'Approvals' })).toHaveAttribute('aria-checked', 'true') } },
+          { name: 'choose All', run: async () => { await filter.getByRole('radio', { name: 'All' }).click(); await expect(filter.getByRole('radio', { name: 'All' })).toHaveAttribute('aria-checked', 'true') } },
+        ],
+      })
+      expect((await line()).rows).toBe(1)
+      expect(Math.abs(await listTop() - top), 'the list starts where it did').toBeLessThanOrEqual(0.5)
+      await page.screenshot({ path: testInfo.outputPath(`fix4-decided-filter-${width}-${theme}.png`) })
+    }
+  })
 })
 
 // The sheet outline: tab, shoulder and sheet are one path; the hairline keeps one weight (±0.25 px)

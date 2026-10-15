@@ -3,20 +3,17 @@
 // The Decision Desk preview (AEON-1214): the former Agents Desk panel, opened
 // from the header's Desk chevron on every page. It reads the canonical
 // projection behind the header badge; every row opens its item on the Desk.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
-import { useSession } from '../../stores/session'
 import { deskItemID, deskLinkOut, type DeskProjectionItem } from '../../lib/decisionDesk'
-import { getDoctrineInbox } from '../../lib/doctrine'
-import { readDoctrineProjects } from '../../lib/decisionDeskApi'
 import { plural, relativeTime } from '../../lib/work'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 
 // On phones the preview is a full-height sheet with its link pinned at the foot.
 defineProps<{ phone?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
-const desk = useDecisionDesk(), projects = useProjects(), session = useSession()
+const desk = useDecisionDesk(), projects = useProjects()
 // A preview, not the Desk: the first rows, and how many the Desk holds.
 const ROWS = 12
 const KIND: Record<DeskProjectionItem['kind'], string> = {
@@ -25,44 +22,18 @@ const KIND: Record<DeskProjectionItem['kind'], string> = {
 }
 // AEON-1339: each row's kind mark, as on the Desk; held questions and approvals are amber.
 const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat', lesson: 'book' }
-const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
 const root = ref<HTMLElement>()
 // A dialog: keyboard focus moves to its first row (or the Desk link) as it opens.
 onMounted(() => { void projects.load(); (root.value?.querySelector<HTMLElement>('.dp-row') ?? root.value?.querySelector<HTMLElement>('.dp-go'))?.focus() })
-const doctrineProjects = ref(new Map<string, string>()), projectError = ref('')
-let projectGeneration = 0
-watch([() => desk.projection, owner], async ([projection, identity], [, previousOwner]) => {
-  const turn = ++projectGeneration
-  // Polls replace the projection object. Keep resolved links under the pointer,
-  // but discard the previous person's cache and any late lookup on invalidation.
-  if (!projection || identity !== previousOwner) { doctrineProjects.value = new Map(); projectError.value = '' }
-  const ids = new Set(projection?.items.filter(item => item.kind === 'doctrine' && !item.project_id && !doctrineProjects.value.has(item.id)).map(item => item.id))
-  if (!ids.size) return
-  projectError.value = ''
-  const current = () => turn === projectGeneration && desk.projection === projection && identity === owner.value && session.authenticationCurrent()
-  try {
-    const inbox = await getDoctrineInbox()
-    if (!current()) return
-    const rules = inbox.items.filter(rule => ids.has(rule.id))
-    const tickets = await readDoctrineProjects(rules)
-    if (!current()) return
-    const resolved = new Map(doctrineProjects.value)
-    for (const rule of rules) {
-      const project = rule.ticket ? tickets.get(rule.ticket) : undefined
-      if (project) resolved.set(rule.id, project)
-      else if (!rule.ticket) resolved.set(rule.id, '') // A workspace rule is resolved without a project.
-    }
-    doctrineProjects.value = resolved
-  } catch {
-    if (current()) projectError.value = 'The projects of some rule changes could not be read.'
-  }
-}, { immediate: true, flush: 'sync' })
-onBeforeUnmount(() => { projectGeneration++ })
+// Rule changes name their project through their ticket. The store's cache outlives this preview,
+// so a rule row names its project as the Agents panel does, from the first frame once read (AEON-1339).
+watch(() => desk.projection, () => { void desk.resolveRuleProjects() }, { immediate: true })
+const projectError = computed(() => desk.ruleProjectError)
 // Ages read against the projection's own time, so they change with each poll.
 const now = computed(() => Date.parse(desk.projection?.as_of ?? '') || Date.now())
 // AEON-1057: each row names its project; workspace-wide items say Workspace.
 function where(item: DeskProjectionItem) {
-  const id = item.project_id || (item.kind === 'doctrine' ? doctrineProjects.value.get(item.id) : undefined)
+  const id = item.project_id || (item.kind === 'doctrine' ? desk.ruleProjects.get(item.id) : undefined)
   if (id) return projects.byId(id)?.title ?? ''
   return item.kind === 'doctrine' && id === undefined ? '' : 'Workspace'
 }
@@ -72,8 +43,9 @@ const items = computed(() => {
 })
 // The Desk returns to the page under the preview after the last decision of a round opened here.
 const shown = computed(() => items.value.slice(0, ROWS).map(item => ({
-  key: deskItemID(item), held: item.held, title: item.title, kind: item.kind, project: where(item),
-  detail: [KIND[item.kind], relativeTime(item.created_at, { now: now.value })].filter(Boolean).join(' · '),
+  // One name for action requests (AEON-1339): the kind is the title, so the detail does not repeat it.
+  key: deskItemID(item), held: item.held, title: item.kind === 'action_request' ? KIND.action_request : item.title, kind: item.kind, project: where(item),
+  detail: [item.kind === 'action_request' ? '' : KIND[item.kind], relativeTime(item.created_at, { now: now.value })].filter(Boolean).join(' · '),
   to: deskLinkOut(item) || { path: '/decision-desk', query: { from: 'preview', item: deskItemID(item) } },
 })))
 const groups = computed(() => [

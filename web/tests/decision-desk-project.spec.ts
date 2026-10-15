@@ -46,7 +46,7 @@ test('every kind names its project with a new-tab link; P opens it, but not whil
     await expect(link).toHaveAttribute('rel', /\bnoopener\b/)
     await expect(page.getByTestId('desk-tab-project')).toHaveText(project.key)
     await expect(page.locator('.desk-dlg .project-dot, .desk-dlg i[aria-hidden="true"]')).toHaveCount(0)
-    kinds.push(await page.locator('.ft-kind').innerText())
+    kinds.push(await page.getByTestId('desk-tab-kind').innerText())
     if (at < 4) { const before = await page.getByTestId('desk-paper').getByRole('heading', { level: 2 }).innerText(); await page.keyboard.press('j'); await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).not.toHaveText(before) }
   }
   expect(kinds).toEqual(['Approval', 'Question', 'Handover question', 'Action request', 'Rule change'])

@@ -10,9 +10,8 @@ import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import { agentName, harnessLabel, RISK_LABEL, riskFor } from '../lib/agentState'
-import { lookupNodes } from '../lib/api'
 import { captureToastOwner, toast } from '../lib/toast'
-import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readQuestion, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
+import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readDeskTickets, readQuestion, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
 import { phoneCapability } from '../lib/deskPhoneApproval'
 import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessRevalidate } from '../lib/authz'
@@ -114,23 +113,19 @@ const person = computed(() => session.identity?.principal.kind === 'person')
 const heldRows = computed(() => visible.value.filter(item => item.held || item.kind === 'approval'))
 const readyRows = computed(() => visible.value.filter(item => !(item.held || item.kind === 'approval')))
 const openRound = computed(() => items.value.filter(item => inScope(item) && !item.decided && !item.linkOut))
-// The ticket each open item is about: one bounded lookup of up to 100 ticket ids per read.
+// The ticket each open item is about, resolved as the memo resolves it (AEON-1339): bounded id and key lookups per read.
 const tickets = ref(new Map<string, DeskTicket>())
 let ticketTurn = 0
 async function readTickets(rows: readonly DeskItem[]) {
   const turn = ++ticketTurn, identity = owner.value
-  const ids = [...new Set(rows.map(row => row.ticketId).filter((id): id is string => !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) && !tickets.value.has(id)))].slice(0, 100)
-  if (!ids.length) return
   try {
-    const page = await lookupNodes(ids)
-    if (!alive || turn !== ticketTurn || identity !== owner.value || !Array.isArray(page?.items)) return
-    const next = new Map(tickets.value)
-    for (const node of page.items.slice(0, 100)) if (ids.includes(node.id) && typeof node.key === 'string') next.set(node.id, { key: node.key, title: typeof node.title === 'string' ? node.title : '' })
-    tickets.value = next
+    const found = await readDeskTickets(rows, tickets.value)
+    if (!alive || turn !== ticketTurn || identity !== owner.value || !found.size) return
+    tickets.value = new Map([...tickets.value, ...found])
   } catch { /* The rows keep their project; a ticket chip waits for the next read. */ }
 }
 function ticketOf(item: DeskItem): DeskTicket | undefined {
-  return (item.ticketId ? tickets.value.get(item.ticketId) : undefined) ?? (item.ticketKey ? { key: item.ticketKey, title: '' } : undefined)
+  return (item.ticketId ? tickets.value.get(item.ticketId) : undefined) ?? (item.ticketKey ? tickets.value.get(`key:${item.ticketKey}`) ?? { key: item.ticketKey, title: '' } : undefined)
 }
 // The asking agent by its exact session when known, else its message address, else the name the source gave.
 function who(item: DeskItem): DeskWho | undefined {
@@ -173,6 +168,8 @@ function meanwhileLine(item: DeskItem) {
   const title = kind === 'parked' ? (ticket ? `Parked ${ticket.key}` : 'Parked') : kind === 'stopped' ? 'Waits for this' : kind === 'paused' ? 'Paused' : 'Carries on'
   return { held: kind !== 'carries_on', icon: (kind === 'parked' ? 'park' : kind === 'stopped' ? 'stop' : kind === 'paused' ? 'hold' : 'arrow') as IconName, title, text }
 }
+// An action request is titled by its kind; its message names the row.
+const rowName = (item: DeskItem) => item.kind === 'action' && item.context ? `${kindLabels.action}: ${item.context.slice(0, 200)}` : `${kindLabels[item.kind]}: ${item.title}`
 const recommends = (item: DeskItem) => item.recommended ? item.choices.find(choice => choice.id === item.recommended)?.title ?? '' : ''
 // Approve, Deny, Resolve and Dismiss open rev 11's inline reason form; they commit through the memo's path.
 const rowForm = ref<{ id: string; revision: number; mode: 'approve' | 'deny' | 'resolve' | 'dismiss'; reason: string; busy: boolean; error: string }>()
@@ -511,12 +508,12 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
           <p class="q-group-label">{{ group.label }}<span class="n">{{ group.rows.length }}</span><span class="group-note">{{ group.note }}</span></p>
           <ul class="items desk-list" :aria-label="group.label">
             <li v-for="item in group.rows" :key="item.id" class="item desk-row" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }" :data-testid="`desk-row-${item.id}`">
-              <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" @click="item.linkOut || begin(item.id)" />
+              <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="rowName(item)" @click="item.linkOut || begin(item.id)" />
               <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="16" /></span>
               <div class="body">
                 <p class="line1"><strong class="what"><span v-if="item.kind === 'lesson'">Lesson to adopt · </span>{{ item.title }}</strong><span class="meta"><time v-if="item.expiresAt" class="expiry" :class="{ soon: soon(item.expiresAt) }" :datetime="item.expiresAt">{{ expiry(item.expiresAt) }}</time><time v-else-if="item.createdAt" class="expiry" :datetime="item.createdAt">{{ ago(item.createdAt) }}</time><span v-if="item.approval" class="risk" :class="{ high: riskFor(item.approval) === 'high' }">{{ RISK_LABEL[riskFor(item.approval)] }}</span></span></p>
-                <p class="line2"><span v-if="who(item)" class="who" :data-tip="who(item)?.model || undefined"><HarnessMark v-if="who(item)?.harness" :harness="who(item)!.harness!" :size="14" /><span>{{ who(item)!.name }}</span></span><span class="phrase"><span v-if="item.kind === 'rule'" class="asks">proposes a rule change for</span><template v-else-if="item.kind === 'action'"><span class="asks">to</span><span class="to">you</span><span class="asks">on</span></template><span v-else-if="who(item)" class="asks">on</span><span class="proj-quiet" data-testid="desk-row-project"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span class="res-key">{{ ticketOf(item)!.key }}</span><span v-if="ticketOf(item)!.title" class="res-title" :data-tip="ticketOf(item)!.title">{{ ticketOf(item)!.title }}</span></template></span></p>
-                <p v-if="item.approval?.resource_kind" class="target">{{ item.approval.resource_kind === 'tenant' ? 'The whole workspace' : `${item.approval.resource_kind === 'node' ? 'Ticket' : 'Run'} ${item.approval.resource_id || 'not named'}` }}</p>
+                <p class="line2"><span v-if="who(item)" class="who" :data-tip="who(item)?.model || undefined"><HarnessMark v-if="who(item)?.harness" :harness="who(item)!.harness!" :size="14" /><span>{{ who(item)!.name }}</span></span><span class="phrase"><span v-if="item.kind === 'rule'" class="asks">{{ who(item) ? 'proposes' : 'An agent proposes' }} a rule change for</span><template v-else-if="item.kind === 'action'"><span class="asks">{{ who(item) ? 'to' : 'From an agent to' }}</span><span class="to">you</span><span class="asks">on</span></template><span v-else-if="who(item)" class="asks">on</span><span class="proj-quiet" data-testid="desk-row-project"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span class="res-key">{{ ticketOf(item)!.key }}</span><span v-if="ticketOf(item)!.title" class="res-title" :data-tip="ticketOf(item)!.title">{{ ticketOf(item)!.title }}</span></template></span></p>
+                <p v-if="item.approval?.resource_kind === 'tenant'" class="target">The whole workspace</p>
                 <p v-if="item.kind !== 'question' && item.kind !== 'handover' && item.context" class="why" :class="{ 'body-text': item.kind === 'action' }">{{ item.context }}</p>
                 <p v-if="item.kind === 'question' || item.kind === 'handover'"><span class="status-line" :class="{ park: meanwhileLine(item).held }"><AppIcon :name="meanwhileLine(item).icon" :size="13" /><span>{{ meanwhileLine(item).title }}<span v-if="meanwhileLine(item).text" class="mt"> · {{ meanwhileLine(item).text }}</span></span></span></p>
                 <p v-if="recommends(item)" class="rec-line"><span class="rec-word">Recommends</span><span>{{ recommends(item) }}</span></p>
@@ -571,7 +568,10 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
 .dp-bar .seg button .n { font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .dp-bar .seg button[aria-checked="true"] .n { color: var(--teal-ink); }
-.dp-bar .dec-filter { margin-left: auto; flex-wrap: wrap; border-radius: 18px; }
+/* The stamp filter stays one line; on a phone it scrolls sideways instead of wrapping (AEON-1339). */
+.dp-bar .dec-filter { margin-left: auto; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.dp-bar .dec-filter::-webkit-scrollbar { display: none; }
+.dp-bar .dec-filter button { flex: none; white-space: nowrap; }
 .trim-pages { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 /* The list card: a warm full tint and a soft gold ring while something waits, never an edge bar. */
 .queue { --agent-state-color: var(--agent-waiting); overflow: clip; container: queue / inline-size; }

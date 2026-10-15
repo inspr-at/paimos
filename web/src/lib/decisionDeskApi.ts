@@ -3,7 +3,7 @@
 import { acceptLearning, dismissLearning, draftLearning, getKnowledge, listLearnings, type MethodLearning } from './knowledge'
 import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
 import { approveStepup, declineStepup, readStepups, stepupAnswer, stepupDelivery, stepupTitle, type StepupDevices, type StepupRequest } from './stepup'
-import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
+import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, lookupNodes, type WorkNode } from './api'
 import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession, type AgentRun } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
 import { getDoctrineInbox, submitDoctrineInbox, dismissDoctrineInbox, type DoctrineInboxItem } from './doctrine'
@@ -11,7 +11,7 @@ import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
 import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
 import { readTierResponse, decideTierResponse } from './agentRows'
-import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect } from './decisionDesk'
+import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskTicket } from './decisionDesk'
 
 export interface QuestionInput {
   request_id: string; question: string; context?: string; findings?: string; options: DeskChoice[]
@@ -119,7 +119,7 @@ export function approvalItem(approval: Approval, projectName = approval.resource
   ]), askers: [{ principalId: approval.agent_principal_id, name: approval.agent_name?.trim() || undefined }], approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
 }
 export function actionItem(message: ProjectMessage, projectId: string, projectName: string): DeskItem {
-  return { ...base(`m:${message.id}`, 'action', 'An agent needs your steer', message.body, [
+  return { ...base(`m:${message.id}`, 'action', 'Action request', message.body, [
     { id: 'reply', title: 'Reply to the agent', description: 'Steer the work with an inbox reply.', answer: '', field: true },
     { id: 'resolved', title: 'I did it myself', description: 'Resolve the request.', answer: 'Resolved' },
     { id: 'dismissed', title: 'Not needed', description: 'Dismiss the request.', answer: 'Dismissed' },
@@ -587,6 +587,23 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
   return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason, delivery: 'Recorded by the native workflow.' }
 }
 export interface DeskContext { ticket?: WorkNode; attachments: Attachment[]; related: WorkNode[]; outcomes: OutcomeEvent[]; warnings: string[] }
+const NODE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, TICKET_REF = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/
+/** The tickets list rows are about, resolved as the memo resolves its own (AEON-1339): a key through the
+ * key lookup, an id through the bounded id lookup (it takes UUIDs only), any other id read on its own.
+ * Found tickets are keyed by id, and keys as `key:<KEY>`; a failed read leaves its rows without a chip. */
+export async function readDeskTickets(rows: readonly Pick<DeskItem, 'ticketId' | 'ticketKey'>[], known: ReadonlyMap<string, DeskTicket>): Promise<Map<string, DeskTicket>> {
+  const ids = [...new Set(rows.map(row => row.ticketId).filter((id): id is string => !!id && TICKET_REF.test(id) && !known.has(id)))]
+  const keys = [...new Set(rows.filter(row => !row.ticketId && row.ticketKey).map(row => row.ticketKey!).filter(key => TICKET_REF.test(key) && !known.has(`key:${key}`)))].slice(0, 100)
+  const uuids = ids.filter(id => NODE_UUID.test(id)).slice(0, 100), others = ids.filter(id => !NODE_UUID.test(id)).slice(0, 20)
+  const found = new Map<string, DeskTicket>()
+  if (!uuids.length && !keys.length && !others.length) return found
+  const [byId, byKey, ...single] = await Promise.allSettled([uuids.length ? lookupNodes(uuids) : Promise.resolve({ items: [] }), keys.length ? lookupNodeKeys(keys) : Promise.resolve({ items: [] }), ...others.map(id => getNode(id))])
+  const ticket = (node: { key?: unknown; title?: unknown }) => typeof node.key === 'string' && node.key ? { key: node.key, title: typeof node.title === 'string' ? node.title : '' } : undefined
+  if (byId?.status === 'fulfilled' && Array.isArray(byId.value?.items)) for (const node of byId.value.items.slice(0, 100)) { const row = uuids.includes(node.id) ? ticket(node) : undefined; if (row) found.set(node.id, row) }
+  if (byKey?.status === 'fulfilled' && Array.isArray(byKey.value?.items)) for (const node of byKey.value.items.slice(0, 100)) { const asked = node.requested_key ?? node.key, row = keys.includes(asked) ? ticket(node) : undefined; if (row) found.set(`key:${asked}`, row) }
+  single.forEach((read, at) => { const row = read.status === 'fulfilled' && read.value.id === others[at] ? ticket(read.value) : undefined; if (row) found.set(others[at]!, row) })
+  return found
+}
 export async function loadDeskContext(ticketId: string, ticketKey?: string): Promise<DeskContext> {
   if (ticketKey) {
     try {

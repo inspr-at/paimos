@@ -124,7 +124,30 @@ const ghost = computed<'skip' | 'decline' | 'change' | ''>(() => {
   if (decidedView.value) return question.value ? 'change' : current.kind === 'lesson' ? 'skip' : ''
   return 'skip'
 })
-// One reserved slot beside Skip for native actions, only in rounds that can use it.
+// One reserved slot beside Skip for native actions, only in rounds that can use it. On narrow desks the
+// slot is a row above Skip and Decide, shown only while the current item has its action (AEON-1339).
+const nativeNow = computed<'revoke' | 'edit' | 'undo' | ''>(() => {
+  const row = item.value
+  if (!row) return ''
+  if (props.revoke && row.kind === 'approval' && row.decided && row.optionId === 'approved') return 'revoke'
+  if (props.editRule && row.kind === 'rule' && !row.decided) return 'edit'
+  if (props.undo && row.kind === 'lesson' && row.decided && row.undoEvent) return 'undo'
+  return ''
+})
+// The tab's width is decided once per round, never per item (AEON-541): hidden copies of every key and kind in
+// the round size it, so a label is cut only when there is truly no room and the pager keeps its place (AEON-1339).
+const tabSizes = computed(() => {
+  const byId = new Map(props.items.map(row => [row.id, row])), sizes = new Map<string, { key: string; kind: string; pager: boolean }>()
+  for (const id of props.round) {
+    const row = byId.get(id)
+    if (!row) continue
+    const key = deskProject(row).key, kind = kindLabels[row.kind]
+    sizes.set(`${key}:${kind}`, { key, kind, pager: props.round.length > 1 })
+    if (sizes.size >= 40) break
+  }
+  sizes.set(':Round finished', { key: '', kind: 'Round finished', pager: false })
+  return [...sizes.values()]
+})
 const nativeSlot = computed(() => (!!props.revoke && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'approval')) || (!!props.editRule && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'rule')) || (!!props.undo && props.round.some(id => props.items.find(row => row.id === id)?.kind === 'lesson')))
 const announcement = ref('')
 const trimRequests = new Map<string, string>()
@@ -641,16 +664,19 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
       <svg ref="sheet" class="sheet-shape" aria-hidden="true" focusable="false"><path :d="sheetPath" /></svg>
       <div class="desk-top desk-toolbar" data-testid="desk-actions">
         <div ref="tab" class="folder-tab" data-testid="desk-tab">
-          <span v-if="project?.key && !finished" class="ft-key" :class="{ switched: !!switchedFrom }" :data-tip="switchedFrom ? `${project.name}: another project than the item before (${switchedFrom.name})` : project.name" data-testid="desk-tab-project">{{ project.key }}</span>
-          <span class="ft-kind">{{ finished ? 'Round finished' : item ? kindLabels[item.kind] : 'Memo' }}</span>
-          <button v-if="round.length > 1 && !finished" ref="pagerButton" class="ft-pager" type="button" aria-haspopup="listbox" :aria-expanded="pager" :disabled="busy" data-tip="All items in this round" data-testid="desk-pager" @click="openPager">{{ index + 1 }} of {{ round.length }}<AppIcon name="chevron" :size="13" /></button>
+          <span class="ft-row">
+            <span v-if="project?.key && !finished" class="ft-key" :class="{ switched: !!switchedFrom }" :data-tip="switchedFrom ? `${project.name}: another project than the item before (${switchedFrom.name})` : project.name" data-testid="desk-tab-project">{{ project.key }}</span>
+            <span class="ft-kind" data-testid="desk-tab-kind">{{ finished ? 'Round finished' : item ? kindLabels[item.kind] : 'Memo' }}</span>
+            <button v-if="round.length > 1 && !finished" ref="pagerButton" class="ft-pager" type="button" aria-haspopup="listbox" :aria-expanded="pager" :disabled="busy" data-tip="All items in this round" data-testid="desk-pager" @click="openPager">{{ index + 1 }} of {{ round.length }}<AppIcon name="chevron" :size="13" /></button>
+          </span>
+          <span v-for="size in tabSizes" :key="`${size.key}:${size.kind}`" class="ft-row ft-size" aria-hidden="true"><span v-if="size.key" class="ft-key" :data-text="size.key" /><span class="ft-kind" :data-text="size.kind" /><span v-if="size.pager" class="ft-pager" :data-text="`${round.length} of ${round.length}`"><AppIcon name="chevron" :size="13" /></span></span>
         </div>
         <span id="desk-status" class="desk-status" role="status" data-testid="desk-status">{{ topStatus }}<template v-if="!topStatus && arrivalsCount"><span class="arrival-hint">{{ arrivalsCount }} new for the next round</span></template></span>
         <div class="desk-acts action-buttons">
-          <span v-if="nativeSlot" class="native-action">
-            <button v-if="revoke" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'approval' && item.decided && item.optionId === 'approved' ? 'visible' : 'hidden' }" :disabled="busy || !item || !canRevoke?.(item)" data-testid="desk-revoke" @click="revokeGrant">Revoke</button>
-            <button v-if="editRule" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'rule' && !item.decided ? 'visible' : 'hidden' }" :disabled="blocked || !editable" data-testid="desk-edit-rule" @click="editRuleProposal">Edit</button>
-            <button v-if="undo" type="button" class="desk-btn ghost sm" :style="{ visibility: item?.kind === 'lesson' && item.decided && item.undoEvent ? 'visible' : 'hidden' }" :disabled="busy || blocked" data-testid="desk-undo" @click="undoLesson">Undo</button>
+          <span v-if="nativeSlot" class="native-action" :data-empty="nativeNow ? undefined : ''" data-testid="desk-native">
+            <button v-if="revoke" type="button" class="desk-btn ghost sm" :style="{ visibility: nativeNow === 'revoke' ? 'visible' : 'hidden' }" :disabled="busy || !item || !canRevoke?.(item)" data-testid="desk-revoke" @click="revokeGrant">Revoke</button>
+            <button v-if="editRule" type="button" class="desk-btn ghost sm" :style="{ visibility: nativeNow === 'edit' ? 'visible' : 'hidden' }" :disabled="blocked || !editable" data-testid="desk-edit-rule" @click="editRuleProposal">Edit</button>
+            <button v-if="undo" type="button" class="desk-btn ghost sm" :style="{ visibility: nativeNow === 'undo' ? 'visible' : 'hidden' }" :disabled="busy || blocked" data-testid="desk-undo" @click="undoLesson">Undo</button>
           </span>
           <button type="button" class="desk-btn ghost" :class="{ slot: !ghost }" :aria-hidden="!ghost || undefined" :tabindex="ghost ? undefined : -1" :disabled="busy || !ghost || (ghost === 'decline' && ((item?.kind === 'key_trim' && !trimDeclinable) || (stepupPending && blocked)))" :aria-keyshortcuts="ghost === 'skip' ? 'S' : ghost === 'change' ? 'C' : undefined" data-testid="desk-skip" @click="declineOrSkip"><span class="btn-face"><span class="face"><span class="lbl">{{ ghost === 'decline' ? 'Decline' : ghost === 'change' ? 'Change' : 'Skip' }}</span><KeyCap v-if="ghost === 'skip'" k="S" /><KeyCap v-else-if="ghost === 'change'" k="C" /></span><span class="face-size" data-reserve="decline" aria-hidden="true"></span><span class="face-size" data-reserve="change" aria-hidden="true"></span><span class="face-size" data-reserve="skip" aria-hidden="true"></span></span></button>
           <button ref="decideButton" class="desk-btn primary" type="button" :aria-disabled="primaryBlocked || undefined" :aria-describedby="topStatus ? 'desk-status' : undefined" aria-keyshortcuts="Enter" data-testid="desk-decide" @click="submit()">
@@ -740,7 +766,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   <div class="stamp-row" role="radiogroup" aria-labelledby="desk-h-stamp" data-testid="desk-stamps">
                     <button v-for="(outcome, at) in outcomes" :key="outcome" type="button" class="stamp" :class="`t-${STAMP[outcome].tone}`" role="radio" :aria-checked="draft.outcome === outcome" :aria-disabled="stampWhy(item, outcome) || decidedView || !editable ? 'true' : undefined" :data-off="stampWhy(item, outcome) ? '' : undefined" :data-faded="decidedView && draft.outcome !== outcome && !stampWhy(item, outcome) ? '' : undefined" :tabindex="decidedView ? -1 : undefined" :aria-keyshortcuts="stampWhy(item, outcome) ? undefined : outcomeKeys[at]" :data-tip="stampWhy(item, outcome) || `${stampDescription({ ...item, suggested: undefined }, outcome)} · key ${outcomeKeys[at]}`" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)"><AppIcon :name="STAMP[outcome].icon" :size="13" /><span v-if="stampWhy(item, outcome)">{{ outcomeLabels[outcome] }}</span><span v-else><u>{{ outcomeLabels[outcome].charAt(0) }}</u>{{ outcomeLabels[outcome].slice(1) }}</span></button>
                   </div>
-                  <p class="stamp-desc" data-testid="desk-stamp-desc">{{ stampDescription(item, draft.outcome) }}<template v-if="suggestedNote && !decidedView"> <span class="sug-off" tabindex="0" :data-tip="stampWhy(item, item.suggested ?? item.outcome)" data-testid="desk-suggest-off">{{ suggestedNote }}</span></template></p>
+                  <p class="stamp-desc" data-testid="desk-stamp-desc">{{ stampDescription(item, draft.outcome) }}<template v-if="suggestedNote && !decidedView">{{ ' ' }}<span class="sug-off" tabindex="0" :data-tip="stampWhy(item, item.suggested ?? item.outcome)" data-testid="desk-suggest-off">{{ suggestedNote }}</span></template></p>
                 </div>
                 <p v-if="noteField && !decidedView" class="ps"><label class="ps-label" for="desk-note">{{ noteField.label }}</label><span class="field-row"><input id="desk-note" v-model="draft.reason" data-field="reason" class="ul-field" :aria-label="noteField.aria" :maxlength="item.kind === 'lesson' ? 500 : 2000" :disabled="!editable" :placeholder="noteField.placeholder" enterkeyhint="done" autocomplete="off" @input="touch" @focus="editing = 'reason'" @blur="editing === 'reason' && (editing = '')" /><span class="field-hint" aria-hidden="true"><KeyCap k="enter" /> done</span></span></p>
                 <p v-else-if="noteField && draft.reason" class="ps"><span class="ps-label">{{ noteField.label }}</span><span class="c-answer">{{ draft.reason }}</span></p>
@@ -762,7 +788,8 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 </section>
                 <template v-if="item.approval">
                   <section class="m-sec"><h3 class="eyebrow">Why</h3><p>{{ item.approval.rationale || 'No reason supplied by the agent.' }}</p></section>
-                  <section class="m-sec" aria-label="Permission request"><h3 class="eyebrow">What it runs</h3><p class="mono-line">{{ scopeLabel(item.approval.scope) }}</p><p>{{ item.approval.resource_kind === 'tenant' ? 'The whole workspace' : `${item.approval.resource_kind === 'node' ? 'Ticket' : 'Run'} ${item.approval.resource_id || 'not named'}` }}</p><p>{{ RISK_LABEL[riskFor(item.approval)] }}</p><p>Asked by {{ askerName }} · expires <time :datetime="item.approval.expires_at">{{ deliveryTime(item.approval.expires_at) }}</time></p><TargetSummary :approval="item.approval" /></section>
+                  <!-- Only what it runs: the ticket is the Re chip; risk, asker and expiry are in the head (AEON-1339). -->
+                  <section class="m-sec" aria-label="Permission request" data-testid="desk-runs"><h3 class="eyebrow">What it runs</h3><p class="mono-line">{{ scopeLabel(item.approval.scope) }}</p><p v-if="item.approval.resource_kind === 'tenant'">Across the whole workspace</p><TargetSummary :approval="item.approval" /></section>
                 </template>
                 <template v-else-if="item.rule">
                   <section class="m-sec"><h3 class="eyebrow">Why</h3><p>{{ item.rule.why || item.context || 'No reason supplied by the proposer.' }}</p></section>
@@ -817,7 +844,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
           <dl v-show="keysOpen" id="desk-keys-pop" class="keys-pop pop"><div v-for="(entry, at) in legend" :key="at" class="kp-row"><dt><template v-for="(k, i) in entry.keys" :key="k + i"><KeyCap :k="k" /></template><template v-if="entry.or"> or <KeyCap v-for="k in entry.or" :key="k" :k="k" /></template><template v-if="entry.range"> or <KeyCap :k="entry.range[0]" />–<KeyCap :k="entry.range[1]" /></template></dt><dd>{{ entry.text }}</dd></div></dl>
         </div>
       </div>
-      <div v-if="toastText" class="dlg-toast" role="status"><AppIcon name="alert" :size="15" /><span>{{ toastText }}</span></div>
+      <div v-if="toastText" class="dlg-toast" :class="{ lifted: nativeSlot && !!nativeNow }" role="status"><AppIcon name="alert" :size="15" /><span>{{ toastText }}</span></div>
     </div>
     <AttachmentLightbox ref="lightbox" :items="context.attachments" :ticket-key="context.ticket?.key || ''" :can-write="false" :set-caption="async () => false" @close="viewing = false" />
   </dialog>
@@ -834,7 +861,12 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .desk-top { display: contents; }
 .folder-tab, .desk-status, .desk-acts, .desk-x, .stack, .desk-foot { position: relative; z-index: 1; }
 /* The folder tab: cut from the memo's paper by the one sheet outline. */
-.folder-tab { grid-area: tab; align-self: end; display: flex; align-items: center; gap: 9px; min-width: 0; height: 44px; padding: 0 18px; color: var(--ink); font-size: 14px; font-weight: 650; white-space: nowrap; }
+.folder-tab { grid-area: tab; align-self: end; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; min-width: 0; height: 44px; padding: 0 18px; color: var(--ink); font-size: 14px; font-weight: 650; white-space: nowrap; }
+.ft-row { grid-area: 1 / 1; display: flex; align-items: center; gap: 9px; min-width: 0; }
+/* The sizing copies: invisible, out of the accessibility tree, their text from CSS so it is never page text. */
+.ft-size { visibility: hidden; overflow: hidden; pointer-events: none; }
+/* Static, so the touch hit areas that coarse pointers give .ft-pager::before never take the copy's text out of the flow. */
+.ft-size [data-text]::before { content: attr(data-text); position: static; width: auto; height: auto; transform: none; }
 .ft-kind { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The project once (Markus 10-14 09:45): its key in the ticket-key style, filled when the project changed. */
 .ft-key { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); font-variant-ligatures: none; letter-spacing: .02em; }
@@ -915,7 +947,6 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
   .stamp-big.slam { animation: stamp-slam .44s cubic-bezier(.3, .7, .3, 1) both; }
   @keyframes stamp-slam { 0% { transform: rotate(-8deg); } 40% { transform: rotate(-3deg) translateY(-26px) scale(1.4); opacity: .7; } 72% { transform: rotate(-9deg) scale(.9); opacity: 1; background: color-mix(in srgb, var(--t) 22%, var(--paper)); } 100% { transform: rotate(-8deg) scale(1); background: color-mix(in srgb, var(--t) 14%, var(--paper)); } }
 }
-.t-ok { --t: var(--ok); } .t-teal { --t: var(--teal-ink); } .t-gold { --t: var(--gold-ink); } .t-red { --t: var(--danger); } .t-ink { --t: var(--ink-2); }
 .memo-q { max-width: 62ch; margin: 0; font: 500 24px/1.25 var(--serif); letter-spacing: -.016em; color: var(--ink); text-wrap: balance; overflow-wrap: anywhere; }
 .memo-meta { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; font-size: 13px; }
 .memo-meta > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -1025,6 +1056,9 @@ a.res-key:hover { text-decoration: underline; }
 .stamp[aria-checked="false"] { --t: var(--ink-3); }
 @media (hover: hover) { .stamp:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { --t: var(--ink-2); } }
 .stamp[aria-checked="true"] { background: color-mix(in srgb, var(--t) 9%, transparent); }
+/* Outcome colours come after .stamp: the chosen stamp takes its outcome's colour (Once teal-green, Always teal, Requirement gold,
+   Doctrine red) for outline, text and tint; the others stay ink-3 through the more specific rules above (AEON-1339). */
+.t-ok { --t: var(--ok); } .t-teal { --t: var(--teal-ink); } .t-gold { --t: var(--gold-ink); } .t-red { --t: var(--danger); } .t-ink { --t: var(--ink-2); }
 .stamp u { text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 /* An unavailable stamp is visibly disabled and still readable (3.4:1 light, 3.6:1 dark), with its reason. */
 .stamp[data-off] { --t: color-mix(in srgb, var(--ink-3) 80%, var(--paper)); opacity: 1; border-style: dashed; box-shadow: none; cursor: not-allowed; }
@@ -1077,6 +1111,7 @@ a.res-key:hover { text-decoration: underline; }
 @media (pointer: coarse) and (hover: none) { .desk-foot { display: none; } }
 /* On narrow desks the status shows as a toast above the action bar, never over it. */
 .dlg-toast { position: fixed; z-index: 9; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100vw - 32px); min-height: 40px; padding: 8px 14px; border-radius: 16px; background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: var(--shadow-pop); }
+.dlg-toast.lifted { bottom: calc(128px + env(safe-area-inset-bottom)); }
 @media (prefers-reduced-motion: no-preference) { .dlg-toast { animation: toast-in .2s ease; } @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } } }
 /* Touch: 44 px hit areas without growing the visuals. */
 @media (pointer: coarse) {
@@ -1088,12 +1123,18 @@ a.res-key:hover { text-decoration: underline; }
 }
 /* Narrow desks (a phone, a small window; the artifact's 640 px desk): one column, background first, actions in a bottom bar. */
 @media (max-width: 688px) {
-  .desk { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(52px, auto) minmax(0, 1fr) auto; grid-template-areas: "tab x" "stack stack" "acts acts"; }
-  .folder-tab { justify-self: start; width: min(230px, 100%); height: 40px; padding: 0 14px; font-size: 13.5px; }
+  /* Pattern B: the sheet takes the height it may use, so the bottom bar stays pinned whatever the memo holds. */
+  .desk { height: calc(100dvh - 7vh - 16px); grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(52px, auto) minmax(0, 1fr) auto; grid-template-areas: "tab x" "stack stack" "acts acts"; }
+  /* The tab grows into the space before the close button: as wide as the round's longest label needs, at least 230 px. */
+  .folder-tab { justify-self: start; width: auto; min-width: min(230px, 100%); max-width: 100%; height: 40px; padding: 0 14px; font-size: 13.5px; }
   .desk-status { display: none; }
   .desk-x { margin-bottom: 4px; }
   .desk-acts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; margin: 0; padding: 10px 0 0; }
-  .desk-acts .native-action { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  /* Revoke, Edit or Undo sit in a compact row above Skip and Decide, only while the item has one: the bar is
+     bottom-anchored, so the row takes its height from the paper and Skip and Decide never move. */
+  .desk-acts .native-action { grid-column: 1 / -1; justify-self: start; }
+  .desk-acts .native-action[data-empty] { display: none; }
+  .desk-acts .native-action .desk-btn { height: 40px; font-size: 13.5px; }
   .desk-acts .desk-btn { min-width: 0; height: 48px; font-size: 14.5px; }
   .desk-btn :deep(.keycap), .face-size::after { display: none; }
   .jump { top: 60px; left: 10px; width: calc(100% - 20px); }
