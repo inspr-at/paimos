@@ -48,7 +48,7 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 		}
 		return k
 	}
-	coordinator := key("dispatcher", authz.CoordinatorKeyScopes)
+	coordinator := key("dispatcher", append(append([]string{}, authz.CoordinatorKeyScopes...), "nodes.write"))
 	author := key("author", []string{"nodes.read"})
 	reviewer := key("reviewer", []string{"nodes.read"})
 	other := key("other-reviewer", []string{"nodes.read"})
@@ -140,7 +140,11 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 	request(coordinator.Token, "", "POST", "/api/review-runs/"+run.ID+"/verdict", inputVerdict(run), 403)
 	request(coordinator.Token, "", "POST", "/api/review-runs/"+run.ID+"/credential", nil, 403)
 	request(other.Token, "", "POST", "/api/review-runs/"+run.ID+"/credential", nil, 403)
-	request(coordinator.Token, "", "POST", "/api/nodes/"+ticket+"/entry-evidence", map[string]any{"check_id": "review_ok_cross_family", "ok": true, "expected_revision": time.Now(), "head_sha": head, "base_sha": base, "author_session_id": authorSession, "reviewer_session_id": reviewerSession}, 403)
+	var revision time.Time
+	if err := adminPool.QueryRow(ctx, `SELECT updated_at FROM nodes WHERE id=$1`, ticket).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	request(coordinator.Token, "", "POST", "/api/nodes/"+ticket+"/entry-evidence", map[string]any{"check_id": "review_ok_cross_family", "ok": true, "expected_revision": revision, "head_sha": head, "base_sha": base, "author_session_id": authorSession, "reviewer_session_id": reviewerSession}, 403)
 	capability := claim(reviewer, run)
 	request(reviewer.Token, capability, "POST", "/api/review-runs/"+run.ID+"/verdict", inputVerdict(run), 403)
 	another := create(input)

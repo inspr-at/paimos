@@ -61,9 +61,13 @@ func (rt *runtime) reviewRunCommand(submit bool) *Command {
 			} else if !validUUID(in.AuthorSession) || !validUUID(in.ReviewerSession) || in.Kind != "review" && in.Kind != "visual" {
 				return usagef("--author-session, --reviewer-session and --kind (review or visual) are required")
 			}
-			n, err := rt.nodeRef(ticket)
-			if err != nil {
-				return err
+			n := apiNode{ID: ticket}
+			var err error
+			if !validUUID(ticket) {
+				n, err = rt.nodeRef(ticket)
+				if err != nil {
+					return err
+				}
 			}
 			var out reviewgate.Run
 			if !submit {
