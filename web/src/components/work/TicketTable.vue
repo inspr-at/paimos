@@ -32,7 +32,7 @@ import { queueable } from '../../lib/workQueue'
 import { PLANNING_COLUMNS, planningPresent, planningTip, type PlanningColumn } from '../../lib/planning'
 import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 import { useReaderAnchor } from '../../lib/readerAnchor'
-import { cancelFigureTip, closeFigureTip, figureTip, hoverFigureTip, openFigureTip } from '../../lib/figureTip'
+import { cancelFigureTip, closeFigureTip, figureTip, focusOpensTip, hoverFigureTip, openFigureTip } from '../../lib/figureTip'
 import { figureColumn } from '../../lib/workFigures'
 import type { ProjectFigures } from '../../lib/api'
 import FigureTip from './FigureTip.vue'
@@ -219,7 +219,7 @@ function headLeave(event: PointerEvent) {
 }
 function headFocus(event: FocusEvent, id: string) {
   const head = event.currentTarget as HTMLElement
-  if (head.matches(':focus-visible')) openFigureTip(head, `${COLUMN_TIP}${id}`, 'above')
+  if (focusOpensTip(head)) openFigureTip(head, `${COLUMN_TIP}${id}`, 'above')
 }
 function headBlur(event: FocusEvent) { closeFigureTip(event.currentTarget as HTMLElement) }
 const sortHint = (label: string) => 'Sort by ' + label.toLowerCase() + '\nShift-click adds a secondary sort'

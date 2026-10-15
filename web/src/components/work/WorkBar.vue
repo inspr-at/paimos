@@ -6,7 +6,7 @@
 // a tap shows the counts. While a new scope is counted, the previous label, total, bar and line stay together, dimmed;
 // the new figures replace all four in one render. Value slots are fixed from the whole project, so nothing shifts.
 import { computed, useId } from 'vue'
-import { closeFigureTip, figureTip, FIGURE_TIP_ID, hoverFigureTip, openFigureTip, cancelFigureTip } from '../../lib/figureTip'
+import { closeFigureTip, figureTip, FIGURE_TIP_ID, focusOpensTip, hoverFigureTip, openFigureTip, cancelFigureTip } from '../../lib/figureTip'
 import { fmtInt, scopeLabel, workTipFoot, GROUP_FILL, type WorkHeader, type WorkSlots } from '../../lib/workFigures'
 import { fill, workFiguresText } from '../../lib/workFiguresText'
 import { vClipTip } from '../../directives/clipTip'
@@ -59,7 +59,7 @@ function leave(event: PointerEvent) {
   cancelFigureTip()
   if (open.value && !figureTip.pinned) closeFigureTip(event.currentTarget as HTMLElement)
 }
-function focus(event: FocusEvent) { const bar = event.currentTarget as HTMLElement; if (bar.matches(':focus-visible')) openFigureTip(bar, owner, 'below') }
+function focus(event: FocusEvent) { const bar = event.currentTarget as HTMLElement; if (focusOpensTip(bar)) openFigureTip(bar, owner, 'below') }
 function blur(event: FocusEvent) { if (open.value && !figureTip.pinned) closeFigureTip(event.currentTarget as HTMLElement) }
 // A tap (and Enter or Space) pins the counts open; the next one closes them.
 function click(event: MouseEvent) {

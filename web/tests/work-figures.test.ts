@@ -4,7 +4,7 @@
 // a column popup whose shape changes between "Counting…" and the landed figures.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { columnTip, fmtDuration, fmtHours, fmtTokens, FIGURE_COLUMNS, hidesRows, largestRemainder, workHeader, workSlots, workTipFoot } from '../src/lib/workFigures.ts'
+import { columnTip, fmtDuration, fmtHours, fmtTokens, FIGURE_COLUMNS, hidesRows, largestRemainder, validFigures, workHeader, workSlots, workTipFoot } from '../src/lib/workFigures.ts'
 import { FIGURES_NOW, viewFigures, wholeFigures } from './work-figures-fixture.ts'
 
 test('durations and hours use the one format table', () => {
@@ -92,4 +92,12 @@ test('Hide closed hides rows only when the view has rows in the hidden statuses'
   const cancelledOnly = { ...open, columns: { ...open.columns, status: { ...open.columns.status, values: [{ value: 'cancelled', count: 2, hours: 0 }] } } }
   assert.equal(hidesRows(cancelledOnly, true, ['done', 'delivered', 'accepted']), false)
   assert.equal(hidesRows(cancelledOnly, true), true)
+})
+
+test('only a figures object counts as figures', () => {
+  assert.equal(validFigures(wholeFigures()), true)
+  assert.equal(validFigures({ items: [] }), false)
+  assert.equal(validFigures(null), false)
+  assert.equal(validFigures({ ...wholeFigures(), groups: { completed: { hours: 1, tickets: 1, statuses: {} } } }), false)
+  assert.equal(validFigures({ ...wholeFigures(), total_hours: 'many' }), false)
 })

@@ -4,7 +4,7 @@
 // or transform clips it. Its owner renders it while lib/figureTip says the tip is theirs; the content is the owner's
 // slot and keeps a fixed size per owner, so "Counting…" and the landed figures occupy the same box.
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { closeFigureTip, FIGURE_TIP_ID, figureTip } from '../../lib/figureTip'
+import { closeFigureTip, escapeFigureTip, FIGURE_TIP_ID, figureTip } from '../../lib/figureTip'
 import '../../styles/work-figures.css'
 
 // fig 300 px and wide 330 px (the design's popups); xwide fits the work bar's longest footer line (no-release projects).
@@ -26,10 +26,8 @@ function place() {
 }
 function keydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || !figureTip.anchor) return
-  const anchor = figureTip.anchor
   event.preventDefault(); event.stopImmediatePropagation()
-  closeFigureTip()
-  anchor.focus({ preventScroll: true })
+  escapeFigureTip()
 }
 function pointerDown(event: PointerEvent) {
   const target = event.target as Node | null

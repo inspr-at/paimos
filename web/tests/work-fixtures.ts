@@ -684,6 +684,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (options.delayList) await new Promise(resolve => setTimeout(resolve, options.delayList))
       if (options.delayChildren && query.get('parent_id') && !data.projects.some(p => p.id === query.get('parent_id'))) await new Promise(resolve => setTimeout(resolve, options.delayChildren))
       let rows = matching(query)
+      const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
+      const levelOf = (n: MockNode) => (n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : String(n.depth ?? 1)
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {

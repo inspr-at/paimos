@@ -7,6 +7,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import { APIError, figuresPath, getProjectFigures, type ProjectFigures } from './api'
 import { apiParams, filtersFromQuery, type ListFilters } from './ticketList'
+import { validFigures } from './workFigures'
 import { workFiguresText } from './workFiguresText'
 
 // The server keeps a scope for 30 s too; older entries still land at once and are counted again quietly.
@@ -99,6 +100,7 @@ export function useViewFigures(options: ViewFiguresOptions) {
     try {
       const value = await getProjectFigures(id, apiParams(id, options.filters.value), request.signal)
       if (request.signal.aborted || disposed) return
+      if (!validFigures(value)) throw new Error('figures response has an unexpected shape')
       land(forKey, value)
       if (!whole.value && forKey !== wholeKey.value) void countWhole()
     } catch (error) {
@@ -122,7 +124,7 @@ export function useViewFigures(options: ViewFiguresOptions) {
     wholeRequest = request
     try {
       const value = await getProjectFigures(id, apiParams(id, filtersFromQuery({})), request.signal)
-      if (!request.signal.aborted && !disposed && forKey === wholeKey.value) { remember(forKey, value); whole.value = value }
+      if (!request.signal.aborted && !disposed && forKey === wholeKey.value && validFigures(value)) { remember(forKey, value); whole.value = value }
     } catch { /* the slots keep their defaults */ }
     finally { if (wholeRequest === request) wholeRequest = null }
   }

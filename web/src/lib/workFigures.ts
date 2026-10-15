@@ -67,6 +67,16 @@ export function fmtFinish(iso: string, now: number): string {
   return minutes >= 0 ? `~${span(minutes)}` : `overdue ${span(-minutes)}`
 }
 
+// The response is the figures object it claims to be; anything else counts as a failed read, never as figures.
+export function validFigures(value: unknown): value is ProjectFigures {
+  const f = value as ProjectFigures | null
+  const num = (n: unknown) => typeof n === 'number' && Number.isFinite(n)
+  const obj = (o: unknown) => !!o && typeof o === 'object' && !Array.isArray(o)
+  return obj(f) && obj(f!.scope) && obj(f!.groups) && obj(f!.columns) && num(f!.total_hours) && num(f!.without_estimate) && typeof f!.marks_releases === 'boolean'
+    && ['whole_project', 'this_view'].includes(f!.scope.kind) && ['rows', 'leaves', 'project_leaves', 'closed'].every(k => num(f!.scope[k as keyof ProjectFigures['scope']]))
+    && (['completed', 'done_not_live', 'in_progress', 'open'] as const).every(k => obj(f!.groups[k]) && num(f!.groups[k].hours) && num(f!.groups[k].tickets))
+}
+
 // ---------- The four work groups, in bar order ----------
 export type GroupId = 'c' | 'd' | 'p' | 'o'
 type ServerGroup = keyof ProjectFigures['groups']
