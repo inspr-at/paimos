@@ -4026,6 +4026,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestStatusHelpAgentReadRequiresAuthentication","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestStatusTimingRoutePermissions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/authz","name":"TestUsageProbeRouteRequiresAccountManage","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestViewerReadsStoredReviewPolicy","tier":"ESSENTIAL"}
@@ -6135,6 +6137,14 @@
     {"kind":"go","package":"internal/delivery","name":"TestShadowRoutingRoundSituationsAndPolicy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestTicketHintsOnlyCanonicalPrefixes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingBackfillIsIdempotentAndTenantScoped","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingImportedHistoryAndQuantilesAPI","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingReopenSkipBackwardAndWindows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketStatusTimingSourceReplayInferenceAndGaps","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryIncludesCreatorProjectForWorkspaceAgent","tier":"ESSENTIAL"}
     ,
