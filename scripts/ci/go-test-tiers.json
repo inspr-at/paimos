@@ -1152,6 +1152,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryRestartWaitsForExitAndRetriesOnlyOutcome","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestAgentdStateDowngradeRoundTrip","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestApprovedDeadlineDoesNotWaitForTelemetryLock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestArchivedWorkerResponseDetachesWithoutStoppingChild","tier":"GATED-FULL"}
