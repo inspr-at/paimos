@@ -30,6 +30,10 @@ func TestPersonStepsOwnershipRoutingAndAudit(t *testing.T) {
 		return p
 	}
 	owner, other := member("Mia Weber"), member("Alex Person")
+	projectAdmin := member("Project admin")
+	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='admin') WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='project' AND scope_id=$3`, admin.TenantID, projectAdmin.ID, project.ID); err != nil {
+		t.Fatal(err)
+	}
 	agent := estimateAgent(t, admin)
 	code, raw := call(t, &admin, "PUT", "/api/projects/"+project.ID+"/definitions", fmt.Sprintf(`{"expected_revision":null,"checks":{"done":[{"id":"manual:release-reviewed","label":"Release notes reviewed","fallback_owner_id":%q}]}}`, other.ID))
 	decode[workorders.EntryDefinition](t, code, raw, 200)
@@ -206,10 +210,11 @@ func TestPersonStepsOwnershipRoutingAndAudit(t *testing.T) {
 		t.Fatalf("revoked owner completed step: %d %s", blocked.code, blocked.raw)
 	}
 	fallback := find(read(admin), "human")
-	if fallback.Owner.ID != admin.ID || fallback.Checked || !fallback.Active {
+	if fallback.Owner.ID != projectAdmin.ID || fallback.Checked || !fallback.Active {
 		t.Fatal("access loss did not immediately fall back to admin", fallback)
 	}
-	desk(admin, 1)
+	desk(admin, 0)
+	desk(projectAdmin, 1)
 	code, raw = callAs(t, decisiondesk.New(appPool), &owner, "GET", "/api/decision-desk/projection", "")
 	inaccessible := decode[decisiondesk.Page](t, code, raw, 200)
 	if inaccessible.Counts.Open != 0 || len(inaccessible.Items) != 0 {
