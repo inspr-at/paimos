@@ -118,7 +118,10 @@ function revealStageCentre() {
   return scroller.scrollTop !== before
 }
 function placeStageNow() {
-  if (placing || pointers || !mounted || props.glimpse || focused.value || !stage.value) return
+  if (placing || !mounted) return
+  // Nothing to place for a glimpse, focus or a held pointer, but a new renderer
+  // still starts at the window's size until it is measured into its host.
+  if (pointers || props.glimpse || focused.value || !stage.value) { measure(); return }
   placing = true
   try {
     for (let pass = 0; pass < 3; pass++) {

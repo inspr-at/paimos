@@ -892,7 +892,7 @@
         ,
         {"file":"tests/from-classic.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/graph-canvas.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/graph-canvas.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/graph-focus.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,

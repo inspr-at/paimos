@@ -8904,6 +8904,8 @@
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"a glimpse renderer takes its host size when its engine loads after the first resize pass","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"the shared canvas consumes a ticket adapter and honors its FPS prop","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/graph-focus.spec.ts","name":"Focus fills the viewport when fullscreen is disabled; Escape keeps filters and canvas","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
