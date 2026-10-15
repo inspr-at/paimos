@@ -342,10 +342,10 @@ func TestWebhookFailureGitHubMetadata(t *testing.T) {
 				t.Fatalf("reader status: %d", w.Code)
 			}
 			extra := map[string]any{"github_status": float64(tc.status)}
-			if tc.id == "A1:B2-C3" {
-				extra["github_request_id"] = tc.id
+			assertWebhookFailureLine(t, logs, "pull_request", "closed", "reader-MergedPull", githubStatusClass(tc.status), 502, extra)
+			if strings.Contains(logs.String(), "github_request_id") || tc.id != "" && strings.Contains(logs.String(), tc.id) {
+				t.Fatal("response header value entered failure log")
 			}
-			assertWebhookFailureLine(t, logs, "pull_request", "closed", "reader-MergedPull", "github_http", 502, extra)
 		})
 	}
 }
