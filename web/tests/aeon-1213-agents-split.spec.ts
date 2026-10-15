@@ -32,7 +32,8 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', handle?: num
   })
   return { work, calls, data }
 }
-const dock = (page: Page) => page.locator('[data-layout-cycle]')
+// The list launcher remains until a session opens; then the header owns layout.
+const dock = (page: Page) => page.locator('[data-layout-cycle]:visible, .session-panel .pane-more')
 const pane = (page: Page) => page.locator('.session-panel')
 const row = (page: Page, id: string) => page.locator(`.sessions [data-row="s:${id}"]`)
 const listWidth = (page: Page) => page.locator('.agents-list-pane').evaluate(el => el.getBoundingClientRect().width)
@@ -131,9 +132,11 @@ for (const theme of ['light', 'dark'] as const) {
       for (const dimension of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[dimension] - dockBox[dimension])).toBeLessThanOrEqual(.5)
     }
     await toWork(page)
-    const stability = await controlStability(page, { preset: dock(page) })
     await dock(page).evaluate(el => { (window as unknown as { p5Dock: Element }).p5Dock = el })
-    await stability.check(async () => { await dock(page).click(); await preset(page, 'focus') })
+    await page.keyboard.press('s'); await preset(page, 'focus')
+    await expect(page.locator('[data-layout-cycle]')).toBeHidden()
+    const stability = await controlStability(page, { preset: dock(page) })
+    await stability.check(async () => { await dock(page).click(); await expect(page.getByRole('menuitem', { name: /^Full screen/ })).toBeVisible(); await page.keyboard.press('Escape') })
     expect(await listWidth(page)).toBe(320)
     await expect(page.locator('.sessions .thead')).toBeHidden()
     await page.clock.runFor(500)
@@ -163,7 +166,7 @@ for (const theme of ['light', 'dark'] as const) {
     rowGuard.done()
     await pane(page).focus()
     await page.screenshot({ path: info.outputPath(`focus-1440-${theme}.png`) })
-    await stability.check(async () => { await dock(page).click(); await preset(page, 'overview') })
+    await stability.check(async () => { await page.keyboard.press('s'); await preset(page, 'overview') })
     const width = await page.locator('.agents-work').evaluate(el => el.getBoundingClientRect().width)
     expect(await listWidth(page)).toBe(width - 16 - 480)
     await expect(page.locator('.sessions .thead')).toBeVisible()
@@ -201,11 +204,12 @@ for (const theme of ['light', 'dark'] as const) {
     await stability.check(async () => {
       await dragTo(page, width - 16 - 379, false)
       await expect(page.locator('.agents-page')).toHaveClass(/will-close/)
-      await page.mouse.up(); await preset(page, 'list'); await expect(pane(page)).toHaveCount(0)
-      expect(await page.locator('main').evaluate(el => el.scrollTop), 'closing the split preserves page scroll').toBe(closingScroll)
     })
-    expect(await dock(page).evaluate(el => el === (window as unknown as { p5Dock: Element }).p5Dock)).toBe(true)
     stability.done()
+    await page.mouse.up(); await preset(page, 'list'); await expect(pane(page)).toHaveCount(0)
+    expect(await page.locator('main').evaluate(el => el.scrollTop), 'closing the split preserves page scroll').toBe(closingScroll)
+    expect(await dock(page).evaluate(el => el === (window as unknown as { p5Dock: Element }).p5Dock)).toBe(true)
+    await expect(page.locator('.session-panel .pane-more')).toHaveCount(0)
     await row(page, data.sessions[1]!.id).click()
     await preset(page, 'focus')
     expect(await listWidth(page)).toBe(280) // the last valid handle, not the closing drag
@@ -226,7 +230,7 @@ for (const theme of ['light', 'dark'] as const) {
       const { data } = await setup(page, theme, 320)
       await page.goto(`/agents/${data.sessions[1]!.id}`)
       await expect(pane(page)).toHaveClass(/sheet/)
-      await expect(dock(page)).toBeHidden()
+      await expect(page.locator('[data-layout-cycle]')).toBeHidden(); await expect(pane(page).getByRole('button', { name: 'More session actions' })).toBeVisible()
       await expect(page.locator('.agents-divider')).not.toHaveAttribute('role', 'separator')
       await expect(page.getByRole('button', { name: 'Close session details', exact: true })).toBeVisible()
       const body = pane(page).locator('.scroll:visible')
@@ -245,7 +249,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width: referenceWidth, height: 1000 })
       await expect(pane(page)).toHaveClass(/sheet/)
       await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0)
-      await expect(dock(page)).toBeHidden()
+      await expect(page.locator('[data-layout-cycle]')).toBeHidden(); await expect(pane(page).getByRole('button', { name: 'More session actions' })).toBeVisible()
       // The visual viewport updates the phone sheet on its next animation frame.
       if (referenceWidth === 400) await expect(pane(page)).toHaveCSS('height', '1000px')
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
@@ -335,7 +339,7 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
   expect(await page.locator('.agents-list-pane').evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0s')
   // Measure the work area itself, independent of the shell's responsive gutter.
   await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.width = '1055px' })
-  await expect(pane(page)).toHaveClass(/sheet/); await expect(dock(page)).toBeHidden()
+  await expect(pane(page)).toHaveClass(/sheet/); await expect(page.locator('[data-layout-cycle]')).toBeHidden(); await expect(pane(page).getByRole('button', { name: 'More session actions' })).toBeVisible()
   await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.width = '1056px' })
   await expect(pane(page)).toHaveClass(/docked/); await expect(dock(page)).toBeVisible()
   await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.removeProperty('width') })
@@ -353,7 +357,7 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
       return { gap: frame.bottom - footer.bottom, inset: parseFloat(getComputedStyle(el).borderBottomWidth) + parseFloat(getComputedStyle(el).paddingBottom) }
     })
     expect(Math.abs(geometry.gap - geometry.inset), `${width}: composer pinned to pane bottom`).toBeLessThanOrEqual(.5)
-    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).getByRole('button', { name: 'Interrupt', exact: true }) })
+    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).getByRole('button', { name: 'More session actions', exact: true }) })
     for (const draft of ['Die vollständigen Berechtigungseinstellungen für sämtliche angeschlossenen Arbeitsbereiche zuverlässig prüfen.', '']) {
       await guard.check(async () => {
         await composer.fill(draft); await composer.blur()
@@ -536,8 +540,8 @@ test('AEON-1213 regression: the table uses the approved columns with the ticket 
     expect(body.x).toBeCloseTo(heading.x, 1)
     expect(body.width).toBeCloseTo(heading.width, 1)
   }
-  await dock(page).click(); await preset(page, 'focus')
-  await dock(page).click(); await preset(page, 'overview')
+  await page.keyboard.press('s'); await preset(page, 'focus')
+  await page.keyboard.press('s'); await preset(page, 'overview')
   await checkRows(page, '1440 light Overview column regression')
 })
 

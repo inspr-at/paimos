@@ -89,12 +89,14 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await page.goto('/p/PHAROS')
     await expect(start).toHaveAttribute('aria-disabled', 'true')
     await card.getByRole('button', { name: /PHAROS .*: open details/ }).click()
-    const panel = page.getByRole('complementary', { name: 'Session details' }), resume = panel.getByRole('button', { name: 'Resume', exact: true }), close = panel.getByRole('button', { name: 'Close session details' })
+    const panel = page.getByRole('complementary', { name: 'Session details' }), resume = page.getByRole('menuitem', { name: /^Resume/ }), close = panel.getByRole('button', { name: 'Close session details' })
+    const more = panel.getByRole('button', { name: 'More session actions', exact: true })
+    await more.click()
     await expect(resume).toBeDisabled()
-    await expect(resume).toHaveAttribute('data-tip', OFF)
+    await expect(resume).toContainText(OFF)
     await resume.hover()
-    await expect(page.locator('.tooltip')).toHaveText(OFF)
-    await expectStableControls({ controls: { resume, close }, scrollAreas: { body: panel.locator('.pane-body') }, interactions: [
+    await expect(resume.locator('small')).toHaveText(OFF)
+    await expectStableControls({ controls: { resume, more, close }, scrollAreas: { body: panel.locator('.pane-body') }, interactions: [
       { name: 'Resume cannot submit', run: async () => { await resume.dispatchEvent('click'); await expect(resume).toBeDisabled() } },
     ] })
     await capture('lead-panel-off')

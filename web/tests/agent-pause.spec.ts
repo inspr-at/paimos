@@ -455,7 +455,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const guard = await controlStability(page, { row, menu: row.locator('.more') })
     await guard.check(async () => {
-      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop…', exact: true }).click()
+      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions', exact: true }).click()
+      await page.getByRole('menuitem', { name: /^Stop…/ }).click()
       const dialog = page.getByRole('dialog', { name: /^Stop now / })
       await dialog.locator('[data-submit]').click()
       await expect(dialog).not.toBeVisible()
@@ -508,7 +509,8 @@ for (const theme of ['light', 'dark'] as const) {
     const before = await lines()
     const guard = await controlStability(page, { row, open })
     await guard.check(async () => {
-      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop…', exact: true }).click()
+      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions', exact: true }).click()
+      await page.getByRole('menuitem', { name: /^Stop…/ }).click()
       await page.getByRole('dialog', { name: /^Stop now / }).locator('[data-submit]').click()
       await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stop requested( · |$)/)
     })

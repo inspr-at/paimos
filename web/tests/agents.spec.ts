@@ -687,7 +687,7 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await ticketFact.evaluate(element => element.scrollIntoView({ block: 'center' }))
     if (width === 390) expect((await ticket.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     await expectStableControls({
-      controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Session actions' }), tabs: details.getByRole('tablist'), ticket },
+      controls: { header: details.locator('.pane-bar'), actions: details.getByRole('group', { name: 'Panel actions' }), tabs: details.getByRole('tablist'), ticket },
       scrollAreas: { details: details.locator('.scroll') },
       interactions: [
         { name: 'hover the ticket title', run: async () => {
