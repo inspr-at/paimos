@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // Author uses a null ID when the classic record has no mapped principal.
@@ -48,7 +49,16 @@ type FieldChange struct {
 	To    *string `json:"to"`
 }
 
+type EntryChange struct {
+	Type     string   `json:"type"`
+	ToStatus string   `json:"to_status"`
+	Failed   []string `json:"failed"`
+	Reason   *string  `json:"reason"`
+	Count    int      `json:"count"`
+}
+
 type Item struct {
+	EntryChecks     *EntryChange            `json:"entry_checks,omitempty"`
 	AutomaticChange *statusautopilot.Change `json:"automatic_change,omitempty"`
 	ID              string                  `json:"id"`
 	At              time.Time               `json:"at"`
@@ -85,6 +95,7 @@ func decodeCursor(raw, tenantID, node string) (*cursor, error) {
 
 type record map[string]any
 type activityEvent struct {
+	entry            *workqueue.EntryRecord
 	id               int64
 	at               time.Time
 	typ, actor       string
@@ -129,7 +140,7 @@ const timelineCandidatesSQL = `SELECT e.id,aeon_activity_at(e.type,e.after,e.at)
     AND (r.at,r.id)<(e.at,e.id) ORDER BY r.at DESC,r.id DESC LIMIT 1
  ) previous ON e.type='import.history'
  WHERE e.tenant_id=$1 AND e.node_id=$2 AND e.id<=$3
- AND e.type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped','status_autopilot.derived','status_autopilot.retained','status_autopilot.causal_undo')
+ AND e.type IN ('import.comment','import.history','import.node_created','node.created','node.updated','entry_checks.refused','node.moved','node.kind_changed','comment.created','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped','status_autopilot.derived','status_autopilot.retained','status_autopilot.causal_undo')
  AND ($4::timestamptz IS NULL OR (aeon_activity_at(e.type,e.after,e.at),e.id)<($4,$5))
  AND coalesce(latest.type,'')<>'comment.deleted'
  AND (e.type<>'import.comment' OR NOT EXISTS (
@@ -184,6 +195,16 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 			if err := rows.Scan(&e.id, &e.at, &e.typ, &e.actor, &before, &after, &meta, &previousID, &previousAt, &previousActor, &previousAfter); err != nil {
 				rows.Close()
 				return err
+			}
+			var metadata struct {
+				Entry *workqueue.EntryRecord `json:"entry_checks"`
+			}
+			if len(meta) > 0 {
+				if err = json.Unmarshal(meta, &metadata); err != nil {
+					rows.Close()
+					return err
+				}
+				e.entry = metadata.Entry
 			}
 			e.job, e.reason = jobReason(meta)
 			e.kindFrom, e.kindTo = kindChange(meta)
@@ -393,7 +414,34 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 	for _, e := range evs {
 		id := strconv.FormatInt(e.id, 10)
 		item := Item{ID: id, At: e.at, Author: e.author(people)}
+		if e.entry != nil && e.entry.OverrideReason != nil {
+			item.Type = "change"
+			item.EntryChecks = &EntryChange{Type: "override", ToStatus: e.entry.ToStatus, Reason: e.entry.OverrideReason, Failed: []string{}, Count: 1}
+			for _, c := range e.entry.Checks {
+				if c.Applicable && !c.Passed {
+					item.EntryChecks.Failed = append(item.EntryChecks.Failed, c.Label)
+				}
+			}
+			items = append(items, item)
+			continue
+		}
 		switch e.typ {
+		case "entry_checks.refused":
+			raw, _ := json.Marshal(e.after)
+			var refusal workqueue.EntryRefusal
+			if json.Unmarshal(raw, &refusal) != nil {
+				continue
+			}
+			item.Type = "change"
+			item.EntryChecks = &EntryChange{Type: "refused", ToStatus: refusal.ToStatus, Failed: []string{}, Count: refusal.Count}
+			for _, c := range refusal.Failed {
+				label := c.Label
+				if c.Owner != nil {
+					label += " · waiting for " + c.Owner.Name
+				}
+				item.EntryChecks.Failed = append(item.EntryChecks.Failed, label)
+			}
+			items = append(items, item)
 		case "comment.created":
 			body := textValue(e.after["body_markdown"])
 			item.Type = "comment"

@@ -54,7 +54,8 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 		"tags": []any{map[string]any{"id": 1, "name": "BUG", "color": "red"}, "worker-8"}, "cost_unit": map[string]any{"id": "x", "label": "Consulting"},
 		"release": map[string]any{"id": 9, "label": "v4.7.8"}, "start_date": "2026-09-10"}, "")
 	b := create(ticket.ID, "PAI-4", "Beta", "in_progress", e2.ID, map[string]any{"priority": "low", "assignee": mira.ID,
-		"tags": []any{"bug"}, "classic": map[string]any{"cost_unit": map[string]any{"id": 4, "label": "Support"}}, "start_date": "2026-02-30"}, "The fleet agent restarts twice.")
+		"tags": []any{"bug"}, "classic": map[string]any{"cost_unit": map[string]any{"id": 4, "label": "Support"}}, "start_date": "2026-02-30",
+		"estimate_hours": 1, "acceptance_criteria": "The list retains the requested filters"}, "The fleet agent restarts twice.")
 	c := create(task.ID, "PAI-5", "Gamma", "qa", a.ID, map[string]any{"cost_unit": nil, "classic": map[string]any{"cost_unit": map[string]any{"label": "Support"}}}, "")
 	d := create(ticket.ID, "PAI-6", "Delta", "done", root.ID, map[string]any{"priority": "medium", "tags": []any{}}, "")
 	_ = create(ticket.ID, "OTH-1", "Elsewhere", "new", other.ID, map[string]any{"tags": []any{"bug"}}, "")

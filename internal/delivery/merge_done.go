@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -280,7 +281,7 @@ func mergeGateTx(ctx context.Context, tx pgx.Tx, e mergeEntry) (string, error) {
 	if human != nil && strings.TrimSpace(*human) != "" {
 		return "needs a human check: " + *human, nil
 	}
-	if issues := ticketbenefits.Transition(e.kind, e.category, "done", e.fields); len(issues) > 0 {
+	if issues := ticketbenefits.PillIssues(e.fields); len(issues) > 0 {
 		return "before done: " + strings.Join(issues, "; "), nil
 	}
 	return "", nil
@@ -392,7 +393,7 @@ func mergeOwnerCandidate(ctx context.Context, tx pgx.Tx, tid string, project *st
 // leaves, retaining other fields and human checks.
 // Receipt lookup and writes share the tenant/tree fence. Events are returned
 // for the caller to append after the whole batch's resource locks and writes.
-func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEntry) (*events.Change, error) {
+func prepareMergeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, repo string, e *mergeEntry) (*events.Change, error) {
 	identity := mergeIdentity(repo, *e)
 	var seen bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND type='delivery.merge_done' AND metadata->>'merge_identity'=$2)`, e.Ticket, identity).Scan(&seen); err != nil {
@@ -409,6 +410,27 @@ func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEn
 	if ticketbenefits.Completed(e.category) && e.category != "done" {
 		e.Result = "already_complete"
 		return nil, nil
+	}
+	var entry *workqueue.EntryRecord
+	if !alreadyDone {
+		target, err := workqueue.EntryTicketTx(ctx, tx, e.Ticket)
+		if err != nil {
+			return nil, err
+		}
+		entry, err = workqueue.RequireEntryTx(ctx, tx, actor, target, "done", nil)
+		var failed *workqueue.EntryFailure
+		if errors.As(err, &failed) {
+			e.Result = "refused"
+			labels := []string{}
+			for _, check := range failed.Failed {
+				labels = append(labels, check.Label+": "+check.Reason)
+			}
+			e.Reason = "Entry checks missing: " + strings.Join(labels, ", ")
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	var after json.RawMessage
 	if alreadyDone {
@@ -427,7 +449,7 @@ func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEn
 	if _, err := tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule='merge_refused' AND anchor LIKE $2`, e.Ticket, identity+"/%"); err != nil {
 		return nil, err
 	}
-	meta, _ := json.Marshal(map[string]any{"job": "merge-done", "repository": repo, "pull_request": e.PR, "merge_sha": e.SHA, "head_sha": e.Head, "merged_at": e.MergedAt, "merge_identity": identity})
+	meta, _ := json.Marshal(map[string]any{"job": "merge-done", "repository": repo, "pull_request": e.PR, "merge_sha": e.SHA, "head_sha": e.Head, "merged_at": e.MergedAt, "merge_identity": identity, "entry_checks": entry})
 	return &events.Change{Type: "delivery.merge_done", NodeID: &e.Ticket, Before: e.before, After: after, Metadata: meta}, nil
 }
 
@@ -510,7 +532,7 @@ func (m *Module) completeMergesPending(ctx context.Context, facts []MergeFact) (
 			if e.Reason != "" {
 				e.Result = "refused"
 			}
-			c, err := prepareMergeTx(ctx, tx, actor.TenantID, m.config.Repository, e)
+			c, err := prepareMergeTx(ctx, tx, actor, m.config.Repository, e)
 			if err != nil {
 				return err
 			}

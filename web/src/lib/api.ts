@@ -173,7 +173,7 @@ export interface NodeCreate {
   kind_id: string; title: string; body?: string; fields?: Record<string, unknown>
   state?: string; parent_id?: string | null; before_id?: string | null; key_prefix?: string
 }
-export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state' | 'human_check'>>
+export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state' | 'human_check'>> & { override_reason?: string }
 
 export class APIError extends Error {
   readonly status: number
@@ -344,6 +344,7 @@ export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${even
 export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags' | 'kind' | 'human_check'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
+  entry_checks?: { type: 'refused' | 'override'; to_status: string; failed: string[]; reason: string | null; count: number }
   id: string; at: string; type: 'comment' | 'change' | 'created'
   author: { id: string | null; name: string; has_avatar?: boolean; automatic?: boolean; job?: string; reason?: string }
   automatic_change?: import('./statusAutopilot').AutomaticChange

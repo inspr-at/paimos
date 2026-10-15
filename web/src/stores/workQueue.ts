@@ -45,6 +45,8 @@ export const useWorkQueue = defineStore('workQueue', () => {
   }
   function gaps(row: ListItem) {
     const saved = advice[row.id]
+    // Provisional advice only: Queue always checks the current definition on
+    // the server, whose answer (including an empty definition) replaces this.
     return saved?.revision === row.updated_at ? saved.value.missing.filter(gap => gap !== 'status') : readyGaps(row)
   }
   function checkReadiness(row: ListItem): Promise<QueueReadiness> {

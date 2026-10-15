@@ -62,6 +62,20 @@ func TestDemoSeedTwice(t *testing.T) {
 	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "" {
 		t.Fatalf("summary %+v", first)
 	}
+	// Risk: default Ready enforcement must not prevent fresh demo seeds or
+	// be bypassed with an override or an empty definition. Inspect the creation
+	// snapshots, retaining the planning inputs admitted before later demo work.
+	active := scalar(t, database, id, `SELECT count(*) FROM events WHERE type='node.created' AND after->>'state'='in_progress'`)
+	ready := scalar(t, database, id, `SELECT count(*) FROM events WHERE type='node.created' AND after->>'state'='in_progress'
+	 AND (after->'fields'->>'estimate_hours')::numeric>0 AND jsonb_array_length(after->'fields'->'acceptance_criteria')>0
+	 AND metadata->'entry_checks'->>'passed'='2' AND metadata->'entry_checks'->>'total'='2'
+	 AND metadata->'entry_checks'->>'definition_id'='00000000-0000-0000-0000-000000000000'`)
+	if active == 0 || ready != active {
+		t.Fatalf("demo Ready inputs: %d of %d active creation snapshots passed the default checks", ready, active)
+	}
+	if overrides := scalar(t, database, id, `SELECT count(*) FROM events WHERE metadata->'entry_checks'->>'override_reason' IS NOT NULL`); overrides != 0 {
+		t.Fatalf("demo used %d entry-check overrides", overrides)
+	}
 	if pins := scalar(t, database, id, `SELECT count(*) FROM model_profiles WHERE slug='demo-'||harness||'-fictional' AND model='demo-'||harness AND effort='default' AND source='manual' AND note='Fictional demo history; no provider model or runner executed.' AND enabled AND harness IN ('codex','claude','grok')`); pins != 3 {
 		t.Fatalf("fresh demo must register its three fictional model pins, got %d", pins)
 	}
