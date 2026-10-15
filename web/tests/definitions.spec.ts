@@ -8,6 +8,7 @@ const baseline: DefinitionChecks = { in_progress: [{ id: 'estimate_set' }, { id:
 const definition = (checks: DefinitionChecks, source: 'project' | 'workspace' = 'workspace'): Definition => ({ id: source === 'workspace' ? 'workspace-definition' : 'project-definition', revision: '2026-10-15T01:00:00Z', source, copied_from_revision: source === 'project' ? '2026-10-14T01:00:00Z' : null, checks })
 async function setup(page: Page, state: 'default' | 'own' | 'empty' | 'none' | 'fold' = 'default', readOnly = false) {
   const data = fixtures(), errors = watchErrors(page)
+  page.on('console', message => { if (message.type() === 'error' && !/Failed to load resource/.test(message.text())) console.log('Definitions browser error:', message.text()) })
   await mockWork(page, data, { admin: !readOnly, readOnly })
   const ws = state === 'none' ? null : definition(structuredClone(baseline))
   const own = state === 'default' || state === 'none' ? null : definition(state === 'empty' ? {} : state === 'fold' ? { done: [{id:'manual:review',label:'Freigabe der vollständig beschriebenen Abnahmekriterien für die Veröffentlichung'}] } : { in_progress: [{id:'estimate_set'}], done: [{id:'manual:review',label:'Release notes reviewed'}] },'project')
