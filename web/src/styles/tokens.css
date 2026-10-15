@@ -50,7 +50,8 @@
   --seg-bg: rgba(32, 60, 61, 0.06);
   --danger-bg: rgba(178, 74, 68, 0.08);
   --danger-line: rgba(178, 74, 68, 0.3);
-  --tip-bg: rgba(32, 60, 61, 0.95);
+  /* AEON-1358: tooltips and popups are opaque, so page text never shows through them. */
+  --tip-bg: #203c3d;
   --tip-ink: #f3f7f5;
   --scrim: rgba(16, 35, 39, 0.28);
   --palette-scrim: rgba(32, 60, 61, 0.1);
@@ -201,7 +202,7 @@
   --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04));
   --seg-bg: rgba(4, 14, 16, 0.3);
   --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
-  --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
+  --tip-bg: #061214; --tip-ink: #edf4f0;
   --scrim: rgba(3, 10, 12, 0.5); --palette-scrim: rgba(3, 10, 12, 0.32); --signin-art-opacity: 0.2; --signin-art-filter: saturate(0.7) brightness(0.9) contrast(1.1);
   --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
   --track: rgba(237, 244, 240, 0.09);
@@ -294,7 +295,7 @@
     --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04));
     --seg-bg: rgba(4, 14, 16, 0.3);
     --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
-    --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
+    --tip-bg: #061214; --tip-ink: #edf4f0;
     --scrim: rgba(3, 10, 12, 0.5); --palette-scrim: rgba(3, 10, 12, 0.32); --signin-art-opacity: 0.2; --signin-art-filter: saturate(0.7) brightness(0.9) contrast(1.1);
     --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
     --track: rgba(237, 244, 240, 0.09);
@@ -432,3 +433,6 @@
 :root { --st-ok-deep: color-mix(in srgb, var(--st-ok) 72%, #000); }
 :root[data-theme="dark"] { --st-ok-deep: color-mix(in srgb, var(--st-ok) 78%, #fff); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --st-ok-deep: color-mix(in srgb, var(--st-ok) 78%, #fff); } }
+
+/* AEON-1358: figures inside the dark tips keep their colours in both themes. */
+:root { --tip-ok: #7fd1a8; --tip-progress: #a4e5df; --tip-line: rgba(237, 244, 240, 0.2); --tip-muted: rgba(243, 247, 245, 0.74); }

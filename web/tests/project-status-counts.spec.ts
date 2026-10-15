@@ -65,16 +65,16 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       await expect(page.locator('.header-activity')).toBeHidden()
       const layout = await page.locator('.head-flex').evaluate(element => {
         const title = element.querySelector('.title-line')!.getBoundingClientRect()
-        const progress = element.querySelector('.progress-line')!.getBoundingClientRect()
+        const work = element.querySelector('.head-work')!.getBoundingClientRect()
         const description = element.querySelector('.description')!.getBoundingClientRect()
         const frame = element.getBoundingClientRect()
         return { columns: getComputedStyle(element).gridTemplateColumns.split(' ').length,
-          titleWidth: title.width, availableTitleWidth: progress.left - frame.left - 10,
-          descriptionWidth: description.width, frameWidth: frame.width }
+          titleWidth: title.width, workWidth: work.width, descriptionWidth: description.width, frameWidth: frame.width }
       })
-      expect(layout.columns, 'only the title and progress tracks exist').toBe(2)
-      expect(layout.titleWidth).toBeCloseTo(layout.availableTitleWidth, 0)
-      expect(layout.titleWidth).toBeGreaterThan(240)
+      // AEON-1358: phones stack the title, the counts, the work bar and the description in one full-width track.
+      expect(layout.columns, 'one full-width track').toBe(1)
+      expect(layout.titleWidth).toBeCloseTo(layout.frameWidth, 0)
+      expect(layout.workWidth).toBeCloseTo(layout.frameWidth, 0)
       expect(layout.descriptionWidth).toBeCloseTo(layout.frameWidth, 0)
     } else {
       await expect(countRoot(page).locator('.status-count')).toHaveCount(11)

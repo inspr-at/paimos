@@ -4,8 +4,8 @@
 import type { DeliveryLanguage } from './delivery'
 import type { StatusTimingActor, TicketLifeline } from './statusTiming'
 import { statusMeta } from './work'
-import { clock, dayKey, fmtDuration, lifeOf, markersOf, slowness, STEP_OF_STATUS, statusFill, whenFull, type Life, type LifeSegment, type Marker, type Typicals } from './workFigures'
-import { put, workFiguresText, type WorkFiguresText } from './workFiguresText'
+import { clock, dayKey, fmtDurationSeconds as fmtDuration, lifeOf, markersOf, slowness, STEP_OF_STATUS, statusFill, whenFull, type Life, type LifeSegment, type Marker, type Typicals } from './workFigures'
+import { put, lifelineText as workFiguresText, type LifelineText as WorkFiguresText } from './workFiguresText'
 
 export interface TipLine { text: string; tone: 'title' | 'muted' | 'plain' | 'attn' }
 export interface LineItem { label: string; value: string | null; soFar: boolean; usual: { text: string; attn: boolean } | null }
@@ -91,4 +91,3 @@ export function typicalsOf(steps: readonly { step: string; p50: number | null; p
   for (const step of steps) out[step.step as keyof Typicals] = { p50: step.p50, p90: step.p90 }
   return out
 }
-

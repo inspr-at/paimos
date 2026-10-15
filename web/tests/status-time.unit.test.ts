@@ -9,7 +9,7 @@ vi.mock('../src/lib/api.ts', () => ({ api: async () => new Response('{}'), APIEr
 import { lifelineView } from '../src/lib/lifelineView'
 import { ticketsModel, trendOf } from '../src/lib/deliveryTickets'
 import type { StatusTimingActor, StatusTimingVisit, TicketLifeline, TicketStatusTiming } from '../src/lib/statusTiming'
-import { fmtDuration, lifeOf, MARKER_STEP, markersOf, placeMarkers, slowness, stripWidths } from '../src/lib/workFigures'
+import { fmtDurationSeconds as fmtDuration, lifeOf, MARKER_STEP, markersOf, placeMarkers, slowness, stripWidths } from '../src/lib/workFigures'
 
 const H = 3600, D = 86_400
 const lead: StatusTimingActor = { name: 'AIT lead', kind: 'agent' }
