@@ -37,29 +37,18 @@ func (m *Module) notifications(w http.ResponseWriter, r *http.Request) {
 	ctx, stop := context.WithTimeout(r.Context(), db.ListenerMaxLifetime)
 	defer stop()
 	r = r.WithContext(ctx)
-	// Authorize before allocating a dedicated LISTEN connection, then authorize
+	// Authorize before joining the shared LISTEN connection, then authorize
 	// again after subscribing. The initial wake closes the replay/listen gap.
 	if _, err := m.notificationHint(r, p, 0); err != nil {
 		workorders.WriteError(w, err)
 		return
 	}
-	connectCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
-	if err == nil {
-		_, err = conn.Exec(connectCtx, "LISTEN aeon_events")
-	}
-	cancel()
-	if conn != nil {
-		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = conn.Close(ctx)
-		}()
-	}
+	conn, err := db.SubscribeNotifications(r.Context(), m.pool, "aeon_events", p.TenantID)
 	if err != nil {
 		workorders.WriteError(w, err)
 		return
 	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	if _, err := m.notificationHint(r, p, 0); err != nil {
 		workorders.WriteError(w, err)
 		return
@@ -101,6 +90,15 @@ func (m *Module) notifications(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			return
+		}
+		if db.IsResync(notice) {
+			if _, err := m.notificationHint(r, p, 0); err != nil {
+				return
+			}
+			if send("harness.wake") != nil {
+				return
+			}
+			continue
 		}
 		var hint struct {
 			TenantID string `json:"tenant_id"`

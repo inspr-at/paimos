@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,6 +38,9 @@ func TestSSEListenerRecycleClosesBackendAndResumesWithoutLoss(t *testing.T) {
 	listening := make(chan *pgx.Conn, 2)
 	cfg := d.App.Config()
 	cfg.ConnConfig.Tracer = listenerTracer{listening: listening}
+	if _, err := db.ConfigurePool(cfg); err != nil {
+		t.Fatal(err)
+	}
 	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
 	if err != nil {
 		t.Fatal(err)

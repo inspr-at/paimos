@@ -17,21 +17,11 @@ import (
 )
 
 // DefaultMaxConns is independent of host CPU count. Two slots are reserved for
-// foreground requests and probes; session-lock workers reuse their one slot.
-// Per-server connection budget (Postgres max_connections=50):
-//
-//	pooled:    16, including session-lock workers and 2 foreground/probe slots
-//	dedicated: 1 shared routine listener + 1 optional phone-push listener
-//	           + 1 per active event stream,
-//	           agent subscription, inbox stream/long poll, harness notification
-//	           stream, or delivery flow stream; chat live uses no DB listener
-//	total:     16 + dedicated (not a fixed 16; CLI/admin/replicas need headroom)
-//
-// With routine dispatch and phone push enabled, at most 32 client listeners fit
-// in the remaining 34 server slots BEFORE Postgres reserves and other clients.
-// Subscription and flow admission caps are each 64, not a global DB cap; lowering
-// the pool alone cannot bound client listeners. AEON_DATABASE_URL pool_max_conns
-// overrides 16.
+// foreground requests and probes; session-lock workers reuse their pool slot.
+// Per server: main pool <=16 (URL configurable), <=4 shared channel listeners,
+// and <=1 agent-subscription admission session. No per-client/tenant backends.
+// CLI/admin/replicas require their own headroom. Listener sessions recycle at
+// ListenerMaxLifetime and close when their last subscriber leaves.
 const DefaultMaxConns int32 = 16
 const ForegroundReserve int32 = 2
 const ProbeAcquireTimeout = 100 * time.Millisecond
@@ -96,7 +86,15 @@ func ConfigurePool(cfg *pgxpool.Config) (*PoolMonitor, error) {
 	if prior, ok := next.(*PoolMonitor); ok {
 		next = prior.next
 	}
-	m := &PoolMonitor{slots: make(chan struct{}, cfg.MaxConns-ForegroundReserve), held: make(map[*pgx.Conn]bool), next: next}
+	_, explicitName := cfg.ConnConfig.RuntimeParams["application_name"]
+	defaultName := !explicitName
+	if prior, ok := cfg.ConnConfig.Tracer.(*PoolMonitor); ok {
+		defaultName = prior.defaultApplicationName
+	}
+	if defaultName {
+		cfg.ConnConfig.RuntimeParams["application_name"] = "aeon-main"
+	}
+	m := &PoolMonitor{defaultApplicationName: defaultName, slots: make(chan struct{}, cfg.MaxConns-ForegroundReserve), held: make(map[*pgx.Conn]bool), next: next}
 	cfg.ConnConfig.Tracer = m
 	return m, nil
 }
@@ -111,18 +109,23 @@ type acquisition struct {
 // reports the p95 of the last 256 completed acquisitions (including failures
 // and worker admission waits), rather than mislabelling a cumulative average.
 type PoolMonitor struct {
-	next          pgx.QueryTracer
-	slots         chan struct{}
-	waiting       atomic.Int64
-	nested        atomic.Int64
-	mu            sync.Mutex
-	held          map[*pgx.Conn]bool
-	samples       [256]time.Duration
-	count         int
-	cursor        int
-	waitingSince  time.Time
-	lastWarn      time.Time
-	acquireErrors map[string]uint64
+	defaultApplicationName bool
+	listenerShutdown       atomic.Bool
+	listenerMu             sync.Mutex
+	listeners              map[string]*notificationHub
+	admission              subscriptionAdmission
+	next                   pgx.QueryTracer
+	slots                  chan struct{}
+	waiting                atomic.Int64
+	nested                 atomic.Int64
+	mu                     sync.Mutex
+	held                   map[*pgx.Conn]bool
+	samples                [256]time.Duration
+	count                  int
+	cursor                 int
+	waitingSince           time.Time
+	lastWarn               time.Time
+	acquireErrors          map[string]uint64
 }
 
 func (m *PoolMonitor) TraceQueryStart(ctx context.Context, c *pgx.Conn, d pgx.TraceQueryStartData) context.Context {

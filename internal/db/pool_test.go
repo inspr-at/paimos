@@ -172,3 +172,25 @@ func TestPoolSizingAndRetainedSessionAdmission(t *testing.T) {
 		t.Fatal("recovery did not reset wait warning")
 	}
 }
+
+// Risk: attribution hides the connection origin or overrides explicit operator
+// naming. Reconfiguring a copied pool must retain the default-name provenance.
+func TestPoolApplicationNameAttribution(t *testing.T) {
+	for _, tc := range []struct{ url, name string }{
+		{"postgres://localhost/fixture", "aeon-main"},
+		{"postgres://localhost/fixture?application_name=operator", "operator"},
+		{"host=localhost dbname=fixture application_name=operator", "operator"},
+		{"postgres://localhost/fixture?application_name=", ""},
+	} {
+		cfg, err := db.ParsePoolConfig(tc.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ConfigurePool(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != tc.name {
+			t.Fatalf("name %q want %q", got, tc.name)
+		}
+	}
+}
