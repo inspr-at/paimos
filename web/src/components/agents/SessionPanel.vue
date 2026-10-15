@@ -907,8 +907,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .pane-bar > :deep(.session-tabs) { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   .pane-buttons { grid-column: 2; grid-row: 1; }
   .pane-layout { display: none; }
-  /* The reason spans the menu below its label: icon 16 + gap 10 + inset 10. */
-  .native-menu .panel-menu-item small { margin-inline: -36px -10px; }
   .pane-icon { width: 44px; height: 44px; }
   .full .pane-bar { height: 48px; grid-template-rows: 48px; }
   .full .pane-bar > :deep(.session-tabs) { display: none; }

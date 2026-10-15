@@ -104,6 +104,8 @@ export async function expectNativeMenu(page: Page) {
     const reason = action.locator('small')
     const label = await action.innerText()
     await expect(reason).toHaveText(label.startsWith('Pause') ? "Pause and resume aren't here yet" : browserReason)
+    expect(await reason.evaluate(el => Math.abs(el.getBoundingClientRect().left - el.parentElement!.getBoundingClientRect().left)),
+      'each disabled reason starts at its label’s left edge').toBeLessThanOrEqual(.5)
     expect((await reason.innerText()).split('\n')).toHaveLength(1)
     const painted = await reason.evaluate(el => {
       const range = document.createRange(); range.selectNodeContents(el)
