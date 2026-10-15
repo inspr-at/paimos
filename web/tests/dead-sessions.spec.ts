@@ -180,14 +180,14 @@ for (const [state, change, panelHint] of [
     // AEON-1309 / #678 condensed the head: Stop, Interrupt and Steer live in More
     // session actions, each enabled only where the server accepts it.
     await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions', exact: true }).click()
-    const menu = page.getByRole('menu', { name: 'More session actions' })
-    const stop = menu.getByRole('menuitem', { name: /^Stop…/ }), steer = menu.getByRole('menuitem', { name: /^Steer…/ })
+    const actions = page.getByRole('menu', { name: 'More session actions' })
+    const stop = actions.getByRole('menuitem', { name: /^Stop…/ }), steer = actions.getByRole('menuitem', { name: /^Steer…/ })
     if (panelHint) await expect(stop).toBeDisabled()
     else await expect(stop).toBeEnabled()
     await expect(steer).toBeDisabled()
     // The quiet line now explains the disabled Steer.
     if (panelHint) await expect(steer).toContainText(panelHint)
-    await expect(menu.getByRole('menuitem', { name: /^Interrupt/ })).toBeDisabled()
+    await expect(actions.getByRole('menuitem', { name: /^Interrupt/ })).toBeDisabled()
     expect([managed, legacy]).toEqual([[], []])
   })
 }
