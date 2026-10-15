@@ -58,14 +58,24 @@ func (m *Module) handleMessagingAssistant(w http.ResponseWriter, r *http.Request
 		}
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
+		var renewal struct {
+			ExpiresAt *time.Time `json:"expires_at"`
+		}
+		var target any = &body
+		if operation == "rotate" {
+			target = &renewal
+		}
 		var extra any
-		if err := dec.Decode(&body); err != nil {
+		if err := dec.Decode(target); err != nil {
 			writeBadRequest(w, "invalid assistant request")
 			return
 		}
-		if dec.Decode(&extra) != io.EOF || operation == "rotate" && body.Name != "" {
+		if dec.Decode(&extra) != io.EOF {
 			writeBadRequest(w, "invalid assistant request")
 			return
+		}
+		if operation == "rotate" {
+			body.ExpiresAt = renewal.ExpiresAt
 		}
 	}
 	rec, err := m.messagingAssistant(r.Context(), p, operation, id, body)

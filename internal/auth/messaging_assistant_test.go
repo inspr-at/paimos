@@ -165,6 +165,9 @@ func TestMessagingAssistantProvisioningBounds(t *testing.T) {
 		if key.ExpiresAt == nil || !key.ExpiresAt.Equal(expires) {
 			t.Fatal("30-day boundary rejected or changed")
 		}
+		if w := assistantHTTP(m, owner, "POST", "/api/agents/assistants/"+key.PrincipalID+"/rotate", string(body)); w.Code != 400 {
+			t.Fatalf("renewal accepted creation fields: %d", w.Code)
+		}
 	})
 	t.Run("notice failure rolls back and withholds secret", func(t *testing.T) {
 		m, owner, now := assistantFixture(t)
