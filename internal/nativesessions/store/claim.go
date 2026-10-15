@@ -21,6 +21,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Expose the closed native reason to transport error mapping while retaining
+// Failure's precise HTTP status (including indistinguishable read 404s).
+func (e *Failure) Unwrap() error {
+	return &nativecontract.ValidationError{Reason: e.Reason, Path: "$"}
+}
+
 type pendingRecord struct {
 	PendingStart
 	actor                   actorRecord
@@ -147,9 +153,9 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if err = authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: r.ProjectID}); err != nil {
 			return fail(403, nativecontract.ReasonPermissionRevoked)
 		}
-		if err = authz.RequireTx(ctx, tx, p, "harness.control", authz.Scope{ProjectID: r.ProjectID}); err != nil {
-			return fail(403, nativecontract.ReasonPermissionRevoked)
-		}
+		// The paired daemon executes with its ordinary runtime ceiling. Control
+		// and the native grant belong to the original actor, re-read below under
+		// the same access fence; they are never delegated to this runtime key.
 		if err = requireStart(ctx, tx, r.actor.principal(), r.ProjectID); err != nil {
 			return err
 		}

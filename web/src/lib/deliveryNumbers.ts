@@ -66,8 +66,19 @@ export const bucketOf = (days: WindowDays): BucketUnit => days <= 30 ? 'day' : d
 // ---------- Numbers in words ----------
 const NB = ' '
 const locale = (lang: DeliveryLanguage) => lang === 'de' ? 'de-AT' : 'en-GB'
+// One formatter per locale and options, kept: toLocale…String with options builds a new one on every
+// call, and the page formats hundreds of numbers and dates per answer (AEON-1352). Same output.
+const formats = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat>()
+function formatter<T extends Intl.NumberFormat | Intl.DateTimeFormat>(key: string, make: () => T): T {
+  let format = formats.get(key) as T | undefined
+  if (!format) { format = make(); formats.set(key, format) }
+  return format
+}
+// toLocale…String says "Invalid Date" where format throws; a malformed date must not break the page.
+const dateText = (format: Intl.DateTimeFormat, date: Date) => Number.isNaN(date.getTime()) ? 'Invalid Date' : format.format(date)
 export function num(value: number, lang: DeliveryLanguage, digits = 0): string {
-  return value.toLocaleString(locale(lang), { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  const at = locale(lang)
+  return formatter(`n|${at}|${digits}`, () => new Intl.NumberFormat(at, { minimumFractionDigits: digits, maximumFractionDigits: digits })).format(value)
 }
 export const pct = (value: number, lang: DeliveryLanguage) => lang === 'de' ? `${num(value, lang)}${NB}%` : `${num(value, lang)}%`
 /** Minutes as [number, unit]: hours from three hours on, one decimal below ten minutes. */
@@ -77,9 +88,17 @@ export function durationParts(minutes: number, lang: DeliveryLanguage): [string,
 }
 export const duration = (minutes: number, lang: DeliveryLanguage) => durationParts(minutes, lang).join(NB)
 const dateOf = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`)
-const fmtDate = (iso: string, lang: DeliveryLanguage, options: Intl.DateTimeFormatOptions) => dateOf(iso).toLocaleDateString(locale(lang), { timeZone: 'UTC', ...options })
+// Every caller names date fields, so the formatter shows what toLocaleDateString showed.
+type DateFields = Pick<Intl.DateTimeFormatOptions, 'weekday' | 'day' | 'month' | 'year'>
+function fmtDate(iso: string, lang: DeliveryLanguage, options: DateFields) {
+  const at = locale(lang)
+  return dateText(formatter(`d|${at}|${options.weekday ?? ''}|${options.day ?? ''}|${options.month ?? ''}|${options.year ?? ''}`, () => new Intl.DateTimeFormat(at, { timeZone: 'UTC', ...options })), dateOf(iso))
+}
 export const shortDate = (iso: string, lang: DeliveryLanguage) => fmtDate(iso, lang, { day: 'numeric', month: 'short' })
-export const clockTime = (iso: string, lang: DeliveryLanguage) => new Date(iso).toLocaleTimeString(locale(lang), { hour: '2-digit', minute: '2-digit', hour12: false })
+export function clockTime(iso: string, lang: DeliveryLanguage) {
+  const at = locale(lang)
+  return dateText(formatter(`t|${at}`, () => new Intl.DateTimeFormat(at, { hour: '2-digit', minute: '2-digit', hour12: false })), new Date(iso))
+}
 
 // ---------- The tiles: ten Arion numbers (3 and 7 carry two metrics), then the v5 readings ----------
 export type TileKind = 'duration' | 'runs' | 'share' | 'review' | 'merge' | 'release' | 'nightly' | 'rate' | 'per100' | 'count'

@@ -119,9 +119,10 @@ export function promotionsBetween(base,{cwd=root,exec=command,baseDirectory}={})
   } catch { return undefined }
 }
 
-export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions,readFile,tests:suppliedTests,imports,browserMap,baseTree}={}) {
+export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph,checkout=root,base,tree,promotions,readFile,tests:suppliedTests,imports,browserMap,baseTree,fingerprint}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
+  if(impact==='off')return full('CI_IMPACT=off')
   if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
   if(!validImpactPaths(paths))return full('invalid or oversized impact diff')
   const browserData=paths.find(browserDataInput)
@@ -155,7 +156,7 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     graph??=webGraph(resolve(root,'web'))
     if(graph[graphIncomplete])return full(`incomplete web dependency graph: ${graph[graphIncomplete]}`)
     const changed=[...webChanges.filter(file=>!risk.handled.has(`web/${file}`)),...webSeeds]
-    const coverage=browserImpact(changed,graph,browserMap,baseTree)
+    const coverage=browserImpact(changed,graph,browserMap,baseTree,fingerprint)
     if(coverage.full)return full(coverage.reason)
     const impacted=new Set([...reverseDependants(new Set(changed),graph),...coverage.specs])
     if(webChanges.some(file=>!risk.handled.has(`web/${file}`)&&!Object.hasOwn(graph,file)))return full('missing trusted web dependency metadata')
@@ -170,7 +171,8 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
 // One precedence rule for every workflow consumer. Only matching trusted
 // exemptions can keep a narrow PR lane. Essential/static are wider layouts.
 // Off returns the frozen classifier value unchanged, regardless of mode/event.
-export function effectiveLane(lane,{mode,event,affectedLane}={}) {
+export function effectiveLane(lane,{mode,event,affectedLane,impact}={}) {
+  if(impact==='off')return 'full'
   if(affectedLane!=='on')return lane
   if(event!=='pull_request')return 'full'
   if(lane==='spec-only'&&mode==='spec-only')return lane
@@ -206,7 +208,8 @@ export function main(env=process.env) {
   const paths=env.GITHUB_EVENT_NAME==='pull_request'?changedPaths(env.GITHUB_EVENT_NAME,env,{fetchBase:true}):undefined
   let decision
   try {
-    if(env.GITHUB_EVENT_NAME==='pull_request'&&env.CI_AFFECTED_LANE==='on'&&Array.isArray(paths)) {
+    if(env.CI_IMPACT==='off')decision={mode:'full',layout:'full',reason:'CI_IMPACT=off'}
+    else if(env.GITHUB_EVENT_NAME==='pull_request'&&env.CI_AFFECTED_LANE==='on'&&Array.isArray(paths)) {
       const payload=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8'))
       decision=trustedSchedulingDecision(payload.pull_request?.base?.sha,paths,env)
     } else {
@@ -218,7 +221,7 @@ export function main(env=process.env) {
   const {mode,reason}=decision
   const layout=mode==='full'?'full':decision.layout??'full'
   if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
-  const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE})
+  const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE,impact:env.CI_IMPACT})
   writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\n`,{flag:'a'})
   console.log(`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}; changed paths ${paths?.length??'unavailable'}`)
   if(env.GITHUB_STEP_SUMMARY)writeFileSync(env.GITHUB_STEP_SUMMARY,`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}\n`,{flag:'a'})
