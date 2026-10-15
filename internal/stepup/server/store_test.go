@@ -482,3 +482,15 @@ func TestStepupListKeysetsExpiryAndTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Empty pages must encode items as [] . A nil slice becomes JSON null and the Desk treats that as a failed read.
+func TestStepupEmptyListEncodesArray(t *testing.T) {
+	f := setup(t)
+	for _, state := range []string{"pending", "decided"} {
+		w := f.call(t, f.person, "GET", "/api/stepup-requests?state="+state+"&limit=100", nil)
+		body := strings.TrimSpace(w.Body.String())
+		if w.Code != 200 || !strings.Contains(body, `"items":[]`) || strings.Contains(body, `"items":null`) {
+			t.Fatalf("%s %d %s", state, w.Code, w.Body.String())
+		}
+	}
+}

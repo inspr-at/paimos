@@ -711,3 +711,14 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     expect(writes).toEqual([])
   })
 }
+
+test('empty desk with a null step-up list shows no source warning', async ({ page }) => {
+  await mockDecisionDesk(page, { emptyDesk: true })
+  await page.goto('/decision-desk')
+  await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+  await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open0/)
+  await expect(page.getByTestId('desk-empty')).toHaveText(/Nothing waits for you/)
+  await expect(page.locator('.source-warnings')).toHaveCount(0)
+  await expect(page.getByText(/couldn’t be loaded|could not be read/)).toHaveCount(0)
+})

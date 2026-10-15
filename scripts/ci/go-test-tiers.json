@@ -10380,6 +10380,8 @@
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupApprovalRechecksAuthorityAfterFenceWait","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupEmptyListEncodesArray","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupFirstDecisionWinsWithTwoApprovers","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupListExpiredResultsPrecedeEvents","tier":"GATED-FULL"}
