@@ -126,6 +126,11 @@ func TestAdmissionStoreAuthenticatedApprovalsAndInvalidation(t *testing.T) {
 	if approved.Review == nil || approved.Review.RunID != run.ID || approved.Review.Model != "claude-opus-4-6" || approved.Review.ReviewerFamily != "anthropic" {
 		t.Fatal("lost P1 provenance", approved)
 	}
+	// New CI prerequisites take effect immediately without another webhook.
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", Settings{RequiredChecks: &[]string{"new-required-check"}}, 200, nil)
+	snapshot("ci_not_green")
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", Settings{RequiredChecks: defaults().RequiredChecks}, 200, nil)
+	approved = snapshot("admissible")
 	// All manual/release/wave holds lift without losing the approval.
 	for _, kind := range []string{"manual", "release_cut", "wave"} {
 		control := approved.Control

@@ -58,6 +58,14 @@ func AdmissionTx(ctx context.Context, tx pgx.Tx, item Item) (AdmissionSnapshot, 
 	if item.Project == nil || item.Ticket == nil || item.PR == nil {
 		return out, fail(409, "admission requires a linked project and ticket")
 	}
+	var current bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN delivery_metric_sources s ON s.tenant_id=n.tenant_id AND s.project_id=n.project_id AND s.repository=$3
+ WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL)`, *item.Ticket, *item.Project, item.Repository).Scan(&current); err != nil {
+		return out, err
+	}
+	if !current {
+		return out, fail(409, "admission ticket or repository binding changed")
+	}
 	out.Control.Binding = reviewgate.RunBinding{Ticket: *item.Ticket, Repository: item.Repository, PR: *item.PR, Target: o.Target, Base: o.Base, Head: item.Head, Scope: o.Base + ".." + item.Head}
 	var raw []byte
 	var target, base, head, scope, project, ticket string
@@ -108,6 +116,11 @@ func AdmissionTx(ctx context.Context, tx pgx.Tx, item Item) (AdmissionSnapshot, 
 	holds := append([]AdmissionHold{}, out.Control.Holds...)
 	if o.HoldReason != nil {
 		holds = append(holds, AdmissionHold{Kind: "manual", Reason: *o.HoldReason})
+	}
+	// CI requirements are live policy, not the observation's saved settings.
+	o.Settings, err = settingsTx(ctx, tx, item.Project)
+	if err != nil {
+		return out, err
 	}
 	out.Decision = EvaluateAdmission(AdmissionInput{Binding: b, Revision: out.BindingRevision, Open: o.Open && !o.Merged, CIGreen: admissionCIGreen(o), ScopeVerified: diff.MergeBase == b.Base && reviewgate.ValidSHA(diff.MergeBase), Review: out.Review, Visual: out.Visual, Diff: diff, Holds: holds, Policy: out.Policy, Fix: out.Control.Fix})
 	return out, nil

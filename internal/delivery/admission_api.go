@@ -128,8 +128,8 @@ func (m *Module) admissionSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// reviewRequest acquires tenant -> tree before the live RequireTx.
-	m.reviewRequest(w, r, permission, true, func(tx pgx.Tx, p tenant.Principal, project string) (any, int, error) {
+	// For mutations reviewRequest acquires tenant -> tree before live RequireTx.
+	m.reviewRequest(w, r, permission, write, func(tx pgx.Tx, p tenant.Principal, project string) (any, int, error) {
 		before, err := admissionPolicyTx(r.Context(), tx, project)
 		if err != nil || !write {
 			return before, 200, err
