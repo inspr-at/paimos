@@ -20,7 +20,7 @@ const density = (page: Page, name: string) => page.getByRole('radio', { name: `$
 
 // The design's figures: the whole project, or "This view · 10 of 166 tickets" for any narrowed view. A gate holds the
 // narrowed answers until the test releases them, so "Counting…" is a state the test controls rather than a race.
-async function serveFigures(page: Page, options: { marksReleases?: boolean; figures?: ProjectFigures } = {}) {
+async function serveFigures(page: Page, options: { marksReleases?: boolean; figures?: ProjectFigures; view?: ProjectFigures } = {}) {
   const requests: URL[] = []
   let gate: Promise<void> | null = null
   await page.route('**/api/projects/*/figures**', async route => {
@@ -28,7 +28,7 @@ async function serveFigures(page: Page, options: { marksReleases?: boolean; figu
     requests.push(url)
     const narrowed = ['q', 'state', 'work_state', 'work_bucket', 'priority', 'assignee', 'tag'].some(name => url.searchParams.get(name))
     if (narrowed && gate) await gate
-    await route.fulfill({ json: narrowed ? viewFigures() : options.figures ?? wholeFigures(options) })
+    await route.fulfill({ json: narrowed ? options.view ?? viewFigures() : options.figures ?? wholeFigures(options) })
   })
   return {
     requests,
@@ -43,7 +43,7 @@ const MODELS = [
   { key: 'PHAROS-12', id: 'n-2', model: { label: 'Codex Sol', harness: 'codex', provider: 'openai', model: 'gpt-6.1-sol', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6.1' } },
   { key: 'PHAROS-13', id: 'n-3', model: { label: 'Grok 4.7', harness: 'grok', provider: 'xai', model: 'grok-4.7', display_name: 'Grok', model_version: '4.7' } },
 ]
-async function open(page: Page, options: { width?: number; theme?: string; marksReleases?: boolean; comfortable?: boolean; automaticColumns?: boolean; visible?: string[]; models?: boolean; figures?: ProjectFigures } = {}) {
+async function open(page: Page, options: { width?: number; theme?: string; marksReleases?: boolean; comfortable?: boolean; automaticColumns?: boolean; visible?: string[]; models?: boolean; figures?: ProjectFigures; view?: ProjectFigures } = {}) {
   const width = options.width ?? 1440
   await page.setViewportSize({ width, height: width <= 600 ? 844 : 900 })
   const data = fixtures()
@@ -413,3 +413,53 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     }
   })
 }
+
+// Fix round 7: the design's popup widths are the floor, not a cap. CI's Linux fonts clipped the Model footer; fonts or
+// languages wider than the design's, and the figures API's largest counts (it refuses above 50,000 rows), grow a box to
+// its longest line instead. A box that grows when its figures land is placed again over its header.
+function largestFigures(): ProjectFigures {
+  const whole = wholeFigures()
+  const columns = Object.fromEntries(Object.entries(whole.columns).map(([key, c]) => [key, { ...c, rows: 49_999, included: c.included === c.rows ? 49_999 : 48_888, without_value: c.without_value ? 48_888 : 0 }]))
+  return { ...whole, scope: { ...whole.scope, rows: 50_000, leaves: 49_999, project_leaves: 49_999, closed: 1_111 }, columns }
+}
+
+test('AEON-1358 no popup clips a footer at the largest counts, and a box that grows is placed again over its header', async ({ page }) => {
+  const { figures, errors } = await open(page, { comfortable: true, models: true, figures: largestFigures(), view: largestFigures(), visible: ['key', 'title', 'status', 'assignee', 'estimate', 'tokens', 'model', 'cost'] })
+  const columns: [string, number, string][] = [
+    ['Key', 300, '49,999 incl. hidden rows · all rows'],
+    ['Status', 330, '49,999 incl. hidden rows · 1,111 closed · leaves only'],
+    ['Assignee', 330, '49,999 incl. hidden rows · 48,888 unassigned · leaves only'],
+    ['Estimate', 300, '48,888 of 49,999 incl. hidden rows · closed left out'],
+    ['Tokens', 300, '49,999 incl. hidden rows · 48,888 without tokens · leaves only'],
+    ['Model', 330, '49,999 incl. hidden rows · 48,888 without model · leaves only'],
+    ['Cost unit', 330, '49,999 incl. hidden rows · 48,888 without cost unit · leaves only'],
+  ]
+  for (const [label, floor, foot] of columns) {
+    await hoverOpen(page, header(page, label))
+    await expect(tip(page).locator('.wf-foot'), label).toHaveText(foot)
+    await expectNothingClipped(page)
+    const shown = await box(tip(page))
+    expect(shown.width, `${label} keeps the design's width as its floor`).toBeGreaterThanOrEqual(floor - .5)
+    expect(shown.x, label).toBeGreaterThanOrEqual(7.5)
+    expect(shown.x + shown.width, label).toBeLessThanOrEqual(1440 - 7.5)
+    await closeTip(page)
+  }
+  // Opened while counting, the Tokens box has the design's width; the landed footer grows it, and it stays centred
+  // over its header (or inside the window), as when it opens.
+  const release = figures.hold()
+  await search(page).fill('Hetzner')
+  await expect(bar(page)).toHaveAttribute('aria-busy', 'true')
+  await hoverOpen(page, header(page, 'Tokens'))
+  await expect(tip(page).locator('.wf-line').first()).toHaveText('Counting…')
+  const counting = await box(tip(page))
+  release()
+  await expect(tip(page).locator('.wf-foot')).toHaveText('49,999 incl. hidden rows · 48,888 without tokens · leaves only')
+  await expect.poll(async () => (await box(tip(page))).width, 'the landed footer grows the box').toBeGreaterThan(counting.width + 1)
+  const offCentre = async () => {
+    const anchor = await box(header(page, 'Tokens')), shown = await box(tip(page))
+    return Math.abs(shown.x - Math.round(Math.min(Math.max(8, anchor.x + anchor.width / 2 - shown.width / 2), 1440 - shown.width - 8)))
+  }
+  await expect.poll(offCentre, 'placed again over its header').toBeLessThanOrEqual(1)
+  await expectNothingClipped(page)
+  expect(errors).toEqual([])
+})

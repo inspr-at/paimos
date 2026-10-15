@@ -97,6 +97,8 @@ it('a phone selection hold suppresses only its own row and pointer click', () =>
       // AEON-1358 column header figures: no figure tip open in this harness.
       '../../lib/figureTip': { figureTip: { anchor: null, owner: '' }, cancelFigureTip() {}, closeFigureTip() {}, focusOpensTip: () => false, hoverFigureTip() {}, openFigureTip() {} },
       '../../lib/workFigures': { figureColumn: () => null },
+      // The Model popup's names follow the person's model display choice.
+      '../../lib/prefs': { useModelDisplay: () => ({ modelDisplay: { value: {} } }) },
     })
     const state = view.state as { pressBegin: (event: unknown, row: unknown) => void; pressFinish: (up: boolean) => void; rowClick: (event: unknown, row: unknown) => void }
     const target = { closest: () => null }, preventDefault = vi.fn()

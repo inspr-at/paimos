@@ -8,6 +8,8 @@ import { closeFigureTip, escapeFigureTip, FIGURE_TIP_ID, figureTip } from '../..
 import '../../styles/work-figures.css'
 
 // fig 300 px and wide 330 px (the design's popups); xwide fits the work bar's longest footer line (no-release projects).
+// These widths are the floor: a font or language wider than the design's grows the box to its longest line instead of
+// clipping it, and the box is placed again whenever its size changes.
 const props = withDefaults(defineProps<{ width?: 'auto' | 'fig' | 'wide' | 'xwide' }>(), { width: 'auto' })
 const tip = ref<HTMLElement>()
 const x = ref(0)
@@ -38,14 +40,17 @@ function scroll(event: Event) { if (!(event.target instanceof Node && tip.value?
 function resize() { closeFigureTip() }
 // Moving along the header row hands the same tip to the next anchor.
 watch(() => [figureTip.anchor, figureTip.owner, props.width], () => { void nextTick(place) })
+let sized: ResizeObserver | null = null
 onMounted(() => {
   void nextTick(place)
+  if (typeof ResizeObserver !== 'undefined' && tip.value) { sized = new ResizeObserver(() => place()); sized.observe(tip.value) }
   window.addEventListener('keydown', keydown, true)
   document.addEventListener('pointerdown', pointerDown, true)
   document.addEventListener('scroll', scroll, true)
   window.addEventListener('resize', resize)
 })
 onBeforeUnmount(() => {
+  sized?.disconnect()
   window.removeEventListener('keydown', keydown, true)
   document.removeEventListener('pointerdown', pointerDown, true)
   document.removeEventListener('scroll', scroll, true)
@@ -71,7 +76,8 @@ defineExpose({ place })
 }
 .figure-tip.pinned { pointer-events: auto; }
 .figure-tip.w-fig, .figure-tip.w-wide, .figure-tip.w-xwide { padding: 6px 12px 7px; }
-.figure-tip.w-fig { width: min(300px, calc(100vw - 16px)); max-width: none; }
-.figure-tip.w-wide { width: min(330px, calc(100vw - 16px)); max-width: none; }
-.figure-tip.w-xwide { width: min(372px, calc(100vw - 16px)); max-width: none; }
+.figure-tip.w-fig, .figure-tip.w-wide, .figure-tip.w-xwide { max-width: calc(100vw - 16px); }
+.figure-tip.w-fig { min-width: min(300px, calc(100vw - 16px)); }
+.figure-tip.w-wide { min-width: min(330px, calc(100vw - 16px)); }
+.figure-tip.w-xwide { min-width: min(372px, calc(100vw - 16px)); }
 </style>
