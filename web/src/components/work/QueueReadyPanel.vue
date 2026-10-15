@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import { APIError, getNode, updateNode, type ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { conditionWords, entryFailure, entryLabel, entryStatus, tickEntryCheck, type EntryCheck, type EntryFailure, type EntryRecord } from '../../lib/entryChecks'
@@ -144,7 +145,7 @@ function keys(event: KeyboardEvent) {
         <p v-if="readonly && entryRecord?.override_reason" class="nr-record">{{ entryRecord.by.name }} · {{ absoluteTime(entryRecord.at) }} · {{ entryRecord.override_reason }}</p>
         <ul class="nr-list"><li v-for="check in rows" :key="check.id" class="nr-item" :class="{ manual: check.id.startsWith('manual:'), ok: check.passed, na: !check.applicable, missing: check.applicable && !check.passed }">
           <span class="nr-mark"><AppIcon :name="!check.applicable ? 'minus' : check.passed ? 'circle-check' : readonly ? 'skip' : 'circle'" :size="15" /></span>
-          <span class="nr-label"><b>{{ check.label }}</b><small :data-tip="historyLabel(check)">{{ historyLabel(check) }}</small><PersonStepOwner v-if="!readonly && check.owner && ownerStep(check.id)" :step="ownerStep(check.id)!" :disabled="busy" @changed="() => { void refresh(); void desk.refresh() }" /></span>
+          <span class="nr-label"><b v-clip-tip="check.label">{{ check.label }}</b><small :data-tip="historyLabel(check)">{{ historyLabel(check) }}</small><PersonStepOwner v-if="!readonly && check.owner && ownerStep(check.id)" :step="ownerStep(check.id)!" :disabled="busy" @changed="() => { void refresh(); void desk.refresh() }" /></span>
           <button v-if="!readonly && check.can_tick" type="button" class="btn sm" :class="{ primary: check.owner?.id === session.identity?.principal.id && !check.passed }" :disabled="busy" @click="tick(check)"><span class="tick-label"><span class="measure" aria-hidden="true">Mark checked</span><span>{{ check.passed ? 'Undo' : 'Mark checked' }}</span></span></button>
           <button v-else-if="!readonly && check.applicable && editLabel(check) && canEdit" type="button" class="btn sm" :disabled="busy || checks.loading.value || check.passed" @click="fix(check)">{{ editLabel(check) }}</button>
         </li></ul>
@@ -168,11 +169,11 @@ function keys(event: KeyboardEvent) {
 .nr-count { font-weight: 500; color: var(--ink-2); }
 .nr-head .mono { font-size: 11.5px; color: var(--ink-3); }
 .nr-lede { flex: none; padding: 0 6px; font-size: 12.5px; color: var(--ink-2); }
-.nr-body { min-height: 0; overflow: auto; display: grid; gap: 8px; }
+.nr-body { min-height: 0; overflow: auto; display: grid; align-content: start; gap: 8px; }
 .nr-refusal { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: 9px; background: var(--surface-sunken); font-size: 12px; line-height: 1.5; color: var(--ink-2); }
 .nr-refusal svg { flex: none; margin-top: 2px; }
 .nr-record { padding: 4px 6px; color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }
-.nr-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.nr-list { display: grid; align-content: start; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .nr-item { display: flex; align-items: center; gap: 10px; height: 76px; box-sizing: border-box; padding: 5px 6px 5px 8px; border-radius: 9px; font-size: 13px; }
 .nr-item.manual { height: 96px; }
 .nr-item.missing { background: var(--surface-sunken); }
@@ -195,5 +196,5 @@ function keys(event: KeyboardEvent) {
 .nr-form label { font-size: 12.5px; font-weight: 600; }
 .nr-hint { font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
 .error { color: var(--danger); font-size: 12px; padding: 0 6px; }
-@media (max-width: 600px) { .nr { height: 100%; max-height: none; padding: max(8px, env(safe-area-inset-top)) 4px max(8px, env(safe-area-inset-bottom)); } .nr-body { flex: 1; } .nr-phone-actions { display: flex; gap: 8px; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--line); flex: none; } .nr-phone-actions .btn { min-height: 44px; } .queue-submit, .desktop-submit { display: none; } .nr-item { height: 88px; } .nr-form-actions .btn { min-height: 44px; } }
+@media (max-width: 600px) { .nr { height: 100%; max-height: none; padding: max(8px, env(safe-area-inset-top)) 4px max(8px, env(safe-area-inset-bottom)); } .nr-body { flex: 1; } .nr-phone-actions { display: flex; gap: 8px; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--line); flex: none; } .nr-phone-actions .btn { min-height: 44px; } .queue-submit, .desktop-submit { display: none; } .nr-item { height: 88px; } .nr-item.manual { height: 124px; } .nr-form-actions .btn { min-height: 44px; } }
 </style>

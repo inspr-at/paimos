@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { vClipTip } from '../../directives/clipTip'
 import { getNode } from '../../lib/api'
 import type { DeskItem } from '../../lib/decisionDesk'
 import { markPersonStep, reassignPersonStep, type PersonStep, type PersonSteps } from '../../lib/personSteps'
@@ -75,7 +76,7 @@ onBeforeUnmount(() => { disposed = true; emit('busy', false) })
 <template>
   <div ref="root" class="person-request" :class="{ resolved: !!resolution }" :style="height ? { height: `${height}px` } : {}" :data-testid="`desk-row-${item.id}`">
     <span class="request-kind">Action request</span>
-    <span class="request-topic"><RouterLink :to="href" class="request-title">{{ resolution || item.title }}</RouterLink><small :data-tip="error || `${item.projectName} · ${step.ticket_key} · ${step.ticket_title} · ${item.meanwhile}`" :role="error ? 'alert' : undefined">{{ error || `${item.projectName} · ${step.ticket_key} · ${step.ticket_title} · ${item.meanwhile}` }}</small></span>
+    <span class="request-topic"><RouterLink :to="href" class="request-title">{{ resolution || item.title }}</RouterLink><small v-clip-tip="error || `${item.projectName} · ${step.ticket_key} · ${step.ticket_title} · ${item.meanwhile}`" :role="error ? 'alert' : undefined">{{ error || `${item.projectName} · ${step.ticket_key} · ${step.ticket_title} · ${item.meanwhile}` }}</small></span>
     <span class="request-actions">
       <button v-if="resolution && undo" ref="undoButton" type="button" class="btn sm" :disabled="busy" @click="undoChange">Undo</button>
       <template v-else><button ref="tickButton" type="button" class="btn sm primary" :disabled="busy || !step.can_tick" @click="checked"><AppIcon name="person-check" :size="13" />Mark checked</button><button type="button" class="icon-btn sm flat" aria-haspopup="menu" :aria-expanded="!!more" :aria-label="`More for ${item.title}`" :disabled="busy" @click="more = $event.currentTarget as HTMLElement"><AppIcon name="more" :size="15" /></button></template>
