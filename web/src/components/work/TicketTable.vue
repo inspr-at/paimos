@@ -249,8 +249,12 @@ const dragWidths = ref<Partial<Record<string, number>>>({})
 // min and max, so a fixed column never collapses.
 // Content fits can give room back before a custom table needs to scroll.
 // Budget them at the card width first; only saved/dragged widths and column
-// minima may force a wider table. Actions keep their minimum while text gives way.
-const fittingWidths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
+// minima may force a wider table. Keep the measured key whole, as in normal
+// lists. Actions keep their minimum while the other text columns give way.
+const fittingWidths = computed(() => layoutWidths(ids.value, width.value, props.prefs, {
+  key: Number.isFinite(props.prefs?.widths?.key) ? widthOf('key', props.prefs, definitions.value) : autoWidths.value.key,
+  ...dragWidths.value,
+}, definitions.value, autoWidths.value))
 const layoutWidth = computed(() => customised.value ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? definitions.value.get(id)!.min : fittingWidths.value[id] ?? widthOf(id, props.prefs, definitions.value)), 0)) : width.value)
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
