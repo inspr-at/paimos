@@ -6,6 +6,7 @@ import { WORKER, binding, makeNative, setup, refresh } from './native-session-pr
 
 // Risk: syntactically valid JSON still has an untrusted shape. Reject it before
 // granting a viewer, rendering a frame or restoring legacy write controls.
+// Live reads must also carry the captured binding guards required by C0.
 test('AEON-1309: malformed native JSON and invalid shapes stay incomplete without granting control', async ({ page }) => {
   const { state, worker, errors } = await setup(page)
   await page.goto(`/agents/${WORKER}`)
@@ -38,7 +39,7 @@ test('AEON-1309: malformed native JSON and invalid shapes stay incomplete withou
   let replay = JSON.stringify(emptyPage), attach = JSON.stringify(grant), stream = ''
   let attached = 0, streamed = 0, detached = 0
   await page.route('**/api/projects/p-pharos/native-sessions/**', route => {
-    const path = new URL(route.request().url()).pathname
+    const url = new URL(route.request().url()), path = url.pathname
     if (path.endsWith('/events')) return route.fulfill({ contentType: 'application/json', body: replay })
     if (path.endsWith('/attach')) {
       attached++
@@ -48,6 +49,10 @@ test('AEON-1309: malformed native JSON and invalid shapes stay incomplete withou
     if (path.endsWith('/stream')) {
       streamed++
       expect(route.request().headers()['x-aeon-viewer-id']).toBe(grant.viewer_id)
+      expect(url.searchParams.get('view')).toBe('structured')
+      expect(url.searchParams.get('expected_runtime_epoch')).toBe(binding.runtime_epoch)
+      expect(url.searchParams.get('expected_binding_revision')).toBe(String(binding.binding_revision))
+      expect(url.searchParams.get('expected_harness_session_id')).toBe(binding.harness_session_id)
       return route.fulfill({ contentType: 'text/event-stream', body: stream })
     }
     expect(path).toMatch(/\/detach$/)

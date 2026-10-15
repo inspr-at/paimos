@@ -400,6 +400,8 @@ const eventTransport: NativeExpertTransport = {
   async stream(request, receive, signal) {
     if (request.view !== 'structured') throw { reason: 'qualification_missing' }
     const path = `/projects/${encodeURIComponent(request.binding.project_id)}/native-sessions/${encodeURIComponent(request.binding.owned_session_id)}`
+    const query = new URLSearchParams({ view: 'structured', expected_runtime_epoch: request.binding.runtime_epoch,
+      expected_binding_revision: String(request.binding.binding_revision), expected_harness_session_id: request.binding.harness_session_id })
     const attached = await boundedJSON(`${path}/attach`, AbortSignal.any([signal, AbortSignal.timeout(3000)]),
       { request_id: crypto.randomUUID(), expected_binding: request.binding, client_id: crypto.randomUUID(), mode: 'view', view: 'structured', consent_id: null })
     if (!record(attached) || attached.mode !== 'view' || attached.control_capability !== null || !nonempty(attached.viewer_id) || !isNativeBinding(attached.binding) ||
@@ -409,7 +411,7 @@ const eventTransport: NativeExpertTransport = {
     try {
       const connecting = new AbortController(), timeout = setTimeout(() => connecting.abort(), 3000)
       let response: Response
-      try { response = await api(`${path}/stream?view=structured`, { signal: AbortSignal.any([lease, connecting.signal]), headers: { Accept: 'text/event-stream', 'X-Aeon-Viewer-ID': attached.viewer_id, ...(request.lastEventId ? { 'Last-Event-ID': request.lastEventId } : {}) } }, 30_000) } finally { clearTimeout(timeout) }
+      try { response = await api(`${path}/stream?${query}`, { signal: AbortSignal.any([lease, connecting.signal]), headers: { Accept: 'text/event-stream', 'X-Aeon-Viewer-ID': attached.viewer_id, ...(request.lastEventId ? { 'Last-Event-ID': request.lastEventId } : {}) } }, 30_000) } finally { clearTimeout(timeout) }
       if (!response.ok || !response.body) throw { status: response.status, reason: response.status === 503 ? 'feature_disabled' : [401, 403, 404].includes(response.status) ? 'permission_revoked' : response.status === 409 ? 'cursor_expired' : 'native_failure' }
       reader = response.body.getReader()
       const decoder = new TextDecoder('utf-8', { fatal: true }); let pending = ''
