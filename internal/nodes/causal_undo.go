@@ -95,6 +95,16 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	}
 	// Both preview and confirmed Undo call this handler under the access fence
 	// and current row lock. A historical event does not grant person authority.
+	if err := requireHumanTickTx(ctx, tx, p, current, before.HumanCheck); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return events.Change{}, events.ErrForbidden
+		}
+		var denied *httpError
+		if errors.As(err, &denied) && denied.status == 403 {
+			return events.Change{}, events.ErrForbidden
+		}
+		return events.Change{}, err
+	}
 	if err := authorizeWorkRestore(p, current, before); err != nil {
 		return events.Change{}, err
 	}

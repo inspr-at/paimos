@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,19 +30,20 @@ const NearExpiry = 15 * time.Minute
 var ErrCoverage = errors.New("desk project coverage exceeds 1000 projects")
 
 type Item struct {
-	ID        string     `json:"id"`
-	Kind      string     `json:"kind"`
-	ProjectID string     `json:"project_id,omitempty"`
-	Revision  int64      `json:"revision"`
-	Title     string     `json:"title"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Held      bool       `json:"held"`
-	CanDecide bool       `json:"can_decide"`
-	Href      string     `json:"href"`
-	Source    string     `json:"source"`
-	Bucket    int        `json:"-"`
-	OrderAt   time.Time  `json:"-"`
+	PersonStep *workorders.PersonStep `json:"person_step,omitempty"`
+	ID         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	ProjectID  string                 `json:"project_id,omitempty"`
+	Revision   int64                  `json:"revision"`
+	Title      string                 `json:"title"`
+	CreatedAt  time.Time              `json:"created_at"`
+	ExpiresAt  *time.Time             `json:"expires_at,omitempty"`
+	Held       bool                   `json:"held"`
+	CanDecide  bool                   `json:"can_decide"`
+	Href       string                 `json:"href"`
+	Source     string                 `json:"source"`
+	Bucket     int                    `json:"-"`
+	OrderAt    time.Time              `json:"-"`
 }
 
 // PushEligible is evaluated again just before dispatch. Answered questions,

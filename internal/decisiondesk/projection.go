@@ -122,8 +122,19 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
 ), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source
  FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
+), person_request_details AS MATERIALIZED (
+ SELECT n.project_id,step FROM nodes n
+ CROSS JOIN LATERAL jsonb_array_elements(aeon_person_steps(n.id)) step
+ WHERE n.tenant_id=$1 AND n.project_id=ANY($28::uuid[]) AND n.deleted_at IS NULL
+ AND step->>'active'='true' AND step->'owner'->>'id'=$4::text
+), person_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT (step->>'id')::uuid,'action_request'::text,project_id,
+ (extract(epoch FROM (step->>'revision')::timestamptz)*1000000)::bigint,
+ 'Confirm: '||(step->>'label'),(step->>'created_at')::timestamptz,NULL::timestamptz,false,
+ '/api/nodes/'||(step->>'node_id')||'/person-steps/'||(step->>'check_id')
+ FROM person_request_details
 ), visible AS MATERIALIZED (
- SELECT *,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
+ SELECT *,(SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
  CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
  SELECT * FROM questions WHERE project_id=ANY($5::uuid[]) AND (NOT $16 OR project_id=ANY($20::uuid[]))
@@ -138,6 +149,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  UNION ALL SELECT * FROM account_matrix WHERE $25
  UNION ALL SELECT * FROM routine_consents
  UNION ALL SELECT * FROM lessons
+ UNION ALL SELECT * FROM person_requests
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -174,7 +186,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}}
+	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}, "nodes.read": {}, "nodes.write": {}}
 	stepupPermissions := map[string][]string{}
 	for _, permission := range stepup.TargetPermissions() {
 		stepupPermissions[permission] = []string{}
@@ -250,7 +262,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, projects["nodes.read"]).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
 	if err != nil {
 		return page, err
 	}
@@ -296,7 +308,12 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 				return page, err
 			}
 		case "action_request":
-			i.CanDecide = check("inbox.manage", i.ProjectID)
+			if i.PersonStep != nil {
+				i.CanDecide = i.PersonStep.Owner.ID == p.ID && check("nodes.write", i.ProjectID)
+				i.PersonStep.CanTick = i.CanDecide
+			} else {
+				i.CanDecide = check("inbox.manage", i.ProjectID)
+			}
 		case "doctrine":
 			i.CanDecide = check("rules.write", "")
 		case "tier_request":

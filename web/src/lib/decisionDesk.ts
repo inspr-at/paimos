@@ -6,6 +6,7 @@ import type { DoctrineInboxItem } from './doctrine'
 import { sha256FirstByte } from './avatar.ts'
 import type { MethodLearning } from './knowledge'
 import type { StepupRequest } from './stepup'
+import type { PersonStep } from './personSteps'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
 export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson'
@@ -21,6 +22,7 @@ export interface DeskOutcomeEffect {
   effect_data?: { retryable?: boolean; review_required?: DeskEffectReview[]; ticket_id?: string; criterion?: string; knowledge_id?: string; doctrine_id?: string; supersedes?: string; superseded_by?: string }
 }
 export interface DeskItem {
+  personStep?: PersonStep
   id: string; kind: DeskKind; projectId: string; projectName: string; projectKey?: string; ticketId?: string; ticketKey?: string
   title: string; context: string; findings: string; meanwhile: string; destination: string
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
@@ -105,6 +107,7 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
+  person_step?: PersonStep
   id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent'; project_id?: string
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }

@@ -319,6 +319,17 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, rules := range in.Checks {
 			for _, rule := range rules {
+				if rule.FallbackOwnerID != nil {
+					fallback := rule
+					fallback.OwnerID, fallback.FallbackOwnerID = rule.FallbackOwnerID, nil
+					owner, err := workqueue.EntryOwnerTx(ctx, tx, p, workqueue.EntryTicket{ProjectID: project}, fallback)
+					if err != nil {
+						return err
+					}
+					if owner == nil || owner.ID != *rule.FallbackOwnerID {
+						return badRequest("manual check fallback must be a person with current project access")
+					}
+				}
 				if rule.OwnerID != nil {
 					t := workqueue.EntryTicket{ProjectID: project}
 					owner, err := workqueue.EntryOwnerTx(ctx, tx, p, t, rule)

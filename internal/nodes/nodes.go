@@ -642,6 +642,11 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			sets = append(sets, "human_check = "+add(nextCheck))
 		}
 		if kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task" {
+			if checkChanged {
+				if err = requireHumanTickTx(ctx, tx, p, current, nextCheck); err != nil {
+					return err
+				}
+			}
 			nextFields, err = humanCheckFields(p, nextFields, current.Fields, current.HumanCheck, nextCheck, checkChanged)
 			if err != nil {
 				return err

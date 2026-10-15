@@ -135,6 +135,8 @@
     "GET /api/nodes/tree": "nodes.read",
     "GET /api/nodes/{nodeId}": "nodes.read",
     "GET /api/nodes/{nodeId}/entry-checks": "nodes.read",
+    "GET /api/nodes/{nodeId}/person-step-owners": "nodes.read",
+    "GET /api/nodes/{nodeId}/person-steps": "nodes.read",
     "GET /api/nodes/{nodeId}/work-lifecycle": "nodes.read",
     "GET /api/projects": "nodes.read",
     "GET /api/projects/lookup": "nodes.read",
@@ -156,6 +158,8 @@
     "POST /api/nodes/{nodeId}/work-lifecycle": "nodes.write",
     "POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue": "nodes.write",
     "PUT /api/nodes/{nodeId}/entry-checks/{checkId}": "nodes.write",
+    "PUT /api/nodes/{nodeId}/person-steps/{checkId}": "nodes.write",
+    "PUT /api/nodes/{nodeId}/person-steps/{checkId}/owner": "nodes.write",
     "PUT /api/projects/{projectId}/definitions": "nodes.write",
     "PUT /api/settings/definitions": "settings.manage",
     "PUT /api/settings/work-vocabulary": "settings.manage"

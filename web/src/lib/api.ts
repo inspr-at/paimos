@@ -248,6 +248,7 @@ export interface ListParent { id: string; key: string; title: string; kind_slug:
 export interface ListProject { id: string; key: string; title: string }
 export interface LeadWorker { name: string; key: string }
 export interface ListItem extends WorkNode {
+  person_waiting?: { check_id: string; label: string; owner: { id: string; name: string } }[]
   kind_slug: string; kind_label: string; priority: string | null; assignee: ListPerson | null
   parent: ListParent | null; children_count: number; project: ListProject | null
   // The nearest epic above the item (a task's is its ticket's epic); absent on older servers.
@@ -264,6 +265,7 @@ export interface ListQuery {
  shape?: string[]; depth?: string[]
   // Work levels: leaf, else a parent's depth (AEON-974).
   level?: string[]
+  person_waiting?: string[]
   human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]

@@ -17,10 +17,14 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import TicketBenefits from './TicketBenefits.vue'
+import PersonStepOwner from './PersonStepOwner.vue'
+import { usePersonSteps } from '../../lib/personSteps'
+import { useDecisionDesk } from '../../stores/decisionDesk'
 const props = withDefaults(defineProps<{ row: ListItem; projectId: string; anchor: HTMLElement; mode?: 'queue' | 'entry' | 'status' | 'record'; toStatus?: string; entryRecord?: EntryRecord; refusal?: EntryFailure }>(), { mode: 'queue', toStatus: 'in_progress' })
 const emit = defineEmits<{ close: [restore: boolean]; queued: [entry: QueueWireEntry]; changed: [] }>()
 const queue = useWorkQueue(), session = useSession()
-const current = ref(props.row), checks = useEntryChecks(() => current.value)
+const current = ref(props.row), checks = useEntryChecks(() => current.value), personSteps = usePersonSteps(() => current.value), desk = useDecisionDesk()
+const ownerStep = (id: string) => personSteps.data.value?.steps.find(step => step.check_id === id)
 const block = computed(() => props.mode === 'record' ? props.entryRecord : checks.data.value?.blocks.find(b => b.to_status === entryStatus(props.toStatus)))
 const rows = computed(() => {
   const items = block.value?.checks ?? []
@@ -52,6 +56,11 @@ function historyLabel(check: EntryCheck) {
   if (!check.applicable) return conditionWords(check)
   const record = currentRecord.value
   if (!check.passed && record?.override_reason && record.checks.some(c => c.id === check.id && !c.passed)) return `Overridden · ${check.reason}`
+  if (!check.passed && check.owner) {
+    if (!person.value) return `A person must tick this: ${check.owner.name}`
+    if (check.owner.id === session.identity?.principal.id) return 'Waiting for you'
+    return check.can_tick ? `Waiting for ${check.owner.name}` : `${check.owner.name} or a project admin ticks this`
+  }
   return check.reason
 }
 async function refresh() {
@@ -95,7 +104,7 @@ async function saveFix() {
 async function tick(check: EntryCheck) {
   if (!check.can_tick || readonly.value) return
   const revision = checks.data.value?.revision ?? current.value.updated_at
-  await run(async () => { await tickEntryCheck(originId, check.id, !check.passed, revision); await refresh() })
+  await run(async () => { await tickEntryCheck(originId, check.id, !check.passed, revision); await refresh(); void desk.refresh() })
 }
 function openReason() { anyway.value = true; void nextTick(() => reasonField.value?.focus()) }
 async function move() {
@@ -133,9 +142,9 @@ function keys(event: KeyboardEvent) {
         <p v-if="latest" class="nr-refusal"><AppIcon name="list-checks" :size="14" /><span>{{ latest.by.name }} couldn’t move it to {{ statusMeta(latest.to_status).label }}: {{ latest.failed.map(c => `${c.label}${c.owner ? ` · waiting for ${c.owner.name}` : ''}`).join(', ') }}<small> · {{ absoluteTime(latest.at) }}<template v-if="latest.count > 1"> · {{ latest.count }} attempts</template></small></span></p>
         <p v-else-if="refusal" class="nr-refusal">Still missing: {{ refusal.failed.map(c => c.label).join(', ') }}.</p>
         <p v-if="readonly && entryRecord?.override_reason" class="nr-record">{{ entryRecord.by.name }} · {{ absoluteTime(entryRecord.at) }} · {{ entryRecord.override_reason }}</p>
-        <ul class="nr-list"><li v-for="check in rows" :key="check.id" class="nr-item" :class="{ ok: check.passed, na: !check.applicable, missing: check.applicable && !check.passed }">
+        <ul class="nr-list"><li v-for="check in rows" :key="check.id" class="nr-item" :class="{ manual: check.id.startsWith('manual:'), ok: check.passed, na: !check.applicable, missing: check.applicable && !check.passed }">
           <span class="nr-mark"><AppIcon :name="!check.applicable ? 'minus' : check.passed ? 'circle-check' : readonly ? 'skip' : 'circle'" :size="15" /></span>
-          <span class="nr-label"><b>{{ check.label }}</b><small :data-tip="historyLabel(check)">{{ historyLabel(check) }}</small></span>
+          <span class="nr-label"><b>{{ check.label }}</b><small :data-tip="historyLabel(check)">{{ historyLabel(check) }}</small><PersonStepOwner v-if="!readonly && check.owner && ownerStep(check.id)" :step="ownerStep(check.id)!" :disabled="busy" @changed="() => { void refresh(); void desk.refresh() }" /></span>
           <button v-if="!readonly && check.can_tick" type="button" class="btn sm" :class="{ primary: check.owner?.id === session.identity?.principal.id && !check.passed }" :disabled="busy" @click="tick(check)"><span class="tick-label"><span class="measure" aria-hidden="true">Mark checked</span><span>{{ check.passed ? 'Undo' : 'Mark checked' }}</span></span></button>
           <button v-else-if="!readonly && check.applicable && editLabel(check) && canEdit" type="button" class="btn sm" :disabled="busy || checks.loading.value || check.passed" @click="fix(check)">{{ editLabel(check) }}</button>
         </li></ul>
@@ -165,6 +174,7 @@ function keys(event: KeyboardEvent) {
 .nr-record { padding: 4px 6px; color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }
 .nr-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .nr-item { display: flex; align-items: center; gap: 10px; height: 76px; box-sizing: border-box; padding: 5px 6px 5px 8px; border-radius: 9px; font-size: 13px; }
+.nr-item.manual { height: 96px; }
 .nr-item.missing { background: var(--surface-sunken); }
 .nr-item.na { opacity: .7; }
 .nr-mark { display: grid; place-items: center; flex: none; width: 18px; color: var(--queue-wait-ink); }

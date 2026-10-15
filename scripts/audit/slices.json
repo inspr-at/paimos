@@ -299,7 +299,10 @@
         "internal/workorders/**",
         "internal/workorders/build_guard.go",
         "internal/nodes/project_lookup.go",
-        "internal/nodes/project_lookup_test.go"
+        "internal/nodes/project_lookup_test.go",
+        "internal/nodes/person_steps.go",
+        "internal/nodes/person_steps_test.go",
+        "internal/workorders/person_steps.go"
       ]
     },
     {
@@ -413,6 +416,8 @@
         "web/src/components/lead/LeadAdoption.vue",
         "web/src/components/agents/AgentChores.vue",
         "web/src/components/agents/DecisionDeskPanel.vue",
+        "web/src/components/agents/PersonStepRequest.vue",
+        "web/src/components/work/PersonStepOwner.vue",
         "web/src/components/lead/LeadContent.vue",
         "web/src/components/agents/SessionQuestion.vue",
         "web/src/components/agents/SessionAvatar.vue",
@@ -447,6 +452,7 @@
         "web/.vscode/**",
         "web/public/**",
         "web/src/lib/displayLanguage.ts",
+        "web/src/lib/personSteps.ts",
         "web/tests/lead-adoption.unit.test.ts",
         "web/tests/lead-adoption.spec.ts",
         "web/tests/access-refresh-panels.unit.test.ts",

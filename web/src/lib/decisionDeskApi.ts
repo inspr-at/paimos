@@ -449,7 +449,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
   // question pages loaded for history. One source has one position and count.
   if (projection !== undefined) {
     const history = items.filter(item => item.decided), byID = new Map(items.map(item => [item.id, item]))
-    const missing = (projection?.items ?? []).filter(row => ['question', 'approval', 'action_request'].includes(row.kind) && !byID.has(deskItemID(row)))
+    const missing = (projection?.items ?? []).filter(row => ['question', 'approval', 'action_request'].includes(row.kind) && !row.person_step && !byID.has(deskItemID(row)))
     if (missing.length > 100) warnings.push('Only 100 additional source details are read at once. Some items need more source pages before review.')
     // Hydrate canonical sources outside their first page in bounded batches,
     // through their permission-checked native reads.
@@ -477,6 +477,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     }
     const open = (projection?.items ?? []).map(row => {
       const id = deskItemID(row), item = byID.get(id), linkOut = deskLinkOut(row)
+      if (row.person_step) return { ...base(id, 'action', row.title, '', []), personStep: { ...row.person_step, can_tick: row.can_decide === true }, projectId: row.project_id ?? '', projectName: name(row.project_id ?? ''), ticketId: row.person_step.node_id, ticketKey: row.person_step.ticket_key, revision: row.revision, createdAt: row.created_at, meanwhile: row.person_step.check_id === 'human' ? 'gates Delivered and Accepted' : `before ${row.person_step.to_status === 'in_progress' ? 'In progress' : row.person_step.to_status === 'done' ? 'Done' : 'QA'}`, source: row.source }
       if (linkOut) return { ...base(id, 'account_matrix', row.title, '', []), linkOut, revision: row.revision, createdAt: row.created_at, held: row.held, source: row.source,
         meanwhile: 'Confirm which accounts agents may use in Settings.', destination: 'Settings · Accounts', unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : undefined }
       if (item && !item.decided) return { ...item, held: row.held, source: row.source,
@@ -498,6 +499,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     projectNames: new Map(projects.map(project => [project.id, project.title])), projectKeys, nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
+  if (item.personStep) return item.personStep.can_tick && can('nodes.write', item.projectId)
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
   if (item.kind === 'lesson') return !!sources.lessons.get(item.id) && can('knowledge.read', item.projectId) && can('knowledge.write', item.projectId) && (!item.lesson?.learning.recommendation?.rule_layer_id || can('rules.write', item.projectId))
   if (item.kind === 'key_trim') return can('keys.manage')
