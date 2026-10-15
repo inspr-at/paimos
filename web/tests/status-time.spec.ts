@@ -209,11 +209,11 @@ test('a failed lifeline keeps its height, says so, and retries', async ({ page }
 test('an open ticket reopened after a minute lands at once, then shows the time so far read again', async ({ page }) => {
   // The gate's M1: the kept answer never aged, so "so far" froze at the first read for the whole session.
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const start = Date.parse(GENERATED)
-  await page.clock.setFixedTime(start)
+  // An installed clock: time runs on, and fastForward jumps it. A fixed clock would hold the sheet's own navigation.
+  await page.clock.install({ time: Date.now() })
   await setup(page)
   // The second read of PHAROS-11 comes 12 hours later: the open visit and the ticket's life are 12 hours longer.
-  const later = { ...REWORK, generated_at: new Date(start + 12 * H * 1000).toISOString(), visits: REWORK.visits.map(visit => visit.ongoing ? { ...visit, seconds: visit.seconds + 12 * H } : visit) }
+  const later = { ...REWORK, generated_at: new Date(Date.parse(GENERATED) + 12 * H * 1000).toISOString(), visits: REWORK.visits.map(visit => visit.ongoing ? { ...visit, seconds: visit.seconds + 12 * H } : visit) }
   const held = gate()
   let reads = 0
   await page.route('**/api/nodes/n-1/lifeline', async route => {
@@ -231,12 +231,12 @@ test('an open ticket reopened after a minute lands at once, then shows the time 
   await expect(caption).toHaveText(/1\.4d so far$/)
   // Within the minute the kept answer stands and nothing is read again.
   await leave()
-  await page.clock.setFixedTime(start + 30_000)
+  await page.clock.fastForward(20_000)
   await back()
   await expect(caption).toHaveText(/1\.4d so far$/)
   // After it, the kept answer still lands at once, without a skeleton, while the lifeline is read again behind it.
   await leave()
-  await page.clock.setFixedTime(start + 61_000)
+  await page.clock.fastForward(45_000)
   await back()
   await expect.poll(() => reads).toBe(2)
   await expect(caption).toHaveText(/1\.4d so far$/)
