@@ -131,8 +131,9 @@ func BenchmarkBackendMemory(b *testing.B) {
 	variants := []struct{ name, params string }{
 		{"cache_statement_512", "default_query_exec_mode=cache_statement&statement_cache_capacity=512"},
 		{"cache_describe", "default_query_exec_mode=cache_describe"},
-		{"cache_statement_32", "statement_cache_capacity=32"},
-		{"cache_statement_48", "statement_cache_capacity=48"},
+		{"cache_statement_32", "default_query_exec_mode=cache_statement&statement_cache_capacity=32"},
+		{"cache_statement_48", "default_query_exec_mode=cache_statement&statement_cache_capacity=48"},
+		{"cache_statement_56", "default_query_exec_mode=cache_statement&statement_cache_capacity=56"},
 	}
 	for run := range 3 {
 		// Rotate order to reduce systematic first-run/shared-buffer bias.
