@@ -247,8 +247,11 @@ const dragWidths = ref<Partial<Record<string, number>>>({})
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
 // min and max, so a fixed column never collapses.
-const liveWidths = computed(() => ({ ...Object.fromEntries(Object.entries(autoWidths.value).filter(([id]) => !Number.isFinite(props.prefs?.widths?.[id]))), ...dragWidths.value }))
-const layoutWidth = computed(() => customised.value ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? definitions.value.get(id)!.min : liveWidths.value[id] ?? widthOf(id, props.prefs, definitions.value)), 0)) : width.value)
+// Content fits can give room back before a custom table needs to scroll.
+// Budget them at the card width first; only saved/dragged widths and column
+// minima may force a wider table. Actions keep their minimum while text gives way.
+const fittingWidths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
+const layoutWidth = computed(() => customised.value ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? definitions.value.get(id)!.min : fittingWidths.value[id] ?? widthOf(id, props.prefs, definitions.value)), 0)) : width.value)
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
