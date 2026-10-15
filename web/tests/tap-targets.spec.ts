@@ -245,7 +245,7 @@ for (const { width, coarse } of [
             const rect = (await queue.boundingBox())!, before = readinessCalls.length, checksBefore = checklistCalls.length
             await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
             await expect(missing).toBeVisible()
-            await expect(missing.getByRole('heading', { name: 'Ready · 0 of 2' })).toBeVisible()
+            await expect(missing.getByRole('heading', { name: 'Ready 0 of 2' })).toBeVisible()
             await expect(missing.locator('.nr-item.missing')).toHaveCount(2)
             await expect(missing.getByText('Estimate set', { exact: true })).toBeVisible()
             await expect(missing.getByText('Acceptance criteria written', { exact: true })).toBeVisible()
