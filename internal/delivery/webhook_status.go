@@ -2,8 +2,10 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
@@ -11,6 +13,10 @@ import (
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 )
+
+// webhookStatusBodyLimit is the only slice of an error body that may be
+// inspected. The bytes are discarded after the class is derived.
+const webhookStatusBodyLimit = 4096
 
 // Only parsed scheduling hints and fixed classes survive the transport. The
 // response, headers, request URL, token and body are never retained here.
@@ -103,6 +109,9 @@ func (t *webhookStatusTransport) RoundTrip(r *http.Request) (*http.Response, err
 		if status == http.StatusForbidden && (retry != "" || response.Header.Get("X-RateLimit-Remaining") == "0") {
 			failure.class = "secondary_limit"
 		}
+		if status == http.StatusForbidden && failure.class == "http_403" {
+			classifyWebhookForbiddenBody(response, failure)
+		}
 		if webhookLimited(failure.class) {
 			// Bound hint parsing before conversion; only derived times survive.
 			if len(retry) <= 128 {
@@ -126,6 +135,70 @@ func (t *webhookStatusTransport) RoundTrip(r *http.Request) (*http.Response, err
 		t.mu.Unlock()
 	}
 	return response, err
+}
+
+// classifyWebhookForbiddenBody upgrades a header-less 403 when GitHub's
+// secondary-rate-limit marker is inside the bounded slice. A confirmed refusal
+// stays http_403. The slice is not stored on the error.
+func classifyWebhookForbiddenBody(response *http.Response, failure *webhookGitHubError) {
+	if response == nil || response.Body == nil || failure == nil {
+		return
+	}
+	prefix := make([]byte, 0, webhookStatusBodyLimit)
+	buf := make([]byte, 512)
+	var readErr error
+	for len(prefix) < webhookStatusBodyLimit {
+		room := webhookStatusBodyLimit - len(prefix)
+		if room > len(buf) {
+			room = len(buf)
+		}
+		n, err := response.Body.Read(buf[:room])
+		if n > 0 {
+			prefix = append(prefix, buf[:n]...)
+		}
+		if err != nil {
+			readErr = err
+			break
+		}
+		if n == 0 {
+			break
+		}
+	}
+	original := response.Body
+	response.Body = struct {
+		io.Reader
+		io.Closer
+	}{Reader: io.MultiReader(bytes.NewReader(prefix), original), Closer: original}
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return
+	}
+	folded := bytes.ToLower(prefix)
+	if bytes.Contains(folded, []byte("secondary rate limit")) || bytes.Contains(folded, []byte("secondary-rate-limit")) {
+		failure.class = "secondary_limit"
+	}
+}
+
+// ProbeAccess reads one repository document. Callers use it as the single
+// permission-pause probe for an installation; it is not a per-receipt read.
+func (g AppReader) ProbeAccess(ctx context.Context) error {
+	if g.App == nil {
+		return errRead
+	}
+	return g.observeGitHub(func(app *crossreview.GitHubApp) error {
+		return app.ReadHistoryInstallation(ctx, func(get func(string, any) error, _ string) error {
+			var repo struct {
+				ID       int64  `json:"id"`
+				FullName string `json:"full_name"`
+			}
+			if err := get("", &repo); err != nil {
+				return err
+			}
+			if repo.ID <= 0 || repo.FullName != g.App.Config.Repository {
+				return errRead
+			}
+			return nil
+		})
+	})
 }
 
 func maxTime(a, b time.Time) time.Time {

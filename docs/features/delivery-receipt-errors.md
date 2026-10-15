@@ -11,22 +11,32 @@ Previously unfinished `github_http` receipts continue from their stored
 checkpoints and receive a specific class on their next failed read. Existing
 terminal receipts are not reopened.
 
-An ordinary 401 or 403 pauses automatic GitHub reads. The existing Delivery
-notice path sends one permission notice per receipt to the currently authorized
-project lead or coordinator session. Receipt scheduling and notice acceptance
-commit together. A missing or unauthorized lead leaves notice routing pending;
-later due passes retry routing without reading GitHub. After installation access
-is repaired, redelivering the same signed GitHub event resumes its unfinished
-step. Its delivery ID, repository, installation and payload digest must still
-match, and completed checkpoints remain intact. A permission refusal on the last
-ordinary attempt retains one explicit repair attempt.
+An ordinary 401 or 403 pauses automatic GitHub reads. The pause epoch is the
+time of the first pause for that tenant, repository, installation and class, and
+it is cleared when a probe shows reads work again. The existing Delivery notice
+path sends one permission notice per tenant, repository, installation, class and
+pause epoch to the currently authorized project lead or coordinator session. The
+notice text includes how many receipts are affected. A later separate outage uses
+a new epoch and notifies again. Receipt scheduling and notice acceptance commit
+together. A missing or unauthorized lead leaves notice routing pending; later due
+passes retry routing without reading GitHub. The hourly pass makes one bounded
+probe read per installation. That probe does not count as an attempt and is not
+a read per receipt. When it succeeds, every paused receipt for that installation
+becomes due immediately, the pause class and epoch are cleared, and the change
+is audited. Redelivering one verified webhook still resumes that delivery. Its
+delivery ID, repository, installation and payload digest must still match, and
+completed checkpoints remain intact. A permission refusal on the last ordinary
+attempt retains one explicit repair attempt.
 
-A 429, or a 403 carrying Retry-After or the exhausted rate-limit marker, waits
-for the parsed Retry-After/reset hint. Scheduling is bounded to one minute through
-one hour, with a one-minute fallback for absent or invalid hints. These waits do
-not consume the twelve-attempt budget. A duplicate webhook cannot bypass the
-stored rate-limit deadline. Header text is discarded; only the derived due time
-is persisted. Best-effort token revocation cannot replace the failed read's hint.
+A 429, or a 403 carrying Retry-After, the exhausted rate-limit marker, or
+GitHub's secondary-rate-limit marker in a size-limited body slice, waits for the
+parsed Retry-After/reset hint. The body text is not stored; only the derived
+class is kept. A confirmed refusal, with neither those headers nor that marker,
+pauses as permission. Scheduling is bounded to one minute through one hour, with
+a one-minute fallback for absent or invalid hints. These waits do not consume
+the twelve-attempt budget. A duplicate webhook cannot bypass the stored
+rate-limit deadline. Header text is discarded; only the derived due time is
+persisted. Best-effort token revocation cannot replace the failed read's hint.
 
 404, server and network failures retain bounded retries. At exhaustion, the
 receipt keeps the upstream class and the failed step's `gave_up` checkpoint;

@@ -814,6 +814,22 @@ func TestDeliveryWebhookGitHubStatusPolicy(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"token": private, "permissions": in.Permissions, "repositories": []any{map[string]string{"full_name": f.m.config.Repository}}})
 				case r.Method == http.MethodGet && r.URL.Path == "/app/installations/456":
 					_ = json.NewEncoder(w).Encode(map[string]any{"id": 456, "app_id": 123, "permissions": map[string]string{"checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read", "actions": "read"}})
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/example/delivery":
+					// The hourly permission probe reads the repository once. It is
+					// not the actions/runs counter the pause assertions use.
+					if status.Load() != 200 {
+						w.Header().Set("Retry-After", tc.retry)
+						w.Header().Set("X-RateLimit-Remaining", tc.remaining)
+						if tc.reset {
+							w.Header().Set("X-RateLimit-Reset", fmt.Sprint(at.Add(5*time.Minute).Unix()))
+						}
+						w.Header().Set("X-GitHub-Request-Id", private)
+						w.Header().Set("X-Accepted-GitHub-Permissions", private)
+						w.WriteHeader(int(status.Load()))
+						_, _ = io.WriteString(w, private)
+						return
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "full_name": "example/delivery"})
 				case r.Method == http.MethodGet && r.URL.Path == "/repos/example/delivery/actions/runs":
 					reads.Add(1)
 					if status.Load() == 0 {
@@ -1094,5 +1110,308 @@ func TestDeliveryWebhookPermissionNoticeAtomicity(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeliveryWebhookPauseFixBodyBound(t *testing.T) {
+	// Risk: a secondary-limit 403 without rate-limit headers is paused as a
+	// permission refusal, or the classifier keeps the response text.
+	marker := `{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again.","documentation_url":"https://docs.github.com/rest/overview/resources-in-the-rest-api#secondary-rate-limits"}`
+	past := strings.Repeat("a", 4096) + "secondary rate limit"
+	for _, tc := range []struct {
+		name, body, class string
+	}{
+		{name: "marker", body: marker, class: "secondary_limit"},
+		{name: "documentation url", body: `{"documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api#secondary-rate-limits"}`, class: "secondary_limit"},
+		{name: "marker past the slice", body: past, class: "http_403"},
+		{name: "confirmed refusal", body: `{"message":"Resource not accessible by integration"}`, class: "http_403"},
+		{name: "empty", body: "", class: "http_403"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &webhookStatusTransport{base: transportFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})}
+			response, err := transport.RoundTrip(httptest.NewRequest(http.MethodGet, "https://api.github.com/repos/example/delivery", nil))
+			if err != nil || response == nil || transport.failure == nil {
+				t.Fatal("403 produced no classification")
+			}
+			got, err := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if err != nil || string(got) != tc.body || transport.failure.class != tc.class {
+				t.Fatalf("class %q body restored %t", transport.failure.class, string(got) == tc.body)
+			}
+			retained := fmt.Sprintf("%+v", *transport.failure)
+			for _, secret := range []string{"exceeded a secondary", "Resource not accessible", "documentation_url", strings.Repeat("a", 32)} {
+				if strings.Contains(retained, secret) {
+					t.Fatal("classifier retained response text")
+				}
+			}
+		})
+	}
+}
+
+func pauseFixLead(t *testing.T, f *fixture) {
+	t.Helper()
+	saveAlertObservation(t, f, alertObservation(f))
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.person.TenantID, f.project, f.person.ID)
+		return err
+	})
+}
+
+func pauseFixGitHub(t *testing.T, f *fixture, status *atomic.Int32, upstreamBody, retry, remaining string, reset bool) (actionReads, repoReads *atomic.Int32) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(keyDir, "synthetic-app.pem")
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	const private = "ghs_SYNTHETIC_PRIVATE_RECEIPT_VALUE"
+	var actions, repos atomic.Int32
+	var runs atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeRefusal := func() {
+			if retry != "" {
+				w.Header().Set("Retry-After", retry)
+			}
+			if remaining != "" {
+				w.Header().Set("X-RateLimit-Remaining", remaining)
+			}
+			if reset {
+				w.Header().Set("X-RateLimit-Reset", fmt.Sprint(f.at.Add(5*time.Minute).Unix()))
+			}
+			w.Header().Set("X-GitHub-Request-Id", private)
+			w.WriteHeader(int(status.Load()))
+			_, _ = io.WriteString(w, upstreamBody)
+		}
+		switch {
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/456/access_tokens":
+			var in struct {
+				Permissions map[string]string `json:"permissions"`
+			}
+			if json.NewDecoder(r.Body).Decode(&in) != nil {
+				t.Error("invalid mint request")
+				return
+			}
+			for _, level := range in.Permissions {
+				if level != "read" {
+					t.Error("probe widened read authority")
+				}
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": private, "permissions": in.Permissions, "repositories": []any{map[string]string{"full_name": f.m.config.Repository}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/app/installations/456":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 456, "app_id": 123, "permissions": map[string]string{"checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read", "actions": "read"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/"+f.m.config.Repository:
+			repos.Add(1)
+			if status.Load() != 200 {
+				writeRefusal()
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "full_name": f.m.config.Repository})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/"+f.m.config.Repository+"/actions/runs":
+			actions.Add(1)
+			if status.Load() != 200 {
+				writeRefusal()
+				return
+			}
+			id := runs.Add(1)
+			// Both fixtures carry check suite 81. Run ids differ so the metric
+			// primary key accepts each receipt; the suite id must match the event.
+			_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 1, "workflow_runs": []any{githubRunBody(1000+id, 1, defaultCIWorkflow, "push", "main", strings.Repeat("d", 40), f.at.Add(-time.Hour), time.Minute, "success", 81)}})
+		default:
+			t.Errorf("unexpected GitHub stub endpoint %s", r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := server.Client()
+	client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		request := r.Clone(r.Context())
+		request.URL.Scheme, request.URL.Host = "http", strings.TrimPrefix(server.URL, "http://")
+		query := request.URL.Query()
+		query.Set("private", private)
+		request.URL.RawQuery = query.Encode()
+		return http.DefaultTransport.RoundTrip(request)
+	})
+	f.m.config.KeyFile = keyFile
+	f.m.github = AppReader{App: &crossreview.GitHubApp{Config: f.m.config, Client: client}}
+	return &actions, &repos
+}
+
+func pauseFixStored(t *testing.T, f *fixture, forbidden ...string) {
+	t.Helper()
+	f.tx(t, func(tx pgx.Tx) error {
+		var receipt, messages, events []byte
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce((SELECT string_agg(to_jsonb(r)::text,'') FROM delivery_webhook_receipts r),''),(SELECT coalesce(jsonb_agg(m),'[]')::text FROM inbox_messages m),(SELECT coalesce(jsonb_agg(e),'[]')::text FROM events e)`).Scan(&receipt, &messages, &events); err != nil {
+			return err
+		}
+		for _, stored := range [][]byte{receipt, messages, events} {
+			for _, secret := range forbidden {
+				if secret != "" && bytes.Contains(stored, []byte(secret)) {
+					t.Fatal("upstream response text entered storage")
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func TestDeliveryWebhookPauseFixSecondaryBody(t *testing.T) {
+	// Risk: GitHub's header-less secondary-limit 403 pauses the receipt and
+	// keeps the response text.
+	f, _ := newMetricsFixture(t)
+	pauseFixLead(t, f)
+	var status atomic.Int32
+	status.Store(http.StatusForbidden)
+	const marker = `{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}`
+	actions, repos := pauseFixGitHub(t, f, &status, marker, "", "", false)
+	var logs bytes.Buffer
+	f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	raw := receiptBody(t, f, map[string]any{"action": "completed", "check_suite": map[string]any{"id": 81, "head_sha": strings.Repeat("d", 40), "head_branch": "main", "status": "completed", "app": map[string]string{"slug": "github-actions"}}})
+	if w := receiptSend(f, "check_suite", "secondary-body", raw); w.Code != 502 {
+		t.Fatalf("failed read status %d", w.Code)
+	}
+	attempts, next, finished, _, step, class := receiptState(t, f, "secondary-body")
+	if attempts != 0 || finished != nil || step == nil || *step != "metrics" || class == nil || *class != "secondary_limit" || !next.Equal(f.at.Add(time.Minute)) {
+		t.Fatalf("header-less secondary limit was not a bounded wait: attempts=%d next=%v class=%v", attempts, next, class)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE sender_label='Delivery'`).Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 {
+			t.Fatal("secondary limit sent a permission notice")
+		}
+		return nil
+	})
+	before := actions.Load()
+	f.at = f.at.Add(time.Second)
+	if err := f.m.retryWebhooks(t.Context()); err != nil || actions.Load() != before || repos.Load() != 0 {
+		t.Fatal("secondary wait reread GitHub before its due time")
+	}
+	pauseFixStored(t, f, marker, "ghs_SYNTHETIC_PRIVATE_RECEIPT_VALUE", "private=")
+	if bytes.Contains(logs.Bytes(), []byte("secondary rate limit")) || bytes.Contains(logs.Bytes(), []byte("ghs_SYNTHETIC_PRIVATE_RECEIPT_VALUE")) {
+		t.Fatal("failure log retained response text")
+	}
+}
+
+func TestDeliveryWebhookPauseFixProbeResume(t *testing.T) {
+	// Risk: permission pauses never drain, or each paused receipt reads GitHub
+	// on the hourly pass.
+	f, _ := newMetricsFixture(t)
+	pauseFixLead(t, f)
+	var status atomic.Int32
+	status.Store(http.StatusForbidden)
+	actions, repos := pauseFixGitHub(t, f, &status, `{"message":"Resource not accessible by integration"}`, "", "", false)
+	raw := receiptBody(t, f, map[string]any{"action": "completed", "check_suite": map[string]any{"id": 81, "head_sha": strings.Repeat("d", 40), "head_branch": "main", "status": "completed", "app": map[string]string{"slug": "github-actions"}}})
+	for _, id := range []string{"probe-a", "probe-b"} {
+		if w := receiptSend(f, "check_suite", id, raw); w.Code != 502 {
+			t.Fatalf("%s status %d", id, w.Code)
+		}
+		attempts, _, finished, _, _, class := receiptState(t, f, id)
+		if attempts != 1 || finished != nil || class == nil || *class != "http_403" {
+			t.Fatalf("%s did not pause: attempts=%d class=%v", id, attempts, class)
+		}
+	}
+	_, next, _, _, _, _ := receiptState(t, f, "probe-a")
+	f.at = next
+	status.Store(http.StatusOK)
+	actionBefore, repoBefore := actions.Load(), repos.Load()
+	if err := f.m.retryWebhooks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if repos.Load()-repoBefore != 1 || actions.Load()-actionBefore != 2 {
+		t.Fatalf("probe was not one installation read: repos +%d actions +%d", repos.Load()-repoBefore, actions.Load()-actionBefore)
+	}
+	var resumed string
+	f.tx(t, func(tx pgx.Tx) error {
+		var n int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*),coalesce(max(after->>'resumed_receipts'),'') FROM events WHERE type='delivery.receipt_pause_resumed'`).Scan(&n, &resumed); err != nil {
+			return err
+		}
+		if n != 1 || resumed != "2" {
+			t.Fatalf("resume audit %d receipts %q", n, resumed)
+		}
+		return nil
+	})
+	for _, id := range []string{"probe-a", "probe-b"} {
+		attempts, _, finished, checkpoints, step, class := receiptState(t, f, id)
+		if attempts != 2 || finished == nil || len(checkpoints) != len(webhookSteps) || step != nil || class != nil {
+			t.Fatalf("%s did not drain from the probe: attempts=%d finished=%v class=%v checkpoints=%d", id, attempts, finished, class, len(checkpoints))
+		}
+	}
+	pauseFixStored(t, f, "Resource not accessible", "ghs_SYNTHETIC_PRIVATE_RECEIPT_VALUE", "private=")
+}
+
+func TestDeliveryWebhookPauseFixNoticeGroup(t *testing.T) {
+	// Risk: one installation outage files a Delivery notice per receipt, and a
+	// later outage stays silent.
+	f := newFixture(t)
+	p := f.pull()
+	f.gh.pulls[7] = p
+	pauseFixLead(t, f)
+	g := &receiptGitHub{metricsFake: &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh}}}
+	f.m.github = g
+	f.gh.err = &crossreview.GitHubHTTPError{StatusCode: http.StatusForbidden}
+	raw := receiptBody(t, f, map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "title": "AEON-848: delivery", "head": map[string]string{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "repo": map[string]string{"full_name": f.m.config.Repository}}}})
+	bodies := func() []string {
+		t.Helper()
+		var out []string
+		f.tx(t, func(tx pgx.Tx) error {
+			rows, err := tx.Query(t.Context(), `SELECT body FROM inbox_messages WHERE sender_label='Delivery' ORDER BY body`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var body string
+				if err := rows.Scan(&body); err != nil {
+					return err
+				}
+				out = append(out, body)
+			}
+			return rows.Err()
+		})
+		return out
+	}
+	for _, id := range []string{"group-a", "group-b"} {
+		if w := receiptSend(f, "pull_request", id, raw); w.Code != 502 {
+			t.Fatalf("%s status %d", id, w.Code)
+		}
+	}
+	if got := bodies(); len(got) != 1 || !strings.Contains(got[0], "permission: http_403") || !strings.Contains(got[0], "2 receipts") {
+		t.Fatalf("permission notices: %q", bodies())
+	}
+	_, next, _, _, _, _ := receiptState(t, f, "group-a")
+	reads := g.pullReads
+	f.at = next
+	if err := f.m.retryWebhooks(t.Context()); err != nil || g.pullReads != reads || len(bodies()) != 1 {
+		t.Fatal("hourly permission pass duplicated the notice or reread per receipt")
+	}
+	f.gh.err = nil
+	f.at = f.at.Add(time.Hour)
+	for _, id := range []string{"group-a", "group-b"} {
+		if err := f.m.processWebhook(t.Context(), id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.gh.err = &crossreview.GitHubHTTPError{StatusCode: http.StatusForbidden}
+	if w := receiptSend(f, "pull_request", "group-c", raw); w.Code != 502 {
+		t.Fatalf("later outage status %d", w.Code)
+	}
+	got := bodies()
+	if len(got) != 2 || !strings.Contains(strings.Join(got, "\n"), "1 receipt") || !strings.Contains(strings.Join(got, "\n"), "2 receipts") {
+		t.Fatalf("later outage notices: %q", got)
 	}
 }
