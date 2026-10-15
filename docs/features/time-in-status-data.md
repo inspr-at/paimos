@@ -149,3 +149,47 @@ CI static job”). This is not a successful check or a code-test failure.
 The coordinator must obtain the full static/merged-main proof in an allowed
 window or authoritative PR CI. No origin push, deployment, review gate, other
 model CLI invocation, ticket-status change or live backfill was performed.
+
+## The UI (AEON-1359)
+
+Built from Tick's approved r4b design (the HTML and specification attached to
+AEON-1356/1357, hashes above).
+
+- **Lifeline on each ticket.** It appears in the ticket sheet and the full
+  page, under the properties row. The caption reads `Time in each status`,
+  then `Created → live 15h`, `8h so far` or `11h from created to Done`.
+  - **Strip.** One segment per status visit, in proportion to time (at least
+    6 px, 2 px apart). Each segment is filled like its status icon:
+    `web/src/styles/status-fills.css`, through `statusFill()` in
+    `web/src/lib/workFigures.ts`.
+  - **Gate markers** sit above the strip where the ticket entered open, doing,
+    done or closed, and again after a backward move. Each sits on a 1 px notch
+    at the exact crossing. The final or current status is pinned at the right
+    end.
+  - **The line** under the strip lists every visit. A visit slower than the
+    project's typical step gets `, usually X`, in attention tone above p90.
+    Typical means Delivery › Tickets at 90 days with no filters.
+  - **Tips.** Hover, the arrow keys (Home, End) or a tap show a segment's tip:
+    from–to, who moved it on, and the usual time. Markers show theirs on hover,
+    focus or tap. Tips are opaque, float on the page and close with Esc.
+  - **Motion.** A live in-progress segment slides; past segments slide only
+    under the pointer. Nothing moves with reduced motion, off-screen or in a
+    hidden tab.
+- **Delivery › Numbers › Tickets.** It sits first after the summary card in
+  Simple. It has three filters (type, priority, worked by), a hero tile for
+  Created → live, one tile per step, and the bridged Created → live chart. A
+  new source chip reads `Status history · every status change since …`.
+  - **Expert** gets six ticket tiles above the key numbers, and Created → live
+    as the first trend.
+  - **No releases.** A project with no Delivered or Accepted ticket in 90 days
+    ends at Done: three steps, and the total reads `Created → done`.
+- **Stability (AEON-541).** Everything keeps its height while loading, on
+  failure and when figures land; another window or filter keeps the previous
+  figures dimmed until the new ones switch in one render.
+  - When a ticket opens, the caption, markers and strip never move. Only the
+    line under the strip can add a row once a long history lands. Content below
+    it then moves down, never up (pattern A).
+- **Words** live in `web/src/lib/workFiguresText.ts` (lifeline) and the
+  delivery text tables, in English and German.
+- **Proof.** `web/tests/status-time.unit.test.ts` and
+  `web/tests/status-time.spec.ts`.
