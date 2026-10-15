@@ -93,6 +93,8 @@ function showTip(next: Omit<Tip, 'pinned'> & { pinned?: boolean }) {
 function position() {
   const current = tip.value, el = tipEl.value
   if (!current || !el || !current.anchor.isConnected) return
+  // A manual popover sits in the top layer, so the tip also shows over a modal dialog holding the ticket (Releases).
+  if (typeof el.showPopover === 'function' && !el.matches(':popover-open')) el.showPopover()
   const rect = current.anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight
   let y = rect.top - h - 8
   if (y < 8) y = rect.bottom + 8
@@ -230,7 +232,7 @@ const kept = new Map<string, Answer>()
     </p>
     <span class="sr-only" aria-live="polite">{{ live }}</span>
     <Teleport to="body">
-      <div v-if="tip" ref="tipEl" class="lf-tip" :class="{ gate: tip.kind === 'gate', pinned: tip.pinned }" role="tooltip"
+      <div v-if="tip" ref="tipEl" popover="manual" class="lf-tip" :class="{ gate: tip.kind === 'gate', pinned: tip.pinned }" role="tooltip"
         :style="{ left: `${place.x}px`, top: `${place.y}px`, visibility: place.placed ? undefined : 'hidden' }">
         <p v-for="(line, i) in tip.lines" :key="i" :class="line.tone">{{ line.text }}</p>
       </div>
@@ -264,6 +266,8 @@ const kept = new Map<string, Answer>()
 .life-line .sep, .life-line .partly { color: var(--ink-3); }
 .retry { display: inline; height: auto; margin: 0; padding: 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .retry:focus-visible { outline: 2px solid var(--primary-line); outline-offset: 2px; border-radius: 3px; }
+.retry { position: relative; }
+@media (pointer: coarse) { .retry::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); } }
 .sk { display: block; border-radius: 6px; background: var(--skeleton); }
 .strip-sk { position: absolute; top: 9px; left: 0; right: 0; height: 10px; border-radius: 3px; }
 .line-sk { display: inline-block; width: 60%; height: 10px; vertical-align: middle; }
@@ -288,7 +292,7 @@ const kept = new Map<string, Answer>()
 
 <style>
 /* The tips live on body: fixed and opaque, so they never move the page or let it show through (AEON-541, r2 fix 1). */
-.lf-tip { position: fixed; z-index: 80; width: max-content; max-width: min(320px, calc(100vw - 16px)); margin: 0; padding: 5px 10px; border-radius: 8px; background: var(--tip-solid); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent); pointer-events: none; }
+.lf-tip { position: fixed; z-index: 80; inset: auto; width: max-content; max-width: min(320px, calc(100vw - 16px)); margin: 0; padding: 5px 10px; border: 0; overflow: visible; border-radius: 8px; background: var(--tip-solid); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent); pointer-events: none; }
 .lf-tip.pinned { pointer-events: auto; }
 .lf-tip.gate { max-width: calc(100vw - 16px); white-space: nowrap; }
 .lf-tip p { margin: 0; color: inherit; }
