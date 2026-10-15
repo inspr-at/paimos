@@ -134,6 +134,20 @@ func TestEntryChecksLessonRecorded(t *testing.T) {
 		}
 		refuse(n, agent, "Deleted notes cannot bypass")
 	})
+	t.Run("body-and-status-in-one-write", func(t *testing.T) {
+		n := newTicket(map[string]any{"tags": []string{"incident"}}, "No lesson: Already documented.")
+		code, raw := call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"done","body":"Still investigating."}`)
+		var failure workqueue.EntryFailure
+		if code != 409 || json.Unmarshal(raw, &failure) != nil || len(failure.Failed) != 1 || failure.Failed[0].ID != "lesson_recorded" {
+			t.Fatalf("removed body note bypassed check: %d %s", code, raw)
+		}
+		if now := currentWorkTest(t, p, n.ID); now.Body != n.Body || now.State != n.State {
+			t.Fatalf("refused write persisted body/status: %+v", now)
+		}
+		n = newTicket(map[string]any{"tags": []string{"incident"}}, "")
+		code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"done","body":"No lesson: Already documented."}`)
+		decode[nodeJSON](t, code, raw, 200)
+	})
 	t.Run("person-override", func(t *testing.T) {
 		n := newTicket(map[string]any{"tags": []string{"incident"}}, "")
 		code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"done"}`)

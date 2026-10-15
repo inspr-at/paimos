@@ -6,8 +6,8 @@ under a project. A project copy replaces the whole workspace default, including
 an empty copy. Until either scope has a saved definition, a built-in workspace
 default requires an estimate, acceptance criteria and a named blocker (for
 blocked tickets) before In progress, and release text and `lesson_recorded`
-before Done. A saved
-empty workspace or project definition deliberately allows free movement.
+before Done. A saved empty workspace or project definition deliberately allows
+free movement.
 The catalog checks
 estimates, acceptance criteria, an approved attached design for UI work, a named
 blocker, another build in flight, CI against latest observed main, independent
