@@ -884,7 +884,7 @@ test('AEON-976 history: more than 200 posts remain reachable and a late refresh 
     await guard.check(async () => { await earlier.click(); await expect(panel.locator('.msg')).toHaveCount(count) })
     guard.done()
     const after = await panel.locator(`.msg[data-id="${id}"]`).evaluate(el => el.getBoundingClientRect().top)
-    const geometry = await thread.evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop, layout: Object.fromEntries(['main', '.agents-page', '.agents-work', '.agents-split', '.session-panel'].map(selector => { const node = document.querySelector<HTMLElement>(selector)!; return [selector, { rect: node.getBoundingClientRect().toJSON(), height: node.clientHeight, content: node.scrollHeight, top: node.scrollTop, css: getComputedStyle(node).position }] })) }))
+    const geometry = await thread.evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop }))
     expect(Math.abs(after - top), JSON.stringify({ count, id, top, after, beforeFrame, geometry })).toBeLessThanOrEqual(.5)
   }
   await expect(earlier).toHaveCount(0)

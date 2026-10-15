@@ -237,7 +237,6 @@ const willClose = computed(() => dragWidth.value !== null && workWidth.value - D
 const layoutSaveFailed = computed(() => preferenceSaves.failed.has(`${person.value}/agents:layout`))
 let lastSession = '', layoutResize: ResizeObserver | undefined, layoutFrame: number | undefined
 let layoutWrite = 0
-let pendingWorkPlacement: { session: string; owner: string; scrollTop: number } | null = null
 let rowAnchor: { id: string; top: number } | null = null
 let drag: { pointer: number; x: number; width: number; person: string } | null = null
 function rememberHandle(width: number) {
@@ -253,13 +252,7 @@ function rememberHandle(width: number) {
 }
 function ensureWorkTop() {
   const main = work.value?.closest('main')
-  if (!main || !work.value) return
-  main.scrollTo({ top: main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top, behavior: 'instant' })
-  // The first render can still have the short list's scroll extent. Retry
-  // when the pane gives the page its full height, while the same person and
-  // session are open and the person has not scrolled elsewhere.
-  pendingWorkPlacement = (split.value || panelOnly.value) && Math.abs(work.value.getBoundingClientRect().top - main.getBoundingClientRect().top) > .5
-    ? { session: sessionId.value, owner: person.value, scrollTop: main.scrollTop } : null
+  if (main && work.value) main.scrollTo({ top: main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top, behavior: 'instant' })
 }
 function placeRow() {
   if (!split.value) return
@@ -586,26 +579,11 @@ onMounted(() => {
   const main = work.value?.closest('main')
   const measureWidth = () => { workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0) }
   const measureHeight = () => { paneHeight.value = Math.max(0, (main?.clientHeight ?? 0) - 8) }
-  let workOffset: number | undefined
-  const preserveWorkPosition = () => {
-    if (!main || !work.value) return
-    const next = main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top
-    const moved = workOffset === undefined ? 0 : next - workOffset
-    workOffset = next
-    // Late dial/account content above an open pane must not move its controls
-    // below the viewport. Document offsets exclude the person's own scrolling.
-    if ((split.value || panelOnly.value) && main.scrollTop > 0 && Math.abs(moved) >= .5) main.scrollTop += moved
-  }
   measureWidth(); measureHeight()
-  preserveWorkPosition()
   layoutResize = new ResizeObserver(entries => {
     // Width only depends on the surrounding page. Apply its breakpoint before
     // paint; deferring it lets the old split move controls during interaction.
     measureWidth()
-    preserveWorkPosition()
-    const pending = pendingWorkPlacement
-    pendingWorkPlacement = null
-    if (pending && main && pending.session === sessionId.value && pending.owner === person.value && (split.value || panelOnly.value) && Math.abs(main.scrollTop - pending.scrollTop) <= .5) ensureWorkTop()
     // The main viewport's height is independent of the split. Its resize can
     // settle immediately too, without briefly opening a zero-height pane.
     if (entries.some(entry => entry.target === main)) measureHeight()
@@ -619,7 +597,6 @@ onMounted(() => {
     })
   })
   if (work.value) layoutResize.observe(work.value)
-  if (work.value?.parentElement) layoutResize.observe(work.value.parentElement)
   if (main) layoutResize.observe(main)
   stopTierWatch = serviceTiers.watchPage()
   document.addEventListener('visibilitychange', evidenceVisible)
@@ -630,7 +607,6 @@ onMounted(() => {
   clock = setInterval(() => agents.tick(), 1000)
 })
 onBeforeUnmount(() => {
-  pendingWorkPlacement = null
   panelLayoutWrite++; panelMedia.removeEventListener('change', syncPanelClass)
   layoutResize?.disconnect(); drag = null; dragWidth.value = null
   if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
@@ -792,6 +768,9 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 .agents-list-pane { flex: 0 0 100%; min-width: 0; max-width: 100%; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
 .split, .panel-only { padding-bottom: 8px; }
+/* The pane toolbar is already below the app header. Page-anchor clearance
+   would scroll its focused controls away from the pane's top. */
+:global(main:has(.agents-page.split)), :global(main:has(.agents-page.panel-only)) { scroll-padding-top: 0; }
 .panel-only .agents-divider { display: none; }
 .agents-divider { position: relative; flex: 0 0 0; align-self: stretch; transition: flex-basis 240ms ease; }
 .split .agents-divider { flex-basis: 16px; flex-shrink: 1; min-width: 0; cursor: col-resize; touch-action: none; }
