@@ -30,3 +30,15 @@ func recordParallelBuild(ctx context.Context, tx pgx.Tx, p tenant.Principal, s S
 		"body_markdown": fmt.Sprintf("Parallel work authorized for session %s: %s", s.ID, *s.ParallelReason),
 	})
 }
+
+func recordBuildContinuation(ctx context.Context, tx pgx.Tx, p tenant.Principal, admission workorders.BuildAdmission, session string) error {
+	if batch, ok := ctx.Value(controlEventKey{}).(*controlEventBatch); ok {
+		for _, change := range admission.Changes(session, "") {
+			if err := batch.addEvent(p, *change.NodeID, change.Type, change.Before, change.After); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return admission.Record(ctx, tx, p, session, "")
+}

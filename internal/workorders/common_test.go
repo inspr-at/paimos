@@ -5,6 +5,7 @@ package workorders
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -15,15 +16,155 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 type bodyDeadlineRecorder struct {
 	*httptest.ResponseRecorder
 	deadlines []time.Time
+}
+
+// Risk: work-order creation silently drops the fix binding, or a direct store
+// caller bypasses exact branch/repository and active-builder exclusion.
+func TestBuildAdmissionContinuationStore(t *testing.T) {
+	d := dbtest.Open(t)
+	p := tenant.Principal{ID: "11111111-1111-4111-8111-111111111111", Kind: tenant.Person}
+	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('continuation-store','Continuation store') RETURNING id::text`).Scan(&p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,name,kind) VALUES($1,$2,'Store caller','person')`, p.TenantID, p.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, p.TenantID, p.ID, "admin")
+	ctx := tenant.WithPrincipal(t.Context(), p)
+	var project, ticket, key string
+	if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Store project','{"project_key":"STO"}' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Store ticket',$2 FROM node_kinds WHERE slug='work' RETURNING id::text,key`, p.TenantID, project).Scan(&ticket, &key); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/linked','CI','Nightly',clock_timestamp())`, p.TenantID, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,'owner/linked',42,$2,clock_timestamp(),'webhook',clock_timestamp())`, p.TenantID, "work/"+strings.ToLower(key)+"-fix")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	branch := "work/" + strings.ToLower(key) + "-fix"
+	for _, scenario := range []string{"same-branch", "other-branch", "no-branch", "unknown-repository", "active-builder"} {
+		t.Run(scenario, func(t *testing.T) {
+			if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+					return err
+				}
+				candidate := &BuildCandidate{Repository: "owner/linked", Branch: branch}
+				if scenario == "other-branch" {
+					candidate.Branch += "-other"
+				} else if scenario == "unknown-repository" {
+					candidate.Repository = "owner/unknown"
+				} else if scenario == "no-branch" {
+					candidate = nil
+				}
+				order, changes, err := CreateDeferred(ctx, tx, p, CreateInput{Title: "Fix", Parent: &ticket, Criteria: []string{"Continue"}, BuildDelivery: candidate})
+				if err != nil {
+					return err
+				}
+				admission, err := OrderBuildAdmissionTx(ctx, tx, order.NodeID)
+				if err != nil || !sameStoreCandidate(admission.Candidate, candidate) || !sameStoreCandidate(order.BuildDelivery, candidate) {
+					t.Fatalf("create/load binding: %+v %+v %v", order, admission, err)
+				}
+				if scenario == "active-builder" {
+					if _, err := tx.Exec(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,branch) VALUES($1,$2,$3,$4,'codex','store','unmanaged','worker','ship','{}','store-ref','store-lease',$5)`, p.TenantID, project, p.ID, ticket, branch); err != nil {
+						return err
+					}
+				}
+				err = RequireBuildAdmissionTx(ctx, tx, p, order.NodeID, "", nil, &admission)
+				if scenario != "same-branch" {
+					var conflict *BuildConflict
+					want := "built_unmerged"
+					if scenario == "active-builder" {
+						want = "active_builder"
+					}
+					if !errors.As(err, &conflict) || conflict.Reason != want || admission.Continuation != nil {
+						t.Fatalf("store %s: admission %+v, error %v", scenario, admission, err)
+					}
+					return nil
+				}
+				if err != nil || admission.Continuation == nil {
+					t.Fatalf("same-branch admission: %+v %v", admission, err)
+				}
+				// All order writes/locks precede the audit counter.
+				for _, change := range changes {
+					if _, err := events.Append(ctx, tx, p, change); err != nil {
+						return err
+					}
+				}
+				return admission.Record(ctx, tx, p, "", "store-run")
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1 AND type='delivery.continued' AND after->>'message'=$2`, ticket, "continues delivery PR #42 on "+branch).Scan(&count)
+		if err == nil && count != 1 {
+			t.Errorf("store continuation audit count = %d", count)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func sameStoreCandidate(a, b *BuildCandidate) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// Risk: a supplied binding amplifies decoding or introduces multiline audit
+// content. Creation rejects invalid bindings before acquiring store locks.
+func TestBuildDeliveryBindingBounds(t *testing.T) {
+	for _, candidate := range []*BuildCandidate{
+		{Repository: "", Branch: "work/ticket"},
+		{Repository: "owner/repo", Branch: ""},
+		{Repository: "owner/repo", Branch: "work/"},
+		{Repository: "owner/repo", Branch: "main"},
+		{Repository: "owner/repo\n", Branch: "work/ticket"},
+		{Repository: "owner/repo", Branch: "work/ticket\u2028injected"},
+		{Repository: strings.Repeat("a", 256), Branch: "work/ticket"},
+		{Repository: "owner/repo", Branch: "work/" + strings.Repeat("a", 196)},
+	} {
+		raw, err := json.Marshal(map[string]any{"title": "Fix", "criteria": []string{"Continue"}, "build_delivery": candidate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var in CreateInput
+		if err := json.Unmarshal(raw, &in); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = CreateDeferred(t.Context(), nil, tenant.Principal{}, in)
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Status != 400 || !strings.Contains(failure.Message, "build_delivery requires") {
+			t.Fatalf("invalid binding reached store: %v", err)
+		}
+	}
 }
 
 func (w *bodyDeadlineRecorder) SetReadDeadline(deadline time.Time) error {

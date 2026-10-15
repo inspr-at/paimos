@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/3.2",
-    "sha256": "6b84c52f684b709be930b55744a963dceb8178daf88248b8343cfa4f62ba0dee",
+    "version": "harness-session/3.3",
+    "sha256": "7f2dd47614a2c7b04edb57abcc6e7ce88cd40150bfb5eea5a7b331a5b82c5110",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -882,6 +882,29 @@
               "string",
               "null"
             ]
+          },
+          "build_continuation": {
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "pull_request": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "repository": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "pull_request",
+              "branch"
+            ],
+            "type": "object"
           },
           "command": {
             "maxLength": 120,
@@ -2252,6 +2275,29 @@
               "string",
               "null"
             ]
+          },
+          "build_continuation": {
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "pull_request": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "repository": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "pull_request",
+              "branch"
+            ],
+            "type": "object"
           },
           "command": {
             "maxLength": 120,

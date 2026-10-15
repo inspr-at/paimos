@@ -136,6 +136,9 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(lead.locator('.c-time')).toHaveAttribute('data-tip', 'Running 1 h 12 min')
       // Wide rows name the model in Execution; no opener mark, no harness twice.
       await expect(lead.locator('.op-mark')).toBeHidden()
+      // Indicator art is an async component. Wait until each avatar has its badge; the probe still requires exactly one.
+      const avatars = page.locator('.sessions .row .ava')
+      for (let i = 0; i < await avatars.count(); i++) await expect(avatars.nth(i).locator('svg.agent-state-mark')).toHaveCount(1)
       const p = await probe(page)
       expectAvatars(p.avatars)
       expect(p.marks.every(n => n === 1), 'one harness mark per row').toBe(true)

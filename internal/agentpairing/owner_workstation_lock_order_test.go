@@ -17,6 +17,7 @@ func TestOwnerWorkstationAuthLockInventory(t *testing.T) {
 	want := map[string]string{
 		"key_scopes.go:agentKeyScopes":                "tenant:NO KEY UPDATE",
 		"key_trim.go:trimFence":                       "tenant:NO KEY UPDATE",
+		"messaging_assistant.go:messagingAssistant":   "tenant.NO_KEY_UPDATE",
 		"owner_workstation.go:workstationGuard":       "pairing.Mutation",
 		"owner_workstation.go:auditWorkstation":       "tenant:NO KEY UPDATE",
 		"owner_workstation.go:handleOwnerWorkstation": "pairing.Mutation",

@@ -2,11 +2,13 @@
 package agentruns
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -411,7 +413,38 @@ func snapshotPathCurrent(ctx context.Context, tx pgx.Tx, path []snapshotNode) (b
 	return true, nil
 }
 
+// Empty and JSON null stay valid for callers that apply a snapshot with no body.
+func decodeOptionalObject(r *http.Request, dst any) error {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return workorders.Fail(400, "invalid JSON")
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(dst); err != nil {
+		return workorders.Fail(400, "invalid JSON")
+	}
+	var extra any
+	if err = dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return workorders.Fail(400, "expected one JSON object")
+	}
+	return nil
+}
+
 func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	var in struct {
+		BuildDelivery *workorders.BuildCandidate `json:"build_delivery,omitempty"`
+	}
+	if err := decodeOptionalObject(r, &in); err != nil {
+		return nil, err
+	}
+	if err := workorders.ValidateBuildCandidate(in.BuildDelivery); err != nil {
+		return nil, err
+	}
 	ctx := r.Context()
 	s, err := loadQueueSnapshot(ctx, tx, p, r.PathValue("snapshotId"), true)
 	if err != nil {
@@ -484,7 +517,7 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 		if !errors.Is(loadErr, pgx.ErrNoRows) {
 			return nil, loadErr
 		}
-		if err = workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil); err != nil {
+		if err = workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil, &workorders.BuildAdmission{Candidate: in.BuildDelivery}); err != nil {
 			var conflict *workqueue.BuildConflict
 			if errors.As(err, &conflict) {
 				item.Outcome, item.Reason = "active", "build in flight"
@@ -513,7 +546,7 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 			s.Partial = true
 			continue
 		}
-		prepared, err := m.queuePrepare(ctx, tx, p, t, queueTarget{})
+		prepared, err := m.queuePrepare(ctx, tx, p, t, queueTarget{}, in.BuildDelivery)
 		if err != nil {
 			var qe *queueError
 			if errors.As(err, &qe) && qe.Code == "queue_not_ready" {
