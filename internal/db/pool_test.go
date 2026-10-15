@@ -194,3 +194,86 @@ func TestPoolApplicationNameAttribution(t *testing.T) {
 		}
 	}
 }
+
+// Risk: sharing sessions makes advisory locks reentrant and accidentally lets
+// more than two streams of one key through; replica admission and loss must
+// retain the prior cross-process bound without per-stream backends.
+func TestSharedSubscriptionAdmissionReplicaLimitAndConnectionLoss(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	open := func() *pgxpool.Pool {
+		cfg, err := db.ParsePoolConfig(d.AppURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pool, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.CloseNotificationConnections(pool); pool.Close() })
+		return pool
+	}
+	one, two := open(), open()
+	first, err := db.AdmitSubscription(ctx, one, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := db.AdmitSubscription(ctx, one, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	var pid int
+	if err := d.Admin.QueryRow(ctx, `SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	for _, pool := range []*pgxpool.Pool{one, two} {
+		if lease, err := db.AdmitSubscription(ctx, pool, "tenant:key"); !errors.Is(err, db.ErrSubscriptionLimit) {
+			if lease != nil {
+				lease.Close()
+			}
+			t.Fatalf("third stream admitted: %v", err)
+		}
+	}
+	second.Close()
+	third, err := db.AdmitSubscription(ctx, two, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third.Close()
+	var terminated bool
+	if err := d.Admin.QueryRow(ctx, `SELECT pg_terminate_backend($1)`, pid).Scan(&terminated); err != nil || !terminated {
+		t.Fatal("failed to terminate admission session", err)
+	}
+	if err := first.Check(ctx); err == nil {
+		t.Fatal("lost advisory session still granted admission")
+	}
+	select {
+	case <-first.Context().Done():
+	default:
+		t.Fatal("lost admission did not cancel stream")
+	}
+	replacement, err := db.AdmitSubscription(ctx, two, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	var sessions int
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 1 {
+		t.Fatalf("replica retained %d admission sessions, want one", sessions)
+	}
+	third.Close()
+	replacement.Close()
+	first.Close()
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 0 {
+		t.Fatal("admission session leaked after final lease close")
+	}
+}

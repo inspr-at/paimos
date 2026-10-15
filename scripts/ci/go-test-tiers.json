@@ -362,6 +362,10 @@
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
   ,
   "tests": [
+    {"kind":"go","package":"internal/db","name":"TestSharedSubscriptionAdmissionReplicaLimitAndConnectionLoss","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestSharedSSEReplaySeamReconnectOverflowAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeConnectionOriginBudget","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPoolApplicationNameAttribution","tier":"ESSENTIAL"}
