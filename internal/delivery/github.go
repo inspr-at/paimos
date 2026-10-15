@@ -258,6 +258,9 @@ func (g AppReader) Group(ctx context.Context, head, base, ref string) ([]Pull, e
 			if p.Base != base || !shas[p.Head] {
 				continue
 			}
+			if err = readAdmissionDiff(get, &p); err != nil {
+				return err
+			}
 			p.Checks, err = checks(get, p.Head)
 			if err != nil {
 				return err
