@@ -77,7 +77,7 @@ func (m *module) queueNotifications(w http.ResponseWriter, r *http.Request) {
 		workorders.WriteError(w, err)
 		return
 	}
-	// Bound dedicated backends, including concurrent reconnects for one daemon.
+	// Bound subscriptions, including concurrent reconnects for one daemon.
 	m.queueHintMu.Lock()
 	if m.queueHintReaders == nil {
 		m.queueHintReaders = make(map[string]int)
@@ -102,23 +102,12 @@ func (m *module) queueNotifications(w http.ResponseWriter, r *http.Request) {
 			delete(m.queueHintReaders, key)
 		}
 	}()
-	op, cancel := context.WithTimeout(ctx, 10*time.Second)
-	conn, err := pgx.ConnectConfig(op, m.pool.Config().ConnConfig.Copy())
-	if err == nil {
-		_, err = conn.Exec(op, "LISTEN "+events.QueueHintChannel)
-	}
-	cancel()
-	if conn != nil {
-		defer func() {
-			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = conn.Close(closeCtx)
-		}()
-	}
+	conn, err := db.SubscribeNotifications(ctx, m.pool, events.QueueHintChannel, p.TenantID)
 	if err != nil {
 		workorders.WriteError(w, err)
 		return
 	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	// Initial wake after LISTEN closes the startup/reconnect gap without replay.
 	if _, err := m.queueNotificationHint(r, p, 0); err != nil {
 		workorders.WriteError(w, err)
@@ -160,6 +149,15 @@ func (m *module) queueNotifications(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			return
+		}
+		if db.IsResync(notice) {
+			if _, err := m.queueNotificationHint(r, p, 0); err != nil {
+				return
+			}
+			if send("queue.wake") != nil {
+				return
+			}
+			continue
 		}
 		var hint struct {
 			TenantID string `json:"tenant_id"`

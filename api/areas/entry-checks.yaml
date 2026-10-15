@@ -153,7 +153,7 @@ paths:
   /projects/{projectId}/definitions:
     get:
       operationId: getProjectEntryDefinition
-      description: 'Read the whole effective definition. A project copy replaces all workspace checks, including an empty copy. When neither scope has a saved definition, the built-in workspace default preserves estimate, criteria and blocker checks before In progress and release copy before Done. No epic or ticket definitions. Uses nodes.read.'
+      description: 'Read the whole effective definition. A project copy replaces all workspace checks, including an empty copy. When neither scope has a saved definition, the built-in workspace default requires estimate, criteria and blocker checks before In progress, and release copy and lesson_recorded before Done. No epic or ticket definitions. Uses nodes.read.'
       security: [{session: []}, {agentKey: []}]
       parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
       responses:
@@ -252,7 +252,7 @@ components:
       type: object
       required: [id]
       properties:
-        id: {type: string, maxLength: 80, description: 'estimate_set, acceptance_present, design_attached, blocker_named, no_active_build, ci_green_latest_main, review_ok_cross_family, visual_ok, pills_benefits_set, release_copy_set, merged, released, or manual:<slug>.'}
+        id: {type: string, maxLength: 80, description: 'estimate_set, acceptance_present, design_attached, blocker_named, no_active_build, ci_green_latest_main, review_ok_cross_family, visual_ok, pills_benefits_set, release_copy_set, lesson_recorded, merged, released, or manual:<slug>. lesson_recorded applies only before Done to incident/regression tags or labels, the non-obvious-fix label, or non_obvious_fix true; it passes with an accepted project Knowledge changelog line linked to the ticket or its comment, or an explicit No lesson: <reason> line in the body, description or a current comment.'}
         label: {type: string, maxLength: 200, description: 'Required for manual items.'}
         label_de: {type: string, maxLength: 200}
         condition: {type: string, enum: [all, ui, code, blocked, release_notes, releases]}

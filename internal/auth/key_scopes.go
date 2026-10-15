@@ -167,6 +167,11 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 		if err != nil {
 			return err
 		}
+		if delta != nil {
+			if err := refuseMessagingAssistantKeyTx(ctx, tx, key.PrincipalID); err != nil {
+				return err
+			}
+		}
 		delta, err = normalizeWorkstationScopeDelta(delta, key.OwnerWorkstation)
 		if err != nil {
 			return err

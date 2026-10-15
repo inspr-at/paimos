@@ -106,6 +106,7 @@ var entryCatalog = map[string]entryCatalogItem{
 	"visual_ok":              {"Visual check ok", "Visuelle Prüfung ok", "ui"},
 	"pills_benefits_set":     {"Pills and benefits set", "Pills und Nutzen beschrieben", "release_notes"},
 	"release_copy_set":       {"Release text set (EN + DE)", "Release-Text gesetzt (EN + DE)", "release_notes"},
+	"lesson_recorded":        {"Lesson recorded", "Lehre festgehalten", "all"},
 	"merged":                 {"Merged to main", "In main gemergt", "code"},
 	"released":               {"Shipped in a release", "In einem Release ausgeliefert", "releases"},
 }
@@ -200,11 +201,11 @@ func EntryDefinitionTx(ctx context.Context, tx pgx.Tx, project *string, inherit 
 	// tenants' guards at rollout. Explicit empty definitions opt out as usual.
 	return &EntryDefinition{
 		ID:       "00000000-0000-0000-0000-000000000000",
-		Revision: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC),
+		Revision: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC),
 		Source:   "workspace",
 		Checks: map[string][]EntryRule{
 			"in_progress": {{ID: "estimate_set"}, {ID: "acceptance_present"}, {ID: "blocker_named"}},
-			"done":        {{ID: "release_copy_set"}},
+			"done":        {{ID: "release_copy_set"}, {ID: "lesson_recorded"}},
 		},
 	}, nil
 }
@@ -343,6 +344,12 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 			r.Label, r.LabelDE = c.en, c.de
 		}
 		r.Applicable = entryApplies(rule, t, usesReleases)
+		if rule.ID == "lesson_recorded" {
+			labels := entryLabels(t.Fields)
+			r.Applicable = r.Applicable && status == "done" && (t.Fields["non_obvious_fix"] == true || slices.ContainsFunc(labels, func(label string) bool {
+				return slices.Contains([]string{"incident", "regression", "non_obvious_fix"}, EntryState(label))
+			}))
+		}
 		if !r.Applicable {
 			r.Reason = "Not applicable"
 			out.Checks = append(out.Checks, r)
@@ -368,6 +375,9 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 		case "release_copy_set", "pills_benefits_set":
 			r.Passed = len(ticketbenefits.Issues(mustEntryJSON(t.Fields))) == 0
 			r.Reason = strings.Join(ticketbenefits.Issues(mustEntryJSON(t.Fields)), "; ")
+		case "lesson_recorded":
+			r.Passed, err = entryLessonTx(ctx, tx, t)
+			r.Reason = "Record the lesson in project Knowledge or add a No lesson: <reason> note"
 		case "no_active_build":
 			err = RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil)
 			var conflict *BuildConflict
@@ -439,6 +449,49 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 		out.Checks = append(out.Checks, r)
 	}
 	return out, nil
+}
+
+func entryLessonTx(ctx context.Context, tx pgx.Tx, t EntryTicket) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	// Explicit notes can live in the ticket body/description or a current
+	// comment. A bare prefix or a mention inside prose is not a reason.
+	hasNote := func(text string) bool {
+		for line := range strings.SplitSeq(text, "\n") {
+			if reason, ok := strings.CutPrefix(strings.TrimSpace(line), "No lesson:"); ok && strings.TrimSpace(reason) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	description, _ := t.Fields["description"].(string)
+	if hasNote(t.Body) || hasNote(description) {
+		return true, nil
+	}
+	var passed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (
+	    SELECT 1 FROM method_learning_decisions d
+	    JOIN nodes k ON k.tenant_id=d.tenant_id AND k.id=d.knowledge_id
+	    WHERE d.project_id=$2 AND k.project_id=$2 AND k.deleted_at IS NULL
+	      AND d.decision='accepted' AND btrim(d.line)<>''
+	      AND strpos(E'\n'||k.body||E'\n', E'\n'||d.line||E'\n')>0
+	      AND (d.source_key='n-'||$1::uuid::text OR EXISTS (
+	          SELECT 1 FROM events c WHERE c.node_id=$1::uuid AND c.type='comment.created'
+	            AND d.source_key='c-'||$1::uuid::text||'-'||c.id::text
+	      ))
+	) OR EXISTS (
+	    SELECT 1 FROM events c
+	    LEFT JOIN LATERAL (
+	        SELECT e.after FROM events e WHERE e.node_id=c.node_id
+	          AND e.type IN ('comment.updated','comment.deleted')
+	          AND e.after->>'comment_id'=c.id::text ORDER BY e.id DESC LIMIT 1
+	    ) latest ON true
+	    WHERE c.node_id=$1::uuid AND c.type='comment.created'
+	      AND coalesce(latest.after->>'deleted','false')<>'true'
+	      AND coalesce(latest.after->>'body_markdown',c.after->>'body_markdown','')
+	          ~ E'(^|\n)[ \\t]*No lesson:[ \\t]*[^ \\t\\r\\n]'
+	)`, t.ID, t.ProjectID).Scan(&passed)
+	return passed, err
 }
 
 func entryCITx(ctx context.Context, tx pgx.Tx, t EntryTicket) (bool, error) {

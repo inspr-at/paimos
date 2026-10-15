@@ -420,6 +420,11 @@ func TestTicketAgentWorkRealUsageModelLength(t *testing.T) {
 
 func TestTicketAgentWorkProjectGrantAndAgentScope(t *testing.T) {
 	f := newWorkFixture(t)
+	// Auth reads principals.messaging_only. This fixture stops before 1215, so 1352 never applies.
+	// The columns stay unrecorded: the upgrade test replays 1352's bare ADD COLUMN.
+	if _, err := f.db.App.Exec(t.Context(), `ALTER TABLE principals ADD COLUMN messaging_only boolean, ADD COLUMN messaging_owner_id uuid`); err != nil {
+		t.Fatal(err)
+	}
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	ticket := uid()
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)

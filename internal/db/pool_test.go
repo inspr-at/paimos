@@ -5,6 +5,9 @@ package db_test
 import (
 	"context"
 	"errors"
+	"net/url"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,5 +173,191 @@ func TestPoolSizingAndRetainedSessionAdmission(t *testing.T) {
 	}
 	if monitor.WarnWaiting(now.Add(8*time.Second), 0) || monitor.WarnWaiting(now.Add(9*time.Second), 1) {
 		t.Fatal("recovery did not reset wait warning")
+	}
+}
+
+// Risk: attribution hides the connection origin or overrides explicit operator
+// naming. Reconfiguring a copied pool must retain the default-name provenance.
+func TestPoolApplicationNameAttribution(t *testing.T) {
+	for _, tc := range []struct{ url, name string }{
+		{"postgres://localhost/fixture", "aeon-main"},
+		{"postgres://localhost/fixture?application_name=operator", "operator"},
+		{"host=localhost dbname=fixture application_name=operator", "operator"},
+		{"postgres://localhost/fixture?application_name=", ""},
+	} {
+		cfg, err := db.ParsePoolConfig(tc.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ConfigurePool(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != tc.name {
+			t.Fatalf("name %q want %q", got, tc.name)
+		}
+	}
+}
+
+// Risk: sharing sessions makes advisory locks reentrant and accidentally lets
+// more than two streams of one key through; replica admission and loss must
+// retain the prior cross-process bound without per-stream backends.
+func TestSharedSubscriptionAdmissionReplicaLimitAndConnectionLoss(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	open := func() *pgxpool.Pool {
+		cfg, err := db.ParsePoolConfig(d.AppURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pool, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.CloseNotificationConnections(pool); pool.Close() })
+		return pool
+	}
+	one, two := open(), open()
+	first, err := db.AdmitSubscription(ctx, one, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := db.AdmitSubscription(ctx, one, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	var pid int
+	if err := d.Admin.QueryRow(ctx, `SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	for _, pool := range []*pgxpool.Pool{one, two} {
+		if lease, err := db.AdmitSubscription(ctx, pool, "tenant:key"); !errors.Is(err, db.ErrSubscriptionLimit) {
+			if lease != nil {
+				lease.Close()
+			}
+			t.Fatalf("third stream admitted: %v", err)
+		}
+	}
+	second.Close()
+	third, err := db.AdmitSubscription(ctx, two, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third.Close()
+	var terminated bool
+	if err := d.Admin.QueryRow(ctx, `SELECT pg_terminate_backend($1)`, pid).Scan(&terminated); err != nil || !terminated {
+		t.Fatal("failed to terminate admission session", err)
+	}
+	if err := first.Check(ctx); err == nil {
+		t.Fatal("lost advisory session still granted admission")
+	}
+	select {
+	case <-first.Context().Done():
+	default:
+		t.Fatal("lost admission did not cancel stream")
+	}
+	replacement, err := db.AdmitSubscription(ctx, two, "tenant:key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	var sessions int
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 1 {
+		t.Fatalf("replica retained %d admission sessions, want one", sessions)
+	}
+	third.Close()
+	replacement.Close()
+	first.Close()
+	for ctx.Err() == nil {
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='aeon-events-admission'`).Scan(&sessions); err != nil {
+			t.Fatal(err)
+		}
+		if sessions == 0 {
+			break
+		}
+		runtime.Gosched()
+	}
+	if sessions != 0 {
+		t.Fatal("admission session leaked after final lease close")
+	}
+}
+
+// Risk: dedicated defaults override an explicit URL application_name, or a
+// shared listener creates duplicate sessions and fails to close its last one.
+func TestSharedListenerAttributionAndFinalClose(t *testing.T) {
+	for _, tc := range []struct{ name, param, value, want string }{
+		{"default", "", "", "aeon-events-listener"},
+		{"explicit", "application_name", "operator", "operator"},
+		{"explicit main", "application_name", "aeon-main", "aeon-main"},
+		{"options", "options", "-c application_name=operator", "operator"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := dbtest.Open(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			u, err := url.Parse(d.AppURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.param != "" {
+				query := u.Query()
+				query.Set(tc.param, tc.value)
+				u.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
+			}
+			cfg, err := db.ParsePoolConfig(u.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool, err := pgxpool.NewWithConfig(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			defer db.CloseNotificationConnections(pool)
+			first, err := db.SubscribeNotifications(ctx, pool, "aeon_events", "one")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer first.Close(context.Background())
+			second, err := db.SubscribeNotifications(ctx, pool, "aeon_events", "two")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer second.Close(context.Background())
+			var name string
+			var count int
+			if err := d.Admin.QueryRow(ctx, `SELECT min(application_name),count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN aeon_events'`).Scan(&name, &count); err != nil {
+				t.Fatal(err)
+			}
+			if name != tc.want || count != 1 {
+				t.Fatalf("listener name=%q count=%d want %q and one", name, count, tc.want)
+			}
+			if err := first.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := second.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for ctx.Err() == nil {
+				if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN aeon_events'`).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count == 0 {
+					break
+				}
+				runtime.Gosched()
+			}
+			if count != 0 {
+				t.Fatal("last subscriber leaked its backend")
+			}
+			if _, err := db.SubscribeNotifications(ctx, pool, "unbounded-channel", "one"); err == nil {
+				t.Fatal("arbitrary channel admitted")
+			}
+		})
 	}
 }

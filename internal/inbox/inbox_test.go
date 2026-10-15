@@ -443,7 +443,7 @@ func TestStreamAndPoll(t *testing.T) {
 	waiting := make(chan struct{}, 1)
 	resume := make(chan struct{})
 	notified := make(chan error, 1)
-	mod.waitNotify = func(ctx context.Context, conn *pgx.Conn, tenantID string, deadline time.Time) error {
+	mod.waitNotify = func(ctx context.Context, conn db.NotificationListener, tenantID string, deadline time.Time) error {
 		waiting <- struct{}{}
 		select {
 		case <-resume:

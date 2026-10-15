@@ -36,7 +36,7 @@ export function goExecutionIdentity(text) {
 }
 
 export function profile(output, { part: onlyPart } = {}) {
-  if (onlyPart !== undefined && ![1, 2].includes(onlyPart)) throw new Error('Expected profile part 1 or 2')
+  if (onlyPart !== undefined && ![1, 2, 3].includes(onlyPart)) throw new Error('Expected profile part 1, 2 or 3')
   const owner = 'internal/nodes', pkg = `github.com/inspr-at/paimos/${owner}`
   const scratch = mkdtempSync(resolve(tmpdir(), 'aeon-go-profile-'))
   const env = { ...process.env, GOMAXPROCS: '2' }
@@ -61,7 +61,9 @@ export function profile(output, { part: onlyPart } = {}) {
     const manifest = load('go'), inventory = validate(manifest, collectGo().tests)
     const all = inventory.filter(row => row.package === owner && row.active)
     const selected = all.filter(row => row.tier !== 'NIGHTLY' && row.lane !== 'timing')
-    const parts = splitOwner(selected, manifest.timingWeights.owners[owner], 2)
+    const timing = manifest.timingWeights.owners[owner]
+    if (onlyPart !== undefined && onlyPart > timing.split.count) throw new Error(`Expected profile part 1..${timing.split.count}`)
+    const parts = splitOwner(selected, timing, timing.split.count)
     const listNames = text => text.split('\n').filter(name => /^(?:Test|Fuzz)\w+$/.test(name)).sort()
     const names = all.map(row => row.name).sort(), cases = [], measurements = []
     for (const [index, part] of parts.entries()) {
@@ -95,7 +97,7 @@ export function profile(output, { part: onlyPart } = {}) {
       cache: 'Existing Go build cache; no cache purge and no test-result reuse (-count=1).',
       package: owner, nativeTests: names.length, selectedTests: cases.length, listSetEqual: true,
       executedSetEqual: true, subtestSetEqual: true, measurements, cases: cases.sort(),
-      part: onlyPart ?? 'both',
+      part: onlyPart ?? 'all',
       subtestIdentityNormalization: 'Only TestListEpicMembershipSetBasedAndScoped runtime UUIDs use a per-run bijection in first-appearance order; distinct IDs, reuse, punctuation and outcomes remain exact.',
       followUpOwner: 'AEON lead / AEON-1014 coordinator: post the seven-day CI outcome after deployment.' }
     saveJSON(output, report)
@@ -106,6 +108,6 @@ export function profile(output, { part: onlyPart } = {}) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (![3, 4].includes(process.argv.length)) throw new Error('Usage: node scripts/test-tiers/go-compile-profile.mjs OUTPUT.json [1|2]')
+  if (![3, 4].includes(process.argv.length)) throw new Error('Usage: node scripts/test-tiers/go-compile-profile.mjs OUTPUT.json [1|2|3]')
   profile(resolve(process.argv[2]), { part: process.argv[3] === undefined ? undefined : Number(process.argv[3]) })
 }

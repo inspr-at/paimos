@@ -19,6 +19,9 @@ import (
 type Module struct {
 	pool   *pgxpool.Pool
 	events Writer
+	// Pointer so a lifecycle Module copy shares one lock. A value field
+	// embeds sync.Mutex; copying it forks the lock around the same map.
+	figures *figuresCache
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -33,7 +36,7 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 	if events == nil {
 		events = SQLWriter{}
 	}
-	return &Module{pool: pool, events: events}
+	return &Module{pool: pool, events: events, figures: &figuresCache{}}
 }
 
 // Mount registers kind and node routes. Paths are the full /api paths the
@@ -51,6 +54,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes", m.handleListNodes)
 	mux.HandleFunc("GET /api/projects", m.handleListProjects)
 	mux.HandleFunc("GET /api/projects/lookup", m.handleLookupProject)
+	mux.HandleFunc("GET /api/projects/{projectId}/figures", m.handleProjectFigures)
 	mux.HandleFunc("POST /api/nodes", m.handleCreateNode)
 	mux.HandleFunc("POST /api/nodes/bulk", m.handleBulk)
 	mux.HandleFunc("GET /api/nodes/lookup", m.handleLookupNodes)

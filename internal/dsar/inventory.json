@@ -667,6 +667,7 @@
         "next_attempt_at": "metadata",
         "payload": "review",
         "payload_sha256": "metadata",
+        "permission_paused_at": "metadata",
         "received_at": "metadata",
         "repository": "metadata",
         "tenant_id": "metadata"
@@ -1335,6 +1336,18 @@
         "tenant_column": "tenant_id"
       },
       "table": "personal_profiles"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "messaging_only": "metadata",
+        "messaging_owner_id": "personal"
+      },
+      "locator": {
+        "person_column": "id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "principals"
     },
     {
       "classification": "personal",

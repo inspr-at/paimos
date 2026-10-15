@@ -155,6 +155,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		}
 	}
 	ctx, cancelWorkers := context.WithCancel(ctx)
+	defer db.CloseNotificationConnections(pool)
 	defer cancelWorkers()
 	workerCtx := db.Background(ctx)
 	startPoolStats := db.Stats(pool)
@@ -215,6 +216,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		closeListener()
 		return fmt.Errorf("aithema host: %w", err)
 	}
+	authMod.AssistantNoticeTx = inbox.MessagingAssistantNoticeTx
 	authMod.Delegated = aithemaHost.DelegatedIntake
 	journalStore.HostAuthorization = aithemaHost.CheckJournal
 	journalStore.AuthorityProjection = aithemaHost.CheckAuthority
