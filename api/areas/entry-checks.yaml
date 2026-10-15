@@ -85,6 +85,37 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetProjectEntryDefinition
+      description: 'Remove the project copy and follow the current workspace default. Requires a person project admin under the tenant and tree fence. Both the project copy and the displayed workspace revision must still match. Tickets keep their status and entry history.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, expected_workspace_revision]
+              properties:
+                expected_revision: {type: string, format: date-time}
+                expected_workspace_revision: {type: [string, 'null'], format: date-time}
+      responses:
+        '200': {description: 'Effective workspace default after reset', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/definitions/context:
+    get:
+      operationId: getProjectEntryDefinitionContext
+      description: 'Read the effective definition, the current workspace default, the server-retained copied checks and current edit authority for the project settings editor. Uses nodes.read in this project; it grants no workspace edit access. The copy base never changes during ordinary edits.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
+      responses:
+        '200': {description: 'Project definition editor context', content: {application/json: {schema: {$ref: '#/components/schemas/EntryDefinitionContext'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /settings/definitions:
     get:
       operationId: getWorkspaceEntryDefinition
@@ -119,8 +150,18 @@ components:
             properties:
               expected_revision: {type: [string, 'null'], format: date-time, description: 'Null creates the first definition at this scope; otherwise its current revision is required.'}
               copied_from_revision: {type: [string, 'null'], format: date-time}
+              expected_workspace_revision: {type: [string, 'null'], format: date-time, description: 'Optional precondition for copying the displayed workspace default; also supports the built-in default revision.'}
               checks: {$ref: '#/components/schemas/EntryDefinitionBlocks'}
   schemas:
+    EntryDefinitionContext:
+      type: object
+      required: [project_id, definition, workspace_default, copied_from_checks, can_manage]
+      properties:
+        project_id: {type: string, format: uuid}
+        definition: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
+        workspace_default: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
+        copied_from_checks: {oneOf: [{$ref: '#/components/schemas/EntryDefinitionBlocks'}, {type: 'null'}], description: 'Checks retained by the server when this project copied the default; null for a definition created without a copy base.'}
+        can_manage: {type: boolean, description: 'The current principal is a person project admin. The server rechecks this inside every write.'}
     EntryDefinitionBlocks:
       type: object
       additionalProperties: false

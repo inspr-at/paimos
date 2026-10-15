@@ -9,10 +9,20 @@ test('AEON-1024 measured splits preserve native baseline cases, tiers and full s
   const result = proveSlowOwners(load('web').tests, load('go').tests)
   assert.equal(result.browserCases, baseline.browserCases.length)
   assert.equal(result.goCases, baseline.goCases.length)
-  // AEON-1338 (LEAD 2026-10-15): three parallel internal/nodes splits. Same
-  // cases, tiers and <250s ceiling; only the part count rises from two.
+  // AEON-1338 schedules three parallel splits and retains the 250-second ceiling.
   assert.equal(result.nodeSeconds.length, 3)
   assert.ok(Math.max(...result.nodeSeconds) < 250)
+  // AEON-1316 adds one independently measured case. Preserve the exact
+  // historical 250-second bound for every prior case and charge only this add.
+  const manifest = load('go'), timing = manifest.timingWeights.owners['internal/nodes']
+  const addition = 'TestProjectDefinitionsCopyEditAndReset'
+  const own = manifest.tests.find(row => row.package === 'internal/nodes' && row.name === addition)
+  assert.equal(own?.tier, 'ESSENTIAL', 'Project Definitions must remain gated')
+  const seconds = timing.split.caseSeconds[addition]
+  assert.ok(Number.isFinite(seconds) && seconds > 0 && seconds <= 2, 'Definitions must retain its independently bounded measured cost')
+  const prior = manifest.tests.filter(row => row.package === 'internal/nodes' && row.tier !== 'NIGHTLY' && row.lane !== 'timing' && row.name !== addition)
+  assert.ok(Math.max(...splitOwner(prior, timing, timing.split.count).map(part => part.weight)) < 250, 'The historical split budget must remain unchanged')
+  assert.ok(Math.max(...result.nodeSeconds) < 250 + seconds, 'Only the measured Definitions addition may grow the split budget')
 })
 
 test('AEON-1024 equality proof rejects omissions, duplicates, renamed cases and changed policies', () => {
