@@ -56,7 +56,7 @@ func useList6000Fixture(t *testing.T) (tenant.Principal, nodeJSON) {
 		project, work := kindBySlug(t, p, "project"), kindBySlug(t, p, "work")
 		root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
 		if err := db.InTenant(dbtest.Seed(ctx), appPool, p.TenantID, func(tx pgx.Tx) error {
-			return explainListSeed(t, tx, `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
+			return explainListSeed(t, ctx, tx, `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
  SELECT $1::uuid,'PERF-'||g,$2::uuid,'Item '||g,
   jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END,
    'tags',CASE g%5 WHEN 0 THEN '[]'::jsonb ELSE jsonb_build_array(jsonb_build_object('name','T'||(g%7)),'bug') END,
@@ -91,9 +91,9 @@ func useList6000Fixture(t *testing.T) (tenant.Principal, nodeJSON) {
 
 // EXPLAIN executes the synthetic insert once, retaining the real app role,
 // RLS and triggers. Its numeric trigger table makes fixture cost visible.
-func explainListSeed(t *testing.T, tx pgx.Tx, query string, args ...any) error {
+func explainListSeed(t *testing.T, ctx context.Context, tx pgx.Tx, query string, args ...any) error {
 	t.Helper()
-	rows, err := tx.Query(t.Context(), "EXPLAIN (ANALYZE, BUFFERS) "+query, args...)
+	rows, err := tx.Query(ctx, "EXPLAIN (ANALYZE, BUFFERS) "+query, args...)
 	if err != nil {
 		return err
 	}
