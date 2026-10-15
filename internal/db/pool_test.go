@@ -5,6 +5,7 @@ package db_test
 import (
 	"context"
 	"errors"
+	"net/url"
 	"testing"
 	"time"
 
@@ -275,5 +276,74 @@ func TestSharedSubscriptionAdmissionReplicaLimitAndConnectionLoss(t *testing.T) 
 	}
 	if sessions != 0 {
 		t.Fatal("admission session leaked after final lease close")
+	}
+}
+
+// Risk: dedicated defaults override an explicit URL application_name, or a
+// shared listener creates duplicate sessions and fails to close its last one.
+func TestSharedListenerAttributionAndFinalClose(t *testing.T) {
+	for _, tc := range []struct{ name, param, value, want string }{
+		{"default", "", "", "aeon-events-listener"},
+		{"explicit", "application_name", "operator", "operator"},
+		{"explicit main", "application_name", "aeon-main", "aeon-main"},
+		{"options", "options", "-c application_name=operator", "operator"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := dbtest.Open(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			u, err := url.Parse(d.AppURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.param != "" {
+				query := u.Query()
+				query.Set(tc.param, tc.value)
+				u.RawQuery = query.Encode()
+			}
+			cfg, err := db.ParsePoolConfig(u.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool, err := pgxpool.NewWithConfig(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			defer db.CloseNotificationConnections(pool)
+			first, err := db.SubscribeNotifications(ctx, pool, "aeon_events", "one")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer first.Close(context.Background())
+			second, err := db.SubscribeNotifications(ctx, pool, "aeon_events", "two")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer second.Close(context.Background())
+			var name string
+			var count int
+			if err := d.Admin.QueryRow(ctx, `SELECT min(application_name),count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN aeon_events'`).Scan(&name, &count); err != nil {
+				t.Fatal(err)
+			}
+			if name != tc.want || count != 1 {
+				t.Fatalf("listener name=%q count=%d want %q and one", name, count, tc.want)
+			}
+			if err := first.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := second.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN aeon_events'`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatal("last subscriber leaked its backend")
+			}
+			if _, err := db.SubscribeNotifications(ctx, pool, "unbounded-channel", "one"); err == nil {
+				t.Fatal("arbitrary channel admitted")
+			}
+		})
 	}
 }

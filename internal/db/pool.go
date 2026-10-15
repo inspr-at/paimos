@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -87,7 +88,7 @@ func ConfigurePool(cfg *pgxpool.Config) (*PoolMonitor, error) {
 		next = prior.next
 	}
 	_, explicitName := cfg.ConnConfig.RuntimeParams["application_name"]
-	defaultName := !explicitName
+	defaultName := !explicitName && !strings.Contains(cfg.ConnConfig.RuntimeParams["options"], "application_name")
 	if prior, ok := cfg.ConnConfig.Tracer.(*PoolMonitor); ok {
 		defaultName = prior.defaultApplicationName
 	}
