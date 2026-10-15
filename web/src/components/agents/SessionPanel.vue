@@ -866,7 +866,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </style>
 
 <style scoped>
-.session-panel { container: pane / inline-size; background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.session-panel { container: pane / inline-size; background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .session-panel.docked .pane-bar { padding-right: 12px; }
 .session-panel.full { position: fixed; z-index: 60; inset: var(--vv-top, 0px) 0 auto; width: auto; height: var(--vv-h, 100dvh); border: 0; border-radius: 0; box-shadow: none; padding-bottom: env(safe-area-inset-bottom); }
 .session-panel.wide.docked { width: 100%; }

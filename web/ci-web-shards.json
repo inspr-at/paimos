@@ -1518,6 +1518,8 @@
     "AEON-1270: native-expert-stream has twelve cases in stable-controls. The prior guarded one-worker run passed all twelve in 7.3 seconds including startup; the ten-second weight is a conservative scheduling estimate from that observation, not a hosted-runtime promise. Six authority/replay/terminal behavior cases are ESSENTIAL; six viewport/theme cases are newly classified NIGHTLY."
     ,
     "AEON-1327: nightly catalogue shards pack from nightlyTiming, measured on hosted run 38488051180. Completed batches contribute wall time apportioned by Playwright case duration. theme-agents (650s), clip-tip-touch (200s), ticket-graph-view (90s) and work-surfaces-fix4 (120s) were still running when the 20-minute step died, so those four keep a conservative full-file estimate. settings-shared and work-surfaces-fix2 were not in that run and keep their tierTiming estimate. PR and merge-group packing stays on tierTiming. The 24-shard estimate peaks near 14.9 minutes, so the nightly execution cap stays 20 minutes."
+    ,
+    "AEON-1309: native-session-program.spec.ts has a nightlyTiming row for all nine cases. Its 60 seconds reuse the declared conservative scheduling estimate; this is not a measurement from run 38488051180. The ESSENTIAL tier, gate membership and historical weight are unchanged."
   ]
   ,
   "nightlyTiming": {
@@ -1869,6 +1871,8 @@
       "tests/native-expert-terminal.spec.ts": {"seconds":19.889,"selectedTests":5}
       ,
       "tests/native-lead-pilot.spec.ts": {"seconds":23.029,"selectedTests":6}
+      ,
+      "tests/native-session-program.spec.ts": {"seconds":60,"selectedTests":9}
       ,
       "tests/native-session-requests.spec.ts": {"seconds":3.796,"selectedTests":7}
       ,
