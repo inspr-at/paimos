@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
@@ -25,6 +26,150 @@ func buildRegistration(f *harnessFixture, label string) map[string]any {
 		"role": "worker", "ticket_node_id": f.ticket, "work_shape": "ship", "display_label": label,
 		"harness_session_ref": "build-reference-" + uid(), "worker_lease": "build-worker-lease-" + uid(),
 	}
+}
+
+// Risk: a correction round is refused as a rebuild, or the exception admits a
+// different branch/active writer. The audit must be atomic and replay-safe.
+func TestTicketDeliveryContinuationAdmissionAndAudit(t *testing.T) {
+	for _, source := range []string{"pull", "branch"} {
+		t.Run(source, func(t *testing.T) {
+			f := fixture(t)
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			const repository, branch = "owner/linked", "work/hts-2-built"
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,$3,'CI','Nightly',clock_timestamp())`, f.person.TenantID, f.project, repository); err != nil {
+					return err
+				}
+				if source == "pull" {
+					_, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,$2,42,$3,clock_timestamp(),'webhook',clock_timestamp())`, f.person.TenantID, repository, branch)
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,branch,head_sha,state,state_since,owner,observation,updated_at) VALUES($1,$2,$3,$4,$5,$6,repeat('b',40),'built',clock_timestamp(),'coordinator','{"open":false}',clock_timestamp())`, f.person.TenantID, uid(), f.project, f.ticket, repository, branch)
+				return err
+			})
+			for _, wrong := range []any{nil, "", "work/hts-2-other", "Work/hts-2-built"} {
+				body := buildRegistration(f, "wrong branch")
+				body["branch"] = wrong
+				buildRefusal(t, f.call(f.agent, "POST", base, body, ""), "built_unmerged")
+			}
+			// A managed order pins its repository: the same name in another
+			// repository is not a continuation of this project's delivery.
+			managed := managedBuildRegistration(t, f)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{build_delivery}','{"repository":"owner/unknown","branch":"work/hts-2-built"}') WHERE id=$1`, managed["work_order_id"])
+				return err
+			})
+			managed["branch"] = branch
+			buildRefusal(t, f.call(f.agent, "POST", base, managed, ""), "built_unmerged")
+			body := buildRegistration(f, "fix round")
+			body["branch"] = branch
+			accepted := f.call(f.agent, "POST", base, body, "")
+			expect(t, accepted, 201)
+			s := decode(t, accepted)
+			continuation, ok := s["build_continuation"].(map[string]any)
+			if !ok || continuation["repository"] != repository || continuation["branch"] != branch || s["parallel_reason"] != nil {
+				t.Fatalf("missing continuation metadata or invented parallel reason: %s", accepted.Body)
+			}
+			message := "continues delivery on " + branch
+			if source == "pull" {
+				message = "continues delivery PR #42 on " + branch
+				if continuation["pull_request"] != float64(42) {
+					t.Fatal("continuation lost its pull request")
+				}
+			}
+			expect(t, f.call(f.agent, "POST", base, body, ""), 201)
+			for _, next := range []string{branch, "work/hts-2-other"} {
+				blocked := buildRegistration(f, "overlapping round")
+				blocked["branch"] = next
+				buildRefusal(t, f.call(f.agent, "POST", base, blocked, ""), "active_builder")
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var audits, comments, wrongTarget int
+				err := tx.QueryRow(t.Context(), `SELECT
+				 (SELECT count(*) FROM events WHERE node_id=$1 AND type='delivery.continued' AND actor_principal_id=$2 AND after->>'session_id'=$3 AND after->>'message'=$4),
+				 (SELECT count(*) FROM events WHERE node_id=$1 AND type='comment.created' AND after->>'body_markdown'=$4),
+				 (SELECT count(*) FROM events WHERE node_id=$5 AND type='delivery.continued')`, f.ticket, f.agent.ID, s["id"], message, managed["work_order_id"]).Scan(&audits, &comments, &wrongTarget)
+				if err == nil && (audits != 1 || comments != 1 || wrongTarget != 0) {
+					t.Errorf("continuation audit/replay: audit=%d comments=%d wrong_target=%d", audits, comments, wrongTarget)
+				}
+				return err
+			})
+			// Rebinding uses the current branch and the same predicate.
+			unbound := buildRegistration(f, "rebound fix")
+			delete(unbound, "ticket_node_id")
+			delete(unbound, "work_shape")
+			unbound["branch"] = branch
+			w := f.call(f.agent, "POST", base, unbound, "")
+			expect(t, w, 201)
+			rebound := decode(t, w)
+			path := base + "/" + rebound["id"].(string)
+			binding := map[string]any{"expected_revision": rebound["revision"], "ticket_node_id": f.ticket, "work_shape": "ship"}
+			buildRefusal(t, f.call(f.agent, "PATCH", path+"/binding", binding, ""), "active_builder")
+			expect(t, f.call(f.agent, "POST", base+"/"+s["id"].(string)+"/stop", map[string]any{"reason": "process_exited"}, body["worker_lease"].(string)), 200)
+			w = f.call(f.agent, "PATCH", path+"/binding", binding, "")
+			expect(t, w, 200)
+			if decode(t, w)["build_continuation"] == nil {
+				t.Fatal("rebind omitted continuation metadata")
+			}
+		})
+	}
+}
+
+// Risk: direct store callers can bypass repository checks or append an audit
+// before failed work commits. Rollback must discard both continuation events.
+func TestDeliveryContinuationStoreBindingAndRollback(t *testing.T) {
+	f := fixture(t)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/linked','CI','Nightly',clock_timestamp())`, f.person.TenantID, f.project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,'owner/linked',42,'work/hts-2-built',clock_timestamp(),'webhook',clock_timestamp())`, f.person.TenantID)
+		return err
+	})
+	for _, repository := range []string{"owner/linked", "owner/unknown"} {
+		ctx := tenant.WithPrincipal(t.Context(), f.person)
+		rollback := errors.New("rollback continuation")
+		err := db.InTenant(ctx, f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+			if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+				return err
+			}
+			candidate := &workorders.BuildCandidate{Repository: repository, Branch: "work/hts-2-built"}
+			order, _, err := workorders.CreateDeferred(ctx, tx, f.person, workorders.CreateInput{Title: "Fix", Parent: &f.ticket, Criteria: []string{"Continue delivery"}, BuildDelivery: candidate})
+			if err != nil {
+				return err
+			}
+			admission, err := workorders.OrderBuildAdmissionTx(ctx, tx, order.NodeID)
+			if err != nil || admission.Candidate == nil || *admission.Candidate != *candidate || order.BuildDelivery == nil || *order.BuildDelivery != *candidate {
+				t.Fatalf("order lost its repository/branch binding: %+v, %v", admission, err)
+			}
+			err = workorders.RequireBuildAdmissionTx(ctx, tx, f.person, order.NodeID, "", nil, &admission)
+			if repository != "owner/linked" {
+				var conflict *workorders.BuildConflict
+				if !errors.As(err, &conflict) || conflict.Reason != "built_unmerged" || admission.Continuation != nil {
+					t.Fatalf("unknown repository was admitted: %+v, %v", admission, err)
+				}
+				return rollback
+			}
+			if err != nil || admission.Continuation == nil {
+				t.Fatalf("same-branch store admission: %+v, %v", admission, err)
+			}
+			if err = admission.Record(ctx, tx, f.person, "store-session", ""); err != nil {
+				return err
+			}
+			return rollback
+		})
+		if !errors.Is(err, rollback) {
+			t.Fatal(err)
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND (type='delivery.continued' OR after->>'body_markdown' LIKE 'continues delivery%')`, f.ticket).Scan(&count)
+		if err == nil && count != 0 {
+			t.Fatal("rollback left a continuation audit")
+		}
+		return err
+	})
 }
 
 func queueableBuildTicket(t *testing.T, f *harnessFixture) {

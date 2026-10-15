@@ -245,15 +245,16 @@ type Session struct {
 	CurrentActivityHistory  []agentactivity.Activity `json:"current_activity_history,omitempty"`
 	doing, toolActivity     *string
 	doingAt, toolActivityAt *time.Time
-	CanReparent             *bool           `json:"can_reparent,omitempty"`
-	OwnerPrincipalID        *string         `json:"owner_principal_id,omitempty"`
-	StartedByPrincipalID    *string         `json:"started_by_principal_id,omitempty"`
-	ParallelReason          *string         `json:"parallel_reason,omitempty"`
-	HandedOverToID          *string         `json:"handed_over_to_id,omitempty"`
-	AdoptedFromID           *string         `json:"adopted_from_id,omitempty"`
-	Controls                []Control       `json:"controls,omitempty"`
-	Watch                   *AttachStatus   `json:"watch,omitempty"`
-	InboxBindingError       json.RawMessage `json:"inbox_binding_error,omitempty"`
+	CanReparent             *bool                     `json:"can_reparent,omitempty"`
+	OwnerPrincipalID        *string                   `json:"owner_principal_id,omitempty"`
+	StartedByPrincipalID    *string                   `json:"started_by_principal_id,omitempty"`
+	ParallelReason          *string                   `json:"parallel_reason,omitempty"`
+	BuildContinuation       *workorders.BuildDelivery `json:"build_continuation,omitempty"`
+	HandedOverToID          *string                   `json:"handed_over_to_id,omitempty"`
+	AdoptedFromID           *string                   `json:"adopted_from_id,omitempty"`
+	Controls                []Control                 `json:"controls,omitempty"`
+	Watch                   *AttachStatus             `json:"watch,omitempty"`
+	InboxBindingError       json.RawMessage           `json:"inbox_binding_error,omitempty"`
 	inboxBindingCode        *string
 	ProcessOwnership        *ownedprocess.Identity `json:"process_ownership,omitempty"`
 	ProcessObservedAt       *time.Time             `json:"process_observed_at,omitempty"`
@@ -1021,6 +1022,10 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
+	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, in.Branch, in.WorkOrderID, in.RunID)
+	if err != nil {
+		return nil, err
+	}
 	if in.Role == "worker" {
 		buildTicket, e := workqueue.BuildTicketTx(ctx, tx, in.TicketNodeID, in.WorkOrderID, in.RunID)
 		if e != nil {
@@ -1034,7 +1039,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 					return nil, err
 				}
 			}
-			if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *buildTicket, "", in.ParallelReason); err != nil {
+			if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *buildTicket, "", in.ParallelReason, &admission); err != nil {
 				return nil, err
 			}
 		}
@@ -1043,6 +1048,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, registrationConflict(err, vendor)
 	}
+	s.BuildContinuation = admission.Continuation
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
@@ -1078,6 +1084,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		}
 	}
 	if err = recordParallelBuild(ctx, tx, p, s); err != nil {
+		return nil, err
+	}
+	if err = recordBuildContinuation(ctx, tx, p, admission, s.ID); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -1349,6 +1358,10 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	before := s
 	var placement json.RawMessage
+	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, s.Branch, s.WorkOrderID, s.RunID)
+	if err != nil {
+		return nil, err
+	}
 	if !same(s.TicketNodeID, in.TicketNodeID) {
 		if s.Role == "worker" {
 			buildTicket, e := workqueue.BuildTicketTx(ctx, tx, in.TicketNodeID, s.WorkOrderID, s.RunID)
@@ -1363,7 +1376,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 						return nil, err
 					}
 				}
-				if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *buildTicket, s.ID, in.ParallelReason); err != nil {
+				if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *buildTicket, s.ID, in.ParallelReason, &admission); err != nil {
 					return nil, err
 				}
 			}
@@ -1389,6 +1402,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	if err != nil {
 		return nil, err
 	}
+	s.BuildContinuation = admission.Continuation
 	if s.TicketNodeID != nil && m.planningStart != nil && !same(before.TicketNodeID, s.TicketNodeID) {
 		if err = m.planningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
 			return nil, err
@@ -1399,6 +1413,9 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	if !same(before.TicketNodeID, s.TicketNodeID) {
 		err = recordParallelBuild(ctx, tx, p, s)
+	}
+	if err == nil {
+		err = recordBuildContinuation(ctx, tx, p, admission, s.ID)
 	}
 	return s, err
 }

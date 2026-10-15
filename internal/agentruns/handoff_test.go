@@ -141,6 +141,87 @@ func TestWorkerHandoffReceiptsReplayAndSuccession(t *testing.T) {
 	f.call(t, f.agent, "GET", path+"/handoff", nil, 403, nil)
 }
 
+// Risk: the queue's route or daemon claim repeats the build guard without the
+// fix order's delivery binding, or lets that exception replace writer proof.
+func TestQueueFixOrderContinuesDeliveryBranch(t *testing.T) {
+	for _, scenario := range []string{"same-branch", "other-branch", "no-branch", "unknown-repository", "active-builder", "changed-binding", "unconfirmed-writer"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, project, e, body := handoffFixture(t)
+			var ticketKey string
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT key FROM nodes WHERE id=$1`, e.NodeID).Scan(&ticketKey)
+			})
+			branch := "work/" + strings.ToLower(ticketKey) + "-fix"
+			binding := map[string]any{"repository": "owner/linked", "branch": branch}
+			if scenario == "other-branch" {
+				binding["branch"] = branch + "-other"
+			} else if scenario == "unknown-repository" {
+				binding["repository"] = "owner/unknown"
+			}
+			raw, err := json.Marshal(binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if scenario != "no-branch" {
+					if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{build_delivery}',$2::jsonb) WHERE id=$1`, e.Run.OrderID, raw); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=jsonb_set(trace,'{worker_assignment,build_delivery}',$2::jsonb) WHERE id=$1`, e.Run.ID, raw); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/linked','CI','Nightly',clock_timestamp())`, f.person.TenantID, project); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,'owner/linked',42,$2,clock_timestamp(),'webhook',clock_timestamp())`, f.person.TenantID, branch); err != nil {
+					return err
+				}
+				if scenario == "active-builder" {
+					_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,branch) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship','{}',$5,$6,$7)`, f.person.TenantID, project, f.agent.ID, e.NodeID, []byte(uuid()), []byte(uuid()), branch)
+					return err
+				}
+				if scenario == "changed-binding" {
+					_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=jsonb_set(trace,'{worker_assignment,build_delivery,branch}',to_jsonb($2::text)) WHERE id=$1`, e.Run.ID, branch+"-old")
+					return err
+				}
+				if scenario == "unconfirmed-writer" {
+					_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,status,trace) VALUES($1,$2,$3,'ownership_lost','{"work_lifecycle_release":{"exit_unconfirmed":true}}')`, f.person.TenantID, e.Run.OrderID, f.other.ID)
+					return err
+				}
+				return nil
+			})
+			if scenario != "same-branch" {
+				w := f.request(f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", mustHandoffJSON(t, body), f.token)
+				want := "built_unmerged"
+				if scenario == "active-builder" {
+					want = "active_builder"
+				} else if scenario == "changed-binding" {
+					want = "assignment brief or ticket changed"
+				} else if scenario == "unconfirmed-writer" {
+					want = "previous writer exit or launch outcome is unconfirmed"
+				}
+				if w.Code != 409 || !strings.Contains(w.Body.String(), want) {
+					t.Fatalf("%s: %d %s", scenario, w.Code, w.Body.String())
+				}
+				if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='delivery.continued'`) != 0 {
+					t.Fatal("refused claim recorded a continuation")
+				}
+				return
+			}
+			for range 2 {
+				f.call(t, f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", body, 200, nil)
+			}
+			if got := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='delivery.continued' AND after->>'run_id'=$2 AND after->>'message'=$3`, e.NodeID, e.Run.ID, "continues delivery PR #42 on "+branch); got != 1 {
+				t.Fatalf("continuation claim/replay audit count = %d", got)
+			}
+			if got := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='comment.created' AND after->>'body_markdown'=$2`, e.NodeID, "continues delivery PR #42 on "+branch); got != 1 {
+				t.Fatalf("continuation comment count = %d", got)
+			}
+		})
+	}
+}
+
 func TestWorkerHandoffRejectsChangedBriefAndMissingPickup(t *testing.T) {
 	for _, change := range []string{"pickup", "ticket", "brief", "order", "permission", "role", "legacy"} {
 		t.Run(change, func(t *testing.T) {

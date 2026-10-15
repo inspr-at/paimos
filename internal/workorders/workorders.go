@@ -29,20 +29,22 @@ type Criterion struct {
 	CheckedBy   *string    `json:"checked_by_principal_id"`
 }
 type Order struct {
-	Kind        string              `json:"kind"`
-	Review      *reviewgate.Binding `json:"review,omitempty"`
-	NodeID      string              `json:"node_id"`
-	Status      string              `json:"status"`
-	Revision    int64               `json:"revision"`
-	RequestedBy string              `json:"requested_by_principal_id"`
-	Assignee    *string             `json:"assignee_principal_id"`
-	MaxCost     *int64              `json:"max_cost_micros"`
-	MaxDuration *int64              `json:"max_duration_seconds"`
-	Criteria    []Criterion         `json:"criteria"`
-	CreatedAt   time.Time           `json:"created_at"`
-	UpdatedAt   time.Time           `json:"updated_at"`
+	BuildDelivery *BuildCandidate     `json:"build_delivery,omitempty"`
+	Kind          string              `json:"kind"`
+	Review        *reviewgate.Binding `json:"review,omitempty"`
+	NodeID        string              `json:"node_id"`
+	Status        string              `json:"status"`
+	Revision      int64               `json:"revision"`
+	RequestedBy   string              `json:"requested_by_principal_id"`
+	Assignee      *string             `json:"assignee_principal_id"`
+	MaxCost       *int64              `json:"max_cost_micros"`
+	MaxDuration   *int64              `json:"max_duration_seconds"`
+	Criteria      []Criterion         `json:"criteria"`
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
 }
 type CreateInput struct {
+	BuildDelivery *BuildCandidate `json:"build_delivery,omitempty"`
 	// RoutineRunID is an internal broker binding, never accepted by HTTP JSON.
 	RoutineRunID string   `json:"-"`
 	Title        string   `json:"title"`
@@ -106,6 +108,11 @@ func Load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Order, error) {
 	if err != nil {
 		return o, err
 	}
+	admission, err := OrderBuildAdmissionTx(ctx, tx, id)
+	if err != nil {
+		return o, err
+	}
+	o.BuildDelivery = admission.Candidate
 	if o.Kind == "review" {
 		o.Review, err = reviewgate.Load(ctx, tx, id)
 		if err != nil {
@@ -269,6 +276,9 @@ func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) 
 // all node, queue and run locks have been acquired. The caller owns the tenant
 // transaction, authorization and tree lock; rollback discards the entire unit.
 func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) (Order, []events.Change, error) {
+	if err := ValidateBuildCandidate(in.BuildDelivery); err != nil {
+		return Order{}, nil, err
+	}
 	if strings.TrimSpace(in.Title) == "" || len(in.Criteria) == 0 || !validBudget(in.MaxCost, in.MaxDuration) || !validID(in.Parent) || !validID(in.Assignee) {
 		return Order{}, nil, Fail(400, "title, criteria, valid budget and IDs required")
 	}
@@ -290,6 +300,15 @@ func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Creat
 	 FROM node_kinds k WHERE k.slug='work_order' RETURNING id::text`, p.TenantID, in.Title, in.Body, in.Parent).Scan(&id)
 	if err != nil {
 		return Order{}, nil, err
+	}
+	if in.BuildDelivery != nil {
+		raw, err := json.Marshal(in.BuildDelivery)
+		if err != nil {
+			return Order{}, nil, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE nodes SET fields=jsonb_set(fields,'{build_delivery}',$2::jsonb) WHERE id=$1`, id, raw); err != nil {
+			return Order{}, nil, err
+		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id,max_cost_micros,max_duration_seconds) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, id, p.ID, in.Assignee, in.MaxCost, in.MaxDuration); err != nil {
 		return Order{}, nil, err

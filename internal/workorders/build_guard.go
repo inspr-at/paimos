@@ -3,6 +3,7 @@ package workorders
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -36,6 +38,103 @@ type BuildDelivery struct {
 	Repository  string `json:"repository"`
 	PullRequest *int64 `json:"pull_request"`
 	Branch      string `json:"branch"`
+}
+
+// BuildCandidate is an exact delivery binding. A harness branch uses the
+// ticket's linked repository; orders also pin the repository explicitly.
+type BuildCandidate struct {
+	Repository string `json:"repository"`
+	Branch     string `json:"branch"`
+}
+
+// BuildAdmission carries a candidate into the shared predicate and its audit
+// out. Admission never appends events: the mutation owner flushes Changes last.
+type BuildAdmission struct {
+	Candidate    *BuildCandidate
+	Continuation *BuildDelivery
+	ticket       string
+}
+
+func (a BuildAdmission) Changes(session, run string) []events.Change {
+	if a.Continuation == nil {
+		return nil
+	}
+	message := "continues delivery on " + a.Continuation.Branch
+	if a.Continuation.PullRequest != nil {
+		message = fmt.Sprintf("continues delivery PR #%d on %s", *a.Continuation.PullRequest, a.Continuation.Branch)
+	}
+	return []events.Change{
+		{NodeID: &a.ticket, Type: "delivery.continued", After: map[string]any{"session_id": session, "run_id": run, "delivery": a.Continuation, "message": message}},
+		{NodeID: &a.ticket, Type: "comment.created", After: map[string]any{"body_markdown": message}},
+	}
+}
+
+func (a BuildAdmission) Record(ctx context.Context, tx pgx.Tx, p tenant.Principal, session, run string) error {
+	for _, change := range a.Changes(session, run) {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidateBuildCandidate(candidate *BuildCandidate) error {
+	if candidate == nil {
+		return nil
+	}
+	if candidate.Repository == "" || len(candidate.Repository) > 255 || strings.TrimSpace(candidate.Repository) != candidate.Repository || !utf8.ValidString(candidate.Repository) || strings.ContainsFunc(candidate.Repository, unicode.IsSpace) || strings.ContainsFunc(candidate.Repository, unicode.IsControl) || len(candidate.Branch) > 200 || !utf8.ValidString(candidate.Branch) || !strings.HasPrefix(candidate.Branch, "work/") || len(candidate.Branch) <= 5 || strings.ContainsFunc(candidate.Branch, unicode.IsSpace) || strings.ContainsFunc(candidate.Branch, unicode.IsControl) {
+		return Fail(400, "build_delivery requires a repository and exact work/ branch within size limits")
+	}
+	return nil
+}
+
+// Orders persist this additive binding in their existing node fields. Read it
+// under the caller's RLS and fences; neither brief text nor a run's untrusted
+// trace is a repository/branch authority.
+func OrderBuildAdmissionTx(ctx context.Context, tx pgx.Tx, order string) (BuildAdmission, error) {
+	var admission BuildAdmission
+	var raw json.RawMessage
+	err := tx.QueryRow(ctx, `SELECT n.fields->'build_delivery' FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id WHERE w.node_id=$1 AND n.deleted_at IS NULL`, order).Scan(&raw)
+	if err == nil && len(raw) > 0 {
+		if len(raw) > 2048 {
+			return admission, Fail(400, "build_delivery exceeds size limit")
+		}
+		err = json.Unmarshal(raw, &admission.Candidate)
+		if err == nil {
+			err = ValidateBuildCandidate(admission.Candidate)
+		}
+	}
+	return admission, err
+}
+
+// Registration must name its actual branch even for an order-bound worker.
+// An order's explicit repository binding takes precedence over project context.
+func HarnessBuildAdmissionTx(ctx context.Context, tx pgx.Tx, branch, order, run *string) (BuildAdmission, error) {
+	var admission BuildAdmission
+	if branch == nil || *branch == "" {
+		return admission, nil
+	}
+	if order == nil && run != nil {
+		var id string
+		if err := tx.QueryRow(ctx, `SELECT work_order_id::text FROM agent_runs WHERE id=$1`, *run).Scan(&id); err != nil {
+			return admission, err
+		}
+		order = &id
+	}
+	if order != nil {
+		var err error
+		admission, err = OrderBuildAdmissionTx(ctx, tx, *order)
+		if err != nil {
+			return admission, err
+		}
+		if admission.Candidate != nil && admission.Candidate.Branch != *branch {
+			return admission, Fail(409, "registration branch conflicts with work-order delivery binding")
+		}
+	}
+	if admission.Candidate == nil {
+		admission.Candidate = &BuildCandidate{Branch: *branch}
+	}
+	return admission, nil
 }
 
 func (e *BuildConflict) Error() string {
@@ -211,7 +310,14 @@ const activeBuildersSQL = `WITH builders AS (
 // except is only the generation being rebound/revived, never its parent.
 // A parallel reason is accepted only with live person/coordinator authority;
 // the admitting caller persists it and appends a ticket audit before commit.
-func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, except string, parallelReason *string) error {
+func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, except string, parallelReason *string, admission ...*BuildAdmission) error {
+	var result *BuildAdmission
+	if len(admission) > 0 {
+		result = admission[0]
+	}
+	if result != nil {
+		result.Continuation, result.ticket = nil, ""
+	}
 	if err := NormalizeParallelReason(parallelReason); err != nil {
 		return err
 	}
@@ -264,6 +370,10 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	// links PRs by ticket; repository PR facts can precede that projection and
 	// link work/<slug> branches by an exact ticket key (1258 never matches 12580).
 	// A merged repository fact supersedes an older unmerged projection.
+	candidateRepository, candidateBranch := "", ""
+	if result != nil && result.Candidate != nil {
+		candidateRepository, candidateBranch = result.Candidate.Repository, result.Candidate.Branch
+	}
 	var delivery BuildDelivery
 	err = tx.QueryRow(ctx, `WITH target AS (
 	 SELECT n.id,n.key,n.tenant_id,s.repository FROM nodes n JOIN delivery_metric_sources s
@@ -280,7 +390,10 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	 SELECT p.repository,p.pull_request,p.head_branch,p.opened_at FROM target n JOIN delivery_metric_pulls p ON p.tenant_id=n.tenant_id AND p.repository=n.repository
 	 WHERE p.closed_at IS NULL AND p.merged_at IS NULL AND p.head_branch LIKE 'work/%'
 	 AND substring(lower(p.head_branch) from '([a-z][a-z0-9_]*-[0-9]+)')=lower(n.key)
-	) SELECT repository,pull_request,branch,since FROM pending ORDER BY since,repository,pull_request NULLS FIRST,branch LIMIT 1`, ticket).Scan(&delivery.Repository, &delivery.PullRequest, &delivery.Branch, &conflict.Since)
+	) SELECT repository,pull_request,branch,since FROM pending
+	 ORDER BY (branch=$2 AND (repository=$3 OR $3='')) DESC,
+	 (branch=$2 AND (repository=$3 OR $3='') AND pull_request IS NOT NULL) DESC,
+	 since,repository,pull_request NULLS FIRST,branch LIMIT 1`, ticket, candidateBranch, candidateRepository).Scan(&delivery.Repository, &delivery.PullRequest, &delivery.Branch, &conflict.Since)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -288,6 +401,12 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		return err
 	}
 	conflict.Reason, conflict.Delivery = "built_unmerged", &delivery
+	if result != nil && result.Candidate != nil && delivery.Repository != "" &&
+		(result.Candidate.Repository == "" || result.Candidate.Repository == delivery.Repository) &&
+		strings.HasPrefix(delivery.Branch, "work/") && result.Candidate.Branch == delivery.Branch {
+		result.Continuation, result.ticket = &delivery, ticket
+		return nil
+	}
 	return &conflict
 }
 

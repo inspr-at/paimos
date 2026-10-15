@@ -107,23 +107,31 @@ func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase
 	if taken {
 		return s, workorders.Fail(403, "harness worker proof rejected")
 	}
+	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, s.Branch, s.WorkOrderID, s.RunID)
+	if err != nil {
+		return s, err
+	}
 	if s.Role == "worker" {
 		buildTicket, err := workqueue.BuildTicketTx(ctx, tx, s.TicketNodeID, s.WorkOrderID, s.RunID)
 		if err != nil {
 			return s, err
 		}
 		if buildTicket != nil {
-			if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, *buildTicket, s.ID, nil); err != nil {
+			if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, *buildTicket, s.ID, nil, &admission); err != nil {
 				return s, err
 			}
 		}
 	}
 	before := s
-	s, err := scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,stopped_at=NULL,stop_reason=NULL,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, phase))
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,stopped_at=NULL,stop_reason=NULL,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, phase))
 	if err != nil {
 		return s, err
 	}
-	return s, record(ctx, tx, p, s, "revived", before, s)
+	s.BuildContinuation = admission.Continuation
+	if err = record(ctx, tx, p, s, "revived", before, s); err == nil {
+		err = recordBuildContinuation(ctx, tx, p, admission, s.ID)
+	}
+	return s, err
 }
 
 // SweepLostContact closes one tenant's silent unmanaged generations and

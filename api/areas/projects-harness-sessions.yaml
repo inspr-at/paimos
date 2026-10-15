@@ -946,7 +946,7 @@ paths:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
 components:
   headers:
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts. Version 3.1 adds an optional value-free inbox binding refusal code. Version 3.2 adds the public parallel reason and initiating principal.", schema: {type: string, enum: ['harness-session/3.2']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts. Version 3.1 adds an optional value-free inbox binding refusal code. Version 3.2 adds the public parallel reason and initiating principal. Version 3.3 adds delivery continuation admission metadata.", schema: {type: string, enum: ['harness-session/3.3']}}
   schemas:
     InboxBindingError:
       type: [string, 'null']
