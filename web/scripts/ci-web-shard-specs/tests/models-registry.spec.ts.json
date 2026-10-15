@@ -1,7 +1,7 @@
 {
   "group": "model-settings",
   "nightlyTiming": {
-    "seconds": 45.201,
+    "seconds": 40.122,
     "selectedTests": 33
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 33,
     "tierTiming": {
       "caseSeconds": {
-        "max": 5.706,
-        "median": 0.594,
-        "min": 0.244
+        "max": 6.115,
+        "median": 0.818,
+        "min": 0.407
       },
-      "seconds": 23.353,
-      "selectedTests": 26
+      "seconds": 40.122,
+      "selectedTests": 33
     },
     "weightSeconds": 30,
     "weightSource": "AEON-1163 mbp2606 single worker 23.8s for 31 cases; the two pause stability guards add about 3s, within the margin"

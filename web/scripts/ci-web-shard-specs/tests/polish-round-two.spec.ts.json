@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 2.74,
+    "seconds": 2.452,
     "selectedTests": 2
   },
   "spec": {
     "file": "tests/polish-round-two.spec.ts",
     "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.239,
+        "median": 1.217,
+        "min": 1.195
+      },
+      "seconds": 2.452,
+      "selectedTests": 2
+    },
     "weightSeconds": 4.439024375,
     "weightSource": "unmeasured-test-rate"
   }

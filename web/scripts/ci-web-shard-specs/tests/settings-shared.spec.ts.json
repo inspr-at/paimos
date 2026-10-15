@@ -1,7 +1,7 @@
 {
   "group": "settings-shared",
   "nightlyTiming": {
-    "seconds": 32.482,
+    "seconds": 30.244,
     "selectedTests": 23
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 23,
     "tierTiming": {
       "caseSeconds": {
-        "max": 6.609,
-        "median": 0.685,
-        "min": 0.399
+        "max": 6.368,
+        "median": 0.599,
+        "min": 0.338
       },
-      "seconds": 32.482,
+      "seconds": 30.244,
       "selectedTests": 23
     },
     "weightSeconds": 20,

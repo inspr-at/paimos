@@ -1,7 +1,7 @@
 {
   "group": "status-help",
   "nightlyTiming": {
-    "seconds": 24.446,
+    "seconds": 20.829,
     "selectedTests": 7
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.09,
-        "median": 2.346,
-        "min": 1.75
+        "max": 4.125,
+        "median": 2.304,
+        "min": 1.932
       },
-      "seconds": 19.356,
+      "seconds": 20.829,
       "selectedTests": 7
     },
     "weightSeconds": 24,

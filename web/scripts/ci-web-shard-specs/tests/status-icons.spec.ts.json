@@ -1,13 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 20.84,
-    "selectedTests": 12,
-    "source": "AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"
+    "seconds": 49.414,
+    "selectedTests": 12
   },
   "spec": {
     "file": "tests/status-icons.spec.ts",
     "listedTests": 12,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.844,
+        "median": 3.918,
+        "min": 2.07
+      },
+      "seconds": 49.414,
+      "selectedTests": 12
+    },
     "weightSeconds": 20.84,
     "weightSource": "AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"
   }

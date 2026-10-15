@@ -1,7 +1,7 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 58.695,
+    "seconds": 45.742,
     "selectedTests": 14
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
-        "max": 9.733,
-        "median": 9.733,
-        "min": 9.733
+        "max": 9.228,
+        "median": 3.896,
+        "min": 0.034
       },
-      "seconds": 9.733,
-      "selectedTests": 1
+      "seconds": 45.742,
+      "selectedTests": 14
     },
     "weightSeconds": 30,
     "weightSource": "AEON-1171 estimate: eleven mocked flows (14.5s on mbp2606 with two workers, plus margin), two skipped evidence runs"

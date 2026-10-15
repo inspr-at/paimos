@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 102.21,
+    "seconds": 61.635,
     "selectedTests": 14
   },
   "spec": {
     "file": "tests/eta-column.spec.ts",
     "listedTests": 14,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.773,
+        "median": 4.84,
+        "min": 1.176
+      },
+      "seconds": 61.635,
+      "selectedTests": 14
+    },
     "weightSeconds": 28.853659,
     "weightSource": "unmeasured-test-rate"
   }

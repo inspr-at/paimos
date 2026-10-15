@@ -1,7 +1,7 @@
 {
   "group": "work-queue",
   "nightlyTiming": {
-    "seconds": 110.116,
+    "seconds": 94.66,
     "selectedTests": 30
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 30,
     "tierTiming": {
       "caseSeconds": {
-        "max": 11.202,
-        "median": 1.5205,
-        "min": 1.024
+        "max": 13.596,
+        "median": 2.57,
+        "min": 1.791
       },
-      "seconds": 53.363,
-      "selectedTests": 24
+      "seconds": 94.66,
+      "selectedTests": 30
     },
     "weightSeconds": 29,
     "weightSource": "web-10"

@@ -1,7 +1,7 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 34.289,
+    "seconds": 39.504,
     "selectedTests": 15
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 14,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.712,
-        "median": 2.639,
-        "min": 2.002
+        "max": 4.324,
+        "median": 2.37,
+        "min": 1.539
       },
-      "seconds": 26.386,
-      "selectedTests": 9
+      "seconds": 39.504,
+      "selectedTests": 15
     },
     "weightSeconds": 24,
     "weightSource": "local-single-worker-AEON-974-11.8s-plus-margin"

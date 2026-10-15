@@ -1,7 +1,7 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 30.156,
+    "seconds": 37.106,
     "selectedTests": 11
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.57,
-        "median": 2.643,
-        "min": 1.953
+        "max": 7.15,
+        "median": 3.125,
+        "min": 2.329
       },
-      "seconds": 29.219,
+      "seconds": 37.106,
       "selectedTests": 11
     },
     "weightSeconds": 12,

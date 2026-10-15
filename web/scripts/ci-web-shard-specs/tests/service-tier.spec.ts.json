@@ -1,7 +1,7 @@
 {
   "group": "service-tier",
   "nightlyTiming": {
-    "seconds": 148.146,
+    "seconds": 118.564,
     "selectedTests": 44
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 44,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.609,
-        "median": 2.166,
-        "min": 1.137
+        "max": 6.337,
+        "median": 2.374,
+        "min": 1.423
       },
-      "seconds": 92.286,
-      "selectedTests": 41
+      "seconds": 118.564,
+      "selectedTests": 44
     },
     "weightSeconds": 91,
     "weightSource": "web-6"

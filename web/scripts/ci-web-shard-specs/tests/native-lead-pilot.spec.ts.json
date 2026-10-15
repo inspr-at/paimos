@@ -1,12 +1,21 @@
 {
   "group": "stable-controls",
   "nightlyTiming": {
-    "seconds": 23.029,
+    "seconds": 24.739,
     "selectedTests": 6
   },
   "spec": {
     "file": "tests/native-lead-pilot.spec.ts",
     "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.332,
+        "median": 4.083,
+        "min": 3.899
+      },
+      "seconds": 24.739,
+      "selectedTests": 6
+    },
     "weightSeconds": 30,
     "weightSource": "AEON-1287: conservative estimate for six unmeasured conversation/stability cases"
   }

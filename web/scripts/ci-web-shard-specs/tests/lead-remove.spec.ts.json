@@ -1,7 +1,7 @@
 {
   "group": "lead-flow",
   "nightlyTiming": {
-    "seconds": 65.325,
+    "seconds": 46.201,
     "selectedTests": 7
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
-        "max": 8.918,
-        "median": 8.41,
-        "min": 2.178
+        "max": 7.824,
+        "median": 7.182,
+        "min": 1.934
       },
-      "seconds": 51.715,
+      "seconds": 46.201,
       "selectedTests": 7
     },
     "weightSeconds": 25.5,

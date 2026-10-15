@@ -1,7 +1,7 @@
 {
   "group": "dispatch",
   "nightlyTiming": {
-    "seconds": 43.824,
+    "seconds": 63.505,
     "selectedTests": 11
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 13.203,
-        "median": 2.236,
-        "min": 1.812
+        "max": 20.882,
+        "median": 2.82,
+        "min": 2.218
       },
-      "seconds": 44.561,
+      "seconds": 63.505,
       "selectedTests": 11
     },
     "weightSeconds": 19.843137,

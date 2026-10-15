@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 6.673,
+    "seconds": 6.731,
     "selectedTests": 2
   },
   "spec": {
     "file": "tests/resilient-polling.spec.ts",
     "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.586,
+        "median": 3.341,
+        "min": 2.095
+      },
+      "seconds": 6.731,
+      "selectedTests": 2
+    },
     "weightSeconds": 4.439024,
     "weightSource": "unmeasured-test-rate"
   }

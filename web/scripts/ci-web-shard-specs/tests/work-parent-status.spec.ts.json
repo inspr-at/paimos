@@ -1,7 +1,7 @@
 {
   "group": "work-node-integration",
   "nightlyTiming": {
-    "seconds": 23.574,
+    "seconds": 21.072,
     "selectedTests": 6
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.15,
-        "median": 2.755,
-        "min": 2.27
+        "max": 3.448,
+        "median": 3.309,
+        "min": 3.237
       },
-      "seconds": 16.488,
+      "seconds": 21.072,
       "selectedTests": 6
     },
     "weightSeconds": 16.082,

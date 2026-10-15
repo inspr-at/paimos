@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 6.59,
+    "seconds": 6.526,
     "selectedTests": 3
   },
   "spec": {
     "file": "tests/agents-head.spec.ts",
     "listedTests": 3,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.752,
+        "median": 2.292,
+        "min": 1.433
+      },
+      "seconds": 6.526,
+      "selectedTests": 3
+    },
     "weightSeconds": 6.658537,
     "weightSource": "unmeasured-test-rate"
   }

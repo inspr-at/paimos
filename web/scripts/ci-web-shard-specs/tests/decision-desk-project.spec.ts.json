@@ -1,7 +1,7 @@
 {
   "group": "decision-desk",
   "nightlyTiming": {
-    "seconds": 60.895,
+    "seconds": 42.455,
     "selectedTests": 14
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 14,
     "tierTiming": {
       "caseSeconds": {
-        "max": 18.858,
-        "median": 4.248,
-        "min": 2.151
+        "max": 4.992,
+        "median": 3.126,
+        "min": 0.43
       },
-      "seconds": 81.17,
+      "seconds": 42.455,
       "selectedTests": 14
     },
     "weightSeconds": 40,

@@ -1,7 +1,7 @@
 {
   "group": "agent-pause",
   "nightlyTiming": {
-    "seconds": 122.003,
+    "seconds": 97.344,
     "selectedTests": 25
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.524,
-        "median": 4.119,
-        "min": 3.983
+        "max": 7.531,
+        "median": 3.866,
+        "min": 1.773
       },
-      "seconds": 25.033,
-      "selectedTests": 6
+      "seconds": 97.344,
+      "selectedTests": 25
     },
     "weightSeconds": 19.97561,
     "weightSource": "unmeasured-test-rate"

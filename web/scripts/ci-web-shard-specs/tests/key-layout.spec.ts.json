@@ -1,7 +1,7 @@
 {
   "group": "key-layout",
   "nightlyTiming": {
-    "seconds": 56.1,
+    "seconds": 46.668,
     "selectedTests": 24
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 24,
     "tierTiming": {
       "caseSeconds": {
-        "max": 2.942,
-        "median": 1.918,
-        "min": 1.44
+        "max": 2.194,
+        "median": 1.915,
+        "min": 1.372
       },
-      "seconds": 44.965,
+      "seconds": 46.668,
       "selectedTests": 24
     },
     "weightSeconds": 26.634146,

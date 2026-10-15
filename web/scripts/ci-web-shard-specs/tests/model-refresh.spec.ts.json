@@ -1,7 +1,7 @@
 {
   "group": "model-settings",
   "nightlyTiming": {
-    "seconds": 1.883,
+    "seconds": 2.068,
     "selectedTests": 1
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
-        "max": 1.449,
-        "median": 1.449,
-        "min": 1.449
+        "max": 2.058,
+        "median": 2.058,
+        "min": 2.058
       },
-      "seconds": 1.449,
+      "seconds": 2.068,
       "selectedTests": 1
     },
     "weightSeconds": 3.5,

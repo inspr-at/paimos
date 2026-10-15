@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 12.83,
+    "seconds": 13.921,
     "selectedTests": 8
   },
   "spec": {
     "file": "tests/connect-verification.spec.ts",
     "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.933,
+        "median": 1.737,
+        "min": 1.54
+      },
+      "seconds": 13.921,
+      "selectedTests": 8
+    },
     "weightSeconds": 17.756098,
     "weightSource": "unmeasured-test-rate"
   }

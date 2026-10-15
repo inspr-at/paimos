@@ -1,7 +1,7 @@
 {
   "group": "clipped-names-and-preferences",
   "nightlyTiming": {
-    "seconds": 19.333,
+    "seconds": 21.058,
     "selectedTests": 7
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.65,
-        "median": 3.616,
-        "min": 1.756
+        "max": 4.519,
+        "median": 3.438,
+        "min": 1.506
       },
-      "seconds": 22.35,
+      "seconds": 21.058,
       "selectedTests": 7
     },
     "weightSeconds": 15.536585,

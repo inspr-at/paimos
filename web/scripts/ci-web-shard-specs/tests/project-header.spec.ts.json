@@ -1,12 +1,21 @@
 {
   "group": "project-header",
   "nightlyTiming": {
-    "seconds": 52.285,
+    "seconds": 57.834,
     "selectedTests": 15
   },
   "spec": {
     "file": "tests/project-header.spec.ts",
     "listedTests": 15,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.222,
+        "median": 3.458,
+        "min": 2.328
+      },
+      "seconds": 57.834,
+      "selectedTests": 15
+    },
     "weightSeconds": 33.292683,
     "weightSource": "unmeasured-test-rate"
   }

@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 56.309,
+    "seconds": 46.55,
     "selectedTests": 17
   },
   "spec": {
     "file": "tests/release-switches.spec.ts",
     "listedTests": 17,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.748,
+        "median": 2.18,
+        "min": 0.038
+      },
+      "seconds": 46.55,
+      "selectedTests": 17
+    },
     "weightSeconds": 37.731707,
     "weightSource": "unmeasured-test-rate"
   }

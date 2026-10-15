@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 175.893,
+    "seconds": 181.37,
     "selectedTests": 27
   },
   "spec": {
     "file": "tests/phone-controls.spec.ts",
     "listedTests": 27,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 13.261,
+        "median": 5.708,
+        "min": 3.138
+      },
+      "seconds": 181.37,
+      "selectedTests": 27
+    },
     "weightSeconds": 59.926829,
     "weightSource": "unmeasured-test-rate"
   }

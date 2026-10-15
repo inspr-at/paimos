@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 8.212,
+    "seconds": 6.178,
     "selectedTests": 3
   },
   "spec": {
     "file": "tests/portal-roadmap.spec.ts",
     "listedTests": 3,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.212,
+        "median": 2.085,
+        "min": 1.834
+      },
+      "seconds": 6.178,
+      "selectedTests": 3
+    },
     "weightSeconds": 6.658537,
     "weightSource": "unmeasured-test-rate"
   }

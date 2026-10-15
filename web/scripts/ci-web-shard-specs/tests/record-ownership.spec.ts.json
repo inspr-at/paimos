@@ -1,12 +1,21 @@
 {
   "group": "stable-controls",
   "nightlyTiming": {
-    "seconds": 11.234,
+    "seconds": 5.1,
     "selectedTests": 2
   },
   "spec": {
     "file": "tests/record-ownership.spec.ts",
     "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.699,
+        "median": 2.513,
+        "min": 2.326
+      },
+      "seconds": 5.1,
+      "selectedTests": 2
+    },
     "weightSeconds": 4.439024,
     "weightSource": "unmeasured-test-rate"
   }

@@ -1,11 +1,20 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 65.77,
+    "seconds": 97.268,
     "selectedTests": 13
   },
   "spec": {
     "file": "tests/aeon-908-polish.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 10.754,
+        "median": 6.76,
+        "min": 5.713
+      },
+      "seconds": 97.268,
+      "selectedTests": 13
+    },
     "weightSeconds": 120
   }
 }

@@ -1,19 +1,19 @@
 {
   "group": "recurrences",
   "nightlyTiming": {
-    "seconds": 159.688,
+    "seconds": 148.874,
     "selectedTests": 15
   },
   "spec": {
     "file": "tests/recurrences.spec.ts",
     "tierTiming": {
       "caseSeconds": {
-        "max": 17.297,
-        "median": 17.297,
-        "min": 17.297
+        "max": 23.297,
+        "median": 5.965,
+        "min": 2.456
       },
-      "seconds": 17.297,
-      "selectedTests": 1
+      "seconds": 148.874,
+      "selectedTests": 15
     },
     "weightSeconds": 45,
     "weightSource": "estimate"

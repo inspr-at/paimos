@@ -1,11 +1,20 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 182.1,
+    "seconds": 183.896,
     "selectedTests": 15
   },
   "spec": {
     "file": "tests/hide-states.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 23.403,
+        "median": 8.271,
+        "min": 4.356
+      },
+      "seconds": 183.896,
+      "selectedTests": 15
+    },
     "weightSeconds": 60,
     "weightSource": "unmeasured-estimate"
   }

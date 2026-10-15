@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 13.817,
+    "seconds": 15.486,
     "selectedTests": 8
   },
   "spec": {
     "file": "tests/ticket-agent-work.spec.ts",
     "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.126,
+        "median": 1.822,
+        "min": 1.77
+      },
+      "seconds": 15.486,
+      "selectedTests": 8
+    },
     "weightSeconds": 17.756098,
     "weightSource": "unmeasured-test-rate"
   }

@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 19.539,
+    "seconds": 18.553,
     "selectedTests": 6
   },
   "spec": {
     "file": "tests/markdown-ticket-links.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.719,
+        "median": 2.56,
+        "min": 2.127
+      },
+      "seconds": 18.553,
+      "selectedTests": 6
+    },
     "weightSeconds": 8.878049,
     "weightSource": "unmeasured-test-rate"
   }

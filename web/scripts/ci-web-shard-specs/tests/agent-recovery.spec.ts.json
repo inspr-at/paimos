@@ -1,7 +1,7 @@
 {
   "group": "stable-controls",
   "nightlyTiming": {
-    "seconds": 65.317,
+    "seconds": 65.667,
     "selectedTests": 9
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
-        "max": 6.14,
-        "median": 5.111,
-        "min": 2.547
+        "max": 8.074,
+        "median": 7.553,
+        "min": 3.46
       },
-      "seconds": 43.118,
+      "seconds": 65.667,
       "selectedTests": 9
     },
     "weightSeconds": 20

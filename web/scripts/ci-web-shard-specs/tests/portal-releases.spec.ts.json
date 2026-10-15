@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 6.957,
+    "seconds": 6.557,
     "selectedTests": 5
   },
   "spec": {
     "file": "tests/portal-releases.spec.ts",
     "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.758,
+        "median": 1.502,
+        "min": 0.762
+      },
+      "seconds": 6.557,
+      "selectedTests": 5
+    },
     "weightSeconds": 11.097561,
     "weightSource": "unmeasured-test-rate"
   }

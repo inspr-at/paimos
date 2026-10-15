@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 20,
+    "seconds": 26.435,
     "selectedTests": 2
   },
   "spec": {
     "file": "tests/delivery-tab-switch.spec.ts",
     "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 14.161,
+        "median": 12.611,
+        "min": 11.061
+      },
+      "seconds": 26.435,
+      "selectedTests": 2
+    },
     "weightSeconds": 30,
     "weightSource": "remote-one-worker-AEON-1352-estimate"
   }

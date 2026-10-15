@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 174.249,
+    "seconds": 246.932,
     "selectedTests": 1
   },
   "spec": {
     "file": "tests/ui-audit-dark-1440.spec.ts",
     "listedTests": 1,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 245.697,
+        "median": 245.697,
+        "min": 245.697
+      },
+      "seconds": 246.932,
+      "selectedTests": 1
+    },
     "weightSeconds": 240,
     "weightSource": "aeon-1326-nightly-progress-estimate"
   }

@@ -1,7 +1,7 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 163.649,
+    "seconds": 144.785,
     "selectedTests": 25
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 14.787,
-        "median": 6.68,
-        "min": 1.787
+        "max": 16.118,
+        "median": 6.91,
+        "min": 1.878
       },
-      "seconds": 124.329,
-      "selectedTests": 19
+      "seconds": 144.785,
+      "selectedTests": 25
     },
     "weightSeconds": 20,
     "weightSource": "aeon-1006-estimate"

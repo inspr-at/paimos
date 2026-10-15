@@ -1,7 +1,7 @@
 {
   "group": "usage-dashboard",
   "nightlyTiming": {
-    "seconds": 12.291,
+    "seconds": 18.674,
     "selectedTests": 10
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 10,
     "tierTiming": {
       "caseSeconds": {
-        "max": 1.727,
-        "median": 0.9265,
-        "min": 0.793
+        "max": 2.884,
+        "median": 1.713,
+        "min": 1.539
       },
-      "seconds": 10.234,
+      "seconds": 18.674,
       "selectedTests": 10
     },
     "weightSeconds": 14.8,

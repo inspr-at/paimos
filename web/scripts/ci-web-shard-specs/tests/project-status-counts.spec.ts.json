@@ -1,11 +1,20 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 62.694,
+    "seconds": 65.062,
     "selectedTests": 12
   },
   "spec": {
     "file": "tests/project-status-counts.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.621,
+        "median": 4.807,
+        "min": 3.208
+      },
+      "seconds": 65.062,
+      "selectedTests": 12
+    },
     "weightSeconds": 60,
     "weightSource": "unmeasured-estimate"
   }

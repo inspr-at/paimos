@@ -1,7 +1,7 @@
 {
   "group": "status-autopilot",
   "nightlyTiming": {
-    "seconds": 35.905,
+    "seconds": 27.447,
     "selectedTests": 11
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 7.551,
-        "median": 1.728,
-        "min": 0.662
+        "max": 8.705,
+        "median": 1.806,
+        "min": 0.812
       },
-      "seconds": 23.425,
+      "seconds": 27.447,
       "selectedTests": 11
     },
     "weightSeconds": 35.820513,

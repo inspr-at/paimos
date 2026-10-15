@@ -1,7 +1,7 @@
 {
   "group": "needs-attention",
   "nightlyTiming": {
-    "seconds": 319.755,
+    "seconds": 221.917,
     "selectedTests": 42
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 42,
     "tierTiming": {
       "caseSeconds": {
-        "max": 69.995,
-        "median": 2.738,
-        "min": 1.315
+        "max": 40.214,
+        "median": 2.912,
+        "min": 1.483
       },
-      "seconds": 203.936,
-      "selectedTests": 41
+      "seconds": 221.917,
+      "selectedTests": 42
     },
     "weightSeconds": 46.609756,
     "weightSource": "estimate"

@@ -1,7 +1,7 @@
 {
   "group": "access-dialogs",
   "nightlyTiming": {
-    "seconds": 147.907,
+    "seconds": 139.744,
     "selectedTests": 42
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 42,
     "tierTiming": {
       "caseSeconds": {
-        "max": 19.208,
-        "median": 2.4125,
-        "min": 1.344
+        "max": 15.019,
+        "median": 1.89,
+        "min": 1.027
       },
-      "seconds": 170.844,
+      "seconds": 139.744,
       "selectedTests": 42
     },
     "weightSeconds": 111.435484,

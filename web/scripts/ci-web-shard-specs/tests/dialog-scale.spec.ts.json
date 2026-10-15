@@ -1,7 +1,7 @@
 {
   "group": "aeon-624-dialogs",
   "nightlyTiming": {
-    "seconds": 159.569,
+    "seconds": 168.563,
     "selectedTests": 9
   },
   "spec": {
@@ -9,12 +9,12 @@
     "listedTests": 8,
     "tierTiming": {
       "caseSeconds": {
-        "max": 14.73,
-        "median": 12.795,
-        "min": 0.003
+        "max": 31.386,
+        "median": 18.034,
+        "min": 0.004
       },
-      "seconds": 27.528,
-      "selectedTests": 3
+      "seconds": 168.563,
+      "selectedTests": 9
     },
     "weightSeconds": 17.756098,
     "weightSource": "unmeasured-test-rate"

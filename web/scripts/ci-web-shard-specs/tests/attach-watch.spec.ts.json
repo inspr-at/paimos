@@ -1,7 +1,7 @@
 {
   "group": "attachment-security",
   "nightlyTiming": {
-    "seconds": 111.75,
+    "seconds": 115.259,
     "selectedTests": 31
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 31,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.499,
-        "median": 3.228,
-        "min": 1.315
+        "max": 5.755,
+        "median": 4.211,
+        "min": 1.653
       },
-      "seconds": 87.304,
+      "seconds": 115.259,
       "selectedTests": 31
     },
     "weightSeconds": 61.483333,

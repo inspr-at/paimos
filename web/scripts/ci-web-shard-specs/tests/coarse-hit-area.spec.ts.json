@@ -1,7 +1,7 @@
 {
   "group": "coarse-hit-area",
   "nightlyTiming": {
-    "seconds": 1.097,
+    "seconds": 0.385,
     "selectedTests": 3
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
-        "max": 0.367,
-        "median": 0.243,
-        "min": 0.23
+        "max": 0.135,
+        "median": 0.125,
+        "min": 0.12
       },
-      "seconds": 0.84,
+      "seconds": 0.385,
       "selectedTests": 3
     },
     "weightSeconds": 6.658537,

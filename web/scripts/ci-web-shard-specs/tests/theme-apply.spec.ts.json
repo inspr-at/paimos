@@ -1,7 +1,7 @@
 {
   "group": "theme-agents",
   "nightlyTiming": {
-    "seconds": 65.938,
+    "seconds": 71.895,
     "selectedTests": 10
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 10,
     "tierTiming": {
       "caseSeconds": {
-        "max": 9.252,
-        "median": 8.152,
-        "min": 1.804
+        "max": 10.718,
+        "median": 9.506,
+        "min": 2.293
       },
-      "seconds": 60.268,
+      "seconds": 71.895,
       "selectedTests": 10
     },
     "weightSeconds": 19.5,

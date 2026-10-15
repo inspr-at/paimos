@@ -1,7 +1,7 @@
 {
   "group": "release",
   "nightlyTiming": {
-    "seconds": 66.015,
+    "seconds": 69.138,
     "selectedTests": 23
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 23,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.367,
-        "median": 2.435,
-        "min": 1.321
+        "max": 5.194,
+        "median": 2.796,
+        "min": 1.786
       },
-      "seconds": 55.21,
+      "seconds": 69.138,
       "selectedTests": 23
     },
     "weightSeconds": 29.35359084,

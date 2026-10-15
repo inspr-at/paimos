@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 31.965,
+    "seconds": 32.464,
     "selectedTests": 8
   },
   "spec": {
     "file": "tests/quote-dock-layout.spec.ts",
     "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.437,
+        "median": 2.926,
+        "min": 2.649
+      },
+      "seconds": 32.464,
+      "selectedTests": 8
+    },
     "weightSeconds": 17.756098,
     "weightSource": "unmeasured-test-rate"
   }

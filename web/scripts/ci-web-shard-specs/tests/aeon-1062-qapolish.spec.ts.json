@@ -1,12 +1,21 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 51.676,
+    "seconds": 50.619,
     "selectedTests": 20
   },
   "spec": {
     "file": "tests/aeon-1062-qapolish.spec.ts",
     "listedTests": 20,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.023,
+        "median": 2.678,
+        "min": 0.854
+      },
+      "seconds": 50.619,
+      "selectedTests": 20
+    },
     "weightSeconds": 24,
     "weightSource": "local-single-worker-AEON-1062-18.8s-plus-margin"
   }

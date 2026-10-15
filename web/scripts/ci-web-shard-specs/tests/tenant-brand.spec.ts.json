@@ -1,7 +1,7 @@
 {
   "group": "footer",
   "nightlyTiming": {
-    "seconds": 16.124,
+    "seconds": 18.254,
     "selectedTests": 15
   },
   "spec": {
@@ -9,11 +9,11 @@
     "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.305,
-        "median": 1.193,
-        "min": 0
+        "max": 3.073,
+        "median": 1.089,
+        "min": 0.001
       },
-      "seconds": 19.711,
+      "seconds": 18.254,
       "selectedTests": 15
     },
     "weightSeconds": 10.487805,
