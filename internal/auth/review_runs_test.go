@@ -41,6 +41,13 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	txdo(func(tx pgx.Tx) error {
+		err := authz.RequireTx(ctx, tx, owner, "reviews.visual_approve", authz.Scope{})
+		if !errors.Is(err, authz.ErrForbidden) {
+			t.Fatalf("built-in owner gained implicit visual approval: %v", err)
+		}
+		return nil
+	})
 	key := func(name string, scopes []string) keyRecord {
 		t.Helper()
 		k, err := m.createAgentKey(ctx, owner, name, "", scopes, nil)

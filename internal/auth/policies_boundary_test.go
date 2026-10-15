@@ -23,6 +23,12 @@ import (
 // separate: the scope ceiling stops these requests before a person check runs.
 func TestPoliciesBearerMiddlewareRefusalsAndLadderRead(t *testing.T) {
 	m, owner := keyFixture(t)
+	// This fixture deliberately covers every agent-grantable permission. Give
+	// its person creator an explicit visual grant instead of assuming a built-in
+	// owner role implicitly carries approval authority.
+	permissions, _ := authz.BuiltinPermissions("owner")
+	owner = keyScopeEditor(t, m, owner, append(permissions, "reviews.visual_approve")...)
+
 	var scopes []string
 	for _, permission := range authz.Registry {
 		if permission.AgentGrantable {

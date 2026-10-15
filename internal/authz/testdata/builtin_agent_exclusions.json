@@ -16,7 +16,6 @@
     "engine.read",
     "events.subscribe",
     "recurrences.manage",
-    "reviewpolicy.manage",
-    "reviews.visual_approve"
+    "reviewpolicy.manage"
   ]
 }

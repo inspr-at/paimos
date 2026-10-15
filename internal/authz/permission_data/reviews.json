@@ -1,8 +1,11 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
-  "builtin_agent_exclusions": ["reviews.visual_approve"],
   "words": {
-    "resources": {"reviews": "review approvals"},
-    "actions": {"visual_approve": "Approve visual"}
+    "resources": {
+      "reviews": "review approvals"
+    },
+    "actions": {
+      "visual_approve": "Approve visual"
+    }
   }
 }

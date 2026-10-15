@@ -1,8 +1,5 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
-  "builtin_agent_exclusions": [
-    "reviews.visual_approve"
-  ],
   "project_filtered": {
     "POST /api/review-runs/{runId}/credential": true
   },
