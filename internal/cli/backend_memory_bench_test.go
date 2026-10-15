@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -48,6 +49,9 @@ func BenchmarkBackendMemory(b *testing.B) {
 	}
 	ctx, cancel := context.WithTimeout(b.Context(), 15*time.Minute)
 	defer cancel()
+	priorLog := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	b.Cleanup(func() { slog.SetDefault(priorLog) })
 	d := dbtest.Open(b)
 	if err := db.EnsureTenant(ctx, d.App, "aeon", "Aeon"); err != nil {
 		b.Fatal(err)
@@ -75,6 +79,7 @@ func BenchmarkBackendMemory(b *testing.B) {
 	}
 	seed := backendMemoryServer(b, d.App)
 	worker := mintAgent(b, seed.URL, "memory-worker")
+	dbtest.BindRole(b, d, worker.TenantID, worker.PrincipalID, "owner")
 	seedProject(b, seed.URL, worker.Token)
 	hc := &http.Client{Timeout: 10 * time.Second}
 	request := func(method, path, body string, status int) []byte {
@@ -197,7 +202,7 @@ func BenchmarkBackendMemory(b *testing.B) {
 					latencies := make([]map[string]any, len(paths))
 					for i, values := range timings {
 						slices.Sort(values)
-						latencies[i] = map[string]any{"endpoint": paths[i], "samples": len(values), "p50_ms": values[(50*len(values)+99)/100-1], "p95_ms": values[(95*len(values)+99)/100-1]}
+						latencies[i] = map[string]any{"endpoint": paths[i], "samples": len(values), "samples_ms": values, "p50_ms": values[(50*len(values)+99)/100-1], "p95_ms": values[(95*len(values)+99)/100-1]}
 					}
 					out, err := json.Marshal(map[string]any{"variant": variant.name, "run": run + 1, "backend": slot + 1, "pid": pid, "exec_mode": cfg.ConnConfig.DefaultQueryExecMode.String(), "statement_cache_capacity": cfg.ConnConfig.StatementCacheCapacity, "policies": policies, "postgres": version, "migration": migration, "cold": cold, "warm": warm, "latencies": latencies})
 					if err != nil {
