@@ -21,13 +21,14 @@ import (
 )
 
 type EntryRule struct {
-	ID        string   `json:"id"`
-	Label     string   `json:"label,omitempty"`
-	LabelDE   string   `json:"label_de,omitempty"`
-	Condition string   `json:"condition,omitempty"`
-	Kinds     []string `json:"kinds,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	OwnerID   *string  `json:"owner_id,omitempty"`
+	ID              string   `json:"id"`
+	Label           string   `json:"label,omitempty"`
+	LabelDE         string   `json:"label_de,omitempty"`
+	Condition       string   `json:"condition,omitempty"`
+	Kinds           []string `json:"kinds,omitempty"`
+	Labels          []string `json:"labels,omitempty"`
+	OwnerID         *string  `json:"owner_id,omitempty"`
+	FallbackOwnerID *string  `json:"fallback_owner_id,omitempty"`
 }
 type EntryDefinition struct {
 	ID         string                 `json:"id"`
@@ -130,7 +131,7 @@ func ValidateEntryRules(checks map[string][]EntryRule) error {
 				return Fail(400, "unknown or duplicate entry check")
 			}
 			seen[r.ID] = true
-			if len(r.ID) > 80 || !utf8.ValidString(r.Label+r.LabelDE) || utf8.RuneCountInString(r.Label) > 200 || utf8.RuneCountInString(r.LabelDE) > 200 || len(r.Kinds) > 16 || len(r.Labels) > 16 || !slices.Contains([]string{"", "all", "ui", "code", "blocked", "release_notes", "releases"}, r.Condition) || r.OwnerID != nil && (!manualEntryID.MatchString(r.ID) || !UUID(*r.OwnerID)) {
+			if len(r.ID) > 80 || !utf8.ValidString(r.Label+r.LabelDE) || utf8.RuneCountInString(r.Label) > 200 || utf8.RuneCountInString(r.LabelDE) > 200 || len(r.Kinds) > 16 || len(r.Labels) > 16 || !slices.Contains([]string{"", "all", "ui", "code", "blocked", "release_notes", "releases"}, r.Condition) || r.OwnerID != nil && (!manualEntryID.MatchString(r.ID) || !UUID(*r.OwnerID)) || r.FallbackOwnerID != nil && (!manualEntryID.MatchString(r.ID) || !UUID(*r.FallbackOwnerID) || r.OwnerID != nil) {
 				return Fail(400, "invalid bounded entry check rule")
 			}
 			for _, s := range append(slices.Clone(r.Kinds), r.Labels...) {
@@ -214,6 +215,8 @@ type EntryTicket struct {
 	ProjectID                    *string
 	Fields                       map[string]any
 	Revision                     time.Time
+	DefinitionID                 string
+	DefinitionRevision           time.Time
 	NamedBlocker                 bool
 }
 
@@ -295,46 +298,32 @@ func entryApplies(r EntryRule, t EntryTicket, usesReleases bool) bool {
 func mustEntryJSON(v any) json.RawMessage { raw, _ := json.Marshal(v); return raw }
 
 func EntryOwnerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t EntryTicket, r EntryRule) (*EntryPerson, error) {
-	project := ""
-	if t.ProjectID != nil {
-		project = *t.ProjectID
+	preferred, fallback := r.OwnerID, r.FallbackOwnerID
+	if preferred == nil {
+		if assignee, ok := t.Fields["assignee"].(string); ok && UUID(assignee) {
+			preferred = &assignee
+		}
 	}
-	candidates := []string{}
-	if r.OwnerID != nil {
-		candidates = append(candidates, *r.OwnerID)
-	} else if assignee, ok := t.Fields["assignee"].(string); ok && UUID(assignee) {
-		candidates = append(candidates, assignee)
-	}
-	rows, err := tx.Query(ctx, `SELECT id::text,name FROM principals WHERE kind='person' AND (id=ANY($1::uuid[]) OR EXISTS(SELECT 1 FROM role_bindings pm JOIN roles r ON r.tenant_id=pm.tenant_id AND r.id=pm.role_id WHERE pm.principal_id=principals.id AND ((pm.scope_type='project' AND pm.scope_id=$2::uuid AND r.key='admin') OR (pm.scope_type='workspace' AND r.key IN ('admin','owner'))))) ORDER BY (id=ANY($1::uuid[])) DESC,id LIMIT 100`, candidates, t.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	people := []EntryPerson{}
-	for rows.Next() {
-		var v EntryPerson
-		if err = rows.Scan(&v.ID, &v.Name); err != nil {
-			rows.Close()
+	if t.ID != "" && t.DefinitionID != "" {
+		var owner string
+		err := tx.QueryRow(ctx, `SELECT after->>'owner_id' FROM events WHERE node_id=$1 AND type='node.person_step_reassigned' AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, r.ID, t.DefinitionID, t.DefinitionRevision).Scan(&owner)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
-		people = append(people, v)
+		if err == nil {
+			preferred = &owner
+			fallback = nil
+		}
 	}
-	err = rows.Err()
-	rows.Close()
+	var person EntryPerson
+	err := tx.QueryRow(ctx, `SELECT id::text,name FROM principals WHERE id=aeon_person_step_owner($1,$2,$3)`, t.ProjectID, preferred, fallback).Scan(&person.ID, &person.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range people {
-		actor := tenant.Principal{ID: v.ID, TenantID: p.TenantID, Kind: tenant.Person}
-		if slices.Contains(candidates, v.ID) {
-			if authz.RequireTx(ctx, tx, actor, "nodes.read", authz.Scope{ProjectID: project}) == nil {
-				return &v, nil
-			}
-		}
-		if authz.RequireProjectAdminTx(ctx, tx, actor, project) == nil {
-			return &v, nil
-		}
-	}
-	return nil, nil
+	return &person, nil
 }
 
 // EvaluateEntryTx runs under the same tenant/tree fence as status and queue
@@ -348,6 +337,7 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.project_id=$1 AND k.slug='release' AND n.deleted_at IS NULL)`, t.ProjectID).Scan(&usesReleases); err != nil {
 		return out, err
 	}
+	t.DefinitionID, t.DefinitionRevision = d.ID, d.Revision
 	for _, rule := range d.Checks[status] {
 		r := EntryResult{EntryRule: rule, Reason: ""}
 		if c, ok := entryCatalog[rule.ID]; ok {
@@ -439,7 +429,7 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 			}
 			r.CanTick = p.Kind == tenant.Person && r.Owner != nil && (r.Owner.ID == p.ID || authz.RequireProjectAdminTx(ctx, tx, p, project) == nil)
 			var raw []byte
-			err = tx.QueryRow(ctx, `SELECT after FROM events WHERE node_id=$1 AND type='entry_check.ticked' AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, rule.ID, d.ID, d.Revision).Scan(&raw)
+			err = tx.QueryRow(ctx, `SELECT after FROM events WHERE node_id=$1 AND type IN ('entry_check.ticked','node.entry_check_ticked') AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, rule.ID, d.ID, d.Revision).Scan(&raw)
 			if errors.Is(err, pgx.ErrNoRows) {
 				err = nil
 			} else if err == nil {

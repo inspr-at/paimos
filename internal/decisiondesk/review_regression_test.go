@@ -3,7 +3,9 @@ package decisiondesk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -329,5 +331,137 @@ func TestProjectionApprovalLabelRetainsScopeWithoutRationale(t *testing.T) {
 	}
 	if !strings.Contains(page.Items[0].Title, "nodes.write") || strings.Contains(page.Items[0].Title, "Private rationale") {
 		t.Fatalf("approval label lost safe scope context: %q", page.Items[0].Title)
+	}
+}
+
+// Risk: irrelevant manual checks exhaust person-step coverage and suppress the
+// reader's real requests, questions and approvals across the whole Desk.
+func TestPersonStepProjectionIgnoresIrrelevantCoverage(t *testing.T) {
+	f := setup(t)
+	question := f.ask(t, f.project, "carries_on", nil)
+	approval := f.approval(t, f.ticket, time.Now().Add(time.Hour))
+	var definition string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,allowed_child_kinds) VALUES($1,'definition','Definition','DEF','list',ARRAY[]::text[])`, f.person.TenantID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields)
+		 SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Workspace definition','{"checks":{}}'
+		 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='definition' RETURNING id::text`, f.person.TenantID).Scan(&definition); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET state='open',fields=jsonb_build_object('assignee',$2::text,'tags',jsonb_build_array('anchor')) WHERE id=$1`, f.ticket, f.reader.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,state)
+		 SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Bulk irrelevant work',$2,'open'
+		 FROM node_kinds k CROSS JOIN generate_series(1,1001) WHERE k.tenant_id=$1 AND k.slug='work'`, f.person.TenantID, f.project)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, tc := range []struct {
+		name           string
+		rule           map[string]any
+		fields         map[string]any
+		state          string
+		event          string
+		activeForOther bool
+	}{
+		{name: "non-applicable UI", rule: map[string]any{"condition": "ui"}},
+		{name: "non-applicable code", rule: map[string]any{"condition": "code"}, fields: map[string]any{"labels": []string{"docs"}}},
+		{name: "non-applicable blocked", rule: map[string]any{"condition": "blocked"}},
+		{name: "non-applicable release notes", rule: map[string]any{"condition": "release_notes"}, fields: map[string]any{"hide_from_release_notes": true}},
+		{name: "non-applicable releases", rule: map[string]any{"condition": "releases"}},
+		{name: "non-applicable kinds", rule: map[string]any{"kinds": []string{"task"}}},
+		{name: "non-applicable labels", rule: map[string]any{"labels": []string{"bulk", "required"}}},
+		{name: "already ticked", event: "entry_check.ticked"},
+		{name: "already ticked legacy event", event: "node.entry_check_ticked"},
+		{name: "another assignee", fields: map[string]any{"assignee": f.person.ID}, activeForOther: true},
+		{name: "another named owner", rule: map[string]any{"owner_id": f.person.ID}, activeForOther: true},
+		{name: "another fallback owner", rule: map[string]any{"fallback_owner_id": f.person.ID}, fields: map[string]any{"assignee": f.agent.ID}, activeForOther: true},
+		{name: "reassigned manual owner", event: "node.person_step_reassigned", activeForOther: true},
+		{name: "another human check owner", state: "done", fields: map[string]any{"assignee": f.person.ID}, activeForOther: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkID := fmt.Sprintf("manual:bulk-%d", i)
+			rule := map[string]any{"id": checkID, "label": "Bulk check", "labels": []string{"bulk"}}
+			for key, value := range tc.rule {
+				rule[key] = value
+			}
+			fields := map[string]any{"assignee": f.reader.ID, "tags": []string{"bulk"}}
+			for key, value := range tc.fields {
+				fields[key] = value
+			}
+			definitionJSON, err := json.Marshal(map[string]any{"checks": map[string]any{"in_progress": []any{
+				map[string]any{"id": "manual:anchor", "label": "Reader's check", "labels": []string{"anchor"}}, rule,
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fieldsJSON, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := tc.state
+			if state == "" {
+				state = "open"
+			}
+			err = db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb,updated_at=$3 WHERE id=$1`, definition, definitionJSON, time.Date(2026, 10, 15, 0, 0, i, 0, time.UTC)); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb,state=$3,human_check=CASE WHEN $3='done' THEN 'Verify deployment' END WHERE tenant_id=$1 AND title='Bulk irrelevant work'`, f.person.TenantID, fieldsJSON, state); err != nil {
+					return err
+				}
+				if tc.event != "" {
+					_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after)
+					 SELECT n.tenant_id,$2,n.id,$3,jsonb_build_object('check_id',$4::text,'definition_id',d.id,'definition_revision',d.updated_at,'checked',true,'owner_id',$5::text)
+					 FROM nodes n CROSS JOIN nodes d WHERE n.tenant_id=$1 AND n.title='Bulk irrelevant work' AND d.id=$6`, f.person.TenantID, f.person.ID, tc.event, checkID, f.person.ID, definition)
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Retain and verify the >1000 fixtures, plus a native sample showing
+			// that they are inactive or currently owned by someone else.
+			var count, active int
+			var owned bool
+			var anchorID string
+			err = db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes WHERE tenant_id=$1 AND title='Bulk irrelevant work'`, f.person.TenantID).Scan(&count); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*)::int,coalesce(bool_and(step->'owner'->>'id'=$2),false)
+				 FROM jsonb_array_elements(aeon_person_steps((SELECT id FROM nodes WHERE tenant_id=$1 AND title='Bulk irrelevant work' ORDER BY id LIMIT 1))) step
+				 WHERE step->>'active'='true'`, f.person.TenantID, f.person.ID).Scan(&active, &owned); err != nil {
+					return err
+				}
+				return tx.QueryRow(t.Context(), `SELECT step->>'id' FROM jsonb_array_elements(aeon_person_steps($1)) step WHERE step->>'active'='true' AND step->'owner'->>'id'=$2`, f.ticket, f.reader.ID).Scan(&anchorID)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count != 1001 || tc.activeForOther && (active != 1 || !owned) || !tc.activeForOther && active != 0 {
+				t.Fatalf("wrong irrelevant fixtures: count=%d active=%d ownedByOther=%t", count, active, owned)
+			}
+			page := f.page(t, f.reader, 100, nil)
+			if page.Counts.Open != 3 || len(page.Items) != 3 || page.HasMore {
+				t.Fatalf("irrelevant person steps changed Desk counts: %+v", page)
+			}
+			want := map[string]string{question.ID: "question", approval: "approval", anchorID: "action_request"}
+			for _, item := range page.Items {
+				if want[item.ID] != item.Kind {
+					t.Fatalf("Desk lost an authorized source or disclosed another owner's step: %+v", item)
+				}
+				delete(want, item.ID)
+			}
+			if len(want) != 0 {
+				t.Fatalf("Desk lost authorized sources: %+v", want)
+			}
+		})
 	}
 }

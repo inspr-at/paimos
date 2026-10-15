@@ -53,7 +53,7 @@ test('the toolbar shows Filter and only applied filters; Type uses the workspace
   await expect(toolbar(page).getByRole('button', { name: 'Clear all' })).toHaveCount(0)
   // Filter offers Type once; Parents / Leaves, Depth and the legacy type are gone.
   await filterButton(page).click()
-  await expect(page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Human check', 'Parent', 'Cost unit', 'Imported release', 'Date'])
+  await expect(page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Waiting for a person', 'Parent', 'Cost unit', 'Imported release', 'Date'])
   await page.keyboard.press('Escape')
 
   const guard = await controlStability(page, { filter: filterButton(page), search: toolbar(page).getByRole('searchbox'), listHead: page.getByRole('grid', { name: 'Tickets' }).locator('thead tr'), firstRow: rows(page).first() })
@@ -260,7 +260,7 @@ for (const width of [1024, 940]) {
     expect(await pills.evaluate(el => el.scrollWidth - el.clientWidth)).toBeGreaterThan(20)
     expect(await toolbar(page).locator('.facets').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
     const guard = await controlStability(page, { filter: filterButton(page), search: toolbar(page).getByRole('searchbox') })
-    for (const name of ['Status', 'Priority', 'Assignee', 'Labels', 'Human check', 'Parent', 'Cost unit', 'Imported release', 'Type']) {
+    for (const name of ['Status', 'Priority', 'Assignee', 'Labels', 'Waiting for a person', 'Parent', 'Cost unit', 'Imported release', 'Type']) {
       await guard.check(async () => {
         await toolbar(page).getByRole('button', { name: `Remove ${name} filter` }).click()
         await expect(toolbar(page).getByRole('button', { name: `Remove ${name} filter` })).toHaveCount(0)

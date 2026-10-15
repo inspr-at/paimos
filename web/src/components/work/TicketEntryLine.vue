@@ -7,16 +7,22 @@ import { useEntryChecks, useEntryDefinitionLayout } from '../../lib/useEntryChec
 import { absoluteTime } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import { usePersonSteps } from '../../lib/personSteps'
 import QueueReadyPanel from './QueueReadyPanel.vue'
 const props = defineProps<{ row: ListItem; projectId: string }>()
-const session = useSession(), checks = useEntryChecks(() => props.row), layout = useEntryDefinitionLayout()
+const session = useSession(), checks = useEntryChecks(() => props.row), steps = usePersonSteps(() => props.row), layout = useEntryDefinitionLayout()
 // Unknown projects reserve the normal row from the first render. A successful
 // empty result removes it and informs the next ticket's layout hint.
 const reserve = computed(() => checks.error.value || checks.defined.value || (!checks.data.value && !layout.isEmpty(props.projectId)))
 watch(checks.data, result => { if (result && props.row.is_leaf !== false) layout.remember(props.projectId, !!result.definition) }, { flush: 'sync' })
 const line = computed(() => entryLine(checks.data.value, props.row.state))
 const anchor = ref<HTMLElement | null>(null)
-const waiting = computed(() => line.value?.block?.checks.filter(check => check.applicable && !check.passed && check.owner) ?? [])
+const waiting = computed(() => {
+  const current = steps.data.value?.steps
+  if (current?.length) return current.filter(step => step.active).map(step => ({ owner: step.owner, label: step.label }))
+  if (props.row.person_waiting?.length) return props.row.person_waiting
+  return line.value?.block?.checks.filter(check => check.applicable && !check.passed && check.owner) ?? []
+})
 const ownerText = computed(() => {
   const owner = waiting.value[0]?.owner
   return owner ? owner.id === session.identity?.principal.id ? 'waiting for you' : `waiting for ${owner.name}` : ''
@@ -25,7 +31,7 @@ const tip = computed(() => {
   const record = line.value?.record
   const missing = line.value?.block?.checks.filter(check => check.applicable && !check.passed).map(check => `${check.label}${check.owner ? ` · waiting for ${check.owner.name}` : ''}`).join(', ')
   const overridden = record?.override_reason ? `${record.by.name} · ${absoluteTime(record.at)} · ${record.override_reason}` : ''
-  return [missing, overridden].filter(Boolean).join('\n')
+  return [missing, ...waiting.value.map(step => `Waiting for ${step.owner?.name}: ${step.label}`), overridden].filter(Boolean).join('\n')
 })
 watch(() => [props.row.id, session.identity?.principal.id], () => { anchor.value = null })
 </script>

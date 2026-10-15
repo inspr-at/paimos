@@ -310,7 +310,30 @@ const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => 
 })
 // The trail element itself, whatever it shows; the probe judges only what is in sight.
 const trailOf = (page: Page) => page.locator('.app-header .crumbs')
-const settle = (page: Page) => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+// The header fits in the resize callback and once more on the next frame: dropping
+// a segment changes the row, and a key can be clipped for that one frame. Two
+// animation frames can land between those passes (nightly: 'chip PHAROS' at a
+// single width). Wait until the chips agree across two frames, after fonts.
+const settle = (page: Page) => page.evaluate(async () => {
+  await document.fonts.ready
+  const signature = () => {
+    const trail = document.querySelector<HTMLElement>('.app-header .crumbs')
+    if (!trail) return 'none'
+    const chips = [...trail.querySelectorAll<HTMLElement>('.sep, .key-badge, .crumb-name, .mono-crumb')].map(el => {
+      const box = el.getBoundingClientRect()
+      return `${el.className}:${el.dataset.dropped ?? ''}:${Math.round(box.width * 2)}:${el.scrollWidth}:${el.clientWidth}`
+    }).join('|')
+    return `${trail.scrollWidth}:${trail.clientWidth}:${chips}`
+  }
+  let previous = ''
+  for (let frame = 0; frame < 40; frame++) {
+    await new Promise<void>(done => requestAnimationFrame(() => done()))
+    const next = signature()
+    if (frame > 0 && next === previous) return
+    previous = next
+  }
+  throw new Error('header trail did not settle')
+})
 const TRAILS = [
   { slug: 'tickets', path: '/p/PHAROS/tickets', ready: (page: Page) => expect(page.locator('.app-header .app-density')).toBeVisible() },
   { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full', ready: (page: Page) => expect(trailOf(page).locator('.crumb.current')).toHaveText('PHAROS-11') },

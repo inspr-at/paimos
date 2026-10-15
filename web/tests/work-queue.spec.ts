@@ -610,7 +610,7 @@ test('live-work In progress stays disabled even when worker details are hidden',
 })
 
 
-test('stale progress hints and ticket actions stay still in both themes at phone tablet and desktop widths', async ({ page }) => {
+test('stale progress hints and ticket actions stay still in both themes at phone tablet and desktop widths', async ({ page }, testInfo) => {
   await world(page, { stale: true, longTitle: true })
   for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
@@ -618,10 +618,16 @@ test('stale progress hints and ticket actions stay still in both themes at phone
     for (const theme of ['light', 'dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
       for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
-      await ticket.hover()
-      await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
-      await page.screenshot({ path: join(shots, `aeon-682-list-${width}-${theme}.png`) })
-      await ticket.locator('.title-text').click()
+      const title = ticket.locator('.title-text')
+      // The reserved person-waiting slot must leave a real title target in a
+      // narrow saved layout, including a long name beside its parent chip.
+      const geometry = await ticket.locator('.c-title .title-cell').evaluate(cell => [...cell.children].map(child => ({ class: child.className, width: child.getBoundingClientRect().width })))
+      await expect(title, `${width}px ${theme}: ${JSON.stringify(geometry)}`).toBeVisible()
+      await expectStableControls({ controls: { title, ticket, copy: ticket.getByRole('button', { name: 'Copy PHAROS-12', exact: true }) }, interactions: [
+        { name: 'hover stale ticket', run: async () => { await ticket.hover(); await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1) } },
+      ] })
+      await page.screenshot({ path: testInfo.outputPath(`aeon-682-list-${width}-${theme}.png`) })
+      await title.click()
       const drawer = page.getByRole('complementary', { name: 'Ticket details' })
       await expect(drawer.locator('.stale-hint.shown')).toHaveCount(1)
       const action = drawer.locator('.q-btn')
@@ -630,7 +636,7 @@ test('stale progress hints and ticket actions stay still in both themes at phone
         { name: 'Undo in detail view', run: async () => { await page.getByRole('button', { name: 'Undo', exact: true }).click(); await expect(action).toHaveAttribute('aria-pressed', 'false') } },
       ] })
       for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
-      await page.screenshot({ path: join(shots, `aeon-682-ticket-${width}-${theme}.png`) })
+      await page.screenshot({ path: testInfo.outputPath(`aeon-682-ticket-${width}-${theme}.png`) })
       await drawer.getByRole('button', { name: 'Close ticket details' }).click()
     }
   }
