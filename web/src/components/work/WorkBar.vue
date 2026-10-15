@@ -5,7 +5,7 @@
 // 45° stripes on hover, Open the empty track), and the line with each group's hours. Hover (380 ms), keyboard focus or
 // a tap shows the counts. While a new scope is counted, the previous label, total, bar and line stay together, dimmed;
 // the new figures replace all four in one render. Value slots are fixed from the whole project, so nothing shifts.
-import { computed, useId } from 'vue'
+import { computed, onBeforeUnmount, useId } from 'vue'
 import { closeFigureTip, figureTip, FIGURE_TIP_ID, focusOpensTip, hoverFigureTip, openFigureTip, cancelFigureTip } from '../../lib/figureTip'
 import { fmtInt, scopeLabel, workTipFoot, GROUP_FILL, type WorkHeader, type WorkSlots } from '../../lib/workFigures'
 import { fill, workFiguresText } from '../../lib/workFiguresText'
@@ -46,6 +46,7 @@ const slotStyle = computed(() => ({
 }))
 const leafZeros = computed(() => '0'.repeat(props.slots?.leaves ?? Math.max(1, String(props.fallbackLeaves).length)))
 const open = computed(() => !!figureTip.anchor && figureTip.owner === owner)
+onBeforeUnmount(() => { if (open.value) closeFigureTip() })
 
 // The tip: the label the header shows (the previous one while counting), the counts per group, one fact per footer line.
 const tipFigures = computed(() => props.busy || props.failure ? null : props.header)

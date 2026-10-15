@@ -16558,6 +16558,8 @@
     ,
     {"kind":"node","file":"tests/work-figures.test.ts","name":"largest remainder keeps every set adding up to its total","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/work-figures.test.ts","name":"only a figures object counts as figures","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/work-figures.test.ts","name":"the header adds up: group hours sum to the total, shares to 100, \"~\" only on the total","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-figures.test.ts","name":"the hover footer is one fact per line; Hide closed and projects without releases add theirs","tier":"ESSENTIAL"}
