@@ -52,6 +52,10 @@ func TestPersonStepsOwnershipRoutingAndAudit(t *testing.T) {
 	desk := func(p tenant.Principal, want int) decisiondesk.Page {
 		t.Helper()
 		code, raw := callAs(t, decisiondesk.New(appPool), &p, "GET", "/api/decision-desk/projection?limit=1", "")
+		if code != 200 {
+			_, err := decisiondesk.New(appPool).Read(tenant.WithPrincipal(t.Context(), p), p, 1, nil)
+			t.Fatalf("Desk read failed: HTTP %d %s; native error: %v", code, raw, err)
+		}
 		out := decode[decisiondesk.Page](t, code, raw, 200)
 		if out.Counts.Open != want || len(out.Items) != min(1, want) {
 			t.Fatalf("wrong Desk for %s: %s", p.Name, raw)

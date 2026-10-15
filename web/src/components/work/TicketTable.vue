@@ -893,7 +893,7 @@ defineExpose({
                   ><AppIcon name="chevron-right" :size="13" /></button>
                   <span v-else class="twisty-spacer" />
                 </span>
-                <span class="person-waiting" :data-tip="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('\n')" :aria-label="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('. ')"><AppIcon v-if="entry.row.person_waiting?.length" name="person-check" :size="14" /></span>
+                <span class="person-waiting" :data-tip="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('\n')" :aria-label="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('. ')"><AppIcon v-if="entry.row.person_waiting?.length" name="person-wait" :size="14" /></span>
                 <TicketTypeIcon :kind="entry.row.kind_slug" :level-name="workLabel(entry.row)" :level-icon="workIcon(entry.row)" :recurrence="entry.row.recurrence" />
                 <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>

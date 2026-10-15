@@ -126,7 +126,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  SELECT n.project_id,step FROM nodes n
  CROSS JOIN LATERAL jsonb_array_elements(aeon_person_steps(n.id)) step
  WHERE n.tenant_id=$1 AND n.project_id=ANY($28::uuid[]) AND n.deleted_at IS NULL
- AND step->>'active'='true' AND step->'owner'->>'id'=$4::text
+ AND step->>'active'='true' AND step->'owner'->>'id'=$4::uuid::text
 ), person_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT (step->>'id')::uuid,'action_request'::text,project_id,
  (extract(epoch FROM (step->>'revision')::timestamptz)*1000000)::bigint,
