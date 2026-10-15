@@ -59,3 +59,11 @@ Rule → test mapping:
 | Admission cannot depend on or bootstrap itself | `TestAdmissionCIExcludesOwnContext` |
 | Real P1 run submission → stored approvals → admission; route/family provenance; visual grant; replacement with changes; all hold types on/off; nightly/fix precedence; new head, retarget and scope A → B → A; stale controls; live CI requirements; permission revocation; projection replay; tenants and agent policy refusal | `TestAdmissionStoreAuthenticatedApprovalsAndInvalidation` |
 | Capability authentication, coordinator/worker forgery, same-family review with policy off, visual-grant revocation | Existing `internal/auth:TestAuthenticatedReviewerRuns` |
+
+The expansion is migration `1356_delivery_admission.sql`: current bindings,
+per-revision approval references, project policy, and the nullable
+`review_runs.admission_revision` column. DSAR inventory classifies all additions.
+Shared registrations are additive: four delivery routes and two project-filter
+entries, one tenant/tree fence caller, five ESSENTIAL test rows, and ownership
+rows for the six delivery source/test files (S2), migration (S1) and contract
+area (S7). Existing permission and key-scope registries are reused.
