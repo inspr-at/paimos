@@ -57,5 +57,5 @@ Rule → test mapping:
 | Proven visual classes; unknown/backend/web/API changes; invalid or incomplete diff; reviewer yes/uncertain | `TestVisualAdmissionClassifier` |
 | Actual merge-base; renamed presentation file; truncated file list; failed read | `TestAdmissionDiffReadsMergeBaseAndRenameSides` |
 | Admission cannot depend on or bootstrap itself | `TestAdmissionCIExcludesOwnContext` |
-| Real P1 run submission → stored approvals → admission; route/family provenance; visual grant; replacement with changes; all hold types on/off; nightly/fix precedence; new head, retarget and scope A → B → A; stale controls; tenants and agent policy refusal | `TestAdmissionStoreAuthenticatedApprovalsAndInvalidation` |
+| Real P1 run submission → stored approvals → admission; route/family provenance; visual grant; replacement with changes; all hold types on/off; nightly/fix precedence; new head, retarget and scope A → B → A; stale controls; permission revocation; projection replay; tenants and agent policy refusal | `TestAdmissionStoreAuthenticatedApprovalsAndInvalidation` |
 | Capability authentication, coordinator/worker forgery, same-family review with policy off, visual-grant revocation | Existing `internal/auth:TestAuthenticatedReviewerRuns` |

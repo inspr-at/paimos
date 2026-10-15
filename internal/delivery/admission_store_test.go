@@ -151,6 +151,24 @@ func TestAdmissionStoreAuthenticatedApprovalsAndInvalidation(t *testing.T) {
 	if !approved.Decision.Admissible {
 		t.Fatal("fix exception blocked", approved.Decision)
 	}
+	// Projection replay of an old target must preserve authoritative admission.
+	original := f.item(t, 7).Observation
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := db.LockTree(ctx, tx, f.person.TenantID); err != nil {
+			return err
+		}
+		historical := original
+		historical.Target = "release"
+		if _, _, err := saveProjectionTx(ctx, tx, f.person.TenantID, historical, false); err != nil {
+			return err
+		}
+		_, _, err := saveProjectionTx(ctx, tx, f.person.TenantID, original, false)
+		return err
+	})
+	replayed := snapshot("admissible")
+	if replayed.BindingRevision != approved.BindingRevision || !replayed.Control.Fix {
+		t.Fatal("projection replay invalidated authority", replayed)
+	}
 	policy.Holds = []AdmissionHold{{Kind: "release_cut", Reason: "Release cut takes precedence"}}
 	f.call(t, f.person, "PUT", settings, policy, 200, &policy)
 	snapshot("hold_release_cut")
@@ -229,6 +247,10 @@ func TestAdmissionStoreAuthenticatedApprovalsAndInvalidation(t *testing.T) {
 	f.call(t, f.agent, "PUT", endpoint, approved.Control, 403, nil)
 	f.call(t, f.foreign, "GET", endpoint, nil, 404, nil)
 	f.call(t, f.agent, "PUT", settings, policy, 403, nil)
+	// Revocation after the displayed snapshot is checked again in the write.
+	dbtest.BindRole(t, f.d, f.person.TenantID, f.person.ID, "viewer")
+	f.call(t, f.person, "PUT", endpoint, approved.Control, 403, nil)
+	dbtest.BindRole(t, f.d, f.person.TenantID, f.person.ID, "admin")
 	// Bounded malformed controls never mutate the valid stored state.
 	bad := approved.Control
 	bad.Holds = []AdmissionHold{{Kind: "manual", Reason: ""}}

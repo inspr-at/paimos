@@ -149,6 +149,12 @@ func platformTx(ctx context.Context, tx pgx.Tx, o *Observation) error {
 	return nil
 }
 func saveTx(ctx context.Context, tx pgx.Tx, tid string, o Observation) (Item, *events.Change, error) {
+	return saveProjectionTx(ctx, tx, tid, o, true)
+}
+
+// Replaying the delivery projection must not replay authoritative approval
+// invalidations or reset the nightly fix designation.
+func saveProjectionTx(ctx context.Context, tx pgx.Tx, tid string, o Observation, observe bool) (Item, *events.Change, error) {
 	if o.PR != nil && o.Ticket != nil {
 		preID := stableID(tid, o.Repository, subject(nil, o.Ticket))
 		if _, err := tx.Exec(ctx, `DELETE FROM delivery_items WHERE id=$1`, preID); err != nil {
@@ -178,8 +184,10 @@ func saveTx(ctx context.Context, tx pgx.Tx, tid string, o Observation) (Item, *e
 	if o.HoldReason == nil {
 		o.HeldFrom = nil
 	}
-	if err := syncAdmissionBindingTx(ctx, tx, tid, o); err != nil {
-		return Item{}, nil, err
+	if observe {
+		if err := syncAdmissionBindingTx(ctx, tx, tid, o); err != nil {
+			return Item{}, nil, err
+		}
 	}
 	after := project(o, before)
 	raw, err := json.Marshal(o)
@@ -339,7 +347,7 @@ func (m *Module) Rebuild(ctx context.Context, tid string) error {
 					return err
 				}
 				for _, o := range os {
-					if _, _, err = saveTx(ctx, tx, tid, o); err != nil {
+					if _, _, err = saveProjectionTx(ctx, tx, tid, o, false); err != nil {
 						return err
 					}
 				}
