@@ -7,6 +7,10 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -44,6 +48,20 @@ func PatternIsPublic(pattern string) bool {
 // allow either staff or customer authority; the handler checks ownership.
 // Status help is scope-free tenant metadata for agents; people retain nodes.read.
 func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
+	p, _ := tenant.PrincipalFrom(ctx)
+	if p.MessagingOnly && !MessagingAssistantInboxRoute(pattern) {
+		return ErrForbidden
+	}
+	if MessagingAssistantOperation(pattern) {
+		pool, _ := ctx.Value(poolKey{}).(*pgxpool.Pool)
+		if pool == nil {
+			return ErrNoStore
+		}
+		return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+			_, err := RequireMessagingAssistantTx(ctx, tx, p)
+			return err
+		})
+	}
 	declaration, ok := PermissionForPattern(pattern)
 	if !ok {
 		return ErrForbidden

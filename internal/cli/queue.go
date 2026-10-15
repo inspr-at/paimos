@@ -86,15 +86,32 @@ func queueTargetBody(agent, profile, account string) (map[string]any, error) {
 	}
 	return out, nil
 }
+func queueDeliveryBody(body map[string]any, repository, branch string) error {
+	if repository == "" && branch == "" {
+		return nil
+	}
+	if repository == "" || branch == "" {
+		return usagef("--repository and --branch are both required for a fix round")
+	}
+	body["build_delivery"] = map[string]string{"repository": repository, "branch": branch}
+	return nil
+}
 func (rt *runtime) queueAddCommand() *Command {
-	var agent, profile, account string
-	return &Command{Name: "add", Short: "Queue ready work; optionally Start now on an agent", Use: "queue add <ticket-ref> [--agent UUID --profile UUID --account UUID]", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) { queueTargetFlags(fs, &agent, &profile, &account) }, run: func(args []string) error {
+	var agent, profile, account, repository, branch string
+	return &Command{Name: "add", Short: "Queue ready work; optionally Start now on an agent", Use: "queue add <ticket-ref> [--agent UUID --profile UUID --account UUID] [--repository NAME --branch work/branch]", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) {
+		queueTargetFlags(fs, &agent, &profile, &account)
+		fs.string(&repository, "repository", 0, "delivery repository for a fix round")
+		fs.string(&branch, "branch", 0, "exact work/ branch for a fix round")
+	}, run: func(args []string) error {
 		body, err := queueTargetBody(agent, profile, account)
 		if err != nil {
 			return err
 		}
 		if profile != "" && agent == "" {
 			return usagef("--profile requires --agent when adding")
+		}
+		if err = queueDeliveryBody(body, repository, branch); err != nil {
+			return err
 		}
 		n, err := rt.nodeRef(args[0])
 		if err != nil {
@@ -258,20 +275,38 @@ func (rt *runtime) queueSnapshotCommand() *Command {
 		}}
 	subs := []*Command{capture}
 	for _, action := range []string{"show", "apply", "cancel"} {
-		subs = append(subs, &Command{Name: action, Short: action + " an owned queue snapshot", Use: "queue snapshot " + action + " <snapshot-UUID>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
+		var repository, branch string
+		cmd := &Command{Name: action, Short: action + " an owned queue snapshot", Use: "queue snapshot " + action + " <snapshot-UUID>", minArgs: 1, maxArgs: 1}
+		if action == "apply" {
+			cmd.Use = "queue snapshot apply <snapshot-UUID> [--repository NAME --branch work/branch]"
+			cmd.addFlags = func(fs *flagSet) {
+				fs.string(&repository, "repository", 0, "delivery repository for a fix round")
+				fs.string(&branch, "branch", 0, "exact work/ branch for a fix round")
+			}
+		}
+		cmd.run = func(args []string) error {
 			if !validUUID(args[0]) {
 				return usagef("snapshot id must be a UUID")
 			}
 			method, path := http.MethodGet, "/api/queue-snapshots/"+args[0]
+			var body any
 			if action == "apply" {
 				method = http.MethodPost
 				path += "/apply"
+				payload := map[string]any{}
+				if err := queueDeliveryBody(payload, repository, branch); err != nil {
+					return err
+				}
+				if len(payload) > 0 {
+					body = payload
+				}
 			}
 			if action == "cancel" {
 				method = http.MethodDelete
 			}
-			return rt.queueSnapshotRequest(method, path, nil)
-		}})
+			return rt.queueSnapshotRequest(method, path, body)
+		}
+		subs = append(subs, cmd)
 	}
 	return &Command{Name: "snapshot", Short: "Capture, inspect, apply or cancel parent queue snapshots", Use: "queue snapshot <capture|show|apply|cancel>", subs: subs}
 }

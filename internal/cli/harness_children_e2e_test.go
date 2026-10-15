@@ -16,6 +16,8 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Use the real CLI, agent auth, API and migrated database while the launcher's
@@ -196,5 +198,75 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 	code, _, stderr = runCLI(wrongAgent, "")
 	if code != 2 || !strings.Contains(stderr, fmt.Sprintf("authenticated agent %q", "aeon-coordinator")) || !strings.Contains(stderr, "--parent-session") {
 		t.Fatal("wrong agent diagnostic omitted the authenticated identity or child guidance")
+	}
+}
+
+// Risk: the CLI omits --branch or hides continuation metadata returned by the
+// real admission store. This exercises agent auth, CLI, API and migrated SQL.
+func TestHarnessRegisterContinuesDeliveryEndToEnd(t *testing.T) {
+	isolate(t)
+	d := dbtest.Open(t)
+	if err := db.EnsureTenant(t.Context(), d.App, "aeon", "Aeon"); err != nil {
+		t.Fatal(err)
+	}
+	base := renameServer(t, d, "aeon", true)
+	key := mintAgent(t, base, "continuation-worker")
+	seedProject(t, base, key.Token)
+	p := tenant.Principal{ID: key.PrincipalID, Kind: tenant.Agent}
+	if err := d.Admin.QueryRow(t.Context(), `SELECT id::text FROM tenants WHERE slug='aeon'`).Scan(&p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	var project, ticket, ticketKey string
+	ctx := tenant.WithPrincipal(t.Context(), p)
+	if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE fields->>'project_key'='AEON'`).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Fix delivery',$2 FROM node_kinds k WHERE k.slug='work' RETURNING id::text,key`, p.TenantID, project).Scan(&ticket, &ticketKey); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/linked','CI','Nightly',clock_timestamp())`, p.TenantID, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,'owner/linked',42,$2,clock_timestamp(),'webhook',clock_timestamp())`, p.TenantID, "work/"+strings.ToLower(ticketKey)+"-fix")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEON_URL", base)
+	t.Setenv("AEON_API_KEY", key.Token)
+	dir := t.TempDir()
+	refFile, leaseFile := filepath.Join(dir, "ref"), filepath.Join(dir, "lease")
+	for path, content := range map[string]string{refFile: "continuation-fixture-reference", leaseFile: "continuation-fixture-worker-lease-000000000000"} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	branch := "work/" + strings.ToLower(ticketKey) + "-fix"
+	args := []string{"aeon", "--config", filepath.Join(dir, "missing"), "--json", "harness", "register", "--project", "AEON", "--agent", "continuation-worker", "--harness", "codex", "--harness-version", "1.0.0", "--host", "fixture", "--role", "worker", "--ticket", ticketKey, "--work-shape", "ship", "--branch", branch, "--harness-session-file", refFile, "--worker-lease-file", leaseFile}
+	code, out, stderr := runCLI(args, "")
+	if code != 0 || stderr != "" {
+		t.Fatalf("same-branch CLI register: exit %d stderr %s", code, stderr)
+	}
+	var s map[string]any
+	if err := json.Unmarshal([]byte(out), &s); err != nil {
+		t.Fatal(err)
+	}
+	continuation, ok := s["build_continuation"].(map[string]any)
+	if !ok || continuation["branch"] != branch || continuation["repository"] != "owner/linked" || continuation["pull_request"] != float64(42) || s["parallel_reason"] != nil {
+		t.Fatalf("CLI lost continuation result: %s", out)
+	}
+	if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1 AND type='delivery.continued' AND actor_principal_id=$2 AND after->>'session_id'=$3`, ticket, p.ID, s["id"]).Scan(&count)
+		if err == nil && count != 1 {
+			t.Errorf("CLI continuation audit count = %d", count)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

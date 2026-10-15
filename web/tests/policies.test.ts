@@ -27,6 +27,13 @@ test('the asks list is exactly the registry’s never-on-an-agent-key permission
   assert.equal(new Set(listed.map(p => p.key)).size, listed.length, 'a permission is listed twice')
   assert.deepEqual(listed.sort((a, b) => a.key.localeCompare(b.key)), registry.filter(p => !p.agent).map(({ key, risk }) => ({ key, risk })).sort((a, b) => a.key.localeCompare(b.key)))
   assert.deepEqual(ASK_RISKS.map(group => group.label), ['High risk', 'Medium risk', 'Low risk'])
+  assert.equal(AGENT_ASKS.high.length, 11)
+  assert.deepEqual(AGENT_ASKS.high.find(item => item.keys.includes('agents.create')), { title: 'Provision messaging assistants', keys: ['agents.create'] })
+  // The Policies risk head renders this sentence. The pre-assistant head started
+  // "High risk · 10 ·" and is what web/tests/policies-rules.spec.ts rejected in CI.
+  const highHead = `High risk · ${AGENT_ASKS.high.length} · ${askPreview(AGENT_ASKS.high)}`
+  assert.equal(/^High risk · 10 · Approve or deny/.test(highHead), false)
+  assert.match(highHead, /^High risk · 11 · Approve or deny what agents ask for, answer questions agents ask, change roles and members, transfer workspace ownership, create and revoke API keys, provision messaging assistants,/)
   assert.equal(askPreview(AGENT_ASKS.medium), 'Connect a chat, edit the portal profile, accept a quote in the portal')
 })
 
