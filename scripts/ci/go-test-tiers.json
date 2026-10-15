@@ -5718,6 +5718,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestPoolApplicationNameAttribution","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestPoolQueryExecutionConfigurationApplied","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestPoolRecycleDefaultsAndExplicitOverrides","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPoolSizingAndRetainedSessionAdmission","tier":"ESSENTIAL"}
