@@ -109,7 +109,7 @@ func TestServeConnectionOriginBudget(t *testing.T) {
 	if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Connection fixture') RETURNING id::text`, tenantID).Scan(&agent); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'connection-fixture','Connection fixture') RETURNING id::text`, tenantID).Scan(&role); err != nil {
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'connection_fixture','Connection fixture') RETURNING id::text`, tenantID).Scan(&role); err != nil {
 		t.Fatal(err)
 	}
 	scopes := []string{"events.subscribe", "agents.plan.read", "nodes.read", "run.read", "harness.worker"}
