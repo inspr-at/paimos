@@ -34,6 +34,11 @@ decision replaces it before it goes out. The legend under the sheet never wraps;
 it does not fit it folds into a Keys button. The Desk list shows rev 11 rows with
 inline Approve, Deny, Resolve and Dismiss, which commit through the memo's path, and
 one calm line per source that could not be read, with Try again.
+The chosen stamp takes its outcome's colour. Rows resolve their ticket as the memo
+does, and action requests are named "Action request" on the Desk, in the header
+preview and in the Agents panel. On narrow desks the bar is pinned at the foot:
+Revoke, Edit or Undo appears as a row above Skip and Decide only when the item has
+one, and the folder tab is sized once per round to fit its longest kind label.
 
 Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
 --option '["Title","Description","Answer"]' "Question"` stores a bounded,
