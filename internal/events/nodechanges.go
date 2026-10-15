@@ -191,7 +191,7 @@ func nodeChangeOf(before, after snapshotObject) (NodeChange, bool) {
 // summarizeNodeChanges derives the node changes one event describes, without
 // projects. Unknown types and shapes describe none.
 func summarizeNodeChanges(e Event) []NodeChange {
-	if (e.Type == "entry_check.ticked" || e.Type == "person_step.reassigned") && e.NodeID != nil {
+	if (e.Type == "entry_check.ticked" || e.Type == "node.entry_check_ticked" || e.Type == "node.person_step_reassigned") && e.NodeID != nil {
 		after := objectOf(e.After)
 		revision := stringOf(after["revision"])
 		if revision == nil {

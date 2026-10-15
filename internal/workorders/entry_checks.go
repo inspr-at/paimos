@@ -305,7 +305,7 @@ func EntryOwnerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t EntryTic
 	}
 	if t.ID != "" && t.DefinitionID != "" {
 		var owner string
-		err := tx.QueryRow(ctx, `SELECT after->>'owner_id' FROM events WHERE node_id=$1 AND type='person_step.reassigned' AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, r.ID, t.DefinitionID, t.DefinitionRevision).Scan(&owner)
+		err := tx.QueryRow(ctx, `SELECT after->>'owner_id' FROM events WHERE node_id=$1 AND type='node.person_step_reassigned' AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, r.ID, t.DefinitionID, t.DefinitionRevision).Scan(&owner)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
@@ -416,7 +416,7 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 			}
 			r.CanTick = p.Kind == tenant.Person && r.Owner != nil && (r.Owner.ID == p.ID || authz.RequireProjectAdminTx(ctx, tx, p, project) == nil)
 			var raw []byte
-			err = tx.QueryRow(ctx, `SELECT after FROM events WHERE node_id=$1 AND type='entry_check.ticked' AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, rule.ID, d.ID, d.Revision).Scan(&raw)
+			err = tx.QueryRow(ctx, `SELECT after FROM events WHERE node_id=$1 AND type IN ('entry_check.ticked','node.entry_check_ticked') AND after->>'check_id'=$2 AND after->>'definition_id'=$3 AND (after->>'definition_revision')::timestamptz=$4 ORDER BY id DESC LIMIT 1`, t.ID, rule.ID, d.ID, d.Revision).Scan(&raw)
 			if errors.Is(err, pgx.ErrNoRows) {
 				err = nil
 			} else if err == nil {

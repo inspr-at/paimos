@@ -94,7 +94,7 @@ func (m *Module) handlePersonStepWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reassign := strings.HasSuffix(r.Pattern, "/owner")
-	if err := decodeJSON(body, &in); err != nil || in.Revision.IsZero() || reassign && (in.OwnerID == nil || !workorders.UUID(*in.OwnerID) || in.Checked != nil) || !reassign && (in.Checked == nil || in.OwnerID != nil) {
+	if err := decodeJSON(body, &in); err != nil || in.Revision.IsZero() || reassign && (in.OwnerID == nil || !workorders.UUID(*in.OwnerID) || in.Checked != nil) || !reassign && (in.Checked == nil || in.OwnerID != nil || in.UndoReassignment != nil) || in.UndoReassignment != nil && *in.UndoReassignment < 1 {
 		writeError(w, 400, "a revision and the requested checked state or person owner are required")
 		return
 	}
@@ -135,7 +135,7 @@ func (m *Module) handlePersonStepWrite(w http.ResponseWriter, r *http.Request) {
 		}
 		undoAllowed := false
 		if reassign && in.UndoReassignment != nil && *in.UndoReassignment > 0 {
-			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events e WHERE e.node_id=$1 AND e.id=$2 AND e.type='person_step.reassigned' AND e.actor_principal_id=$3 AND e.before->'owner'->>'id'=$4 AND e.after->>'owner_id'=$5 AND e.after->>'check_id'=$6 AND (e.after->>'revision')::timestamptz=$7 AND e.id=(SELECT max(id) FROM events WHERE node_id=$1 AND type='person_step.reassigned' AND after->>'check_id'=$6))`, id, *in.UndoReassignment, p.ID, *in.OwnerID, step.Owner.ID, check, n.UpdatedAt).Scan(&undoAllowed)
+			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events e WHERE e.node_id=$1 AND e.id=$2 AND e.type='node.person_step_reassigned' AND e.actor_principal_id=$3 AND e.before->'owner'->>'id'=$4 AND e.after->>'owner_id'=$5 AND e.after->>'check_id'=$6 AND (e.after->>'revision')::timestamptz=$7 AND e.id=(SELECT max(id) FROM events WHERE node_id=$1 AND type='node.person_step_reassigned' AND after->>'check_id'=$6))`, id, *in.UndoReassignment, p.ID, *in.OwnerID, step.Owner.ID, check, n.UpdatedAt).Scan(&undoAllowed)
 			if err != nil {
 				return err
 			}
@@ -173,7 +173,7 @@ func (m *Module) handlePersonStepWrite(w http.ResponseWriter, r *http.Request) {
 			}
 			// All mutation locks precede the event counter. The response below
 			// uses only reads and shares the canonical projection predicates.
-			err = m.record(ctx, tx, p.ID, &id, "person_step.reassigned", map[string]any{"check_id": check, "owner": step.Owner}, map[string]any{"check_id": check, "owner_id": candidate.ID, "definition_id": step.DefinitionID, "definition_revision": step.DefinitionRevision, "revision": at, "undo_of": in.UndoReassignment})
+			err = m.record(ctx, tx, p.ID, &id, "node.person_step_reassigned", map[string]any{"check_id": check, "owner": step.Owner}, map[string]any{"check_id": check, "owner_id": candidate.ID, "definition_id": step.DefinitionID, "definition_revision": step.DefinitionRevision, "revision": at, "undo_of": in.UndoReassignment})
 		} else if step.Checked == *in.Checked {
 			return nil
 		} else if check == "human" {
@@ -195,14 +195,15 @@ func (m *Module) handlePersonStepWrite(w http.ResponseWriter, r *http.Request) {
 			if err = tx.QueryRow(ctx, `UPDATE nodes SET updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING updated_at`, id).Scan(&at); err != nil {
 				return err
 			}
-			err = m.record(ctx, tx, p.ID, &id, "entry_check.ticked", nil, map[string]any{"check_id": check, "checked": *in.Checked, "definition_id": step.DefinitionID, "definition_revision": step.DefinitionRevision, "by": workorders.EntryPerson{ID: p.ID, Name: p.Name}, "at": at})
+			mark := map[string]any{"check_id": check, "checked": *in.Checked, "definition_id": step.DefinitionID, "definition_revision": step.DefinitionRevision, "by": workorders.EntryPerson{ID: p.ID, Name: p.Name}, "at": at}
+			err = m.recordEntryTick(ctx, tx, p, id, mark)
 		}
 		if err != nil {
 			return err
 		}
 		out, err = personStepsTx(ctx, tx, p, id)
 		if err == nil && reassign {
-			err = tx.QueryRow(ctx, `SELECT id FROM events WHERE node_id=$1 AND type='person_step.reassigned' AND actor_principal_id=$2 ORDER BY id DESC LIMIT 1`, id, p.ID).Scan(&out.UndoReassignment)
+			err = tx.QueryRow(ctx, `SELECT id FROM events WHERE node_id=$1 AND type='node.person_step_reassigned' AND actor_principal_id=$2 ORDER BY id DESC LIMIT 1`, id, p.ID).Scan(&out.UndoReassignment)
 		}
 		return err
 	})

@@ -221,7 +221,7 @@ func TestPersonStepsOwnershipRoutingAndAudit(t *testing.T) {
 		t.Fatal("named fallback not used for agent assignee", secondOut)
 	}
 	var assignmentCount, completionCount, refusals int
-	if err := testDB.Admin.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='person_step.reassigned'),count(*) FILTER(WHERE type='entry_check.ticked'),count(*) FILTER(WHERE type='entry_checks.refused') FROM events WHERE tenant_id=$1 AND node_id=$2`, admin.TenantID, node.ID).Scan(&assignmentCount, &completionCount, &refusals); err != nil {
+	if err := testDB.Admin.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='node.person_step_reassigned'),count(*) FILTER(WHERE type='entry_check.ticked'),count(*) FILTER(WHERE type='entry_checks.refused') FROM events WHERE tenant_id=$1 AND node_id=$2`, admin.TenantID, node.ID).Scan(&assignmentCount, &completionCount, &refusals); err != nil {
 		t.Fatal(err)
 	}
 	if assignmentCount != 2 || completionCount != 2 || refusals != 1 {

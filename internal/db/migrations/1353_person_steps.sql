@@ -76,7 +76,7 @@ BEGIN
        IF jsonb_array_length(coalesce(rule->'kinds','[]'))>0 THEN applies:=applies AND rule->'kinds' ? n.slug; END IF;
        IF EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(rule->'labels','[]')) v WHERE NOT lower(v)=ANY(label_list)) THEN applies:=false; END IF;
        IF NOT coalesce(applies,false) THEN CONTINUE; END IF;
-       SELECT e.after INTO assigned FROM events e WHERE e.node_id=n.id AND e.type='person_step.reassigned'
+       SELECT e.after INTO assigned FROM events e WHERE e.node_id=n.id AND e.type='node.person_step_reassigned'
          AND e.after->>'check_id'=rule->>'id' AND e.after->>'definition_id'=d.id::text
          AND (e.after->>'definition_revision')::timestamptz=d.updated_at ORDER BY e.id DESC LIMIT 1;
        preferred:=NULL; fallback:=NULL;
@@ -88,7 +88,7 @@ BEGIN
        END IF;
        person_id:=aeon_person_step_owner(n.project_id,preferred,fallback);
        IF person_id IS NULL THEN RAISE EXCEPTION 'person step has no current person owner'; END IF;
-       SELECT e.after INTO mark FROM events e WHERE e.node_id=n.id AND e.type='entry_check.ticked'
+       SELECT e.after INTO mark FROM events e WHERE e.node_id=n.id AND e.type IN ('entry_check.ticked','node.entry_check_ticked')
          AND e.after->>'check_id'=rule->>'id' AND e.after->>'definition_id'=d.id::text
          AND (e.after->>'definition_revision')::timestamptz=d.updated_at ORDER BY e.id DESC LIMIT 1;
        checked:=coalesce((mark->>'checked')::boolean,false);
@@ -104,7 +104,7 @@ BEGIN
  END IF;
  text_value:=coalesce(n.human_check,n.fields->'human_check_completed'->>'text');
  IF text_value IS NOT NULL AND btrim(text_value)<>'' THEN
-   SELECT e.after INTO assigned FROM events e WHERE e.node_id=n.id AND e.type='person_step.reassigned'
+   SELECT e.after INTO assigned FROM events e WHERE e.node_id=n.id AND e.type='node.person_step_reassigned'
      AND e.after->>'check_id'='human' ORDER BY e.id DESC LIMIT 1;
    preferred:=NULL;
    IF assigned IS NOT NULL THEN preferred:=(assigned->>'owner_id')::uuid;
@@ -124,4 +124,4 @@ END
 $$;
 
 CREATE INDEX person_step_events_idx ON events(tenant_id,node_id,type,id DESC)
- WHERE type IN ('person_step.reassigned','entry_check.ticked');
+ WHERE type IN ('node.person_step_reassigned','entry_check.ticked','node.entry_check_ticked');

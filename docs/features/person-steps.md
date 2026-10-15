@@ -25,7 +25,7 @@ and a previous owner with current access. A subsequent edit invalidates it.
 
 Requests are a live projection, not another persisted queue. The source ticket
 creation/status/edit and definition events audit why a request became relevant;
-`person_step.reassigned`, `entry_check.ticked` and the server-written human-check
+`node.person_step_reassigned`, `entry_check.ticked` and the server-written human-check
 completion audit routing and resolution. Repeating the current state makes no
 new write or event. Every mutation binds the ticket revision, and manual-step
 mutations also bind the definition revision. The append-only events retain old
