@@ -291,6 +291,19 @@ func TestAnthropic55MigrationKeepsHistoryAndActivationPolicy(t *testing.T) {
 			if events != 3 {
 				t.Fatalf("migration audit duplicated or missing: %d", events)
 			}
+			if i == 0 {
+				var retained bool
+				if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE type='model.profile_upgraded'
+ AND after->'pause_before'->>'reason'='Weaker successor pause'
+ AND after->'pause_before'->>'until_at' IS NOT NULL
+ AND after->'pause_after'->>'reason'='Owner pause'
+ AND after->'pause_after'->>'until_at' IS NULL)`).Scan(&retained); err != nil {
+					return err
+				}
+				if !retained {
+					t.Fatal("extending the successor pause lost its prior audit value")
+				}
+			}
 			return nil
 		})
 		if err != nil {
