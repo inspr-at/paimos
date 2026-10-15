@@ -152,7 +152,7 @@ test('a stale check leaves the pending flag for review; help never chooses a sta
 test('human-check filter is linked and removes tickets that do not need a check', async ({ page }) => {
   const { calls, data } = await setup(page)
   data.nodes.find(node => node.id === 'n-1')!.state = 'done'
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS?closed=1')
   await page.getByRole('button', { name: 'Add a filter', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Waiting for a person', exact: true }).click()
   const choices = page.getByRole('dialog', { name: 'Filter by Waiting for a person' })

@@ -17,7 +17,12 @@ const reserve = computed(() => checks.error.value || checks.defined.value || (!c
 watch(checks.data, result => { if (result && props.row.is_leaf !== false) layout.remember(props.projectId, !!result.definition) }, { flush: 'sync' })
 const line = computed(() => entryLine(checks.data.value, props.row.state))
 const anchor = ref<HTMLElement | null>(null)
-const waiting = computed(() => steps.data.value?.steps.filter(step => step.active).map(step => ({ owner: step.owner, label: step.label })) ?? props.row.person_waiting ?? line.value?.block?.checks.filter(check => check.applicable && !check.passed && check.owner) ?? [])
+const waiting = computed(() => {
+  const current = steps.data.value?.steps
+  if (current?.length) return current.filter(step => step.active).map(step => ({ owner: step.owner, label: step.label }))
+  if (props.row.person_waiting?.length) return props.row.person_waiting
+  return line.value?.block?.checks.filter(check => check.applicable && !check.passed && check.owner) ?? []
+})
 const ownerText = computed(() => {
   const owner = waiting.value[0]?.owner
   return owner ? owner.id === session.identity?.principal.id ? 'waiting for you' : `waiting for ${owner.name}` : ''
