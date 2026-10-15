@@ -539,6 +539,34 @@ func TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem(t *tes
 		}
 		return err
 	})
+	// A commit status belongs to the SHA. Two PRs sharing a head must not
+	// overwrite one another's binding and hide a hold on the preceding PR.
+	shared := newAdmissionFixture(t)
+	p8 := shared.gh.pulls[7]
+	p8.Number = 8
+	shared.gh.pulls[8] = p8
+	shared.tx(t, func(tx pgx.Tx) error {
+		if err := db.LockTree(ctx, tx, shared.person.TenantID); err != nil {
+			return err
+		}
+		o, err := shared.m.observationTx(ctx, tx, p8, shared.at)
+		if err != nil {
+			return err
+		}
+		_, _, err = saveTx(ctx, tx, shared.person.TenantID, o)
+		return err
+	})
+	shared.approve(p8, "ok")
+	if err := shared.m.publishAdmission(ctx, p8.Head); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, shared, p8.Head, "success")
+	shared.hold(t, true)
+	if err := shared.m.publishAdmission(ctx, p8.Head); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, shared, p8.Head, "failure")
+
 }
 
 type admissionRaceReader struct {

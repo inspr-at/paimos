@@ -79,6 +79,9 @@ func (m *Module) admissionStateTx(ctx context.Context, tx pgx.Tx, sha string) (a
 	if err != nil {
 		return p, "", err
 	}
+	if len(raw) > 64<<10 {
+		return p, "failure", nil
+	}
 	if err = json.Unmarshal(raw, &p.Members); err != nil {
 		return p, "", err
 	}
