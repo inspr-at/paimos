@@ -39,11 +39,16 @@ replay emits no further continuation history.
 Fix orders can bind `build_delivery: {repository, branch}` at creation. Queue
 add (`POST /api/queue`) and parent-snapshot apply accept the same optional
 binding. The server validates it, admits the exact pending delivery, and stores
-it on the created order. Omitting it, or naming another repository or branch,
-still refuses with **already built — ship it** and creates no work. Replaying
-the same target and binding returns the existing queued run. Recurrence
-enqueue accepts a binding when its caller supplies one. A new occurrence has
-no pending delivery of its own, so occurrence creation does not invent one.
+it on the created order. Only a ticket whose own pending delivery the binding
+continues stores it: a ticket with nothing pending, such as a clean sibling in
+a parent snapshot, is queued without a binding, so its worker keeps its own
+branch. Omitting it, or naming another repository or branch, still refuses
+with **already built — ship it** and creates no work. Replaying the same
+target and stored binding returns the existing queued run; a delivery that
+became pending after enqueue refuses the replay instead of attaching silently.
+Recurrence enqueue applies the same rule when its caller supplies a binding. A
+new occurrence has no pending delivery of its own, so occurrence creation does
+not invent one.
 The binding is stored in the order's existing node fields and returned with the
 order. Queue routing and daemon pickup pass that stored binding to the same
 guard; the frozen lead assignment also retains it and rejects a changed binding.

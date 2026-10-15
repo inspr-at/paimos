@@ -2772,6 +2772,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestElapsedBudgetAndZeroCostCeiling","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestEnqueueSystemStoresOnlyContinuedDelivery","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestEscalatedClaimRequiresFreshMeasuredRoom","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestHeartbeatKeepsWaiting","tier":"GATED-FULL"}

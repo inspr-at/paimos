@@ -55,6 +55,16 @@ type BuildAdmission struct {
 	ticket       string
 }
 
+// ContinuedBinding is the binding an enqueue may store: the candidate only when
+// it continued this ticket's own pending delivery. A ticket with nothing
+// pending stays unbound, so a fix-round binding never steers a clean sibling.
+func (a BuildAdmission) ContinuedBinding() *BuildCandidate {
+	if a.Continuation == nil {
+		return nil
+	}
+	return a.Candidate
+}
+
 func (a BuildAdmission) Changes(session, run string) []events.Change {
 	if a.Continuation == nil {
 		return nil
