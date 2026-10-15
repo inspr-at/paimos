@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -48,7 +50,38 @@ func TestPoolRecycleDefaultsAndExplicitOverrides(t *testing.T) {
 // operators cannot control retained server plans through the existing URL.
 // Check the actual connection and retained statements, not only parsed fields.
 func TestPoolQueryExecutionConfigurationApplied(t *testing.T) {
-	fresh := dbtest.Open(t)
+	// SELECT $1::int needs a real restricted app connection, not migrations.
+	fresh, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := fresh.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	service := filepath.Join(t.TempDir(), "pg_service.conf")
+	if err := os.WriteFile(service, []byte("[fixture]\nhost=localhost\ndbname=fixture\ndefault_query_exec_mode=cache_describe\nstatement_cache_capacity=96\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	serviceQuery := url.Values{"service": {"fixture"}, "servicefile": {service}}
+	for _, tc := range []struct {
+		url      string
+		mode     pgx.QueryExecMode
+		capacity int
+	}{
+		{"host=localhost dbname=fixture default_query_exec_mode=cache_describe statement_cache_capacity=96", pgx.QueryExecModeCacheDescribe, 96},
+		{"postgres://localhost/fixture?" + serviceQuery.Encode(), pgx.QueryExecModeCacheDescribe, 96},
+		{"postgres://localhost/fixture?" + serviceQuery.Encode() + "&default_query_exec_mode=cache_statement&statement_cache_capacity=128", pgx.QueryExecModeCacheStatement, 128},
+	} {
+		cfg, err := db.ParsePoolConfig(tc.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ConnConfig.DefaultQueryExecMode != tc.mode || cfg.ConnConfig.StatementCacheCapacity != tc.capacity {
+			t.Fatal("keyword/service/URL query configuration lost its explicit settings")
+		}
+	}
 	for _, tc := range []struct {
 		params   string
 		mode     pgx.QueryExecMode
