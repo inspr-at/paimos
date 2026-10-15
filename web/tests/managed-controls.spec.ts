@@ -309,7 +309,9 @@ test('setting rejected keeps reported values and surfaces the receipt', async ({
   await editor(page, 'Model').getByRole('button', { name: 'Save model' }).click()
   await expect(feedback(page)).toHaveText('Model rejected by the harness.')
   await more(page).click()
-  await expect(settingItem(page, 'model')).toContainText('fixture-model')
+  await expect(settingItem(page, 'model')).toContainText('Fixture Model · high')
+  await settingItem(page, 'model').click()
+  await expect(editor(page, 'Model').getByLabel('Model', { exact: true })).toHaveValue('fixture-model')
 })
 
 test('setting pending blocks competing settings and process controls', async ({ page }) => {

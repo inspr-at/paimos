@@ -93,7 +93,16 @@ stay unchanged. No assertion is removed without checking its replacement.
 | `web/tests/managed-controls.spec.ts` | Inline Steer/settings, a second More menu and inline feedback → the one header More menu, anchored setting/steer editors or phone sheets, and header receipts. Check real action items remain disabled while pending/unauthorized; retain ownership payloads, drafts, retry IDs, request counts, confirmation and reported-value assertions. |
 | `web/tests/agents.spec.ts` | Session actions group → Panel actions; retain ticket text, full link, state, hover/focus and header/tab geometry assertions. |
 | `web/tests/aeon-1213-agents-split.spec.ts` | A floating dock throughout an open split → the header More action while open and the original launcher when closed; retain registered preset keys, divider bounds, person isolation, shared preferences and geometry through layouts. Sheets expose More while the old dock stays hidden. |
-| `web/tests/attach-watch.spec.ts` | No More button for a watched session → More is available for view/layout choices, and its actual menu contains no mutation/settings actions; no textbox or automatic watch is introduced. |
+| `web/tests/attach-watch.spec.ts` | No More button for a watched session → More is available for view/layout choices, and its actual menu contains no mutation/settings actions, including Recover, Remove, Restart and Reconnect; no textbox or automatic watch is introduced. |
+
+This preserves the watched-session read-only boundary in the product too:
+the panel's managed-settings, recovery and removal predicates reject watched
+sessions, and the Restart/Reconnect item uses the same watch guard. Moving
+all actions into More must not expose mutations that the retired header hid.
+Managed retry controls sit above their feedback in the header. Feedback grows
+downward in normal flow, so an error cannot cover Retry or move the header's
+existing actions. The retained lost-response test clicks the real Retry
+button and proves that its request ID and payload are reused.
 
 The nine new panel cases move, unchanged, into `native-session-program.spec.ts`
 (mode/identity/menu), `native-session-program-{390,1024,1440}.spec.ts` (two

@@ -97,7 +97,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await resume.hover()
     await expect(resume.locator('small')).toHaveText(OFF)
     await expectStableControls({ controls: { resume, more, close }, scrollAreas: { body: panel.locator('.pane-body') }, interactions: [
-      { name: 'Resume cannot submit', run: async () => { await resume.dispatchEvent('click'); await expect(resume).toBeDisabled() } },
+      { name: 'Resume cannot submit', run: async () => { await resume.dispatchEvent('click'); await expect(page.getByRole('menu', { name: 'More session actions' })).toBeHidden(); await more.click(); await expect(resume).toBeDisabled() } },
     ] })
     await capture('lead-panel-off')
     expect(mocked.state.calls.filter(c => c.method === 'POST' || c.method === 'PUT')).toEqual([])

@@ -66,7 +66,7 @@ test('watch is default-off, including the approving owner', async ({ page }) => 
   const more = panel.getByRole('button', { name: 'More session actions', exact: true })
   await expect(more).toBeVisible()
   await more.click()
-  await expect(page.getByRole('menu', { name: 'More session actions' }).getByRole('menuitem', { name: /^(Message|Interrupt|Pause|Stop|Resume|Recover|Name|Model|Effort)/ })).toHaveCount(0)
+  await expect(page.getByRole('menu', { name: 'More session actions' }).getByRole('menuitem', { name: /^(Message|Interrupt|Pause|Stop|Resume|Recover|Remove|Restart|Reconnect|Name|Model|Effort)/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
 })
 test('live text is inert, bounded, cleared on end and never automatically rejoined', async ({ page }) => {

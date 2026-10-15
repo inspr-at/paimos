@@ -147,16 +147,16 @@ const removal = ref<{ remove: () => void }>()
 // control capability collapses Recover, Remove and settings into one overflow.
 const managedControls = computed(() => {
   const session = props.view?.session
-  return !!session && session.management_mode === 'managed' && session.advertised_capabilities.includes('managed_control_v1')
+  return !!session && !session.watch && session.management_mode === 'managed' && session.advertised_capabilities.includes('managed_control_v1')
 })
 // A watched session is read-only (AEON-258): no controls to collapse.
 const showRecover = computed(() => {
   const session = props.view?.session
-  return !!session && !session.archived_at && (can('harness.recover', session.project_id) || can('harness.force_stop', session.project_id))
+  return !!session && !session.watch && !session.archived_at && (can('harness.recover', session.project_id) || can('harness.force_stop', session.project_id))
 })
 const showRemove = computed(() => {
   const session = props.view?.session
-  return !!session && auth.identity?.principal.kind === 'person' && !session.archived_at && can('harness.read', session.project_id)
+  return !!session && !session.watch && auth.identity?.principal.kind === 'person' && !session.archived_at && can('harness.read', session.project_id)
 })
 // AEON-1212: one panel. Choice on opening only; live state never pulls someone
 // off the tab they are reading. Both preferences belong to the signed-in person.
@@ -566,6 +566,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </div>
       </div>
       <p v-if="isLead && why" class="sr-only">Opened on {{ PANEL_TAB_LABEL[openedTab] }}: {{ why.replace('Session is', 'Details is') }}</p>
+      <ManagedSessionControls v-if="view && !loading && !reported?.watch && !nativeKnown" ref="managed" overflow :session="reported || view.session" :now="now" :run-status="view.run?.status" />
       <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
       <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" :width="360" @close="closeActions">
         <div class="panel-menu" :class="{ 'phone-full': panelLayout === 'full' }" role="menu" aria-label="More session actions">
@@ -589,14 +590,13 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-if="managedControls">
             <button v-for="setting in (['rename', 'model', 'effort'] as const)" :key="setting" type="button" role="menuitem" class="panel-menu-item" :disabled="!!settingReason(setting)" @click="editSetting(setting)"><AppIcon name="edit" :size="16" /><span>{{ setting === 'rename' ? 'Name…' : setting === 'model' ? 'Model…' : 'Effort…' }}<small>{{ settingReason(setting) || (setting === 'rename' ? view.name : setting === 'model' ? modelLine : view.session.reasoning_effort) }}</small></span></button>
           </template>
-          <button v-if="!nativeKnown && agentRecovery.action(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); closeActions(false)"><AppIcon name="refresh" :size="16" /><span>{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
+          <button v-if="!reported?.watch && !nativeKnown && agentRecovery.action(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); closeActions(false)"><AppIcon name="refresh" :size="16" /><span>{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
         </div>
       </FloatingPanel>
     </header>
     <template v-if="view && !loading">
       <SessionRecovery ref="recovery" hide-trigger :session="view.session" />
       <RemoveSessionDialog ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
-      <ManagedSessionControls v-if="!reported?.watch && !nativeKnown" ref="managed" overflow :session="reported || view.session" :now="now" :run-status="view.run?.status" />
     </template>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -881,7 +881,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .pane-icon { display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--ink-2); cursor: pointer; }
 .pane-icon:hover { background: var(--row-hover); color: var(--ink); }
 .pane-icon:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
-.session-feedback { position: absolute; z-index: 2; top: 100%; left: 12px; right: 12px; padding: 8px 12px; margin: 0; background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: 12px; overflow-wrap: anywhere; }
+.session-feedback { padding: 8px 12px; margin: 0; background: var(--surface-raised); font-size: 12px; overflow-wrap: anywhere; }
 .panel-menu { display: grid; gap: 2px; min-width: 0; }
 .panel-menu-item { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--ink); text-align: left; text-decoration: none; font: inherit; font-size: 13px; cursor: pointer; }
 .panel-menu-item > svg { flex: none; color: var(--ink-2); }

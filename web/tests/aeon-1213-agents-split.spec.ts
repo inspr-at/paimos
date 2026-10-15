@@ -551,8 +551,9 @@ test.describe('touch', () => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     const { data } = await setup(page, 'dark')
     await page.goto(`/agents/${data.sessions[1]!.id}`)
-    await expect(dock(page)).toBeVisible()
-    const box = (await dock(page).boundingBox())!
+    const panelMore = pane(page).getByRole('button', { name: 'More session actions', exact: true })
+    await expect(panelMore).toBeVisible()
+    const box = (await panelMore.boundingBox())!
     expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44)
     const hitWidth = await page.locator('.agents-divider').evaluate(el => { const css = getComputedStyle(el, '::after'); return el.getBoundingClientRect().width - parseFloat(css.left) - parseFloat(css.right) })
     expect(hitWidth).toBeGreaterThanOrEqual(44)
