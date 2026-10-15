@@ -5,6 +5,7 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport } from '../src/lib/serviceTier'
+import type { EntryChecks } from '../src/lib/entryChecks'
 
 test.use({ screenshot: 'only-on-failure' })
 
@@ -21,6 +22,7 @@ const report: TierReport = {
 }
 async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable' | 'compact') {
   const readinessCalls: string[] = []
+  const checklistCalls: string[] = []
   await page.addInitScript(() => {
     const openedTabs: string[] = []
     Object.assign(window, { openedTabs })
@@ -35,6 +37,23 @@ async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable'
   // spec checks hit areas, rather than the automatic-column policy.
   data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'updated'] }
   await mockWork(page, data, { admin: true })
+  // AEON-1315 replaces the missing-fields card with the project's Ready
+  // checklist. Keep both failures real in that read, as in the readiness reply.
+  await page.route('**/api/nodes/*/entry-checks', route => {
+    const id = new URL(route.request().url()).pathname.split('/')[3]!
+    checklistCalls.push(id)
+    if (id !== 'n-2') return route.fallback()
+    const node = data.nodes.find(node => node.id === id)!
+    const checks: EntryChecks = {
+      node_id: id, revision: node.updated_at,
+      definition: { id: 'definition', revision: node.created_at, source: 'project', checks: { in_progress: [{ id: 'estimate_set' }, { id: 'acceptance_present' }] } },
+      blocks: [{ to_status: 'in_progress', passed: 0, total: 2, checks: [
+        { id: 'estimate_set', label: 'Estimate set', applicable: true, passed: false, reason: 'Add an estimate.', can_tick: false },
+        { id: 'acceptance_present', label: 'Acceptance criteria written', applicable: true, passed: false, reason: 'Write acceptance criteria.', can_tick: false },
+      ] }], entries: [], latest_refusal: null,
+    }
+    return route.fulfill({ json: checks })
+  })
   const agents = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
     tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   agents.sessions.splice(1); agents.approvals.splice(0); agents.messages.splice(0)
@@ -64,7 +83,7 @@ async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable'
     }
     return route.fallback()
   })
-  return { readinessCalls }
+  return { readinessCalls, checklistCalls }
 }
 
 // Chromium excludes the right/bottom boundary of a box. Sample -22 exactly,
@@ -131,7 +150,7 @@ for (const { width, coarse } of [
     test('ticket and tier controls keep their visuals, reach and position', async ({ page }) => {
       const expanded = width <= 720 || coarse
       const phone = width <= 720
-      const { readinessCalls } = await setup(page, theme, density)
+      const { readinessCalls, checklistCalls } = await setup(page, theme, density)
       await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(coarse)
@@ -218,28 +237,35 @@ for (const { width, coarse } of [
           expect(b.x + b.width / 2 + 22, 'Open target stays inside its row').toBeLessThanOrEqual(rowBox.x + rowBox.width)
         } else expect(centres).toBe(density === 'compact' ? 24 : 26)
         const edges = coarse ? [[-21, 0], [21, 0], [0, -21], [0, 21]] as const : [[0, 0]] as const
-        const missing = page.getByRole('dialog', { name: 'PHAROS-12: what is missing to queue it', exact: true })
+        const missing = page.getByRole('dialog', { name: 'PHAROS-12: Ready checks', exact: true })
         let openedCount = 0
         const openedTabs = () => page.evaluate(() => (window as Window & { openedTabs: string[] }).openedTabs)
         await expectStableControls({ controls: { row: second, actions: second.locator('.row-actions'), queue, open, title: second.locator('.title-link') }, interactions: edges.flatMap(([dx, dy]) => [
           { name: `Queue edge ${dx},${dy}`, run: async () => {
-            const rect = (await queue.boundingBox())!, before = readinessCalls.length
+            const rect = (await queue.boundingBox())!, before = readinessCalls.length, checksBefore = checklistCalls.length
             await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
             await expect(missing).toBeVisible()
-            await expect(missing.getByRole('status')).toContainText('Still missing: estimate, acceptance criteria.')
+            await expect(missing.getByRole('heading', { name: 'Ready 0 of 2' })).toBeVisible()
+            await expect(missing.locator('.nr-item.missing')).toHaveCount(2)
+            await expect(missing.getByText('Estimate set', { exact: true })).toBeVisible()
+            await expect(missing.getByText('Acceptance criteria written', { exact: true })).toBeVisible()
+            await expect(missing.getByRole('button', { name: 'Queue', exact: true })).toBeDisabled()
             expect(readinessCalls.length).toBeGreaterThan(before)
             expect(readinessCalls.every(id => id === 'n-2')).toBe(true)
+            expect(checklistCalls.length).toBeGreaterThan(checksBefore)
+            expect(checklistCalls.slice(checksBefore).every(id => id === 'n-2')).toBe(true)
             expect(await openedTabs()).toHaveLength(openedCount)
             await page.keyboard.press('Escape'); await expect(missing).toHaveCount(0)
           } },
           { name: `Open edge ${dx},${dy}`, run: async () => {
-            const rect = (await open.boundingBox())!, before = readinessCalls.length
+            const rect = (await open.boundingBox())!, before = readinessCalls.length, checksBefore = checklistCalls.length
             await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
             openedCount++
             const opened = await openedTabs()
             expect(opened).toHaveLength(openedCount)
             expect(new URL(opened.at(-1)!, page.url()).pathname).toBe('/p/PHAROS/PHAROS-12')
             expect(readinessCalls).toHaveLength(before)
+            expect(checklistCalls).toHaveLength(checksBefore)
             await expect(missing).toHaveCount(0)
           } },
         ]) })

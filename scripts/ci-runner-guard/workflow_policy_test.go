@@ -529,7 +529,7 @@ func TestWorkflowPolicyAllowsReviewedWorkflowsAndFilteredPRs(t *testing.T) {
 // planningEnabledEnv clears the AEON-1333 kill switch for one gate simulation.
 // CI publishes CI_IMPACT=off on the test process. These cases prove classified
 // lanes, the static layout and reuse while planning stays enabled. Kill-switch
-// rejections stay in impact-plan.test.mjs, which sets CI_IMPACT=off itself.
+// rejection scenarios set CI_IMPACT=off explicitly.
 // Assigned keys replace inherited entries so the shell observes that value.
 func planningEnabledEnv(t *testing.T, values map[string]string) []string {
 	t.Helper()
@@ -539,21 +539,37 @@ func planningEnabledEnv(t *testing.T, values map[string]string) []string {
 	}
 	assigned["CI_IMPACT"] = ""
 	assigned["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
-	env := make([]string, 0, len(os.Environ())+len(assigned))
+	return scenarioEnviron(assigned)
+}
+
+// scenarioEnviron isolates workflow switches from the caller's scenario.
+// Explicit scenario values replace inherited entries, including CI_IMPACT=off,
+// so ambient workflow settings cannot mask a lane or disable its kill switch.
+func scenarioEnviron(scenario map[string]string) []string {
+	blocked := map[string]struct{}{
+		"CI_IMPACT":        {},
+		"CI_AFFECTED_LANE": {},
+		"CI_MG_REUSE":      {},
+		"CI_TREE_REUSE":    {},
+	}
+	env := make([]string, 0, len(os.Environ())+len(scenario))
 	for _, entry := range os.Environ() {
-		name, _, _ := strings.Cut(entry, "=")
-		if _, replaced := assigned[name]; replaced {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, drop := blocked[key]; drop {
+			continue
+		}
+		if _, replaced := scenario[key]; replaced {
 			continue
 		}
 		env = append(env, entry)
 	}
-	names := make([]string, 0, len(assigned))
-	for name := range assigned {
+	names := make([]string, 0, len(scenario))
+	for name := range scenario {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		env = append(env, name+"="+assigned[name])
+		env = append(env, name+"="+scenario[name])
 	}
 	return env
 }
@@ -813,5 +829,74 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 	// release-check has no layout input: the static lane keeps release checks.
 	if _, exists := mapping(mapping(mapping(jobs["release-check"])["steps"].([]any)[0])["env"])["TIER_LAYOUT"]; exists {
 		t.Fatal("release checks must not vary with the tier layout")
+	}
+}
+
+// The release-check job publishes CI_IMPACT=off. Aggregate simulations must
+// keep the lanes they classify, and must still reject those lanes when the
+// scenario itself engages the kill switch.
+func TestAggregateScenariosIgnoreAmbientImpactKillSwitch(t *testing.T) {
+	t.Setenv("CI_IMPACT", "off")
+	t.Setenv("CI_AFFECTED_LANE", "off")
+	var workflow map[string]any
+	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
+		t.Fatal(err)
+	}
+	jobs := mapping(workflow["jobs"])
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(id string, index int, values map[string]string) error {
+		t.Helper()
+		steps := mapping(jobs[id])["steps"].([]any)
+		script, _ := mapping(steps[index])["run"].(string)
+		scenario := make(map[string]string, len(values)+1)
+		for name, value := range values {
+			scenario[name] = value
+		}
+		scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = root
+		cmd.Env = scenarioEnviron(scenario)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%w: %s", err, out)
+		}
+		return nil
+	}
+	docs := map[string]string{
+		"CI_LANE": "docs-only", "CI_PLAN": "success", "REUSE": "none", "REUSE_PROOF": "skipped",
+		"SOURCE_RUN": "", "CACHE_PRIME": "skipped", "TIER_PLAN": "success", "TIER_LAYOUT": "full",
+		"GO_TEST": "skipped", "GO_STATIC": "skipped", "GO_TIMING": "skipped",
+	}
+	if err := run("go", 0, docs); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected a docs-only aggregate: %v", err)
+	}
+	spec := map[string]string{
+		"CI_LANE": "spec-only", "CI_PLAN": "success", "REUSE": "none", "REUSE_PROOF": "skipped",
+		"SOURCE_RUN": "", "CACHE_PRIME": "skipped", "TIER_PLAN": "success", "TIER_LAYOUT": "full",
+		"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "success",
+	}
+	webSteps := mapping(jobs["web"])["steps"].([]any)
+	if err := run("web", len(webSteps)-1, spec); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected a spec-only aggregate: %v", err)
+	}
+	static := map[string]string{
+		"CI_LANE": "full", "CI_PLAN": "success", "TIER_PLAN": "success", "TIER_LAYOUT": "static",
+		"REUSE": "none", "REUSE_PROOF": "skipped", "SOURCE_RUN": "", "CACHE_PRIME": "skipped",
+		"GITHUB_EVENT_NAME": "pull_request", "CHECK_RESULT": "skipped",
+	}
+	e2eSteps := mapping(jobs["e2e"])["steps"].([]any)
+	if err := run("e2e", len(e2eSteps)-1, static); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected the static e2e layout: %v", err)
+	}
+	killed := make(map[string]string, len(docs)+1)
+	for name, value := range docs {
+		killed[name] = value
+	}
+	killed["CI_IMPACT"] = "off"
+	if err := run("go", 0, killed); err == nil {
+		t.Fatal("scenario CI_IMPACT=off accepted a docs-only aggregate")
 	}
 }

@@ -212,7 +212,7 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 
 // planningEnabledEnv clears the AEON-1333 kill switch for one gate simulation.
 // CI publishes CI_IMPACT=off on the test process. Reuse proof is a planning-
-// enabled path; impact-plan.test.mjs sets CI_IMPACT=off when it must reject reuse.
+// enabled path; kill-switch scenarios set CI_IMPACT=off to reject reuse.
 func planningEnabledEnv(t *testing.T, values map[string]string) []string {
 	t.Helper()
 	assigned := make(map[string]string, len(values)+2)
@@ -221,21 +221,37 @@ func planningEnabledEnv(t *testing.T, values map[string]string) []string {
 	}
 	assigned["CI_IMPACT"] = ""
 	assigned["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
-	env := make([]string, 0, len(os.Environ())+len(assigned))
+	return scenarioEnviron(assigned)
+}
+
+// scenarioEnviron isolates workflow switches from the caller's scenario.
+// Explicit scenario values replace inherited entries, including CI_IMPACT=off,
+// so ambient workflow settings cannot mask a lane or disable its kill switch.
+func scenarioEnviron(scenario map[string]string) []string {
+	blocked := map[string]struct{}{
+		"CI_IMPACT":        {},
+		"CI_AFFECTED_LANE": {},
+		"CI_MG_REUSE":      {},
+		"CI_TREE_REUSE":    {},
+	}
+	env := make([]string, 0, len(os.Environ())+len(scenario))
 	for _, entry := range os.Environ() {
-		name, _, _ := strings.Cut(entry, "=")
-		if _, replaced := assigned[name]; replaced {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, drop := blocked[key]; drop {
+			continue
+		}
+		if _, replaced := scenario[key]; replaced {
 			continue
 		}
 		env = append(env, entry)
 	}
-	names := make([]string, 0, len(assigned))
-	for name := range assigned {
+	names := make([]string, 0, len(scenario))
+	for name := range scenario {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		env = append(env, name+"="+assigned[name])
+		env = append(env, name+"="+scenario[name])
 	}
 	return env
 }
@@ -1064,5 +1080,61 @@ func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
 		if err := execute("PR_CONFIRM_RUN", "124"); err == nil {
 			t.Fatalf("%s accepts confirmation of another run", id)
 		}
+	}
+}
+
+// The release-check job publishes CI_IMPACT=off. Reuse simulations must keep
+// a verified result, and must still reject it when the scenario itself
+// engages the kill switch.
+func TestReuseAggregatesIgnoreAmbientImpactKillSwitch(t *testing.T) {
+	t.Setenv("CI_IMPACT", "off")
+	t.Setenv("CI_AFFECTED_LANE", "off")
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	goJob := treeMap(jobs["go"])
+	verified := map[string]string{
+		"REUSE": "merge_group", "REUSE_PROOF": "success", "SOURCE_RUN": "123",
+		"CACHE_PRIME": "success", "CI_PLAN": "success", "CI_LANE": "full",
+		"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
+		"TIER_PLAN": "success", "TIER_LAYOUT": "full",
+		"GO_TEST": "skipped", "GO_STATIC": "skipped", "GO_TIMING": "skipped",
+	}
+	confirmed := map[string]string{
+		"REUSE": "pull_request", "REUSE_PROOF": "success", "PR_CONFIRM_REUSE": "pull_request",
+		"PR_CONFIRM_RUN": "123", "SOURCE_RUN": "123", "CACHE_PRIME": "skipped",
+		"CI_PLAN": "success", "CI_LANE": "full", "TIER_LAYOUT": "full",
+		"GITHUB_EVENT_NAME": "merge_group", "TIER_PLAN": "success",
+		"GO_TEST": "skipped", "GO_STATIC": "success", "GO_TIMING": "success",
+	}
+	run := func(script string, values map[string]string) error {
+		t.Helper()
+		scenario := make(map[string]string, len(values)+1)
+		for name, value := range values {
+			scenario[name] = value
+		}
+		scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = root(t)
+		cmd.Env = scenarioEnviron(scenario)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%w: %s", err, out)
+		}
+		return nil
+	}
+	mainGate := reuseStep(t, goJob, "Require every Go shard and the static checks")
+	if err := run(mainGate["run"].(string), verified); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected verified merge-group reuse: %v", err)
+	}
+	prGate := reuseStep(t, goJob, "Require confirmed PR execution proof")
+	if err := run(prGate["run"].(string), confirmed); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected confirmed PR reuse: %v", err)
+	}
+	killed := make(map[string]string, len(verified)+1)
+	for name, value := range verified {
+		killed[name] = value
+	}
+	killed["CI_IMPACT"] = "off"
+	if err := run(mainGate["run"].(string), killed); err == nil {
+		t.Fatal("scenario CI_IMPACT=off accepted merge-group reuse")
 	}
 }
