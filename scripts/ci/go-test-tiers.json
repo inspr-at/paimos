@@ -2772,6 +2772,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestElapsedBudgetAndZeroCostCeiling","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestEnqueueSystemStoresOnlyContinuedDelivery","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestEscalatedClaimRequiresFreshMeasuredRoom","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestHeartbeatKeepsWaiting","tier":"GATED-FULL"}
@@ -2832,9 +2834,17 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueCancellationInterruptsHTTPTransport","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueEnqueueRoutesAndClaimsBoundDelivery","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueEscalationCannotBypassBoundedRetry","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueFixOrderContinuesDeliveryBranch","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueOversizedBodyDoesNotWaitForTenantFence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueRouteContinuesBoundDelivery","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueSnapshotApplyContinuesBoundDelivery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueStalledBodyHoldsNoTenantFence","tier":"GATED-FULL"}
     ,
@@ -4756,6 +4766,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessReadersUseTheFence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessRegisterContinuesDeliveryEndToEnd","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRegisterSendsVendorSessionRef","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRegistrationFileTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -6406,6 +6418,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestDeletingSessionRemovesReadMarkers","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestDeliveryContinuationStoreBindingAndRollback","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestDeskAnswerReferencesSurviveVerifiedResumeAndLateCorrection","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestDrainLeaseHoldsOffTheSweeper","tier":"GATED-FULL"}
@@ -6831,6 +6845,8 @@
     {"kind":"go","package":"internal/harness","name":"TestTicketBuilderAdmissionRaceBindingRevivalAndQueue","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestTicketBuiltUnmergedAdmissionUsesLinkedDeliveryAndMerge","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketDeliveryContinuationAdmissionAndAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestTicketEtaRetainsWorkingHintWithoutReport","tier":"GATED-FULL"}
     ,
@@ -10611,6 +10627,10 @@
     {"kind":"go","package":"internal/workorders","name":"TestBufferEndpointBodyCancellationKeepsInterruptDeadline","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestBufferEndpointBodyDeadlineBudget","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/workorders","name":"TestBuildAdmissionContinuationStore","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/workorders","name":"TestBuildDeliveryBindingBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestEndpointBodyNetworkDeadline","tier":"GATED-FULL"}
     ,
