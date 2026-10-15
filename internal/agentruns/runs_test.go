@@ -68,6 +68,16 @@ func setup(t *testing.T) *fixture {
 	dbtest.BindRole(t, f.d, tid, f.person.ID, "admin")
 	dbtest.BindRole(t, f.d, tid, f.agent.ID, "member")
 	dbtest.BindRole(t, f.d, tid, f.other.ID, "member")
+	// AEON-1248 Q3: readiness is explicitly configured; no definition is free movement.
+	// Retain the queue tests' readiness risks with the original three checks.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var kind string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'definition','Definition','DEF','list') RETURNING id::text`, tid).Scan(&kind); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) VALUES($1,$2,aeon_next_node_key($1,'DEF'),'Queue checks','{"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"blocker_named"}]}}')`, tid, kind)
+		return err
+	})
 	f.profile = uuid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'test','1','codex','openai','requested-test-model','high','strong')`, tid, f.profile)
@@ -507,7 +517,12 @@ func TestClaimRejectsStaleProbeAndReplacedGeneration(t *testing.T) {
 
 func TestCreationRollsBackWhenEventCannotBeWritten(t *testing.T) {
 	f := setup(t)
-	baseline := f.count(t, f.person, `SELECT count(*) FROM events`)
+	// setup commits the queue definition and its key. The failed create must
+	// add nothing on top of that baseline.
+	baselines := map[string]int64{}
+	for _, table := range []string{"work_orders", "work_criteria", "nodes", "events", "node_key_counters"} {
+		baselines[table] = f.count(t, f.person, `SELECT count(*) FROM `+table)
+	}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.Admin, f.person.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_work_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
 		 IF NEW.type='work_order.created' THEN RAISE EXCEPTION 'test event failure' USING ERRCODE='XX000'; END IF;
@@ -523,11 +538,7 @@ func TestCreationRollsBackWhenEventCannotBeWritten(t *testing.T) {
 	}
 	f.call(t, f.person, "POST", "/api/work-orders", map[string]any{"title": "Must roll back", "criteria": []string{"not persisted"}}, 500, nil)
 	for _, table := range []string{"work_orders", "work_criteria", "nodes", "events", "node_key_counters"} {
-		want := int64(0)
-		if table == "events" {
-			want = baseline
-		}
-		if f.count(t, f.person, `SELECT count(*) FROM `+table) != want {
+		if f.count(t, f.person, `SELECT count(*) FROM `+table) != baselines[table] {
 			t.Fatalf("%s survived failed event", table)
 		}
 	}

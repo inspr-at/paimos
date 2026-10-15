@@ -617,6 +617,10 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   // AEON-1289 adds its terminal regressions after the prior baseline; charge the spec's weight separately.
   const expertTerminal = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/native-expert-terminal.spec.ts')
   assert.ok(expertTerminal && gated.some(spec => spec.file === expertTerminal.file), 'Expert terminal regressions must remain in the gate')
+  // AEON-1315 adds the entry-check regression; keep the historical gate budget
+  // unchanged and charge this new spec's explicit scheduling weight.
+  const entryChecks = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/entry-checks.spec.ts')
+  assert.ok(entryChecks && gated.some(spec => spec.file === entryChecks.file), 'Entry-check regressions must remain in the gate')
   // AEON-1331 adds lesson decisions after the prior baseline. Preserve that
   // baseline and charge only this slice's independently bounded spec budget.
   // AEON-1363 adds three Knowledge lesson-line cases to the same spec.
@@ -627,16 +631,16 @@ test('ungated groups stay declared and checked but only run with --all', () => {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== deskLessons).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + deskLessons.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal and lesson decision specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check and lesson decision specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

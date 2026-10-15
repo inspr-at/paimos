@@ -142,8 +142,8 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 		if parent != "" {
 			body["parent_id"] = parent
 		}
-		if kind == "work" {
-			body["fields"] = json.RawMessage(benefitFields)
+		if kind == "work" || kind == "task" {
+			body["fields"] = workStatusFieldsTest(t)
 		}
 		raw, _ := json.Marshal(body)
 		return mustNode(t, p, string(raw))
@@ -186,8 +186,8 @@ func TestProjectStatusBuckets(t *testing.T) {
 		t.Helper()
 		k := kindBySlug(t, p, kind)
 		body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": parent}
-		if kind == "work" {
-			body["fields"] = json.RawMessage(benefitFields)
+		if kind == "work" || kind == "task" {
+			body["fields"] = workStatusFieldsTest(t)
 		}
 		raw, err := json.Marshal(body)
 		if err != nil {
@@ -313,8 +313,8 @@ func TestHideClosedAgreesWithBuckets(t *testing.T) {
 			root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"`+kind+` project","state":"active"}`)
 			for _, state := range []string{"open", "blocked", "mystery", "canceled", "done", "accepted", "delivered", "in-progress", "qa", "archived"} {
 				body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": root.ID}
-				if kind == "work" {
-					body["fields"] = json.RawMessage(benefitFields)
+				if kind == "work" || kind == "task" {
+					body["fields"] = workStatusFieldsTest(t)
 				}
 				raw, err := json.Marshal(body)
 				if err != nil {
@@ -373,9 +373,7 @@ func TestStateSortFollowsWorkflow(t *testing.T) {
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Sort","state":"active"}`)
 	for _, state := range []string{"archived", "mystery", "done", "qa", "active", "in-progress", "blocked", "open", "new", "cancelled", "canceled", "accepted", "delivered"} {
 		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}
-		if state == "done" || state == "accepted" || state == "delivered" {
-			body["fields"] = json.RawMessage(benefitFields)
-		}
+		body["fields"] = workStatusFieldsTest(t)
 		raw, err := json.Marshal(body)
 		if err != nil {
 			t.Fatal(err)
@@ -430,9 +428,7 @@ func TestStateSortNormalisesSpellings(t *testing.T) {
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Norm sort","state":"active"}`)
 	for _, state := range []string{"mystery", " OPEN ", "done", "in--progress", " QA ", "archived", "open", "qa"} {
 		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}
-		if state == "done" {
-			body["fields"] = json.RawMessage(benefitFields)
-		}
+		body["fields"] = workStatusFieldsTest(t)
 		raw, err := json.Marshal(body)
 		if err != nil {
 			t.Fatal(err)
