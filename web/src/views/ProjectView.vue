@@ -6,6 +6,7 @@ import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMo
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
+import { entryStatus, requestEntryPanel, type EntryChecks } from '../lib/entryChecks'
 import { benefitGateError, benefitSkip, benefitStepSummary, completionFields, needsBenefitPrompt, skippedStatusLabel } from '../lib/doneGate'
 import { can, ensurePermissions } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
@@ -42,7 +43,6 @@ import { useFooterSummary } from '../lib/footerSummary'
 import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
 import { useWorkVocabulary } from '../stores/workVocabulary'
-import { workNoun } from '../lib/workVocabulary'
 import { useReleases } from '../stores/releases'
 import { usePoller } from '../lib/usePolledData'
 import { queueable, queueHours } from '../lib/workQueue'
@@ -1016,10 +1016,18 @@ function closeStatus(restore: boolean) {
   statusMenu.value = null
   if (restore) menu?.anchor.focus()
 }
-function chooseStatus(state: string) {
+function chooseStatus(state: string, checks: EntryChecks | null = null) {
   const menu = statusMenu.value
   statusMenu.value = null
   if (!menu) return
+  const current = rowStore.latest(menu.row.id) ?? menu.row
+  const block = checks?.blocks.find(b => b.to_status === entryStatus(state))
+  // Use the menu's current advisory snapshot to open the one checklist before
+  // changing the row. The mutation still enforces the live definition.
+  if (checks?.node_id === current.id && checks.revision === current.updated_at && block?.checks.some(c => c.applicable && !c.passed)) {
+    requestEntryPanel({ row: current, toStatus: state, anchor: menu.anchor })
+    return
+  }
   void list.setStatus(menu.row, state).then(changed => { if (changed) { void projects.load(true); outline.refreshStatsFor(menu.row.id) } })
   if (menu.from === 'panel') menu.anchor.focus()
   else table.value?.focusGrid()
@@ -1052,12 +1060,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     const catalog = await kinds()
     const kind = catalog.find(candidate => candidate.slug === 'work') ?? catalog.find(candidate => candidate.slug === draft.kind || candidate.slug === 'ticket')
     if (!kind) throw new Error('this workspace has no such type')
-    let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
-    if (needsBenefitPrompt({ kind_id: kind.id, kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
-      const text = await askDoneGate({ key: `New ${workNoun(vocabulary.leaf.name)}`, title: draft.title, state: draft.state, fields })
-      if (!text) return false
-      fields = completionFields(fields, text)
-    }
+    const fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
     const node = await createNode({
       kind_id: kind.id, title: draft.title, state: draft.state, fields,
       parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
@@ -1507,19 +1510,7 @@ const count = (n: number) => plural(n, 'ticket')
 async function bulkStatus(state: string) {
   if (bulkBusy.value) return
   closeBulk(false)
-  const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
-  const gatedIds = new Set(gated.map(row => row.id))
-  const ready = [...selected.value].filter(id => !gatedIds.has(id))
-  if (ready.length) await runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`, ready)
-  if (!gated.length) return
-  bulkBusy.value = true
-  try {
-    const outcome = await stepBenefitGate(gated, state)
-    announceBenefitStep(outcome.done, outcome.skipped)
-  } finally {
-    bulkBusy.value = false
-    table.value?.focusGrid()
-  }
+  await runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`)
 }
 function bulkArchive() { void runBulk({ state: 'archived' }, n => `Archived ${count(n)}`) }
 function bulkAssign(value: string) {
@@ -1961,7 +1952,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :node-id="statusMenu.row.id" :revision="statusMenu.row.updated_at" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :summary="project" :filters="filters" :options="options" :loading="sheetLoading" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         :project-header="ticketsHeader"

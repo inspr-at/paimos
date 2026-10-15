@@ -69,6 +69,15 @@ func mergeFixture(t *testing.T) (*fixture, *mergeGitHubFixture) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,updated_by) VALUES($1,$2,$3,$3)`, f.person.TenantID, f.project, f.person.ID)
 		return err
 	})
+	// Q1 keeps release copy as a configured completion check.
+	f.tx(t, func(tx pgx.Tx) error {
+		var kind string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'definition','Definition','DEF','list') RETURNING id::text`, f.person.TenantID).Scan(&kind); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) VALUES($1,$2,aeon_next_node_key($1,'DEF'),'Done checks','{"checks":{"done":[{"id":"release_copy_set"}]}}')`, f.person.TenantID, kind)
+		return err
+	})
 	statusautopilot.New(f.d.App).Mount(f.mux)
 	return f, g
 }

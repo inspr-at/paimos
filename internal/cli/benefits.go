@@ -17,7 +17,7 @@ func (b *benefitFlags) flags(fs *flagSet) {
 	fs.string(&b.PillDE, "pill-de", 0, "German benefit pill (2–4 words)")
 	fs.string(&b.BenefitEN, "benefit-en", 0, "English user benefit (one or two sentences)")
 	fs.string(&b.BenefitDE, "benefit-de", 0, "German user benefit (one or two neutral sentences)")
-	fs.string(&b.Hide, "hide-from-release-notes", 0, "true or false; does not waive benefits")
+	fs.string(&b.Hide, "hide-from-release-notes", 0, "true or false; hidden work is exempt from the release-text entry check")
 	fs.string(&b.NoReleaseNeeded, "no-release-needed", 0, "true or false; content work needs no software release and is omitted from release notes")
 }
 func (b benefitFlags) changed() bool {

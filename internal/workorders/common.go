@@ -34,6 +34,7 @@ type Error struct {
 }
 
 func (e *Error) Error() string              { return e.Message }
+func (e *Error) HTTPStatus() int            { return e.Status }
 func Fail(status int, message string) error { return &Error{status, message} }
 
 type orderPage struct {
