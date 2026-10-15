@@ -1,12 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { TAB_LABEL, type LeadTab, type PanelTab } from '../../lib/leadPanel'
+import { PANEL_TAB_LABEL, panelTabs, type LeadTab, type PanelTab } from '../../lib/leadPanel'
+import { shortcutHint } from '../../lib/shortcuts'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ selected: PanelTab; unread: number; lead?: boolean; pinned?: LeadTab | null }>()
-const emit = defineEmits<{ select: [tab: PanelTab]; pin: [] }>()
-const tabs = computed<PanelTab[]>(() => props.lead ? ['lead', 'session', 'chat'] : ['overview', 'chat'])
+const props = defineProps<{ selected: PanelTab; unread: number; lead?: boolean; terminal?: boolean; watch?: boolean; pinned?: LeadTab | null }>()
+const emit = defineEmits<{ select: [tab: PanelTab] }>()
+const tabs = computed(() => panelTabs(!!props.lead, !!props.terminal, !!props.watch))
 const panelId = (tab: PanelTab) => tab === 'chat' ? 'messages' : tab === 'session' ? 'overview' : tab
+const icon = (tab: PanelTab) => tab === 'lead' ? 'tree' : tab === 'chat' ? 'message' : tab === 'events' ? 'list' : tab === 'terminal' ? 'terminal' : 'info'
 function move(event: KeyboardEvent) {
   if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault(); event.stopPropagation()
@@ -18,37 +20,25 @@ function move(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="tabs-line">
-    <div class="session-tabs" role="tablist" :aria-label="lead ? 'Lead panel' : 'Session'" @keydown="move">
-      <button v-for="tab in tabs" :id="`session-tab-${panelId(tab)}`" :key="tab" type="button" role="tab" :data-tab="tab" :aria-selected="selected === tab" :aria-controls="`session-panel-${panelId(tab)}`" :tabindex="selected === tab ? 0 : -1" @click="emit('select', tab)">
-        {{ TAB_LABEL[tab] }}
-        <span v-if="tab === 'chat'" class="count" :class="{ hidden: !unread }" :aria-label="unread ? `${unread} unread` : undefined" :aria-hidden="!unread">{{ unread > 99 ? '99+' : unread || 1 }}</span>
-        <span v-if="lead" class="pinned" :class="{ hidden: pinned !== tab }" :data-tip="pinned === tab ? 'Your default' : undefined" :aria-hidden="pinned !== tab"><AppIcon name="pin" :size="11" /></span>
-      </button>
-    </div>
-    <button v-if="lead" type="button" class="pin-btn" :aria-pressed="pinned === selected" :aria-label="pinned === selected ? 'Remove your default tab' : 'Make this your default tab'" :data-tip="pinned === selected ? 'Remove your default tab' : 'Make this your default tab'" @click="emit('pin')"><AppIcon name="pin" :size="13" /><span class="pl"><span :class="{ hidden: pinned === selected }" :aria-hidden="pinned === selected">Set as default</span><span :class="{ hidden: pinned !== selected }" :aria-hidden="pinned !== selected">Default</span></span></button>
+  <div class="session-tabs" role="tablist" :aria-label="lead ? 'Lead panel' : 'Session'" @keydown="move">
+    <button v-for="(tab, index) in tabs" :id="`session-tab-${panelId(tab)}`" :key="tab" type="button" role="tab" :data-tab="tab" :aria-label="PANEL_TAB_LABEL[tab]" :data-tip="[PANEL_TAB_LABEL[tab], shortcutHint(`agents.panel.tab.${(index + 1) as 1 | 2 | 3 | 4 | 5}`)].filter(Boolean).join(' · ')" :aria-selected="selected === tab" :aria-controls="`session-panel-${panelId(tab)}`" :tabindex="selected === tab ? 0 : -1" @click="emit('select', tab)">
+      <AppIcon :name="icon(tab)" :size="15" /><span class="tab-label">{{ PANEL_TAB_LABEL[tab] }}</span>
+      <span v-if="tab === 'chat' && unread" class="count" :aria-label="`${unread} unread`">{{ unread > 99 ? '99+' : unread }}</span>
+      <span v-if="tab === 'lead' && pinned === 'lead'" class="pinned" aria-label="Your default"><AppIcon name="pin" :size="10" /></span>
+    </button>
   </div>
 </template>
 
 <style scoped>
-.tabs-line { display: flex; align-items: center; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); min-width: 0; }
-.session-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
-button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--ink-2); font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.session-tabs { display: inline-flex; align-items: center; flex: none; gap: 2px; height: 32px; padding: 3px; border-radius: 999px; background: var(--seg-bg); }
+button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; min-width: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 button:hover { color: var(--ink); background: var(--row-hover); }
-button[aria-selected="true"] { color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
-button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 11px var(--font); }
-.pinned { display: inline-grid; color: var(--ink-3); }
-.hidden { visibility: hidden; }
-.pin-btn { margin-left: auto; gap: 5px; min-height: 30px; padding: 0 9px; border-radius: 999px; color: var(--ink-3); font-size: 12px; }
-.pin-btn[aria-pressed="true"] { color: var(--teal-ink); background: var(--chip-teal-bg); }
-.pl { display: grid; }
-.pl > span { grid-area: 1 / 1; }
-@media (max-width: 720px) {
-  .tabs-line { padding: 0 8px; }
-  button, .pin-btn { min-height: 44px; }
-  .pin-btn { min-width: 44px; justify-content: center; padding: 0; }
-  .pl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
-@media (pointer: coarse) { button, .pin-btn { min-height: 44px; } }
+button[aria-selected="true"] { color: var(--teal-ink); background: var(--seg-on); font-weight: 700; box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); }
+button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.count { position: absolute; right: 1px; top: -2px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 9px var(--font); }
+.pinned { position: absolute; right: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); }
+@container pane (max-width: 1000px) { .tab-label { display: none; } button { padding-inline: 5px; } }
+@media (max-width: 720px) { .session-tabs { height: 44px; padding: 0 2px; } button { min-width: 44px; height: 44px; padding-inline: 5px; gap: 4px; font-size: 12px; } .tab-label { display: inline; } }
+@media (max-width: 360px) { .tab-label { display: none; } }
+@media (pointer: coarse) { .session-tabs { height: 44px; padding-block: 0; } button { height: 44px; min-width: 44px; } }
 </style>
