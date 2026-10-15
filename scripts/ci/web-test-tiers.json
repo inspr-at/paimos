@@ -974,6 +974,10 @@
     ,
     "browser:tests/native-expert-terminal.spec.ts:AEON-1289 r5 Fit, grid edges and phone controls stay stable across panel sizes"
     ,
+    "browser:tests/native-session-program-reader.spec.ts:AEON-1309: negative control reproduces reader drift with the anchor disabled"
+    ,
+    "browser:tests/native-session-program-validation.spec.ts:AEON-1309: malformed native JSON and invalid shapes stay incomplete without granting control"
+    ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1440"
@@ -10751,6 +10755,24 @@
     {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-1024.spec.ts","name":"AEON-1309: 1024 dark panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-1024.spec.ts","name":"AEON-1309: 1024 light panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-1440.spec.ts","name":"AEON-1309: 1440 dark panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-1440.spec.ts","name":"AEON-1309: 1440 light panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-390.spec.ts","name":"AEON-1309: 390 dark panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-390.spec.ts","name":"AEON-1309: 390 light panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-reader.spec.ts","name":"AEON-1309: negative control reproduces reader drift with the anchor disabled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program-validation.spec.ts","name":"AEON-1309: malformed native JSON and invalid shapes stay incomplete without granting control","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/native-session-program.spec.ts","name":"AEON-1309: fake-host mode changes stay read-only, preserve the menu and reject stale context","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 discards stale identities and rejects wrong request completions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

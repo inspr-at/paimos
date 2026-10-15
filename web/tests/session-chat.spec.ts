@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-273: the session chat on phones and desktop. Overview and Messages tabs with
+// AEON-273: the session chat on phones and desktop. Details and Chat tabs with
 // an unread badge, a per-viewer read watermark, a pinned bottom with a jump button,
 // delivery ticks, and no horizontal scroll with long unbroken tokens.
 import { mkdirSync } from 'node:fs'
@@ -144,12 +144,12 @@ const localEvent = (page: Page, sessionId: string) => page.evaluate(key => {
 const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const messagesTab = (page: Page) => panelOf(page).getByRole('tab', { name: /Chat/ })
 async function noUnreadBadge(badge: Locator) {
-  // The approved tabs reserve its width; zero unread is hidden from both the
-  // screen and accessibility tree, rather than moving the neighbouring tab.
-  await expect(badge).toHaveAttribute('aria-hidden', 'true')
-  await expect(badge).toBeHidden()
+  // The segmented menu removes a zero count and keeps Chat's accessible name.
+  // Geometry checks below still prove that the neighbouring controls stay put.
+  await expect(badge).toHaveCount(0)
+  await expect(messagesTab(badge.page())).toHaveAccessibleName('Chat')
 }
-async function rememberTab(page: Page, name: 'Chat' | 'Overview') {
+async function rememberTab(page: Page, name: 'Chat' | 'Details') {
   const saved = page.waitForResponse(response => response.request().method() === 'PUT' && decodeURIComponent(new URL(response.url()).pathname).endsWith('/preferences/agents:session-panel'))
   await panelOf(page).getByRole('tab', { name: new RegExp(`^${name}`) }).click()
   await saved
@@ -174,7 +174,7 @@ for (const width of [375, 390, 430]) {
     const { worker } = await setup(page)
     await page.setViewportSize({ width, height: 844 })
     await page.goto(`/agents/${worker.id}`)
-    await expect(panelOf(page).getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+    await expect(panelOf(page).getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
     expect(await noHorizontalScroll(page)).toEqual({ doc: true, panel: true, inner: true })
     await messagesTab(page).click()
     await expect(panelOf(page).getByText(longUrl.slice(0, 40), { exact: false }).first()).toBeVisible()
@@ -209,9 +209,9 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await page.reload()
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
   await expect(panel.getByRole('separator')).toHaveCount(0)
-  await rememberTab(page, 'Overview')
+  await rememberTab(page, 'Details')
   await page.reload()
-  await expect(panel.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+  await expect(panel.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
   await noUnreadBadge(messagesTab(page).locator('.count'))
 })
 
@@ -222,7 +222,7 @@ for (const width of [1600, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto(`/agents/${worker.id}`)
     const panel = panelOf(page)
-    const overview = panel.getByRole('tab', { name: 'Overview' })
+    const overview = panel.getByRole('tab', { name: 'Details' })
     const badge = messagesTab(page).locator('.count')
     // No local watermark: the badge is the server marker (event 201 leaves two later posts).
     await expect(overview).toHaveAttribute('aria-selected', 'true')
@@ -243,7 +243,7 @@ for (const width of [1600, 390]) {
     await expect.poll(() => localEvent(page, worker.id)).toBe(204)
     await page.clock.fastForward(1_600)
     await expect.poll(() => markerPuts(calls).at(-1)?.body).toMatchObject({ last_read_event_id: 204 })
-    await rememberTab(page, 'Overview')
+    await rememberTab(page, 'Details')
     await page.evaluate(() => localStorage.removeItem('aeon.session-read.v1'))
     await page.reload()
     await expect(overview).toHaveAttribute('aria-selected', 'true')
@@ -625,7 +625,7 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await jump.click()
   await expect.poll(atBottom).toBe(true)
   await expect(jump).toHaveCount(0)
-  await panel.getByRole('tab', { name: 'Overview' }).click()
+  await panel.getByRole('tab', { name: 'Details' }).click()
   await noUnreadBadge(messagesTab(page).locator('.count'))
   await messagesTab(page).click()
 
@@ -853,7 +853,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect.poll(() => pre.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(2)
     expect(await pre.evaluate(el => getComputedStyle(el).maskImage)).toContain('rgba(0, 0, 0, 0)')
     await thread.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, bubbles: true })) })
-    const fold = code.locator('.code-fold'), copy = code.locator('.code-copy'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
+    const fold = code.locator('.code-fold'), copy = code.locator('.code-copy'), stop = panel.getByRole('button', { name: 'More session actions', exact: true })
     await expect(fold).toHaveText('Show all 40 lines')
     const guard = await controlStability(page, { copy, fold, composer: panel.locator('textarea'), stop, frame: panel })
     await guard.check(async () => { await fold.click(); await expect(code).not.toHaveClass(/folded/) })
@@ -879,11 +879,13 @@ test('AEON-976 history: more than 200 posts remain reachable and a late refresh 
     await thread.evaluate(el => el.scrollTo({ top: 0 }))
     const anchor = panel.locator('.msg').first(), id = await anchor.getAttribute('data-id')
     const top = await anchor.evaluate(el => el.getBoundingClientRect().top)
+    const beforeFrame = await thread.evaluate(el => ({ top: el.scrollTop, rect: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop }))
     const guard = await controlStability(page, { composer: panel.locator('textarea'), send: panel.locator('.compose-row .send'), frame: panel })
     await guard.check(async () => { await earlier.click(); await expect(panel.locator('.msg')).toHaveCount(count) })
     guard.done()
     const after = await panel.locator(`.msg[data-id="${id}"]`).evaluate(el => el.getBoundingClientRect().top)
-    expect(Math.abs(after - top)).toBeLessThanOrEqual(.5)
+    const geometry = await thread.evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop }))
+    expect(Math.abs(after - top), JSON.stringify({ count, id, top, after, beforeFrame, geometry })).toBeLessThanOrEqual(.5)
   }
   await expect(earlier).toHaveCount(0)
   await expect(panel.getByText('Start of the conversation')).toBeAttached()
@@ -913,7 +915,7 @@ test('AEON-976 shell updates: follow newest output until the reader scrolls up i
   await expect(pre).toContainText('Prüfschritt 050')
   await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
   // Hiding the tab must retain the reader's position and upward intent.
-  await panelOf(page).getByRole('tab', { name: /^Overview/ }).click()
+  await panelOf(page).getByRole('tab', { name: /^Details/ }).click()
   await expect(pre).toBeHidden()
   await messagesTab(page).click()
   await expect(pre).toBeVisible()
@@ -936,12 +938,12 @@ test('AEON-976 Stop: Esc leaves the field then interrupts with captured process 
     return route.fulfill({ status: 409, json: { error: 'ownership changed' } })
   })
   await page.goto(`/agents/${worker.id}?tab=messages`)
-  const panel = panelOf(page), field = panel.locator('textarea'), stop = panel.getByRole('button', { name: 'Interrupt', exact: true })
+  const panel = panelOf(page), field = panel.locator('textarea'), stop = panel.getByRole('button', { name: 'More session actions', exact: true })
   await field.fill('Keep this draft')
   await field.press('Escape')
   await expect(field).not.toBeFocused()
   expect(payloads).toHaveLength(0)
-  await stop.click()
+  await stop.click(); await page.getByRole('menuitem', { name: /^Interrupt/ }).click()
   await expect.poll(() => payloads.length).toBe(1)
   expect(payloads[0]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
   // AEON-1212: Interrupt keeps the panel and its private draft open.
@@ -950,7 +952,7 @@ test('AEON-976 Stop: Esc leaves the field then interrupts with captured process 
   await expect(field).toHaveValue('Keep this draft')
   await expect(panel).toBeVisible()
   const guard = await controlStability(page, { field, stop, send: panel.locator('.send'), frame: panel })
-  await guard.check(async () => { await stop.click(); await expect.poll(() => payloads.length).toBe(2) })
+  await guard.check(async () => { await stop.click(); await page.getByRole('menuitem', { name: /^Interrupt/ }).click(); await expect.poll(() => payloads.length).toBe(2) })
   guard.done()
   expect(payloads[1]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
 })
@@ -985,7 +987,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await field.focus()
     await expect(panel.locator('.queue-item')).toHaveCount(1)
     await expect(panel.locator(`.msg[data-id="${original.id}"]`)).toHaveCount(0)
-    const guard = await controlStability(page, { field, primary: panel.locator('.send'), alternative: panel.locator('.steer-send'), stop: panel.getByRole('button', { name: 'Interrupt', exact: true }), tab: messagesTab(page), capability: panel.getByRole('group', { name: 'Session actions' }), frame: panel })
+    const guard = await controlStability(page, { field, primary: panel.locator('.send'), alternative: panel.locator('.steer-send'), stop: panel.getByRole('button', { name: 'More session actions', exact: true }), tab: messagesTab(page), capability: panel.getByRole('group', { name: 'Panel actions' }), frame: panel })
     const queueRow = panel.locator('.queue-item')
     const editGuard = await controlStability(page, { row: queueRow, edit: queueRow.getByRole('button', { name: 'Edit', exact: true }), cancel: queueRow.getByRole('button', { name: 'Cancel', exact: true }) })
     const editedText = 'Die überarbeitete Nachricht bleibt erhalten, wenn der Agent die ursprüngliche Nachricht schon übernommen hat.'

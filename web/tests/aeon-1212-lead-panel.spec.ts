@@ -111,6 +111,15 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details', exact: true })
 const question = (page: Page) => panel(page).locator('.session-question')
 const tab = (page: Page, name: string) => panel(page).getByRole('tab', { name: new RegExp(`^${name}`) })
+const sessionMenu = (page: Page) => page.getByRole('menu', { name: 'More session actions', exact: true })
+// A3/A4/A5/r5 keep the opening explanation for assistive technology, without
+// adding a visible line or a separate pin control to the condensed header.
+async function expectOpening(page: Page, name: string, reason: string) {
+  const explanation = panel(page).locator('p.sr-only').filter({ hasText: `Opened on ${name}:` })
+  await expect(explanation).toContainText(`Opened on ${name}: ${reason}`)
+  await expect(explanation).toHaveClass('sr-only')
+  await expect(panel(page).locator('.why')).toHaveCount(0)
+}
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r }); return { promise, resolve } }
 
 // Risk: wide fixed-height worker rows let long metadata cover a neighbour,
@@ -154,7 +163,7 @@ for (const look of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 1000 })
       await row.scrollIntoViewIfNeeded()
       await contained()
-      const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), row, neighbour }
+      const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Panel actions' }), tabs: panel(page).getByRole('tablist'), row, neighbour }
       await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content'), workers: panel(page).locator('.worker-list') }, interactions: [
         { name: 'read each clipped metadata value on hover', run: async () => {
           for (const [selector, value] of [['.worker-execution > span', `${metadata.model} 6 · medium`], ['.worker-execution > small', `Codex · ${metadata.account}`], ['.worker-computer', metadata.computer]] as const) {
@@ -209,7 +218,8 @@ test('AEON-1212 fix2: an overlapping refresh cannot finish the opening on discar
     await page.locator(`[data-row="s:${LEAD_SESSION}"] .agent-link`).click()
     laterAnswer.resolve()
     await expect(tab(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
-    await expect(panel(page).locator('.why')).toContainText('it asks you something')
+    await expectOpening(page, 'Chat', 'it asks you something')
+    await expect(question(page)).toContainText(world.state.question.input.question)
   } finally {
     openingAnswer.resolve(); laterAnswer.resolve()
     await opening
@@ -228,15 +238,15 @@ test('AEON-1212 fix2: a manual tab choice cancels automatic opening while questi
   try {
     await page.goto(`/agents/${LEAD_SESSION}`)
     await started.promise
-    await expect(tab(page, 'Session')).toBeVisible()
-    await expectStableControls({ controls: { header: panel(page).locator('.pane-bar'), tabs: panel(page).getByRole('tablist'), selected: tab(page, 'Session') }, interactions: [{ name: 'manual Session choice before the opening read finishes', run: async () => {
-      await tab(page, 'Session').click()
+    await expect(tab(page, 'Details')).toBeVisible()
+    await expectStableControls({ controls: { header: panel(page).locator('.pane-bar'), tabs: panel(page).getByRole('tablist'), selected: tab(page, 'Details') }, interactions: [{ name: 'manual Details choice before the opening read finishes', run: async () => {
+      await tab(page, 'Details').click()
       answer.resolve()
       await page.evaluate(async () => {
         await (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().refresh()
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
       })
-      await expect(tab(page, 'Session')).toHaveAttribute('aria-selected', 'true')
+      await expect(tab(page, 'Details')).toHaveAttribute('aria-selected', 'true')
       await expect(panel(page).locator('#session-panel-overview')).toBeVisible()
     } }] })
   } finally { answer.resolve() }
@@ -372,20 +382,26 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
     await expect(tab(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
     let desktopRowHeight = 0
     if (width <= 400) {
-      await tab(page, 'Session').click()
+      await tab(page, 'Details').click()
       await expect(panel(page).locator('.host-fact')).toBeVisible()
       desktopRowHeight = await panel(page).locator('.host-fact').evaluate(row => row.getBoundingClientRect().height)
       await tab(page, 'Chat').click()
       await page.setViewportSize({ width, height: 1000 })
     }
-    await expect(panel(page).locator('.why')).toContainText('it asks you something')
+    await expectOpening(page, 'Chat', 'it asks you something')
     await expect(question(page)).toContainText('Asks you')
     if (width === 1000) await page.screenshot({ path: info.outputPath(`AEON-1212/1000-sheet-${width}-${look}.png`) })
-    const stable = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), pin: panel(page).getByRole('button', { name: 'Make this your default tab' }), close: panel(page).getByRole('button', { name: 'Close session details' }) }
+    const stable = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Panel actions' }), tabs: panel(page).getByRole('tablist'), more: panel(page).getByRole('button', { name: 'More session actions', exact: true }), close: panel(page).getByRole('button', { name: 'Close session details' }) }
     await expectStableControls({ controls: stable, scrollAreas: { panel: panel(page) }, interactions: [
+      { name: 'session actions in the head overflow', run: async () => {
+        await stable.more.click()
+        for (const name of [/^Interrupt/, /^Pause…/, /^Stop…/]) await expect(sessionMenu(page).getByRole('menuitem', { name })).toBeVisible()
+        await expect(panel(page).locator('.pane-bar').getByRole('button', { name: /^(Interrupt|Pause|Stop)/ })).toHaveCount(0)
+        await stable.more.click()
+      } },
       { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-sheet-${width}-${look}.png`) }) } },
-      { name: 'Session', run: async () => {
-        await tab(page, 'Session').click()
+      { name: 'Details', run: async () => {
+        await tab(page, 'Details').click()
         await expect(panel(page).locator('#session-panel-overview')).toBeVisible()
         await checkPanel(page, width <= 400)
         if (width <= 400) await checkHostPill(page, desktopRowHeight)
@@ -412,7 +428,7 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
         const phone = await touch.newPage(), touchErrors = watchErrors(phone)
         await setup(phone)
         await phone.goto(`/agents/${LEAD_SESSION}`)
-        await tab(phone, 'Session').click()
+        await tab(phone, 'Details').click()
         await expect(panel(phone).locator('.host-fact')).toBeVisible()
         expect(await phone.evaluate(() => matchMedia('(pointer: coarse)').matches), 'real touch context uses a coarse pointer').toBe(true)
         await checkPanel(phone, true)
@@ -456,7 +472,7 @@ test('AEON-1212: failed answer retries the same request, a plain message never d
   const worker = world.data.live.find(row => row.role === 'worker')!
   await tab(page, 'Lead').click()
   await panel(page).locator('.worker').filter({ hasText: worker.ticket!.key }).click()
-  await expect(tab(page, 'Overview')).toBeVisible()
+  await expect(tab(page, 'Details')).toBeVisible()
   world.release()
   await expect.poll(() => world.state.question.state).toBe('answered')
   await expect(question(page)).toHaveCount(0)
@@ -474,7 +490,7 @@ for (const width of [1440, 1024, 390]) for (const look of ['light', 'dark'] as c
     await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
     await expect(question(page)).toBeVisible()
     await expect(question(page).locator('.primary')).toHaveCount(0)
-    const controls = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), composer: panel(page).locator('.composer'), card: question(page), answerArea: question(page).locator('.answer-slot') }
+    const controls = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Panel actions' }), composer: panel(page).locator('.composer'), card: question(page), answerArea: question(page).locator('.answer-slot') }
     await page.screenshot({ path: info.outputPath(`AEON-1212/long-text-chat-${width}-${look}.png`) })
     world.hold()
     await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.thread-scroll') }, interactions: [
@@ -494,7 +510,9 @@ test('AEON-1212: server action omission and decision denial remain read-only, an
   await expect(question(page)).toContainText('Waits for a project admin')
   await expect(question(page).getByRole('button')).toHaveCount(0)
   await expect(question(page).getByRole('link', { name: 'Open on the Desk' })).toHaveAttribute('href', `/decision-desk?item=q:${Q}`)
-  await expect(panel(page).getByRole('button', { name: 'Pause…', exact: true })).toBeDisabled()
+  await panel(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await expect(sessionMenu(page).getByRole('menuitem', { name: /^Pause…/ })).toBeDisabled()
+  await panel(page).getByRole('button', { name: 'More session actions', exact: true }).click()
   expect(world.state.calls).toEqual([])
   const more = await setup(page)
   more.state.question.input.options.push(...[3,4,5].map(n => ({ id: `choice${n}`, title: `Option ${n}`, description: '', answer: String(n) })))
@@ -529,14 +547,26 @@ test('AEON-1212: losing question-read access clears retained cards and discards 
 test('AEON-1212: pinned and last-used tabs belong to the person; queue links force Lead at Next up and chat keys only type', async ({ page }) => {
   const world = await setup(page, { question: false, pinned: 'session', last: 'chat', german: true })
   await page.goto(`/agents/${LEAD_SESSION}`)
-  await expect(tab(page, 'Session')).toHaveAttribute('aria-selected', 'true')
-  await expect(panel(page).locator('.why')).toContainText('your default')
-  await panel(page).getByRole('button', { name: 'Remove your default tab' }).click()
+  await expect(tab(page, 'Details')).toHaveAttribute('aria-selected', 'true')
+  await expectOpening(page, 'Details', 'your default')
+  await expect(panel(page).getByRole('button', { name: 'Remove your default tab', exact: true })).toHaveCount(0)
+  const more = panel(page).getByRole('button', { name: 'More session actions', exact: true })
+  await more.click()
+  const defaultLead = sessionMenu(page).getByRole('menuitemcheckbox', { name: 'Open on Lead by default', exact: true })
+  await expect(defaultLead).toHaveAttribute('aria-checked', 'false')
+  await defaultLead.click()
+  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'lead', last: 'chat' })
+  await page.reload()
+  await expect(tab(page, 'Lead')).toHaveAttribute('aria-selected', 'true')
+  await expectOpening(page, 'Lead', 'your default')
+  await more.click()
+  await expect(defaultLead).toHaveAttribute('aria-checked', 'true')
+  await defaultLead.click()
   await tab(page, 'Chat').click()
   await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: null, last: 'chat' })
   await page.reload()
   await expect(tab(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
-  await expect(panel(page).locator('.why')).toContainText('last used')
+  await expectOpening(page, 'Chat', 'last used')
   const field = panel(page).locator('textarea')
   await field.fill('jksf/')
   await field.press('Control+a')
@@ -546,7 +576,8 @@ test('AEON-1212: pinned and last-used tabs belong to the person; queue links for
   await page.goto(`/agents/${LEAD_SESSION}?tab=lead#next-up`)
   await expect(tab(page, 'Lead')).toHaveAttribute('aria-selected', 'true')
   await expect(panel(page).locator('#next-up')).toBeFocused()
-  await expect(panel(page).locator('.why')).toContainText('Next up')
+  await expectOpening(page, 'Lead', 'Next up, from the queue count')
+  await expect(panel(page).locator('#next-up .wk')).not.toHaveCount(0)
 })
 
 // AEON-1212 / #592 originally put all five risks under one 30-second budget.
@@ -565,11 +596,12 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await checkPanel(page, width === 400)
         await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${captureWidth}-${look}.png`) })
       }
-      const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist') }
+      const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Panel actions' }), tabs: panel(page).getByRole('tablist') }
       if (scenario === 'question results') {
         await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
         await expect(question(page)).toContainText('Asks you')
-        await expect(panel(page).locator('.pt-sub')).toContainText('Opus 5.5 · high')
+        await expect(panel(page).locator('.pane-title')).toHaveAttribute('data-tip', /Opus 5\.5 · high/)
+        await expect(panel(page).locator('.pt-sub')).toHaveCount(0)
         world.hold()
         try {
           await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
@@ -657,7 +689,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
           if (width === 1440) {
             await panel(page).getByRole('button', { name: 'Close session details' }).click()
             await page.locator('.sessions .row[data-row^="s:"] .agent-link').last().click()
-            await expect(tab(page, 'Overview')).toHaveAttribute('aria-selected', 'true')
+            await expect(tab(page, 'Details')).toHaveAttribute('aria-selected', 'true')
             await page.screenshot({ path: info.outputPath(`AEON-1212/pick-last-row-${width}-${look}.png`) })
           }
         } else if (scenario === 'admission states') {

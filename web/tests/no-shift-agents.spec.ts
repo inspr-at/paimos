@@ -42,18 +42,18 @@ for (const width of [1440, 1024, 390]) {
     await page.route('**/api/projects/*/harness-sessions/*/controls/*', route => route.fulfill({ json: { id: request.request_id, session_id: session(1), kind: request.kind, state: 'completed', outcome: 'applied', reason: 'native_interrupt_acknowledged' } }))
     await page.goto(`/agents/${session(1)}`)
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    const interrupt = panel.getByRole('button', { name: 'Interrupt', exact: true })
+    const interrupt = page.getByRole('menuitem', { name: /^Interrupt/ })
     const more = panel.getByRole('button', { name: 'More session actions', exact: true })
-    const stop = panel.getByRole('button', { name: 'Stop…', exact: true })
+    const stop = page.getByRole('menuitem', { name: /^Stop…/ })
     const dialog = page.getByRole('dialog', { name: /^Stop .+\?$/ })
     await expectStableControls({
-      controls: { interrupt, more, stop, tabs: panel.getByRole('tablist') },
+      controls: { more, actions: panel.getByRole('group', { name: 'Panel actions' }), close: panel.getByRole('button', { name: 'Close session details' }), tabs: panel.getByRole('tablist') },
       interactions: [
-        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(panel.locator('.session-feedback')).toContainText('Interrupt applied') } },
-        { name: 'open and cancel Stop', run: async () => { await stop.click(); await dialog.getByRole('button', { name: 'Stop session', exact: true }).hover(); await dialog.getByRole('button', { name: 'Cancel', exact: true }).click() } },
+        { name: 'interrupt receipt', run: async () => { await more.click(); await interrupt.click(); await expect(panel.locator('.session-feedback')).toContainText('Interrupt applied') } },
+        { name: 'open and cancel Stop', run: async () => { await more.click(); await stop.click(); await dialog.getByRole('button', { name: 'Stop session', exact: true }).hover(); await dialog.getByRole('button', { name: 'Cancel', exact: true }).click() } },
       ],
     })
-    await stop.click()
+    await more.click(); await stop.click()
     await expectStableControls({
       controls: { cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }), confirm: dialog.getByRole('button', { name: 'Stop session', exact: true }), actions: dialog.locator('.actions') },
       scrollAreas: { body: dialog.locator('#confirm-body') },
@@ -275,7 +275,8 @@ test('phone steer feedback and retry never move the pinned action bar', async ({
   Object.assign(data.sessions[0]!, { advertised_capabilities: ['status', 'steer', 'stop', 'managed_control_v1'], process_ownership: { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 1234, group_id: 1234, started_at: new Date().toISOString() }, process_observed_at: new Date().toISOString() })
   await page.route('**/api/projects/*/harness-sessions/*/managed-controls', route => route.abort('failed'))
   await page.goto(`/agents/${session(1)}`)
-  await page.getByRole('region', { name: 'Session controls' }).getByRole('button', { name: 'Steer', exact: true }).click()
+  await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions' }).click()
+  await page.getByRole('menuitem', { name: /^Steer…/ }).click()
   const sheet = page.getByRole('dialog', { name: 'Steer', exact: true })
   const send = sheet.getByRole('button', { name: 'Send steer' })
   await expectStableControls({

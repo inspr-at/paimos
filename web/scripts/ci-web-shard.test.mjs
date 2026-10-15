@@ -627,6 +627,18 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
   assert.ok(deskLessons && deskLessons.listedTests === 26, 'Lesson decision regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
+  // AEON-1309 splits its nine unchanged panel cases so files can be packed
+  // independently. Charge only this slice's declared weights, like the other
+  // additions above; the historical <300s bound and twelve shards stay intact.
+  const panelFiles = new Set(['tests/native-session-program.spec.ts',
+    'tests/native-session-program-390.spec.ts', 'tests/native-session-program-1024.spec.ts',
+    'tests/native-session-program-1440.spec.ts', 'tests/native-session-program-reader.spec.ts',
+    'tests/native-session-program-validation.spec.ts'])
+  const panelAdded = real.groups.flatMap(group => group.specs).filter(spec => panelFiles.has(spec.file))
+  assert.equal(panelAdded.length, 6, 'All six balanced panel files must remain declared')
+  assert.equal(panelAdded.reduce((sum, spec) => sum + spec.listedTests, 0), 9, 'The split must retain every panel case')
+  for (const spec of panelAdded) assert.ok(gated.some(candidate => candidate.file === spec.file), 'Panel specs must remain in the declared gate')
+  const panelGrowth = panelAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0)
   // AEON-1316 adds its project Definitions spec after the historical budget.
   // Keep the old budget and charge only this independently bounded addition.
   // FIX4 adds six verdict regressions alongside the original three flows.
@@ -637,16 +649,16 @@ test('ungated groups stay declared and checked but only run with --all', () => {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + projectDefinitions.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check and lesson decision specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel and project Definitions specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

@@ -71,6 +71,11 @@ async function rowGuard(page: Page) {
 
 // The design check's probes (design/ag-approved/check.mjs), limited to the Sessions card.
 async function probe(page: Page) {
+  // Rows appear before LiveBot's async artwork; sample only once every visible
+  // avatar has its state badge. Keep the normal assertion timeout.
+  await expect.poll(() => page.locator('.sessions .row .ava:visible').evaluateAll(avatars =>
+    avatars.length > 3 && avatars.every(avatar => avatar.querySelectorAll('svg.agent-state-mark').length === 1),
+  ), { message: 'visible session avatars have mounted their state badges' }).toBe(true)
   return page.locator('.sessions').evaluate(card => {
     const visible = (el: Element) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' }
     const edges: string[] = []
