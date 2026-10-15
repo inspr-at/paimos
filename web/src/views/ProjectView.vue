@@ -705,7 +705,7 @@ const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.st
 // Counted in the background after the list paints, per scope (never Hide closed); the project's summary changing
 // (a status, an estimate, a new ticket) counts the shown scope again quietly.
 const { figures: viewFigures, whole: wholeFigures, busy: figuresBusy, failed: figuresFailed, narrowed: figuresNarrowed, retry: retryFigures } = useViewFigures({
-  projectId, filters, ready: entryResolved, listLoading: list.loading,
+  owner: computed(() => scopeOwner(session.identity)), projectId, filters, ready: entryResolved, listLoading: list.loading,
   freshness: computed(() => project.value ? [project.value.last_activity, project.value.open, project.value.in_progress, project.value.done, project.value.total].join('|') : ''),
 })
 const workHead = computed(() => viewFigures.value ? workHeader(viewFigures.value) : null)

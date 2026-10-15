@@ -21,6 +21,8 @@ function remember(key: string, value: ProjectFigures) {
 export function forgetViewFigures() { cache.clear() }
 
 export interface ViewFiguresOptions {
+  // The signed-in identity (tenant/principal): cached figures belong to the person who read them.
+  owner: Ref<string>
   projectId: Ref<string | null>
   filters: Ref<ListFilters>
   // False until the project's default saved view is resolved, so the first count is the view that shows.
@@ -48,13 +50,14 @@ function idle(): Promise<void> {
 }
 
 export function useViewFigures(options: ViewFiguresOptions) {
+  const scoped = (path: string) => `${options.owner.value} ${path}`
   const key = computed(() => {
     const id = options.projectId.value
-    return id && options.ready.value ? figuresPath(id, apiParams(id, options.filters.value)) : ''
+    return id && options.owner.value && options.ready.value ? scoped(figuresPath(id, apiParams(id, options.filters.value))) : ''
   })
   const wholeKey = computed(() => {
     const id = options.projectId.value
-    return id ? figuresPath(id, apiParams(id, filtersFromQuery({}))) : ''
+    return id && options.owner.value ? scoped(figuresPath(id, apiParams(id, filtersFromQuery({})))) : ''
   })
   // The figures on screen (the previous scope's while busy), the whole project's (slot widths), and the state.
   const figures = shallowRef<ProjectFigures | null>(null)
@@ -124,7 +127,9 @@ export function useViewFigures(options: ViewFiguresOptions) {
     finally { if (wholeRequest === request) wholeRequest = null }
   }
 
-  watch(options.projectId, () => {
+  // A new project or another person: nothing of the previous one stays on screen or in the cache.
+  watch(options.owner, () => cache.clear())
+  watch([options.projectId, options.owner], () => {
     viewRequest?.abort(); wholeRequest?.abort(); wholeRequest = null
     figures.value = null; whole.value = null; busy.value = false; failure.value = null; shownKey = ''
   })
@@ -145,7 +150,7 @@ export function useViewFigures(options: ViewFiguresOptions) {
   // The work changed (a status, an estimate, a new ticket): forget this project's scopes and count the shown one again.
   watch(options.freshness, (now, before) => {
     if (now === before || !key.value) return
-    const project = figuresPath(options.projectId.value!, {}).split('?')[0]
+    const project = scoped(figuresPath(options.projectId.value!, {}).split('?')[0])
     for (const cachedKey of [...cache.keys()]) if (cachedKey.split('?')[0] === project) cache.delete(cachedKey)
     void count(key.value, shownKey === key.value)
   })

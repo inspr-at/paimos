@@ -213,7 +213,8 @@ function headEnter(event: PointerEvent, id: string) {
 }
 function headLeave(event: PointerEvent) {
   const head = event.currentTarget as HTMLElement
-  if (event.pointerType !== 'mouse' || document.activeElement === head) return
+  // A keyboard-opened popup stays until blur; one the pointer opened (or a sort click left focused) goes with it.
+  if (event.pointerType !== 'mouse' || head.matches(':focus-visible')) return
   cancelFigureTip(); closeFigureTip(head)
 }
 function headFocus(event: FocusEvent, id: string) {
