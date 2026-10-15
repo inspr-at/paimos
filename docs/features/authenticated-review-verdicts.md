@@ -64,3 +64,17 @@ observation for that kind. The authenticated verdict includes `visual_impact`
 
 These endpoints record evidence only. Enqueue, merge authority, holds and the
 conservative visual-impact classifier belong to the admission packages.
+
+`TestAuthenticatedReviewerRuns` exercises the real authentication middleware,
+store, entry-check reads and Done transition. It covers coordinator forgery,
+wrong runs and ranges, immutable route attribution, single use, injected-clock
+expiry, retargeting, policy `off`, visual grant revocation, legacy flags, key
+revocation and service-principal restrictions. The CLI behavior test covers
+private credential handling, refusals, redirects and submission without an
+ordinary API key.
+
+The negative control uses `internal/auth/testdata/review-legacy/overlay.json`
+with Go's `-overlay` flag to restore the original vulnerable evidence writer
+and consumer from test fixtures. Running `TestAuthenticatedReviewerRuns` with
+that overlay must fail because the forged coordinator approval returns 204
+instead of 403. The normal source tree must pass the same assertion.
