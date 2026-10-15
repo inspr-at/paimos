@@ -5712,6 +5712,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestNestedAndNodelessEventReferences","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestNodeInsertSkipsEmptyReleaseReconciliation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestNodeProjectRootFollowsMoves","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestNotificationFanoutOverflowAndIsolation","tier":"ESSENTIAL"}
