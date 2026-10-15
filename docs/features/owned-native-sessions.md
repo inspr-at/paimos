@@ -50,13 +50,24 @@ No provider/account qualification, release gate or live cutover is performed
 by this panel change. Core wiring and Tick's visual check remain owned by the
 coordinator.
 
-## Integration handoff
+## Response validation and compatibility
 
-The I2-UI implementation still needs its native-context read moved into a
-fixed operation in `web/src/lib/agentRows.ts`, as required by the AEON-449
-transport rule, and its JSON decoding changed to unknown values with
-validation. The central transport file is outside AEON-1309's current grant.
-The older lead-panel browser assertions also require requalification for the
-flat menu and overflow actions. This branch is an unfinished handoff until
-those checks and authoritative CI pass; it does not enable a native runtime
-or complete a release gate.
+The native-context lookup is a fixed operation in `agentRows.ts`, alongside
+the other session sub-resources. The panel bounds response bytes before
+decoding JSON as unknown, checks the context and read-only viewer grant, and
+validates replay pages and stream envelopes against the current binding and
+generation. Malformed responses leave an explicit incomplete view; a known
+owned session never regains legacy write controls after a failed read. Stream
+failure detaches only the read-only viewer.
+
+The lead-panel regression checks follow the approved A3/A4/A5/r5 design:
+Session and Overview selectors target Details; the visible opening-reason
+line is replaced by the accessible explanation and the actual question or
+focused Next up content. Header stability measures Panel actions and More
+session actions. Pause and the default-Lead choice are checked inside the
+overflow, including persistence and removal of the saved choice. The model
+check reads the identity tooltip's full name. The historical test names stay
+stable, and no case is skipped or given a longer timeout.
+
+Core wiring, authoritative CI and Tick's visual check remain coordinator
+release responsibilities.

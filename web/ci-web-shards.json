@@ -336,7 +336,7 @@
         ,
         {"file":"tests/native-lead-pilot.spec.ts","listedTests":6,"weightSeconds":30,"weightSource":"AEON-1287: conservative estimate for six unmeasured conversation/stability cases"}
         ,
-        {"file":"tests/native-session-program.spec.ts","listedTests":8,"weightSeconds":45,"weightSource":"AEON-1309: conservative estimate for eight integrated panel/stability and negative-control cases, pending guarded measurement"}
+        {"file":"tests/native-session-program.spec.ts","listedTests":9,"weightSeconds":60,"weightSource":"AEON-1309: conservative estimate for eight integrated panel/stability and negative-control cases plus malformed JSON coverage, pending guarded measurement"}
         ,
         {"file":"tests/native-session-requests.spec.ts","listedTests":7,"weightSeconds":4.219,"weightSource":"AEON-1304: guarded remote serial Playwright wall 4219ms for seven cases at 8362dbbfc"}
         ,
