@@ -6,39 +6,36 @@ import { dirname, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { browserIdentity, browserImpact, nightlyBrowserMap, gitTree } from './browser-impact.mjs'
 import { boundedText } from './inputs.mjs'
-import { validImpactPaths, isDocsLike, webGraph, graphIncomplete, reverseDependants, shard, key, tierRank, validate, specShardRecordPattern } from './core.mjs'
-import { tierWeights, validateManifest, loadManifest } from '../../web/scripts/ci-web-shard.mjs'
+import { validImpactPaths, isDocsLike, webGraph, graphIncomplete, reverseDependants, shard, validate, specShardRecordPattern, registryImpact as schemaRegistryImpact } from './core.mjs'
+import { tierWeights, loadManifest } from '../../web/scripts/ci-web-shard.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const browserRows = manifest => manifest.tests.filter(row => row.kind === 'browser' && row.active !== false)
 const stable = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
-const stripTiming = value => {
-  if (Array.isArray(value)) return value.map(stripTiming)
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !['timingWeights', 'nightlyTiming', 'weightSeconds', 'weightSource', 'tierTiming'].includes(key)).map(([key, item]) => [key, stripTiming(item)]))
-}
-
-// Timing edits must not change membership, exclusions or launch policy. Tier
-// promotions are the only other narrow metadata change; demotions stay full.
+// Schema-located comparison. Unknown fields inside timing stay policy. The
+// phrases stay the ones the shadow observations already publish.
 export function registryImpact(file, before, after) {
-  if (!before || !after || before.version !== 1 || after.version !== 1) return { full: true, reason: 'registry inputs missing or invalid' }
+  if (file !== 'web/ci-web-shards.json' && file !== 'scripts/ci/web-test-tiers.json')
+    return { full: true, promoted: [], reason: 'unmapped registry' }
+  if (!before || !after || before.version !== 1 || after.version !== 1)
+    return { full: true, promoted: [], reason: 'registry inputs missing or invalid' }
+  const rule = schemaRegistryImpact(file, before, after)
   if (file === 'web/ci-web-shards.json') {
-    try { validateManifest(before); validateManifest(after) } catch { return { full: true, reason: 'invalid browser launch policy' } }
-    return stable(stripTiming(before)) === stable(stripTiming(after))
-      ? { full: false, promoted: [], reason: 'timing-only browser registry' }
-      : { full: true, reason: 'browser ownership, exclusion or execution policy changed' }
+    if (rule.full && rule.reason === 'invalid registry or timing data')
+      return { full: true, promoted: [], reason: 'invalid browser launch policy' }
+    if (rule.full) return { full: true, promoted: [], reason: 'browser ownership, exclusion or execution policy changed' }
+    return { full: false, promoted: [], reason: 'timing-only browser registry' }
   }
-  if (file !== 'scripts/ci/web-test-tiers.json' || !Array.isArray(before.tests) || !Array.isArray(after.tests)) return { full: true, reason: 'unmapped registry' }
-  const previous = new Map(before.tests.map(row => [key(row), row])), promoted = []
-  if (previous.size !== before.tests.length || before.tests.length !== after.tests.length) return { full: true, reason: 'catalogue membership changed' }
-  for (const row of after.tests) {
-    const old = previous.get(key(row))
-    if (!old || stable({ ...old, tier: undefined }) !== stable({ ...row, tier: undefined }) || !Object.hasOwn(tierRank, row.tier) || !Object.hasOwn(tierRank, old.tier)) return { full: true, reason: 'case identity, ownership or configuration changed' }
-    if (tierRank[row.tier] < tierRank[old.tier]) return { full: true, reason: 'tier demotion requires full validation and approval' }
-    if (tierRank[row.tier] > tierRank[old.tier] && row.kind === 'browser') promoted.push(row)
+  if (!Array.isArray(before.tests) || !Array.isArray(after.tests)) return { full: true, promoted: [], reason: 'unmapped registry' }
+  if (rule.full) {
+    if (/demotion/.test(rule.reason)) return { full: true, promoted: [], reason: 'tier demotion requires full validation and approval', requiresApproval: true }
+    if (/membership/.test(rule.reason)) return { full: true, promoted: [], reason: 'catalogue membership changed' }
+    if (rule.reason === 'registry ownership, exclusions, configuration or execution policy changed')
+      return { full: true, promoted: [], reason: 'tier execution policy changed' }
+    return { full: true, promoted: [], reason: 'case identity, ownership or configuration changed' }
   }
-  if (stable(stripTiming({ ...before, tests: undefined })) !== stable(stripTiming({ ...after, tests: undefined }))) return { full: true, reason: 'tier execution policy changed' }
+  const promoted = (rule.promoted ?? []).filter(row => row.kind === 'browser')
   return { full: false, promoted, reason: promoted.length ? 'browser tier promotions execute' : 'timing-only tier registry' }
 }
 

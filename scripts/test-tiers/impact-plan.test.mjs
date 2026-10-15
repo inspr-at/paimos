@@ -38,6 +38,21 @@ test('AEON-1333 shadow selection unions essential, import and observed navigatio
   assert.deepEqual(result.execution, { mode: 'full', layout: 'full', lane: 'full' })
 })
 
+test('AEON-1334 unknown timing fields fail wide and fixture markdown is not documentation', () => {
+  const previous = manifest(tests)
+  const hidden = { ...previous, timingWeights: { owners: { 'tests/import.spec.ts': { seconds: 9, selectedTests: 1, env: { OMIT: '1' } } } } }
+  assert.equal(registryImpact('scripts/ci/web-test-tiers.json', previous, hidden).full, true)
+  const browser = policy()
+  const measured = structuredClone(browser)
+  measured.groups[0].specs[0].tierTiming = { seconds: 1, selectedTests: 1 }
+  assert.equal(registryImpact('web/ci-web-shards.json', browser, measured).full, false)
+  const nested = structuredClone(browser)
+  nested.groups[0].specs[0].tierTiming = { seconds: 1, selectedTests: 1, env: { OMIT: '1' } }
+  assert.equal(registryImpact('web/ci-web-shards.json', browser, nested).full, true)
+  assert.notEqual(plan({ paths: ['web/tests/fixtures/example.md'] }).browser_scope, 'none')
+  assert.equal(plan({ paths: ['docs/features/example.md'] }).browser_scope, 'none')
+})
+
 test('AEON-1333 docs and pure timing registries propose no browser shards; promotions execute including formerly nightly cases', () => {
   for (const paths of [['docs/features/example.md'], ['README.md', 'LICENSE']]) {
     const result = plan({ paths }); assert.equal(result.browser_scope, 'none'); assert.equal(result.would_have_skipped.count, 4)
@@ -391,7 +406,7 @@ test('AEON-1333 depth-1 merge checkout publishes complete would-have-skipped evi
   git(full, ['config', 'user.name', 'Fixture']); git(full, ['config', 'user.email', 'fixture@example.invalid'])
   git(full, ['config', 'uploadpack.allowReachableSHA1InWant', 'true'])
   for (const file of ['scripts/test-tiers/impact-plan.mjs', 'scripts/test-tiers/browser-impact.mjs', 'scripts/test-tiers/inputs.mjs',
-    'scripts/test-tiers/core.mjs', 'scripts/test-tiers/migration.mjs', 'scripts/playwright-safe.mjs', 'scripts/playwright-global-setup.mjs',
+    'scripts/test-tiers/core.mjs', 'scripts/test-tiers/drift-obligations.json', 'scripts/test-tiers/migration.mjs', 'scripts/playwright-safe.mjs', 'scripts/playwright-global-setup.mjs',
     'scripts/playwright-lock.mjs', 'scripts/playwright-processes.mjs', 'scripts/ci-pr-plan.mjs', 'web/scripts/ci-web-shard.mjs', 'web/scripts/ci-web-shard-source.mjs'])
     write(file, readFileSync(resolve(repository, file)))
   write('scripts/ci/web-test-tiers.json', JSON.stringify(manifest(tests)))

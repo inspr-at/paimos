@@ -10,7 +10,7 @@ import { command, root, web, evidence, flattenBrowser } from '../../scripts/test
 import { resolve, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerHooks } from 'node:module'
-import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
+import { validate, key, select, fullGateTests } from '../../scripts/test-tiers/core.mjs'
 
 // The planner assertions concern browser gates. Collect every browser case
 // natively once, and use declared unit identities for the unrelated unit lane.
@@ -83,6 +83,17 @@ describe('native suite', () => {
   assert.equal(failure.stdout.trim(), '', 'a partial batch must never report a successful catalogue')
 })
 
+function fullBrowserGate(browser, paths) {
+  const expected = fullGateTests(browser, paths)
+  const drift = new Set(JSON.parse(readFileSync(resolve(root, 'scripts/test-tiers/drift-obligations.json'), 'utf8')).browserFiles)
+  assert.ok(browser.length > expected.length, 'Fixture must include optional nonessential registrations')
+  assert.ok(expected.some(row => row.tier === 'NIGHTLY' && drift.has(row.file)), 'a recorded drift file stays inside the full gate')
+  const deferred = browser.filter(row => row.tier === 'NIGHTLY' && !drift.has(row.file))
+  assert.ok(deferred.length > 0, 'a nightly case outside the drift files stays in the catalogue')
+  assert.ok(deferred.every(row => !expected.some(item => key(item) === key(row))), 'a nightly case outside the drift files stays deferred')
+  return expected
+}
+
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async t=>{
   // Exercise every unchanged planner/CLI path against the same native snapshot.
   // Recollecting the entire catalogue for each mode made this one regression
@@ -101,13 +112,10 @@ export const collectWeb = () => { if (!inventory) { collections++; inventory = n
   }})
   t.after(()=>hook.deregister())
   const {plan,main}=await import(entry)
-  const policy=loadWebPolicy()
-  const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
   const selection=plan('web',options)
   const browser=selection.all.filter(row=>row.kind==='browser')
-  const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
-  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
+  const expected=fullBrowserGate(browser, options.paths)
   assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
   assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
   assert.equal(selection.full,true)
@@ -155,13 +163,10 @@ export const collectWeb = () => (${JSON.stringify(snapshot)});`
   }})
   try {
     const {plan,main}=await import('../../scripts/test-tiers/cli.mjs?native-planning-snapshot')
-    const policy=loadWebPolicy()
-    const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
     const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
     const selection=plan('web',options)
     const browser=selection.all.filter(row=>row.kind==='browser')
-    const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
-    const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
+    const expected=fullBrowserGate(browser, options.paths)
     assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
     assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
     assert.equal(selection.full,true)

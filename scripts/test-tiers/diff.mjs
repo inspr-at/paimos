@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
 import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
-import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern, select, webShardPlan } from './core.mjs'
+import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, semanticRegistryPattern, registryImpact, select, webShardPlan } from './core.mjs'
 import { browserImpact, nightlyBrowserMap } from './browser-impact.mjs'
 import { loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
 
@@ -120,7 +120,27 @@ export function promotionsBetween(base,{cwd=root,exec=command,baseDirectory}={})
   } catch { return undefined }
 }
 
-export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph,checkout=root,base,tree,promotions,readFile,tests:suppliedTests,imports,browserMap,baseTree,fingerprint}={}) {
+// Read exactly the changed registries, from the trusted base and candidate.
+// Missing, deleted, symlinked, malformed or oversized inputs widen the gate.
+export function registryChangesBetween(base, paths, { cwd = root, exec = command, baseDirectory } = {}) {
+  const changes = new Map(), limit = 4 * 1024 * 1024
+  for (const file of paths.filter(path => semanticRegistryPattern.test(path))) {
+    try {
+      let before
+      if (baseDirectory !== undefined) before = boundedText(baseDirectory, file, limit)
+      else {
+        if (!/^[a-f0-9]{40}$/.test(base ?? '')) throw new Error('unbound registry base')
+        before = exec('git', ['show', `${base}:${file}`], { cwd, timeout: 15_000 })
+      }
+      const after = boundedText(cwd, file, limit)
+      if ([before, after].some(text => typeof text !== 'string' || Buffer.byteLength(text) >= limit)) throw new Error('unreadable registry')
+      changes.set(file, registryImpact(file, JSON.parse(before), JSON.parse(after)))
+    } catch { changes.set(file, { full: true, reason: 'registry comparison unavailable', promoted: [] }) }
+  }
+  return changes
+}
+
+export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph,checkout=root,base,tree,registryChanges,readFile,tests:suppliedTests,imports,browserMap,baseTree,fingerprint}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
   if(impact==='off')return full('CI_IMPACT=off')
@@ -134,11 +154,11 @@ export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph
   const goChanges=paths.some(path=>/^(?:internal|cmd)\//.test(path)&&!path.endsWith('.md'))
   if(on||goChanges) {
     tree??=sourceTree(checkout)
-    if(promotions===undefined&&paths.some(path=>tierManifestPattern.test(path))) promotions=promotionsBetween(base,{cwd:checkout})
   }
+  if (on && registryChanges === undefined) registryChanges = registryChangesBetween(base, paths, { cwd: checkout })
   const manifests=on||goChanges||webChanges.length?manifestsAt(file=>boundedText(root,file)):{}
   const tests=suppliedTests??Object.values(manifests).flatMap(manifest=>manifest.tests??[])
-  const risk=impactRisk(paths,{event,affectedLane,webImports:graph,tree,promotions,tests,
+  const risk=impactRisk(paths,{event,affectedLane,webImports:graph,tree,registryChanges,tests,
     readFile:readFile??(path=>exists(path)?boundedText(checkout,path):undefined)})
   if(risk.full)return full(risk.reasons.join('; ')||'full event or uncertain impact')
   if(goChanges||risk.goSeeds.size) {
@@ -188,13 +208,13 @@ export function schedulingMode(event,paths,exists,options) {
 // Reuse the execution selector on the catalogue, without native discovery or
 // browsers. In trusted mode policy/graph come from the base, and the candidate
 // catalogue is data only; unknown/new owners fail wide.
-export function sizeWebDecision(decision, paths, { event='pull_request', affectedLane, checkout=root,
-  graph, tree, promotions, browserMap, baseTree, fingerprint, tests, policy }={}) {
+export function sizeWebDecision(decision, paths, { event='pull_request', affectedLane, impact, checkout=root,
+  graph, tree, registryChanges, browserMap, baseTree, fingerprint, tests, policy }={}) {
   if (decision.mode !== 'essential' || decision.layout === 'static') return decision
   tests ??= JSON.parse(boundedText(checkout,'scripts/ci/web-test-tiers.json',4*1024*1024)).tests
   policy ??= loadPolicy(resolve(root,'web/ci-web-shards.json'))
   graph ??= webGraph(resolve(root,'web'))
-  const selection=select(tests,{event,paths,affectedLane,webImports:graph,tree:tree??sourceTree(checkout),promotions,
+  const selection=select(tests,{event,paths,affectedLane,impact,webImports:graph,tree:tree??sourceTree(checkout),registryChanges,
     browserMap,baseTree,fingerprint,readFile:path=>boundedText(checkout,path)})
   if(selection.full) return {mode:'full',layout:'full',reason:selection.reason}
   const webShardSizing=webShardPlan(selection.tests,policy)
@@ -208,7 +228,7 @@ export function trustedSchedulingDecision(base, paths, env=process.env, {cwd=roo
   if(!/^[a-f0-9]{40}$/.test(base??''))throw new Error('Invalid trusted planner base')
   if(!validImpactPaths(paths))throw new Error('Invalid trusted paths')
   const directory=realpathSync(mkdtempSync(resolve(tmpdir(),'aeon-trusted-tier-')))
-  const archive=execFileSync('git',['archive',base,'scripts/test-tiers','scripts/ci','web/src','web/tests','web/e2e','web/scripts','web/ci-web-shards.json'],
+  const archive=execFileSync('git',['archive',base,'scripts/test-tiers','scripts/ci','scripts/ci-pr-plan.mjs','scripts/playwright-safe.mjs','scripts/playwright-global-setup.mjs','scripts/playwright-lock.mjs','scripts/playwright-processes.mjs','web/src','web/tests','web/e2e','web/scripts','web/ci-web-shards.json'],
     {cwd,timeout:30_000,maxBuffer:64*1024*1024})
   execFileSync('tar',['-x','-C',directory],{input:archive,timeout:30_000,maxBuffer:2*1024*1024})
   const output=execFileSync(process.execPath,[resolve(directory,'scripts/test-tiers/diff.mjs'),'--trusted-paths'],
@@ -256,10 +276,10 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
       // Base planner, base graph and base manifests come from this snapshot;
       // the candidate checkout supplies the changed files and head manifests.
       const checkout=process.env.AEON_TIER_CHECKOUT
-      const promotions=paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(undefined,{cwd:checkout,baseDirectory:root}):undefined
+      const registryChanges=registryChangesBetween(undefined,paths,{cwd:checkout,baseDirectory:root})
       const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
       const coverage=paths.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue):{}
-      const options={event:process.env.GITHUB_EVENT_NAME,affectedLane:process.env.CI_AFFECTED_LANE,checkout,promotions,...coverage}
+      const options={event:process.env.GITHUB_EVENT_NAME,affectedLane:process.env.CI_AFFECTED_LANE,impact:process.env.CI_IMPACT,checkout,registryChanges,...coverage}
       console.log(JSON.stringify(sizeWebDecision(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,
         path=>existsSync(resolve(checkout,path)),options),paths,options)))
     } else process.exitCode=main()

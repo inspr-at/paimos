@@ -288,10 +288,11 @@ for (const { width, coarse } of [
         await expect(page.getByRole('menu', { name: /Actions for/ })).toBeVisible()
         await page.keyboard.press('Escape')
       }
-      // AEON-1213 / #591 moves tier changes into a 44px details trigger in every form.
+      // AEON-1213 / #591 moves tier changes into a 44px details trigger in every form;
+      // AEON-1309 / #678 named the Overview tab Details.
       await session.locator('.agent-link').click()
       const panel = page.getByRole('complementary', { name: 'Session details' })
-      await panel.getByRole('tab', { name: 'Overview' }).click()
+      await panel.getByRole('tab', { name: 'Details' }).click()
       const tier = panel.locator('.service-tier .tier-mark:visible')
       await expect(tier).toBeVisible()
       // The initial report can replace a read-only span with the live button.

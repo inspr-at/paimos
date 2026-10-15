@@ -39,9 +39,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await page.locator('[data-row="s:bk5-worker-0"] .agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-step')).toHaveText('Implementing the assigned change')
-    // AEON-1212 moved the state into the unified panel identity line.
-    const state = panel.locator('.pane-title .agent-state-label')
-    await expect(state).toHaveText('Working')
+    // AEON-1212 keeps the state in the panel identity's screen-reader text.
+    const state = panel.locator('.pane-title .sr-only')
+    await expect(state).toHaveText(/\bWorking\b/)
     const inbox = panel.getByRole('region', { name: 'Inbox attention' })
     // AEON-313: shared-inbox obligations stay outside the session thread, in
     // Chat as well as in Now. AEON-977 (2c33f633d) renamed the tab and its panel.
@@ -73,9 +73,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await expect(page.getByTestId('desk-preview-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?from=preview&item=a:bk5-approval')
     await page.keyboard.press('Escape')
     await page.locator('[data-row="s:bk5-worker-0"] .agent-link').click()
-    await expect(state).toHaveText('Awaiting approval')
-    // The panel reopens on the remembered tab (Chat, above); evidence lives in Overview.
-    await panel.getByRole('tab', { name: 'Overview' }).click()
+    await expect(state).toHaveText(/\bAwaiting approval\b/)
+    // The panel reopens on the remembered tab (Chat, above); evidence lives in Details.
+    await panel.getByRole('tab', { name: 'Details' }).click()
     await expect(panel.locator('.now-step')).toContainText('awaiting a person’s decision')
     await expect(panel.getByRole('region', { name: 'Session state evidence' }).getByRole('link', { name: 'Permission requests' })).toHaveAttribute('href', '/decision-desk')
     await page.getByRole('button', { name: 'Close session details' }).click()
@@ -85,7 +85,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     // A late approval list must not override the fresh explicit false projection.
     Object.assign(agents.sessions[0]!, { needs_attention: false, attention_reasons: [] })
     await page.goto('/agents/bk5-worker-0')
-    await expect(state).toHaveText('Working')
+    await expect(state).toHaveText(/\bWorking\b/)
     await expect(panel.locator('.callout')).toHaveCount(0)
     await expect(panel.getByRole('region', { name: 'Inbox attention' })).toHaveCount(0)
   })
