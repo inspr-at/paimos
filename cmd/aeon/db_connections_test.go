@@ -30,6 +30,7 @@ import (
 // elapsed-time assertion or sleep substitutes for an established listener.
 func TestServeConnectionOriginBudget(t *testing.T) {
 	t.Setenv("AEON_ENV", "dev")
+	t.Setenv("AEON_BOOTSTRAP_TENANT_SLUG", "connections")
 	t.Setenv("AEON_BOOTSTRAP_ADMIN_EMAIL", "connections@example.test")
 	for _, key := range []string{"AEON_SESSION_KEY_FILE", "AEON_OIDC_ISSUER", "AEON_OIDC_CLIENT_ID"} {
 		t.Setenv(key, "")
@@ -50,7 +51,7 @@ func TestServeConnectionOriginBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	public, private, err := webpush.GenerateVAPIDKeys()
+	private, public, err := webpush.GenerateVAPIDKeys()
 	if err != nil {
 		t.Fatal(err)
 	}
