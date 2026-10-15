@@ -1,0 +1,228 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Page-owned selectors span section components without adding layout wrappers. */
+
+:deep(:where(.project-head) .head-edit) { flex: none; margin-top: 2px; color: var(--ink-3); }
+@media (pointer: coarse), (max-width: 600px) {
+:deep(:where(.project-head) .head-edit) { width: 44px; height: 44px; } }
+/* Lists use the full width; the gutter grows with the screen. */
+.project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
+/* The header follows its own width, not the window's: a docked ticket panel can
+   leave the list as narrow as a phone on a wide screen (AEON-140). */
+:deep(.attention-view-link) { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; font-size: 13px; color: var(--ink-2); text-decoration: none; }
+@media (pointer: coarse) {
+:deep(.attention-view-link) { position: relative; }
+:deep(.attention-view-link::before) { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+}
+:deep(.project-head) { padding: 4px 0 14px; container: projecthead / inline-size; }
+:deep(:where(.project-head) .head-flex) { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; }
+:deep(:where(.project-head) .head-flex.with-glimpse) { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }
+:deep(:where(.project-head) .head-flex.with-glimpse .head-stats), :deep(:where(.project-head) .head-flex.with-glimpse .head-main) { align-self: start; }
+:deep(:where(.project-head) .head-main) { min-width: 0; flex: 1; position: relative; z-index: 1; }
+:deep(:where(.project-head) .head-main:has(.description-full)) { z-index: 6; }
+:deep(:where(.project-head) .head-stats) { position: relative; z-index: 1; }
+:deep(:where(.project-head) .title-line) { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+:deep(:where(.project-head) .key-badge.big) { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
+:deep(:where(.project-head) .title-line h1) { flex: 1 1 auto; min-width: 0; max-width: 100%; font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+:deep(:where(.project-head) .title-line .key-badge), :deep(:where(.project-head) .state-chip) { flex: none; margin-top: 4px; }
+:deep(:where(.project-head) .state-chip) { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+:deep(:where(.project-head) .description) { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:deep(:where(.project-head) .description-measure) { position: absolute; width: 0; height: 0; overflow: clip; visibility: hidden; pointer-events: none; contain: paint; }
+:deep(:where(.project-head) .description-probe) { width: min(320px, calc(100vw - 16px)); padding: 5px 10px; font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+:deep(:where(.project-head) .description-block) { position: relative; display: flex; flex-direction: column; min-width: 0; }
+:deep(:where(.project-head) .description-block:has(.description-full)) { z-index: 6; }
+:deep(:where(.project-head) .description-more) { display: block; align-self: flex-start; min-width: 5ch; height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+:deep(:where(.project-head) .description-full) { position: absolute; z-index: 6; top: 100%; inset-inline: 0; max-height: 40dvh; overflow: auto; overscroll-behavior: contain; padding: 12px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); font-size: 13.5px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+:deep(:where(.project-head) .description) { min-height: 44px; line-height: 22px; } }
+:deep(:where(.project-head) .head-stats) { display: grid; justify-items: end; gap: 7px; flex-shrink: 0; }
+:deep(.head-stats-skeleton) { width: 280px; }
+:deep(:where(.project-head) .stat-placeholder) { width: 100%; height: 19px; }
+:deep(:where(.project-head) .progress-placeholder) { width: 100%; height: 12px; }
+:deep(:where(.project-head) .activity-placeholder) { width: 42%; height: 18px; }
+:deep(:where(.project-head) .q-stat) { height: 22px; margin: -2px -6px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: inherit; }
+:deep(:where(.project-head) .q-stat:hover) { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+@media (max-width: 600px) {
+  /* The configurable header folds its timestamp, not the queue action.
+     Keep these selectors more specific than its general phone folding rules. */
+.project-page[class*="header-"] :deep(:where(.project-head) .header-activity > span) { display: none; }
+.project-page[class*="header-"] :deep(:where(.project-head) .header-activity) { display: flex; grid-area: activity; justify-self: start; }
+.project-page[class*="header-"] :deep(:where(.project-head) .header-activity .q-stat) { margin: 0; min-width: 44px; min-height: 44px; }
+.project-page[class*="header-"] :deep(.project-head .head-flex) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "activity" "stats" "work" "description"; }
+}
+:deep(:where(.project-head) .q-warn) { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+:deep(:where(.project-head) .q-warn.on) { color: var(--queue-wait-ink); }
+:deep(:where(.project-head) .stat-line) { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
+:deep(:where(.project-head) .stat) { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+:deep(:where(.project-head) .stat b) { font: 600 13px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
+:deep(:where(.project-head) .head-work) { width: 280px; }
+:deep(:where(.project-head) .activity) { font-size: 12px; color: var(--ink-3); }
+:deep(:where(.project-head) .activity time) { color: var(--ink-2); }
+:deep(.stick-mark) { height: 1px; margin-bottom: -1px; }
+/* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
+:deep(.list-view.selecting) { padding-bottom: calc(var(--live-obstacle-h, 0px) + 20px + env(safe-area-inset-bottom)); }
+@media (max-width: 720px) {
+  /* The fixed chip never moves rows when it arrives; the last row can scroll
+     above both it and the measured selection sheet. Desktop stays in the header. */
+:deep(.list-view.has-live-updates) { padding-bottom: calc(var(--live-obstacle-h, 0px) + 68px + env(safe-area-inset-bottom)); }
+}
+:deep(.phone-pick) { display: none; }
+@media (max-width: 720px) {
+:deep(.phone-pick) { display: flex; align-items: center; justify-content: flex-start; min-height: 44px; margin-top: -2px; }
+:deep(.phone-pick-status) { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 0; font-size: 15px; color: var(--ink-2); }
+:deep(.phone-pick-status b) { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+:deep(.phone-pick .dot) { color: var(--ink-3); }
+:deep(.phone-pick .gone) { color: var(--ink-2); }
+:deep(.phone-pick button) { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
+:deep(.phone-pick button.quiet) { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
+:deep(.phone-pick.on button) { margin-left: -12px; color: var(--teal-ink); }
+:deep(.phone-pick button:focus-visible) { box-shadow: var(--focus-ring); }
+}
+/* Without the saved-view strip the header glimpse keeps that room (14px + the 42px strip) to spread into; the graph was framed for it. */
+:deep(.project-head.glimpse-room) { padding-bottom: 56px; }
+:deep(.toolbar-wrap) { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
+:deep(.ticket-freshness) { margin: 0 0 8px 4px; }
+:deep(.toolbar-wrap.stuck) { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px color-mix(in srgb, var(--shadow-color) 35%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
+:deep(:where(.list-view) > .hint) { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
+/* The hint waits for the rows, like the footer, so it never jumps while they load. */
+.project-page:has(.skeleton-body) :deep(:where(.list-view) > .hint) { visibility: hidden; }
+:deep(:where(.list-view) > .hint .keycap + .keycap) { margin-left: 2px; }
+:deep(.hint-link) { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; }
+:deep(.hint-link:hover) { color: var(--teal-ink); }
+.project-page.full-view { padding-top: 12px; }
+.project-page.knowledge-entry { padding-top: 0; }
+/* The docked knowledge entry reads a little wider than a ticket and keeps a width of
+   its own (dragged, it is the person's); the list always keeps its 560px. */
+.project-page.knowledge-dock {
+  --panel-default: clamp(560px, calc(560px + (100vw - 1200px) * .36), 840px);
+  --panel-w: min(var(--knowledge-panel-user-w, var(--panel-default)), calc(100vw - 620px));
+}
+/* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
+.project-page.ticket-dock { --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw, calc(100vw - 500px)); }
+@media (min-width: 900px) {
+.project-page.ticket-dock { padding-right: calc(var(--panel-w) + 22px); }
+.project-page.ticket-dock :deep(.ticket-ws.panel) { width: var(--panel-w); }
+.project-page.ticket-dock :deep(.toolbar-wrap) { margin-right: 0; padding-right: 0; }
+}
+@media (min-width: 1100px) {
+.project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }
+.project-page.panel-open :deep(.toolbar-wrap) { margin-right: 0; padding-right: 0; }
+.project-page.panel-open :deep(:where(.project-head) .description) { max-width: 100%; }
+}
+:deep(.page-state) { display: grid; justify-items: center; gap: 10px; padding: 96px 24px; text-align: center; }
+:deep(.page-state > svg) { color: var(--teal); }
+:deep(.page-state h1) { font-size: 26px; }
+:deep(.page-state .btn) { margin-top: 8px; }
+:deep(.head-skeleton) { display: grid; gap: 12px; padding: 12px 0; }
+:deep(.sk-a) { width: 320px; height: 26px; border-radius: 8px; }
+:deep(.sk-b) { width: 520px; }
+:deep(.sk-c) { width: 100%; height: 44px; border-radius: 12px; margin-top: 18px; }
+@media (max-width: 1080px) {
+:deep(:where(.project-head) .head-work) { width: 240px; }
+:deep(:where(.project-head) .stat-line) { gap: 12px; } }
+@container projecthead (max-width: 760px) {
+:deep(:where(.project-head) .head-flex.with-glimpse) { display: flex; }
+:deep(:where(.project-head) .head-flex.with-glimpse .head-main), :deep(:where(.project-head) .head-flex.with-glimpse .head-stats) { align-self: stretch; }
+:deep(:where(.project-head) .head-flex.with-glimpse .head-main) { padding-top: 0; }
+:deep(:where(.project-head) .head-flex.with-glimpse .glimpse-col) { display: none; }
+:deep(:where(.project-head) .head-flex) { flex-direction: column; align-items: stretch; gap: 12px; }
+:deep(:where(.project-head) .head-stats) { justify-items: start; }
+:deep(.head-stats-skeleton) { width: 100%; min-height: 103px; }
+:deep(:where(.project-head) .head-work) { width: 100%; }
+:deep(:where(.project-head) .title-line h1) { font-size: 24px; }
+:deep(:where(.project-head) .stat-line) { flex-wrap: wrap; gap: 4px 14px; }
+}
+@media (max-width: 720px) {
+.project-page { padding: 14px 12px 16px; }
+:deep(.toolbar-wrap) { margin: 0 -12px; padding: 0 12px; }
+:deep(:where(.project-head) .title-line) { gap: 10px; }
+:deep(:where(.project-head) .title-line h1) { font-size: 24px; }
+:deep(:where(.project-head) .description) { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+:deep(:where(.project-head) .stat-line) { flex-wrap: wrap; gap: 4px 14px; }
+:deep(:where(.project-head) .activity) { display: none; }
+:deep(:where(.list-view) > .hint) { display: none; }
+}
+
+/* AEON-639: header and view settings fold together; the independent toolbar
+   retains the same width and horizontal layout in every density. */
+.project-page[class*="header-"] { padding-top: 12px; }
+:deep(.project-navigation) { display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+:deep(.project-navigation .sections) { margin-top: 0; }
+:deep(.project-navigation .view-bar) { flex: 1; min-width: 0; padding: 0; }
+:deep(.nav-divider) { width: 1px; height: 20px; background: var(--line-2); flex: none; }
+:deep(.project-view-settings) { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
+.project-page[class*="header-"] :deep(.project-head) { padding: 0 0 4px; }
+/* AEON-1425: one line for the name. Counts wrap below it before the name
+   column shrinks under 20rem. display:contents let that column fall to one glyph. */
+.project-page[class*="header-"] :deep(:where(.project-head) .head-flex) { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-start; gap: 8px 16px; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-main) { display: flex; flex-direction: column; flex: 0 0 auto; min-width: 0; max-width: 100%; }
+/* The 20rem basis belongs to the row layout only. In a stacked (column) header it would be a height and leave a band under the description. */
+@container projecthead (width > 760px) {
+.project-page[class*="header-"] :deep(:where(.project-head) .head-main) { flex: 1 1 20rem; min-width: min(100%, 20rem); }
+}
+.project-page[class*="header-"] :deep(:where(.project-head) .title-line) { width: 100%; max-width: none; min-width: 0; }
+/* Don't grow: the edit control stays against the words, and the line still shrinks to an ellipsis. */
+.project-page[class*="header-"] :deep(:where(.project-head) .title-line h1) { flex: 0 1 auto; width: auto; max-width: 100%; font-size: 22px; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; overflow-wrap: normal; -webkit-line-clamp: unset; -webkit-box-orient: unset; }
+.project-page[class*="header-"] :deep(:where(.project-head) .description-block) { min-width: 0; }
+.project-page[class*="header-"] :deep(:where(.project-head) .description) { margin: 0; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.project-page[class*="header-"] :deep(:where(.project-head) .activity) { flex: 0 0 auto; white-space: nowrap; align-self: flex-start; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-stats) { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 12px; max-width: 100%; }
+.project-page[class*="header-"] :deep(:where(.project-head) .stat-line) { gap: 10px; }
+/* The bar keeps its 300px slot, and grows when the scope and total need more, so the row wraps instead of painting past the page. */
+.project-page[class*="header-"] :deep(:where(.project-head) .head-work) { width: max(300px, max-content); max-width: 100%; min-width: 0; }
+.project-page.header-comfortable :deep(:where(.project-head) .title-line h1) { font-size: 34px; }
+.project-page.header-comfortable :deep(:where(.project-head) .description) { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.55; }
+.project-page.header-comfortable :deep(:where(.project-head) .head-stats) { display: grid; align-content: start; align-items: stretch; justify-items: stretch; gap: 8px; }
+:deep(:where(.project-head) .header-activity) { display: flex; align-items: center; gap: 12px; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-stats > .project-status-counts) { min-width: 0; }
+.project-page.header-comfortable :deep(:where(.project-head) .head-work) { width: 100%; }
+.project-page.header-comfortable :deep(.project-navigation) { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
+@media (min-width: 601px) and (max-width: 1100px) {
+:deep(.project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label)) { display: none; }
+.project-page.header-comfortable :deep(:where(.project-head) .head-work) { width: 100%; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-flex) { column-gap: 8px; }
+.project-page[class*="header-"] :deep(:where(.project-head) .stat-line) { gap: 8px; }
+}
+@media (max-width: 900px) {
+:deep(.project-view-settings) { display: none; } }
+@container projecthead (max-width: 760px) {
+.project-page[class*="header-"] :deep(:where(.project-head) .head-flex) { flex-direction: column; align-items: stretch; }
+  /* Stacked: the name column is as tall as its content, in every density and with the panel open. */
+.project-page[class*="header-"] :deep(:where(.project-head) .head-main) { flex: 0 0 auto; min-width: 0; width: 100%; }
+.project-page.header-compact :deep(:where(.project-head) .title-line) { width: 100%; max-width: none; }
+.project-page.header-compact :deep(:where(.project-head) .head-stats) { display: flex; flex-direction: column; align-items: stretch; width: 100%; max-width: 100%; }
+.project-page.header-compact :deep(:where(.project-head) .head-work) { width: 100%; }
+}
+@media (max-width: 600px) {
+:deep(:where(.project-head) .header-activity) { display: none; }
+:deep(:where(.project-head) .header-activity:has(.q-stat)) { display: flex; grid-area: activity; justify-self: start; }
+:deep(:where(.project-head) .header-activity:has(.q-stat) > span) { display: none; }
+:deep(:where(.project-head) .header-activity .q-stat) { min-height: 44px; margin: 0; }
+.project-page[class*="header-"] :deep(.project-head .head-flex) { display: grid; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-flex), .project-page.header-comfortable :deep(:where(.project-head) .head-flex) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "stats" "work" "description" "activity"; gap: 4px 10px; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-main) { display: contents; }
+.project-page[class*="header-"] :deep(:where(.project-head) .title-line) { grid-area: title; width: auto; max-width: none; }
+.project-page[class*="header-"] :deep(:where(.project-head) .title-line h1) { font-size: 24px; }
+.project-page.header-comfortable :deep(:where(.project-head) .title-line h1) { font-size: 28px; }
+.project-page[class*="header-"] :deep(:where(.project-head) .description-block) { grid-area: description; }
+.project-page[class*="header-"] :deep(:where(.project-head) .description) { white-space: nowrap; display: block; }
+.project-page.header-comfortable :deep(:where(.project-head) .description) { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.project-page[class*="header-"] :deep(.project-head .head-stats) { display: contents; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-stats > .project-status-counts) { grid-area: stats; }
+.project-page[class*="header-"] :deep(:where(.project-head) .head-work), .project-page.header-comfortable :deep(:where(.project-head) .head-work) { grid-area: work; width: 100%; margin: 2px 0 4px; }
+:deep(.project-navigation) { margin-top: 8px; min-height: 52px; gap: 6px; flex-wrap: wrap; }
+:deep(.attention-view-link) { flex: none; min-height: 44px; }
+  /* Saved views keep their own scrollable row below the project navigation. */
+:deep(.project-navigation .view-bar) { flex-basis: 100%; }
+:deep(.project-navigation .nav-divider) { display: none; }
+:deep(.project-navigation :deep(.sections button:not([aria-selected="true"]))) { flex: none; width: 44px; padding: 0; }
+:deep(.project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label)) { display: none; }
+:deep(.project-navigation .view-bar) { padding: 0; }
+}
+:deep(.project-navigation.legacy-navigation) { display: block; border: 0; padding: 0; }
+:deep(.project-navigation.legacy-navigation .sections) { margin-top: 18px; }
+:deep(.project-navigation.legacy-navigation .view-bar) { padding: 2px 0 6px; }
+/* AEON-1027: the lead card, open or folded, keeps its own card gap (16px, as between the Agents page
+   cards) to the section bar, in every header density. One :deep() only: Vue leaves a second :deep()
+   literal and the browser drops the rule. */
+.project-page :deep(.lead + .project-navigation) { margin-top: 0; }
+.project-page :deep(.lead + .legacy-navigation .sections) { margin-top: 0; }
