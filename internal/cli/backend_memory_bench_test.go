@@ -145,6 +145,9 @@ func BenchmarkBackendMemory(b *testing.B) {
 					b.Fatal(err)
 				}
 				cfg.MaxConns, cfg.MinConns, cfg.MinIdleConns = 3, 0, 0
+				// Match db.Open's production OLTP session setting. This pool
+				// must start fresh without running migrations on a sampled backend.
+				cfg.ConnConfig.RuntimeParams["jit"] = "off"
 				pool, err := pgxpool.NewWithConfig(ctx, cfg)
 				if err != nil {
 					b.Fatal(err)
