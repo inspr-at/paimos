@@ -287,11 +287,16 @@ func auditRecipientTx(ctx context.Context, tx pgx.Tx, tid string, a MergeAudit) 
 }
 
 func auditAlert(ctx context.Context, tx pgx.Tx, actor tenant.Principal, a MergeAudit, to *auditRecipient) error {
+	key := digest([]byte(actor.TenantID + "|" + a.Repository + "|" + a.SHA))
+	body := fmt.Sprintf("Merge audit: %s %s bypassed delivery safeguards (%s).", a.Repository, a.SHA, strings.Join(a.Flags, ", "))
+	return deliveryNoticeTx(ctx, tx, actor, a.Project, to, key, body)
+}
+
+func deliveryNoticeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, project *string, to *auditRecipient, key, body string) error {
 	if to == nil {
 		return nil
 	}
-	// Serialize using the tenant fence and audit PK, before the first append.
-	key := digest([]byte(actor.TenantID + "|" + a.Repository + "|" + a.SHA))
+	// The caller fences current state, recipient and authority before this append.
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE sender_principal_id=$1 AND idempotency_key=$2)`, actor.ID, key).Scan(&exists); err != nil {
 		return err
@@ -299,8 +304,7 @@ func auditAlert(ctx context.Context, tx pgx.Tx, actor tenant.Principal, a MergeA
 	if exists {
 		return nil
 	}
-	body := fmt.Sprintf("Merge audit: %s %s bypassed delivery safeguards (%s).", a.Repository, a.SHA, strings.Join(a.Flags, ", "))
-	_, err := inbox.AcceptMessageTx(ctx, tx, actor, inbox.Acceptance{RecipientPrincipalID: to.principal, RecipientSessionID: to.session, SenderLabel: "Delivery", Body: body, IdempotencyKey: key, ProjectID: a.Project})
+	_, err := inbox.AcceptMessageTx(ctx, tx, actor, inbox.Acceptance{RecipientPrincipalID: to.principal, RecipientSessionID: to.session, SenderLabel: "Delivery", Body: body, IdempotencyKey: key, ProjectID: project})
 	return err
 }
 

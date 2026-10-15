@@ -667,6 +667,7 @@
         "next_attempt_at": "metadata",
         "payload": "review",
         "payload_sha256": "metadata",
+        "permission_paused_at": "metadata",
         "received_at": "metadata",
         "repository": "metadata",
         "tenant_id": "metadata"
