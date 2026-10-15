@@ -10,6 +10,8 @@ import { managedControlSession, managedControlUnavailable } from '../../lib/mana
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
+import { isSettingsField, settingsSubmitKey } from '../../lib/settingsOverlays'
 import { pausingSession } from '../../lib/agentPause'
 import FloatingPanel from '../work/FloatingPanel.vue'
 
@@ -68,6 +70,16 @@ async function json<T>(answer: Promise<Response>): Promise<T> {
 }
 const sheetOpen = computed(() => phone.value && (composing.value || !!editing.value))
 const sheetTitle = computed(() => editing.value ? settingNames[editing.value] : 'Steer')
+function editorKeys(event: KeyboardEvent) {
+  if (!settingsSubmitKey(event)) return
+  event.preventDefault(); event.stopPropagation()
+  void submit(editing.value || 'steer')
+}
+function cancelSheet() {
+  const field = document.activeElement
+  if (isSettingsField(field)) { field.blur(); sheetEl.value?.focus({ preventScroll: true }); return }
+  closeSheet()
+}
 function closeSheet() { composing.value = false; editing.value = null; editorAnchor.value = null }
 function backdrop(event: MouseEvent) { if (event.target === sheetEl.value) closeSheet() }
 function toggleMore(event: MouseEvent) {
@@ -203,9 +215,9 @@ async function sendRequest() {
     <p v-if="error && !sheetOpen && !overflow" class="hint" role="alert">{{ error }}</p>
     <div v-if="uncertain && !sheetOpen" class="control-row"><button type="button" class="btn sm ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn sm ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
     <details v-if="!phone && !overflow"><summary><AppIcon name="chevron-right" :size="12" />Control limits</summary><p>Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p></details>
-    <FloatingPanel v-if="overflow && !phone && editorAnchor && (editing || composing)" :anchor="editorAnchor" :label="sheetTitle" :width="360" field-escape cycle @close="closeSheet">
-      <form class="setting-form overflow-editor" @submit.prevent="editing ? submit(editing) : submit('steer')">
-        <div class="control-row"><button type="submit" class="btn sm primary" :disabled="waiting || loadingSettings || !!unavailable || (editing ? !validValue : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}</button><button type="button" class="btn sm ghost" @click="closeSheet">Cancel</button></div>
+    <FloatingPanel v-if="overflow && !phone && editorAnchor && (editing || composing)" :anchor="editorAnchor" :label="sheetTitle" :width="360" settings-keys cycle @close="closeSheet">
+      <form class="setting-form overflow-editor" @keydown="editorKeys" @submit.prevent="editing ? submit(editing) : submit('steer')">
+        <div class="control-row"><button type="submit" class="btn sm primary" :disabled="waiting || loadingSettings || !!unavailable || (editing ? !validValue : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}<KeyCap k="mod" /><KeyCap k="enter" /></button><button type="button" class="btn sm ghost" @click="closeSheet">Cancel</button></div>
         <label :for="`${uid}-overflow-setting`">{{ editing ? settingNames[editing] : 'What should change?' }}</label>
         <input v-if="editing === 'rename'" :id="`${uid}-overflow-setting`" v-model="settingValue" maxlength="128" :disabled="waiting" autocomplete="off" />
         <select v-else-if="editing" :id="`${uid}-overflow-setting`" v-model="settingValue" :disabled="waiting || loadingSettings || !settingChoices.length"><option value="" disabled>Choose {{ settingNames[editing].toLowerCase() }}</option><option v-for="value in settingChoices" :key="value" :value="value">{{ value }}</option></select>
@@ -214,8 +226,8 @@ async function sendRequest() {
         <p v-if="feedback" role="status" class="hint">{{ feedback }}</p><p v-if="error" role="alert" class="hint">{{ error }}</p>
       </form>
     </FloatingPanel>
-    <dialog v-if="phone" ref="sheetEl" class="steer-sheet" :aria-labelledby="`${uid}-sheet-title`" @cancel.prevent="closeSheet" @click="backdrop">
-      <div class="sheet-card">
+    <dialog v-if="phone" ref="sheetEl" class="steer-sheet" :aria-labelledby="`${uid}-sheet-title`" @cancel.prevent="cancelSheet" @click="backdrop">
+      <div class="sheet-card" @keydown="editorKeys">
         <span class="grabber" aria-hidden="true" />
         <header class="sheet-head">
           <h2 :id="`${uid}-sheet-title`">{{ sheetTitle }}</h2>
@@ -243,7 +255,7 @@ async function sendRequest() {
             <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
           </div>
           <div class="sheet-actions">
-            <button type="submit" :form="`${uid}-sheet-form`" class="btn primary" :disabled="!!unavailable || waiting || (editing ? !validValue || loadingSettings : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}</button>
+            <button type="submit" :form="`${uid}-sheet-form`" class="btn primary" :disabled="!!unavailable || waiting || (editing ? !validValue || loadingSettings : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
             <button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button>
           </div>
         </footer>

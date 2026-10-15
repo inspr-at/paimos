@@ -533,7 +533,7 @@ const shortcutDisposers = [
   onAction('agents.session.resume', () => pauseSelected('resume'), actionScope),
   onAction('agents.details.close', event => {
     if (ticketPeekOpen.value) return false
-    if (shortcutTyping(event.target)) { (event.target as HTMLElement).blur(); return }
+    if (shortcutTyping(event.target)) { (event.target as HTMLElement).blur(); (event.target as HTMLElement).closest<HTMLElement>('.session-panel')?.focus({ preventScroll: true }); return }
     if (sessionId.value && panelLayout.value === 'full') void setPanelLayout('side')
     else if (sessionId.value) void closePanel()
     else if (filter.value) filter.value = null

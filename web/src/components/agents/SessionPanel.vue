@@ -1,4 +1,26 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script lang="ts">
+import { shallowRef } from 'vue'
+import { onAction } from '../../lib/shortcuts'
+interface PanelShortcutOwner { enabled: () => boolean; when: (event: KeyboardEvent) => boolean; select: (index: number) => false | void; toggle: () => void }
+const panelOwners: PanelShortcutOwner[] = [], panelOwnersRevision = shallowRef(0)
+let panelBindings: (() => void)[] = []
+function registerPanelShortcuts(owner: PanelShortcutOwner) {
+  panelOwners.push(owner); panelOwnersRevision.value++
+  const current = () => { void panelOwnersRevision.value; return panelOwners.at(-1) }
+  if (panelOwners.length === 1) {
+    const scope = { enabled: () => !!current()?.enabled(), when: (event: KeyboardEvent) => !!current()?.when(event) }
+    panelBindings = [onAction('agents.panel.fullscreen', () => current()?.toggle(), scope),
+      ...([1, 2, 3, 4, 5] as const).map(number => onAction(`agents.panel.tab.${number}`, () => current()?.select(number - 1), scope))]
+  }
+  return () => {
+    const index = panelOwners.indexOf(owner)
+    if (index >= 0) panelOwners.splice(index, 1)
+    panelOwnersRevision.value++
+    if (!panelOwners.length) { panelBindings.forEach(dispose => dispose()); panelBindings = [] }
+  }
+}
+</script>
 <script setup lang="ts">
 import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
@@ -57,7 +79,7 @@ import { listHostLabels } from '../../lib/agents'
 import ServiceTierBlock from './ServiceTierBlock.vue'
 import { tierHistoryText, tierRunCostLabel, tierCostAmount } from '../../lib/serviceTier'
 import { useReaderAnchor } from '../../lib/readerAnchor'
-import { onAction, shortcutHint, shortcutKeys } from '../../lib/shortcuts'
+import { shortcutHint, shortcutKeys, shortcutTyping } from '../../lib/shortcuts'
 import { isHolderTerminalTarget, type TerminalActionView } from '../../lib/nativeTerminal/ports'
 import { bindingKey, liveTerminalLink, type ExpertViewer, type NativeExpertTransport } from '../../lib/nativeExpert/ports'
 import { SessionEvents, SessionTerminal } from '../../lib/nativeExpert/views'
@@ -78,6 +100,18 @@ function chatBlur(event: FocusEvent) {
   if (event.relatedTarget instanceof Node && !root.value?.contains(event.relatedTarget)) composing.value = false
 }
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; docked?: boolean; sheet?: boolean; layout?: PanelLayout; sidebarAvailable?: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string; section?: 'next-up' | null }>()
+const localLayout = ref<PanelLayout>('side')
+const panelLayout = computed(() => props.layout ?? localLayout.value)
+const localLargeLayout = usePreference<{ layout?: PanelLayout }>('agents:panel.layout.large'), localSmallLayout = usePreference<{ layout?: PanelLayout }>('agents:panel.layout.phone')
+let localLayoutWrite = 0
+async function requestLayout(next: PanelLayout, automatic = false) {
+  if (props.layout !== undefined) { if (automatic) emit('autoLayout', next); else emit('layout', next); return }
+  const write = ++localLayoutWrite, who = auth.identity?.principal.id, id = s.value?.id
+  localLayout.value = next
+  if (automatic) return
+  const preference = window.innerWidth <= 720 || window.innerHeight <= 480 ? localSmallLayout : localLargeLayout
+  if (await preference.ensureLoaded() && write === localLayoutWrite && who === auth.identity?.principal.id && id === s.value?.id) preference.save({ ...preference.value.value, layout: next }, 0)
+}
 const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval]; layout: [layout: PanelLayout]; autoLayout: [layout: PanelLayout] }>()
 watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
@@ -138,8 +172,8 @@ const pinned = computed(() => leadTab(leadPreference.value.value?.pinned))
 const questionReadable = computed(() => !!s.value && can('questions.read', s.value.project_id) && projection.questions.state !== 'forbidden')
 const questions = computed(() => s.value && questionReadable.value ? projection.asksOf(s.value.id).filter(q => q.project_id === s.value!.project_id) : [])
 const hasQuestion = computed(() => questions.value.length > 0 && auth.identity?.principal.kind === 'person' && can('questions.decide', s.value?.project_id))
-const native = ref<NativeSessionView | null>(null), nativeReason = ref('Reading the session’s live capabilities…'), terminalAtOpen = ref(false), nativeKnown = ref(false), menuReady = ref(false)
-const availableTabs = computed(() => panelTabs(isLead.value, terminalAtOpen.value, !!s.value?.watch))
+const native = ref<NativeSessionView | null>(null), nativeReason = ref('Reading the session’s live capabilities…'), terminalAtOpen = ref(false), nativeKnown = ref(false), menuReady = ref(false), leadAtOpen = ref(false), viewerAtOpen = ref(false)
+const availableTabs = computed(() => panelTabs(leadAtOpen.value, terminalAtOpen.value, !!s.value?.watch))
 const viewer = computed<ExpertViewer>(() => ({ tenantId: auth.identity?.tenant.id ?? '', principalId: auth.identity?.principal.id ?? '',
   kind: auth.identity?.principal.kind === 'person' ? 'person' : 'agent', canRead: !!s.value && can('harness.read', s.value.project_id),
   // Consent is never inferred from a capability or from the current person's ownership.
@@ -158,18 +192,19 @@ let nativeReady: Promise<void> = Promise.resolve()
 watch(() => [s.value?.project_id, s.value?.id, owner.value, s.value?.heartbeat_at], (_keys, _old, cleanup) => {
   const read = ++nativeRead, selected = s.value, panel = `${owner.value}/${selected?.project_id}/${selected?.id}`
   const fresh = panel !== nativePanel; nativePanel = panel
-  if (fresh) { native.value = null; nativeKnown.value = false; terminalAtOpen.value = false; menuReady.value = false; nativeReason.value = 'Reading the session’s live capabilities…' }
+  if (fresh) { native.value = null; nativeKnown.value = false; terminalAtOpen.value = false; menuReady.value = false; leadAtOpen.value = false; viewerAtOpen.value = false; nativeReason.value = 'Reading the session’s live capabilities…' }
   if (!selected || !owner.value) { menuReady.value = true; return }
   const abort = new AbortController(); cleanup(() => abort.abort())
   const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(3000)])
   nativeReady = (async () => {
     try {
-      await ensurePermissions(selected.project_id)
+      await Promise.all([ensurePermissions(selected.project_id), leads.loadLead(selected.project_id)])
       const value = await boundedJSON<NativeSessionView>(`/projects/${encodeURIComponent(selected.project_id)}/harness-sessions/${encodeURIComponent(selected.id)}/native-context`, signal)
       if (read !== nativeRead || abort.signal.aborted) return
       if (!value || !value.capabilities || typeof value.owned_session_id !== 'string' || !value.owner_person_id || !Number.isSafeInteger(value.generation) || !Number.isSafeInteger(value.revision) ||
         value.profile !== 'native' || (value.current_binding && (value.current_binding.tenant_id !== viewer.value.tenantId || value.current_binding.project_id !== selected.project_id || value.current_binding.harness_session_id !== selected.id || value.current_binding.owned_session_id !== value.owned_session_id))) throw new Error('Invalid native context')
       native.value = value; nativeKnown.value = true; nativeReason.value = ''
+      if (!menuReady.value) viewerAtOpen.value = !!terminalLink.value
       if (!menuReady.value) terminalAtOpen.value = viewer.value.kind === 'person' && viewer.value.canRead && (value.capabilities.take_supported || value.mode === 'terminal' || !!terminalLink.value)
     } catch (error) {
       if (read !== nativeRead || abort.signal.aborted) return
@@ -177,7 +212,7 @@ watch(() => [s.value?.project_id, s.value?.id, owner.value, s.value?.heartbeat_a
       native.value = null
       const reason = (error as { reason?: string }).reason
       nativeReason.value = reason === 'feature_disabled' || reason === 'permission_revoked' ? 'Live events are not available for this session yet.' : 'The session’s live capabilities could not be read. Reopen the panel to try again.'
-    } finally { if (read === nativeRead) menuReady.value = true }
+    } finally { if (read === nativeRead) { if (!menuReady.value) leadAtOpen.value = isLead.value; menuReady.value = true } }
   })()
 }, { immediate: true, flush: 'sync' })
 
@@ -186,7 +221,7 @@ function selectTab(next: PanelTab) {
   if (!availableTabs.value.includes(next)) return
   opening++ // A person's choice cancels any automatic selection still awaiting reads.
   tab.value = next
-  if (next === 'terminal' && window.innerHeight <= 480 && props.layout !== 'full') emit('autoLayout', 'full')
+  if (next === 'terminal' && window.innerHeight <= 480 && panelLayout.value !== 'full') void requestLayout('full', true)
   if (isLead.value) leadPreference.save({ ...leadPreference.value.value, last: next }, 0)
   else workerPreference.save({ last: next }, 0)
   if (route.query.tab !== undefined || route.hash === '#next-up') { const query = { ...route.query }; delete query.tab; void router.replace({ query, hash: '' }) }
@@ -224,6 +259,16 @@ watch(() => [route.query.tab, route.hash, props.section], () => {
 watch(isLead, value => { if (!value && ['lead', 'session'].includes(tab.value)) tab.value = 'overview' })
 onBeforeUnmount(() => { opening++ })
 useVisualViewport(root)
+watch(() => [owner.value, s.value?.id], async () => {
+  if (props.layout !== undefined) return
+  const write = ++localLayoutWrite, who = owner.value
+  localLayout.value = 'side'
+  const preference = window.innerWidth <= 720 || window.innerHeight <= 480 ? localSmallLayout : localLargeLayout
+  await preference.ready
+  if (write !== localLayoutWrite || who !== owner.value) return
+  const saved = preference.value.value?.layout
+  if (saved === 'side' || saved === 'wide' || saved === 'full') localLayout.value = saved
+}, { immediate: true })
 const ticketState = ref('')
 
 const pending = computed(() => s.value?.run_id && s.value.phase !== 'stopped' && s.value.needs_attention !== false ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id && approvalRun(a) === s.value!.run_id) : [])
@@ -264,18 +309,18 @@ const recentRunModel = (item: typeof recentRuns.value[number]) => panelModelLine
 const modelLine = computed(() => s.value ? panelModelLine(reported.value || s.value, agents.models, props.view?.model) : '')
 
 const identityTitle = computed(() => [props.view?.ticket?.title ?? (isLead.value ? props.view?.projectTitle : ''), props.view?.status.label, native.value?.controller ? native.value.controller.actor_id === viewer.value.principalId ? 'You have control in a terminal' : 'Another person has control' : '', modelLine.value, s.value?.host].filter(Boolean).join(' · '))
-const fullScreenTip = computed(() => props.layout === 'full' ? 'Exit full screen · Esc' : ['Full screen', shortcutHint('agents.panel.fullscreen')].filter(Boolean).join(' · '))
+const fullScreenTip = computed(() => panelLayout.value === 'full' ? 'Exit full screen · Esc' : ['Full screen', shortcutHint('agents.panel.fullscreen')].filter(Boolean).join(' · '))
 const shortcutScope = { enabled: () => !!s.value && !props.loading && menuReady.value, when: (event: KeyboardEvent) => !isHolderTerminalTarget(event.target) && !isHolderTerminalTarget(document.activeElement) }
-const panelShortcuts = [
-  onAction('agents.panel.fullscreen', () => emit('layout', props.layout === 'full' ? 'side' : 'full'), shortcutScope),
-  ...([1, 2, 3, 4, 5] as const).map((number) => onAction(`agents.panel.tab.${number}`, () => {
-    const next = availableTabs.value[number - 1]
+const stopPanelShortcuts = registerPanelShortcuts({ ...shortcutScope,
+  toggle: () => { void requestLayout(panelLayout.value === 'full' ? 'side' : 'full') },
+  select: index => {
+    const next = availableTabs.value[index]
     if (!next) return false
     selectTab(next)
     void nextTick(() => root.value?.querySelector<HTMLElement>(`[role="tab"][aria-selected="true"]`)?.focus({ preventScroll: true }))
-  }, shortcutScope)),
-]
-onBeforeUnmount(() => panelShortcuts.forEach(dispose => dispose()))
+  },
+})
+onBeforeUnmount(() => { localLayoutWrite++; stopPanelShortcuts() })
 function editSetting(kind: 'rename' | 'model' | 'effort') {
   const anchor = actionsAnchor.value
   closeActions(false)
@@ -439,7 +484,9 @@ async function stopSession(anchor: HTMLElement) {
   if (confirmed && id === s.value?.id && who === owner.value && ownership === JSON.stringify(controlSession.value?.process_ownership) && !stopReason.value) void managed.value?.stop()
 }
 function panelKey(event: KeyboardEvent) {
-  if (props.layout !== 'full' || event.key !== 'Tab' || !root.value) return
+  if (isHolderTerminalTarget(event.target) && !event.metaKey && !event.ctrlKey && (event.key === 'Escape' || /^[1-5f]$/i.test(event.key) || event.key.toLowerCase() === 'e' && event.shiftKey)) { event.stopImmediatePropagation(); return }
+  if (props.layout === undefined && event.key === 'Escape' && panelLayout.value === 'full' && !shortcutTyping(event.target)) { event.preventDefault(); event.stopImmediatePropagation(); void requestLayout('side'); return }
+  if (panelLayout.value !== 'full' || event.key !== 'Tab' || !root.value) return
   const controls = [...root.value.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input, textarea, select, [tabindex="0"]')].filter(el => el.getClientRects().length && !el.closest('[inert]'))
   if (!controls.length) return
   const edge = event.shiftKey ? controls[0] : controls.at(-1)
@@ -449,7 +496,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
 <template>
-  <aside ref="root" class="session-panel" :class="{ composing, docked, sheet, full: layout === 'full', wide: layout === 'wide' }" :data-layout="layout || 'side'" aria-label="Session details" tabindex="-1" @keydown="panelKey" @focusin="chatFocus" @focusout="chatBlur">
+  <aside ref="root" class="session-panel" :class="{ composing, docked, sheet, full: panelLayout === 'full', wide: panelLayout === 'wide' }" :data-layout="panelLayout" aria-label="Session details" tabindex="-1" @keydown="panelKey" @focusin="chatFocus" @focusout="chatBlur">
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
       <div class="pane-bar">
@@ -461,20 +508,20 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           </h2>
         </div>
         <div v-else class="pane-identity" role="status">{{ loading ? 'Reading session…' : 'Session unavailable' }}</div>
-        <SessionTabs v-if="view && !loading && menuReady" :selected="tab" :lead="isLead" :terminal="terminalAtOpen" :watch="!!reported?.watch" :pinned="pinned" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)" @select="selectTab" />
+        <SessionTabs v-if="view && !loading && menuReady" :selected="tab" :lead="leadAtOpen" :terminal="terminalAtOpen" :watch="!!reported?.watch" :pinned="pinned" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)" @select="selectTab" />
         <div class="pane-buttons" role="group" aria-label="Panel actions">
-          <button v-if="sidebarAvailable" type="button" class="pane-icon pane-layout" aria-label="Sessions list" :aria-pressed="layout === 'side'" :data-tip="layout === 'side' ? 'Hide the sessions list' : 'Show the sessions list'" @click="emit('layout', layout === 'side' ? 'wide' : 'side')"><AppIcon :name="layout === 'side' ? 'layout-focus' : 'layout-list'" :size="18" /></button>
-          <button type="button" class="pane-icon pane-layout" aria-label="Full screen" :aria-pressed="layout === 'full'" :data-tip="fullScreenTip" :aria-keyshortcuts="shortcutKeys('agents.panel.fullscreen').join(' ') || undefined" @click="emit('layout', layout === 'full' ? 'side' : 'full')"><AppIcon :name="layout === 'full' ? 'collapse' : 'expand'" :size="18" /></button>
+          <button v-if="sidebarAvailable" type="button" class="pane-icon pane-layout" aria-label="Sessions list" :aria-pressed="panelLayout === 'side'" :data-tip="panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list'" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side')"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="18" /></button>
+          <button type="button" class="pane-icon pane-layout" aria-label="Full screen" :aria-pressed="panelLayout === 'full'" :data-tip="fullScreenTip" :aria-keyshortcuts="shortcutKeys('agents.panel.fullscreen').join(' ') || undefined" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full')"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="18" /></button>
           <button v-if="view && !loading && menuReady" type="button" class="pane-icon pane-more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = actionsAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" :size="18" /></button>
           <button type="button" class="pane-icon pane-close" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="18" /></button>
         </div>
       </div>
       <p v-if="isLead && why" class="sr-only">Opened on {{ PANEL_TAB_LABEL[openedTab] }}: {{ why.replace('Session is', 'Details is') }}</p>
       <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
-      <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" @close="closeActions">
-        <div class="panel-menu" :class="{ 'phone-full': layout === 'full' }" role="menu" aria-label="More session actions">
-          <button type="button" role="menuitem" class="panel-menu-item" @click="emit('layout', layout === 'full' ? 'side' : 'full'); closeActions(true)"><AppIcon :name="layout === 'full' ? 'collapse' : 'expand'" :size="16" /><span>{{ layout === 'full' ? 'Exit full screen' : 'Full screen' }}</span><KeyCap k="shift" /><KeyCap k="E" /></button>
-          <button v-if="sidebarAvailable" type="button" role="menuitem" class="panel-menu-item" @click="emit('layout', layout === 'side' ? 'wide' : 'side'); closeActions(true)"><AppIcon :name="layout === 'side' ? 'layout-focus' : 'layout-list'" :size="16" /><span>{{ layout === 'side' ? 'Hide the sessions list' : 'Show the sessions list' }}</span></button>
+      <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" :width="360" @close="closeActions">
+        <div class="panel-menu" :class="{ 'phone-full': panelLayout === 'full' }" role="menu" aria-label="More session actions">
+          <button type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full'); closeActions(true)"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="16" /><span>{{ panelLayout === 'full' ? 'Exit full screen' : 'Full screen' }}</span><KeyCap k="shift" /><KeyCap k="E" /></button>
+          <button v-if="sidebarAvailable" type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side'); closeActions(true)"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="16" /><span>{{ panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list' }}</span></button>
           <div class="phone-panel-choices" role="group" aria-label="Session views">
             <button v-for="choice in availableTabs" :key="choice" type="button" role="menuitemradio" :aria-checked="choice === tab" class="panel-menu-item" @click="selectTab(choice); closeActions(true)"><span>{{ PANEL_TAB_LABEL[choice] }}</span><AppIcon v-if="choice === tab" name="check" :size="14" /></button>
           </div>
@@ -484,8 +531,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
             <button type="button" role="menuitem" class="panel-menu-item danger-ghost" :disabled="!!stopReason" @click="stopSession(actionsAnchor!); closeActions(false)"><AppIcon name="stop" :size="16" /><span>Stop…<small>{{ stopReason || 'Opens the confirmation' }}</small></span></button>
             <button v-if="managedControls" type="button" role="menuitem" class="panel-menu-item" :disabled="!!settingReason('steer')" @click="steer"><AppIcon name="send" :size="16" /><span>Steer…<small>{{ settingReason('steer') || 'Change the next step' }}</small></span></button>
           </template>
-          <button v-if="terminalAtOpen && nativeAction" type="button" role="menuitem" class="panel-menu-item" disabled><AppIcon name="terminal" :size="16" /><span>{{ nativeAction.label }}<small>{{ nativeAction.reason }}</small></span></button>
-          <a v-if="terminalLink" role="menuitem" class="panel-menu-item" :href="terminalLink.href" target="_blank" rel="noopener noreferrer" @click="closeActions(false)"><AppIcon name="terminal" :size="16" /><span>Open live terminal</span><AppIcon name="external" :size="14" /></a>
+          <button v-if="terminalAtOpen" type="button" role="menuitem" class="panel-menu-item" disabled><AppIcon name="terminal" :size="16" /><span>{{ nativeAction?.label || 'Control unavailable' }}<small>{{ nativeAction?.reason || nativeReason }}</small></span></button>
+          <a v-if="viewerAtOpen && viewer.kind === 'person'" role="menuitem" class="panel-menu-item" :href="terminalLink?.href" :aria-disabled="!terminalLink" :tabindex="terminalLink ? 0 : -1" target="_blank" rel="noopener noreferrer" @click="terminalLink ? closeActions(false) : $event.preventDefault()"><AppIcon name="terminal" :size="16" /><span>Open live terminal</span><AppIcon name="external" :size="14" /></a>
           <button v-if="showRecover" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :title="nativeKnown ? 'Owned session recovery requires the qualified session client.' : undefined" @click="recovery?.open(actionsAnchor ?? undefined); closeActions(false)"><AppIcon name="wrench" :size="16" /><span>Recover<small v-if="nativeKnown">Owned session recovery requires the qualified session client.</small></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :aria-label="`Remove ${view.name}`" @click="removal?.remove(); closeActions(false)"><AppIcon name="trash" :size="16" /><span>{{ quick ? 'Remove' : 'Remove…' }}<small v-if="nativeKnown">Owned session removal is not available in this panel yet.</small></span></button>
           <button v-if="isLead" type="button" role="menuitemcheckbox" :aria-checked="pinned === 'lead'" class="panel-menu-item" @click="pinTab(); closeActions(true)"><AppIcon name="pin" :size="16" /><span>Open on Lead by default</span><AppIcon v-if="pinned === 'lead'" name="check" :size="14" /></button>
@@ -629,8 +676,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <p v-else class="live-unavailable" role="status">{{ nativeReason }}</p>
     </div>
     <div v-if="view && !loading && terminalAtOpen" v-show="tab === 'terminal'" id="session-panel-terminal" class="live-pane" role="tabpanel" aria-labelledby="session-tab-terminal">
-      <SessionTerminal v-if="native && native.mode !== 'terminal' && native.terminal_viewer_url" :session="native" :viewer="viewer" :consent="null" :transport="eventTransport" :active="tab === 'terminal'" :name="view.name" :host="view.session.host || ''" />
-      <NativeTerminal v-else-if="native" :session="native" :viewer="viewer" :consent="null" :transport="{ stream: async () => { throw { reason: 'qualification_missing' } } }" :renderer-factory="null" :active="tab === 'terminal'" :model-name="modelLine" :host="view.session.host || ''" :layout="layout || 'side'" :action="nativeAction" />
+      <SessionTerminal v-if="native && native.mode !== 'terminal' && viewerAtOpen" :session="native" :viewer="viewer" :consent="null" :transport="eventTransport" :active="tab === 'terminal'" :name="view.name" :host="view.session.host || ''" />
+      <NativeTerminal v-else-if="native" :session="native" :viewer="viewer" :consent="null" :transport="{ stream: async () => { throw { reason: 'qualification_missing' } } }" :renderer-factory="null" :active="tab === 'terminal'" :model-name="modelLine" :host="view.session.host || ''" :layout="panelLayout" :action="nativeAction" />
       <p v-else class="live-unavailable" role="status">The live terminal is no longer available.</p>
     </div>
     <div v-if="nativeKnown && view && !loading" v-show="tab === 'chat'" id="session-panel-messages" class="live-pane" role="tabpanel" aria-labelledby="session-tab-messages"><p class="live-unavailable">Owned session input from this panel is not available yet. Use the qualified session client.</p></div>
@@ -777,7 +824,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .pane-icon:hover { background: var(--row-hover); color: var(--ink); }
 .pane-icon:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .session-feedback { position: absolute; z-index: 2; top: 100%; left: 12px; right: 12px; padding: 8px 12px; margin: 0; background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: 12px; overflow-wrap: anywhere; }
-.panel-menu { display: grid; gap: 2px; min-width: min(20rem, 80vw); }
+.panel-menu { display: grid; gap: 2px; min-width: 0; }
 .panel-menu-item { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--ink); text-align: left; text-decoration: none; font: inherit; font-size: 13px; cursor: pointer; }
 .panel-menu-item > svg { flex: none; color: var(--ink-2); }
 .panel-menu-item > span { flex: 1; min-width: 0; }
@@ -788,6 +835,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .phone-panel-choices { display: none; }
 .live-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .live-unavailable { padding: 24px; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.live-pane :deep(.replay-controls:has(.btn-label > span:first-child[aria-hidden="false"]) .replay-history > button), .live-pane :deep(.replay-controls:has(.btn-label > span:first-child[aria-hidden="false"]) .replay-history > span[aria-hidden="true"]) { display: none; }
 .live-pane :deep(.expert-bar) { height: 44px; padding-block: 4px; border-bottom: 0; }
 @container pane (max-width: 450px) { .pane-layout { display: none; } .pane-bar { gap: 16px; } }
 @media (max-width: 720px) {
@@ -802,6 +850,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .full .pane-bar { height: 48px; grid-template-rows: 48px; }
   .full .pane-bar > :deep(.session-tabs) { display: none; }
   .panel-menu.phone-full .phone-panel-choices { display: grid; }
+  .live-pane :deep(.retained-size) { display: none; }
+  .live-pane :deep(.retained-value) { white-space: nowrap; }
+  .live-pane :deep(.retained-value:has(.count)) { font-size: 0; }
+  .live-pane :deep(.retained-value .count), .live-pane :deep(.retained-value:has(.count)::before), .live-pane :deep(.retained-value:has(.count)::after) { font-size: 12px; }
+  .live-pane :deep(.retained-value:has(.count)::before) { content: "Last "; }
+  .live-pane :deep(.retained-value:has(.count)::after) { content: " events"; }
   .scroll :deep(.btn), .project-link { min-width: 44px; min-height: 44px; }
 }
 @media (pointer: coarse) { .pane-icon { width: 44px; height: 44px; } .pane-bar { min-height: 48px; } }

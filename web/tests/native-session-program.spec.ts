@@ -20,6 +20,7 @@ const makeNative = (): NativeSessionView => ({ owned_session_id: binding.owned_s
 
 async function setup(page: Page, theme = 'light') {
   const world = await mockLeadFlow(page, { lead: 'working', question: false, longText: true })
+  world.data.preferences['theme'] = { choice: theme }
   const worker = world.data.live.find(row => row.session_id === WORKER)!
   worker.model = 'gpt-6.1-sol'; worker.reasoning_effort = 'xhigh'
   worker.ticket!.title = 'Verbindungswiederherstellung mit revisionsgebundener Sitzungssteuerung und überprüfter Prozessidentität'
@@ -35,7 +36,7 @@ async function setup(page: Page, theme = 'light') {
     id: WORKER, project_id: 'p-pharos', agent_principal_id: worker.principal_id, parent_harness_session_id: LEAD_SESSION,
     work_order_id: null, run_id: null, ticket_node_id: 'n-1', ticket: worker.ticket, project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' },
     harness: 'codex', host: 'fixture-host', management_mode: 'managed', role: 'worker', model: worker.model, reasoning_effort: 'xhigh',
-    advertised_capabilities: ['inbox', 'status'], phase: 'working', activity: 'busy', activity_note: state.note,
+    advertised_capabilities: ['inbox', 'status'], phase: 'working', activity: 'busy', activity_note: state.note, agent_activity_mode: 'agent_summary', current_activity: { text: state.note, source: 'agent', at: '2026-10-06T10:00:00Z' },
     heartbeat_at: worker.heartbeat_at, created_at: worker.since, stopped_at: null, display_label: worker.name,
     activity_sequence: state.native.revision, revision: state.native.revision, work_shape: 'ship',
     activity_history: Array.from({ length: 6 }, (_, index) => ({ at: `2026-10-06T09:${50 + index}:00Z`, note: `Step ${index + 1}: checking the assigned session and preserving its current owner and permission boundary.` })),
@@ -48,7 +49,7 @@ async function setup(page: Page, theme = 'light') {
       expect(url.searchParams.get('generation')).toBe(String(state.native.generation))
       const event: NativeStreamEvent = { binding: { ...state.native.current_binding! }, generation: state.native.generation, seq: '1', sequence: '1',
         observed_at: '2026-10-06T10:00:00Z', dropped_frames: '0', source: 'native', kind: 'structured', payload: { kind: 'input_evidence', text: null, reference: 'input-fixture', state: 'write_acknowledged' } }
-      return route.fulfill({ json: { generation: state.native.generation, items: [event], next_before: null, truncated: false } })
+      return route.fulfill({ json: { generation: state.native.generation, items: Array.from({ length: 22 }, (_, index) => ({ ...event, seq: String(22 - index), sequence: String(22 - index) })), next_before: null, truncated: false } })
     }
     // The UI may request a read-only viewer, but this fixture leaves the I2-core
     // stream unavailable. It must report that limitation and never acquire control.
@@ -108,6 +109,23 @@ test('AEON-1309: fake-host mode changes stay read-only, preserve the menu and re
   release()
   await expect(panel.getByRole('tab', { name: 'Terminal', exact: true })).toHaveCount(0)
   expect(state.calls.filter(call => /\/(take|return|input|stop|resize)$/.test(call.path))).toEqual([])
+  // The same panel is also mounted by project overlays. Its shortcut owner
+  // must take precedence without registering the actions twice.
+  await page.evaluate(async () => { const { openLeadPanel } = await import('/src/lib/leadOverlay.ts'); openLeadPanel('p-pharos') })
+  const overlay = page.locator('.project-lead-panel')
+  await expect(overlay.getByRole('tab', { name: 'Lead', exact: true })).toBeVisible()
+  await page.keyboard.press('3')
+  await expect(overlay.getByRole('tab', { name: 'Chat', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await overlay.getByRole('button', { name: 'Full screen', exact: true }).click()
+  await expect(overlay).toHaveAttribute('data-layout', 'full')
+  await overlay.evaluate(el => { const holder = document.createElement('div'); holder.dataset.nativeTerminalHolder = 'true'; holder.tabIndex = 0; el.append(holder); holder.focus() })
+  await page.keyboard.press('Escape')
+  await expect(overlay).toHaveAttribute('data-layout', 'full')
+  await overlay.getByRole('button', { name: 'Close session details' }).focus()
+  await page.keyboard.press('Escape')
+  await expect(overlay).toHaveAttribute('data-layout', 'side')
+  await page.keyboard.press('Escape')
+  await expect(overlay).toHaveCount(0)
   expect(errors).toEqual([])
 })
 
@@ -135,9 +153,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     // facts into view, then grow a real activity line above the reader.
     await panel.locator('#session-panel-overview').evaluate(el => { (el as HTMLElement).style.overflowAnchor = 'none' })
     const facts = panel.locator('.block.first')
-    await facts.scrollIntoViewIfNeeded()
+    await facts.evaluate(el => { const scroller = el.closest<HTMLElement>('#session-panel-overview')!; scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top })
     const before = await facts.evaluate(el => el.getBoundingClientRect().top)
-    state.note = 'Neue Erkenntnisse zur Sitzungssteuerung, zur Verbindungswiederherstellung und zu den revisionsgebundenen Eigentumsnachweisen. '.repeat(16)
+    state.note = 'Neue Erkenntnisse zur Sitzungssteuerung und zur Wiederherstellung sichern die aktuelle Prozessidentität.'
     worker.heartbeat_at = '2026-10-06T10:00:04Z'; state.native.revision++
     await refresh(page)
     await expect(panel.locator('.now-step')).toContainText('Neue Erkenntnisse')
@@ -170,3 +188,29 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     expect(errors).toEqual([])
   })
 }
+
+test('AEON-1309: negative control reproduces reader drift with the anchor disabled', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  const { state, worker } = await setup(page)
+  // Disable only this fix in the browser's test module. No throwaway source
+  // commit, production fixture, other worktree or model process is involved.
+  await page.route('**/src/lib/readerAnchor.ts', async route => {
+    const response = await route.fetch(), original = await response.text()
+    const disabled = original.replace(/onBeforeUpdate\(anchor.capture\);?/, '').replace(/onUpdated\(anchor.restore\);?/, '')
+    expect(disabled).not.toBe(original)
+    await route.fulfill({ response, body: disabled })
+  })
+  await page.goto(`/agents/${WORKER}`)
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await expect(panel.getByRole('tab', { name: 'Details', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await panel.locator('#session-panel-overview').evaluate(el => { (el as HTMLElement).style.overflowAnchor = 'none' })
+  const facts = panel.locator('.block.first')
+  await facts.evaluate(el => { const scroller = el.closest<HTMLElement>('#session-panel-overview')!; scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top })
+  const before = await facts.evaluate(el => el.getBoundingClientRect().top)
+  state.note = 'Neue Erkenntnisse zur Sitzungssteuerung und zur Wiederherstellung sichern die aktuelle Prozessidentität.'
+  worker.heartbeat_at = '2026-10-06T10:00:04Z'; state.native.revision++
+  await refresh(page)
+  await expect(panel.locator('.now-step')).toContainText('Neue Erkenntnisse')
+  const after = await facts.evaluate(el => el.getBoundingClientRect().top)
+  expect(Math.abs(after - before), 'the positive control must fail without reader anchoring').toBeGreaterThan(.5)
+})

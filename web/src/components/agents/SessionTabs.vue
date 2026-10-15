@@ -22,7 +22,7 @@ function move(event: KeyboardEvent) {
 <template>
   <div class="session-tabs" role="tablist" :aria-label="lead ? 'Lead panel' : 'Session'" @keydown="move">
     <button v-for="(tab, index) in tabs" :id="`session-tab-${panelId(tab)}`" :key="tab" type="button" role="tab" :data-tab="tab" :aria-label="PANEL_TAB_LABEL[tab]" :data-tip="[PANEL_TAB_LABEL[tab], shortcutHint(`agents.panel.tab.${(index + 1) as 1 | 2 | 3 | 4 | 5}`)].filter(Boolean).join(' · ')" :aria-selected="selected === tab" :aria-controls="`session-panel-${panelId(tab)}`" :tabindex="selected === tab ? 0 : -1" @click="emit('select', tab)">
-      <AppIcon :name="icon(tab)" :size="15" /><span class="tab-label">{{ PANEL_TAB_LABEL[tab] }}</span>
+      <AppIcon :name="icon(tab)" :size="15" /><span class="tab-label"><span class="label-width" aria-hidden="true">{{ PANEL_TAB_LABEL[tab] }}</span><span>{{ PANEL_TAB_LABEL[tab] }}</span></span>
       <span v-if="tab === 'chat' && unread" class="count" :aria-label="`${unread} unread`">{{ unread > 99 ? '99+' : unread }}</span>
       <span v-if="tab === 'lead' && pinned === 'lead'" class="pinned" aria-label="Your default"><AppIcon name="pin" :size="10" /></span>
     </button>
@@ -35,10 +35,13 @@ button { position: relative; display: inline-flex; align-items: center; justify-
 button:hover { color: var(--ink); background: var(--row-hover); }
 button[aria-selected="true"] { color: var(--teal-ink); background: var(--seg-on); font-weight: 700; box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); }
 button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.tab-label { display: inline-grid; }
+.tab-label > span { grid-area: 1 / 1; }
+.label-width { font-weight: 700; visibility: hidden; }
 .count { position: absolute; right: 1px; top: -2px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 9px var(--font); }
 .pinned { position: absolute; right: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); }
 @container pane (max-width: 1000px) { .tab-label { display: none; } button { padding-inline: 5px; } }
-@media (max-width: 720px) { .session-tabs { height: 44px; padding: 0 2px; } button { min-width: 44px; height: 44px; padding-inline: 5px; gap: 4px; font-size: 12px; } .tab-label { display: inline; } }
+@media (max-width: 720px) { .session-tabs { height: 44px; padding: 0 2px; } button { min-width: 44px; height: 44px; padding-inline: 5px; gap: 4px; font-size: 12px; } .tab-label { display: inline-grid; } }
 @media (max-width: 360px) { .tab-label { display: none; } }
 @media (pointer: coarse) { .session-tabs { height: 44px; padding-block: 0; } button { height: 44px; min-width: 44px; } }
 </style>

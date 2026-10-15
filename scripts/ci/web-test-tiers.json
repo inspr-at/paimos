@@ -10660,6 +10660,8 @@
     ,
     {"kind":"browser","file":"tests/native-session-program.spec.ts","name":"AEON-1309: fake-host mode changes stay read-only, preserve the menu and reject stale context","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/native-session-program.spec.ts","name":"AEON-1309: negative control reproduces reader drift with the anchor disabled","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 discards stale identities and rejects wrong request completions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
