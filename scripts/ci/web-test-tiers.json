@@ -15254,6 +15254,8 @@
     ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"effective agent lists override all hosts, including an explicit empty list","tier":"NIGHTLY"}
     ,
+    {"kind":"node","file":"tests/agent-pause.test.ts","name":"normalizes all selected hosts and agents to the complete scope","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"paused is resumable evidence, scheduled pauses stay working and stop requests do not claim exit","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"planning counts down from its report and stale or cleared snapshots never revive legacy ETA","tier":"NIGHTLY"}
@@ -15309,6 +15311,8 @@
     {"kind":"node","file":"tests/agentState.test.ts","name":"approvals: pending by urgency, history by recency, risk from what is allowed","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"controls are blocked with a reason people can act on","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/agentState.test.ts","name":"fresh and overdue starting sessions keep their live status groups","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"fresh session projection cannot be changed by a stale optional run or request cache","tier":"GATED-FULL"}
     ,
@@ -15449,6 +15453,10 @@
     {"kind":"node","file":"tests/business.test.ts","name":"parseJSONExact keeps number spellings and rejects exponents","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"plugin gates fail closed and quotes wait on both dependencies","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business.test.ts","name":"sums exact amounts and rejects excess precision","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/business.test.ts","name":"typed amounts accept decimal separators and reject negative values","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"typed quantities, tax percentages and rates stay exact","tier":"ESSENTIAL"}
     ,
@@ -16522,6 +16530,8 @@
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"a reload rebuilds the hook wait from the loaded thread and its receipts (AEON-369)","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"blocked storage never breaks read marks","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat keys distinguish after-turn input, steer and composition","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat queue placement respects evidence and the per-session capability flags","tier":"GATED-FULL"}
@@ -17264,6 +17274,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tags":[],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice when usage is unmeasured","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice while explaining unmeasured usage","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > accepts typed limits and totals, clamps large values, and rejects invalid drafts","tier":"NIGHTLY"}
@@ -17510,6 +17522,8 @@
     ,
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"both production roots have no imports of the named retired UI and retain live glob and collaboration dependencies","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"production runtime exports have a lexical consumer or an explained exception","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"retired Business and compatibility URLs still resolve to their canonical owners, and external account links remain","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
@@ -17587,6 +17601,8 @@
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"formats delivery deadlines and keeps a rule proposal PR link","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"freezes round IDs while arrivals and decided/skipped counts remain distinct","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"freezes round IDs while new arrivals remain distinct","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"hydrates a canonical approval beyond the history page and retains native read-only authority","tier":"ESSENTIAL"}
     ,

@@ -31,9 +31,7 @@ export interface QuoteVersion {
   acceptance: { customer_principal_id: string; accepted_content_sha256: string; accepted_at: string; event_id: number } | null
 }
 export interface QuoteLineWrite { description: string; cost_unit_node_id: string; unit: Unit; quantity: string; tax_rate: string }
-export interface QuoteVersionWrite {
-  expected_revision: number; recipient_contact_node_id: string; currency: string; title: string; terms_markdown: string; lines: QuoteLineWrite[]
-}
+
 export interface CostRate {
   id: string; cost_unit_node_id: string; unit: Unit; currency: string; internal_amount: string; bill_amount: string
   effective_from: string; effective_until: string | null; created_by_principal_id: string; created_at: string
@@ -53,7 +51,7 @@ export interface TimeEntry {
 // A correction sends only what changed. A start alone keeps the duration.
 export interface EntryPatch { node_id?: string; cost_unit_node_id?: string; started_at?: string; duration_seconds?: number; note?: string }
 export interface TimeTotals { node_id: string; duration_seconds: number; amounts: { currency: string; amount: string }[] }
-export interface Binding { principal_id: string; contact_node_id: string; bound_by_principal_id: string; bound_at: string; principal_name: string; principal_kind: 'person' | 'agent' }
+
 export interface Principal { id: string; kind: 'person' | 'agent'; name: string; roles: string[]; has_avatar?: boolean }
 
 // A validated decimal written as a JSON number, never through Number().
@@ -122,31 +120,15 @@ function period(raw: TimePeriod): TimePeriod {
   return { ...raw, revision: int(raw.revision), approval: raw.approval ? { ...raw.approval, total_seconds: int(raw.approval.total_seconds), event_id: int(raw.approval.event_id) } : null }
 }
 function entry(raw: TimeEntry): TimeEntry { return { ...raw, duration_seconds: int(raw.duration_seconds) } }
-
-// ---------- Quotes ----------
-export const listQuotes = async (filter: { project_node_id?: string; customer_org_node_id?: string } = {}) => {
-  const params = new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][]).toString()
-  return (await call<Quote[]>(`/quotes${params ? `?${params}` : ''}`)).map(quote)
-}
 export const getQuote = async (quoteId: string) => quote(await call<Quote>(`/quotes/${id(quoteId)}`))
 export const createQuote = async (body: { title: string; project_node_id: string; customer_org_node_id: string }) => quote(await call<Quote>('/quotes', 'POST', body))
 export const listVersions = async (quoteId: string) => (await call<QuoteVersion[]>(`/quotes/${id(quoteId)}/versions`)).map(version)
-export const createVersion = async (quoteId: string, body: QuoteVersionWrite) => version(await call<QuoteVersion>(`/quotes/${id(quoteId)}/versions`, 'POST', {
-  ...body, lines: body.lines.map(line => ({ ...line, quantity: new Decimal(line.quantity), tax_rate: new Decimal(line.tax_rate) })),
-}))
-export const issueVersion = async (quoteId: string, n: number) => quote(await call<Quote>(`/quotes/${id(quoteId)}/versions/${n}/issue`, 'POST'))
-export const acceptVersion = (quoteId: string, n: number, digest: string) => call<unknown>(`/quotes/${id(quoteId)}/versions/${n}/accept`, 'POST', { expected_content_sha256: digest })
-export const exportURL = (quoteId: string, n: number, format: 'markdown' | 'pdf') => `/api/quotes/${id(quoteId)}/versions/${n}/export?format=${format}`
 
 // ---------- Cost units ----------
 export const listRates = (costUnitId: string) => call<CostRate[]>(`/cost-units/${id(costUnitId)}/rates`)
 export const createRate = (costUnitId: string, body: CostRateWrite) => call<CostRate>(`/cost-units/${id(costUnitId)}/rates`, 'POST', {
   ...body, internal_amount: new Decimal(body.internal_amount), bill_amount: new Decimal(body.bill_amount),
 })
-
-// ---------- CRM ----------
-export const listBindings = (contactId: string) => call<Binding[]>(`/crm/contacts/${id(contactId)}/principals`)
-export const bindContact = (contactId: string, principalId: string) => call<Binding>(`/crm/contacts/${id(contactId)}/principals`, 'POST', { principal_id: principalId })
 // Teaches the avatars who has a picture (lib/avatar), for every list of members.
 export const listPrincipals = () => call<Principal[]>('/business/principals').then(items => { learnPictures(items); return items })
 

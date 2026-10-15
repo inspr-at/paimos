@@ -9,7 +9,7 @@ import { getWalker } from './releaseData.ts'
 import {
   addReleaseMembership, assertReleaseOpen, isMoveConflict, isStaleRevision, listNativeMemberships, newReleaseFailure, openReleaseWithTickets,
   reconcileOpenedMembership, ReleaseUnconfirmed,
-  type MembershipResult, type MembershipTicket, type OpenedMembership,
+  type MembershipResult, type OpenedMembership,
 } from './releaseMembership.ts'
 import { statusMeta } from './work.ts'
 
@@ -43,12 +43,6 @@ async function confirmMoves(moves: { key: string; title: string; releaseTitle?: 
     confirmLabel: `Move into ${into}`,
     cancelLabel: 'Leave them',
   })
-}
-
-export async function confirmOptionMoves(tickets: MembershipTicket[], into: string): Promise<boolean> {
-  const moves = tickets.filter(ticket => ticket.availability === 'other_release')
-  if (!moves.length) return true
-  return confirmMoves(moves.map(ticket => ({ key: ticket.key, title: ticket.title, releaseTitle: ticket.release_title })), into)
 }
 
 export async function assignToRelease(projectId: string, tickets: AssignTicket[], target: ReleaseTarget, knownMoves: { key: string; title: string; releaseTitle: string | null }[] = []): Promise<AssignOutcome> {

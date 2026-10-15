@@ -16,35 +16,6 @@ export interface PrefView { choices_truncated?: boolean; choices?: PrefChoice[];
 export interface ModelPreferences { revision: number; person_id: string | null; kinds: WorkKind[]; levels: Record<PrefLevel, PrefScope | null>; views: Record<PrefLevel, PrefView | null>; can: Record<'edit_default' | 'edit_person' | 'edit_project' | 'add_default_kind' | 'add_project_kind', boolean>; residency_lock_mode: ResidencyLockMode }
 export interface PrefWriteResult { level: PrefScope; revision: number; running_outside: string[]; residency: ResidencyView }
 export const LEVELS: PrefLevel[] = ['default', 'person', 'project']
-export const LEVEL_LABEL: Record<PrefLevel, string> = { default: 'Default', person: 'You', project: 'This project' }
-export const RESIDENCY_LABEL: Record<Residency, string> = { any: 'Any provider', eu: 'EU-hosted only', local: 'Local only' }
-export const lowerLevelLabel = (level: PrefLevel) => level === 'default' ? 'People and projects may change this' : 'Projects may change this'
-export const resetRowLabel = (level: PrefLevel) => level === 'project' ? 'Reset to your setting' : 'Reset to default'
-export const resetLevelLabel = (level: PrefLevel) => level === 'default' ? 'Reset to product defaults' : level === 'person' ? 'Reset all your changes' : 'Reset all project changes'
-export const summaryLabel = (level: PrefLevel, changes: number) => level === 'default' ? 'You are editing the default for everyone.' : `${changes} ${changes === 1 ? 'change' : 'changes'} ${level === 'person' ? 'on your level' : 'for this project'}.`
-export const setByLabel = (row: Pick<PrefViewRow, 'locked_by' | 'changed_here' | 'set_by'>) => row.locked_by ? `Locked by ${row.locked_by === 'person' ? 'you' : row.locked_by === 'project' ? 'this project' : 'default'}` : row.changed_here ? 'Changed here' : LEVEL_LABEL[row.set_by as PrefLevel] ?? 'Default'
-export const canAddKind = (doc: ModelPreferences, level: PrefLevel) => level === 'default' ? doc.can.add_default_kind : level === 'project' && doc.can.add_project_kind
-export const canRemoveKind = (kind: WorkKind, level: PrefLevel, editable: boolean) => editable && !kind.system && (level === 'default' ? !kind.project_id : level === 'project' && !!kind.project_id)
-export const visibleKinds = (kinds: WorkKind[], level: PrefLevel) => kinds.filter(k => !k.archived_at && (level === 'project' || !k.project_id)).sort((a, b) => a.position - b.position || a.label.localeCompare(b.label))
-const STRICTNESS: Record<Residency, number> = { any: 0, eu: 1, local: 2 }
-export function providerDisabled(value: Residency, view: ResidencyView, level: PrefLevel, mode: ResidencyLockMode): boolean {
-  if (!view.locked_by || view.locked_by === level) return false
-  const locked = view.lock_value ?? view.value
-  return mode === 'freeze' ? value !== locked : mode === 'tighten_only' ? STRICTNESS[value] < STRICTNESS[locked] : false
-}
-export function providerWarning(view: ResidencyView): string {
-  if (!view.loosened_lock) return ''
-  const locks = view.loosened_locks?.length ? view.loosened_locks : [{ level: view.locked_by ?? 'default', value: view.lock_value ?? 'eu' }]
-  return `Looser than the lock. ${locks.map(l => `${LEVEL_LABEL[l.level]} locks Allowed providers to ${RESIDENCY_LABEL[l.value]}`).join('; ')}. ${RESIDENCY_LABEL[view.value]} applies here. Runs may use providers outside that lock; their trace records the choice.`
-}
-export function modelCopy(model: EffectiveModel, review = false, choices: PrefChoice[] = []) {
-  const selector = model.selector, auto = selector.mode === 'auto'
-  const requested = selector.mode === 'pinned' ? choices.find(c => c.profile.id === selector.profile_id)?.profile : null
-  const name = auto ? review ? 'Another family' : 'Automatic' : selector.mode === 'latest' ? model.unavailable_reason ? selector.line : model.profile?.display_name || selector.line : requested?.display_name || (model.profile?.id === (selector.mode === 'pinned' ? selector.profile_id : '') ? model.profile.display_name || model.label : 'Pinned model')
-  const detail = model.unavailable_reason ? `Unavailable · ${model.profile ? 'Automatic' : 'work waits'}` : auto ? review ? 'strongest qualified reviewer' : "the ticket’s role" : [model.today_version, model.profile?.effort].filter(Boolean).join(' · ') || 'Version not reported'
-  const tip = model.unavailable_reason || (auto ? `Follows the ticket's own role.${model.profile ? ` Typical pick today: ${model.label} ${model.today_version} · ${model.profile.effort}.` : ''}` : `${model.follows_latest ? 'Follows new versions' : 'Pinned'}: ${name} · ${detail}`)
-  return { name, detail, tip }
-}
 // Keep this in step with modelregistry.ProfileLine. Profile revision is never a model version.
 export function profileLine(p: PrefProfile): { line: string; version: string } {
   let id = p.model
@@ -68,13 +39,6 @@ export function compareModelVersions(a: string, b: string): number {
     if (difference) return Math.sign(difference)
   }
   return 0
-}
-export function pickerReason(choice: PrefChoice | undefined, review: boolean, residency: ResidencyView): string {
-  if (!choice) return 'Model choice evidence is unavailable'
-  if (!choice.profile.enabled) return 'Disabled in the model registry'
-  if (review && choice.review_reason) return choice.review_reason
-  if (residency.value !== 'any' && !choice.residency_routes) return `No ${residency.value === 'eu' ? 'EU-hosted' : 'local'} route for this model today`
-  return ''
 }
 
 export interface ModelPreferenceTrace {

@@ -12,7 +12,7 @@
 // five choices are not sent as extra properties.
 import { api, APIError, getNode, listNodes, type WorkNode } from './api.ts'
 import { capacityWaitText } from './capacityWait.ts'
-import type { AgentAccount, AgentRun, ModelProfile } from './agents.ts'
+import type { AgentRun } from './agents.ts'
 import { createRun, listRuns, runNowOnce, type AgentRunRow } from './agentRows.ts'
 import type { Wire } from './wire.ts'
 
@@ -93,32 +93,6 @@ export async function startAgent(selection: StartSelection, admission: RunAdmiss
     ...(selection.runNow ? { capacity_override: 'now' as const } : {}),
   }))
   return { run, reused: false }
-}
-
-export interface DispatchHint { label: string; detail: string; tone: 'neutral' | 'warn' }
-const freshProbe = (a: AgentAccount, now: number) => {
-  const at = Date.parse(a.last_probe_at ?? '')
-  return Number.isFinite(at) && at <= now && now - at < 120_000
-}
-function accountHeadroom(account: AgentAccount, now: number): 'open' | 'unknown' | 'closed' {
-  const windows = (account.windows ?? []).filter(w => Date.parse(w.starts_at) <= now && now < Date.parse(w.ends_at))
-  if (!windows.length) return 'closed'
-  if (windows.some(w => w.provisional)) return 'unknown'
-  const open = windows.every(w => [w.allowance, w.used, w.reserved].every(Number.isSafeInteger)
-    && BigInt(w.allowance) - BigInt(w.used) - BigInt(w.reserved) > 0n)
-  return open ? 'open' : 'closed'
-}
-// This is an observed preflight hint, never a reservation. The daemon enforces
-// its enrollment, current parallel capacity, estimates and exact allowance pace.
-export function dispatchHint(accounts: AgentAccount[], agentId: string, profile: ModelProfile | undefined, now: number, accountId?: string): DispatchHint {
-  if (!agentId || !profile) return { label: 'Choose an agent and model', detail: 'The daemon will check account capacity before claiming the run.', tone: 'neutral' }
-  const owned = accounts.filter(a => a.registered_by_principal_id === agentId)
-  if (!owned.some(a => freshProbe(a, now))) return { label: 'No daemon online', detail: 'No account probe from this agent in the last two minutes. A queued run waits until its daemon connects.', tone: 'warn' }
-  const available = owned.filter(a => (!accountId || a.id === accountId) && a.harness === profile.harness && a.state === 'available' && a.last_probe_ok && freshProbe(a, now))
-  const ranks = available.map(account => accountHeadroom(account, now))
-  if (ranks.includes('open')) return { label: 'Account available', detail: 'Recent account probe received. The daemon rechecks pacing and capacity, then runs in its configured workspace.', tone: 'neutral' }
-  if (ranks.includes('unknown')) return { label: 'Allowance unknown', detail: 'Measured usage is missing for an active window, so remaining allowance is unknown. The run can queue; the daemon rechecks before it claims.', tone: 'warn' }
-  return { label: 'No eligible account', detail: 'No matching account reports a fresh sign-in and allowance headroom. The run can queue; dispatch waits for capacity.', tone: 'warn' }
 }
 
 export function launchState(run: AgentRun): { label: string; detail: string } {

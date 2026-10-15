@@ -34,8 +34,6 @@ export async function loadTicketGraphContext(projectId: string, filters: ListFil
     truncated: data.truncated,
   } }
 }
-
-export const GLIMPSE_MIN_WIDTH = 1280
 export const GLIMPSE_MIN_TICKETS = 8
 export const GLIMPSE_MIN_LINKS = 1
 

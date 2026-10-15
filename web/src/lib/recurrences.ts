@@ -132,7 +132,6 @@ export function copyDefinition(value: RoutineDefinition | null | undefined): Rou
   const a = value.assignment
   return { scope: { ...value.scope }, owner_principal_id: value.owner_principal_id, ...(a ? { assignment: { ...a, sources: (a.sources ?? []).map(source => ({ ...source })), allowed_actions: [...(a.allowed_actions ?? [])], runtime_requirements: { ...a.runtime_requirements }, ...(a.budget ? { budget: { ...a.budget } } : {}) } } : {}) }
 }
-export const isAgentRoutine = (item: Pick<RecurrenceInput, 'definition'>) => !!item.definition?.assignment
 export const routineScope = (item: Pick<RecurrenceInput, 'definition'>): RoutineScopeKind => item.definition?.scope.kind ?? 'project'
 
 // Effort is the registry role; there is no model picker. mechanical stays API/CLI-only.

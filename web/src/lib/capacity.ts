@@ -450,13 +450,6 @@ function uniqueHosts(hosts: string[]): string[] {
   for (const host of hosts) if (host && !out.includes(host)) out.push(host)
   return out
 }
-/** Two doors of one login: "Same account on build-7 and studio". */
-export function sameAccountCopy(hosts: string[]): string {
-  const list = uniqueHosts(hosts)
-  if (list.length < 2) return ''
-  if (list.length === 2) return `Same account on ${list[0]} and ${list[1]}`
-  return `Same account on ${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
-}
 /** One gauge per quota. The door without sameQuotaAs keeps the windows; slots are not added twice. */
 function mergeQuotas(rows: AccountRow[]): AccountRow[] {
   const out: AccountRow[] = []
@@ -543,23 +536,6 @@ export const poolOfRow = (pools: PoolView[], row: Pick<AccountRow, 'id' | 'group
   pools.find(p => p.rows.some(r => r.id === row.id)) ?? pools.find(p => p.id === (row.groupId ? `group:${row.groupId}` : row.harness))
 /** The pool's own override; Away comes from the person's schedule and ends in the header. */
 export const ownOverride = (pool: PoolView | undefined): Override => (!pool || pool.override === 'away' ? '' : pool.override)
-export interface HoldOption { label: string; hint: string; name: string; until: string | undefined }
-/** Hold for two hours, until the next work day starts, or until resumed. */
-export function holdOptions(schedule: CapacitySchedule, now: number): HoldOption[] {
-  const later = new Date(Math.floor((now + 2 * 3600e3) / 60_000) * 60_000).toISOString()
-  const tomorrow = new Date(workStart(schedule, now, 1)).toISOString()
-  const [day, time] = when(tomorrow, now).split(' ')
-  return [
-    { label: 'For 2 hours', hint: `until ${when(later, now)}`, name: 'Hold for 2 hours', until: later },
-    { label: `Until ${day}`, hint: time ?? '', name: `Hold until ${when(tomorrow, now)}`, until: tomorrow },
-    { label: 'Until I resume', hint: '', name: 'Hold until I resume', until: undefined },
-  ]
-}
-/** What a saved override now does, said after the write succeeded. */
-export function overrideDone(pool: Pick<PoolView, 'name'>, value: Override, until: string | undefined, now: number): string {
-  return value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.`
-    : value === 'hold' ? `Holding ${pool.name}${until ? ` until ${when(until, now)}` : ''}. Running steps finish.` : `${pool.name} follows your work week again.`
-}
 
 // ---------- The plan per account ----------
 export interface AccountPlan {
@@ -607,28 +583,7 @@ export function gauge(row: AccountRow, plan: AccountPlan | null): Gauge {
   const today = Math.min(Math.max(0, plan.budget - plan.used), L - yours)
   return { yours, later: L - yours - today, today, spent, tick: Math.max(0, Math.min(100, plan.leftAtStart - plan.budget)), frozen }
 }
-export type TodayCell =
-  | { kind: 'quiet'; text: string }
-  | { kind: 'reserve'; text: string; tip: string }
-  | { kind: 'signin'; command: string }
-  | { kind: 'sprint'; text: string }
-  | { kind: 'ahead'; used: string; plan: string }
-  | { kind: 'share'; value: string; tip: string }
-export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell {
-  if (row.state === 'offline') return { kind: 'quiet', text: `waits for ${row.host}` }
-  if (row.state === 'signin') return { kind: 'signin', command: LOGIN_COMMAND[row.harness] ?? '' }
-  if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
-  if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
-  if (row.sharedQuotaName) return { kind: 'quiet', text: '' }
-  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : hidesCapacityLimit(row.harness) ? unreportedCapacity(row.harness) : 'no reading yet' }
-  if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
-  if (plan.override === 'sprint' || plan.override === 'away') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
-  if (plan.dayOff && !plan.expiring) return { kind: 'quiet', text: 'day off' }
-  if (plan.ahead) return { kind: 'ahead', used: pct(plan.used), plan: `~${pct(plan.budget)}` }
-  if (plan.atReserve) return { kind: 'reserve', text: 'kept for you', tip: `The ${pct(plan.left)} left is kept for you while you work` }
-  const rest = Math.max(0, plan.budget - plan.used)
-  return { kind: 'share', value: `~${pct(plan.budget)}`, tip: `Plan for today ~${pct(plan.budget)}: ${pct(plan.used)} used, ${pct(rest)} to go${plan.night >= 0.5 ? `; ~${pct(plan.night)} of it tonight` : ''}` }
-}
+
 /** Who measured it, and how old it is. Empty when there is no reading yet. */
 export function sourceLine(row: AccountRow, now: number): string {
   const w = row.primary
@@ -806,21 +761,3 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
 // ---------- Gauge preference ----------
 export type GaugeMode = 'left' | 'used'
 export interface GaugePreference { mode: GaugeMode; accounts: Record<string, GaugeMode> }
-export const gaugeModeFor = (pref: GaugePreference | null, accountId: string): GaugeMode => pref?.accounts?.[accountId] ?? pref?.mode ?? 'left'
-/** Toggle one account; an account that matches the global choice stores nothing. */
-export function toggleAccountMode(pref: GaugePreference | null, accountId: string): GaugePreference {
-  const base: GaugePreference = { mode: pref?.mode ?? 'left', accounts: { ...(pref?.accounts ?? {}) } }
-  const next: GaugeMode = gaugeModeFor(base, accountId) === 'left' ? 'used' : 'left'
-  if (next === base.mode) delete base.accounts[accountId]
-  else base.accounts[accountId] = next
-  return base
-}
-export const setGlobalMode = (_pref: GaugePreference | null, mode: GaugeMode): GaugePreference => ({ mode, accounts: {} })
-
-/** The folded Accounts and computers line on /agents (AEON-402): counts only, no filler. */
-export function setupSummary(input: { computers: number; ready: number; total: number }): string {
-  const parts: string[] = []
-  if (input.computers) parts.push(`${input.computers} ${input.computers === 1 ? 'computer' : 'computers'}`)
-  if (input.total) parts.push(input.ready === input.total ? `${input.total} ${input.total === 1 ? 'account' : 'accounts'} ready` : `${input.ready} of ${input.total} accounts ready`)
-  return parts.join(' · ')
-}

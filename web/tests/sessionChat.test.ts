@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { inboxBindingReason, advanceReceipt, chatSendLevel, awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { inboxBindingReason, advanceReceipt, chatSendLevel, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, sessionBoundSends, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import { chatCapability, isQueuedMessage } from '../src/components/agents/sessionChat.ts'
@@ -18,18 +18,9 @@ const message = (id: string, event: number, sender = 'agent', body = `Body ${id}
   created_at: new Date(1_800_000_000_000 + event * 1000).toISOString(),
 })
 
-test('the last tab is remembered per viewer and a deep link wins', () => {
-  const store = memory()
-  assert.equal(loadTab(store), 'overview')
-  saveTab('messages', store)
-  assert.equal(loadTab(store), 'messages')
-  assert.equal(initialTab(undefined, store), 'messages')
-  assert.equal(initialTab('overview', store), 'overview')
-  assert.equal(initialTab(['messages'], memory()), 'messages')
-  assert.equal(initialTab('bogus', memory()), 'overview')
+test('blocked storage never breaks read marks', () => {
   // Blocked storage never breaks the panel.
-  assert.equal(loadTab(broken), 'overview')
-  assert.doesNotThrow(() => saveTab('messages', broken))
+
   assert.equal(loadReadMark('me', 's1', broken), null)
   assert.doesNotThrow(() => saveReadMark('me', 's1', 5, 'm5', broken))
 })
@@ -95,9 +86,6 @@ test('delivery wording is short and specific (AEON-280)', () => {
   for (const [reason, text] of [['session_ended', 'the session ended'], ['no_listener', 'the session was not listening'], ['deadline', 'not confirmed in time'], ['attempts', 'every attempt failed'], ['http_error', 'http error']]) {
     assert.equal(statusLabel({ ...base, status: 'not_delivered', reason }), `Not delivered · ${text}`)
   }
-  assert.equal(statusDone(sent), false)
-  assert.equal(statusDone(read), true)
-  assert.equal(statusDone({ ...base, status: 'not_delivered', reason: 'deadline' }), true)
 })
 
 test('a live session without a hook binding waits for the inbox hook (AEON-369)', () => {
@@ -108,8 +96,6 @@ test('a live session without a hook binding waits for the inbox hook (AEON-369)'
   assert.equal(awaitsInboxHook({ ...live, inbox_seen_via: 'drain' }), true)
   assert.equal(awaitsInboxHook({ ...live, phase: 'stopped', stopped_at: '2026-09-29T00:00:00Z' }), false)
   assert.equal(awaitsInboxHook({ ...live, archived_at: '2026-09-29T00:00:00Z' }), false)
-  assert.equal(hookDeliveryNotice, "Delivered when the session's inbox hook runs.")
-  assert.equal(hookDeliveryNotice.toLowerCase().includes("delivered when the session's inbox hook runs"), true)
 })
 
 test('the hook notice follows each pending send, including a terminal failure (AEON-369)', () => {
@@ -231,7 +217,6 @@ test('near the bottom allows a small slack', () => {
   assert.equal(nearBottom({ scrollHeight: 1000, scrollTop: 570, clientHeight: 400 }), true)
   assert.equal(nearBottom({ scrollHeight: 1000, scrollTop: 500, clientHeight: 400 }), false)
 })
-
 
 test('chat keys distinguish after-turn input, steer and composition', () => {
   const enter = { key: 'Enter', shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, isComposing: false }

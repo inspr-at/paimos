@@ -175,18 +175,6 @@ export function glanceSummary(accounts: OverviewAccount[], computers: PairingVie
   return { tone: 'ok', ready, total, more: 0, text: `${head} · ${online} ${online === 1 ? 'computer' : 'computers'} online` }
 }
 
-/** The grid's column caption: "Busy · 3 of 8 agents", and the phone's short "3 of 8". */
-export function computerCaptionParts(c: PairingView): { long: string; short: string; tone: 'ok' | 'wait' | 'blocked' } {
-  if (c.computer_state === 'revoked') return { long: 'Removed', short: 'Removed', tone: 'blocked' }
-  const state = c.host_capacity?.reason ? 'Busy' : describeComputerStatus(c).stateLabel
-  const tone = c.computer_state === 'connected' && c.connectivity === 'online' && !c.host_capacity?.reason ? 'ok' : 'wait'
-  const host = c.host_capacity
-  if (!host) return { long: state, short: state, tone }
-  const max = host.policy.maximum_agents
-  const count = max ? `${host.running} of ${max}` : `${host.running}`
-  return { long: `${state} · ${count} ${max || host.running !== 1 ? 'agents' : 'agent'}`, short: count, tone }
-}
-
 // ---------- The accounts chip on the Agents page (AEON-1209, AEON-1176 P6) ----------
 // The chip in the capacity row names what there is; its popover holds three tiles that
 // open the three parts of Settings, each with its own state words.

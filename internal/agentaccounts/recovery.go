@@ -25,8 +25,6 @@ func recoverableFact(f ReadinessFact) bool {
 		(f.Remaining == nil || *f.Remaining > 0) && f.CreditState != "exhausted"
 }
 
-func recoveryBackoff(step int) time.Duration { return time.Hour << min(max(step, 0), 3) }
-
 // Current legacy telemetry is projected even before its first fenced write.
 // Its canonical row prevents a cleared run stop from being imported again.
 func legacyVendorFact(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (*ReadinessFact, error) {

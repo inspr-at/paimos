@@ -244,8 +244,6 @@ const sameDay = (iso: string, now: Date) => { const d = new Date(iso); return d.
 export const gateOf = (fold: DecisionFold) => Object.entries(fold.review).filter(([, outcome]) => outcome === 'requested').map(([id]) => id)
 /** Release handoffs happen after the merge; today's handoffs are today's merges. */
 export const mergedOf = (fold: DecisionFold, now = new Date()) => Object.entries(fold.handoff).filter(([, at]) => sameDay(at, now)).map(([id]) => id)
-export const atGate = (decisions: LeadDecision[]) => gateOf(foldDecisions(emptyFold(), decisions))
-export const mergedToday = (decisions: LeadDecision[], now = new Date()) => mergedOf(foldDecisions(emptyFold(), decisions), now)
 export function decisionLine(d: LeadDecision, key: (id: string) => string): string {
   const t = d.request.ticket_node_id ? key(d.request.ticket_node_id) : 'a ticket'
   const why = d.reason_codes.map(code => code.replaceAll('_', ' ')).join(', ')
@@ -258,34 +256,6 @@ export function decisionLine(d: LeadDecision, key: (id: string) => string): stri
   return `${d.outcome} for ${t}`
 }
 export type CheckState = 'ok' | 'full' | 'unreadable' | 'unknown'
-export interface StartCheck { kind: GateKind; label: string; state: CheckState; detail: string }
-const GATE_REASON: Record<GateKind, string> = { dial: 'dial', harness: 'harness', account_room: 'account', host_load: 'host' }
-const GATE_LABEL: Record<GateKind, string> = { dial: 'Dial', harness: 'Harness limits', account_room: 'Account room', host_load: 'Host load' }
-/** One row per mandatory gate: the current wait reason wins, then the lead's latest admission report.
- *  A report is a reading taken at that start, never a promise about the next one. */
-export function startChecks(lead: ProjectLead | null, decisions: LeadDecision[], dial: { running: number; total: number } | null): StartCheck[] {
-  const admission = [...decisions].reverse().find(d => d.request.stage === 'admission' && d.gate_freshness.length)
-  const at = admission ? new Date(admission.recorded_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
-  return (['dial', 'harness', 'account_room', 'host_load'] as GateKind[]).map(kind => {
-    const reason = lead?.reason ?? '', prefix = GATE_REASON[kind]
-    const reported = admission?.gate_freshness.find(g => g.kind === kind)?.freshness
-    // A fresh reading can still be a full gate: the server records it as a reason code.
-    const reportedFull = !!admission && (admission.reason_codes.includes(`${kind}_full`) || !!admission.request.gates?.some(g => g.kind === kind && g.state === 'full'))
-    const dialText = kind === 'dial' && dial ? `${dial.running} of ${dial.total} running` : ''
-    if (reason === `${prefix}_full`) return { kind, label: GATE_LABEL[kind], state: 'full', detail: dialText ? `${dial!.running} of ${dial!.total} · full` : 'Full' }
-    if (reason === `${prefix}_unavailable` || reported === 'unreadable' || reported === 'stale') return { kind, label: GATE_LABEL[kind], state: 'unreadable', detail: reported === 'stale' ? 'Last reading too old' : 'Can’t be read' }
-    if (reported === 'fresh' && reportedFull) return { kind, label: GATE_LABEL[kind], state: 'full', detail: `Full at ${at}` }
-    if (reported === 'fresh') return { kind, label: GATE_LABEL[kind], state: 'ok', detail: dialText || `Passed at ${at}` }
-    return { kind, label: GATE_LABEL[kind], state: 'unknown', detail: dialText || 'Checked at the next start' }
-  })
-}
-/** The heading over the checks: past readings never read as current availability. */
-export function checksSummary(checks: StartCheck[]): string {
-  if (checks.some(c => c.state === 'unreadable')) return 'A check can’t be read'
-  if (checks.some(c => c.state === 'full')) return 'A limit is full'
-  if (checks.length && checks.every(c => c.state === 'ok')) return 'All passed at the last start'
-  return 'Checked again at every start'
-}
 
 // ---------- A ticket on the line ----------
 export type StepId = 'queued' | 'sized' | 'working' | 'gate' | 'merged'

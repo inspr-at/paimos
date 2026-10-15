@@ -693,7 +693,13 @@ func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
-	ids, err := listVendorModels(context.Background(), client, "anthropic", "fixture-key")
+	fetched, err := fetchProviderCatalog(context.Background(), client, "anthropic", "fixture-key", time.Now())
+	ids := []string{}
+	for _, fact := range fetched.Facts {
+		if fact.Fact == "model_id" {
+			ids = append(ids, fact.ModelID)
+		}
+	}
 	if err != nil || !reflect.DeepEqual(ids, []string{"claude-new", "claude-other"}) {
 		t.Fatalf("%v %v", ids, err)
 	}
@@ -703,7 +709,7 @@ func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
 	dc.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 302, Body: io.NopCloser(strings.NewReader("fixture-key")), Header: http.Header{"Location": []string{server.URL}}}, nil
 	})
-	_, err = listVendorModels(t.Context(), dc, "openai", "fixture-key")
+	_, err = fetchProviderCatalog(t.Context(), dc, "openai", "fixture-key", time.Now())
 	if err == nil || strings.Contains(err.Error(), "fixture-key") {
 		t.Fatal("unsafe vendor error")
 	}
@@ -716,8 +722,14 @@ func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
 	if err != nil || catalog.Skipped != 1 {
 		t.Fatalf("unsupported identifier poisoned source: skipped=%d err=%v", catalog.Skipped, err)
 	}
-	if ids, err := listVendorModels(t.Context(), bad, "xai", "fixture-key"); err != nil || !reflect.DeepEqual(ids, []string{"grok-4.7"}) {
-		t.Fatalf("unsafe identifier was retained or good identifier lost: %v %v", ids, err)
+	ids = nil
+	for _, fact := range catalog.Facts {
+		if fact.Fact == "model_id" {
+			ids = append(ids, fact.ModelID)
+		}
+	}
+	if !reflect.DeepEqual(ids, []string{"grok-4.7"}) {
+		t.Fatalf("unsafe identifier was retained or good identifier lost: %v", ids)
 	}
 }
 

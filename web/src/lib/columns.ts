@@ -271,17 +271,6 @@ export function tagList(fields: Record<string, unknown> | null | undefined): Tag
   })
 }
 
-// Moving a column one step within the reorderable part.
-export function moveColumn(order: ColumnId[], id: ColumnId, step: -1 | 1): ColumnId[] {
-  const free = order.filter(x => !PINNED.includes(x))
-  const index = free.indexOf(id)
-  const to = index + step
-  if (index === -1 || to < 0 || to >= free.length) return order
-  const next = [...free]
-  ;[next[index], next[to]] = [next[to], next[index]]
-  return [...PINNED, ...next]
-}
-
 // Host columns are additive, ordered and unique; built-in definitions always win.
 export function withHostColumns(base: readonly ColumnDef[], extra: readonly ColumnDef[] = []): ColumnDef[] {
   const seen = new Set<string>(COLUMN_BY_ID.keys())

@@ -4,10 +4,13 @@ package modelregistry
 
 import (
 	"context"
-	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
+	"math"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Historical ladder fixture writers are intentionally test-only. Production
@@ -182,4 +185,206 @@ type seedRoute struct {
 	Role     string
 	Priority int
 	Slug     string
+}
+
+func profilesExist(ctx context.Context, tx pgx.Tx, routes []Route) error {
+	if len(routes) == 0 {
+		return nil
+	}
+	ids := make([]string, len(routes))
+	seen := map[string]struct{}{}
+	for i, route := range routes {
+		ids[i] = route.ProfileID
+		seen[route.ProfileID] = struct{}{}
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM model_profiles WHERE id::text = ANY($1::text[])`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := map[string]struct{}{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		found[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(found) != len(seen) {
+		return fail(http.StatusBadRequest, "unknown profile")
+	}
+	return nil
+}
+
+func routesEqual(a, b []Route) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Role != b[i].Role || a[i].Priority != b[i].Priority || a[i].ProfileID != b[i].ProfileID || a[i].State != b[i].State || a[i].Reason != b[i].Reason {
+			return false
+		}
+		if !timePtrEqual(a[i].ValidUntil, b[i].ValidUntil) {
+			return false
+		}
+	}
+	return true
+}
+
+func roleRoutes(role string, rows []Route) []Route {
+	out := []Route{}
+	for _, row := range rows {
+		if row.Role == role {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func boundedStoredRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
+	out, err := listRoutes(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if err := routeBounds(out); err != nil {
+		return nil, prefFail(413, "audit_snapshot_too_large")
+	}
+	return out, nil
+}
+
+func normalizeStoredRoutes(incoming, stored []Route, now time.Time, clear bool) ([]Route, error) {
+	out, err := normalizeRouteStructure(incoming)
+	if err != nil {
+		return nil, err
+	}
+	out = canonicalRoutes(out)
+	prior := map[string]Route{}
+	for _, row := range stored {
+		prior[row.Role+"/"+row.ProfileID] = row
+	}
+	for i, row := range out {
+		if row.State == "available" || row.ValidUntil.After(now) {
+			continue
+		}
+		if clear {
+			out[i].State, out[i].Reason, out[i].ValidUntil = "available", "", nil
+			continue
+		}
+		old, exists := prior[row.Role+"/"+row.ProfileID]
+		if !exists || old.State != row.State || old.Reason != row.Reason || !timePtrEqual(old.ValidUntil, row.ValidUntil) {
+			return nil, prefFail(422, "suppression_expired")
+		}
+	}
+	return out, nil
+}
+
+func samePin(p Profile, s seedProfile) bool {
+	return p.Slug == s.Slug && p.Harness == s.Harness && p.Family == s.Family && p.Model == s.Model && p.Effort == s.Effort && p.Tier == s.Tier && p.Enabled
+}
+
+func routeBounds(rows []Route) error {
+	if len(rows) > routesTotalLimit {
+		return prefFail(413, "too_many_routes")
+	}
+	counts := map[string]int{}
+	for _, row := range rows {
+		counts[row.Role]++
+		if counts[row.Role] > routesDisplayLimit {
+			return prefFail(413, "too_many_routes")
+		}
+	}
+	return nil
+}
+
+func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
+	out := []Route{}
+	for _, role := range roleLadder {
+		steps, _, err := derivedRoleSteps(ctx, tx, nil, role.name, routesTotalLimit+1)
+		if err != nil {
+			return nil, err
+		}
+		for _, step := range steps {
+			out = append(out, step.Route)
+		}
+		if len(out) > routesTotalLimit {
+			return nil, prefFail(413, "audit_snapshot_too_large")
+		}
+	}
+	return out, nil
+}
+
+// Structural checks run before standalone setup. Expiry and profile existence
+// remain authoritative in the final transaction.
+func normalizeRouteStructure(incoming []Route) ([]Route, error) {
+	if incoming == nil {
+		return nil, fail(http.StatusBadRequest, "routes must be an array")
+	}
+	seenPriority := map[string]bool{}
+	seenProfile := map[string]bool{}
+	out := make([]Route, 0, len(incoming))
+	for _, route := range incoming {
+		if !validRole(route.Role) {
+			return nil, fail(http.StatusBadRequest, "invalid role")
+		}
+		if route.Priority < 1 {
+			return nil, fail(http.StatusBadRequest, "priority must be positive")
+		}
+		if route.Priority > math.MaxInt32 {
+			return nil, fail(http.StatusBadRequest, "priority exceeds storage range")
+		}
+		if !uuidRE.MatchString(route.ProfileID) {
+			return nil, fail(http.StatusBadRequest, "invalid profile id")
+		}
+		switch route.State {
+		case "available", "unavailable", "conserved", "budget_limited":
+		default:
+			return nil, fail(http.StatusBadRequest, "invalid route state")
+		}
+		keyP := route.Role + "/" + itoa(route.Priority)
+		keyID := route.Role + "/" + strings.ToLower(route.ProfileID)
+		if seenPriority[keyP] || seenProfile[keyID] {
+			return nil, fail(http.StatusBadRequest, "duplicate route")
+		}
+		seenPriority[keyP] = true
+		seenProfile[keyID] = true
+		route.ProfileID = strings.ToLower(route.ProfileID)
+		route.Reason = strings.TrimSpace(route.Reason)
+		if route.State == "available" {
+			route.Reason = ""
+			route.ValidUntil = nil
+		} else {
+			if route.Reason == "" || len(route.Reason) > 512 || strings.ContainsAny(route.Reason, "\x00\r\n") {
+				return nil, fail(http.StatusBadRequest, "suppression requires a reason")
+			}
+			if route.ValidUntil == nil {
+				return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
+			}
+		}
+		out = append(out, route)
+	}
+	return out, nil
+}
+
+func timePtrEqual(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [16]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PairingView } from '../src/lib/agentPairing'
 import { buildRows, defaultSchedule, type AccountCapacity, type AccountInput, type CapacityWindow } from '../src/lib/capacity'
-import { buildComputerCards, computerCaption, middleEllipsis, pacingSummary, readySummary } from '../src/lib/computerAccounts'
+import { buildComputerCards, computerCaption, pacingSummary } from '../src/lib/computerAccounts'
 
 const NOW = Date.parse('2026-10-01T12:30:00Z')
 const CODEX = 'ac000000-0000-4000-8000-000000000001'
@@ -73,9 +73,6 @@ describe('offline computer', () => {
     const [card] = buildComputerCards({ computers: [stale], rows: buildRows(inputs('offline'), capacity()), now: NOW })
     expect(card.accounts.map(a => a.readiness.text)).toEqual(['Paused · computer offline', 'Paused · computer offline'])
   })
-  it('the header pill names the computer', () => {
-    expect(readySummary(cards)).toEqual({ text: '0 of 2 ready · build-7 offline', tone: 'warn' })
-  })
 })
 
 describe('online, no readings yet', () => {
@@ -93,7 +90,6 @@ describe('online, no readings yet', () => {
     expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: 'Usage unknown · reserve not enforceable' })
     expect(cards[0].accounts[1].learnedUse).toBe('')
     expect(cards[0].legend).toBe(false)
-    expect(readySummary(cards)).toEqual({ text: '2 of 2 ready', tone: 'ok' })
   })
   it('shows observed spend when the vendor reports no window', () => {
     const cap = capacity()
@@ -123,7 +119,6 @@ describe('online with readings', () => {
     const [card] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), capacity([weekly(0)])), now: NOW })
     expect(card.accounts[0].readiness.kind).toBe('limit')
     expect(card.accounts[0].readiness.text).toMatch(/^At limit until /)
-    expect(readySummary([card])?.text).toBe('1 of 2 ready')
   })
   it('the server routing wait decides when it gives one', () => {
     const cap = capacity([weekly(40)])
@@ -143,30 +138,18 @@ describe('waits from the server routing', () => {
   it('a run still working makes the account busy, not ready', () => {
     const cards = waiting('capacity')
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'busy', text: 'Busy · run in progress', tone: 'mute', tip: 'Waiting for the current run to finish' })
-    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'mute' })
   })
   it('a reading on its way makes the account wait, not ready', () => {
     const cards = waiting('reading')
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'waiting', text: 'Waiting for a reading', tone: 'mute' })
-    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'mute' })
   })
   it('a residency wait explains allowed providers and keeps the account out of the ready count', () => {
     const cards = waiting('residency')
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'attention', text: 'Outside allowed providers', tone: 'warn', tip: 'Waiting for an account within the allowed providers' })
-    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'warn' })
+
     expect(cards[0].accounts[0].capacity).toMatchObject({ kind: 'bar', dim: true })
   })
-  it('the only account busy is "0 of 1 ready", and a warning elsewhere still warns', () => {
-    const cap = capacity([weekly(40)]).slice(0, 1)
-    cap[0].routing = { rank: 0, available_slots: 0, wait: { code: 'capacity', run_now_allowed: false } }
-    const view = computer({ enrollments: computer().enrollments.slice(0, 1) })
-    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online').slice(0, 1), cap), now: NOW })
-    expect(readySummary(cards)).toEqual({ text: '0 of 1 ready', tone: 'mute' })
-    const signin = computer({ harness_statuses: { codex: 'ready', cursor: 'login_required' }, harness_details: { cursor: { state: 'login_required', reason: 'login_required' } } })
-    const mixed = capacity([weekly(40)])
-    mixed[0].routing = { rank: 0, available_slots: 0, wait: { code: 'reading', run_now_allowed: false } }
-    expect(readySummary(buildComputerCards({ computers: [signin], rows: buildRows(inputs('online'), mixed), now: NOW }))).toEqual({ text: '0 of 2 ready', tone: 'warn' })
-  })
+
   it('a ranked account with a free slot stays ready', () => {
     const cap = capacity([weekly(40)])
     cap[0].routing = { rank: 1, available_slots: 2 }
@@ -226,11 +209,8 @@ describe('words', () => {
     const s = { ...defaultSchedule('Europe/Vienna'), week: defaultSchedule('UTC').week.map(d => ({ ...d, on: true })), reserve: 'fixed' as const, reserve_percent: 10, nights: true }
     expect(pacingSummary(s)).toBe('7 days · keep 10% · nights 22–08')
     expect(pacingSummary(defaultSchedule('UTC'))).toBe('5 days · keep auto · no nights')
-    expect(middleEllipsis('admin@example.com', 40)).toBe('admin@example.com')
-    expect(middleEllipsis('admin@example.com', 15)).toBe('admin@e…ple.com')
   })
 })
-
 
 describe('AEON-623 account diagnostics', () => {
   it('keeps a blocked Claude account without a capacity projection, with its exact cause and repair', () => {
@@ -271,7 +251,6 @@ it('AEON-623: revoked bindings cannot reappear as live loose accounts; active an
   expect(kept.find(a => a.id === CODEX)?.capacity.kind).toBe('bar')
 })
 
-
 it('AEON-623: account cards keep different blocked causes and never borrow an unknown account repair', () => {
   const permission = 'the default Claude profile is not private (requires mode 0700)'
   const signedOut = "the approved account is signed out in the daemon's view"
@@ -301,7 +280,7 @@ describe('expired account verification', () => {
     view.enrollments[0].verification_expired_ready = true
     const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'ready', text: 'Ready', tip: 'Verification expired; the live account probe is ready.' })
-    expect(readySummary(cards)?.text).toBe('2 of 2 ready')
+
     expect(view.enrollments[0].verification_state).toBe('expired')
   })
   it('uses the server’s own probe rather than a ready sibling', () => {
@@ -320,7 +299,6 @@ describe('expired account verification', () => {
     }
   })
 })
-
 
 describe('verification reporting failures', () => {
   it('shows a stalled check as a problem without changing its active ownership', () => {

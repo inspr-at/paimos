@@ -45,12 +45,7 @@ type decision struct {
 }
 
 func pending(n node) bool { return n.HumanCheck != nil && strings.TrimSpace(*n.HumanCheck) != "" }
-func fieldTime(n node, key string) time.Time {
-	var s string
-	_ = json.Unmarshal(n.Fields[key], &s)
-	t, _ := time.Parse(time.RFC3339Nano, s)
-	return t
-}
+
 func fieldString(n node, key string) string {
 	var s string
 	_ = json.Unmarshal(n.Fields[key], &s)

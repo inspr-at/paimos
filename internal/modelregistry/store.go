@@ -4,17 +4,15 @@ package modelregistry
 
 import (
 	"context"
-	"math"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -225,23 +223,6 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	return out, rows.Err()
 }
 
-func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
-	out := []Route{}
-	for _, role := range roleLadder {
-		steps, _, err := derivedRoleSteps(ctx, tx, nil, role.name, routesTotalLimit+1)
-		if err != nil {
-			return nil, err
-		}
-		for _, step := range steps {
-			out = append(out, step.Route)
-		}
-		if len(out) > routesTotalLimit {
-			return nil, prefFail(413, "audit_snapshot_too_large")
-		}
-	}
-	return out, nil
-}
-
 func validateProfile(in profileWrite) error {
 	if !boundedText(in.Note, 80) || strings.ContainsAny(in.Note, "\x00\r\n") {
 		return fail(400, "invalid model note")
@@ -317,139 +298,6 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 		return Profile{}, err
 	}
 	return out, nil
-}
-
-func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
-	out, err := normalizeRouteStructure(incoming)
-	if err != nil {
-		return nil, err
-	}
-	for _, route := range out {
-		if route.State != "available" && !route.ValidUntil.After(now) {
-			return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
-		}
-	}
-	return out, nil
-}
-
-// Structural checks run before standalone setup. Expiry and profile existence
-// remain authoritative in the final transaction.
-func normalizeRouteStructure(incoming []Route) ([]Route, error) {
-	if incoming == nil {
-		return nil, fail(http.StatusBadRequest, "routes must be an array")
-	}
-	seenPriority := map[string]bool{}
-	seenProfile := map[string]bool{}
-	out := make([]Route, 0, len(incoming))
-	for _, route := range incoming {
-		if !validRole(route.Role) {
-			return nil, fail(http.StatusBadRequest, "invalid role")
-		}
-		if route.Priority < 1 {
-			return nil, fail(http.StatusBadRequest, "priority must be positive")
-		}
-		if route.Priority > math.MaxInt32 {
-			return nil, fail(http.StatusBadRequest, "priority exceeds storage range")
-		}
-		if !uuidRE.MatchString(route.ProfileID) {
-			return nil, fail(http.StatusBadRequest, "invalid profile id")
-		}
-		switch route.State {
-		case "available", "unavailable", "conserved", "budget_limited":
-		default:
-			return nil, fail(http.StatusBadRequest, "invalid route state")
-		}
-		keyP := route.Role + "/" + itoa(route.Priority)
-		keyID := route.Role + "/" + strings.ToLower(route.ProfileID)
-		if seenPriority[keyP] || seenProfile[keyID] {
-			return nil, fail(http.StatusBadRequest, "duplicate route")
-		}
-		seenPriority[keyP] = true
-		seenProfile[keyID] = true
-		route.ProfileID = strings.ToLower(route.ProfileID)
-		route.Reason = strings.TrimSpace(route.Reason)
-		if route.State == "available" {
-			route.Reason = ""
-			route.ValidUntil = nil
-		} else {
-			if route.Reason == "" || len(route.Reason) > 512 || strings.ContainsAny(route.Reason, "\x00\r\n") {
-				return nil, fail(http.StatusBadRequest, "suppression requires a reason")
-			}
-			if route.ValidUntil == nil {
-				return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
-			}
-		}
-		out = append(out, route)
-	}
-	return out, nil
-}
-
-func profilesExist(ctx context.Context, tx pgx.Tx, routes []Route) error {
-	if len(routes) == 0 {
-		return nil
-	}
-	ids := make([]string, len(routes))
-	seen := map[string]struct{}{}
-	for i, route := range routes {
-		ids[i] = route.ProfileID
-		seen[route.ProfileID] = struct{}{}
-	}
-	rows, err := tx.Query(ctx, `SELECT id::text FROM model_profiles WHERE id::text = ANY($1::text[])`, ids)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	found := map[string]struct{}{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return err
-		}
-		found[id] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if len(found) != len(seen) {
-		return fail(http.StatusBadRequest, "unknown profile")
-	}
-	return nil
-}
-
-func routesEqual(a, b []Route) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].Role != b[i].Role || a[i].Priority != b[i].Priority || a[i].ProfileID != b[i].ProfileID || a[i].State != b[i].State || a[i].Reason != b[i].Reason {
-			return false
-		}
-		if !timePtrEqual(a[i].ValidUntil, b[i].ValidUntil) {
-			return false
-		}
-	}
-	return true
-}
-
-func timePtrEqual(a, b *time.Time) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return a.Equal(*b)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [16]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
 }
 
 // flushCatalogChanges runs after the caller's final resource operation.

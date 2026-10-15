@@ -59,67 +59,6 @@ func canonicalRoutes(routes []Route) []Route {
 	return out
 }
 
-func roleRoutes(role string, rows []Route) []Route {
-	out := []Route{}
-	for _, row := range rows {
-		if row.Role == role {
-			out = append(out, row)
-		}
-	}
-	return out
-}
-
-func routeBounds(rows []Route) error {
-	if len(rows) > routesTotalLimit {
-		return prefFail(413, "too_many_routes")
-	}
-	counts := map[string]int{}
-	for _, row := range rows {
-		counts[row.Role]++
-		if counts[row.Role] > routesDisplayLimit {
-			return prefFail(413, "too_many_routes")
-		}
-	}
-	return nil
-}
-
-func boundedStoredRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
-	out, err := listRoutes(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if err := routeBounds(out); err != nil {
-		return nil, prefFail(413, "audit_snapshot_too_large")
-	}
-	return out, nil
-}
-
-func normalizeStoredRoutes(incoming, stored []Route, now time.Time, clear bool) ([]Route, error) {
-	out, err := normalizeRouteStructure(incoming)
-	if err != nil {
-		return nil, err
-	}
-	out = canonicalRoutes(out)
-	prior := map[string]Route{}
-	for _, row := range stored {
-		prior[row.Role+"/"+row.ProfileID] = row
-	}
-	for i, row := range out {
-		if row.State == "available" || row.ValidUntil.After(now) {
-			continue
-		}
-		if clear {
-			out[i].State, out[i].Reason, out[i].ValidUntil = "available", "", nil
-			continue
-		}
-		old, exists := prior[row.Role+"/"+row.ProfileID]
-		if !exists || old.State != row.State || old.Reason != row.Reason || !timePtrEqual(old.ValidUntil, row.ValidUntil) {
-			return nil, prefFail(422, "suppression_expired")
-		}
-	}
-	return out, nil
-}
-
 // The legacy writer is retired. Do not prepare a catalog, decode a body or
 // acquire mutation locks merely to report the successor API.
 func (m *Module) replace(w http.ResponseWriter, r *http.Request) {

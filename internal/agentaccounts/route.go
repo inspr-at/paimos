@@ -12,13 +12,12 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
 )
 
 type runRow struct {
@@ -853,33 +852,4 @@ func windowEstimate(w Window, estimates map[string]int64) int64 {
 		return max(1, w.capacityHold)
 	}
 	return estimates[w.Unit]
-}
-
-// When all measured windows have reset, Claude needs one small run to emit its
-// next snapshot. This is a provisional 1% estimate, never a renewed vendor limit.
-// The account row is locked; one durable grant per last observation prevents
-// retries, releases or its five-minute expiry from minting more refresh jobs.
-func expiredCapacityRefresh(a Account, windows []Window, now time.Time) *Window {
-	var latest time.Time
-	for _, w := range windows {
-		if w.capacityReadAt == nil || synthetic(w) {
-			continue
-		}
-		if !w.capacityRetired && (w.EndsAt.After(now) || !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute) {
-			return nil
-		}
-		if w.capacityReadAt.After(latest) {
-			latest = *w.capacityReadAt
-		}
-	}
-	if latest.IsZero() {
-		return nil
-	}
-	for _, w := range windows {
-		if w.capacityKind == "refresh" && w.capacityReadAt != nil && !w.capacityReadAt.Before(latest) {
-			return nil
-		}
-	}
-	w := Window{AccountID: a.ID, StartsAt: now, EndsAt: now.Add(5 * time.Minute), Unit: "percent", Allowance: 1, PaceModel: "unrestricted", capacityReadAt: &latest, capacityAllowed: true, capacityKind: "refresh", Provisional: true}
-	return &w
 }

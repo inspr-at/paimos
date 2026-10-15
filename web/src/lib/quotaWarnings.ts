@@ -9,9 +9,3 @@ export interface QuotaWarningSession {
   severity?: 'early' | 'urgent'; remaining_percent?: number; threshold_percent?: number; window_key?: string; resets_at?: string | null
 }
 export interface QuotaWarningPage { items: QuotaWarningSession[]; next_after: string | null }
-export async function readQuotaWarnings(): Promise<QuotaWarningPage> {
-  const { api } = await import('./api.ts')
-  const response = await api('/agent-accounts/quota-warnings?limit=100')
-  if (!response.ok) throw new Error('Account availability could not be refreshed.')
-  return response.json()
-}

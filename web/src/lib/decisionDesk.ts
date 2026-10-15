@@ -7,6 +7,7 @@ import { sha256FirstByte } from './avatar.ts'
 import type { MethodLearning } from './knowledge'
 import type { StepupRequest } from './stepup'
 import type { PersonStep } from './personSteps'
+
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
 export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson'
@@ -126,16 +127,6 @@ export function arrivals(items: DeskItem[], round: string[]): DeskItem[] {
   const ids = new Set(round)
   return items.filter(item => !ids.has(item.id) && !item.decided)
 }
-export function roundCounts(items: DeskItem[], round: string[], skipped: Set<string>) {
-  const byId = new Map(items.map(item => [item.id, item]))
-  let decided = 0, open = 0, skip = 0
-  for (const id of round) {
-    if (byId.get(id)?.decided) decided++
-    else if (skipped.has(id)) skip++
-    else open++
-  }
-  return { decided, open, skipped: skip }
-}
 // AEON-1057: every item names its project. PAIMOS projects carry no colour of
 // their own, so a project gets a stable hue from its key: the project-group
 // marker hues, at one lightness per theme (--project-l / --project-c).
@@ -146,10 +137,6 @@ export function projectHue(key: string): number { return PROJECT_HUES[sha256Firs
 export function deskProject(item: Pick<DeskItem, 'projectId' | 'projectName' | 'projectKey'>): DeskProject {
   const key = item.projectId ? item.projectKey ?? '' : ''
   return { id: item.projectId, key, name: item.projectName, href: key ? `/p/${encodeURIComponent(key)}` : '', hue: key ? projectHue(key) : null }
-}
-/** The project colour as a CSS value; neutral ink when there is no project. */
-export function projectColor(project: Pick<DeskProject, 'hue'>): string {
-  return project.hue === null ? 'var(--ink-3)' : `oklch(var(--project-l) var(--project-c) ${project.hue})`
 }
 /** The project of the previously shown item, when it differs from this one. */
 export function projectSwitch(previous: DeskProject | undefined, current: DeskProject): DeskProject | undefined {

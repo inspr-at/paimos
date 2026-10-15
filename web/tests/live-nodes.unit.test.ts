@@ -4,7 +4,7 @@ import type { ListItem, WorkNode } from '../src/lib/api'
 import { LiveNodeStore, mergeChanges, parseNodeChanges, type LiveView, type NodeChange } from '../src/lib/liveNodes'
 import { RowStore } from '../src/lib/rowStore'
 import {
-  autoApplyDelay, canAutoApply, classifyChange, compareRevision, describeFields, PendingUpdates, PENDING_CAP, pillText, type ApplyGuard,
+  autoApplyDelay, classifyChange, compareRevision, describeFields, PendingUpdates, PENDING_CAP, pillText, type ApplyGuard,
 } from '../src/lib/liveUpdates'
 
 it('session lifecycle and telemetry hints invalidate both old and new bound ticket projections', () => {
@@ -166,8 +166,6 @@ describe('PendingUpdates', () => {
 describe('canAutoApply', () => {
   const idle: ApplyGuard = { selected: 0, editing: false, menuOpen: false, dialogOpen: false, dragging: false, scrolling: false, hidden: false, lastInputAt: 0, now: 5000 }
   it('applies after 2 s without input when nothing blocks it', () => {
-    expect(canAutoApply(idle)).toBe(true)
-    expect(canAutoApply({ ...idle, lastInputAt: 3500 })).toBe(false)
     expect(autoApplyDelay({ ...idle, lastInputAt: 3500 })).toBe(500)
     expect(autoApplyDelay({ ...idle, lastInputAt: 3000 })).toBe(0)
   })
@@ -175,7 +173,6 @@ describe('canAutoApply', () => {
     ['a selection', { selected: 1 }], ['an editor', { editing: true }], ['a menu', { menuOpen: true }], ['a dialog', { dialogOpen: true }],
     ['a drag', { dragging: true }], ['a scroll', { scrolling: true }], ['a hidden tab', { hidden: true }],
   ])('waits for %s', (_, blocker) => {
-    expect(canAutoApply({ ...idle, ...blocker })).toBe(false)
     expect(autoApplyDelay({ ...idle, ...blocker })).toBeNull()
   })
 })

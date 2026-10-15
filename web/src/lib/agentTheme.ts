@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref } from 'vue'
-import type { ActiveTheme, ThemeAccent } from './themes.ts'
+import type { ThemeAccent } from './themes.ts'
 import type { AgentIndicatorStyle, IndicatorRing } from './indicatorVariants.ts'
 import type { AgentColourState, AgentPalette } from './agentPalettes.ts'
-import { publishTheme, resetTheme } from './themeRuntime.ts'
+import { resetTheme } from './themeRuntime.ts'
 
 export interface AgentThemeAppearance {
   avatar: AgentIndicatorStyle; ring: IndicatorRing | null; hover: boolean; size: number | null; palette: AgentPalette
@@ -29,14 +29,6 @@ export function resetAgentTheme(identity = '') {
 }
 export function installAgentTheme(value: AgentThemeAppearance) {
   agentTheme.value = { ...value }
-}
-// The theme editor (stores/themeEditor) is the one writer after sign-in: it
-// publishes every server-confirmed active theme for the identity it loaded it
-// for. An answer for another person, or for a session that has since been
-// reset, never reaches the runtime.
-export function publishAgentTheme(identity: string, active: ActiveTheme) {
-  if (!identity || identity !== person) return false
-  return publishTheme(identity, active)
 }
 export async function restoreAgentTheme(identity: string) {
   if (person !== identity) resetAgentTheme(identity)

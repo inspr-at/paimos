@@ -70,4 +70,3 @@ export function readTypicals(owner: string, projectId: string, now = Date.now())
 export function keepTypicals(owner: string, timing: TicketStatusTiming, filters: TimingFilters, now = Date.now()) {
   if (timing.window === 90 && filters.type === 'all' && filters.priority === 'all' && filters.worked_by === 'all') typicals.set(`${owner}|${timing.project_id}`, { at: now, answer: Promise.resolve(timing) })
 }
-export function forgetTypicals() { typicals.clear() }

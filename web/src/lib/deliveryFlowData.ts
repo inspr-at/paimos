@@ -216,7 +216,6 @@ export const ARION_PATH: readonly ArionStep[] = [
 /** Same path after Phases 2 and 4: the queue is 10.7 and the switch is a 4 min pre-pull. 53.9 in all. */
 export const ARION_LATER: readonly ArionStep[] = ARION_PATH.map(([key, minutes, lane, en, de]) => [key, key === 'a' ? 10.7 : key === 'k' ? 4 : minutes, lane, en, de] as const)
 export const ARION_MINUTES = ARION_PATH.reduce((sum, step) => sum + step[1], 0)
-export const ARION_LATER_MINUTES = ARION_LATER.reduce((sum, step) => sum + step[1], 0)
 /** The target run on a relative axis; scaled when the release names another target length.
  *  W and the catalogue overrun stay beside the critical path and never change its end. */
 export function arionTarget(lang: DeliveryLanguage, minutes = ARION_MINUTES): FlowRun {

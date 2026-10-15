@@ -33,10 +33,3 @@ export const kindsCopy = {
 } as const
 export type KindsText = (key: keyof typeof kindsCopy) => string
 export const textForKinds = (german: boolean): KindsText => key => kindsCopy[key][german ? 1 : 0]
-
-// Shared by Kinds of work and the Expert picker; limits come from the server.
-export function situationDefinition(situation: 'first' | 'fix' | 'stuck', rounds: number, german: boolean) {
-  if (situation === 'first') return textForKinds(german)('firstDefinition')
-  if (situation === 'fix') return german ? `Runden 1 bis ${rounds}: Der Agent behebt, was eine Prüfung gefunden hat.` : `Rounds 1 to ${rounds}: the agent fixes what a review found.`
-  return german ? `Nach ${rounds} Korrekturrunden scheitert die Prüfung noch; eine andere Modellfamilie übernimmt.` : `After ${rounds} fix rounds review still fails; another model family takes over.`
-}

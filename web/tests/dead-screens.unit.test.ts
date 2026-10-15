@@ -15,6 +15,41 @@ import { mountView, textOf } from './webcore-view-harness'
 import * as projectSettings from '../src/lib/projectSettings'
 
 const root = fileURLToPath(new URL('../src/', import.meta.url))
+
+// AEON-1413: count lexical identifiers, including strings/templates, across all
+// source modules and Vue templates. Tests classify a finding but cannot make it
+// live. This deliberately conservative check needs no typechecker or bundle.
+const exportAllowlist = [
+  { path: 'lib/ledger.check.ts', reason: 'Compile-time brand/readonly fixtures, enforced by vue-tsc.' },
+  { path: 'vendor/calendar-version-display/', reason: 'Vendored upstream API; keep its supported exports intact.' },
+  { path: 'lib/nativeSessionContract.ts', name: 'nativeSessionProtocol', reason: 'Generated shared protocol contract; generator owns this symbol.' },
+  { path: 'lib/nativeTerminal/renderer.ts', name: 'createXtermRenderer', reason: 'Injected terminal renderer used by the expert harness; retain pending native composition wiring.' },
+  { path: 'lib/themeEngine.ts', name: 'PORCELAIN', reason: 'Shared saved-theme fixture for unit/browser tests and scripts/theme-tokens.mjs.' },
+  { path: 'lib/position.ts', name: 'writeFloor', reason: 'Read-only test probe of the live write-position ledger.' },
+  { path: 'lib/projectOrder.ts', name: 'orderBytes', reason: 'Test measurement of the live persisted-order byte budget.' },
+  { path: 'lib/shortcuts.ts', name: 'shortcutConflicts', reason: 'Test validator of the canonical live shortcut registry.' },
+  { path: 'lib/graphRenderer.ts', name: 'glimpseOrbDelta', reason: 'Contrast measurement probe for tests of live orb geometry and colours.' },
+  { path: 'lib/releaseMembership.ts', name: 'resetReleaseOpenForTests', reason: 'Explicit test reset for pending release ownership and identity changes.' },
+]
+
+it('production runtime exports have a lexical consumer or an explained exception', () => {
+  const counts = { production: new Map<string, number>(), tests: new Map<string, number>() }
+  const declarations: { path: string; name: string }[] = []
+  for (const [directory, bucket] of [[root, counts.production], [resolve(root, '../tests'), counts.tests]] as const) {
+    for (const path of globSync('**/*.{ts,vue,js,mjs}', { cwd: directory })) {
+      const source = readFileSync(resolve(directory, path), 'utf8')
+      for (const [word] of source.matchAll(/\b[A-Za-z_$][\w$]*\b/g)) bucket.set(word, (bucket.get(word) ?? 0) + 1)
+      if (directory === root) {
+        for (const match of source.matchAll(/\bexport\s+(?:async\s+)?(?:function|const|let|class|enum)\s+(\w+)/g)) declarations.push({ path, name: match[1]! })
+      }
+    }
+  }
+  const unused = declarations.filter(({ path, name }) => counts.production.get(name) === 1
+    && !exportAllowlist.some(entry => (entry.path.endsWith('/') ? path.startsWith(entry.path) : path === entry.path) && (!entry.name || name === entry.name)))
+    .map(({ path, name }) => `${path}:${name} (${counts.tests.has(name) ? 'test-only' : 'unused'})`).sort()
+  expect(unused, `Remove verified dead exports and their implementation-only tests, or explain dynamic/test use:\n${unused.join('\n')}`).toEqual([])
+})
+
 const removed = [
   'components/agents/CapacityCard.vue', 'components/agents/ApprovalQueue.vue',
   'components/ExpandableText.vue', 'components/agents/approvalSettle.ts',

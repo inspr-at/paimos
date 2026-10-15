@@ -22,9 +22,6 @@ export async function phoneRequest<T>(path: string, method = 'GET', body?: unkno
   }
   return response.status === 204 ? undefined as T : response.json()
 }
-// AEON-455 advertises availability through its existing settings read. A 404
-// means the package is absent; other errors must not enable an unverified write.
-export async function phoneVerificationAvailable(): Promise<boolean> { return (await phoneCapability()).available }
 // AEON-1048: step-up Approve uses an existing passkey when the person has one,
 // otherwise a fresh sign-in. The same read tells the desk which one to name.
 export async function phoneCapability(): Promise<{ available: boolean; passkeys: number }> {

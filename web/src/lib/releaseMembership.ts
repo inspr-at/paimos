@@ -20,19 +20,6 @@ export interface MembershipTicket {
   availability: TicketAvailability
 }
 
-export interface TicketOptionQuery {
-  q?: string
-  status?: string
-  epic?: string
-  type?: string
-  limit?: number
-}
-
-export interface TicketOptions {
-  expected_revision: number
-  tickets: MembershipTicket[]
-}
-
 export interface MembershipWrite {
   expected_revision: number
   ticket_node_ids: string[]
@@ -43,39 +30,6 @@ export interface MembershipResult {
   leaf_node_ids?: string[]
   walker: Walker
   event_id: number
-}
-
-const AVAILABILITY = new Set<TicketAvailability>(['addable', 'included', 'closed', 'released', 'other_release', 'active_release', 'unsupported'])
-
-// other_release is a planning source and may move after confirmation.
-// active_release is any other live source; the write would refuse it.
-export function canSelectTicket(ticket: Pick<MembershipTicket, 'availability'>): boolean {
-  return ticket.availability === 'addable' || ticket.availability === 'other_release'
-}
-
-export function availabilityMark(ticket: Pick<MembershipTicket, 'availability' | 'release_title'>): string {
-  switch (ticket.availability) {
-    case 'included': return 'In this release'
-    case 'closed': return 'Closed'
-    case 'released': return 'Already released'
-    case 'other_release': return ticket.release_title ? `In ${ticket.release_title}` : 'In another planning release'
-    case 'active_release': return ticket.release_title ? `In ${ticket.release_title} · not planning` : 'Not in a planning release'
-    case 'unsupported': return 'Not a release ticket'
-    case 'unavailable': return 'Cannot be added'
-    default: return ''
-  }
-}
-
-export function ticketOptionQuery(query: TicketOptionQuery): string {
-  const params = new URLSearchParams()
-  const q = query.q?.trim()
-  if (q) params.set('q', q)
-  if (query.status) params.set('status', query.status)
-  if (query.epic) params.set('epic', query.epic)
-  if (query.type) params.set('type', query.type)
-  if (query.limit) params.set('limit', String(query.limit))
-  const text = params.toString()
-  return text ? `?${text}` : ''
 }
 
 export function isStaleRevision(error: unknown): boolean {
@@ -96,29 +50,6 @@ export function isMoveConflict(error: unknown): boolean {
 function text(value: unknown): string { return typeof value === 'string' ? value : '' }
 function nullable(value: unknown): string | null { return typeof value === 'string' && value ? value : null }
 
-export function parseTicketOptions(data: unknown): TicketOptions {
-  if (!data || typeof data !== 'object') throw new Error('The ticket list did not answer.')
-  const body = data as { expected_revision?: unknown; tickets?: unknown }
-  const revision = body.expected_revision
-  if (typeof revision !== 'number' || revision < 1) throw new Error('The release revision is missing.')
-  const rows = Array.isArray(body.tickets) ? body.tickets : []
-  const tickets: MembershipTicket[] = []
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue
-    const ticket = row as Record<string, unknown>
-    const id = text(ticket.ticket_node_id)
-    const key = text(ticket.key)
-    if (!id || !key) continue
-    const availability = AVAILABILITY.has(ticket.availability as TicketAvailability) ? ticket.availability as TicketAvailability : 'unavailable'
-    tickets.push({
-      ticket_node_id: id, key, title: text(ticket.title), status: text(ticket.status), type: text(ticket.type),
-      feature_node_id: nullable(ticket.feature_node_id), release_node_id: nullable(ticket.release_node_id),
-      release_title: nullable(ticket.release_title), availability,
-    })
-  }
-  return { expected_revision: revision, tickets }
-}
-
 export function parseMembership(data: unknown): MembershipResult {
   if (!data || typeof data !== 'object') throw new Error('The release did not answer.')
   const body = data as { walker?: Walker; event_id?: unknown; leaf_node_ids?: unknown }
@@ -138,11 +69,6 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 
 const enc = encodeURIComponent
 const releaseRoot = (project: string, release: string) => `/projects/${enc(project)}/releases/${enc(release)}`
-
-export async function listReleaseTicketOptions(project: string, release: string, query: TicketOptionQuery): Promise<TicketOptions> {
-  const data = await request<unknown>(`${releaseRoot(project, release)}/ticket-options${ticketOptionQuery(query)}`)
-  return parseTicketOptions(data)
-}
 
 export async function addReleaseMembership(project: string, release: string, body: MembershipWrite): Promise<MembershipResult> {
   if (body.ticket_node_ids.length < 1 || body.ticket_node_ids.length > 100) throw new Error('Add between 1 and 100 tickets.')
