@@ -37,8 +37,9 @@ type DiscoverySource struct {
 }
 type SourceResult struct {
 	DiscoverySource
-	State string `json:"state"`
-	Seen  int    `json:"seen"`
+	State   string `json:"state"`
+	Seen    int    `json:"seen"`
+	Skipped int    `json:"skipped"`
 }
 type RefreshResult struct {
 	At                     time.Time      `json:"at"`
@@ -160,9 +161,19 @@ type discoveredSource struct {
 // Reserve before making network calls. Only short catalog transactions hold
 // the tenant lock; both workers and the scheduler obey the same interval.
 func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled bool) (RefreshResult, error) {
+	return m.runRefreshMode(ctx, p, scheduled, true)
+}
+
+// fetchNeverRun is false only for the server sweep. A tenant that has never
+// refreshed anchors last_run_at and still applies local catalog maintenance,
+// and does not open a socket. The next due sweep fetches keyless catalogs
+// whether or not credential discovery is enabled. Explicit refresh keeps
+// fetchNeverRun true, so a person refresh still looks immediately.
+func (m *Module) runRefreshMode(ctx context.Context, p tenant.Principal, scheduled, fetchNeverRun bool) (RefreshResult, error) {
 	out := RefreshResult{Sources: []SourceResult{}, NewLines: []string{}}
 	inputs := []discoveryInput{}
 	reserved := false
+	var anchorOnly bool
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) (err error) {
 		if err := preferenceFence(ctx, tx, p); err != nil {
 			return err
@@ -213,7 +224,12 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			}
 			return fail(429, "model refresh interval has not elapsed")
 		}
-		if cfg.APIEnabled {
+		// Never-run is not overdue. Opening the three public catalogs here
+		// created Internet sockets during process start, and network denial
+		// killed the server. A due run (last_run_at already set) still fetches
+		// those keyless catalogs below.
+		skipNet := scheduled && last == nil && !fetchNeverRun
+		if !skipNet && cfg.APIEnabled {
 			rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.vendor) c.account_id::text,c.vendor,c.ciphertext FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE a.state='available' ORDER BY c.vendor,c.account_id`)
 			if err != nil {
 				return err
@@ -230,9 +246,9 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 				return err
 			}
 		}
-		// Explicit refreshes can discover public facts without a key. Startup
-		// and interval workers need the existing person's discovery opt-in.
-		if !scheduled || cfg.APIEnabled {
+		// Public catalogs send no credentials or tenant data. Discovery opt-in
+		// governs only the credentialed requests above, including scheduled runs.
+		if !skipNet {
 			for _, source := range publicCatalogSources {
 				inputs = append(inputs, discoveryInput{DiscoverySource: DiscoverySource{Vendor: source}})
 			}
@@ -245,10 +261,15 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			}
 		}
 		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1,last_manual_run_at=CASE WHEN $2 THEN $1 ELSE last_manual_run_at END`, out.At, !scheduled && p.Kind == tenant.Person)
-		reserved = err == nil
-		return err
+		if err != nil {
+			return err
+		}
+		reserved = true
+		// Anchoring is not a catalog refresh: do not publish an empty result.
+		anchorOnly = skipNet
+		return nil
 	})
-	if err != nil || !reserved {
+	if err != nil || !reserved || anchorOnly {
 		return out, err
 	}
 
@@ -268,13 +289,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 		var err error
 		key := ""
 		if input.AccountID == "" {
-			if scheduled {
-				err = m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
-					return tx.QueryRow(fetchCtx, `SELECT api_enabled FROM model_refresh_settings`).Scan(&allowed)
-				})
-			} else {
-				allowed = true
-			}
+			allowed = true
 		} else {
 			err = m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
 				return tx.QueryRow(fetchCtx, `SELECT api_enabled AND EXISTS(SELECT 1 FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available') FROM model_refresh_settings`, input.AccountID, input.Vendor, input.cipher).Scan(&allowed)
@@ -324,7 +339,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					return err
 				}
 			}
-			if (!scheduled || cfg.APIEnabled) && (input.AccountID == "" || cfg.APIEnabled) && valid && fetched.fresh {
+			if (input.AccountID == "" || cfg.APIEnabled) && valid && fetched.fresh {
 				if err := RecordCatalogFacts(ctx, tx, p.TenantID, fetched.catalog.Facts); err != nil {
 					return err
 				}
@@ -339,6 +354,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					}
 				}
 				result.State, result.Seen = "fresh", len(models)
+				result.Skipped = fetched.catalog.Skipped
 				if cfg.AutoAddProfiles {
 					var limited bool
 					var err error
@@ -724,7 +740,7 @@ func (m *Module) sweep(ctx context.Context) {
 		})
 		if err == nil {
 			p := tenant.Principal{TenantID: id, ID: actor, Kind: tenant.Agent}
-			_, err = m.runRefresh(db.NoProjects(work, "model catalog scheduler"), p, true)
+			_, err = m.runRefreshMode(db.NoProjects(work, "model catalog scheduler"), p, true, false)
 		}
 		cancel()
 		if err != nil && ctx.Err() == nil {

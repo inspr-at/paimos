@@ -338,7 +338,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current)}
+		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current), printedReviewCommand: true}
 		if query.Harness != "" {
 			// A harness filter must name one of the role's Models routes,
 			// as it named a ladder route before the retirement. The routes

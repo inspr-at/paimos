@@ -58,7 +58,7 @@ func TestCommandTemplates(t *testing.T) {
 		readOnly               bool
 		want                   string
 	}{
-		{"codex", "gpt-6-astra", "xhigh", true, "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'"},
+		{"codex", "gpt-6-astra", "xhigh", true, "codex exec --ignore-user-config -s read-only -m gpt-6-astra -c model_reasoning_effort=xhigh '{prompt}'"},
 		{"codex", "gpt-6.1-sol", "high", false, "codex exec -m gpt-6.1-sol -c model_reasoning_effort=high '{prompt}'"},
 		{"claude", "fable", "xhigh", true, "claude -p --model fable --effort xhigh --permission-mode plan '{prompt}'"},
 		{"cursor", "grok-4.7-xhigh", "xhigh", false, "cursor-agent --trust --model grok-4.7-xhigh -p '{prompt}'"},

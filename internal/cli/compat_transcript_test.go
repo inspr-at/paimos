@@ -900,3 +900,45 @@ func TestSessionFullScopeIncomplete(t *testing.T) {
 		}
 	}
 }
+
+// Risk R14: an old server prints a sandbox-only command as a qualified reviewer,
+// or the CLI drops isolation while translating the route for an agent.
+func TestModelResolveCodexRequiresPrintedIsolation(t *testing.T) {
+	const safe = "codex exec --ignore-user-config -s read-only -m gpt-6.1-sol -c model_reasoning_effort=xhigh '{prompt}'"
+	for _, command := range []string{safe, strings.Replace(safe, "--ignore-user-config ", "", 1), strings.Replace(safe, "-s read-only ", "", 1)} {
+		t.Run(command, func(t *testing.T) {
+			isolate(t)
+			profile := map[string]any{"id": "11111111-1111-4111-8111-111111111111", "slug": "codex-sol", "version": "1", "family": "openai", "harness": "codex", "model": "gpt-6.1-sol", "effort": "xhigh"}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/models/resolve" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"role": "review-gate", "author_family": "anthropic", "profile": profile, "ladder": []any{}, "command_template": command, "owner_required": false, "source": "aeon"})
+					return
+				}
+				if r.URL.Path == "/api/models" {
+					_ = json.NewEncoder(w).Encode([]any{profile})
+					return
+				}
+				t.Errorf("unexpected request: %s", r.URL.Path)
+				w.WriteHeader(404)
+			}))
+			defer srv.Close()
+			t.Setenv("PAIMOS_URL", srv.URL)
+			t.Setenv("PAIMOS_API_KEY", testKey)
+			for _, jsonOut := range []bool{false, true} {
+				args := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "model", "resolve", "review-gate", "--author-family", "claude"}
+				if jsonOut {
+					args = append(args, "--json")
+				}
+				code, out, stderr := runCLI(args, "")
+				if command == safe {
+					if code != 0 || stderr != "" || !strings.Contains(out, safe) {
+						t.Fatalf("exact isolated command lost: code=%d out=%s stderr=%s", code, out, stderr)
+					}
+				} else if code == 0 || out != "" || !strings.Contains(stderr, "exact isolated command") {
+					t.Fatalf("unsafe command printed as usable: code=%d out=%s stderr=%s", code, out, stderr)
+				}
+			}
+		})
+	}
+}

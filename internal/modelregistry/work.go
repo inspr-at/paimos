@@ -19,6 +19,9 @@ type WorkQuery struct {
 	// routineEval applies the mandatory family floor to board routing
 	// only for the internal routine resolver; ordinary routes retain their API.
 	routineEval bool
+	// printedReviewCommand admits Codex only on the resolution path that
+	// returns its exact isolated command, never the managed no-tools adapter.
+	printedReviewCommand bool
 	// preview shares an editor preview's bounded catalog with every Models
 	// walk of that preview; nil reads the live catalog for each walk.
 	preview          *preferencePreviewCatalog
@@ -161,6 +164,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 }
 
 func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
+	q.printedReviewCommand = true
 	if catalog != nil {
 		// Editor previews retain their smaller, honest truncation boundary,
 		// and every cell's Models walk reuses that one bounded read.

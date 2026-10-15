@@ -3,7 +3,7 @@
 package modelregistry
 
 // CatalogVersion identifies the ID-only offline evidence bootstrap.
-const CatalogVersion = "4"
+const CatalogVersion = "5"
 
 type seedProfile struct {
 	Slug    string
@@ -35,8 +35,8 @@ var seedModels = []seedModel{
 	{"claude", "sonnet"},
 	{"claude", "opus"},
 	{"claude", "fable"},
-	{"pi", "anthropic/claude-sonnet-5"},
-	{"pi", "anthropic/claude-opus-5"},
+	{"pi", "anthropic/claude-sonnet-5.5"},
+	{"pi", "anthropic/claude-opus-5.5"},
 	{"cursor", "composer-2.5"},
 	{"cursor", "composer-2.5-fast"},
 	{"gemini", "gemini-2.5-flash"},

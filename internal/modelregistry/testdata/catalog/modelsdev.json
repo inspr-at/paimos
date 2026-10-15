@@ -92,5 +92,19 @@
         }
       }
     }
+  },
+  "cloudflare-workers-ai": {
+    "models": {
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "name": "Llama 3.3 70B Instruct fp8 Fast",
+        "reasoning": false,
+        "limit": {
+          "context": 24000,
+          "output": 24000
+        },
+        "canonical_model_id": "meta/llama-3.3-70b-instruct"
+      }
+    }
   }
 }

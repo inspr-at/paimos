@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -228,17 +229,61 @@ func TestCatalogKeylessRefreshPersistsFactsWithoutAccountAuthority(t *testing.T)
 	}
 }
 
-// Risk: startup makes unsolicited public requests, or disabling discovery
-// during a fetch still starts more requests or publishes the in-flight facts.
+// Risk R13/R14: one unsupported identifier hides the entire provider catalog,
+// or skipped entries bypass the collection bounds. Fixtures include the real
+// 2026-10-15 OpenRouter aliases, Cloudflare namespaces and LiteLLM templates.
+func TestCatalogSkipsUnsupportedIdentifiers(t *testing.T) {
+	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	for source, skipped := range map[string]int{"openrouter": 1, "modelsdev": 1, "litellm": 2} {
+		t.Run(source, func(t *testing.T) {
+			c, err := fetchProviderCatalog(t.Context(), fixtureCatalogClient(t, nil), source, "", at)
+			if err != nil || c.Skipped != skipped || len(c.Facts) == 0 {
+				t.Fatalf("usable source lost: skipped=%d facts=%d err=%v", c.Skipped, len(c.Facts), err)
+			}
+			found := false
+			for _, f := range c.Facts {
+				if !modelRE.MatchString(f.ModelID) || !modelRE.MatchString(f.Provider) {
+					t.Fatalf("unsupported identifier persisted: %+v", f)
+				}
+				found = found || f.Provider == "anthropic" && f.ModelID == "claude-opus-5.5"
+			}
+			if source == "openrouter" && !found {
+				t.Fatal("supported Opus 5.5 was lost alongside the alias")
+			}
+		})
+	}
+	raw := `{"data":[` + strings.Repeat(`{"id":"~alias/latest"},`, maxDiscoveryModels) + `{"id":"~last/latest"}]}`
+	if _, err := ParseProviderCatalog("openrouter", []byte(raw), at); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("unsupported IDs escaped bounds: %v", err)
+	}
+	c, err := ParseProviderCatalog("modelsdev", []byte(`{"anthropic":{"models":{"valid":{"id":"valid","canonical_model_id":"anthropic/@invalid"},"good":{"id":"good"}}}}`), at)
+	if err != nil || c.Skipped != 1 || len(c.Facts) == 0 {
+		t.Fatalf("canonical override poisoned source: %+v %v", c, err)
+	}
+}
+
+// LEAD's AEON-1409 decision replaces the opt-in requirement for keyless catalogs.
+// Risk R1/R13: public scheduling stays offline, or the change also bypasses the
+// credential opt-in and its final publication fence. No live network is used.
 func TestCatalogScheduledRefreshRequiresOptInAndRechecksIt(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "catalog-schedule", "person", "Owner", []string{"admin"})
+	agent := addPrincipal(t, p.TenantID, "agent", "Discovery", nil)
+	account := enrollEvidenceHarness(t, p, agent, "codex")
 	ctx := tenant.WithPrincipal(t.Context(), p)
-	at := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	seen := []string{}
-	m := NewWithVault(appPool, nil)
+	m := NewWithVault(appPool, []byte(strings.Repeat("v", 32)))
 	m.discovery = fixtureCatalogClient(t, &seen)
 	m.validationClock = func(context.Context, pgx.Tx) (time.Time, error) { return at, nil }
+	cipher, err := linkvault.Encrypt(m.vaultKey, p.TenantID, "models/"+account+"/openai", "fixture-discovery-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,'openai',$3)`, p.TenantID, account, cipher)
+		return err
+	})
 	refresh := func() RefreshResult {
 		t.Helper()
 		out, err := m.runRefresh(ctx, p, true)
@@ -247,68 +292,80 @@ func TestCatalogScheduledRefreshRequiresOptInAndRechecksIt(t *testing.T) {
 		}
 		return out
 	}
-	setEnabled := func(enabled bool) {
+	checkPublic := func(out RefreshResult) {
 		t.Helper()
-		inRegistry(t, p, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET api_enabled=$1`, enabled)
-			return err
-		})
-	}
-	if out := refresh(); len(seen) != 0 || len(out.Sources) != 0 {
-		t.Fatalf("default scheduled refresh attempted external discovery: %v %+v", seen, out)
-	}
-	inRegistry(t, p, func(tx pgx.Tx) error {
-		var bootstrap, external int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE source_kind='bootstrap'),count(*) FILTER (WHERE source_kind<>'bootstrap') FROM model_catalog_facts`).Scan(&bootstrap, &external); err != nil {
-			return err
-		}
-		if bootstrap == 0 || external != 0 {
-			t.Fatalf("offline scheduled preparation lost bootstrap or fetched facts: %d %d", bootstrap, external)
-		}
-		return nil
-	})
-
-	setEnabled(true)
-	at = at.Add(24 * time.Hour)
-	if out := refresh(); !reflect.DeepEqual(seen, publicCatalogSources) || len(out.Sources) != len(publicCatalogSources) {
-		t.Fatalf("opted-in keyless scheduled discovery did not run: %v %+v", seen, out)
-	} else {
-		for _, source := range out.Sources {
-			if source.State != "fresh" || source.Seen == 0 {
-				t.Fatalf("opted-in source failed: %+v", source)
+		skips := map[string]int{"openrouter": 1, "modelsdev": 1, "litellm": 2}
+		public := 0
+		for _, s := range out.Sources {
+			if n, ok := skips[s.Vendor]; ok {
+				public++
+				if s.State != "fresh" || s.Seen == 0 || s.Skipped != n {
+					t.Fatalf("public source failed: %+v", s)
+				}
 			}
 		}
+		if public != 3 {
+			t.Fatalf("public sources missing: %+v", out.Sources)
+		}
 	}
-	acceptedAt := at
+	out := refresh()
+	if !reflect.DeepEqual(seen, publicCatalogSources) {
+		t.Fatalf("keyless schedule or credential opt-in failed: %v", seen)
+	}
+	checkPublic(out)
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var aliases int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_catalog_facts WHERE source_kind='bootstrap' AND ((route='claude/opus' AND model_id='claude-opus-5.5') OR (route='claude/sonnet' AND model_id='claude-sonnet-5.5'))`).Scan(&aliases); err != nil {
+			return err
+		}
+		if aliases != 2 {
+			t.Fatalf("bootstrap aliases stayed stale: %d", aliases)
+		}
+		_, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET api_enabled=true`)
+		return err
+	})
 	seen = []string{}
 	at = at.Add(24 * time.Hour)
-	fixtureTransport := m.discovery.Transport
+	transport := m.discovery.Transport
 	m.discovery.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		resp, err := fixtureTransport.RoundTrip(r)
-		// The first response is held until the settings write commits. No
-		// database transaction spans this fetch or its competing write.
+		resp, err := transport.RoundTrip(r)
 		if len(seen) == 1 {
-			setEnabled(false)
+			if seen[0] != "openai" || r.Header.Get("Authorization") == "" {
+				t.Fatal("credentialed source not exercised")
+			}
+			// Commit the opt-out before the fetch returns, proving the final fence.
+			inRegistry(t, p, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET api_enabled=false`)
+				return err
+			})
 		}
 		return resp, err
 	})
-	out := refresh()
-	if !reflect.DeepEqual(seen, publicCatalogSources[:1]) || len(out.Sources) != len(publicCatalogSources) {
-		t.Fatalf("disabled scheduled discovery started another request: %v %+v", seen, out)
+	out = refresh()
+	checkPublic(out)
+	if !reflect.DeepEqual(seen, append([]string{"openai"}, publicCatalogSources...)) || len(out.Sources) != 4 {
+		t.Fatalf("public refresh stopped after credential opt-out: %v %+v", seen, out)
 	}
-	for _, source := range out.Sources {
-		if source.State != "stale" || source.Seen != 0 {
-			t.Fatalf("disabled discovery reported successful publication: %+v", source)
-		}
+	if out.Sources[0].State != "stale" || out.Sources[0].Seen != 0 {
+		t.Fatalf("revoked credential result published: %+v", out.Sources[0])
 	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
-		var latest time.Time
-		if err := tx.QueryRow(ctx, `SELECT max(fetched_at) FROM model_catalog_facts WHERE source_kind='aggregator'`).Scan(&latest); err != nil {
+		var native int
+		var persisted RefreshResult
+		var raw []byte
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_catalog_facts WHERE source_kind='native'`).Scan(&native); err != nil {
 			return err
 		}
-		if !latest.Equal(acceptedAt) {
-			t.Fatalf("disabled discovery replaced accepted facts: %s, want %s", latest, acceptedAt)
+		if native != 0 {
+			t.Fatal("credential opt-out published native facts")
 		}
+		if err := tx.QueryRow(ctx, `SELECT last_result FROM model_refresh_settings`).Scan(&raw); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(raw, &persisted); err != nil {
+			return err
+		}
+		checkPublic(persisted)
 		return nil
 	})
 }
@@ -346,5 +403,45 @@ func TestCatalogNewPinsKeepUnknownAndLegacyMetadataReadable(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Risk: the server sweep treats a never-run tenant as overdue and opens
+// keyless catalog sockets at startup. Network denial then kills the process
+// (TestDefaultServerHasNoOutboundNetwork exits 2). A later due run must still
+// fetch those catalogs while discovery opt-in stays off. Fails on ca7456ed,
+// whose sweep dials on the first pass.
+func TestServerSweepAnchorsNeverRunTenantsWithoutCatalogDial(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "catalog-sweep", "person", "Owner", []string{"admin"})
+	seen := []string{}
+	m := NewWithVault(appPool, []byte(strings.Repeat("v", 32)))
+	m.discovery = fixtureCatalogClient(t, &seen)
+	m.sweep(t.Context())
+	if len(seen) != 0 {
+		t.Fatalf("startup sweep dialed before a refresh was due: %v", seen)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var at *time.Time
+		var version string
+		if err := tx.QueryRow(t.Context(), `SELECT last_run_at,catalog_version FROM model_refresh_settings`).Scan(&at, &version); err != nil {
+			return err
+		}
+		if at == nil || version != CatalogVersion {
+			t.Fatalf("schedule was not anchored locally: at=%v version=%s", at, version)
+		}
+		return nil
+	})
+	m.sweep(t.Context())
+	if len(seen) != 0 {
+		t.Fatalf("anchored interval still dialed: %v", seen)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=clock_timestamp()-interval '25 hours'`)
+		return err
+	})
+	m.sweep(t.Context())
+	if !reflect.DeepEqual(seen, publicCatalogSources) {
+		t.Fatalf("due sweep did not fetch keyless catalogs: %v", seen)
 	}
 }

@@ -88,6 +88,12 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 	if strings.HasPrefix(result.Role, "review-gate") && result.Profile != nil && result.Profile.Family == author {
 		return rt.fail(fmt.Errorf("invalid review resolution: selected author family"), "")
 	}
+	if strings.HasPrefix(result.Role, "review-gate") && result.Profile != nil {
+		p := result.Profile
+		if err := modelregistry.ValidateReviewCommand(p.Harness, p.Model, p.Effort, result.CommandTemplate); err != nil {
+			return rt.fail(fmt.Errorf("invalid review resolution: %w", err), "")
+		}
+	}
 	var profiles []modelProfile
 	if err := rt.do(http.MethodGet, "/api/models", nil, &profiles); err != nil {
 		return err
