@@ -5115,7 +5115,7 @@
     "confirmation_48_benchmark": "PASS, 125.038s; 18 backend samples; runner exit 0; persistent test-cluster maintenance fixes the experiment watcher cleanup race.",
     "confirmation_56_benchmark": "PASS, 214.158s; 18 backend samples; runner exit 0.",
     "configuration_test": "PASS: TestPoolQueryExecutionConfigurationApplied, internal/db 0.618s, approved mbp2606 lane, 98dc20289b. Checks default and explicit modes/capacities on real restricted connections; URL, keyword and service precedence; retained server statements.",
-    "static": "pending",
+    "static": "UNPROVEN: ci-static-remote.sh refused twice with exit 3 on source 200fedba3: remote static check paused at night (night protocol; mbp2606 is shared with the CI pool). No heavy local fallback. Coordinator PR CI must complete the static check.",
     "review_gate": "not run; coordinator-owned",
     "origin_push": "not performed",
     "deploy": "not performed",
@@ -5129,5 +5129,10 @@
     "backend_samples": 63,
     "timing_samples": 31500,
     "contents": "All per-backend cold/warm context-name/category breakdowns and complete sorted HTTP timing vectors. No SQL idents, token values, payloads, DSNs, or operator credentials."
-  }
+  },
+  "reproduction": [
+    "/Users/markus/.aeon/lead/aeon/remote-test.sh <worktree> ./internal/cli -run '^$' -bench '^BenchmarkBackendMemory$' -benchtime=1x -count=1",
+    "/Users/markus/.aeon/lead/aeon/remote-test.sh <worktree> ./internal/db -run TestPoolQueryExecutionConfigurationApplied -count=1",
+    "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh"
+  ]
 }
