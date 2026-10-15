@@ -405,3 +405,43 @@ func TestCatalogNewPinsKeepUnknownAndLegacyMetadataReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Risk: the server sweep treats a never-run tenant as overdue and opens
+// keyless catalog sockets at startup. Network denial then kills the process
+// (TestDefaultServerHasNoOutboundNetwork exits 2). A later due run must still
+// fetch those catalogs while discovery opt-in stays off. Fails on ca7456ed,
+// whose sweep dials on the first pass.
+func TestServerSweepAnchorsNeverRunTenantsWithoutCatalogDial(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "catalog-sweep", "person", "Owner", []string{"admin"})
+	seen := []string{}
+	m := NewWithVault(appPool, []byte(strings.Repeat("v", 32)))
+	m.discovery = fixtureCatalogClient(t, &seen)
+	m.sweep(t.Context())
+	if len(seen) != 0 {
+		t.Fatalf("startup sweep dialed before a refresh was due: %v", seen)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var at *time.Time
+		var version string
+		if err := tx.QueryRow(t.Context(), `SELECT last_run_at,catalog_version FROM model_refresh_settings`).Scan(&at, &version); err != nil {
+			return err
+		}
+		if at == nil || version != CatalogVersion {
+			t.Fatalf("schedule was not anchored locally: at=%v version=%s", at, version)
+		}
+		return nil
+	})
+	m.sweep(t.Context())
+	if len(seen) != 0 {
+		t.Fatalf("anchored interval still dialed: %v", seen)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=clock_timestamp()-interval '25 hours'`)
+		return err
+	})
+	m.sweep(t.Context())
+	if !reflect.DeepEqual(seen, publicCatalogSources) {
+		t.Fatalf("due sweep did not fetch keyless catalogs: %v", seen)
+	}
+}

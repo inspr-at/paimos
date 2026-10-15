@@ -15,9 +15,11 @@ shared by Gemini and OpenCode resolve to the same provider identity.
 
 The existing manual/scheduled refresh path fetches OpenRouter, models.dev and
 LiteLLM without keys. Explicit refreshes fetch public sources without a vault.
-`api_enabled` controls only credentialed native requests. Startup and interval
-workers fetch the three keyless public catalogs regardless of that setting,
-using the existing bounded refresh interval. Disabling credentialed discovery
+`api_enabled` controls only credentialed native requests. A tenant that has
+never refreshed does not open a connection at startup: the worker anchors the
+interval locally and still applies catalog maintenance. Once `last_run_at` is
+set, a due scheduled run fetches the three keyless public catalogs regardless
+of that setting, using the existing bounded refresh interval. Disabling credentialed discovery
 still fences subsequent native requests and their in-flight publication.
 Available OpenAI, Anthropic, xAI and Google account credentials add native facts.
 Google uses the same vault derivation and the credential endpoint's additive

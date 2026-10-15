@@ -7998,6 +7998,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestSelectorValidationBoundedLargeCatalog","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestServerSweepAnchorsNeverRunTenantsWithoutCatalogDial","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestStoredModelDisplayAndEffort","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestV2UpgradePreservesPinsCustomRoutesAndOverrides","tier":"GATED-FULL"}
