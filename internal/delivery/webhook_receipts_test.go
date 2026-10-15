@@ -237,7 +237,7 @@ func TestDeliveryWebhookAcceptsOpaqueInstallationToken(t *testing.T) {
 					response = map[string]any{"ref": body["merge_group"].(map[string]any)["head_ref"], "object": map[string]string{"type": "commit", "sha": group}}
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/compare/"):
 					reads++
-					response = map[string]any{"total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
+					response = map[string]any{"merge_base_commit": map[string]string{"sha": base}, "files": []any{map[string]string{"filename": "docs/fixture.md", "status": "modified"}}, "total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
 				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
 					reads++
 					response = map[string]any{"total_count": 0, "check_runs": []any{}}

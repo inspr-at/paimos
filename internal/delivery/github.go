@@ -14,6 +14,7 @@ import (
 )
 
 type Pull struct {
+	AdmissionDiff                     *AdmissionDiff
 	QueueHead                         string
 	Number                            int64
 	Title, Branch, Head, Base, Target string
@@ -132,6 +133,9 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 			return errRead
 		}
 		if out.Open {
+			if err = readAdmissionDiff(get, &out); err != nil {
+				return err
+			}
 			out.Checks, err = checks(get, out.Head)
 			if err == nil {
 				out.Queued, out.QueueHead, err = queue(out.Number, out.Head)
@@ -175,6 +179,9 @@ func (g AppReader) OpenPulls(ctx context.Context) ([]Pull, error) {
 			return err
 		}
 		for i := range out {
+			if err = readAdmissionDiff(get, &out[i]); err != nil {
+				return err
+			}
 			out[i].Checks, err = checks(get, out[i].Head)
 			if err == nil {
 				out[i].Queued, out[i].QueueHead, err = queue(out[i].Number, out[i].Head)
@@ -250,6 +257,9 @@ func (g AppReader) Group(ctx context.Context, head, base, ref string) ([]Pull, e
 		for _, p := range ps {
 			if p.Base != base || !shas[p.Head] {
 				continue
+			}
+			if err = readAdmissionDiff(get, &p); err != nil {
+				return err
 			}
 			p.Checks, err = checks(get, p.Head)
 			if err != nil {

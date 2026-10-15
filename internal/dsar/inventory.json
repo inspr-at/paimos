@@ -1847,13 +1847,70 @@
         "tenant_id": "metadata",
         "ticket_node_id": "metadata",
         "verdict": "metadata",
-        "visual_impact": "metadata"
+        "visual_impact": "metadata",
+        "admission_revision": "metadata"
       },
       "locator": {
         "person_column": "reviewer_principal_id",
         "tenant_column": "tenant_id"
       },
       "table": "review_runs"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "project_id": "metadata",
+        "ticket_node_id": "metadata",
+        "target_branch": "metadata",
+        "base_sha": "metadata",
+        "head_sha": "metadata",
+        "scope": "metadata",
+        "revision": "metadata",
+        "control_revision": "metadata",
+        "holds": "review",
+        "fix": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_admission_bindings"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "binding_revision": "metadata",
+        "target_branch": "metadata",
+        "base_sha": "metadata",
+        "head_sha": "metadata",
+        "scope": "metadata",
+        "review_run_id": "metadata",
+        "visual_run_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_admission_approvals"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "revision": "metadata",
+        "block_on_nightly_red": "metadata",
+        "nightly_state": "metadata",
+        "holds": "review"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_admission_settings"
     }
   ],
   "version": 1

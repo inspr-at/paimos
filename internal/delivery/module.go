@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -42,6 +43,7 @@ func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWorkQueue(mux)
 	m.mountReviews(mux)
+	m.mountAdmission(mux)
 	m.mountShipping(mux)
 	m.mountMetrics(mux)
 	m.mountFlow(mux)
@@ -92,6 +94,10 @@ func (m *Module) mountWorkQueue(mux *http.ServeMux) {
 func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.Time) (Observation, error) {
 	pr := p.Number
 	o := Observation{Repository: m.config.Repository, PR: &pr, Branch: p.Branch, Head: p.Head, Base: p.Base, Target: p.Target, Open: p.Open, Merged: p.Merged, Queued: p.Queued, QueueHead: p.QueueHead, Checks: p.Checks, At: at}
+	o.AdmissionDiff = p.AdmissionDiff
+	if p.AdmissionDiff != nil && reviewgate.ValidSHA(p.AdmissionDiff.MergeBase) {
+		o.Base = p.AdmissionDiff.MergeBase
+	}
 	o.ID = stableID(m.config.TenantID, o.Repository, subject(o.PR, nil))
 	before, err := load(ctx, tx, o.ID)
 	if err != nil {
