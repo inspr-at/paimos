@@ -77,11 +77,13 @@ export function validImpactPaths(paths) {
 // tests, module/package manifests and build/test configuration. A PR can edit
 // its own workflow anyway, so the merge queue's full gate is the protection;
 // keeping these full just avoids debugging a lane change through a lane change.
-export const machineryPattern = /^(?:\.github\/|scripts\/ci-[^/]*$|scripts\/ci-[^/]+\/|scripts\/ci\/static-checks\.json$|scripts\/test-tiers\/|scripts\/test-tier-go\/|scripts\/releaseworkflow\/|go\.(?:mod|sum)$|go\.work(?:\.sum)?$|web\/package[^/]*\.json$|web\/(?:tsconfig|vite|playwright)[^/]*\.(?:json|ts|js|mjs)$|web\/scripts\/(?!(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs$))/
+// Per-spec shard records are weight manifests, not the planner (AEON-1389).
+export const specShardRecordPattern = /^web\/scripts\/ci-web-shard-specs\/.+\.spec\.ts\.json$/
+export const machineryPattern = /^(?:\.github\/|scripts\/ci-[^/]*$|scripts\/ci-[^/]+\/|scripts\/ci\/static-checks\.json$|scripts\/test-tiers\/|scripts\/test-tier-go\/|scripts\/releaseworkflow\/|go\.(?:mod|sum)$|go\.work(?:\.sum)?$|web\/package[^/]*\.json$|web\/(?:tsconfig|vite|playwright)[^/]*\.(?:json|ts|js|mjs)$|web\/scripts\/(?!(?:(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs|ci-web-shard-specs\/.+\.spec\.ts\.json)$))/
 const generatedPattern = /(?:^|[/.])(?:generated|codegen)(?:\/|\.)|\.(?:gen|pb)\.|(?:^|\/)package[^/]*\.json$|(?:^|\/)(?:tsconfig|vite|playwright)[^/]*\.(?:json|ts|js|mjs)$/
 // R1: tier/shard/weight/policy manifests plus the regression tests that pin
 // them; every lane that reaches web-unit shard 1 and go-static re-validates them.
-const manifestPattern = /^(?:scripts\/ci\/(?!static-checks\.json$)[^/]+\.(?:json|txt)|web\/ci-web-shards\.json|scripts\/migration-policy[^/]*\.json|scripts\/audit\/[^/]+\.json|web\/scripts\/(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs)$/
+const manifestPattern = /^(?:scripts\/ci\/(?!static-checks\.json$)[^/]+\.(?:json|txt)|web\/ci-web-shards\.json|web\/scripts\/ci-web-shard-specs\/.+\.spec\.ts\.json|scripts\/migration-policy[^/]*\.json|scripts\/audit\/[^/]+\.json|web\/scripts\/(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs)$/
 export const tierManifestPattern = /^scripts\/ci\/(?:go|web)-test-tiers\.json$/
 // R9: regression tests of the unconditional migration-compat job.
 const alwaysOnTestPattern = /^scripts\/(?:check-migrations\.test\.mjs|migration_compat_probe_test\.py)$/

@@ -679,6 +679,42 @@ test('R1 manifest-only diffs take the static layout; promotions must execute and
   assert.equal(same.count,0,'identical manifests promote nothing')
 })
 
+test('AEON-1389 shard records stay R1 and a new spec does not go full because of its record',()=>{
+  const record='web/scripts/ci-web-shard-specs/tests/needs-attention.spec.ts.json'
+  assert.equal(machineryPattern.test(record),false,record)
+  assert.equal(affectedRisk(record).rule,'R1')
+  const weight=on([record])
+  assert.equal(weight.full,false)
+  assert.ok(essentialOnly(weight),'a weight record runs essentials only')
+  assert.match(weight.reason,/R1: manifest\/static checks: /)
+  assert.deepEqual([decide([record]).mode,decide([record]).layout],['essential','static'])
+  const spec='web/tests/needs-attention.spec.ts'
+  const changed=on([spec])
+  assert.equal(changed.full,false,'an existing spec stays reduced')
+  const withRecord=on([spec,record])
+  assert.equal(withRecord.full,false,'its shard record must not widen the spec')
+  assert.deepEqual(withRecord.tests,changed.tests)
+  assert.equal(decide([spec,record]).mode,'essential')
+  const fresh='tests/aeon-1389-fresh.spec.ts'
+  const freshRecord=`web/scripts/ci-web-shard-specs/${fresh}.json`
+  const graph={...replayGraph,[fresh]:[]}
+  const rows=[...replayRows,{kind:'browser',file:fresh,name:'fresh',tier:'GATED-FULL',config:'playwright.ui.config.ts',project:''}]
+  const options={event:'pull_request',affectedLane:'on',webImports:graph,imports:replay.goImports,tree:repoTree,promotions:noPromotions,readFile:readRepo}
+  const specOnly=select(rows,{...options,paths:[`web/${fresh}`]})
+  const both=select(rows,{...options,paths:[`web/${fresh}`,freshRecord]})
+  assert.equal(specOnly.full,false)
+  assert.equal(both.full,false,'a new spec record is not CI machinery')
+  assert.deepEqual(both.tests,specOnly.tests)
+  assert.ok(both.tests.some(row=>row.file===fresh))
+  const planned=schedulingDecision('pull_request',[`web/${fresh}`,freshRecord],()=>true,{affectedLane:'on',graph,tree:repoTree,promotions:noPromotions,tests:rows})
+  assert.equal(planned.mode,'essential')
+  assert.doesNotMatch(planned.reason,/CI machinery/)
+  assert.equal(on(['web/scripts/ci-web-shard-source.mjs']).full,true,'the assembler stays machinery')
+  assert.equal(on(['web/scripts/ci-web-shard-specs/notes.json']).full,true,'a non-record under the source directory stays machinery')
+  assert.equal(machineryPattern.test('web/scripts/ci-web-shard.mjs'),true)
+  assert.equal(machineryPattern.test('web/scripts/ci-web-shard.test.mjs'),false)
+})
+
 test('R2 contract diffs run the Go packages that read the contract and keep web at essentials',()=>{
   assert.equal(on(['api/openapi.yaml']).full,true,'real consumer fan-out keeps the full gate')
   const selected=on(['api/openapi.yaml'],{imports:{}})
