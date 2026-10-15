@@ -172,7 +172,7 @@ the nine split panel cases/screenshots, and the prior approved 56-case
 guarded run reports zero remaining owned browser processes.
 
 The guarded static wrapper also returned exit 3: remote static checks are
-paused by the night protocol while mbp2606 is shared with the CI pool. This
+paused by the night protocol while the remote host is shared with the CI pool. This
 is incomplete, not a passing static result. PR CI is authoritative. Worker
 progress remains 95%; the coordinator retains static CI, the cross-family
 gate and Tick's visual check. No origin push, merge, deployment, model CLI
