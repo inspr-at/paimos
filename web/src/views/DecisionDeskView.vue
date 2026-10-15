@@ -153,7 +153,16 @@ async function refresh() {
 }
 function applyRead(result: DeskRead) {
   const present = new Set(result.items.map(item => item.id))
-  result.items.push(...items.value.filter(item => !present.has(item.id) && (item.kind === 'lesson' && item.decided || item.personStep && (settledSteps.value.has(item.id) && item.decided || pendingSteps.value.has(item.id)))))
+  // A server refresh can omit an already committed request while its write
+  // response is still in flight. Retain its old slot, then its resolved slot,
+  // until this visit ends; appending it would move every following control.
+  for (const [index, item] of items.value.entries()) {
+    if (present.has(item.id) || !item.personStep || !(settledSteps.value.has(item.id) && item.decided || pendingSteps.value.has(item.id))) continue
+    const successor = items.value.slice(index + 1).find(row => present.has(row.id))
+    const at = successor ? result.items.findIndex(row => row.id === successor.id) : Math.min(index, result.items.length)
+    result.items.splice(at, 0, item); present.add(item.id)
+  }
+  result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
   projectNames.value = result.projectNames
