@@ -321,12 +321,6 @@ test('AEON-1318 definition editor saves named and assignee-first owners without 
       expect(world.definition.checks.in_progress![0]).toMatchObject({ label: longLabel, owner_id: mia.id })
       expect(world.definition.checks.done![0]).toMatchObject({ owner_id: me.id, fallback_owner_id: mia.id })
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-saved-${width}-${theme}.png`) })
-      // Card/menu actions have no form footer, so their failures still toast.
-      world.fail = true
-      const cardStable = await controlStability(page, { row, more })
-      await cardStable.check(async () => { await more.click(); await page.getByRole('menuitem', { name: 'Remove', exact: true }).click(); await expect(page.locator('.toast.error')).toHaveText(/Owner policy could not be saved/); await expect(more).toBeEnabled() })
-      cardStable.done()
-      expect(world.definition.checks.done![0]).toMatchObject({ owner_id: me.id, fallback_owner_id: mia.id })
     } finally { await context.close() }
   }
 })

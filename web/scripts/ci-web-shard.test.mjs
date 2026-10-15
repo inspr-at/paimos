@@ -634,15 +634,16 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(projectDefinitions && projectDefinitions.listedTests === 9, 'Project Definitions regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
   // AEON-1318 adds its four ownership flows after the historical baseline.
+  // FIX8 adds the phone title-line regression alongside those flows.
   // Retain the five-minute bound for every prior case and charge only this
   // independently measured, bounded addition, as for Project Definitions.
   const personSteps = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/person-steps.spec.ts')
-  assert.ok(personSteps && personSteps.listedTests === 4, 'All four person-step ownership regressions must remain declared')
+  assert.ok(personSteps && personSteps.listedTests === 5, 'All five person-step ownership and phone regressions must remain declared')
   assert.equal(gated.filter(spec => spec.file === personSteps.file).length, 1, 'Person-step ownership must remain gated exactly once')
   const personTiming = real.nightlyTiming.files[personSteps.file]
   assert.equal(personTiming?.selectedTests, personSteps.listedTests, 'Person-step timing must cover the complete file')
   assert.equal(personSteps.weightSeconds, personTiming?.seconds, 'Charge only the measured person-step scheduling cost')
-  assert.ok(personSteps.weightSeconds <= 40, 'The four person-step flows must retain their independently bounded measured cost')
+  assert.ok(personSteps.weightSeconds <= 40, 'The five person-step flows must retain their independently bounded measured cost')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
