@@ -579,11 +579,23 @@ onMounted(() => {
   const main = work.value?.closest('main')
   const measureWidth = () => { workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0) }
   const measureHeight = () => { paneHeight.value = Math.max(0, (main?.clientHeight ?? 0) - 8) }
+  let workOffset: number | undefined
+  const preserveWorkPosition = () => {
+    if (!main || !work.value) return
+    const next = main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top
+    const moved = workOffset === undefined ? 0 : next - workOffset
+    workOffset = next
+    // Late dial/account content above an open pane must not move its controls
+    // below the viewport. Document offsets exclude the person's own scrolling.
+    if ((split.value || panelOnly.value) && main.scrollTop > 0 && Math.abs(moved) >= .5) main.scrollTop += moved
+  }
   measureWidth(); measureHeight()
+  preserveWorkPosition()
   layoutResize = new ResizeObserver(entries => {
     // Width only depends on the surrounding page. Apply its breakpoint before
     // paint; deferring it lets the old split move controls during interaction.
     measureWidth()
+    preserveWorkPosition()
     // The main viewport's height is independent of the split. Its resize can
     // settle immediately too, without briefly opening a zero-height pane.
     if (entries.some(entry => entry.target === main)) measureHeight()
@@ -597,6 +609,7 @@ onMounted(() => {
     })
   })
   if (work.value) layoutResize.observe(work.value)
+  if (work.value?.parentElement) layoutResize.observe(work.value.parentElement)
   if (main) layoutResize.observe(main)
   stopTierWatch = serviceTiers.watchPage()
   document.addEventListener('visibilitychange', evidenceVisible)
@@ -767,7 +780,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
    Cap the pane at the row and let the divider yield so that frame cannot widen main. */
 .agents-list-pane { flex: 0 0 100%; min-width: 0; max-width: 100%; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
-.split, .panel-only { padding-bottom: 8px; }
+.split, .panel-only { padding-bottom: 8px; overflow-anchor: none; }
 .panel-only .agents-divider { display: none; }
 .agents-divider { position: relative; flex: 0 0 0; align-self: stretch; transition: flex-basis 240ms ease; }
 .split .agents-divider { flex-basis: 16px; flex-shrink: 1; min-width: 0; cursor: col-resize; touch-action: none; }
