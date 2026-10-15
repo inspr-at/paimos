@@ -452,3 +452,107 @@ func TestEntryChecksEnforcementOverrideAndOwnership(t *testing.T) {
 		t.Fatalf("empty copy merged or erased entry history: %s", raw)
 	}
 }
+
+// Risk: editing an old copy silently merges a newer default, or a stale reset
+// changes governance without authority and loses the tickets' audit history.
+func TestProjectDefinitionsCopyEditAndReset(t *testing.T) {
+	p := newPrincipal(t, "definition-settings")
+	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project definitions"}`, kindBySlug(t, p, "project").ID))
+	path := "/api/projects/" + project.ID + "/definitions"
+	code, raw := call(t, &p, "GET", path+"/context", "")
+	initial := decode[entryDefinitionContext](t, code, raw, 200)
+	if !initial.CanManage || initial.ProjectID != project.ID || initial.Definition.Source != "workspace" || initial.Workspace == nil {
+		t.Fatalf("context: %s", raw)
+	}
+	revision := func(d *workqueue.EntryDefinition) string {
+		return d.Revision.Format("2006-01-02T15:04:05.999999999Z07:00")
+	}
+	put := func(checks string, current *workqueue.EntryDefinition) *workqueue.EntryDefinition {
+		expected := "null"
+		if current != nil {
+			expected = fmt.Sprintf("%q", revision(current))
+		}
+		code, raw = call(t, &p, "PUT", path, fmt.Sprintf(`{"expected_revision":%s,"copied_from_revision":%q,"expected_workspace_revision":%q,"checks":%s}`, expected, revision(initial.Workspace), revision(initial.Workspace), checks))
+		d := decode[workqueue.EntryDefinition](t, code, raw, 200)
+		return &d
+	}
+	own := put(`{"in_progress":[{"id":"estimate_set","kinds":["work"],"labels":["ui"]}]}`, nil)
+	agent := estimateAgent(t, p)
+	create := func(label bool) nodeJSON {
+		fields := `{"acceptance_criteria":"Prove governance"}`
+		if label {
+			fields = `{"acceptance_criteria":"Prove governance","labels":["ui"]}`
+		}
+		return mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Unestimated work","fields":%s}`, kindBySlug(t, p, "work").ID, project.ID, fields))
+	}
+	n := create(false)
+	code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"in_progress"}`)
+	decode[nodeJSON](t, code, raw, 200)
+	checked := create(true)
+	code, raw = call(t, &agent, "PATCH", "/api/nodes/"+checked.ID, `{"state":"in_progress","override_reason":"An agent cannot override"}`)
+	if code != 409 || !strings.Contains(string(raw), `"id":"estimate_set"`) || !strings.Contains(string(raw), `"error":"entry_checks_failed"`) {
+		t.Fatalf("condition enforcement: %d %s", code, raw)
+	}
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+checked.ID, `{"state":"in_progress","override_reason":"Plan estimate after the prototype"}`)
+	checked = decode[nodeJSON](t, code, raw, 200)
+	// Change the workspace after the copy. Edits must retain the original base.
+	code, raw = call(t, &p, "PUT", "/api/settings/definitions", `{"expected_revision":null,"checks":{"in_progress":[{"id":"estimate_set"}],"done":[{"id":"release_copy_set"}]}}`)
+	ws := decode[workqueue.EntryDefinition](t, code, raw, 200)
+	code, raw = call(t, &p, "PUT", path, fmt.Sprintf(`{"expected_revision":%q,"copied_from_revision":%q,"checks":{}}`, revision(own), revision(initial.Workspace)))
+	empty := decode[workqueue.EntryDefinition](t, code, raw, 200)
+	code, raw = call(t, &p, "GET", path+"/context", "")
+	context := decode[entryDefinitionContext](t, code, raw, 200)
+	if context.Definition.ID != own.ID || len(context.Definition.Checks) != 0 || !context.Definition.CopiedFrom.Equal(initial.Workspace.Revision) || len(context.Base["in_progress"]) != 3 || context.Workspace.ID != ws.ID {
+		t.Fatalf("copy or base overwritten: %s", raw)
+	}
+	resetBody := func(copyRevision, workspaceRevision string) string {
+		return fmt.Sprintf(`{"expected_revision":%q,"expected_workspace_revision":%q}`, copyRevision, workspaceRevision)
+	}
+	for _, body := range []string{resetBody(revision(own), revision(&ws)), resetBody(revision(&empty), revision(initial.Workspace))} {
+		code, raw = call(t, &p, "DELETE", path, body)
+		if code != 409 {
+			t.Fatalf("stale reset: %d %s", code, raw)
+		}
+	}
+	code, raw = call(t, &agent, "DELETE", path, resetBody(revision(&empty), revision(&ws)))
+	if code != 403 {
+		t.Fatalf("agent reset governance: %d %s", code, raw)
+	}
+	member := tenant.Principal{ID: addPrincipalIn(t, p.TenantID, "Definition reader").ID, TenantID: p.TenantID, Kind: tenant.Person, Name: "Definition reader"}
+	if _, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, p.TenantID, member.ID, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	code, raw = call(t, &member, "GET", path+"/context", "")
+	readonly := decode[entryDefinitionContext](t, code, raw, 200)
+	if readonly.CanManage {
+		t.Fatal("nonadmin was offered governance writes")
+	}
+	code, raw = call(t, &member, "DELETE", path, resetBody(revision(&empty), revision(&ws)))
+	if code != 403 {
+		t.Fatalf("nonadmin reset governance: %d %s", code, raw)
+	}
+	free := create(true)
+	code, raw = call(t, &agent, "PATCH", "/api/nodes/"+free.ID, `{"state":"in_progress"}`)
+	decode[nodeJSON](t, code, raw, 200)
+	code, raw = call(t, &p, "DELETE", path, resetBody(revision(&empty), revision(&ws)))
+	restored := decode[workqueue.EntryDefinition](t, code, raw, 200)
+	if restored.ID != ws.ID || restored.Source != "workspace" {
+		t.Fatalf("reset did not restore current default: %s", raw)
+	}
+	after := create(false)
+	code, raw = call(t, &agent, "PATCH", "/api/nodes/"+after.ID, `{"state":"in_progress"}`)
+	if code != 409 || !strings.Contains(string(raw), `"id":"estimate_set"`) {
+		t.Fatalf("reset failed to restore enforcement: %d %s", code, raw)
+	}
+	code, raw = call(t, &p, "GET", "/api/nodes/"+checked.ID+"/entry-checks", "")
+	history := decode[workqueue.EntryChecks](t, code, raw, 200)
+	if len(history.Entries) != 1 || history.Entries[0].OverrideReason == nil || *history.Entries[0].OverrideReason != "Plan estimate after the prototype" || history.Entries[0].DefinitionID != own.ID || currentWorkTest(t, p, checked.ID).State != checked.State {
+		t.Fatalf("reset erased entry history or changed status: %s", raw)
+	}
+	var resets int
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND type='definition.reset'`, own.ID).Scan(&resets)
+	}); err != nil || resets != 1 {
+		t.Fatalf("reset audit: %d %v", resets, err)
+	}
+}

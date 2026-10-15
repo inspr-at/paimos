@@ -7,7 +7,7 @@ import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { fillProjectSettingsExplainer, PROJECT_SETTINGS_EXPLAINERS, type ProjectSettingsExplainerContext, type ProjectSettingsExplainerId } from '../../lib/projectSettingsExplainers'
 
-const props = defineProps<ProjectSettingsExplainerContext & { id: ProjectSettingsExplainerId }>()
+const props = defineProps<ProjectSettingsExplainerContext & { id: ProjectSettingsExplainerId; label?: string }>()
 const button = ref<HTMLButtonElement>(), heading = ref<HTMLElement>(), content = ref<HTMLElement>()
 const open = ref(false), phone = ref(false), headingId = useId()
 const registerOverlay = useProjectSettingsOverlay()
@@ -34,7 +34,7 @@ onBeforeUnmount(() => close(false))
 </script>
 
 <template>
-  <button ref="button" type="button" class="how" :data-how="id" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="open ? headingId : undefined" @click="show"><AppIcon name="info" :size="12" /><span>How this works</span></button>
+  <button ref="button" type="button" class="how" :data-how="id" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="open ? headingId : undefined" @click="show"><AppIcon name="info" :size="12" /><span>{{ label || 'How this works' }}</span></button>
   <Teleport v-if="open && phone" to="body"><div class="explainer-scrim" aria-hidden="true" @click="close()" /></Teleport>
   <FloatingPanel v-if="open" :anchor="button ?? null" :width="400" :tallest="800" :label="text.title" cycle class="explainer project-settings-explainer" :class="{ 'as-sheet': phone }" @close="restore => close(restore)">
     <div ref="content" class="explainer-content" data-project-settings-overlay tabindex="-1">

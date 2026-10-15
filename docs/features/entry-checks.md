@@ -88,3 +88,31 @@ returns readiness for that revision, including an empty definition.
 Bulk status writes acquire the complete builder-fence batch in sorted ticket-id
 order before locking node rows. Entry checks can then re-enter those fences
 without acquiring another builder lock after a per-ticket audit event.
+
+Project settings › Definitions (AEON-1316) follows Repository & delivery. It
+shows the inherited workspace default read-only until a person project admin
+chooses “Change for this project”. Every edit saves the whole project copy;
+removing every check deliberately allows tickets to move freely. Rows explain
+added checks, changed conditions and checks left out of the default. More than
+three left-out checks fold below the three status blocks. Remove leaves a row
+with Undo; restoring a folded check keeps that row in place for the visit.
+
+The shared editor adds catalog checks and person-confirmed free-text items,
+reorders checks within a status, and restricts them by ticket kind and required
+labels. A manual item can use the person assignee (falling back to a current
+project admin) or a named person from the project's people. Server authority
+still decides whether that person has access. Failed saves retain the current
+checks and drafts. Late responses are discarded after project, person or tenant
+changes. Read-only callers see the checks and a lock explanation.
+
+`GET /api/projects/{id}/definitions/context` includes current project edit
+authority, the effective definition, the current workspace default and the
+server-retained checks from the copied revision. Ordinary edits preserve that
+base even after the workspace default changes. `DELETE` on the definitions
+resource resets to the current default; both `expected_revision` and
+`expected_workspace_revision` must match. Reset confirms the checks and
+conditions that will change, writes one `definition.reset` event, and preserves
+ticket statuses and entry history. The existing built-in workspace policy stays
+in effect when no saved workspace definition exists. P3 owns workspace editing
+and the decision controls for later changes; P4 owns Desk routing and per-ticket
+owner reassignment.
