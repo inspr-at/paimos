@@ -645,20 +645,26 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const projectDefinitions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions.spec.ts')
   assert.ok(projectDefinitions && projectDefinitions.listedTests === 9, 'Project Definitions regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
+  // AEON-1425 adds eight project-name wrap cases after the historical budget.
+  // Leaving the file inside that budget packs the twelve shards to 301.322264s.
+  // Keep the old budget and charge only this file's scheduling weight.
+  const nameWrap = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/project-name-wrap.spec.ts')
+  assert.ok(nameWrap && nameWrap.listedTests === 8, 'Project name wrap regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === nameWrap.file), 'Project name wrap must remain gated')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== nameWrap).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + nameWrap.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel and project Definitions specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions and project name wrap specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

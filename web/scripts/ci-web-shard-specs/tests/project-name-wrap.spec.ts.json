@@ -1,5 +1,9 @@
 {
   "group": "project-header",
+  "nightlyTiming": {
+    "seconds": 24.9,
+    "selectedTests": 8
+  },
   "spec": {
     "file": "tests/project-name-wrap.spec.ts",
     "listedTests": 8,
