@@ -72,6 +72,13 @@ func RequireMessagingAssistantTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 	} else if p.Kind != tenant.Person {
 		return "", ErrForbidden
 	}
+	owner, err := canonicalPerson(ctx, tx, p.TenantID, owner)
+	if err != nil {
+		return "", err
+	}
+	if owner == "" {
+		return "", ErrForbidden
+	}
 	person := tenant.Principal{ID: owner, TenantID: p.TenantID, Kind: tenant.Person}
 	for _, permission := range []string{"agents.create", "keys.manage"} {
 		if err := RequireTx(ctx, tx, person, permission, Scope{}); err != nil {

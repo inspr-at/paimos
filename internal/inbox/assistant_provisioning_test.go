@@ -4,6 +4,7 @@ package inbox
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,12 +12,16 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk: provisioning works in the store but production authentication rejects
@@ -33,7 +38,7 @@ func TestMessagingAssistantProvisionedThroughProductionAuth(t *testing.T) {
 	srv := httptest.NewTLSServer(server.Handler())
 	t.Cleanup(srv.Close)
 	owner := receiptSession(t, w, w.admin)
-	expires := time.Now().Add(7 * 24 * time.Hour).UTC()
+	expires := time.Now().Add(7 * 24 * time.Hour).UTC().Truncate(time.Microsecond)
 	body := fmt.Sprintf(`{"name":"Amy provisioned","expires_at":%q}`, expires.Format(time.RFC3339Nano))
 	var logs bytes.Buffer
 	prior := slog.Default()
@@ -140,7 +145,99 @@ func TestMessagingAssistantProvisionedThroughProductionAuth(t *testing.T) {
 	if status != 401 {
 		t.Fatalf("revoked assistant status %d", status)
 	}
+	coordinator := receiptAgentKey(t, w, w.agent, authz.CoordinatorKeyScopes...)
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$2 WHERE principal_id=$1`, w.agent.ID, w.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, data = receiptRequest(t, srv, coordinator, "POST", "/api/agents/assistants", strings.Replace(body, "Amy provisioned", "Coordinator helper", 1))
+	if status != 201 {
+		t.Fatalf("bounded coordinator HTTP status %d", status)
+	}
+	var bounded struct {
+		Token string `json:"token"`
+		Owner string `json:"created_by_principal_id"`
+	}
+	if json.Unmarshal(data, &bounded) != nil || bounded.Token == "" || bounded.Owner != w.admin.ID {
+		t.Fatal("bounded HTTP ownership lost")
+	}
 	if strings.Contains(logs.String(), secret) || strings.Contains(logs.String(), replacement.Token) {
 		t.Fatal("credential leaked into logs")
+	}
+	if strings.Contains(logs.String(), bounded.Token) {
+		t.Fatal("bounded provisioning secret logged")
+	}
+}
+
+// Risk: a coordinator passes route admission, but the owner's provisioning
+// rights disappear before body decode and the final write. The barrier is
+// behind production authentication and route authorization, without sleeps.
+func TestMessagingAssistantFinalWriteRechecksOwnerRights(t *testing.T) {
+	w, m, _, _ := messagingWorld(t)
+	var role string
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'assistant_owner','Assistant owner') RETURNING id::text`, w.admin.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, w.admin.TenantID, role, append(authz.CoordinatorKeyScopes, "agents.create", "keys.manage")); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, w.admin.ID, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	coordinator := receiptAgentKey(t, w, w.agent, authz.CoordinatorKeyScopes...)
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$2 WHERE principal_id=$1`, w.agent.ID, w.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	server := &httpapi.Server{Pool: w.db.App, Modules: []httpapi.Module{m.base, m}}
+	a, err := auth.Attach(server, auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{3}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.AssistantNoticeTx = MessagingAssistantNoticeTx
+	admitted, resume := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	defer release.Do(func() { close(resume) })
+	server.Middleware = append(server.Middleware, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if r.Pattern == "POST /api/agents/assistants" {
+				r.Body = &messagingAdmissionBody{ReadCloser: r.Body, pause: func() {
+					close(admitted)
+					select {
+					case <-resume:
+					case <-r.Context().Done():
+					}
+				}}
+			}
+			next.ServeHTTP(rw, r)
+		})
+	})
+	srv := httptest.NewTLSServer(server.Handler())
+	t.Cleanup(srv.Close)
+	before := countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM events`)
+	result := make(chan int, 1)
+	go func() {
+		status, _ := receiptRequest(t, srv, coordinator, "POST", "/api/agents/assistants", fmt.Sprintf(`{"name":"Revoked during admission","expires_at":%q}`, time.Now().Add(time.Hour).Format(time.RFC3339)))
+		result <- status
+	}()
+	guard, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	dbtest.Await(t, guard, admitted)
+	if err := db.InTenant(dbtest.Seed(guard), w.db.App, w.admin.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(guard, tx, w.admin.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(guard, `DELETE FROM role_permissions WHERE role_id=$1 AND permission='agents.create'`, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	release.Do(func() { close(resume) })
+	if status := dbtest.Await(t, guard, result); status != 403 {
+		t.Fatalf("revoked owner write status %d", status)
+	}
+	if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM events`) != before || countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM principals WHERE name='Revoked during admission'`) != 0 || countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_messages`) != 0 {
+		t.Fatal("revoked owner write persisted principal, notice or audit")
 	}
 }

@@ -7202,6 +7202,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAddressAuthSnapshotAndConcurrentSend","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestMessagingAssistantFinalWriteRechecksOwnerRights","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAssistantProvisionedThroughProductionAuth","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAtomicRollbackAndProjectBoundary","tier":"ESSENTIAL"}

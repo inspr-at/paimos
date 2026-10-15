@@ -182,22 +182,24 @@ func (m *Module) messagingAssistant(ctx context.Context, p tenant.Principal, ope
 			}
 			rec.Token = "aeon_" + prefix + "_" + secret
 		}
-		auditType := "messaging_assistant.provisioned"
-		if operation != "create" {
-			auditType = "messaging_assistant." + map[string]string{"create": "provisioned", "rotate": "rotated", "revoke": "revoked"}[operation]
+		action := map[string]string{"create": "provisioned", "rotate": "rotated", "revoke": "revoked"}[operation]
+		// The audit actor is another existing FK parent. Fence it before the
+		// notice appends its first event, along with the owner and assistant.
+		if _, err := tx.Exec(ctx, `SELECT id FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, []string{p.ID, owner, id}); err != nil {
+			return err
 		}
 		var noticeID string
 		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&noticeID); err != nil {
 			return err
 		}
-		body := fmt.Sprintf("Messaging assistant %s (%s) %s by %s for %s. No action needed.", in.Name, id, map[string]string{"create": "provisioned", "rotate": "rotated", "revoke": "revoked"}[operation], p.ID, owner)
+		body := fmt.Sprintf("Messaging assistant %s (%s) %s by %s for %s. No action needed.", in.Name, id, action, p.ID, owner)
 		if err := m.AssistantNoticeTx(ctx, tx, p.TenantID, owner, noticeID, body); err != nil {
 			return err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{Type: auditType, After: map[string]any{
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "messaging_assistant." + action, After: map[string]any{
 			"principal_id": id, "caller_id": p.ID, "owner_id": owner, "key_id": rec.ID,
 			"scopes": authz.MessagingAssistantScopes(), "expires_at": in.ExpiresAt,
-			"summary": fmt.Sprintf("messaging assistant %s by %s for %s", map[string]string{"create": "provisioned", "rotate": "rotated", "revoke": "revoked"}[operation], p.ID, owner),
+			"summary": fmt.Sprintf("messaging assistant %s by %s for %s", action, p.ID, owner),
 		}})
 		return err
 	})
