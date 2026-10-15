@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -39,6 +41,99 @@ func TestPoolRecycleDefaultsAndExplicitOverrides(t *testing.T) {
 			}
 			if cfg.MaxConnLifetime != tc.lifetime || cfg.MaxConnLifetimeJitter != tc.jitter || cfg.MaxConnIdleTime != tc.idle || cfg.MaxConns != 16 {
 				t.Fatalf("recycle config: lifetime=%v jitter=%v idle=%v max=%d", cfg.MaxConnLifetime, cfg.MaxConnLifetimeJitter, cfg.MaxConnIdleTime, cfg.MaxConns)
+			}
+		})
+	}
+}
+
+// Risk: a deployment's query-mode/cache override is silently ignored, so
+// operators cannot control retained server plans through the existing URL.
+// Check the actual connection and retained statements, not only parsed fields.
+func TestPoolQueryExecutionConfigurationApplied(t *testing.T) {
+	// SELECT $1::int needs a real restricted app connection, not migrations.
+	fresh, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := fresh.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	service := filepath.Join(t.TempDir(), "pg_service.conf")
+	if err := os.WriteFile(service, []byte("[fixture]\nhost=localhost\ndbname=fixture\ndefault_query_exec_mode=cache_describe\nstatement_cache_capacity=96\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	serviceQuery := url.Values{"service": {"fixture"}, "servicefile": {service}}
+	for _, tc := range []struct {
+		url      string
+		mode     pgx.QueryExecMode
+		capacity int
+	}{
+		{"host=localhost dbname=fixture default_query_exec_mode=cache_describe statement_cache_capacity=96", pgx.QueryExecModeCacheDescribe, 96},
+		{"postgres://localhost/fixture?" + serviceQuery.Encode(), pgx.QueryExecModeCacheDescribe, 96},
+		{"postgres://localhost/fixture?" + serviceQuery.Encode() + "&default_query_exec_mode=cache_statement&statement_cache_capacity=128", pgx.QueryExecModeCacheStatement, 128},
+	} {
+		cfg, err := db.ParsePoolConfig(tc.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ConnConfig.DefaultQueryExecMode != tc.mode || cfg.ConnConfig.StatementCacheCapacity != tc.capacity {
+			t.Fatal("keyword/service/URL query configuration lost its explicit settings")
+		}
+	}
+	for _, tc := range []struct {
+		params   string
+		mode     pgx.QueryExecMode
+		capacity int
+		prepared bool
+	}{
+		{"", pgx.QueryExecModeCacheStatement, 512, true},
+		{"default_query_exec_mode=cache_describe", pgx.QueryExecModeCacheDescribe, 512, false},
+		{"default_query_exec_mode=cache_statement&statement_cache_capacity=32", pgx.QueryExecModeCacheStatement, 32, true},
+		{"default_query_exec_mode=cache_describe&statement_cache_capacity=0", pgx.QueryExecModeCacheDescribe, 0, false},
+	} {
+		t.Run(tc.params, func(t *testing.T) {
+			u, err := url.Parse(fresh.AppURL)
+			if err != nil {
+				t.Fatal("invalid fixture URL")
+			}
+			params, err := url.ParseQuery(tc.params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			query := u.Query()
+			for key, values := range params {
+				query[key] = values
+			}
+			u.RawQuery = query.Encode()
+			cfg, err := db.ParsePoolConfig(u.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			conn, err := pool.Acquire(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Release()
+			applied := conn.Conn().Config()
+			if applied.DefaultQueryExecMode != tc.mode || applied.StatementCacheCapacity != tc.capacity {
+				t.Fatalf("applied mode=%s capacity=%d, want %s/%d", applied.DefaultQueryExecMode, applied.StatementCacheCapacity, tc.mode, tc.capacity)
+			}
+			var value, plans int
+			if err := conn.QueryRow(t.Context(), `SELECT $1::int`, 7).Scan(&value); err != nil || value != 7 {
+				t.Fatalf("configured query result=%d err=%v", value, err)
+			}
+			if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM pg_prepared_statements WHERE statement='SELECT $1::int'`, pgx.QueryExecModeSimpleProtocol).Scan(&plans); err != nil {
+				t.Fatal(err)
+			}
+			if (plans == 1) != tc.prepared || plans > 1 {
+				t.Fatalf("retained plans=%d, want prepared=%v", plans, tc.prepared)
 			}
 		})
 	}
