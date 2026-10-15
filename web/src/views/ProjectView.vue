@@ -2190,8 +2190,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 @media (max-width: 900px) { .project-view-settings { display: none; } }
 @container projecthead (max-width: 760px) {
-  .project-page.header-compact .head-flex { flex-direction: column; align-items: stretch; }
-  .project-page.header-compact .head-main { flex-basis: auto; min-width: 0; width: 100%; }
+  .project-page.header-compact .head-flex,
+  .project-page.header-comfortable .head-flex { flex-direction: column; align-items: stretch; }
+  /* A column parent makes the 20rem flex basis a height. Reset both densities. */
+  .project-page.header-compact .head-main,
+  .project-page.header-comfortable .head-main { flex-basis: auto; min-width: 0; width: 100%; }
   .project-page.header-compact .title-line { width: 100%; max-width: none; }
   .project-page.header-compact .head-stats { display: flex; flex-direction: column; align-items: stretch; width: 100%; max-width: 100%; }
   .project-page.header-compact .head-work { width: 100%; }

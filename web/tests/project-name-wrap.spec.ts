@@ -22,6 +22,8 @@ interface Reading {
   overflow: number
   spill: string
   rootFont: number
+  stacked: boolean
+  mainSlack: number
 }
 
 const overlaps = (a: Box, b: Box) => a.width > 0 && b.width > 0 && a.height > 0 && b.height > 0
@@ -48,7 +50,23 @@ async function readHeader(page: Page): Promise<Reading> {
     }
     const title = document.getElementById('project-title')!
     const style = getComputedStyle(title)
-    const frame = document.querySelector('.head-flex')!.getBoundingClientRect()
+    const flex = document.querySelector('.head-flex')!
+    const frame = flex.getBoundingClientRect()
+    const flexStyle = getComputedStyle(flex)
+    const mainEl = document.querySelector('.head-main')
+    const mainStyle = mainEl ? getComputedStyle(mainEl) : null
+    const stacked = flexStyle.display === 'flex' && flexStyle.flexDirection === 'column' && mainStyle?.display !== 'contents'
+    let mainSlack = 0
+    if (stacked && mainEl) {
+      const rect = mainEl.getBoundingClientRect()
+      let contentBottom = rect.top
+      for (const child of mainEl.children) {
+        const childStyle = getComputedStyle(child)
+        if (childStyle.display === 'none' || childStyle.position === 'absolute' || childStyle.position === 'fixed') continue
+        contentBottom = Math.max(contentBottom, child.getBoundingClientRect().bottom)
+      }
+      mainSlack = rect.bottom - contentBottom
+    }
     const pageBox = document.querySelector('.project-page')!.getBoundingClientRect()
     const rel = (r: { x: number; y: number; width: number; height: number } | null) => r && r.width > 0 && r.height > 0
       ? { x: r.x - pageBox.x, y: r.y - pageBox.y, width: r.width, height: r.height } : null
@@ -73,6 +91,8 @@ async function readHeader(page: Page): Promise<Reading> {
       clipped: title.scrollWidth > title.clientWidth + 1,
       neighbours,
       overflow: document.querySelector('.project-page')!.scrollWidth - document.querySelector('.project-page')!.clientWidth,
+      stacked,
+      mainSlack,
       spill: (() => {
         const pageEl = document.querySelector('.project-page')!
         const edge = pageEl.getBoundingClientRect().right
@@ -120,6 +140,7 @@ function assertName(reading: Reading) {
     expect(overlaps(reading.title, neighbour.box), `name overlaps ${neighbour.name}`).toBe(false)
   }
   expect(reading.overflow, `header does not spill sideways${reading.spill ? ` (${reading.spill})` : ''}`).toBeLessThanOrEqual(1)
+  if (reading.stacked) expect(reading.mainSlack, 'stacked header stays content-sized').toBeLessThanOrEqual(8)
 }
 
 async function shot(page: Page, width: number, theme: string, density: string, panel: string) {
@@ -157,6 +178,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('.description-more')).toBeVisible()
       const closed = await readHeader(page)
       assertName(closed)
+      if (density === 'comfortable' && width === 768) expect(closed.stacked, '768 comfortable header stacks').toBe(true)
       if (closed.clipped) {
         await expect(title).toHaveAttribute('data-tip', NAME)
         await page.keyboard.press('Tab')
@@ -174,6 +196,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
       await expect(close).toBeVisible()
       const opened = await readHeader(page)
       assertName(opened)
+      if (density === 'comfortable' && (width === 768 || width === 1024)) expect(opened.stacked, `${width} comfortable header stacks once the list is narrow`).toBe(true)
       near(opened.title.x, closed.title.x, `${density} name x while the panel is open`)
       near(opened.title.y, closed.title.y, `${density} name y while the panel is open`)
       near(opened.title.height, closed.title.height, `${density} name height while the panel is open`)
