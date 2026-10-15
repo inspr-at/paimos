@@ -58,7 +58,7 @@ test('AEON-1316 project definitions copy, edit, undo, conditions and reset stay 
   await more.click(); await page.getByRole('menuitem',{name:'Applies to…',exact:true}).click()
   const form = page.getByRole('dialog',{name:'Estimate set applies to',exact:true}), code = form.getByRole('radio',{name:'Code tickets',exact:true}), label = form.getByRole('textbox',{name:'Required labels (comma-separated)'})
   await expect(form).toBeInViewport()
-  const conditions = await controlStability(page,{code,label,save:form.getByRole('button',{name:/^Save/})})
+  const conditions = await controlStability(page,{form,code,label,save:form.getByRole('button',{name:/^Save/})})
   await conditions.check(() => code.check())
   await conditions.check(() => label.fill('ui, security'))
   conditions.done()
