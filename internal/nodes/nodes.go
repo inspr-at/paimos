@@ -566,7 +566,7 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			// Use the normal schema, attribution, event and revision paths.
 			raw["fields"] = merged
 		}
-		nextState, nextFields := current.State, current.Fields
+		nextState, nextFields, nextBody := current.State, current.Fields, current.Body
 		sets := []string{"updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')"}
 		args := []any{}
 		add := func(v any) string {
@@ -585,6 +585,7 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			if err != nil {
 				return err
 			}
+			nextBody = s
 			sets = append(sets, "body = "+add(s))
 		}
 		if v, ok := raw["state"]; ok {
@@ -688,6 +689,7 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 				reason = &text
 			}
 			t.Fields = workqueue.Fields(nextFields)
+			t.Body = nextBody
 			if to != priorCategory {
 				entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, reason)
 			}

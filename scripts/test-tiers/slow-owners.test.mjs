@@ -9,7 +9,9 @@ test('AEON-1024 measured splits preserve native baseline cases, tiers and full s
   const result = proveSlowOwners(load('web').tests, load('go').tests)
   assert.equal(result.browserCases, baseline.browserCases.length)
   assert.equal(result.goCases, baseline.goCases.length)
-  assert.equal(result.nodeSeconds.length, 2)
+  // AEON-1338 (LEAD 2026-10-15): three parallel internal/nodes splits. Same
+  // cases, tiers and <250s ceiling; only the part count rises from two.
+  assert.equal(result.nodeSeconds.length, 3)
   assert.ok(Math.max(...result.nodeSeconds) < 250)
 })
 
@@ -38,7 +40,8 @@ test('AEON-1024 owner splitter balances measured cases, charges both launches an
   assert.equal(splitOwner(rows.slice(0, 1), timing, 2).length, 1)
   assert.throws(() => splitOwner([...rows, rows[0]], timing, 2), /unique/)
   assert.throws(() => splitOwner(rows, timing, 0), /limit/)
-  for (const split of [{ ...timing.split, count: 3 }, { ...timing.split, overheadSeconds: -1 },
+  // AEON-1338 made a recorded count of three legal. Four stays invalid.
+  for (const split of [{ ...timing.split, count: 4 }, { ...timing.split, overheadSeconds: -1 },
     { ...timing.split, caseSeconds: { TestLarge: NaN } }, { ...timing.split, caseSeconds: { 'TestA/sub': 1 } }])
     assert.throws(() => splitOwner(rows, { ...timing, split }, 2), /Invalid/)
   const timingRows = rows.map(row => ({ ...row, lane: 'timing' }))
