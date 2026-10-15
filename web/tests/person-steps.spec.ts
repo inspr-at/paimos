@@ -118,12 +118,12 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
       await page.goto('/decision-desk')
       await page.evaluate(value => document.documentElement.dataset.theme = value, theme)
       const row = page.getByTestId(`desk-row-m:${steps()[0]!.id}`), otherRow = page.getByTestId(`desk-row-m:${steps()[1]!.id}`)
-      const open = page.locator('.desk-summary .view-tabs button').first()
+      const open = page.getByTestId('desk-tab-open')
       const badge = page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk, / })
-      await expect(open).toHaveText('Open 2'); await expect(badge).toHaveAccessibleName(/2/)
+      await expect(open).toHaveText('Open2'); await expect(badge).toHaveAccessibleName(/2/)
       const guard = await controlStability(page, { row, otherRow, open })
       state.fail = true
-      await guard.check(async () => { await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(row.getByRole('alert')).toContainText('The ticket changed'); await expect(open).toHaveText('Open 2') })
+      await guard.check(async () => { await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(row.getByRole('alert')).toContainText('The ticket changed'); await expect(open).toHaveText('Open2') })
       state.fail = false
       await guard.check(async () => {
         let release!: () => void
@@ -133,29 +133,29 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
         // The server has committed, but the action response is held. A normal
         // polling/Refresh read must retain this pending row under the pointer.
         await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-        await expect(open).toHaveText('Open 1')
+        await expect(open).toHaveText('Open1')
         await expect(row.getByRole('button', { name: 'Mark checked' })).toBeDisabled()
         release(); state.holdResponse = undefined
         await expect(row.getByText('Checked by you · moves to Decided')).toBeVisible()
       })
       await expect(badge).toHaveAccessibleName(/1/)
       expect(state.calls.at(-1)?.body).toMatchObject({ checked: true, expected_revision: state.calls[0]!.body.expected_revision, definition_revision: definitionRevision })
-      await guard.check(async () => { await row.getByRole('button', { name: 'Undo' }).click(); await expect(row.getByRole('button', { name: 'Mark checked' })).toBeVisible(); await expect(open).toHaveText('Open 2') })
+      await guard.check(async () => { await row.getByRole('button', { name: 'Undo' }).click(); await expect(row.getByRole('button', { name: 'Mark checked' })).toBeVisible(); await expect(open).toHaveText('Open2') })
       const more = row.getByRole('button', { name: /^More for/ })
       await guard.check(() => more.hover())
       const revisionBeforeAssign = manualNode.updated_at
       await more.click(); await page.getByRole('menuitem', { name: 'Ask someone else…' }).click()
       const picker = page.getByRole('dialog', { name: 'Who checks this', exact: true })
       await expect(picker.getByRole('button', { name: mia.name })).toBeVisible()
-      await guard.check(async () => { await picker.getByRole('button', { name: mia.name }).click(); await expect(row.getByText(`Asked ${mia.name} · it left your Desk`)).toBeVisible(); await expect(open).toHaveText('Open 1') })
+      await guard.check(async () => { await picker.getByRole('button', { name: mia.name }).click(); await expect(row.getByText(`Asked ${mia.name} · it left your Desk`)).toBeVisible(); await expect(open).toHaveText('Open1') })
       guard.done()
       const assignment = state.calls.at(-1)!
       expect(assignment.body).toMatchObject({ owner_id: mia.id, expected_revision: revisionBeforeAssign, definition_revision: definitionRevision })
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-desk-${width}-${theme}.png`) })
       await row.getByRole('button', { name: 'Undo' }).click()
-      await expect(open).toHaveText('Open 2')
+      await expect(open).toHaveText('Open2')
       expect(state.calls.at(-1)?.body).toMatchObject({ owner_id: me.id, undo_reassignment: 701 })
-      await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(open).toHaveText('Open 1')
+      await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(open).toHaveText('Open1')
       await page.reload(); await expect(page.getByTestId(`desk-row-m:${steps()[0]!.id}`)).toHaveCount(0)
     } finally { await context.close() }
   }

@@ -194,10 +194,11 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
 const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({
   ...def,
-  // Keep the designed text room after reserving the person-waiting slot (16px
-  // plus its 8px gap), and the extra touch arrow/action reach (26px + 40px).
+  // Only the default title renders the person-waiting slot (16px plus its 8px
+  // gap). Custom titles keep their own room, without clipping host actions.
+  // Also reserve the extra touch arrow/action reach (26px + 40px).
   // Saved tablet layouts can scroll inside the card.
-  min: def.min + (def.id === 'title' ? 24 + (coarse.value && !phone.value ? 66 : 0) : 0),
+  min: def.min + (def.id === 'title' ? (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0) : 0),
   field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host',
 })))
 const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
