@@ -189,7 +189,7 @@ const nativeAction = computed<TerminalActionView | null>(() => {
 
 let nativeRead = 0, nativePanel = ''
 let nativeReady: Promise<void> = Promise.resolve()
-watch(() => [s.value?.project_id, s.value?.id, owner.value, s.value?.heartbeat_at], (_keys, _old, cleanup) => {
+watch([() => s.value?.project_id, () => s.value?.id, owner, () => s.value?.heartbeat_at], (_keys, _old, cleanup) => {
   const read = ++nativeRead, selected = s.value, panel = `${owner.value}/${selected?.project_id}/${selected?.id}`
   const fresh = panel !== nativePanel; nativePanel = panel
   if (fresh) { native.value = null; nativeKnown.value = false; terminalAtOpen.value = false; menuReady.value = false; leadAtOpen.value = false; viewerAtOpen.value = false; nativeReason.value = 'Reading the session’s live capabilities…' }
@@ -233,7 +233,7 @@ function closeActions(restore: boolean) {
   if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
 }
 function showQuestion(id: string) { selectTab('chat'); questionFocus.value = ''; void nextTick(() => { questionFocus.value = id }) }
-watch(() => [s.value?.id, owner.value], async () => {
+watch([() => s.value?.id, owner], async () => {
   const mine = ++opening, selected = s.value, who = owner.value
   if (!selected || !who) return
   questionFocus.value = ''; why.value = ''
@@ -259,7 +259,7 @@ watch(() => [route.query.tab, route.hash, props.section], () => {
 watch(isLead, value => { if (!value && ['lead', 'session'].includes(tab.value)) tab.value = 'overview' })
 onBeforeUnmount(() => { opening++ })
 useVisualViewport(root)
-watch(() => [owner.value, s.value?.id], async () => {
+watch([owner, () => s.value?.id], async () => {
   if (props.layout !== undefined) return
   const write = ++localLayoutWrite, who = owner.value
   localLayout.value = 'side'
