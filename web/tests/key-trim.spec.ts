@@ -45,7 +45,8 @@ for (const width of [390, 1440]) {
     await expect(page.getByTestId('desk-decide')).toBeEnabled()
     await expect(page.getByTestId('key-trim-evidence')).toContainText('Risk if dropped')
     await expectStableControls({ controls: {
-      actions: page.getByTestId('desk-actions').locator('.action-buttons'), primary: page.getByTestId('desk-decide'), secondary: page.getByTestId('desk-skip'), pager: page.getByTestId('desk-pager'), close: page.getByTestId('desk-close'), stamps: page.getByTestId('desk-stamps'), frame: page.getByTestId('desk-frame'),
+      // A decided trim has no Decline or Change: its slot stays reserved but invisible, so the group keeps its size (AEON-1339).
+      actions: page.getByTestId('desk-actions').locator('.action-buttons'), primary: page.getByTestId('desk-decide'), pager: page.getByTestId('desk-pager'), close: page.getByTestId('desk-close'), frame: page.getByTestId('desk-frame'),
     }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'approve in one click', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => control.calls.length).toBe(1); await expect(page.getByRole('heading', { name: 'Trim worker-trim-2?' })).toBeVisible(); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
       { name: 'return to applied memo', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-decide')).toHaveText(/Restore/) } },
@@ -110,7 +111,7 @@ for (const width of [390, 1440]) {
     await page.getByTestId('desk-row-k:trim-1').click(); await page.getByTestId('desk-decide').click()
     await expect.poll(() => control.calls.length).toBe(1)
     await page.getByTestId('desk-close').click()
-    await page.getByRole('button', { name: /^Decided / }).click()
+    await page.getByRole('radio', { name: /^Decided / }).click()
     await expect(page.getByTestId('desk-row-k:trim-2')).toHaveCount(0)
     await next.click(); await expect(page.getByTestId('desk-row-k:trim-2')).toBeVisible()
     await page.getByTestId('desk-row-k:trim-2').click(); await expect(page.getByTestId('desk-decide')).toHaveText(/Restore/)

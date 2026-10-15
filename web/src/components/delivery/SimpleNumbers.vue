@@ -57,6 +57,9 @@ const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as c
       </template>
     </div>
 
+    <!-- Delivery › Tickets (AEON-1359): the outer loop, first after the summary card. -->
+    <slot name="tickets" />
+
     <section v-for="(section, index) in page.sections" :key="index" class="s-sec" :aria-labelledby="`s-sec-${index}`">
       <div class="s-sec-head">
         <h3 :id="`s-sec-${index}`">{{ section.title }}</h3>

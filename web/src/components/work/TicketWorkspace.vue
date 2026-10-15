@@ -44,6 +44,7 @@ import TicketDelivery from './TicketDelivery.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketEntryLine from './TicketEntryLine.vue'
+import TicketLifeline from './TicketLifeline.vue'
 import TicketBenefits from './TicketBenefits.vue'
 import TicketExtensions from './TicketExtensions.vue'
 import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap, firstPillGap } from '../../lib/ticketBenefits'
@@ -561,6 +562,11 @@ async function openLink(anchor: HTMLElement | null) {
   if (matchMedia('(max-width: 600px)').matches) {
     anchor.scrollIntoView({ block: 'start', behavior: 'instant' })
     await new Promise(requestAnimationFrame)
+  } else {
+    // The shortcut can open it while Link sits below the fold: bring Link into view first, or the picker opens off-screen.
+    // A visible Link does not move.
+    const rect = anchor.getBoundingClientRect()
+    if (rect.top < 0 || rect.bottom > window.innerHeight) { anchor.scrollIntoView({ block: 'nearest', behavior: 'instant' }); await new Promise(requestAnimationFrame) }
   }
   linkAnchor.value = anchor
 }
@@ -727,6 +733,7 @@ defineExpose({
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
+          <TicketLifeline :node-id="item.id" :project-id="project.id" :revision="item.updated_at" />
           <TicketEntryLine :key="item.id" :row="item" :project-id="project.id" />
           <section v-if="queueEntry" class="q-card" :class="{ wait: queueEntry.waiting_reason }" aria-label="Work queue">
             <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />

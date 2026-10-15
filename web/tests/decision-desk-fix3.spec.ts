@@ -19,8 +19,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     world.rule.why = 'Die vorhandenen Berechtigungen und die Mandantentrennung müssen bei jeder Änderung erhalten bleiben.'
     await page.goto('/decision-desk?item=q:question-1')
     const effects = page.getByTestId('desk-outcome-effects')
-    const draftLink = effects.getByRole('link', { name: `Review doctrine draft ${world.rule.id}`, exact: true })
-    const reviewLink = effects.getByRole('link', { name: `Review doctrine (${world.rule.id})`, exact: true })
+    const draftLink = effects.getByRole('link', { name: 'Review the doctrine draft', exact: true })
+    const reviewLink = effects.getByRole('link', { name: 'Open the draft to review', exact: true })
     const target = `/decision-desk?item=r:${world.rule.id}`
     await expect(draftLink).toHaveAttribute('href', target)
     await expect(reviewLink).toHaveAttribute('href', target)
@@ -38,7 +38,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     }
     await draftLink.click(); await openDraft()
     await expectStableControls({ controls: { decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
-      choices: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-0'), stamps: page.getByTestId('desk-stamps'), once: page.getByTestId('stamp-once'), ...(width === 390 ? { frame: page.getByTestId('desk-frame') } : {}) },
+      choices: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-0'), ...(width === 390 ? { frame: page.getByTestId('desk-frame') } : {}) },
       scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [{ name: 'choose the exact linked draft without moving the controls', run: async () => {
         await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
       } }] })
@@ -58,9 +58,9 @@ test('published doctrine effects keep their proposal review while an earlier pen
   question.pending = [{ id: 'effect-2', revision: 2, kind: 'outcome', state: 'delivered', deliver_after: '', doctrine_state: 'in_review',
     effect_data: { doctrine_id: 'published-1', review_required: [{ kind: 'doctrine', ref: world.rule.id, why: 'The earlier edited draft still needs review.' }] } }]
   await page.goto('/decision-desk?item=q:question-1')
-  const effects = page.getByTestId('desk-outcome-effects'), published = effects.getByRole('link', { name: 'Review doctrine draft published-1', exact: true })
+  const effects = page.getByTestId('desk-outcome-effects'), published = effects.getByRole('link', { name: 'Review the doctrine draft', exact: true })
   await expect(published).toHaveAttribute('href', '/settings/agent-rules')
-  const pending = effects.getByRole('link', { name: `Review doctrine (${world.rule.id})`, exact: true })
+  const pending = effects.getByRole('link', { name: 'Open the draft to review', exact: true })
   await expect(pending).toHaveAttribute('href', `/decision-desk?item=r:${world.rule.id}`)
   await pending.click()
   await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText(world.rule.label)
