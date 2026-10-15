@@ -136,18 +136,19 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
       await guard.check(async () => {
         let release!: () => void
         state.holdResponse = new Promise<void>(resolve => { release = resolve })
-        await row.getByRole('button', { name: 'Mark checked' }).click()
-        await expect.poll(() => state.committed).toBe(1)
-        // The server has committed, but the action response is held. A normal
-        // focus refresh must retain this pending row under the pointer.
-        await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
-        const before = state.projectionReads
-        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-        await expect.poll(() => state.projectionReads).toBeGreaterThan(before)
-        await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
-        await expect(open).toHaveText('Open1')
-        await expect(row.getByRole('button', { name: 'Mark checked' })).toBeDisabled()
-        release(); state.holdResponse = undefined
+        try {
+          await row.getByRole('button', { name: 'Mark checked' }).click()
+          await expect.poll(() => state.committed).toBe(1)
+          // The server has committed, but the action response is held. A normal
+          // focus refresh must retain this pending row under the pointer.
+          await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+          const before = state.projectionReads
+          await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+          await expect.poll(() => state.projectionReads).toBeGreaterThan(before)
+          await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+          await expect(open).toHaveText('Open1')
+          await expect(row.getByRole('button', { name: 'Mark checked' })).toBeDisabled()
+        } finally { release(); state.holdResponse = undefined }
         await expect(row.getByText('Checked by you · moves to Decided')).toBeVisible()
       })
       await expect(badge).toHaveAccessibleName(/1/)
