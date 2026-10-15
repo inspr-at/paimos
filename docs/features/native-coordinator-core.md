@@ -25,3 +25,21 @@ P1b/I1 still needs authorized server intents, managed generation/binding creatio
 The fake-SDK installation copies Node into each test's owned directory outside its workspace, preserving production dependency checks even when the host's Node prefix has unsafe permissions. Ownership migration fixtures use canonical UTC timestamps without weakening their equality assertion. A subprocess regression reruns all four affected behaviors with a world-writable Node prefix and `TZ=UTC`, requiring each named test to execute and pass.
 
 Validation for the P1a handoff (2026-10-13, fix round 2): the guarded remote run passed the full `internal/agentd`, `internal/cli`, `internal/harness`, `internal/localjournal`, and `internal/reportercontract` suites. The final focused native run passed again (`agentd` 4.150s). An isolated negative control retained the original `277b0eb8` fixtures and reproduced all four CI failures under the same host conditions; its diagnostic commit is outside the delivery branch. The guarded static check with `--merge-main` exited 0: 42 checks passed, zero optional skips. Earlier busy refusals were retried and were never counted as passes. Ten new behavior tests are registered in the Go tier manifest; existing S2/S3 source globs cover the new files. Browser specs are not applicable to this source-only slice. No public OpenAPI schema, SQL migration, permission registry, running session, push, deployment or model review gate was changed or executed by this package.
+
+AEON-1370 validation (2026-10-15): the focused Go run passed
+`TestAgentdStateDowngradeRoundTrip`,
+`TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion` and
+`TestLeadRuntimeUnattemptedReceiptDoesNotFreezeStartup` in 0.443 s. Restoring
+the pre-fix writer on a temporary scratch branch made all four safe receipt
+cases fail at the frozen release-131 startup fence; the scratch branch was
+removed and the committed fix restored. An isolated execution of the real
+native rehearsal script confirmed the new Go invocation and propagation of
+its nonzero exit. Canonical manifest checks passed 28 tests; the ownership
+audit passed 33. Existing S2 source globs cover the three new Go files; the
+only new registry row is the ESSENTIAL downgrade behavior test. The requested
+full Go suites were refused by the guarded remote runner for capacity, and
+the remote static check was paused by night protocol (both exit 3, neither
+counted as green). The broader tier/web tooling run exited 1 with missing Vue
+dependencies in this worktree. Full Go/static validation remains outstanding
+for the coordinator/CI. No real pairing state, Keychain item, model CLI,
+review gate, deployment or origin push was used.
