@@ -1,228 +1,69 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+# AEON-1335: scratch experiment only. Never merge, open a PR, or enqueue this ref.
+# Reuse the registered nightly path so no new default-branch workflow is needed.
 name: Nightly full
-# All three tiers, including never-gated browser cases. This separate workflow
-# reports failures for classification without becoming a PR/main required check.
-# A red nightly opens a ticket with the failing case and exact tested SHA.
-# Automated ticket creation, ownership and budget wiring belong to OPS step 2.
+run-name: 'AEON-1335 ${{ inputs.shards }}x${{ inputs.workers }} repeat ${{ inputs.repetition }}'
 
 on:
-  schedule:
-    - cron: '23 1 * * *'
   workflow_dispatch:
+    inputs:
+      workers:
+        description: 'Workers in parallel-safe browser groups'
+        type: choice
+        options: ['1', '2', '3']
+        default: '1'
+        required: true
+      shards:
+        description: 'Browser shards (12x1, 6x2, or 4x3 only)'
+        type: choice
+        options: ['12', '6', '4']
+        default: '12'
+        required: true
+      repetition:
+        description: 'Independent repetition on the same immutable SHA'
+        type: choice
+        options: ['1', '2']
+        default: '1'
+        required: true
 
+# Run one experiment at a time (within the brief's maximum of two).
+# Dispatch the next only after completion; GitHub retains just one pending run.
+# The dispatcher must monitor ALL org queues and stop/cancel its own run above 20.
+concurrency:
+  group: aeon-1335-worker-qualification
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
-# Nightly still executes the catalogue when shadow observation is disabled.
 env:
-  CI_IMPACT: ${{ vars.CI_IMPACT }}
+  CI_IMPACT: 'off'
 
 jobs:
-  nightly-go-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        # Use the same event/ref/attempt guards as runs-on when evaluated.
-        # Re-run all jobs: partial reruns may retain earlier matrix values.
-        shard: [1, 2, 3, 4, 5, 6, 7]
+  experiment-plan:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/exp/aeon-1335-workers'
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
-        image: ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
-        env:
-          POSTGRES_USER: aeon
-          POSTGRES_PASSWORD: aeon
-          POSTGRES_DB: aeon
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U aeon -d aeon"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      # Maintenance database only. This user is the image superuser, so tests may CREATE DATABASE.
-      AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
-      AEON_GO_SHARD_COUNT: ${{ strategy.job-total }}
-      # Four-shard reruns may retain the Mac layout on hosted hardware. Never
-      # replay test results from the self-hosted runner's persistent GOCACHE.
-      GOFLAGS: ${{ strategy.job-total == 4 && '-count=1' || '' }}
+    timeout-minutes: 2
+    outputs:
+      matrix: ${{ steps.layout.outputs.matrix }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        id: setup-go
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - name: Node for test tier selection
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - name: Locate Go build cache
-        id: go-cache-path
-        run: echo "path=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-      # setup-go's dependency snapshot is immutable. Refresh compiled artifacts
-      # per source revision and shard, restoring the branch first, then main.
-      # GOCACHE also holds test results; all shard tests bypass those below.
-      # GitHub scopes PR writes to refs/pull/N/merge; main cannot restore them.
-      - name: Persist Go build cache
-        id: go-cache
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
-          restore-keys: |
-            go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
-            go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
-      - name: Install shells used by pairing tests
-        timeout-minutes: 4
-        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt zsh fish
-      - name: Test this shard (essential plus changed area, or full on main)
+      - name: Validate the paired layout
+        id: layout
         env:
-          # Backup drills use the clients in the exact PostgreSQL 18 service.
-          AEON_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
-          GOFLAGS: -count=1
-        run: node scripts/test-tiers/cli.mjs run go --all --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
-      - name: Preserve test tier measurements
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: go-test-${{ matrix.shard }}-tier-measurements
-          path: tmp/test-tiers/
-          if-no-files-found: warn
-          retention-days: 8
-          overwrite: true
-      - name: Record successful test evidence
+          WORKERS: ${{ inputs.workers }}
+          SHARDS: ${{ inputs.shards }}
         run: |
-          case "$RUNNER_ENVIRONMENT" in
-            github-hosted) runner_class=hosted ;;
-            self-hosted) runner_class=mbp2606 ;;
-            *) exit 1 ;;
-          esac
-          printf 'Green test result: runner_class=%s commit=%s event=%s shards=%s\n' "$runner_class" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" "$AEON_GO_SHARD_COUNT" >> "$GITHUB_STEP_SUMMARY"
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          import { cpus } from 'node:os';
+          const n = Number(process.env.WORKERS), m = Number(process.env.SHARDS);
+          if (![[12, 1], [6, 2], [4, 3]].some(([shards, workers]) => shards === m && workers === n)) throw new Error('Invalid paired layout');
+          if (cpus().length !== 4) throw new Error('Qualification requires 4-vCPU hosted runners');
+          appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(Array.from({ length: m }, (_, index) => index + 1))}\n`);
+          JS
 
-  # Timing budgets were calibrated on hosted hardware. Always run this job,
-  # regardless of the selected shard layout or which jobs are being rerun.
-  nightly-go-timing:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
-        image: ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
-        env:
-          POSTGRES_USER: aeon
-          POSTGRES_PASSWORD: aeon
-          POSTGRES_DB: aeon
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U aeon -d aeon"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - name: Timing budgets, alone
-        env:
-          GOFLAGS: -count=1
-        run: node scripts/test-tiers/cli.mjs run go --all --timing --job go-timing
-      - name: Preserve isolated timing measurements
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: go-timing-tier-measurements
-          path: tmp/test-tiers/
-          if-no-files-found: warn
-          retention-days: 8
-          overwrite: true
-
-  nightly-go-static:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - name: Forbid volatile CI identity reads in Go tests
-        run: |
-          python3 - <<'PY'
-          import pathlib, re, sys
-          # Include multiline calls and indirect reads via named constants.
-          volatile = re.compile(r'\bGITHUB_(?:SHA|RUN_ID|RUN_NUMBER|RUN_ATTEMPT)\b')
-          allowed = '--source-digest \\"$GITHUB_SHA\\"'
-          failures = []
-          for path in sorted(pathlib.Path('.').rglob('*_test.go')):
-              source = path.read_text()
-              # This existing release-contract assertion checks a workflow's
-              # literal binding; it does not read the process environment.
-              if path.as_posix() == 'scripts/releaseworkflow/workflow_test.go':
-                  source = source.replace(allowed, '')
-              for match in volatile.finditer(source):
-                  line = source.count('\n', 0, match.start()) + 1
-                  failures.append(f'{path}:{line}: volatile CI identity in test source')
-          if failures:
-              print('\n'.join(failures), file=sys.stderr)
-              sys.exit(1)
-          print('Go tests do not depend on volatile CI identity')
-          PY
-      - run: go vet ./...
-      - name: Check prepared rules bootstrap drift
-        run: go run ./scripts/rules-bootstrap check
-      - name: Test tier selector regressions
-        run: node --test scripts/test-tiers/test-tiers.test.mjs
-      - name: Validate every Go tier against native collection
-        run: node scripts/test-tiers/cli.mjs check go --strict
-      - name: Check the shard list covers go test ./...
-        run: |
-          go run ./scripts/ci-go-shards check -count 7
-          go run ./scripts/ci-go-shards check -count 4
-
-  # Job id go is the required check. It stays red when a shard or the static
-  # job fails because if: always() still runs this gate.
-  nightly-go:
-    if: always()
-    needs: [nightly-go-test, nightly-go-static, nightly-go-timing]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require every Go shard and the static checks
-        env:
-          GO_TEST: ${{ needs.nightly-go-test.result }}
-          GO_STATIC: ${{ needs.nightly-go-static.result }}
-          GO_TIMING: ${{ needs.nightly-go-timing.result }}
-        run: |
-          set -euo pipefail
-          echo "go-test=${GO_TEST} go-static=${GO_STATIC} go-timing=${GO_TIMING}"
-          test "${GO_TEST}" = success
-          test "${GO_STATIC}" = success
-          test "${GO_TIMING}" = success
-
-  # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
-  # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e
-  # model-settings step ran specs that the shards now own (groups footer,
-  # status-help, status-autopilot, model-settings); their unit tests run once in
-  # web-setup via npm run test:unit.
   nightly-web-setup:
+    needs: experiment-plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -311,54 +152,20 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
-  # Classification maintenance is scheduled and separate from executing tests.
-  # Manifest drift never blocks a PR or prevents the full suite from running.
-  nightly-tier-classification:
-    if: github.event_name == 'schedule'
-    needs: nightly-web-setup
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - name: Download shared web runtime
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: web-runtime
-          path: ${{ runner.temp }}/web-runtime
-      - name: Restore web runtime
-        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
-      - name: Report Go cases needing classification
-        run: node scripts/test-tiers/cli.mjs check go --strict
-      - name: Report web cases needing classification
-        if: always()
-        run: node scripts/test-tiers/cli.mjs check web --strict
-
   nightly-web-shard:
-    needs: nightly-web-setup
+    needs: [experiment-plan, nightly-web-setup]
     runs-on: ubuntu-latest
-    # AEON-1351: the UI step is 30 minutes. Shard 23 on run 38582896804
-    # passed every case and still hit the old 20-minute step at 19.83 minutes.
-    # The job stays at 40 minutes so a hung job is still caught. Dependency
-    # install keeps its own 13-minute step cap. AEON-1325: 24 shards.
-    # AEON-1327: run 38488051180 packs every shard near 15 minutes.
-    # PR lanes keep their budgets.
+    # Retain the current full-catalogue timeout budgets for comparison.
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+        shard: ${{ fromJSON(needs.experiment-plan.outputs.matrix) }}
     env:
       PW_RETRIES: '0'
+      EXPERIMENT_WORKERS: ${{ inputs.workers }}
+      EXPERIMENT_SHARD: ${{ matrix.shard }}
+      EXPERIMENT_SHARDS: ${{ inputs.shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -392,7 +199,126 @@ jobs:
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: node scripts/test-tiers/cli.mjs run web --all --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          import { freemem, cpus } from 'node:os';
+          import { plan, run } from './scripts/test-tiers/cli.mjs';
+          import { key } from './scripts/test-tiers/core.mjs';
+          import { loadManifest } from './web/scripts/ci-web-shard.mjs';
+          import { runPlaywright } from './scripts/playwright-safe.mjs';
+
+          // AEON-1335 helpers: keep worker policy and accounting independently checkable.
+          function experimentPolicy(policy) {
+            return { ...policy, groups: policy.groups.map(group => ({ ...group, env: {
+              ...group.env,
+              AEON_WORKER_EXPERIMENT_SERIAL: group.config !== 'playwright.ui.config.ts' ||
+                !group.flags.includes('--workers=2') || group.env.AEON_PW_SHARD === '1' ? '1' : '0',
+            } })) };
+          }
+          function workerArguments(args, serial, workers) {
+            if (!Number.isInteger(workers) || workers < 1 || workers > 3) throw new Error('Invalid worker count');
+            const effective = serial ? 1 : workers;
+            if (args.filter(arg => arg === '--workers=1').length !== 1) throw new Error('Unexpected tier worker policy');
+            return { effective, args: args.map(arg => arg === '--workers=1' ? `--workers=${effective}` : arg) };
+          }
+          function activeSeconds(report) {
+            if (!Array.isArray(report.suites)) return null;
+            const intervals = [];
+            let valid = true;
+            const visit = suites => {
+              for (const suite of suites ?? []) {
+                for (const spec of suite.specs ?? []) for (const test of spec.tests ?? []) {
+                  if ((test.results ?? []).length !== 1) valid = false;
+                  for (const result of test.results ?? []) {
+                    if (result.status === 'skipped') continue;
+                    if (!['passed', 'failed', 'timedOut'].includes(result.status)) valid = false;
+                    const start = Date.parse(result.startTime), end = start + result.duration;
+                    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) valid = false;
+                    else intervals.push([start, end]);
+                  }
+                }
+                visit(suite.suites);
+              }
+            };
+            visit(report.suites);
+            if (!valid || report.errors?.length) return null;
+            intervals.sort((a, b) => a[0] - b[0]);
+            let milliseconds = 0, end = -Infinity;
+            for (const [start, stop] of intervals) { milliseconds += Math.max(0, stop - Math.max(start, end)); end = Math.max(end, stop); }
+            return milliseconds / 1000;
+          }
+          // AEON-1335 execution: hosted dispatch only; never call this from local validation.
+          const env = process.env;
+          if (env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_REF !== 'refs/heads/exp/aeon-1335-workers' ||
+              env.GITHUB_ACTIONS !== 'true' || env.RUNNER_ENVIRONMENT !== 'github-hosted' ||
+              env.RUNNER_OS !== 'Linux' || cpus().length !== 4) throw new Error('Experiment requires its scratch ref and 4-vCPU hosted Linux');
+          const workers = Number(env.EXPERIMENT_WORKERS), index = Number(env.EXPERIMENT_SHARD), count = Number(env.EXPERIMENT_SHARDS);
+          if (![[12, 1], [6, 2], [4, 3]].some(([m, n]) => m === count && n === workers) ||
+              !Number.isInteger(index) || index < 1 || index > count) throw new Error('Invalid experiment layout');
+          const job = `web-shard-${index}`, directory = resolve('tmp/test-tiers');
+          const launches = [], memory = { samples: 0, minFreeBytes: null, peakCgroupBytes: null, eventsBefore: null, eventsAfter: null };
+          const cgroup = name => { try { return readFileSync(`/sys/fs/cgroup/${name}`, 'utf8').trim(); } catch { return null; } };
+          const events = () => {
+            const value = cgroup('memory.events');
+            return value === null ? null : Object.fromEntries(value.split('\n').filter(Boolean).map(line => {
+              const [name, count] = line.split(/\s+/); return [name, Number(count)];
+            }));
+          };
+          const sample = () => {
+            memory.samples++;
+            const free = freemem(), current = cgroup('memory.current');
+            memory.minFreeBytes = Math.min(memory.minFreeBytes ?? free, free);
+            if (current !== null && Number.isFinite(Number(current))) memory.peakCgroupBytes = Math.max(memory.peakCgroupBytes ?? 0, Number(current));
+          };
+          const policy = experimentPolicy(loadManifest());
+          const selection = plan('web', { env, event: 'workflow_dispatch', paths: [], all: true, index, count, cache: false });
+          memory.eventsBefore = events(); sample();
+          const timer = setInterval(sample, 1000);
+          const dependencies = {
+            loadBrowserPolicy: () => policy,
+            runPlaywright: async (args, options) => {
+              const serial = options.env.AEON_WORKER_EXPERIMENT_SERIAL === '1';
+              const chosen = workerArguments(args, serial, workers);
+              const started = performance.now();
+              const result = await runPlaywright(chosen.args, { ...options, env: { ...options.env,
+                ...(serial ? { AEON_PW_SHARD: '1' } : {}), PW_WORKERS: String(chosen.effective) } });
+              const wallSeconds = (performance.now() - started) / 1000;
+              let active = null;
+              try { active = activeSeconds(JSON.parse(readFileSync(options.env.PLAYWRIGHT_JSON_OUTPUT_FILE, 'utf8'))); } catch {}
+              launches.push({ workers: chosen.effective, serial, config: args[args.indexOf('--config') + 1],
+                result: result.code, wallSeconds, activeSeconds: active,
+                nonCaseSeconds: active === null || active > wallSeconds ? null : wallSeconds - active,
+                browserProcesses: result.metrics });
+              return result;
+            },
+          };
+          let firstCode = 1, retryCode = null, first, retry, failed = [];
+          try {
+            firstCode = await run('web', selection, { env, job }, dependencies);
+            first = JSON.parse(readFileSync(resolve(directory, `${job}-measurement.json`), 'utf8'));
+            const failedKeys = new Set(first.browserCases.filter(row => row.status === 'failed').map(row => row.key));
+            failed = selection.tests.filter(row => failedKeys.has(key(row)));
+            // Bounded, explicit diagnostic retry; first-pass failure remains red.
+            if (!first.runnerFailure && first.execution.status === 'completed' && failed.length > 0 && failed.length <= 3) {
+              retryCode = await run('web', { ...selection, tests: failed, full: false, scope: 'experiment-failed-cases',
+                timing: { collectSeconds: 0, planSeconds: 0 } }, { env, job: `${job}-retry` }, dependencies);
+              retry = JSON.parse(readFileSync(resolve(directory, `${job}-retry-measurement.json`), 'utf8'));
+            }
+          } finally {
+            clearInterval(timer); sample(); memory.eventsAfter = events();
+            writeFileSync(resolve(directory, `${job}-experiment.json`), JSON.stringify({
+              sha: env.GITHUB_SHA, run: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, workers, index, count,
+              firstCode, retryCode, firstPassFailures: first ? failed.length : null,
+              failThenPass: retry?.browserCases.filter(row => row.status === 'passed').map(row => row.key) ?? [],
+              retryIncomplete: failed.length > 0 && (!retry || retry.runnerFailure || retry.execution.status !== 'completed'),
+              launches, memory,
+              accounting: 'Use complete Actions job durations for runner-minutes. Summed case durations are worker-seconds; nonCaseSeconds uses the union of case intervals. Cgroup readings may be unavailable; samples are not a proof of no OOM.',
+            }, null, 2) + '\n');
+          }
+          process.exitCode = firstCode;
+          JS
       - name: Preserve browser tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -421,210 +347,3 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
           overwrite: true
-
-  # Preserve the ruleset's required check identity, including failed/skipped setup.
-  nightly-web:
-    name: nightly-web
-    if: always()
-    needs: [nightly-web-setup, nightly-web-shard]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require setup and every web shard
-        env:
-          WEB_SETUP: ${{ needs.nightly-web-setup.result }}
-          WEB_SHARD: ${{ needs.nightly-web-shard.result }}
-        run: |
-          set -euo pipefail
-          echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
-          test "${WEB_SETUP}" = success
-          test "${WEB_SHARD}" = success
-
-  nightly-release-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - run: node scripts/verify-release.mjs
-      - name: Release rehearsal and tag gate regressions
-        run: node --test scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
-      - name: Require this release's own frozen product notes
-        run: |
-          node --test scripts/check-own-release-notes.test.mjs
-          node scripts/check-own-release-notes.mjs
-      - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
-      - run: node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs
-      - run: node --test scripts/cross-family-gate.test.mjs
-      - run: node --test scripts/release-pin-pr.test.mjs
-      - name: Offline code-health audit toolkit and slice ownership
-        run: |
-          python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
-          python3 -B scripts/audit/covcheck.py --summary
-          node scripts/check-tracked-bytecode.mjs
-      - name: Full UI QA workflow regressions
-        run: node --test scripts/full-ui-qa.test.mjs
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - name: Exact-SHA reuse provenance and workflow regressions
-        run: |
-          node --test scripts/ci-tree-reuse.test.mjs
-          go test ./scripts/releaseworkflow -count=1
-      - name: Enforce test runner trust boundary
-        run: |
-          node --test scripts/ci-runner-route.test.mjs
-          go test ./scripts/ci-runner-guard -count=1
-          go run ./scripts/ci-runner-guard
-
-  nightly-e2e:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
-        image: ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
-        env:
-          POSTGRES_USER: aeon
-          POSTGRES_PASSWORD: aeon
-          POSTGRES_DB: aeon
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U aeon -d aeon"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      AEON_ENV: dev
-      AEON_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
-      BASE_URL: http://127.0.0.1:8080
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-      - name: Build web
-        working-directory: web
-        run: npm run build
-      - name: Build server
-        run: go build -tags webembed -o bin/paimos ./cmd/aeon
-      - name: Install Playwright
-        timeout-minutes: 13
-        working-directory: web
-        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install --with-deps --only-shell chromium
-      - name: Measure Chromium shell cleanup on success, failure and interruption
-        env:
-          AEON_BROWSER_LIFECYCLE: '1'
-        run: node --test --test-concurrency=1 scripts/playwright-safe.test.mjs
-      - name: Start server and run smoke
-        run: |
-          set -euo pipefail
-          nohup ./bin/paimos serve >"$RUNNER_TEMP/aeon.log" 2>&1 &
-          echo $! >"$RUNNER_TEMP/aeon.pid"
-          ready=0
-          for _ in $(seq 1 30); do
-            if curl -sf "$BASE_URL/api/health" >/dev/null; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" -ne 1 ]; then
-            echo "server did not become ready" >&2
-            cat "$RUNNER_TEMP/aeon.log" >&2 || true
-            exit 1
-          fi
-          npm run e2e --prefix web
-
-  # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
-  nightly-migration-compat:
-    permissions:
-      contents: read
-      packages: read
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - name: Resolve the latest published stable release
-        id: previous
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")"
-          tag="$(jq -r '.tag_name' <<< "$release")"
-          [[ "$tag" =~ ^v[0-9]{12}\.0\.0$ ]] || { echo 'Expected a published calendar release' >&2; exit 1; }
-          digest="$(jq -r '.body' <<< "$release" | sed -nE 's/^Digest: (sha256:[a-f0-9]{64})\r?$/\1/p')"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one published image digest' >&2; exit 1; }
-          git show-ref --verify "refs/tags/$tag" >/dev/null
-          echo "Previous published release: $tag; image: ghcr.io/inspr-at/aeon@$digest"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Static migration policy
-        env:
-          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
-        run: |
-          node --test scripts/check-migrations.test.mjs
-          node scripts/check-migrations.mjs --base-ref "$PREVIOUS_TAG"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - name: Checker and migration runner SQL splitter parity
-        run: GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1
-      - name: Previous binary on the candidate schema
-        env:
-          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
-          PREVIOUS_DIGEST: ${{ steps.previous.outputs.digest }}
-        run: |
-          python3 -B -m unittest discover -s scripts -p migration_compat_probe_test.py
-          bash scripts/migration-compat.sh "$PREVIOUS_TAG" "$PREVIOUS_DIGEST"
-
-  nightly-tier-measurements:
-    if: always()
-    needs: [nightly-go, nightly-web, nightly-release-check, nightly-e2e, nightly-migration-compat]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: '*-tier-measurements'
-          path: tmp/tier-job-evidence
-      - name: Report cases and complete job runner minutes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/test-tiers/measure.mjs tmp/tier-job-evidence
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: test-tier-run-measurement
-          path: tmp/test-tier-run-measurement.json
-          if-no-files-found: warn
-          retention-days: 30
