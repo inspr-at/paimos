@@ -176,6 +176,7 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 	if err != nil {
 		return err
 	}
+	var mutationErr error
 	if action != "" {
 		err = db.InTenant(ctx, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 			if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
@@ -202,19 +203,19 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 			}
 			return m.admissionGitHub.Dequeue(ctx, e.PR)
 		})
-		if err != nil {
-			return err
-		}
+		// A merge can win while dequeue is in flight. Even a refused or
+		// uncertain mutation must be followed by a read to report that race.
+		mutationErr = err
 	}
 	confirmed, err := m.github.Pull(ctx, e.PR)
 	if err != nil {
-		return err
+		return errors.Join(mutationErr, err)
 	}
+	result := "pending"
 	err = db.InTenant(ctx, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
-		result := "pending"
 		if confirmed.Head != e.Head {
 			result = "superseded"
 		} else if action == "dequeue" {
@@ -231,6 +232,9 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 	})
 	if err != nil {
 		return err
+	}
+	if mutationErr != nil && result == "pending" {
+		return mutationErr
 	}
 	return m.admissionNotice(ctx, e)
 }

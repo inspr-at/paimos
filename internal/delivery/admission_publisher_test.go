@@ -19,14 +19,15 @@ import (
 )
 
 type admissionFake struct {
-	mu            sync.Mutex
-	f             *fixture
-	states        map[string]string
-	posts         []string
-	enqueues      []string
-	dequeues      int
-	post          func(context.Context, string, string) error
-	refuseRemoval bool
+	mu             sync.Mutex
+	f              *fixture
+	states         map[string]string
+	posts          []string
+	enqueues       []string
+	dequeues       int
+	post           func(context.Context, string, string) error
+	refuseRemoval  bool
+	mergeOnDequeue bool
 }
 
 func (g *admissionFake) Status(_ context.Context, sha string) (string, error) {
@@ -62,6 +63,14 @@ func (g *admissionFake) Dequeue(_ context.Context, pr int64) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.dequeues++
+	if g.mergeOnDequeue {
+		p := g.f.gh.pulls[pr]
+		p.Queued = false
+		p.Open = false
+		p.Merged = true
+		g.f.gh.pulls[pr] = p
+		return crossreview.ErrTransient
+	}
 	if !g.refuseRemoval {
 		p := g.f.gh.pulls[pr]
 		p.Queued = false
@@ -435,11 +444,12 @@ func TestAdmissionQueueBoundsInfrastructureRetryAndReportsMergedBeforeHold(t *te
 	})
 	// New independent fixture proves the race without quarantine as another cause.
 	merged := newAdmissionFixture(t)
-	merged.hold(t, true)
 	live := merged.gh.pulls[7]
-	live.Open = false
-	live.Merged = true
-	merged.gh.pulls[7] = live
+	if err := merged.m.admitQueueEntry(ctx, admissionQueueEntry{PR: 7, Head: live.Head}); err != nil {
+		t.Fatal(err)
+	}
+	merged.hold(t, true)
+	merged.writer.mergeOnDequeue = true
 	if err := merged.m.admitQueueEntry(ctx, admissionQueueEntry{PR: 7, Head: live.Head}); err != nil {
 		t.Fatal(err)
 	}
