@@ -226,6 +226,13 @@ func TestAdmissionPublisherSerializesStalledSuccessAndCurrentFailure(t *testing.
 		t.Fatal(err)
 	}
 	requireAdmissionState(t, f, head, "failure")
+	posts := len(f.writer.posts)
+	if err := restarted.publishAdmission(t.Context(), head); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writer.posts) != posts {
+		t.Fatal("confirmed reconciliation repeated an identical status POST")
+	}
 	var revision int64
 	f.tx(t, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT revision FROM delivery_admission_outbox WHERE sha=$1`, head).Scan(&revision)

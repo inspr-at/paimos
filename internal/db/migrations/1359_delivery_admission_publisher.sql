@@ -55,12 +55,12 @@ BEGIN
    -- Publication's own status webhook and observation timestamps are not a
    -- new prerequisite. Otherwise every POST would dirty itself indefinitely.
    fact=jsonb_set(fact-'updated_at','{observation}',
-    (fact->'observation'-'at'-'checks') || jsonb_build_object('checks',
+    ((fact->'observation')-'at'-'checks') || jsonb_build_object('checks',
      (SELECT coalesce(jsonb_agg(c ORDER BY c->>'name',c),'[]'::jsonb)
       FROM jsonb_array_elements(CASE WHEN jsonb_typeof(fact->'observation'->'checks')='array' THEN fact->'observation'->'checks' ELSE '[]'::jsonb END) c
       WHERE c->>'name'<>'aeon/admission')));
    old_fact=jsonb_set(old_fact-'updated_at','{observation}',
-    (old_fact->'observation'-'at'-'checks') || jsonb_build_object('checks',
+    ((old_fact->'observation')-'at'-'checks') || jsonb_build_object('checks',
      (SELECT coalesce(jsonb_agg(c ORDER BY c->>'name',c),'[]'::jsonb)
       FROM jsonb_array_elements(CASE WHEN jsonb_typeof(old_fact->'observation'->'checks')='array' THEN old_fact->'observation'->'checks' ELSE '[]'::jsonb END) c
       WHERE c->>'name'<>'aeon/admission')));
