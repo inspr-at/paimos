@@ -461,6 +461,64 @@ test('OPS-257 conflict markers fail the canonical checker before staging', t => 
   assert.equal(readFileSync(resolve(directory, goFile), 'utf8'), result.output)
 })
 
+// Risk: old-format additions can merge cleanly but block both manifest commands.
+test('AEON-1389 legacy policy additions explain conversion and retain their spec metadata', t => {
+  const directory = fixtures(t), path = resolve(directory, shardsFile)
+  const initial = JSON.parse(readFileSync(path, 'utf8'))
+  Object.assign(initial.groups[0].specs[1], { listedTests: 3, weightSource: 'fixture measurement',
+    tierTiming: { seconds: 7, selectedTests: 3 } })
+  initial.nightlyTiming = { run: 'fixture run', files: { 'tests/a.spec.ts': { seconds: 9, selectedTests: 3 } } }
+  const policy = structuredClone(initial)
+  policy.specSource = specSource
+  const [existing] = policy.groups[0].specs.splice(0, 1)
+  const put = value => {
+    const record = resolve(directory, 'web', specSource, `${value.spec.file}.json`)
+    mkdirSync(resolve(record, '..'), { recursive: true })
+    writeFileSync(record, formatSpecSource(value))
+  }
+  put({ group: policy.groups[0].id, spec: existing })
+  writeFileSync(path, formatManifest(policy, shardsFile))
+  const before = manifestPaths.map(file => readFileSync(resolve(directory, file), 'utf8'))
+  for (const operation of [checkManifests, writeManifests]) {
+    assert.throws(() => operation(directory), error => {
+      assert.match(error.message, /Expected per-spec sources and empty policy spec lists/)
+      assert.ok(error.message.includes('web/scripts/ci-web-shard-specs/<spec.file>.json'))
+      assert.ok(error.message.includes('{"group":"<group.id>","spec":<original spec entry>}'))
+      assert.match(error.message, /preserving all spec metadata/)
+      assert.match(error.message, /empty each policy group specs array/)
+      assert.ok(error.message.includes(fixCommand))
+      assert.ok(error.message.includes('node scripts/test-tiers/cli.mjs manifests --check'))
+      return true
+    })
+    assert.deepEqual(manifestPaths.map(file => readFileSync(resolve(directory, file), 'utf8')), before,
+      'Failed conversion validation must not partially rewrite manifests')
+  }
+  // Follow the diagnostic, then prove that only the storage format changed.
+  for (const group of policy.groups) {
+    for (const spec of group.specs) put({ group: group.id, spec })
+    group.specs = []
+  }
+  writeFileSync(path, JSON.stringify(policy))
+  for (const operation of [checkManifests, writeManifests]) {
+    assert.throws(() => operation(directory), error => {
+      assert.match(error.message, /Nightly file timings belong in per-spec sources/)
+      assert.ok(error.message.includes('nightlyTiming.files[spec.file]'))
+      assert.ok(error.message.includes('web/scripts/ci-web-shard-specs/<spec.file>.json as nightlyTiming'))
+      assert.ok(error.message.includes(fixCommand))
+      return true
+    })
+  }
+  for (const group of initial.groups) for (const spec of group.specs) {
+    const nightlyTiming = policy.nightlyTiming.files[spec.file]
+    if (nightlyTiming) put({ group: group.id, spec, nightlyTiming })
+  }
+  policy.nightlyTiming.files = {}
+  writeFileSync(path, JSON.stringify(policy))
+  writeManifests(directory)
+  checkManifests(directory)
+  assert.equal(proveConversion(initial, loadPolicy(path), shardsFile).tiersWeightsAndMetadataUnchanged, true)
+})
+
 // Risk: GitHub does not install clone-local merge drivers. Concurrent new
 // specs must merge with ordinary Git, retain their owners and regenerate once.
 test('AEON-1389 independent spec sources merge canonically without custom drivers', t => {

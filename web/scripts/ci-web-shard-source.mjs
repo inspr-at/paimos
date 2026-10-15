@@ -15,7 +15,12 @@ export function policySources(path) {
   const policy = JSON.parse(readInput(inputMetadata(root, relative(root, path), 4 * 1024 * 1024), 4 * 1024 * 1024))
   if (policy.specSource === undefined) return { policy, records: [] } // Historical/fixture policies.
   if (policy.specSource !== specSource || !Array.isArray(policy.groups) || policy.groups.some(group => !Array.isArray(group.specs) || group.specs.length))
-    throw new Error('Expected per-spec sources and empty policy spec lists')
+    throw new Error('Expected per-spec sources and empty policy spec lists. ' +
+      'Move each groups[].specs entry to web/scripts/ci-web-shard-specs/<spec.file>.json as ' +
+      '{"group":"<group.id>","spec":<original spec entry>}, preserving all spec metadata. ' +
+      'Set specSource to "scripts/ci-web-shard-specs" and empty each policy group specs array. ' +
+      'Move each nightlyTiming.files[spec.file] to that source record nightlyTiming and empty policy nightlyTiming.files. ' +
+      'Then run node scripts/test-tiers/cli.mjs manifests --write and node scripts/test-tiers/cli.mjs manifests --check.')
   const files = []
   let entries = 0, bytes = 0
   const visit = directory => {
@@ -53,7 +58,10 @@ export function loadPolicy(path) {
   if (policy.specSource === undefined) return policy
   const groups = new Map(policy.groups.map(group => [group.id, group]))
   if (groups.size !== policy.groups.length) throw new Error('Duplicate policy group')
-  if (Object.keys(policy.nightlyTiming?.files ?? {}).length) throw new Error('Nightly file timings belong in per-spec sources')
+  if (Object.keys(policy.nightlyTiming?.files ?? {}).length) throw new Error('Nightly file timings belong in per-spec sources. ' +
+    'Move each nightlyTiming.files[spec.file] to web/scripts/ci-web-shard-specs/<spec.file>.json as nightlyTiming, ' +
+    'preserving the timing metadata, and empty policy nightlyTiming.files. ' +
+    'Then run node scripts/test-tiers/cli.mjs manifests --write and node scripts/test-tiers/cli.mjs manifests --check.')
   for (const { value: { group, spec, nightlyTiming } } of records) {
     if (!groups.has(group)) throw new Error(`Unknown policy group: ${group}`)
     groups.get(group).specs.push(spec)
