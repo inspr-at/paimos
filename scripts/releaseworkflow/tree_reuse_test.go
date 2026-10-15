@@ -210,6 +210,33 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 	}
 }
 
+// scenarioEnviron runs an aggregate gate under the caller's scenario.
+// CI_IMPACT, CI_AFFECTED_LANE, CI_MG_REUSE and CI_TREE_REUSE are workflow
+// env on the job that executes the test. They belong to the scenario only
+// when the scenario sets them. AEON-1387: CI_IMPACT=off in that job otherwise
+// rejects verified merge-group and confirmed pull-request reuse. An explicit
+// scenario value still wins, so the kill switch stays testable.
+func scenarioEnviron(scenario map[string]string) []string {
+	blocked := map[string]struct{}{
+		"CI_IMPACT":        {},
+		"CI_AFFECTED_LANE": {},
+		"CI_MG_REUSE":      {},
+		"CI_TREE_REUSE":    {},
+	}
+	env := make([]string, 0, len(os.Environ())+len(scenario))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, drop := blocked[key]; drop {
+			continue
+		}
+		env = append(env, entry)
+	}
+	for key, value := range scenario {
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
 func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
@@ -236,13 +263,15 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 		execute := func(changed, result string) error {
 			cmd := exec.Command("bash", "-c", s["run"].(string))
 			cmd.Dir = root(t)
-			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			scenario := make(map[string]string, len(values)+1)
+			scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
 			for key, value := range values {
 				if key == changed {
 					value = result
 				}
-				cmd.Env = append(cmd.Env, key+"="+value)
+				scenario[key] = value
 			}
+			cmd.Env = scenarioEnviron(scenario)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("%w: %s", err, out)
@@ -996,13 +1025,15 @@ func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
 		}
 		execute := func(key, value string) error {
 			cmd := exec.Command("bash", "-c", gate["run"].(string))
-			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			scenario := make(map[string]string, len(values)+1)
+			scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
 			for name, result := range values {
 				if name == key {
 					result = value
 				}
-				cmd.Env = append(cmd.Env, name+"="+result)
+				scenario[name] = result
 			}
+			cmd.Env = scenarioEnviron(scenario)
 			return cmd.Run()
 		}
 		if err := execute("", ""); err != nil {
@@ -1025,5 +1056,61 @@ func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
 		if err := execute("PR_CONFIRM_RUN", "124"); err == nil {
 			t.Fatalf("%s accepts confirmation of another run", id)
 		}
+	}
+}
+
+// The release-check job publishes CI_IMPACT=off. Reuse simulations must keep
+// a verified result, and must still reject it when the scenario itself
+// engages the kill switch.
+func TestReuseAggregatesIgnoreAmbientImpactKillSwitch(t *testing.T) {
+	t.Setenv("CI_IMPACT", "off")
+	t.Setenv("CI_AFFECTED_LANE", "off")
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	goJob := treeMap(jobs["go"])
+	verified := map[string]string{
+		"REUSE": "merge_group", "REUSE_PROOF": "success", "SOURCE_RUN": "123",
+		"CACHE_PRIME": "success", "CI_PLAN": "success", "CI_LANE": "full",
+		"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
+		"TIER_PLAN": "success", "TIER_LAYOUT": "full",
+		"GO_TEST": "skipped", "GO_STATIC": "skipped", "GO_TIMING": "skipped",
+	}
+	confirmed := map[string]string{
+		"REUSE": "pull_request", "REUSE_PROOF": "success", "PR_CONFIRM_REUSE": "pull_request",
+		"PR_CONFIRM_RUN": "123", "SOURCE_RUN": "123", "CACHE_PRIME": "skipped",
+		"CI_PLAN": "success", "CI_LANE": "full", "TIER_LAYOUT": "full",
+		"GITHUB_EVENT_NAME": "merge_group", "TIER_PLAN": "success",
+		"GO_TEST": "skipped", "GO_STATIC": "success", "GO_TIMING": "success",
+	}
+	run := func(script string, values map[string]string) error {
+		t.Helper()
+		scenario := make(map[string]string, len(values)+1)
+		for name, value := range values {
+			scenario[name] = value
+		}
+		scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = root(t)
+		cmd.Env = scenarioEnviron(scenario)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%w: %s", err, out)
+		}
+		return nil
+	}
+	mainGate := reuseStep(t, goJob, "Require every Go shard and the static checks")
+	if err := run(mainGate["run"].(string), verified); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected verified merge-group reuse: %v", err)
+	}
+	prGate := reuseStep(t, goJob, "Require confirmed PR execution proof")
+	if err := run(prGate["run"].(string), confirmed); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected confirmed PR reuse: %v", err)
+	}
+	killed := make(map[string]string, len(verified)+1)
+	for name, value := range verified {
+		killed[name] = value
+	}
+	killed["CI_IMPACT"] = "off"
+	if err := run(mainGate["run"].(string), killed); err == nil {
+		t.Fatal("scenario CI_IMPACT=off accepted merge-group reuse")
 	}
 }

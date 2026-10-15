@@ -10724,6 +10724,8 @@
     ,
     {"kind":"go","package":"scripts/ci-proof","name":"TestCLIHasNoExecutionOrPublicationMode","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestAggregateScenariosIgnoreAmbientImpactKillSwitch","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIClassifiedAggregateResults","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIClassifiedWebShardMatrix","tier":"GATED-FULL"}
@@ -10861,6 +10863,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsedBuilderPins","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAggregatesIgnoreAmbientImpactKillSwitch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAlwaysPrimesMatchingMainCacheKeys","tier":"GATED-FULL"}
     ,

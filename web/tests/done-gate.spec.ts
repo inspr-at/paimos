@@ -2,6 +2,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
 
+// AEON-1315 lets the server decide entry requirements. These dialog cases keep
+// the historical benefit_required response to exercise its compatibility path:
+// the first state-only attempt is refused, then the dialog supplies the fields.
+// Configured checks and their unified checklist are covered by entry-checks.spec.ts.
 const benefits = {
   pill_en: 'Clear release notes',
   pill_de: 'Verständliche Release Notes',
@@ -65,7 +69,11 @@ for (const theme of ['light', 'dark'] as const) {
       await dialog.getByRole('button', { name: 'Mark done' }).click()
       await expect(dialog).toHaveCount(0)
       await expect(page.getByText('PHAROS-11 is now Done')).toBeVisible()
-      const patch = calls.find(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
+      const patches = calls.filter(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
+      expect(patches).toHaveLength(2)
+      expect(patches[0].body).toEqual({ state: 'done' })
+      const patch = patches[1]
+      expect(patch.headers['if-unmodified-since']).toBe(patches[0].headers['if-unmodified-since'])
       expect(patch?.headers['if-unmodified-since']).toBeTruthy()
       const body = patch?.body as { state: string; fields: Record<string, unknown> }
       expect(body.state).toBe('done')
@@ -101,7 +109,10 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(dialog.getByText('PHAROS-11', { exact: true })).toBeVisible()
       const bulk = calls.filter(call => call.path === '/api/nodes/bulk')
       expect(bulk).toHaveLength(1)
-      expect(bulk[0].body).toEqual({ ids: ['n-2', 'n-3'], state: 'done', if_unmodified_since: { 'n-2': expect.any(String), 'n-3': expect.any(String) } })
+      // Admission is evaluated for every selected ticket by the server; only
+      // its refused ticket enters the fallback dialog, without a second bulk write.
+      expect(bulk[0].body).toEqual({ ids: ['n-1', 'n-2', 'n-3'], state: 'done', if_unmodified_since: { 'n-1': expect.any(String), 'n-2': expect.any(String), 'n-3': expect.any(String) } })
+      expect(calls.filter(call => call.method === 'PATCH')).toHaveLength(0)
       await expect(page.getByText('2 tickets are now Done')).toBeVisible()
       if (width === 390) await page.keyboard.press('Escape')
       else await dialog.getByRole('button', { name: 'Not now' }).click()
@@ -133,7 +144,10 @@ for (const theme of ['light', 'dark'] as const) {
       await dialog.getByLabel('Benefit · Deutsch').fill(benefits.benefit_de)
       await dialog.getByRole('button', { name: 'Mark done' }).click()
       await expect(page.getByText('PHAROS-11 is now Done')).toBeVisible()
-      const patch = calls.find((call: Call) => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
+      const patches = calls.filter((call: Call) => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
+      expect(patches).toHaveLength(2)
+      expect(patches[0].body).toEqual({ state: 'done' })
+      const patch = patches[1]
       expect((patch?.body as { state?: string; fields?: { pill_en?: string } }).state).toBe('done')
       expect((patch?.body as { fields?: { pill_en?: string } }).fields?.pill_en).toBe(benefits.pill_en)
       await expect(page.getByText('before done:')).toHaveCount(0)
@@ -181,7 +195,10 @@ for (const width of [1600, 390] as const) {
     await page.keyboard.press('ControlOrMeta+Enter')
     await expect(dialog).toHaveCount(0)
     await expect(page.getByText('PHAROS-11 is now Done')).toBeVisible()
-    const patch = calls.find(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
+    const patches = calls.filter(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
+    expect(patches).toHaveLength(2)
+    expect(patches[0].body).toEqual({ state: 'done' })
+    const patch = patches[1]
     expect(patch?.body).toMatchObject({ state: 'done', fields: { ...benefits, hide_from_release_notes: true } })
     expect(errors).toEqual([])
   })
@@ -189,7 +206,20 @@ for (const width of [1600, 390] as const) {
   test(`a conflict keeps the typed benefit and asks again (${width})`, async ({ page }) => {
     const errors = watchErrors(page)
     await scene(page, 'light', width)
-    const calls = await mockWork(page, fixtures(), { conflictOn: 'n-1' })
+    const data = fixtures()
+    const calls = await mockWork(page, data)
+    // Change the server copy only when the filled dialog is submitted. A
+    // conflict on the initial state-only request has no benefit draft to retain.
+    let conflicted = false
+    await page.route('**/api/nodes/n-1', route => {
+      if (route.request().method() === 'PATCH' && route.request().postDataJSON().fields && !conflicted) {
+        conflicted = true
+        const node = data.nodes.find(node => node.id === 'n-1')!
+        node.updated_at = new Date(Date.parse(node.updated_at) + 30_000).toISOString()
+        node.title += ' (edited elsewhere)'
+      }
+      return route.fallback()
+    })
     await page.goto('/p/PHAROS')
     await row(page, 'PHAROS-11').getByRole('button', { name: /Change status of PHAROS-11/ }).click()
     await page.getByRole('menuitemradio', { name: 'Done' }).click()
@@ -212,9 +242,11 @@ for (const width of [1600, 390] as const) {
     await dialog.getByRole('button', { name: 'Mark done' }).click()
     await expect(page.getByText('PHAROS-11 is now Done')).toBeVisible()
     const patches = calls.filter(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
-    expect(patches).toHaveLength(2)
+    expect(patches).toHaveLength(3)
+    expect(patches[0].body).toEqual({ state: 'done' })
     expect(patches[1].body).toMatchObject({ state: 'done', fields: { ...benefits, hide_from_release_notes: true } })
-    expect(patches[1].headers['if-unmodified-since']).not.toBe(patches[0].headers['if-unmodified-since'])
+    expect(patches[2].body).toEqual(patches[1].body)
+    expect(patches[2].headers['if-unmodified-since']).not.toBe(patches[1].headers['if-unmodified-since'])
     expect(errors).toEqual([])
   })
 
@@ -253,12 +285,13 @@ for (const width of [1600, 390] as const) {
   test(`edit form focuses the first invalid benefit and says why (${width})`, async ({ page }) => {
     const errors = watchErrors(page)
     await scene(page, 'light', width)
-    const calls = await mockWork(page, fixtures())
+    const calls = await mockWork(page, fixtures(), { entryChecks: true })
     await page.goto('/p/PHAROS/PHAROS-12')
     const ws = page.getByRole('complementary', { name: 'Ticket details' })
     await ws.getByRole('button', { name: 'Edit', exact: true }).click()
     const form = ws.getByRole('form', { name: 'Edit PHAROS-12' })
     await form.getByRole('button', { name: 'Status Backlog' }).click()
+    await expect(page.getByRole('menuitemradio', { name: 'Done' })).toContainText('0 of 1')
     await page.getByRole('menuitemradio', { name: 'Done' }).click()
     await form.getByLabel('Pill · English').fill(benefits.pill_en)
     await form.getByLabel('Pill · Deutsch').fill(benefits.pill_de)
