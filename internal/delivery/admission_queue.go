@@ -30,8 +30,10 @@ func stageAdmissionHeadTx(ctx context.Context, tx pgx.Tx, tid string, o Observat
 	}
 	raw, _ := json.Marshal([]admissionMember{{PR: *o.PR, Head: o.Head, Revision: rev, Project: project}})
 	_, err := tx.Exec(ctx, `INSERT INTO delivery_admission_outbox(tenant_id,repository,sha,context,kind,members,resolved) VALUES($1,$2,$3,$4,'head',$5,true)
- ON CONFLICT(tenant_id,repository,sha,context) DO UPDATE SET members=EXCLUDED.members,revision=delivery_admission_outbox.revision+1
- WHERE delivery_admission_outbox.kind='head' AND delivery_admission_outbox.members IS DISTINCT FROM EXCLUDED.members`, tid, o.Repository, o.Head, AdmissionContext, raw)
+ ON CONFLICT(tenant_id,repository,sha,context) DO UPDATE SET members=
+ (SELECT coalesce(jsonb_agg(m ORDER BY m->>'pr'),'[]'::jsonb) FROM jsonb_array_elements(delivery_admission_outbox.members) m WHERE m->>'pr'<>$6) || EXCLUDED.members,
+ revision=delivery_admission_outbox.revision+1
+ WHERE delivery_admission_outbox.kind='head' AND NOT delivery_admission_outbox.members @> EXCLUDED.members`, tid, o.Repository, o.Head, AdmissionContext, raw, fmt.Sprint(*o.PR))
 	if err != nil {
 		return err
 	}
