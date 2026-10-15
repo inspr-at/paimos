@@ -883,7 +883,8 @@ test('AEON-976 history: more than 200 posts remain reachable and a late refresh 
     await guard.check(async () => { await earlier.click(); await expect(panel.locator('.msg')).toHaveCount(count) })
     guard.done()
     const after = await panel.locator(`.msg[data-id="${id}"]`).evaluate(el => el.getBoundingClientRect().top)
-    expect(Math.abs(after - top)).toBeLessThanOrEqual(.5)
+    const geometry = await thread.evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop }))
+    expect(Math.abs(after - top), JSON.stringify({ count, id, top, after, geometry })).toBeLessThanOrEqual(.5)
   }
   await expect(earlier).toHaveCount(0)
   await expect(panel.getByText('Start of the conversation')).toBeAttached()

@@ -123,7 +123,8 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       for (let i = 0; i < 24; i++) await chunk(page, 5 + i, `Paragraph ${i + 1}: the gate stays green and the counts match the staging build.\n\n`)
       const last = panel.getByText('Paragraph 24: the gate stays green', { exact: false })
       await expect(last).toBeVisible()
-      await expect(last).toBeInViewport()
+      const geometry = await panel.locator('.thread-scroll').evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop }))
+      await expect(last, JSON.stringify(geometry)).toBeInViewport()
     })
     // Interrupt works mid-stream from the pinned session header.
     await guard.check(async () => {
