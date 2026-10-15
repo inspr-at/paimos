@@ -23,8 +23,8 @@ import (
 const subscriptionBatch = 200
 const subscriptionHeartbeat = 15 * time.Second
 
-// Admission bounds connection creation as well as persistent listeners. The
-// session advisory slots below enforce the key limit across server processes.
+// Admission bounds local streams. One shared admission session enforces the
+// same two advisory slots per key across server processes.
 type subscriptionLimits struct {
 	mu    sync.Mutex
 	keys  map[string]int
@@ -157,41 +157,23 @@ func (m *module) subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
-	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
-	if err == nil {
-		admitted := false
-		for slot := 0; slot < 2; slot++ {
-			err = conn.QueryRow(connectCtx, `SELECT pg_try_advisory_lock(hashtextextended($1,885))`, fmt.Sprintf("%s:%d", key, slot)).Scan(&admitted)
-			if err == nil && admitted {
-				break
-			}
-			if err != nil {
-				break
-			}
-		}
-		if err == nil && !admitted {
-			conn.Close(connectCtx)
-			subscriptionLimit(w)
-			cancel()
-			return
-		}
-		if err == nil {
-			_, err = conn.Exec(connectCtx, "LISTEN aeon_events")
-		}
-	}
-	cancel()
-	if conn != nil {
-		defer func() {
-			closeCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-			defer stop()
-			_ = conn.Close(closeCtx)
-		}()
+	lease, err := db.AdmitSubscription(ctx, m.pool, key)
+	if errors.Is(err, db.ErrSubscriptionLimit) {
+		subscriptionLimit(w)
+		return
 	}
 	if err != nil {
 		subscriptionFailure(w, err)
 		return
 	}
+	defer lease.Close()
+	ctx = lease.Context()
+	conn, err := db.SubscribeNotifications(ctx, m.pool, "aeon_events", p.TenantID)
+	if err != nil {
+		subscriptionFailure(w, err)
+		return
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	// LISTEN precedes the boundary read, closing the replay/live handoff gap.
 	newest, err := m.subscriptionNewest(ctx, p)
 	if err != nil {
@@ -256,6 +238,9 @@ func (m *module) subscribe(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				// Revalidate even an idle connection before sending its ping.
+				if lease.Check(ctx) != nil {
+					return
+				}
 				if err := m.subscriptionAuthorize(ctx); err != nil {
 					return
 				}
@@ -276,7 +261,7 @@ func (m *module) subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func waitSubscription(ctx context.Context, conn *pgx.Conn, deadline time.Time) error {
+func waitSubscription(ctx context.Context, conn db.NotificationListener, deadline time.Time) error {
 	for {
 		if !time.Now().Before(deadline) {
 			return context.DeadlineExceeded
