@@ -59,12 +59,12 @@ test('card and header count open, blocked and unknown work at 390 and 1600', asy
     await expect(stats.getByRole('button', { name: 'Filter open tickets: 5', exact: true })).toBeVisible()
     await expect(stats.getByRole('button', { name: 'Filter doing tickets: 3', exact: true })).toBeVisible()
     await expect(stats.getByRole('button', { name: 'Filter done tickets: 2', exact: true })).toBeVisible()
-    await expect(stats.locator('.pct')).toHaveText('20%')
-    await expect(stats.locator('.progress-line')).toHaveAttribute('data-tip', '2 of 10 done · 1 cancelled')
+    // AEON-1358: the header's work bar (hours, leaves only) replaced the count-based percent and its tip.
+    await expect(stats.locator('.head-work .wk-scope')).toContainText('Whole project')
     await expect(stats.getByRole('button', { name: 'Filter open tickets: 5', exact: true })).toHaveAttribute('data-tip', 'Show only open tickets; click again to clear')
     // On phones the stats wrapper uses display:contents; check both actual
     // rendered islands rather than treating its absent CSS box as a frame.
-    const islands = stats.locator('.project-status-counts, .progress-line')
+    const islands = stats.locator('.project-status-counts, .head-work')
     await expect(islands).toHaveCount(2)
     for (const island of await islands.all()) {
       const statsBox = (await island.boundingBox())!
