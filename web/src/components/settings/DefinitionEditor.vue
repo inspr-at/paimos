@@ -13,7 +13,7 @@ import KeyCap from '../KeyCap.vue'
 
 const props = withDefaults(defineProps<{ checks: DefinitionChecks; workspace?: DefinitionChecks; base?: DefinitionChecks | null; projectKey: string; own?: boolean; editable: boolean; busy?: boolean; error?: string; people?: ProjectPerson[] }>(), { base: null, own: false, busy: false, error: '', people: () => [] })
 const emit = defineEmits<{ change: [checks: DefinitionChecks, applied: () => void] }>()
-const root = ref<HTMLElement>(), panelBody = ref<HTMLElement>(), uid = useId(), phone = ref(false)
+const panelBody = ref<HTMLElement>(), uid = useId(), phone = ref(false)
 type Panel = { kind: 'add' | 'menu' | 'conditions' | 'manual' | 'owner'; block: DefinitionStatus; rule?: DefinitionRule; anchor: HTMLElement }
 const panel = ref<Panel | null>(null), condition = ref<DefinitionCondition>('all'), kinds = ref(''), labels = ref(''), text = ref(''), owner = ref('')
 const register = useProjectSettingsOverlay()
@@ -122,7 +122,7 @@ onBeforeUnmount(() => close(false))
 </script>
 
 <template>
-  <div ref="root" class="definition-editor">
+  <div class="definition-editor">
     <section v-for="block in DEFINITION_BLOCKS" :key="block.id" class="dblock" :aria-labelledby="`${uid}-${block.id}`" :data-block="block.id">
       <header class="db-head"><h3 :id="`${uid}-${block.id}`">{{ block.name }} <span>· to enter {{ block.to }}</span></h3><button v-if="editable" type="button" class="add" :disabled="busy || (checks[block.id]?.length ?? 0) >= 32" :aria-label="`Add check to ${block.name}`" aria-haspopup="dialog" @click="open('add', block.id, $event)"><AppIcon name="plus" :size="13" />Add check</button></header>
       <ul class="drs">
