@@ -6768,8 +6768,8 @@
     "261015121011.0.0": {
       "release_channel": "stable",
       "release_sequence": 134,
-      "snapshot_sha256": "acbf579ac696c612e1a3bb1b18da0813d121f8cc2a14a22b9ce568730595b60a",
-      "captured_at": "2026-10-15T12:25:39Z",
+      "snapshot_sha256": "e5a9761f21fbce6f4fd120167d0af226d4acfb86bd73b24771cb943be83ba0d7",
+      "captured_at": "2026-10-15T12:31:00Z",
       "release_revision": 1,
       "items": [
         {
@@ -6856,8 +6856,8 @@
           "key": "AEON-1370",
           "pill_en": "Safe agent rollbacks",
           "pill_de": "Sichere Agenten-Rücknahmen",
-          "benefit_en": "Computers paired with Aeon keep state the previous version can still read, so an update can be rolled back; running or unconfirmed sessions still block the restart for safety.",
-          "benefit_de": "Mit Aeon gekoppelte Computer behalten einen Zustand, den auch die vorige Version lesen kann, sodass sich ein Update zurücknehmen lässt; laufende oder unbestätigte Sitzungen sperren den Neustart weiterhin zur Sicherheit.",
+          "benefit_en": "Paired computers keep their local session state readable by release 131, so a rollback to it works; active or unconfirmed native sessions still block the restart.",
+          "benefit_de": "Gekoppelte Computer behalten einen lokalen Sitzungszustand, den Release 131 lesen kann, sodass eine Rücknahme darauf funktioniert; aktive oder unbestätigte native Sitzungen sperren den Neustart weiterhin.",
           "group": "fixes"
         },
         {
