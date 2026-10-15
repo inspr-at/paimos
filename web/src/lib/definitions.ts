@@ -9,7 +9,7 @@ export const DEFINITION_BLOCKS = [
 ] as const
 export type DefinitionStatus = typeof DEFINITION_BLOCKS[number]['id']
 export type DefinitionCondition = 'all' | 'ui' | 'code' | 'blocked' | 'release_notes' | 'releases'
-export interface DefinitionRule { id: string; label?: string; label_de?: string; condition?: DefinitionCondition; kinds?: string[]; labels?: string[]; owner_id?: string | null }
+export interface DefinitionRule { id: string; label?: string; label_de?: string; condition?: DefinitionCondition; kinds?: string[]; labels?: string[]; owner_id?: string | null; fallback_owner_id?: string | null }
 export type DefinitionChecks = Partial<Record<DefinitionStatus, DefinitionRule[]>>
 export interface Definition { id: string; revision: string; source: 'project' | 'workspace'; copied_from_revision: string | null; checks: DefinitionChecks }
 export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean }
@@ -41,14 +41,18 @@ export function fixedRuleCondition(rule: DefinitionRule): DefinitionCondition | 
 }
 export const ruleLabel = (rule: DefinitionRule, language = 'en') => (language === 'de' ? rule.label_de : rule.label) || (language === 'de' ? DEFINITION_CATALOG.find(c => c.id === rule.id)?.de : DEFINITION_CATALOG.find(c => c.id === rule.id)?.en) || rule.label || rule.id
 export const ruleCondition = (rule: DefinitionRule): DefinitionCondition => rule.condition || DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition || 'all'
-export function ruleWords(rule: DefinitionRule): string {
-  return [DEFINITION_CONDITIONS[ruleCondition(rule)], rule.kinds?.length ? `Kinds: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `Labels: ${rule.labels.join(', ')}` : '', manualRule(rule) ? 'A person ticks this' : ''].filter(Boolean).join(' · ')
+export function ruleOwnerWords(rule: DefinitionRule, people: { id: string; name: string }[] = []): string {
+  const name = (id: string) => people.find(person => person.id === id)?.name ?? 'a named person'
+  return rule.owner_id ? `Ticked by ${name(rule.owner_id)}` : `Ticked by the ticket’s assignee, else ${rule.fallback_owner_id ? name(rule.fallback_owner_id) : 'a project admin'}`
+}
+export function ruleWords(rule: DefinitionRule, people: { id: string; name: string }[] = []): string {
+  return [DEFINITION_CONDITIONS[ruleCondition(rule)], rule.kinds?.length ? `Kinds: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `Labels: ${rule.labels.join(', ')}` : '', manualRule(rule) ? ruleOwnerWords(rule, people) : ''].filter(Boolean).join(' · ')
 }
 export const cloneChecks = (checks: DefinitionChecks = {}): DefinitionChecks => JSON.parse(JSON.stringify(checks))
 export const checkCount = (checks: DefinitionChecks = {}) => DEFINITION_BLOCKS.reduce((n, b) => n + (checks[b.id]?.length ?? 0), 0)
 const set = (values: string[] = []) => [...new Set(values.map(s => s.toLowerCase()))].sort()
 export function sameRule(a: DefinitionRule, b: DefinitionRule) {
-  return ruleLabel(a) === ruleLabel(b) && ruleLabel(a, 'de') === ruleLabel(b, 'de') && ruleCondition(a) === ruleCondition(b) && (a.owner_id ?? null) === (b.owner_id ?? null) && JSON.stringify([...(a.kinds ?? [])].sort()) === JSON.stringify([...(b.kinds ?? [])].sort()) && JSON.stringify(set(a.labels)) === JSON.stringify(set(b.labels))
+  return ruleLabel(a) === ruleLabel(b) && ruleLabel(a, 'de') === ruleLabel(b, 'de') && ruleCondition(a) === ruleCondition(b) && (a.owner_id ?? null) === (b.owner_id ?? null) && (a.fallback_owner_id ?? null) === (b.fallback_owner_id ?? null) && JSON.stringify([...(a.kinds ?? [])].sort()) === JSON.stringify([...(b.kinds ?? [])].sort()) && JSON.stringify(set(a.labels)) === JSON.stringify(set(b.labels))
 }
 export interface DefinitionDifference { item: DefinitionRule; kind: 'same' | 'added' | 'changed' | 'moved' | 'left' | 'waiting_new' | 'waiting_changed' | 'waiting_removed'; default?: DefinitionRule; block: DefinitionStatus }
 export function definitionDiff(own: DefinitionChecks, workspace: DefinitionChecks = {}, base: DefinitionChecks | null = null): DefinitionDifference[] {

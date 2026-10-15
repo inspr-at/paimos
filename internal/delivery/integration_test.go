@@ -548,7 +548,7 @@ func TestAppReaderMergeGroupKeepsRequiredChecks(t *testing.T) {
 		case r.Method == "GET" && strings.Contains(r.URL.Path, "/git/ref/"):
 			body = map[string]any{"ref": ref, "object": map[string]string{"type": "commit", "sha": group}}
 		case r.Method == "GET" && strings.Contains(r.URL.Path, "/compare/"):
-			body = map[string]any{"total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
+			body = map[string]any{"merge_base_commit": map[string]string{"sha": base}, "files": []any{map[string]string{"filename": "docs/fixture.md", "status": "modified"}}, "total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
 		default:
 			t.Fatalf("unexpected GitHub operation: %s %s", r.Method, r.URL.Path)
 		}
@@ -567,6 +567,9 @@ func TestAppReaderMergeGroupKeepsRequiredChecks(t *testing.T) {
 	queued := f.item(t, 7)
 	if queued.State != InQueue {
 		t.Fatalf("queue group missing: %s", queued.State)
+	}
+	if queued.Observation.AdmissionDiff == nil || !queued.Observation.AdmissionDiff.Complete || queued.Observation.AdmissionDiff.MergeBase != base {
+		t.Fatal("queue observation dropped exact scoped diff evidence")
 	}
 	if !requiredChecksStored(queued) {
 		t.Errorf("checks_requested dropped required-check success: %+v", queued.Observation.Checks)

@@ -27,6 +27,8 @@
     ]
   },
   "project_filtered": {
+    "GET /api/delivery/{itemId}/admission": true,
+    "PUT /api/delivery/{itemId}/admission": true,
     "DELETE /api/delivery/{itemId}/hold": true,
     "GET /api/delivery": true,
     "GET /api/delivery/alerts": true,
@@ -73,6 +75,10 @@
     }
   ],
   "routes": {
+    "GET /api/delivery/{itemId}/admission": "delivery.read",
+    "PUT /api/delivery/{itemId}/admission": "delivery.manage",
+    "GET /api/projects/{projectId}/delivery-admission": "delivery.read",
+    "PUT /api/projects/{projectId}/delivery-admission": "delivery.manage",
     "DELETE /api/delivery/{itemId}/hold": "delivery.manage",
     "GET /api/delivery": "delivery.read",
     "GET /api/delivery/alerts": "delivery.read",

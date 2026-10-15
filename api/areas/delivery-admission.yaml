@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /delivery/{itemId}/admission:
+    parameters:
+      - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDeliveryAdmission
+      description: 'Requires delivery.read on the current project. Returns the exact-head and merge-base scope binding, authenticated P1 approval records, visible holds and pure admission decision. A new head, scope, target or ticket/project binding creates a new revision, including when returning to an earlier value. Missing nightly evidence fails closed when the policy is enabled. No GitHub write or enqueue.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Current admission snapshot', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdmission'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: setDeliveryAdmissionControl
+      description: 'Person with delivery.manage on the current project. Replaces PR holds and explicitly designates a nightly fix exception for the exact displayed binding and control revision. Holds persist across new heads; fix designation resets. Release-cut, wave and manual holds always take precedence over the nightly fix exception. Empty holds lifts PR holds. Never records an approval, publishes a status or enqueues.'
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdmissionControl'}}}}
+      responses:
+        '200': {description: 'Updated admission snapshot', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdmission'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery-admission:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDeliveryAdmissionPolicy
+      description: 'Requires delivery.read. Returns project-wide release-cut, wave and manual holds and nightly policy state. Default nightly policy is enabled with unknown evidence; admission waits until the policy owner records the nightly state or explicitly disables the policy.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Current policy', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdmissionPolicy'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: setDeliveryAdmissionPolicy
+      description: 'Person with delivery.manage. Replaces the project holds and nightly policy at the displayed revision. Nightly state is an explicit policy-owner record in P2; automatic nightly observation is a later integration. Holds carry visible reasons. A red nightly permits only a designated fix, without bypassing CI, review, visual approval or explicit holds. No GitHub writes.'
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdmissionPolicy'}}}}
+      responses:
+        '200': {description: 'Updated policy', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdmissionPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    DeliveryAdmissionHold:
+      type: object
+      additionalProperties: false
+      required: [kind, reason]
+      properties:
+        kind: {type: string, enum: [release_cut, wave, manual]}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    DeliveryAdmissionPolicy:
+      type: object
+      additionalProperties: false
+      required: [revision, block_on_nightly_red, nightly_state, holds]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        block_on_nightly_red: {type: boolean}
+        nightly_state: {type: string, enum: [unknown, red, green]}
+        holds: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/DeliveryAdmissionHold'}}
+    DeliveryAdmissionControl:
+      type: object
+      additionalProperties: false
+      required: [revision, binding, holds, fix]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        binding: {$ref: '#/components/schemas/ReviewRunBinding'}
+        holds: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/DeliveryAdmissionHold'}}
+        fix: {type: boolean}
+    DeliveryAdmissionApproval:
+      type: object
+      required: [binding, binding_revision, run_id, kind, author_family, reviewer_family, harness, model, reasoning_effort, verdict, visual_impact, reason]
+      properties:
+        binding: {$ref: '#/components/schemas/ReviewRunBinding'}
+        binding_revision: {type: integer, format: int64, minimum: 1}
+        run_id: {type: string, format: uuid}
+        kind: {type: string, enum: [review, visual]}
+        author_family: {type: string}
+        reviewer_family: {type: string}
+        harness: {type: string}
+        model: {type: string}
+        reasoning_effort: {type: string}
+        verdict: {type: string, enum: [ok, changes]}
+        visual_impact: {type: string, enum: [yes, no, uncertain]}
+        reason: {type: string, maxLength: 2000}
+    DeliveryAdmissionDecision:
+      type: object
+      required: [admissible, reason, hold_reason, visual_required, visual_reason]
+      properties:
+        admissible: {type: boolean}
+        reason: {type: string, description: 'Stable denial or admissible code. Explicit holds precede CI and approval denials.'}
+        hold_reason: {type: string}
+        visual_required: {type: boolean}
+        visual_reason: {type: string}
+    DeliveryAdmission:
+      type: object
+      required: [binding_revision, control, policy, review, visual, decision]
+      properties:
+        binding_revision: {type: integer, format: int64, minimum: 1}
+        control: {$ref: '#/components/schemas/DeliveryAdmissionControl'}
+        policy: {$ref: '#/components/schemas/DeliveryAdmissionPolicy'}
+        review: {oneOf: [{$ref: '#/components/schemas/DeliveryAdmissionApproval'}, {type: 'null'}]}
+        visual: {oneOf: [{$ref: '#/components/schemas/DeliveryAdmissionApproval'}, {type: 'null'}]}
+        decision: {$ref: '#/components/schemas/DeliveryAdmissionDecision'}

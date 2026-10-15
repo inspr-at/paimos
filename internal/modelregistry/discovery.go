@@ -106,12 +106,13 @@ func fetchProviderCatalog(ctx context.Context, client *http.Client, source, key 
 		}
 		out.Facts = append(out.Facts, c.Facts...)
 		out.Models = append(out.Models, c.Models...)
+		out.Skipped += c.Skipped
 		for _, f := range c.Facts {
 			if f.Fact == "model_id" {
 				seenModels[f.Provider+"/"+f.ModelID+"/"+f.Route] = true
 			}
 		}
-		if len(seenModels) > maxDiscoveryModels || len(out.Facts) > maxCatalogFacts {
+		if len(seenModels)+out.Skipped > maxDiscoveryModels || len(out.Facts) > maxCatalogFacts {
 			return out, errors.New("model list identifier limit")
 		}
 		if !c.HasMore {

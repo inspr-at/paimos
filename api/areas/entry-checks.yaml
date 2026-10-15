@@ -65,6 +65,91 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '412': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/person-steps:
+    get:
+      operationId: getNodePersonSteps
+      description: 'Current manual definition items and the ticket human check, with one live person owner, tick authority and whether each request matters now. Access loss falls back immediately to a current project admin. Requires nodes.read; the list is bounded to 97 steps.'
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{$ref: '#/components/parameters/EntryNodeId'}]
+      responses:
+        '200': {description: 'Current person steps', content: {application/json: {schema: {$ref: '#/components/schemas/PersonSteps'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/person-step-owners:
+    get:
+      operationId: listNodePersonStepOwners
+      description: 'Bounded person picker for a current step owner or project admin with nodes.write. Lists active canonical people with current nodes.read in the ticket project. Each page rechecks access; no agent or inaccessible person is offered.'
+      security: [{session: []}]
+      parameters:
+        - {$ref: '#/components/parameters/EntryNodeId'}
+        - {name: check_id, in: query, required: true, schema: {type: string, maxLength: 80}}
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: 'At most 50 current people'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, maxItems: 50, items: {type: object, required: [id, name], properties: {id: {type: string, format: uuid}, name: {type: string}}}}
+                  next_cursor: {type: [string, 'null'], format: uuid}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/person-steps/{checkId}/owner:
+    put:
+      operationId: reassignNodePersonStep
+      description: 'Ask one current person with project access to own this ticket step. Only the current owner or a project admin with nodes.write may reassign, under the tenant/tree fence. Ticket and definition revisions bind the action. Repeating the current owner is a no-op. The event is the audit record and moves the derived Desk request immediately.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/EntryNodeId'}
+        - {name: checkId, in: path, required: true, schema: {type: string, maxLength: 80}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/PersonStepPrecondition'}
+                - type: object
+                  required: [owner_id]
+                  properties:
+                    owner_id: {type: string, format: uuid}
+                    undo_reassignment: {type: integer, minimum: 1, description: 'Only the original actor may reverse this exact latest reassignment at its unchanged ticket revision, to its previous owner who must still have access.'}
+      responses:
+        '200': {description: 'Current person steps', content: {application/json: {schema: {$ref: '#/components/schemas/PersonSteps'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '412': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/person-steps/{checkId}:
+    put:
+      operationId: markNodePersonStep
+      description: 'Tick or undo a manual item or human check as its person owner or a project admin, with nodes.write rechecked inside the final tenant/tree-fenced transaction. Agents cannot tick. Repeating the recorded state is a no-op. The native completion event resolves or reopens the derived Desk request; no second queue owns its state.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/EntryNodeId'}
+        - {name: checkId, in: path, required: true, schema: {type: string, maxLength: 80}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/PersonStepPrecondition'}
+                - type: object
+                  required: [checked]
+                  properties:
+                    checked: {type: boolean}
+      responses:
+        '200': {description: 'Current person steps', content: {application/json: {schema: {$ref: '#/components/schemas/PersonSteps'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '412': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/definitions:
     get:
       operationId: getProjectEntryDefinition
@@ -153,6 +238,41 @@ components:
               expected_workspace_revision: {type: [string, 'null'], format: date-time, description: 'Optional precondition for copying the displayed workspace default; also supports the built-in default revision.'}
               checks: {$ref: '#/components/schemas/EntryDefinitionBlocks'}
   schemas:
+    PersonStepPrecondition:
+      type: object
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: string, format: date-time}
+        definition_revision: {type: [string, 'null'], format: date-time, description: 'Required for manual items; null for the human check.'}
+    PersonStep:
+      type: object
+      required: [id, node_id, check_id, label, owner, checked, active, can_tick, revision, created_at]
+      properties:
+        id: {type: string, format: uuid, description: 'Stable native request identity for this ticket and definition revision.'}
+        node_id: {type: string, format: uuid}
+        check_id: {type: string, maxLength: 80, description: 'human or a manual:<slug> ID.'}
+        label: {type: string, maxLength: 500}
+        label_de: {type: string, maxLength: 500}
+        to_status: {type: string}
+        owner: {type: object, required: [id, name], properties: {id: {type: string, format: uuid}, name: {type: string}}}
+        checked: {type: boolean}
+        active: {type: boolean, description: 'Manual item in the next status block, or a pending human check on Done. Checked items are inactive.'}
+        can_tick: {type: boolean}
+        revision: {type: string, format: date-time}
+        definition_id: {type: [string, 'null'], format: uuid}
+        definition_revision: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+        ticket_key: {type: string}
+        ticket_title: {type: string}
+        project_id: {type: [string, 'null'], format: uuid}
+    PersonSteps:
+      type: object
+      required: [node_id, revision, steps]
+      properties:
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        undo_reassignment: {type: integer, minimum: 1, description: 'Audit event ID for a revision-bound Undo of the reassignment just written.'}
+        steps: {type: array, maxItems: 97, items: {$ref: '#/components/schemas/PersonStep'}}
     EntryDefinitionContext:
       type: object
       required: [project_id, definition, workspace_default, copied_from_checks, can_manage]
@@ -179,7 +299,8 @@ components:
         condition: {type: string, enum: [all, ui, code, blocked, release_notes, releases]}
         kinds: {type: array, maxItems: 16, items: {type: string, maxLength: 64}}
         labels: {type: array, maxItems: 16, items: {type: string, maxLength: 100}, description: 'All listed labels must be present, case-insensitively.'}
-        owner_id: {type: [string, 'null'], format: uuid, description: 'A named person; otherwise the person assignee, then a current project admin.'}
+        owner_id: {type: [string, 'null'], format: uuid, description: 'A named person; otherwise the person assignee, then the named fallback or a current project admin.'}
+        fallback_owner_id: {type: [string, 'null'], format: uuid, description: 'For assignee-first manual items, a named person used when the assignee is not a person with current project access.'}
     EntryDefinition:
       type: object
       required: [id, revision, source, checks]

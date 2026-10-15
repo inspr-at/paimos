@@ -137,6 +137,11 @@ func bootstrapCatalogFacts(ctx context.Context, tx pgx.Tx, tenantID string) erro
 	seen := map[string]bool{}
 	for _, s := range seedModels {
 		provider, model := CatalogIdentity("", s.Harness, s.ID, "")
+		// Verified moving CLI aliases, scoped to this versioned bootstrap.
+		// The launch route retains the alias and advertises no capabilities.
+		if s.Harness == "claude" && (s.ID == "opus" || s.ID == "sonnet") {
+			model = "claude-" + s.ID + "-5.5"
+		}
 		key := provider + "/" + model + "/" + s.Harness + "/" + s.ID
 		if seen[key] {
 			continue

@@ -36,8 +36,8 @@ var (
 
 func TestMain(m *testing.M) {
 	code := m.Run()
-	if testDB != nil {
-		if err := testDB.Close(); err != nil {
+	for _, d := range []*dbtest.DB{testDB, list6000Fixture.db} {
+		if err := d.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "dbtest cleanup: %v\n", err)
 			if code == 0 {
 				code = 1

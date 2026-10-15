@@ -5026,6 +5026,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelResolveAuthorFamilyAliases","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestModelResolveCodexRequiresPrintedIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestModelResolveCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelResolveOwnerRequiredTranscript","tier":"GATED-FULL"}
@@ -5650,6 +5652,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestAithemaContentMigrationLockReleaseAndUniqueRecovery","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestAnthropic55MigrationKeepsHistoryAndActivationPolicy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestAttentionEventsMigrationUpgradeAndReapply","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestBillingSnapshotMigrationBoundsLockWaitAndRetries","tier":"GATED-FULL"}
@@ -5711,6 +5715,8 @@
     {"kind":"go","package":"internal/db","name":"TestMoreHarnessesValidationReleasesInstallationLocksAndResumes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestNestedAndNodelessEventReferences","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestNodeInsertSkipsEmptyReleaseReconciliation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestNodeProjectRootFollowsMoves","tier":"GATED-FULL"}
     ,
@@ -5862,6 +5868,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestNotificationPointersAndNormalBriefingItem","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestPersonStepProjectionIgnoresIrrelevantCoverage","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPreparedLessonProjectionVisibilityAndDecision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestProjectionApprovalLabelRetainsScopeWithoutRationale","tier":"GATED-FULL"}
@@ -5885,6 +5893,14 @@
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableApprovalDoesNotStarveHeldQuestion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableQuestionDoesNotStarveAuthorizedQuestion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionCIExcludesOwnContext","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionDiffReadsMergeBaseAndRenameSides","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionRules","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionStoreAuthenticatedApprovalsAndInvalidation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAppReaderMergeGroupKeepsRequiredChecks","tier":"ESSENTIAL"}
     ,
@@ -6166,6 +6182,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneRefusesWaitingLifecycleAction","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestOpenPullCompareFailureStillObservesRepository","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestPreflightAdmissionMissingRedStaleAndLookupFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}
@@ -6203,6 +6221,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryIncludesCreatorProjectForWorkspaceAgent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestVisualAdmissionClassifier","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestWebhookBodyTimeoutDoesNotPoisonKeepAliveConnection","tier":"ESSENTIAL"}
     ,
@@ -7656,6 +7676,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogScheduledRefreshRequiresOptInAndRechecksIt","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogSkipsUnsupportedIdentifiers","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogSourcesPreserveNativePrecedenceAndUnknown","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}
@@ -7976,6 +7998,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestReviewOrderSavedFallbackPreferencesAndQualification","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestReviewResolutionBindsCodexIsolationAndExplainsMissingGrok","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRevisionFollowsRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRouteSuppressionAccountSkipsAndExpiry","tier":"GATED-FULL"}
@@ -7989,6 +8013,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestSelectorLatestSQLMatchesProfileLine","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestSelectorValidationBoundedLargeCatalog","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestServerSweepAnchorsNeverRunTenantsWithoutCatalogDial","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestStoredModelDisplayAndEffort","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -8415,6 +8441,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestPatchRefusesDifferentKind","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPeopleSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestPersonStepsOwnershipRoutingAndAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlaceRanks","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

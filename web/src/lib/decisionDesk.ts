@@ -6,6 +6,7 @@ import type { DoctrineInboxItem } from './doctrine'
 import { sha256FirstByte } from './avatar.ts'
 import type { MethodLearning } from './knowledge'
 import type { StepupRequest } from './stepup'
+import type { PersonStep } from './personSteps'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
 export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson'
@@ -27,6 +28,8 @@ export interface DeskAsker { principalId: string; sessionId?: string; name?: str
 /** The answer's own delivery as the server reports it (AEON-1339; the read receipt follows with AEON-1340). */
 export type DeskDeliveryState = 'pending' | 'delivered' | 'failed'
 export interface DeskItem {
+  personStep?: PersonStep
+  personStepUndo?: { step: PersonStep; owner?: string; event?: number }
   id: string; kind: DeskKind; projectId: string; projectName: string; projectKey?: string; ticketId?: string; ticketKey?: string
   askers?: DeskAsker[]; meanwhileKind?: DeskMeanwhile; suggested?: DeskOutcome; suggestedBy?: 'agent' | 'ticket' | 'project'
   decidedAt?: string; deliverAfter?: string; deliveryState?: DeskDeliveryState
@@ -161,6 +164,7 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
+  person_step?: PersonStep
   id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent'; project_id?: string
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }

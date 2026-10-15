@@ -887,6 +887,8 @@
     "AEON-1309: nine unchanged panel cases are split into six spec files. A split alone left the historical-budget comparison at 304.841982s, above 300s. Seven open/menu/Escape/no-shift cases remain ESSENTIAL; only malformed-response coverage and the reader negative control move to NIGHTLY. The original conservative 60s estimate is apportioned by case count for gate and nightly packing; no hosted measurement is claimed. Historical prior-gate weight excluding this slice remains 299.838842s and is still bounded below 300s."
     ,
     "AEON-1400: nightlyTiming and tierTiming refresh from hosted nightly run 38732586462. Shards 1-10, 12-14, 16-20 and 22-24 are attempt 1; shards 11, 15 and 21 are attempt 2. Completed batches contribute wall time apportioned by Playwright case duration. agent-rules-shots, knowledge-shots and session-chat-cli recorded zero case duration and keep their one-second placeholder. PR and merge-group packing still reads tierTiming. The twelve-shard full-layout estimate peaks at 13.49 minutes; shard 7 estimates 13.48 minutes."
+    ,
+    "AEON-1425: project-name-wrap was not in hosted nightly run 38732586462. The mbp2606 one-worker run of all eight cases passed in 24.9 seconds including startup; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight. The historical twelve-shard prior gate stays at 299.838842s by charging this file outside that budget."
   ]
   ,
   "nightlyTiming": {

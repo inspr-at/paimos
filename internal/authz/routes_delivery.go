@@ -5,6 +5,10 @@ package authz
 // Route and scope declarations for delivery.
 func init() {
 	registerRoutes("delivery", map[string]string{
+		"GET /api/delivery/{itemId}/admission":                               "delivery.read",
+		"PUT /api/delivery/{itemId}/admission":                               "delivery.manage",
+		"GET /api/projects/{projectId}/delivery-admission":                   "delivery.read",
+		"PUT /api/projects/{projectId}/delivery-admission":                   "delivery.manage",
 		"DELETE /api/delivery/{itemId}/hold":                                 "delivery.manage",
 		"GET /api/delivery":                                                  "delivery.read",
 		"GET /api/delivery/alerts":                                           "delivery.read",
@@ -53,11 +57,13 @@ func init() {
 		"PUT /api/settings/delivery":                                         "delivery.manage",
 	})
 	registerDeclarations("delivery", "project_filtered", ProjectFilteredRoutes, map[string]bool{
-		"DELETE /api/delivery/{itemId}/hold": true,
-		"GET /api/delivery":                  true,
-		"GET /api/delivery/alerts":           true,
-		"GET /api/delivery/enqueue-allowed":  true,
-		"GET /api/nodes/{id}/delivery":       true,
-		"POST /api/delivery/{itemId}/hold":   true,
+		"GET /api/delivery/{itemId}/admission": true,
+		"PUT /api/delivery/{itemId}/admission": true,
+		"DELETE /api/delivery/{itemId}/hold":   true,
+		"GET /api/delivery":                    true,
+		"GET /api/delivery/alerts":             true,
+		"GET /api/delivery/enqueue-allowed":    true,
+		"GET /api/nodes/{id}/delivery":         true,
+		"POST /api/delivery/{itemId}/hold":     true,
 	})
 }
