@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -82,6 +83,12 @@ func BenchmarkBackendMemory(b *testing.B) {
 	dbtest.BindRole(b, d, worker.TenantID, worker.PrincipalID, "owner")
 	seedProject(b, seed.URL, worker.Token)
 	hc := &http.Client{Timeout: 10 * time.Second}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	person := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	backendMemoryRequest(b, ctx, person, seed.URL, "", "POST", "/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, 200)
 	request := func(method, path, body string, status int) []byte {
 		return backendMemoryRequest(b, ctx, hc, seed.URL, worker.Token, method, path, body, status)
 	}
@@ -184,9 +191,12 @@ func BenchmarkBackendMemory(b *testing.B) {
 							}
 						}
 						if iteration < 30 {
-							for _, path := range []string{"/api/kinds", "/api/projects", "/api/nodes/tree?root_id=" + project.ID + "&limit=100", "/api/nodes/" + workIDs[iteration] + "/activity?limit=50", "/api/projects/" + project.ID + "/figures"} {
+							for _, path := range []string{"/api/kinds", "/api/projects", "/api/nodes/tree?root_id=" + project.ID + "&limit=100", "/api/nodes/" + workIDs[iteration] + "/activity?limit=50"} {
 								backendMemoryRequest(b, ctx, hc, srv.URL, worker.Token, "GET", path, "", 200)
 							}
+							// Figures is a person-facing route; exercise its existing
+							// session authority alongside the CLI's scoped agent reads.
+							backendMemoryRequest(b, ctx, person, srv.URL, "", "GET", "/api/projects/"+project.ID+"/figures", "", 200)
 							body := fmt.Sprintf(`{"title":"Memory workload %d"}`, iteration)
 							backendMemoryRequest(b, ctx, hc, srv.URL, worker.Token, "PATCH", "/api/nodes/"+workIDs[iteration], body, 200)
 						}
@@ -230,7 +240,9 @@ func backendMemoryRequest(b *testing.B, ctx context.Context, hc *http.Client, ba
 	if err != nil {
 		b.Fatal("construct workload request")
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
