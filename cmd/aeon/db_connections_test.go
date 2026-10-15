@@ -95,11 +95,10 @@ func TestServeConnectionOriginBudget(t *testing.T) {
 		}
 		return out
 	}
-	call("/api/auth/dev-login", map[string]string{"email": "connections@example.test"})
-	var tenantID, person, project, agent, role string
-	if err := d.Admin.QueryRow(ctx, `SELECT t.id::text,p.id::text FROM tenants t JOIN principals p ON p.tenant_id=t.id AND p.email='connections@example.test' WHERE t.slug='connections'`).Scan(&tenantID, &person); err != nil {
-		t.Fatal(err)
-	}
+	identity := call("/api/auth/dev-login", map[string]string{"email": "connections@example.test"})
+	loggedIn := identity["principal"].(map[string]any)
+	tenantID, person := loggedIn["tenant_id"].(string), loggedIn["id"].(string)
+	var project, agent, role string
 	// A second tenant exercises the server's per-tenant routine dispatch loops.
 	if err := db.EnsureTenant(ctx, pool, "connections-other", "Other"); err != nil {
 		t.Fatal(err)
