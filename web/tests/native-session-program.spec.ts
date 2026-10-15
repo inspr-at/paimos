@@ -140,7 +140,7 @@ test('AEON-1309: fake-host mode changes stay read-only, preserve the menu and re
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`AEON-1309: ${width} ${theme} panel controls, layouts and live-reader anchor stay stable`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
-    const { state, worker, errors } = await setup(page, theme)
+    const { state, worker, errors, world } = await setup(page, theme)
     await page.goto(`/agents/${WORKER}`)
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.getByRole('tab', { name: 'Details', exact: true })).toHaveAttribute('aria-selected', 'true')
@@ -174,6 +174,15 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     const link = panel.getByRole('link', { name: 'Open live terminal' })
     await expect(link).toHaveAttribute('target', '_blank'); await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-terminal.png`) })
+    if (width >= 1100) {
+      await panel.getByRole('button', { name: 'Sessions list', exact: true }).click()
+      await expect(panel).toHaveAttribute('data-layout', 'wide')
+      await expect(page.locator('.agents-list-pane')).toBeHidden()
+      await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-wide.png`) })
+      await panel.getByRole('button', { name: 'Sessions list', exact: true }).click()
+      await expect(panel).toHaveAttribute('data-layout', 'side')
+      await expect(page.locator('.agents-list-pane')).toBeVisible()
+    }
     await panel.getByRole('button', { name: 'More session actions' }).click()
     await page.getByRole('menuitem', { name: /^Full screen/ }).click()
     await expect(panel).toHaveAttribute('data-layout', 'full')
@@ -193,6 +202,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(panel).toHaveAttribute('data-layout', 'side')
     await page.keyboard.press('2')
     await expect(panel.getByRole('tab', { name: 'Chat', exact: true })).toHaveAttribute('aria-selected', 'true')
+    const callsBeforeAuto = world.calls.length
+    await page.setViewportSize({ width: 844, height: 340 })
+    await panel.getByRole('tab', { name: 'Terminal', exact: true }).click()
+    await expect(panel).toHaveAttribute('data-layout', 'full')
+    expect(world.calls.slice(callsBeforeAuto).filter(call => call.method !== 'GET' && call.path.includes('agents:panel.layout'))).toEqual([])
+    await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-short-full.png`) })
     expect(errors).toEqual([])
   })
 }
