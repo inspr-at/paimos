@@ -629,8 +629,9 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
   // AEON-1316 adds its project Definitions spec after the historical budget.
   // Keep the old budget and charge only this independently bounded addition.
+  // FIX4 adds six verdict regressions alongside the original three flows.
   const projectDefinitions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions.spec.ts')
-  assert.ok(projectDefinitions && projectDefinitions.listedTests === 3, 'Project Definitions regressions must remain declared')
+  assert.ok(projectDefinitions && projectDefinitions.listedTests === 9, 'Project Definitions regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
   const priorGate = {
     ...real,
