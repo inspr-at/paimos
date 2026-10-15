@@ -24,29 +24,34 @@ function keyEvent(key: string, region: string, shiftKey = false) {
   return { key, target: new Target(region), shiftKey, metaKey: false, ctrlKey: false, altKey: false,
     defaultPrevented: false, repeat: false, isComposing: false, preventDefault: vi.fn(), stopPropagation: vi.fn() }
 }
-const scrolling = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', ' ', 'PageDown', 'PageUp', 'Home', 'End']
+// AEON-1339: the sheet is the one scroll container. Reading keys stay native on it;
+// arrows choose, as the approved artifact does, and Escape closes.
+const scrolling = [' ', 'PageDown', 'PageUp', 'Home', 'End']
 function desk() {
-  const choose = vi.fn(), navigate = vi.fn(), close = vi.fn(), submit = vi.fn()
+  const choose = vi.fn(), navigate = vi.fn(), close = vi.fn(), submit = vi.fn(), skip = vi.fn(), stamp = vi.fn()
   const keys = handler('agents/DecisionDeskMemo.vue', 'keys', {
-    Element: Target, viewing: { value: false }, fieldTarget: () => false, submitModifier: () => false,
-    mac: false, pager: { value: false }, outcomeKeys: ['O', 'A', 'R', 'D'],
-    item: { value: { choices: [{ id: 'first' }, { id: 'second' }] } }, draft: { value: { optionId: 'first' } },
-    choose, navigate, close, submit,
+    Element: Target, HTMLButtonElement: class {}, viewing: { value: false }, fieldTarget: () => false, submitModifier: () => false,
+    mac: false, pager: { value: false }, keysOpen: { value: false }, finished: { value: false }, outcomeKeys: ['O', 'A', 'R', 'D'], outcomes: ['once', 'always', 'requirement', 'doctrine'],
+    item: { value: { choices: [{ id: 'first' }, { id: 'second' }] } }, draft: { value: { optionId: 'first' } }, editable: { value: true }, question: { value: true },
+    outcomeUnavailable: () => '', status: { value: '' }, ghost: { value: 'skip' }, project: { value: undefined }, memo: { value: null }, decideButton: { value: null },
+    choose, navigate, close, submit, skip, stamp,
   })
-  return { keys, choose, navigate, close, submit }
+  return { keys, choose, navigate, close, submit, skip, stamp }
 }
-describe('Decision Desk selected-answer scrolling', () => {
-  for (const key of scrolling) for (const shift of [false, true]) it(`keeps ${shift ? 'Shift+' : ''}${key} native without changing the answer or memo`, () => {
-    const { keys, choose, navigate, submit } = desk(), event = keyEvent(key, '.answer-slot', shift)
+describe('Decision Desk sheet scrolling', () => {
+  for (const key of scrolling) for (const shift of [false, true]) it(`keeps ${shift ? 'Shift+' : ''}${key === ' ' ? 'Space' : key} native without changing the answer or memo`, () => {
+    const { keys, choose, navigate, submit, skip } = desk(), event = keyEvent(key, '', shift)
     keys(event)
     expect(event.preventDefault).not.toHaveBeenCalled()
-    expect(choose).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled()
+    expect(choose).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled(); expect(skip).not.toHaveBeenCalled()
   })
-  it('retains choice navigation outside the summary and Escape inside it', () => {
+  it('keeps Shift+arrows native and lets plain arrows choose; Escape closes', () => {
     const { keys, choose, close } = desk()
+    const shifted = keyEvent('ArrowDown', '', true); keys(shifted)
+    expect(shifted.preventDefault).not.toHaveBeenCalled(); expect(choose).not.toHaveBeenCalled()
     const down = keyEvent('ArrowDown', ''); keys(down)
     expect(choose).toHaveBeenCalledWith('second'); expect(down.preventDefault).toHaveBeenCalledOnce()
-    keys(keyEvent('Escape', '.answer-slot')); expect(close).toHaveBeenCalledOnce()
+    keys(keyEvent('Escape', '')); expect(close).toHaveBeenCalledOnce()
   })
 })
 describe('retired Release Walker', () => {

@@ -10,7 +10,8 @@ import type { DeliveryText } from '../../lib/deliveryNumbersText'
 import { vClipTip } from '../../directives/clipTip'
 import NightlyStrip from './NightlyStrip.vue'
 
-const props = defineProps<{ model: ChartModel; state: 'loading' | 'error' | 'ready'; text: DeliveryText }>()
+// `small` is the shorter plot inside a tile, `bare` drops the card chrome and the foot for a chart embedded in a tile.
+const props = defineProps<{ model: ChartModel; state: 'loading' | 'error' | 'ready'; text: DeliveryText; small?: boolean; bare?: boolean }>()
 const plot = ref<HTMLElement>()
 const width = ref(0)
 const selected = ref<number | null>(null)
@@ -24,7 +25,7 @@ onBeforeUnmount(() => observer?.disconnect())
 watch(() => props.model.buckets, () => { selected.value = null })
 
 const nightly = computed(() => props.model.kind === 'nightly')
-const H = computed(() => nightly.value ? 70 : 156)
+const H = computed(() => nightly.value ? 70 : props.small ? 124 : 156)
 const W = computed(() => Math.max(160, width.value))
 const n = computed(() => props.model.buckets.length)
 const Lm = computed(() => nightly.value ? 4 : 34), Rm = 6, Tm = 8, Bm = 18
@@ -69,19 +70,27 @@ function drawPanel(panel: ChartPanel, box: Box, main: boolean) {
       else if (run.length > 1) bands.push(`M${run.map(([x, , high]) => `${x},${high}`).join('L')}L${run.slice().reverse().map(([x, low]) => `${x},${low}`).join('L')}Z`)
       run = []
     }
-    panel.band.forEach((pair, k) => { if (!pair) flush(); else run.push([X(k), Y(pair[0]), Y(pair[1])]) })
+    // A bridged line's band also spans observed buckets without a sample.
+    const bridged = panel.lines.some(line => line.bridge)
+    panel.band.forEach((pair, k) => { if (!pair) { if (!(bridged && buckets[k]?.status === 'empty')) flush() } else run.push([X(k), Y(pair[0]), Y(pair[1])]) })
     flush()
   }
-  const sparse = props.model.kind === 'release' || props.model.kind === 'merge' || n.value <= 13
+  const sparse = props.model.sparse || props.model.kind === 'release' || props.model.kind === 'merge' || n.value <= 13
   const lines = ready.value ? panel.lines.map(line => {
     const points = line.values.map((value, k) => value == null ? null : { x: X(k), y: Y(value), partial: buckets[k]?.status === 'partial' })
     const segments: { d: string; partial: boolean }[] = []
+    const joined = points.map(() => false)
     if (line.connect) for (let k = 1; k < points.length; k++) {
-      const a = points[k - 1], b = points[k]
-      if (a && b) segments.push({ d: `M${a.x},${a.y}L${b.x},${b.y}`, partial: a.partial || b.partial })
+      const b = points[k]
+      if (!b) continue
+      // A bridged line reaches back across observed buckets without a sample, never across partial or no-data ones.
+      let j = k - 1
+      if (line.bridge) while (j >= 0 && !points[j] && buckets[j]?.status === 'empty') j--
+      const a = j >= 0 ? points[j] : null
+      if (a) { segments.push({ d: `M${a.x},${a.y}L${b.x},${b.y}`, partial: a.partial || b.partial }); joined[k] = true }
     }
     const dots: Dot[] = points.flatMap((point, k) => point ? [{ ...point, tone: line.tone, last: k === points.length - 1,
-      shown: point.partial || sparse || !line.connect || (!points[k - 1] && !points[k + 1]) || k === points.length - 1 }] : [])
+      shown: point.partial || sparse || !line.connect || (!joined[k] && !points[k + 1]) || k === points.length - 1 }] : [])
     return { tone: line.tone, segments, dots, points }
   }) : []
   // The main target label sits above its line unless data is there; then below.
@@ -133,7 +142,7 @@ const id = computed(() => `dl-chart-${props.model.key}`)
 </script>
 
 <template>
-  <article class="chart-card" :class="{ wide: nightly }" :aria-labelledby="`${id}-title`">
+  <article class="chart-card" :class="{ wide: nightly, bare }" :aria-labelledby="`${id}-title`">
     <div class="c-head">
       <h4 :id="`${id}-title`">{{ model.label }}</h4>
       <span v-if="model.legend === 'two'" class="c-key">
@@ -148,7 +157,7 @@ const id = computed(() => `dl-chart-${props.model.key}`)
       <span v-else class="c-unit">{{ model.unit }}</span>
     </div>
     <p :id="`${id}-readout`" v-clip-tip class="readout" aria-live="polite">{{ readout }}</p>
-    <div ref="plot" class="plot" :class="{ nightly }" tabindex="0" role="group" aria-roledescription="chart" :aria-label="`${text.chartOf} ${model.label}. ${text.keys}`"
+    <div ref="plot" class="plot" :class="{ nightly, small }" tabindex="0" role="group" aria-roledescription="chart" :aria-label="`${text.chartOf} ${model.label}. ${text.keys}`"
       :aria-describedby="`${id}-readout`" @pointermove="point" @pointerdown="point" @pointerleave="leave" @focus="focus" @blur="selected = null" @keydown="key">
       <span v-if="state === 'loading'" class="sk plot-sk" />
       <svg v-else-if="width" :viewBox="`0 0 ${W} ${H}`" :width="W" :height="H" aria-hidden="true">
@@ -187,13 +196,16 @@ const id = computed(() => `dl-chart-${props.model.key}`)
         </template>
       </svg>
     </div>
-    <div class="c-foot"><span>{{ state === 'ready' ? model.foot : model.foot.split(' · ')[0] }}</span></div>
+    <div v-if="!bare" class="c-foot"><span>{{ state === 'ready' ? model.foot : model.foot.split(' · ')[0] }}</span></div>
   </article>
 </template>
 
 <style scoped>
 .chart-card { position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 14px 10px 16px; border-radius: 16px; background: var(--glass); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -22px color-mix(in srgb, var(--primary-line) 35%, transparent); }
 .chart-card.wide { grid-column: 1 / -1; }
+/* Embedded in a tile: the tile is the card. Its region labels sit on the tile's glass, so they take --ink-2 (4.5:1). */
+.chart-card.bare { padding: 0; border-radius: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+.chart-card.bare .g-rlabel:not(.p) { fill: var(--ink-2); }
 .c-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .c-head h4 { flex: 1; min-width: 0; margin: 0; font: 600 13.5px/1.3 var(--font); color: var(--ink); overflow-wrap: anywhere; }
 .c-unit { font: 500 11px/1 var(--mono); color: var(--ink-3); white-space: nowrap; }
@@ -203,6 +215,7 @@ const id = computed(() => `dl-chart-${props.model.key}`)
 .readout { height: 18px; margin: 0; overflow: hidden; font: 500 11px/18px var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; text-overflow: ellipsis; }
 .plot { position: relative; height: 156px; margin: 2px -4px 0; border-radius: 10px; cursor: crosshair; touch-action: pan-y; }
 .plot.nightly { height: 70px; cursor: default; }
+.plot.small { height: 124px; }
 .plot:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .plot-sk { position: absolute; inset: 8px 4px 20px 36px; }

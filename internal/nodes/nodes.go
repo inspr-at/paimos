@@ -1006,8 +1006,8 @@ func loadNode(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (nodeJS
 	return node, nil
 }
 
-// Qualified sort keys: a bare ORDER BY name binds to the text output column,
-// which sorts "10" before "9" and ties every append from the eleventh child on.
+// A bare ORDER BY position would sort the text output column ("10" < "9"),
+// so every child after the tenth would append at rank 10. Qualify the inputs.
 func loadSiblings(ctx context.Context, tx pgx.Tx, parentID *string) ([]sibling, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, position::text
