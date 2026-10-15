@@ -2164,7 +2164,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 /* AEON-1425: one line for the name. Counts wrap below it before the name
    column shrinks under 20rem. display:contents let that column fall to one glyph. */
 .project-page[class*="header-"] .head-flex { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-start; gap: 8px 16px; }
-.project-page[class*="header-"] .head-main { display: flex; flex-direction: column; flex: 1 1 20rem; min-width: min(100%, 20rem); max-width: 100%; }
+.project-page[class*="header-"] .head-main { display: flex; flex-direction: column; flex: 0 0 auto; min-width: 0; max-width: 100%; }
+/* The 20rem basis belongs to the row layout only. In a stacked (column) header it would be a height and leave a band under the description. */
+@container projecthead (width > 760px) {
+  .project-page[class*="header-"] .head-main { flex: 1 1 20rem; min-width: min(100%, 20rem); }
+}
 .project-page[class*="header-"] .title-line { width: 100%; max-width: none; min-width: 0; }
 /* Don't grow: the edit control stays against the words, and the line still shrinks to an ellipsis. */
 .project-page[class*="header-"] .title-line h1 { flex: 0 1 auto; width: auto; max-width: 100%; font-size: 22px; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; overflow-wrap: normal; -webkit-line-clamp: unset; -webkit-box-orient: unset; }
@@ -2190,11 +2194,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 @media (max-width: 900px) { .project-view-settings { display: none; } }
 @container projecthead (max-width: 760px) {
-  .project-page.header-compact .head-flex,
-  .project-page.header-comfortable .head-flex { flex-direction: column; align-items: stretch; }
-  /* A column parent makes the 20rem flex basis a height. Reset both densities. */
-  .project-page.header-compact .head-main,
-  .project-page.header-comfortable .head-main { flex-basis: auto; min-width: 0; width: 100%; }
+  .project-page[class*="header-"] .head-flex { flex-direction: column; align-items: stretch; }
+  /* Stacked: the name column is as tall as its content, in every density and with the panel open. */
+  .project-page[class*="header-"] .head-main { flex: 0 0 auto; min-width: 0; width: 100%; }
   .project-page.header-compact .title-line { width: 100%; max-width: none; }
   .project-page.header-compact .head-stats { display: flex; flex-direction: column; align-items: stretch; width: 100%; max-width: 100%; }
   .project-page.header-compact .head-work { width: 100%; }

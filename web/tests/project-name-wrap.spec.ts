@@ -24,6 +24,8 @@ interface Reading {
   rootFont: number
   stacked: boolean
   mainSlack: number
+  band: number
+  bandNext: string
 }
 
 const overlaps = (a: Box, b: Box) => a.width > 0 && b.width > 0 && a.height > 0 && b.height > 0
@@ -93,6 +95,21 @@ async function readHeader(page: Page): Promise<Reading> {
       overflow: document.querySelector('.project-page')!.scrollWidth - document.querySelector('.project-page')!.clientWidth,
       stacked,
       mainSlack,
+      ...(() => {
+        // Empty band under the description: distance to the nearest header element that continues below it.
+        // Counts beside the description reach below its bottom and so close the band (0).
+        const description = document.getElementById('project-description')!.getBoundingClientRect()
+        let band = Number.POSITIVE_INFINITY
+        let bandNext = 'none'
+        for (const { name, box: placed } of neighbours) {
+          if (['key', 'edit', 'description', 'more'].includes(name)) continue
+          const top = placed.y + pageBox.y
+          if (top + placed.height <= description.bottom + 0.5) continue
+          const gap = Math.max(0, top - description.bottom)
+          if (gap < band) { band = gap; bandNext = name }
+        }
+        return { band, bandNext }
+      })(),
       spill: (() => {
         const pageEl = document.querySelector('.project-page')!
         const edge = pageEl.getBoundingClientRect().right
@@ -119,6 +136,11 @@ async function readHeader(page: Page): Promise<Reading> {
       rootFont: parseFloat(getComputedStyle(document.documentElement).fontSize) || 16,
     }
   })
+}
+
+function assertBand(reading: Reading, label: string) {
+  expect(reading.bandNext, `${label}: a header element follows the description`).not.toBe('none')
+  expect(reading.band, `${label}: gap from the description to ${reading.bandNext}`).toBeLessThanOrEqual(16)
 }
 
 function assertName(reading: Reading) {
@@ -177,6 +199,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
       await expect(title).toHaveAttribute('aria-label', NAME)
       await expect(page.locator('.description-more')).toBeVisible()
       const closed = await readHeader(page)
+      assertBand(closed, `${width} ${theme} ${density} closed`)
       assertName(closed)
       if (density === 'comfortable' && width === 768) expect(closed.stacked, '768 comfortable header stacks').toBe(true)
       if (closed.clipped) {
@@ -195,6 +218,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
       await row.evaluate(el => (el as HTMLElement).click())
       await expect(close).toBeVisible()
       const opened = await readHeader(page)
+      assertBand(opened, `${width} ${theme} ${density} open`)
       assertName(opened)
       if (density === 'comfortable' && (width === 768 || width === 1024)) expect(opened.stacked, `${width} comfortable header stacks once the list is narrow`).toBe(true)
       near(opened.title.x, closed.title.x, `${density} name x while the panel is open`)
@@ -205,6 +229,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
       await close.click()
       await expect(close).toBeHidden()
       const restored = await readHeader(page)
+      assertBand(restored, `${width} ${theme} ${density} restored`)
       assertName(restored)
       near(restored.title.x, closed.title.x, `${density} name x after close`)
       near(restored.title.y, closed.title.y, `${density} name y after close`)
