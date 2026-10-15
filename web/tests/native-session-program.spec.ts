@@ -25,12 +25,6 @@ async function setup(page: Page, theme = 'light') {
   worker.model = 'gpt-6.1-sol'; worker.reasoning_effort = 'xhigh'
   worker.ticket!.title = 'Verbindungswiederherstellung mit revisionsgebundener Sitzungssteuerung und überprüfter Prozessidentität'
   const state = { native: makeNative(), unavailable: false, calls: [] as { path: string; method: string; body: unknown }[], note: 'Working on the assigned change.' }
-  await page.addInitScript(() => Object.assign(window, { panelAnchorDebug: [] }))
-  await page.route('**/src/lib/readerAnchor.ts', async route => {
-    const response = await route.fetch(), original = await response.text()
-    const instrumented = original.replace('restore() {', 'restore() { if (capturedScroller?.id === "session-panel-overview") window.panelAnchorDebug.push({ kind: "restore", marks: marks.map(m => ({ tag: m.el.tagName, cls: m.el.className, top: m.top, current: m.el.getBoundingClientRect().top })), scroll: capturedScroller.scrollTop });')
-    await route.fulfill({ response, body: instrumented })
-  })
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(value => localStorage.setItem('aeon:theme', value), theme)
@@ -174,7 +168,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await refresh(page)
     await expect(panel.locator('.now-step')).toContainText('Neue Erkenntnisse')
     const after = await facts.evaluate(el => el.getBoundingClientRect().top)
-    expect(Math.abs(after - before), JSON.stringify({ before, after, anchors: await page.evaluate(() => (window as unknown as { panelAnchorDebug: unknown[] }).panelAnchorDebug) })).toBeLessThanOrEqual(.5)
+    expect(Math.abs(after - before), 'live content above the reader must not move the facts').toBeLessThanOrEqual(.5)
 
     await panel.getByRole('tab', { name: 'Terminal', exact: true }).click()
     const link = panel.getByRole('link', { name: 'Open live terminal' })

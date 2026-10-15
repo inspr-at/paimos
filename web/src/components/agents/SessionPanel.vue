@@ -136,8 +136,8 @@ watch([() => props.view?.session.host, () => auth.identity?.principal.id], async
 }, { immediate: true })
 const root = ref<HTMLElement>()
 const thread = ref<HTMLElement>()
-// AEON-1279: live facts above the viewport must not move what is being read.
-useReaderAnchor({ scroller: () => thread.value, rows: () => thread.value?.querySelectorAll<HTMLElement>(':scope > *, :scope > section > *') })
+// AEON-1279: anchor visible content, never the clipped absolute Now label.
+useReaderAnchor({ scroller: () => thread.value, rows: () => thread.value?.querySelectorAll<HTMLElement>(':scope > :not(.sr-only):not([aria-hidden="true"]), :scope > section > :not(.sr-only):not([aria-hidden="true"])') })
 const recovery = ref<{ open: (anchor?: HTMLElement) => void }>()
 const removal = ref<{ remove: () => void }>()
 // Same breakpoint as the full-height sheet. Only a managed session with the
