@@ -105,6 +105,15 @@ export async function expectNativeMenu(page: Page) {
     const label = await action.innerText()
     await expect(reason).toHaveText(label.startsWith('Pause') ? "Pause and resume aren't available here yet" : browserReason)
     expect((await reason.innerText()).split('\n')).toHaveLength(1)
+    expect(await reason.evaluate(el => {
+      const range = document.createRange(); range.selectNodeContents(el)
+      return new Set([...range.getClientRects()].map(rect => rect.top)).size
+    }), 'each disabled reason paints on one line').toBe(1)
+    expect(await reason.evaluate(el => {
+      const range = document.createRange(); range.selectNodeContents(el)
+      const text = range.getBoundingClientRect(), menu = el.closest('.panel-menu')!.getBoundingClientRect()
+      return Math.max(menu.left - text.left, text.right - menu.right)
+    }), 'the whole reason fits inside the menu').toBeLessThanOrEqual(.5)
   }
 }
 // Layout saves use a queued preference writer. Await each manual save's real
