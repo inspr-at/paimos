@@ -149,10 +149,12 @@ func TestReviewResolutionBindsCodexIsolationAndExplainsMissingGrok(t *testing.T)
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	pin := profileBySlug(profiles, "codex-6-1-sol-xhigh")
 	account := minimalAccount(t, p, pin)
-	got := decode[WorkResolution](t, &p, "GET", "/api/models/resolve?role=review-gate&author_family=claude&harness=codex", "", 200)
 	const want = "codex exec --ignore-user-config -s read-only -m gpt-6.1-sol -c model_reasoning_effort=xhigh '{prompt}'"
-	if got.OwnerRequired || got.Profile == nil || got.Profile.ID != pin.ID || got.CommandTemplate != want || len(got.Trace.QualifyingAccountIDs) != 1 || got.Trace.QualifyingAccountIDs[0] != account {
-		t.Fatalf("isolated route not usable: %+v", got)
+	for _, filter := range []string{"&harness=codex", ""} {
+		got := decode[WorkResolution](t, &p, "GET", "/api/models/resolve?role=review-gate&author_family=claude"+filter, "", 200)
+		if got.OwnerRequired || got.Profile == nil || got.Profile.ID != pin.ID || got.CommandTemplate != want || len(got.Trace.QualifyingAccountIDs) != 1 || got.Trace.QualifyingAccountIDs[0] != account {
+			t.Fatalf("isolated route not usable: %+v", got)
+		}
 	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		managed, err := ResolveReviewFor(t.Context(), tx, p, WorkQuery{AuthorFamily: "claude", Harness: "codex"}, time.Now())
