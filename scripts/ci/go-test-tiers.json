@@ -3928,6 +3928,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestWorkstationModelReadSnapshots","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestWorkstationOrdinaryKeySurvivesExplicitVisualPermission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestWorkstationOtherPairedComputerCannotFetchChallenge","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestWorkstationPathsAcquireTenantBeforeTree","tier":"ESSENTIAL"}

@@ -2,11 +2,9 @@
 
 package authz
 
-// Route and scope declarations for crossreview.
+// Route declarations for crossreview. The visual-approval permission lives in
+// permissions_crossreview.go so the Policies registry parse can see it.
 func init() {
-	registerPermissions("crossreview", []Permission{
-		{Key: "reviews.visual_approve", Group: "Reviews", Description: "Approve visual review verdicts", Risk: "high", GrantableAt: []string{"workspace", "project"}, AgentGrantable: true, OwnerWorkstationGrantable: false},
-	})
 	registerDeclarations("crossreview", "project_filtered", ProjectFilteredRoutes, map[string]bool{"POST /api/review-runs/{runId}/credential": true})
 	registerRoutes("crossreview", map[string]string{
 		"POST /api/nodes/{nodeId}/review-runs":     "nodes.read",
