@@ -14,7 +14,7 @@ async function installSteps(page: Page, data: Fixtures, mode: 'owner' | 'admin' 
   const manualNode = data.nodes.find(node => node.id === 'n-4')!, humanNode = data.nodes.find(node => node.id === 'n-5')!
   manualNode.state = 'qa'; manualNode.is_leaf = true; manualNode.title = 'Freigabe mit dokumentierter Wiederherstellung und nachvollziehbarer Prüfung'
   humanNode.state = 'done'; humanNode.is_leaf = true; humanNode.human_check = 'Die veröffentlichte Freigabe und die Wiederherstellung auf einem Telefon prüfen'
-  const state = { owner: mode === 'owner' ? { ...me } : { ...mia }, humanOwner: mode === 'owner' ? { ...me } : { ...mia }, checked: false, humanChecked: false, fail: false, holdResponse: undefined as Promise<void> | undefined, committed: 0, projectionReads: 0, calls: [] as { path: string; body: Record<string, unknown> }[] }
+  const state = { owner: mode === 'owner' ? { ...me } : { ...mia }, humanOwner: mode === 'owner' ? { ...me } : { ...mia }, checked: false, humanChecked: false, held: false, fail: false, holdResponse: undefined as Promise<void> | undefined, committed: 0, projectionReads: 0, calls: [] as { path: string; body: Record<string, unknown> }[] }
   const mayTick = (owner = state.owner) => mode === 'owner' && owner.id === me.id || mode === 'admin'
   const steps = (): PersonStep[] => [
     { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', node_id: manualNode.id, check_id: 'manual:release-reviewed', label: longLabel, to_status: 'done', owner: state.owner, checked: state.checked, active: !state.checked, can_tick: mayTick(), revision: manualNode.updated_at, definition_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', definition_revision: definitionRevision, created_at: manualNode.created_at, ticket_key: manualNode.key, ticket_title: manualNode.title, project_id: manualNode.project },
@@ -36,8 +36,8 @@ async function installSteps(page: Page, data: Fixtures, mode: 'owner' | 'admin' 
     }
     if (path === '/api/decision-desk/projection') {
       state.projectionReads++
-      const rows = steps().filter(step => step.active && step.owner.id === me.id).map(step => ({ id: step.id, kind: 'action_request', revision: 1, project_id: step.project_id, title: `Confirm: ${step.label}`, created_at: step.created_at, held: false, can_decide: step.can_tick, source: `/api/nodes/${step.node_id}/person-steps/${step.check_id}`, href: `/decision-desk?item=m:${step.id}`, person_step: step }))
-      return json({ items: rows, counts: { open: rows.length, held: 0, chores: 0 }, has_more: false, as_of: definitionRevision })
+      const rows = steps().filter(step => step.active && step.owner.id === me.id).map(step => ({ id: step.id, kind: 'action_request', revision: 1, project_id: step.project_id, title: `Confirm: ${step.label}`, created_at: step.created_at, held: state.held, can_decide: step.can_tick, source: `/api/nodes/${step.node_id}/person-steps/${step.check_id}`, href: `/decision-desk?item=m:${step.id}`, person_step: step }))
+      return json({ items: rows, counts: { open: rows.length, held: state.held ? rows.length : 0, chores: 0 }, has_more: false, as_of: definitionRevision })
     }
     if (!node) return route.fallback()
     if (path.endsWith('/person-step-owners')) return json({ items: [me, mia].filter(person => person.name.toLowerCase().includes((new URL(request.url()).searchParams.get('q') ?? '').toLowerCase())), next_cursor: null })
@@ -82,7 +82,9 @@ test('AEON-1318 owner controls and person-waiting views stay stable', async ({ b
       const row = page.locator('tr.ticket-row').filter({ hasText: manualNode.key })
       await expect(row.locator('.person-waiting svg')).toBeVisible()
       await expect(row.locator('.person-waiting')).toHaveAttribute('data-tip', `Waiting for ${me.name}: ${longLabel}`)
-      const rows = await controlStability(page, { row, title: row.locator('.title-text'), otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
+      // Fix8 intentionally reclaims an empty phone waiting slot. Row bounds
+      // and actions stay fixed; only phone title content uses that freed room.
+      const rows = await controlStability(page, { row, ...(width === 390 ? {} : { title: row.locator('.title-text') }), status: row.getByRole('button', { name: /^Status:/ }), otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
       await rows.check(() => row.locator('.person-waiting').hover())
       await rows.check(async () => { state.checked = true; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toHaveCount(0) })
       await rows.check(async () => { state.checked = false; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toBeVisible() })
@@ -113,6 +115,54 @@ test('AEON-1318 owner controls and person-waiting views stay stable', async ({ b
   }
 })
 
+// Risk: the waiting slot wraps the kind marker above the title, adding a line
+// to every phone row. The reference uses main's title DOM and flex basis.
+test('AEON-1318 FIX8 phone titles share their kind line and retain main row heights', async ({ browser }, testInfo) => {
+  test.setTimeout(180_000)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height: 1000 }, hasTouch: width === 390, colorScheme: theme, reducedMotion: 'reduce' })
+    try {
+      const page = await context.newPage(), data = fixtures()
+      await mockWork(page, data)
+      await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: theme } }))
+      const { state, waiting, manualNode, humanNode } = await installSteps(page, data)
+      state.humanChecked = true; waiting()
+      humanNode.title = 'Prüfung ohne wartenden Schritt mit dokumentierter Wiederherstellung'
+      data.nodes.splice(0, data.nodes.length, manualNode, humanNode)
+      await page.goto('/p/PHAROS?sort=key&closed=1')
+      const row = page.locator('tr.ticket-row').filter({ hasText: manualNode.key }), plain = page.locator('tr.ticket-row').filter({ hasText: humanNode.key })
+      await expect(row.locator('.person-waiting svg')).toBeVisible()
+      await expect(plain.locator('.person-waiting svg')).toHaveCount(0)
+      const guard = await controlStability(page, { row, plain, kind: row.locator('.ticket-type-icon'), title: row.locator('.title-link'), status: row.getByRole('button', { name: /^Status:/ }), plainTitle: plain.locator('.title-link') })
+      await guard.check(() => row.locator('.person-waiting').hover())
+      await guard.check(() => plain.locator('.title-link').hover())
+      guard.done()
+      if (width === 390) {
+        for (const target of [row, plain]) {
+          const kind = await target.locator('.ticket-type-icon').boundingBox(), title = await target.locator('.title-text').boundingBox()
+          expect(kind).not.toBeNull(); expect(title).not.toBeNull()
+          expect(Math.abs(kind!.y - title!.y), 'kind and first title line').toBeLessThanOrEqual(2)
+        }
+        await expect(plain.locator('.person-waiting')).toBeHidden()
+        const main = await plain.evaluate(element => {
+          const reference = element.cloneNode(true) as HTMLElement
+          reference.style.visibility = 'hidden'
+          reference.querySelector('.person-waiting')?.remove()
+          reference.querySelector<HTMLElement>('.title-link')!.style.flexBasis = 'calc(100% - 30px)'
+          element.after(reference)
+          try { return { row: reference.getBoundingClientRect().height, title: reference.querySelector('.title-link')!.getBoundingClientRect().width } }
+          finally { reference.remove() }
+        })
+        const plainBox = await plain.boundingBox(), titleBox = await plain.locator('.title-link').boundingBox()
+        expect(main.row).toBeGreaterThan(0); expect(main.title).toBeGreaterThan(0)
+        expect(Math.abs(plainBox!.height - main.row), 'non-waiting row keeps main height').toBeLessThanOrEqual(.5)
+        expect(Math.abs(titleBox!.width - main.title), 'non-waiting title keeps main room').toBeLessThanOrEqual(.5)
+      }
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1318-fix8-title-${width}-${theme}.png`) })
+    } finally { await context.close() }
+  }
+})
+
 // Risk: a failed action looks checked, resolving removes the row under the
 // pointer, reassignment leaves the badge stale, or Undo targets another step.
 test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ browser }, testInfo) => {
@@ -123,12 +173,14 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
       const page = await context.newPage(), data = fixtures()
       await mockWork(page, data)
       const { state, steps, manualNode } = await installSteps(page, data)
+      state.held = true
       await page.goto('/decision-desk')
       await page.evaluate(value => document.documentElement.dataset.theme = value, theme)
       const row = page.getByTestId(`desk-row-m:${steps()[0]!.id}`), otherRow = page.getByTestId(`desk-row-m:${steps()[1]!.id}`)
       const open = page.getByTestId('desk-tab-open')
+      const sectionCount = page.locator('.q-group.held .q-group-label > .n')
       const badge = page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk, / })
-      await expect(open).toHaveText('Open2'); await expect(badge).toHaveAccessibleName(/2/)
+      await expect(open).toHaveText('Open2'); await expect(badge).toHaveAccessibleName(/2/); await expect(sectionCount).toHaveText('2')
       const guard = await controlStability(page, { row, otherRow, open })
       state.fail = true
       await guard.check(async () => { await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(row.getByRole('alert')).toContainText('The ticket changed'); await expect(open).toHaveText('Open2') })
@@ -147,28 +199,30 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
           await expect.poll(() => state.projectionReads).toBeGreaterThan(before)
           await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
           await expect(open).toHaveText('Open1')
+          await expect(sectionCount).toHaveText('1')
           await expect(row.getByRole('button', { name: 'Mark checked' })).toBeDisabled()
         } finally { release(); state.holdResponse = undefined }
         await expect(row.getByText('Checked by you · moves to Decided')).toBeVisible()
       })
       await expect(badge).toHaveAccessibleName(/1/)
+      await expect(sectionCount).toHaveText('1')
       expect(state.calls.at(-1)?.body).toMatchObject({ checked: true, expected_revision: state.calls[0]!.body.expected_revision, definition_revision: definitionRevision })
-      await guard.check(async () => { await row.getByRole('button', { name: 'Undo' }).click(); await expect(row.getByRole('button', { name: 'Mark checked' })).toBeVisible(); await expect(open).toHaveText('Open2') })
+      await guard.check(async () => { await row.getByRole('button', { name: 'Undo' }).click(); await expect(row.getByRole('button', { name: 'Mark checked' })).toBeVisible(); await expect(open).toHaveText('Open2'); await expect(sectionCount).toHaveText('2') })
       const more = row.getByRole('button', { name: /^More for/ })
       await guard.check(() => more.hover())
       const revisionBeforeAssign = manualNode.updated_at
       await more.click(); await page.getByRole('menuitem', { name: 'Ask someone else…' }).click()
       const picker = page.getByRole('dialog', { name: 'Who checks this', exact: true })
       await expect(picker.getByRole('button', { name: mia.name })).toBeVisible()
-      await guard.check(async () => { await picker.getByRole('button', { name: mia.name }).click(); await expect(row.getByText(`Asked ${mia.name} · it left your Desk`)).toBeVisible(); await expect(open).toHaveText('Open1') })
+      await guard.check(async () => { await picker.getByRole('button', { name: mia.name }).click(); await expect(row.getByText(`Asked ${mia.name} · it left your Desk`)).toBeVisible(); await expect(open).toHaveText('Open1'); await expect(sectionCount).toHaveText('1'); await expect(badge).toHaveAccessibleName(/1/) })
       guard.done()
       const assignment = state.calls.at(-1)!
       expect(assignment.body).toMatchObject({ owner_id: mia.id, expected_revision: revisionBeforeAssign, definition_revision: definitionRevision })
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-desk-${width}-${theme}.png`) })
       await row.getByRole('button', { name: 'Undo' }).click()
-      await expect(open).toHaveText('Open2')
+      await expect(open).toHaveText('Open2'); await expect(sectionCount).toHaveText('2')
       expect(state.calls.at(-1)?.body).toMatchObject({ owner_id: me.id, undo_reassignment: 701 })
-      await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(open).toHaveText('Open1')
+      await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(open).toHaveText('Open1'); await expect(sectionCount).toHaveText('1')
       await page.reload(); await expect(page.getByTestId(`desk-row-m:${steps()[0]!.id}`)).toHaveCount(0)
     } finally { await context.close() }
   }
@@ -237,7 +291,7 @@ test('AEON-1318 definition editor saves named and assignee-first owners without 
       await stable.check(() => person.selectOption(me.id))
       await stable.check(async () => { await assignee.check(); await expect(fallback).toHaveValue(mia.id); await expect(person).toBeDisabled() })
       world.fail = true
-      await stable.check(async () => { await save.click(); await expect(form.getByRole('status')).toHaveText('Owner policy could not be saved'); await expect(save).toBeEnabled() })
+      await stable.check(async () => { await save.click(); await expect(form.getByRole('status')).toHaveText('Owner policy could not be saved'); await expect(save).toBeEnabled(); await expect(page.locator('.toast.error')).toHaveCount(0) })
       expect(world.definition.checks.done![0]).toEqual(manual)
       stable.done()
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-owner-${width}-${theme}.png`) })
@@ -267,6 +321,12 @@ test('AEON-1318 definition editor saves named and assignee-first owners without 
       expect(world.definition.checks.in_progress![0]).toMatchObject({ label: longLabel, owner_id: mia.id })
       expect(world.definition.checks.done![0]).toMatchObject({ owner_id: me.id, fallback_owner_id: mia.id })
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-saved-${width}-${theme}.png`) })
+      // Card/menu actions have no form footer, so their failures still toast.
+      world.fail = true
+      const cardStable = await controlStability(page, { row, more })
+      await cardStable.check(async () => { await more.click(); await page.getByRole('menuitem', { name: 'Remove', exact: true }).click(); await expect(page.locator('.toast.error')).toHaveText(/Owner policy could not be saved/); await expect(more).toBeEnabled() })
+      cardStable.done()
+      expect(world.definition.checks.done![0]).toMatchObject({ owner_id: me.id, fallback_owner_id: mia.id })
     } finally { await context.close() }
   }
 })

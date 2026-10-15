@@ -99,11 +99,17 @@ const showAllTo = computed(() => {
   return { path: '/decision-desk', query }
 })
 // A scoped Open count matches the list. The header keeps the whole-desk total.
+const openSourceIDs = computed(() => desk.projection ? new Set(desk.projection.items.map(deskItemID)) : null)
+// Retained person-step slots keep Undo still, but only the canonical open
+// source counts them, including while a committed write response is pending.
+const openItems = computed(() => items.value.filter(item => !item.decided && inScope(item)
+  && (!item.personStep || !openSourceIDs.value || openSourceIDs.value.has(item.id))))
 const openCountLabel = computed(() => {
   if (!scopeActive.value) return desk.count ?? '?'
   if (state.value !== 'ready' || desk.count === null) return '?'
-  return items.value.filter(item => !item.decided && inScope(item)).length
+  return openItems.value.length
 })
+const groupOpenCount = (rows: DeskItem[]) => rows.filter(item => openItems.value.includes(item)).length
 const decidedCountLabel = computed(() => items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
 const visible = computed(() => items.value.filter(item => inScope(item) && (item.decided === (filter.value === 'decided') || filter.value === 'open' && item.personStep && settledSteps.value.has(item.id)) && (filter.value === 'open' || !outcomeFilter.value
   || (outcomeFilter.value === 'approvals' ? item.kind === 'approval' : (item.kind === 'question' || item.kind === 'handover') && item.outcome === outcomeFilter.value))))
@@ -546,7 +552,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
       <template v-else-if="filter === 'open'">
         <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon :name="sourceLines.some(line => line.retry) ? 'alert' : 'check'" :size="16" /><span>{{ scopeActive ? emptyCopy : sourceLines.some(line => line.retry) ? 'Nothing to show from the sources that answered' : 'Nothing waits for you' }}</span></p>
         <div v-for="group in [{ key: 'held', label: 'Waiting on you', note: 'something is held up until you answer', rows: heldRows }, { key: 'ready', label: 'When you’re ready', note: 'the agents carry on meanwhile', rows: readyRows }].filter(group => group.rows.length)" :key="group.key" class="q-group" :class="group.key">
-          <p class="q-group-label">{{ group.label }}<span class="n">{{ group.rows.length }}</span><span class="group-note">{{ group.note }}</span></p>
+          <p class="q-group-label">{{ group.label }}<span class="n">{{ groupOpenCount(group.rows) }}</span><span class="group-note">{{ group.note }}</span></p>
           <ul class="items desk-list" :aria-label="group.label">
             <template v-for="item in group.rows" :key="item.id">
               <li v-if="item.personStep"><PersonStepRequest :item="item" @settled="stepSettled" @busy="value => stepBusy(item.id, value)" /></li>

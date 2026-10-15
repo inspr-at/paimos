@@ -1435,11 +1435,15 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-title { grid-area: title; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
+  /* Phones keep main's title line when nothing waits. A waiting mark and its
+     gap share that line with the kind icon instead of wrapping the title. */
+  .person-waiting:empty { display: none; }
+  .title-cell:has(.person-waiting svg) { --person-wait-room: 24px; }
   .title-cell .kind-glyph, .title-cell .ticket-type-icon { margin-top: 2px; }
   /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
      so a third line never shows through the reach below (AEON-140). */
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */
-  .title-link { flex: 1 1 calc(100% - 30px); white-space: normal; font-size: 14.5px; line-height: 1.35; }
+  .title-link { flex: 1 1 calc(100% - 30px - var(--person-wait-room, 0px)); white-space: normal; font-size: 14.5px; line-height: 1.35; }
   .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
@@ -1462,7 +1466,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .tree-row .tree { display: contents; }
   /* The arrow slot (44), type marker (22) and two gaps (16) share one line.
      Reserve all three so a long title cannot wrap under the arrow's reach. */
-  .tree-row .title-link { flex-basis: calc(100% - 82px); }
+  .tree-row .title-link { flex-basis: calc(100% - 82px - var(--person-wait-room, 0px)); }
   .epic-progress { flex-basis: 100%; margin-left: 22px; padding-left: 0; }
   .epic-progress .bar { display: block; width: 96px; }
   .ticket-row.top td { border-top: 0; }

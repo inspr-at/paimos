@@ -11170,6 +11170,8 @@
     ,
     {"kind":"browser","file":"tests/performance.spec.ts","name":"cold ticket page has bounded API requests","config":"playwright.perf.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/person-steps.spec.ts","name":"AEON-1318 FIX8 phone titles share their kind line and retain main row heights","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/person-steps.spec.ts","name":"AEON-1318 definition editor saves named and assignee-first owners without moving controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/person-steps.spec.ts","name":"AEON-1318 inline Desk checks and reassignment settle in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

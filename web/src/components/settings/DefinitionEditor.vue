@@ -16,6 +16,8 @@ const emit = defineEmits<{ change: [checks: DefinitionChecks, applied: () => voi
 const panelBody = ref<HTMLElement>(), uid = useId()
 type Panel = { kind: 'add' | 'menu' | 'conditions' | 'manual' | 'owner'; block: DefinitionStatus; rule?: DefinitionRule; anchor: HTMLElement }
 const panel = ref<Panel | null>(null), condition = ref<DefinitionCondition>('all'), kinds = ref(''), labels = ref(''), text = ref(''), owner = ref('')
+const formOpen = computed(() => !!panel.value && ['conditions', 'manual', 'owner'].includes(panel.value.kind))
+defineExpose({ formOpen })
 const ownerMode = ref<'assignee' | 'named'>('assignee'), fallbackOwner = ref('')
 const personOptions = computed(() => props.people.filter(person => person.kind === 'person'))
 const ownership = () => ({ owner_id: ownerMode.value === 'named' ? owner.value : null, fallback_owner_id: fallbackOwner.value || null })
@@ -135,7 +137,9 @@ function addBack(block: DefinitionStatus, item: DefinitionRule, event: MouseEven
 }
 function conditions() { if (panel.value) panel.value.kind = 'conditions' }
 function indexOfPanel() { return panel.value ? props.checks[panel.value.block]?.findIndex(r => r.id === panel.value?.rule?.id) ?? -1 : -1 }
-watch(() => props.editable, allowed => { if (!allowed) close(false) })
+// A failed save stays readable in its footer even when a conflict disables
+// editing. Identity/access resets still unmount the editor and discard it.
+watch(() => props.editable, allowed => { if (!allowed && !props.error) close(false) })
 onBeforeUnmount(() => close(false))
 </script>
 
@@ -179,7 +183,7 @@ onBeforeUnmount(() => close(false))
               <div class="owner-option"><label class="condition"><input v-model="ownerMode" type="radio" value="named" name="definition-owner" aria-label="One named person" /><b>One named person</b></label><label class="owner-person">For every ticket in this block:<select v-model="owner" class="field" aria-label="The named person" :disabled="ownerMode !== 'named'"><option v-if="!owner" value="" disabled>Choose a person</option><option v-if="owner && !personOptions.some(p => p.id === owner)" :value="owner">Current named person</option><option v-for="person in personOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select></label></div>
             </fieldset><p class="hint">They get each ticket’s step on their Decision Desk once it matters. Project admins can always tick it too.</p></template>
             <template v-if="panel.kind === 'conditions'"><p v-if="fixedCondition" class="fixed-condition"><span>Applies to</span><b>{{ DEFINITION_CONDITIONS[fixedCondition] }}</b></p><fieldset v-else><legend>Applies to</legend><label v-for="option in DEFINITION_CONDITION_OPTIONS" :key="option.value" class="condition"><input v-model="condition" type="radio" :value="option.value" name="definition-condition" :aria-label="DEFINITION_CONDITIONS[option.value]" :aria-describedby="`${uid}-${option.value}-detail`" /><span><b>{{ DEFINITION_CONDITIONS[option.value] }}</b><small :id="`${uid}-${option.value}-detail`">{{ option.detail }}</small></span></label></fieldset><label>Ticket kinds (comma-separated)<input v-model="kinds" class="field" maxlength="1039" autocomplete="off" /></label><label>Required labels (comma-separated)<input v-model="labels" class="field" maxlength="1615" autocomplete="off" /></label><p class="hint">The condition, ticket kind and every required label must match. Leave kinds and labels empty for no extra restriction.</p></template>
-          </div><footer class="pop-actions"><p class="form-error" role="status">{{ error }}</p><button type="button" class="btn" @click="close()">Cancel</button><button type="submit" class="btn primary" :disabled="busy || !valid">{{ panel.kind === 'manual' ? 'Add' : 'Save' }}<KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
+          </div><footer class="pop-actions"><p class="form-error" role="status">{{ error }}</p><button type="button" class="btn" @click="close()">Cancel</button><button type="submit" class="btn primary" :disabled="busy || !valid || !editable">{{ panel.kind === 'manual' ? 'Add' : 'Save' }}<KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
         </form>
       </div>
     </FloatingPanel>
