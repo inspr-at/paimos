@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { DEFINITION_BLOCKS, DEFINITION_CATALOG, DEFINITION_CONDITIONS, DEFINITION_CONDITION_OPTIONS, checkCount, cloneChecks, definitionDiff, fixedRuleCondition, manualRule, ruleCondition, ruleIcon, ruleLabel, ruleWords, type DefinitionChecks, type DefinitionCondition, type DefinitionRule, type DefinitionStatus } from '../../lib/definitions'
+import { DEFINITION_BLOCKS, DEFINITION_CATALOG, DEFINITION_CONDITIONS, DEFINITION_CONDITION_OPTIONS, checkCount, cloneChecks, definitionDiff, fixedRuleCondition, manualRule, ruleCondition, ruleIcon, ruleLabel, ruleOwnerWords, ruleWords, sameRule, type DefinitionChecks, type DefinitionCondition, type DefinitionRule, type DefinitionStatus } from '../../lib/definitions'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import type { ProjectPerson } from '../../lib/api'
@@ -16,6 +16,9 @@ const emit = defineEmits<{ change: [checks: DefinitionChecks, applied: () => voi
 const panelBody = ref<HTMLElement>(), uid = useId()
 type Panel = { kind: 'add' | 'menu' | 'conditions' | 'manual' | 'owner'; block: DefinitionStatus; rule?: DefinitionRule; anchor: HTMLElement }
 const panel = ref<Panel | null>(null), condition = ref<DefinitionCondition>('all'), kinds = ref(''), labels = ref(''), text = ref(''), owner = ref('')
+const ownerMode = ref<'assignee' | 'named'>('assignee'), fallbackOwner = ref('')
+const personOptions = computed(() => props.people.filter(person => person.kind === 'person'))
+const ownership = () => ({ owner_id: ownerMode.value === 'named' ? owner.value : null, fallback_owner_id: fallbackOwner.value || null })
 const register = useProjectSettingsOverlay()
 let unregister: (() => void) | undefined, release: (() => void) | undefined
 const ghosts = ref<{ block: DefinitionStatus; item: DefinitionRule; index: number; height: number }[]>([])
@@ -42,22 +45,32 @@ function note(rule: DefinitionRule, block: DefinitionStatus) {
   return row?.kind === 'added' ? `Added for ${props.projectKey}` : row?.kind === 'moved' ? `Moved for ${props.projectKey}` : row?.kind === 'changed' ? `Changed for ${props.projectKey}` : row?.kind === 'waiting_changed' || row?.kind === 'waiting_removed' ? 'Workspace default changed; this copy is kept' : ''
 }
 function wordsOf(rule: DefinitionRule) {
-  const who = rule.owner_id ? props.people.find(person => person.id === rule.owner_id)?.name ?? 'a named person' : 'the ticket’s assignee, else a project admin'
-  return `${ruleWords(rule)}${manualRule(rule) ? ` · Who ticks: ${who}` : ''}`
+  return ruleWords(rule, personOptions.value)
 }
 function words(rule: DefinitionRule, block: DefinitionStatus) {
   const row = diff.value.find(r => r.block === block && r.item.id === rule.id)
   const current = wordsOf(rule)
-  if ((row?.kind === 'changed' || row?.kind === 'waiting_changed') && row.default) {
+  if (row?.default && !sameRule(rule, row.default)) {
     const label = ruleLabel(rule) === ruleLabel(row.default) ? '' : `${ruleLabel(row.default)} · `
     return `${current} · workspace default: ${label}${wordsOf(row.default)}`
   }
   return current
 }
+// Reserve the actual possible ownership summaries, including their diff, so
+// saving a policy never moves this row's menu or the controls in later rows.
+function ownerSummaries(rule: DefinitionRule, block: DefinitionStatus) {
+  const ids = [...new Set([rule.owner_id, rule.fallback_owner_id, ...personOptions.value.map(person => person.id)].filter((id): id is string => !!id))]
+  const policies = [{ owner_id: null, fallback_owner_id: null }, ...ids.flatMap(id => [{ owner_id: id, fallback_owner_id: null }, { owner_id: null, fallback_owner_id: id }])]
+  return [...new Set(policies.map(policy => words({ ...rule, ...policy }, block)))]
+}
 const catalog = computed(() => DEFINITION_CATALOG.filter(item => !DEFINITION_BLOCKS.some(b => props.checks[b.id]?.some(r => r.id === item.id))).sort((a, b) => Number(b.block === panel.value?.block) - Number(a.block === panel.value?.block)))
 const panelTitle = computed(() => panel.value?.kind === 'add' ? `Add to ${DEFINITION_BLOCKS.find(b => b.id === panel.value?.block)?.name}` : panel.value?.kind === 'manual' ? 'Add a free-text item' : panel.value?.kind === 'owner' ? 'Who ticks this' : panel.value?.kind === 'conditions' ? `${ruleLabel(panel.value.rule!)} applies to` : panel.value?.rule ? ruleLabel(panel.value.rule) : '')
 const split = (value: string) => [...new Set(value.split(',').map(s => s.trim()).filter(Boolean))]
-const valid = computed(() => panel.value?.kind === 'manual' ? !!text.value.trim() && [...text.value.trim()].length <= 200 : split(kinds.value).length <= 16 && split(labels.value).length <= 16 && split(kinds.value).every(v => v.length <= 64) && split(labels.value).every(v => v.length <= 100))
+const valid = computed(() => {
+  if (panel.value?.kind === 'manual') return !!text.value.trim() && [...text.value.trim()].length <= 200
+  if (panel.value?.kind === 'owner') return ownerMode.value === 'assignee' || !!owner.value
+  return split(kinds.value).length <= 16 && split(labels.value).length <= 16 && split(kinds.value).every(v => v.length <= 64) && split(labels.value).every(v => v.length <= 100)
+})
 function close(focus = true) {
   const anchor = panel.value?.anchor
   panel.value = null; unregister?.(); unregister = undefined; release?.(); release = undefined
@@ -70,6 +83,7 @@ async function open(kind: Panel['kind'], block: DefinitionStatus, event: MouseEv
   release = claimSettingsPopover(() => close(false))
   unregister = register({ element: () => panelBody.value, close, submit })
   condition.value = fixedCondition.value ?? (rule ? ruleCondition(rule) : 'all'); kinds.value = rule?.kinds?.join(', ') ?? ''; labels.value = rule?.labels?.join(', ') ?? ''; text.value = ''; owner.value = rule?.owner_id ?? ''
+  ownerMode.value = rule?.owner_id ? 'named' : 'assignee'; fallbackOwner.value = rule?.fallback_owner_id ?? ''
   await nextTick(); panelBody.value?.querySelector<HTMLElement>('input, button:not([disabled])')?.focus({ preventScroll: true })
 }
 function change(checks: DefinitionChecks, applied: () => void = () => {}) { if (props.editable && !props.busy) emit('change', checks, applied) }
@@ -79,14 +93,15 @@ function add(rule: DefinitionRule) {
   const next = cloneChecks(props.checks); (next[target.block] ??= []).push(rule)
   change(next, () => { ghosts.value = ghosts.value.filter(g => g.item.id !== rule.id); close() })
 }
-function freeText() { if (panel.value) { panel.value.kind = 'manual'; text.value = ''; void nextTick(() => panelBody.value?.querySelector('input')?.focus()) } }
+function freeText() { if (panel.value) { panel.value.kind = 'manual'; text.value = ''; owner.value = ''; ownerMode.value = 'assignee'; fallbackOwner.value = ''; void nextTick(() => panelBody.value?.querySelector('input')?.focus()) } }
+function chooseOwner() { if (panel.value) { panel.value.kind = 'owner'; if (!owner.value) owner.value = personOptions.value[0]?.id ?? '' } }
 function submit() {
   if (!valid.value || !panel.value || props.busy) return
   if (panel.value.kind === 'manual') { add({ id: `manual:item-${crypto.randomUUID()}`, label: text.value.trim(), condition: 'all', ...(owner.value ? { owner_id: owner.value } : {}) }); return }
   if (panel.value.kind !== 'conditions' && panel.value.kind !== 'owner') return
   const next = cloneChecks(props.checks), target = panel.value, index = next[target.block]?.findIndex(r => r.id === target.rule?.id) ?? -1
   if (index < 0) return
-  next[target.block]![index] = target.kind === 'owner' ? { ...target.rule!, owner_id: owner.value || null } : { ...target.rule!, condition: fixedCondition.value ?? condition.value, kinds: split(kinds.value), labels: split(labels.value) }
+  next[target.block]![index] = target.kind === 'owner' ? { ...target.rule!, ...ownership() } : { ...target.rule!, condition: fixedCondition.value ?? condition.value, kinds: split(kinds.value), labels: split(labels.value) }
   change(next, () => close())
 }
 function move(direction: number) {
@@ -131,8 +146,8 @@ onBeforeUnmount(() => close(false))
       <ul class="drs">
         <li v-for="row in rows(block.id)" :key="row.item.id" class="dr" :class="{ ghost: row.ghost }" :style="row.height ? { height: `${row.height}px` } : undefined" :data-check="row.item.id">
           <AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" />
-          <span class="dr-l"><b>{{ ruleLabel(row.item) }}</b><small>{{ row.ghost ? 'Removed' : words(row.item, block.id) }}<span v-if="!row.ghost && note(row.item, block.id)" class="phone-note"> · {{ note(row.item, block.id) }}</span></small></span>
-          <span v-clip-tip="note(row.item, block.id)" class="dr-note">{{ row.ghost ? '' : note(row.item, block.id) }}</span>
+          <span class="dr-l"><b>{{ ruleLabel(row.item) }}</b><small :class="{ 'owner-words': manualRule(row.item) && !row.ghost }"><span>{{ row.ghost ? 'Removed' : words(row.item, block.id) }}<span v-if="!row.ghost && note(row.item, block.id)" class="phone-note"> · {{ note(row.item, block.id) }}</span></span><template v-if="manualRule(row.item) && !row.ghost"><span v-for="summary in ownerSummaries(row.item, block.id)" :key="summary" class="owner-space" aria-hidden="true">{{ summary }}<span class="phone-note"> · {{ note(row.item, block.id) || `Changed for ${projectKey}` }}</span></span></template></small></span>
+          <span v-clip-tip="note(row.item, block.id)" class="dr-note" :class="{ 'owner-words': manualRule(row.item) }"><span>{{ row.ghost ? '' : note(row.item, block.id) }}</span><span v-if="manualRule(row.item)" class="owner-space" aria-hidden="true">Changed for {{ projectKey }}</span></span>
           <span class="dr-action"><button v-if="row.ghost && editable" type="button" class="link-btn undo" :disabled="busy" @click="undo(block.id, row.item)">Undo</button>
           <button v-else-if="editable" type="button" class="icon-btn sm flat" :disabled="busy" :aria-label="`More for ${ruleLabel(row.item)}`" aria-haspopup="menu" @click="open('menu', block.id, $event, row.item)"><AppIcon name="more" :size="15" /></button></span>
         </li>
@@ -154,12 +169,15 @@ onBeforeUnmount(() => close(false))
         </div>
         <div v-else-if="panel.kind === 'menu'" role="menu" :aria-label="panelTitle" class="pop-body">
           <button type="button" class="mi" role="menuitem" :disabled="busy || indexOfPanel() <= 0" @click="move(-1)"><AppIcon name="arrow-up" :size="14" />Move up</button><button type="button" class="mi" role="menuitem" :disabled="busy || indexOfPanel() >= (checks[panel.block]?.length ?? 0) - 1" @click="move(1)"><AppIcon name="arrow-down" :size="14" />Move down</button>
-          <button type="button" class="mi" role="menuitem" @click="conditions"><AppIcon name="filter" :size="14" />Applies to…</button><button v-if="panel.rule && manualRule(panel.rule)" type="button" class="mi" role="menuitem" @click="panel.kind = 'owner'"><AppIcon name="person-check" :size="14" />Who ticks this…</button><button type="button" class="mi danger" role="menuitem" :disabled="busy" @click="remove"><AppIcon name="trash" :size="14" />Remove</button>
+          <button type="button" class="mi" role="menuitem" @click="conditions"><AppIcon name="filter" :size="14" />Applies to…</button><button v-if="panel.rule && manualRule(panel.rule)" type="button" class="mi" role="menuitem" @click="chooseOwner"><AppIcon name="person-check" :size="14" /><span><b>Who ticks this…</b><small>{{ ruleOwnerWords(panel.rule, personOptions) }}</small></span></button><button type="button" class="mi danger" role="menuitem" :disabled="busy" @click="remove"><AppIcon name="trash" :size="14" />Remove</button>
         </div>
         <form v-else class="def-form" @submit.prevent="submit">
           <div class="pop-body">
-            <template v-if="panel.kind === 'manual'"><label>What a person confirms<input v-model="text" class="field" maxlength="200" autocomplete="off" /></label><p class="hint">The ticket’s assignee ticks this. If the assignee is an agent or nobody, a project admin ticks it. Only its owner or a project admin may tick.</p></template>
-            <template v-if="panel.kind === 'manual' || panel.kind === 'owner'"><label>Who ticks this<select v-model="owner" class="field"><option value="">The ticket’s assignee, else a project admin</option><option v-if="owner && !people.some(p => p.id === owner)" :value="owner">Current named person</option><option v-for="person in people.filter(p => p.kind === 'person')" :key="person.id" :value="person.id">{{ person.name }}</option></select></label></template>
+            <template v-if="panel.kind === 'manual'"><label>What a person confirms<input v-model="text" class="field" maxlength="200" autocomplete="off" /></label><label>Who ticks this<select v-model="owner" class="field"><option value="">The ticket’s assignee, else a project admin</option><option v-for="person in personOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select></label><p class="hint">One person ticks it on each ticket, from their Decision Desk; agents can’t. It applies to all tickets.</p></template>
+            <template v-if="panel.kind === 'owner'"><fieldset class="owner-options"><legend>Who ticks “{{ ruleLabel(panel.rule!) }}”</legend>
+              <div class="owner-option"><label class="condition"><input v-model="ownerMode" type="radio" value="assignee" name="definition-owner" aria-label="The ticket’s assignee" /><b>The ticket’s assignee</b></label><label class="owner-person">If the assignee is an agent or nobody:<select v-model="fallbackOwner" class="field" :disabled="ownerMode !== 'assignee'"><option value="">A project admin</option><option v-if="fallbackOwner && !personOptions.some(p => p.id === fallbackOwner)" :value="fallbackOwner">Current fallback person</option><option v-for="person in personOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select></label></div>
+              <div class="owner-option"><label class="condition"><input v-model="ownerMode" type="radio" value="named" name="definition-owner" aria-label="One named person" /><b>One named person</b></label><label class="owner-person">For every ticket in this block:<select v-model="owner" class="field" aria-label="The named person" :disabled="ownerMode !== 'named'"><option v-if="!owner" value="" disabled>Choose a person</option><option v-if="owner && !personOptions.some(p => p.id === owner)" :value="owner">Current named person</option><option v-for="person in personOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select></label></div>
+            </fieldset><p class="hint">They get each ticket’s step on their Decision Desk once it matters. Project admins can always tick it too.</p></template>
             <template v-if="panel.kind === 'conditions'"><p v-if="fixedCondition" class="fixed-condition"><span>Applies to</span><b>{{ DEFINITION_CONDITIONS[fixedCondition] }}</b></p><fieldset v-else><legend>Applies to</legend><label v-for="option in DEFINITION_CONDITION_OPTIONS" :key="option.value" class="condition"><input v-model="condition" type="radio" :value="option.value" name="definition-condition" :aria-label="DEFINITION_CONDITIONS[option.value]" :aria-describedby="`${uid}-${option.value}-detail`" /><span><b>{{ DEFINITION_CONDITIONS[option.value] }}</b><small :id="`${uid}-${option.value}-detail`">{{ option.detail }}</small></span></label></fieldset><label>Ticket kinds (comma-separated)<input v-model="kinds" class="field" maxlength="1039" autocomplete="off" /></label><label>Required labels (comma-separated)<input v-model="labels" class="field" maxlength="1615" autocomplete="off" /></label><p class="hint">The condition, ticket kind and every required label must match. Leave kinds and labels empty for no extra restriction.</p></template>
           </div><footer class="pop-actions"><p class="form-error" role="status">{{ error }}</p><button type="button" class="btn" @click="close()">Cancel</button><button type="submit" class="btn primary" :disabled="busy || !valid">{{ panel.kind === 'manual' ? 'Add' : 'Save' }}<KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
         </form>
@@ -171,6 +189,7 @@ onBeforeUnmount(() => close(false))
 <style scoped>
 .dblock { padding-top: 14px; }.db-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 0 2px 6px; }.db-head h3 { font: 600 14px/1.35 var(--font); }.db-head h3 > span { font-weight: 500; color: var(--ink-3); }.add { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 32px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--teal-ink); font: 600 12.5px var(--font); }.add:hover { background: var(--row-hover); }.drs { border-top: 1px solid var(--line); list-style: none; padding: 0; margin: 0; }.dr { display: grid; grid-template-columns: 28px minmax(0,1fr) minmax(0, auto) 44px; align-items: center; column-gap: 12px; min-height: 64px; padding: 8px 2px; border-bottom: 1px solid var(--line); box-sizing: border-box; }.dr-ic { justify-self: center; color: var(--ink-3); }.dr-l { display: grid; gap: 2px; min-width: 0; }.dr-l b { font: 600 13.5px/1.5 var(--font); overflow-wrap: anywhere; }.dr-l small { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); overflow-wrap: anywhere; }.phone-note { display: none; }.dr-note { font-size: 12px; color: var(--ink-2); max-width: 13em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.dr-action { justify-self: end; min-width: 44px; height: 44px; display: grid; place-items: center; }.dr-action .icon-btn { width: 44px; height: 44px; }.dr-action .undo { min-width: 44px; min-height: 44px; }.left .dr-l b, .ghost .dr-l b { color: var(--ink-3); font-weight: 500; }.left, .fold-head { grid-template-columns: 28px minmax(0,1fr) auto; }.none { grid-template-columns: 28px minmax(0,1fr); }.none .dr-l b { font-weight: 500; color: var(--ink-2); }.link-btn { padding: 0; color: var(--ink-2); font-size: 12.5px; background: transparent; border: 0; white-space: nowrap; min-height: 32px; }.undo { justify-self: end; }.lfold { margin-top: 10px; }.fold-head .link-btn { min-inline-size: 4em; }.enforce { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }.enforce > svg { flex: none; margin-top: 3px; }.enforce :deep(.how) { margin-left: 4px; }
 :global(.floating.definition-pop) { padding: 0; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); border-radius: 12px; overflow: hidden; }.def-panel { display: flex; flex-direction: column; min-height: 0; max-height: inherit; }.def-panel:focus { outline: none; }.pop-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; flex: none; border-bottom: 1px solid var(--line); }.pop-head h3 { flex: 1; font: 600 14px/1.4 var(--font); }.pop-body { padding: 8px 12px; overflow: auto; min-height: 0; }.mi { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; color: var(--ink); }.mi:hover { background: var(--row-hover); }.mi > svg { flex: none; color: var(--ink-3); }.mi span { min-width: 0; }.mi b, .mi small { display: block; font-weight: 500; }.mi small { font-size: 12px; color: var(--ink-3); line-height: 1.5; }.mi.danger { color: var(--danger-ink); }.manual-add { border-top: 1px solid var(--line); margin-top: 6px; padding-bottom: 8px; }.manual-add :deep(.how) { margin-left: 8px; }.def-form { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }.def-form .pop-body { display: grid; gap: 14px; }.def-form label:not(.condition) { display: grid; gap: 6px; font-size: 12.5px; }.hint { color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }.condition { display: flex; align-items: center; gap: 10px; height: 44px; font-size: 13px; }.condition input { accent-color: var(--teal-ink); }.def-form fieldset { border: 0; padding: 0; }.def-form legend { font-size: 12px; color: var(--ink-3); }.condition b, .fixed-condition b { display: block; font-weight: 500; }.condition small { display: block; font-size: 12px; line-height: 1.4; color: var(--ink-3); }.fixed-condition { display: grid; gap: 6px; font-size: 13px; }.fixed-condition > span { font-size: 12px; color: var(--ink-3); }.form-error { height: 2.8em; overflow: auto; overflow-wrap: anywhere; font-size: 12px; line-height: 1.4; color: var(--danger-ink); }.pop-actions { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 12px; border-top: 1px solid var(--line); flex: none; }
+.owner-words { display: grid; }.owner-words > span { grid-area: 1 / 1; }.owner-space { visibility: hidden; pointer-events: none; user-select: none; }.owner-options legend { overflow-wrap: anywhere; }.owner-option + .owner-option { margin-top: 12px; }.def-form .owner-person { margin-inline-start: 24px; color: var(--ink-3); }.owner-person .field { min-inline-size: 0; inline-size: 100%; color: var(--ink); }
 @container project-settings-body (max-width: 600px) { .dr { grid-template-columns: 24px minmax(0,1fr) 44px; gap: 2px 8px; }.dr-note { display: none; }.phone-note { display: inline; }.dr > .dr-action { grid-column: 3; grid-row: 1; }.left, .fold-head { grid-template-columns: 24px minmax(0,1fr) auto; }.none { grid-template-columns: 24px minmax(0,1fr); }.db-head { min-height: 50px; }.db-head h3 > span { display: block; font-size: 12px; }.db-head .db-dot { display: none; } }
 @media (max-width: 600px) { :global(.floating.definition-pop.sheet) { height: 100dvh; max-height: 100dvh !important; border-radius: 0; }.def-panel.as-form { height: 100%; }.def-form { flex: 1; }.def-form .pop-body { flex: 1; align-content: start; }.pop-actions { padding-bottom: max(14px,env(safe-area-inset-bottom)); }.pop-actions .btn { flex: 1; }.pop-head { padding-top: max(12px,env(safe-area-inset-top)); } }
 @media (pointer: coarse), (max-width: 600px) { .add, .link-btn, .pop-actions .btn { min-height: 44px; }.dr .icon-btn, .pop-head .icon-btn { height: 44px; width: 44px; } }

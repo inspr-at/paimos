@@ -52,7 +52,11 @@ coverage above 1000 candidate tickets with 422 rather than presenting partial
 totals. Existing tenant
 and project RLS still apply.
 
-The approved P2 Definitions settings editor is not present in this base.
-Its manual-item menu/free-text form must expose the existing `owner_id` and
-`fallback_owner_id` contract once P2 supplies that editor; this package does
-not create a competing settings editor.
+In Project settings › Definitions, a free-text item starts with the ticket’s
+person assignee or a project admin, or a named person chosen while adding it.
+Its row menu’s “Who ticks this…” form chooses between the ticket’s assignee
+with a named fallback (or a project admin), and one named person for every
+ticket. Both choices stay visible while editing. The row describes who ticks
+the item and any difference from the workspace default; changing only the
+fallback counts as a definition difference. Saves retain the definition
+revision checks and the owner’s current project-access validation.

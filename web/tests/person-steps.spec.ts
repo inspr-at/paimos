@@ -5,6 +5,7 @@ import { mockDecisionDesk } from './decision-desk-fixtures'
 import { controlStability } from './control-stability'
 import type { PersonStep } from '../src/lib/personSteps'
 import type { EntryChecks } from '../src/lib/entryChecks'
+import { definitionDiff, type Definition, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
 
 const mia = { id: '22222222-2222-4222-8222-222222222222', name: 'Mia Weber' }
 const definitionRevision = '2026-10-14T10:00:00Z'
@@ -177,6 +178,82 @@ test('AEON-1318 tick controls distinguish owner, project admin, member and agent
       const checklist = page.getByRole('dialog', { name: `${manualNode.key}: Done checks` })
       if (mode === 'member' || mode === 'agent') { await expect(checklist.getByRole('button', { name: 'Mark checked' })).toHaveCount(0); await expect(checklist.getByText(mode === 'agent' ? `A person must tick this: ${mia.name}` : `${mia.name} or a project admin ticks this`)).toBeVisible() }
       else await expect(checklist.getByRole('button', { name: 'Mark checked' })).toBeVisible()
+    } finally { await context.close() }
+  }
+})
+
+// Risk: the settings editor drops a named fallback, makes a person-only check
+// belong to an agent, or moves the owner choices and actions while editing.
+test('AEON-1318 definition editor saves named and assignee-first owners without moving controls', async ({ browser }, testInfo) => {
+  test.setTimeout(180_000)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height: 1000 }, hasTouch: width === 390, colorScheme: theme, reducedMotion: 'reduce' })
+    try {
+      const page = await context.newPage(), data = fixtures()
+      data.people.find(person => person.id === mia.id)!.name = mia.name
+      await mockWork(page, data)
+      await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: theme } }))
+      const manual = { id: 'manual:release-reviewed', label: longLabel, fallback_owner_id: me.id }
+      const baseline: DefinitionChecks = { done: [manual, { id: 'merged' }] }
+      const workspace: Definition = { id: 'workspace-definition', revision: definitionRevision, source: 'workspace', copied_from_revision: null, checks: structuredClone(baseline) }
+      const world = { definition: { ...workspace, id: 'project-definition', source: 'project', copied_from_revision: definitionRevision, checks: structuredClone(baseline) } as Definition, writes: [] as { checks: DefinitionChecks; expected_revision: string }[], fail: false }
+      await page.route('**/api/projects/*/definitions/context', route => route.fulfill({ json: { project_id: 'p-pharos', definition: world.definition, workspace_default: workspace, copied_from_checks: baseline, can_manage: true } satisfies DefinitionContext }))
+      await page.route('**/api/projects/*/definitions', route => {
+        const body = route.request().postDataJSON() as typeof world.writes[number]
+        world.writes.push(body)
+        if (world.fail) return route.fulfill({ status: 503, json: { error: 'Owner policy could not be saved' } })
+        expect(body.expected_revision).toBe(world.definition.revision)
+        world.definition = { ...world.definition, checks: body.checks, revision: new Date(Date.parse(world.definition.revision) + 1000).toISOString() }
+        return route.fulfill({ json: world.definition })
+      })
+      await page.goto('/p/PHAROS/settings/definitions')
+      const card = page.locator('#definitions'), row = card.locator(`[data-check="${manual.id}"]`), more = row.getByRole('button', { name: `More for ${longLabel}`, exact: true })
+      const summary = row.locator('.dr-l small > span').first()
+      await expect(summary).toContainText(`Ticked by the ticket’s assignee, else ${me.name}`)
+      const rowStable = await controlStability(page, { row, more, action: row.locator('.dr-action'), nextMenu: card.locator('[data-check="merged"]').getByRole('button', { name: 'More for Merged to main' }) })
+      await rowStable.check(async () => { await more.click(); await expect(page.getByRole('menuitem', { name: /^Who ticks this…/ }).locator('svg')).toBeVisible() })
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-menu-${width}-${theme}.png`) })
+      await page.getByRole('menuitem', { name: /^Who ticks this…/ }).click()
+      const form = page.getByRole('dialog', { name: 'Who ticks this', exact: true }), assignee = form.getByRole('radio', { name: 'The ticket’s assignee', exact: true }), named = form.getByRole('radio', { name: 'One named person', exact: true })
+      const fallback = form.getByRole('combobox', { name: 'If the assignee is an agent or nobody:', exact: true }), person = form.getByRole('combobox', { name: 'The named person', exact: true })
+      const save = form.getByRole('button', { name: /^Save/ }), cancel = form.getByRole('button', { name: 'Cancel', exact: true })
+      await expect(assignee).toBeChecked(); await expect(fallback).toHaveValue(me.id); await expect(person).toBeDisabled()
+      const stable = await controlStability(page, { ...(width === 390 ? { frame: form } : {}), options: form.locator('fieldset'), assignee, named, fallback, person, save, cancel })
+      await stable.check(() => fallback.selectOption(mia.id))
+      await stable.check(async () => { await named.check(); await expect(fallback).toBeDisabled(); await expect(person).toBeEnabled() })
+      await stable.check(() => person.selectOption(me.id))
+      await stable.check(async () => { await assignee.check(); await expect(fallback).toHaveValue(mia.id); await expect(person).toBeDisabled() })
+      world.fail = true
+      await stable.check(async () => { await save.click(); await expect(form.getByRole('status')).toHaveText('Owner policy could not be saved'); await expect(save).toBeEnabled() })
+      expect(world.definition.checks.done![0]).toEqual(manual)
+      stable.done()
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-owner-${width}-${theme}.png`) })
+      world.fail = false
+      await rowStable.check(async () => { await save.click(); await expect(form).toHaveCount(0); await expect(summary).toContainText(`Ticked by the ticket’s assignee, else ${mia.name}`) })
+      expect(world.definition.checks.done![0]).toMatchObject({ ...manual, owner_id: null, fallback_owner_id: mia.id })
+      expect(definitionDiff(world.definition.checks, workspace.checks)[0]!.kind).toBe('changed')
+      await expect(summary).toContainText(`workspace default: All tickets · Ticked by the ticket’s assignee, else ${me.name}`)
+      await more.click(); await page.getByRole('menuitem', { name: /^Who ticks this…/ }).click()
+      await expect(fallback).toHaveValue(mia.id)
+      await named.check(); await person.selectOption(me.id)
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-named-${width}-${theme}.png`) })
+      await rowStable.check(async () => { await save.click(); await expect(form).toHaveCount(0); await expect(summary).toContainText(`Ticked by ${me.name}`) })
+      expect(world.definition.checks.done![0]).toMatchObject({ owner_id: me.id, fallback_owner_id: mia.id })
+      rowStable.done()
+      await page.reload(); await expect(summary).toContainText(`Ticked by ${me.name}`)
+      const add = card.getByRole('button', { name: 'Add check to Ready', exact: true })
+      await add.click(); await page.getByRole('menuitem', { name: 'Free-text item… Something a person confirms', exact: true }).click()
+      const freeText = page.getByRole('dialog', { name: 'Add a free-text item', exact: true }), text = freeText.getByRole('textbox', { name: 'What a person confirms', exact: true }), who = freeText.getByRole('combobox', { name: 'Who ticks this', exact: true }), addItem = freeText.getByRole('button', { name: /^Add/ })
+      await expect(who).toHaveValue('')
+      const freeStable = await controlStability(page, { text, who, addItem, cancel: freeText.getByRole('button', { name: 'Cancel', exact: true }) })
+      await freeStable.check(() => text.fill(longLabel))
+      await freeStable.check(() => who.selectOption(mia.id))
+      freeStable.done()
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-free-text-${width}-${theme}.png`) })
+      await addItem.click(); await expect(freeText).toHaveCount(0)
+      expect(world.definition.checks.in_progress![0]).toMatchObject({ label: longLabel, owner_id: mia.id })
+      expect(world.definition.checks.done![0]).toMatchObject({ owner_id: me.id, fallback_owner_id: mia.id })
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1318-editor-saved-${width}-${theme}.png`) })
     } finally { await context.close() }
   }
 })
