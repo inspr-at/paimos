@@ -18,6 +18,27 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+// EXPLAIN executes the synthetic insert once, retaining the real app role,
+// RLS and triggers. Its numeric trigger table makes fixture cost visible.
+func explainListSeed(t *testing.T, tx pgx.Tx, query string, args ...any) error {
+	t.Helper()
+	rows, err := tx.Query(t.Context(), "EXPLAIN (ANALYZE, BUFFERS) "+query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return err
+		}
+		if strings.HasPrefix(line, "Trigger ") || strings.HasPrefix(line, "Execution Time:") || strings.Contains(line, "Buffers:") {
+			t.Logf("6000-node seed: %s", line)
+		}
+	}
+	return rows.Err()
+}
+
 // Only synthetic performance fixtures call this, after the measured requests.
 // Keep the failed budget unchanged and collect each actual query once, bounded
 // by both a statement and an overall timeout, under the request's RLS context.
