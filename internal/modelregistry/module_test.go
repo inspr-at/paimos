@@ -289,8 +289,9 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	}
 
 	luna := profileBySlug(profiles, "codex-luna-medium")
+	astra := profileBySlug(profiles, "codex-astra-xhigh")
 	minimalAccount(t, admin, luna)
-	minimalAccount(t, admin, profileBySlug(profiles, "codex-astra-xhigh"))
+	minimalAccount(t, admin, astra)
 	scout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
 	if scout.Source != "aeon" || scout.OwnerRequired || scout.Profile == nil || scout.Profile.ID != luna.ID ||
 		scout.CommandTemplate != "codex exec -m gpt-6-luna -c model_reasoning_effort=medium '{prompt}'" {
@@ -304,17 +305,13 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if status != http.StatusBadRequest || errorText(body) != "role and harness combination is unsupported" {
 		t.Fatalf("unsupported cursor scout %d %s", status, body)
 	}
-	// Automatic review takes the first family after the author's in the family
-	// order with a qualified no-tools adapter (Models v2): Codex cannot verify
-	// read-only and xAI wrote the work, so the enrolled Claude route reviews it.
+	// AEON-1427 qualifies the printed isolated Codex command. Automatic review
+	// takes that first cross-family route while retaining tenant/account gates.
 	fable := profileBySlug(profiles, "claude-fable-xhigh")
 	minimalAccount(t, admin, fable)
 	gate := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=xai", "", http.StatusOK)
-	fableCommand, err := commandTemplate(fable.Harness, fable.Model, fable.Effort, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gate.Profile == nil || gate.Profile.ID != fable.ID || gate.OwnerRequired || gate.CommandTemplate != fableCommand || len(gate.Ladder) < 2 {
+	const isolated = "codex exec --ignore-user-config -s read-only -m gpt-6-astra -c model_reasoning_effort=xhigh '{prompt}'"
+	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired || gate.CommandTemplate != isolated || len(gate.Ladder) != 1 || !gate.Ladder[0].Selected {
 		t.Fatalf("gate %+v", gate)
 	}
 	for _, c := range gate.Ladder {
@@ -322,10 +319,8 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 			t.Fatalf("gate considered the author's family or skipped without a reason: %+v", c)
 		}
 	}
-	if slices.IndexFunc(gate.Ladder, func(c Candidate) bool {
-		return slices.Contains(c.SkipReasons, "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.")
-	}) < 0 {
-		t.Fatalf("gate skipped Codex without its adapter reason: %+v", gate.Ladder)
+	if err := ValidateReviewCommand(astra.Harness, astra.Model, astra.Effort, strings.Replace(isolated, "--ignore-user-config ", "", 1)); err == nil {
+		t.Fatal("gate admitted the same pin without command isolation")
 	}
 	otherProfiles := decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
 	minimalAccount(t, other, profileBySlug(otherProfiles, "claude-fable-xhigh"))
