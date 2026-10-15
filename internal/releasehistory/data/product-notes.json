@@ -6768,56 +6768,40 @@
     "261015121011.0.0": {
       "release_channel": "stable",
       "release_sequence": 134,
-      "snapshot_sha256": "32cdf2adcfe0c83414c361a9f27b89e10741fe21abd565a5dab28817c86dbf56",
-      "captured_at": "2026-10-15T12:10:47Z",
+      "snapshot_sha256": "acbf579ac696c612e1a3bb1b18da0813d121f8cc2a14a22b9ce568730595b60a",
+      "captured_at": "2026-10-15T12:25:39Z",
       "release_revision": 1,
       "items": [
         {
-          "key": "AEON-1290",
-          "pill_en": "Owned agent sessions",
-          "pill_de": "Eigene Agentensitzungen",
-          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
-          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
-          "group": "features"
-        },
-        {
           "key": "AEON-1315",
-          "pill_en": "Clear ready and done",
-          "pill_de": "Klare Bereit- und Fertig-Regeln",
-          "benefit_en": "Each project shows what a ticket needs before it is ready, in QA or done, and agents cannot skip a step.",
-          "benefit_de": "Jedes Projekt zeigt, was ein Ticket vor Bereit, QA oder Fertig braucht; Agenten können keinen Schritt überspringen.",
+          "pill_en": "Clear status checks",
+          "pill_de": "Klare Statusprüfungen",
+          "benefit_en": "Each project shows the checks a ticket must pass to move to In progress, QA or Done; agents can move it only once those checks pass.",
+          "benefit_de": "Jedes Projekt zeigt, welche Prüfungen ein Ticket für In Arbeit, QA oder Erledigt bestehen muss; Agenten können es erst danach verschieben.",
           "group": "features"
         },
         {
           "key": "AEON-1316",
-          "pill_en": "Clear ready and done",
-          "pill_de": "Klare Bereit- und Fertig-Regeln",
-          "benefit_en": "Each project shows what a ticket needs before it is ready, in QA or done, and agents cannot skip a step.",
-          "benefit_de": "Jedes Projekt zeigt, was ein Ticket vor Bereit, QA oder Fertig braucht; Agenten können keinen Schritt überspringen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1333",
-          "pill_en": "Faster pull request checks",
-          "pill_de": "Schnellere PR-Prüfungen",
-          "benefit_en": "Pull requests are tested by real impact, so more run at once and merge sooner; main stays fully protected.",
-          "benefit_de": "Pull Requests werden nach echter Wirkung geprüft; mehr laufen gleichzeitig und werden früher gemergt; main bleibt voll geschützt.",
+          "pill_en": "Clear status checks",
+          "pill_de": "Klare Statusprüfungen",
+          "benefit_en": "Each project shows the checks a ticket must pass to move to In progress, QA or Done; agents can move it only once those checks pass.",
+          "benefit_de": "Jedes Projekt zeigt, welche Prüfungen ein Ticket für In Arbeit, QA oder Erledigt bestehen muss; Agenten können es erst danach verschieben.",
           "group": "features"
         },
         {
           "key": "AEON-1338",
-          "pill_en": "Lessons never lost",
-          "pill_de": "Keine Lehre geht verloren",
-          "benefit_en": "An incident or regression ticket can only close once its lesson is written down where others find it.",
-          "benefit_de": "Ein Incident- oder Regressions-Ticket schließt erst, wenn die Lehre dort festgehalten ist, wo andere sie finden.",
+          "pill_en": "Lessons checked before Done",
+          "pill_de": "Lehren vor dem Abschluss",
+          "benefit_en": "By default, incident and regression tickets need a recorded lesson, or a stated reason why none is needed, before Done; people can override with a recorded reason.",
+          "benefit_de": "Standardmäßig brauchen Incident- und Regressions-Tickets vor Erledigt eine festgehaltene Lehre oder eine Begründung, warum keine nötig ist; Personen können mit protokollierter Begründung übersteuern.",
           "group": "features"
         },
         {
           "key": "AEON-1339",
           "pill_en": "Calmer Decision Desk",
           "pill_de": "Ruhigerer Decision Desk",
-          "benefit_en": "The Decision Desk closes once everything is decided and matches its approved design.",
-          "benefit_de": "Der Decision Desk schließt sich, sobald alles entschieden ist, und entspricht dem freigegebenen Design.",
+          "benefit_en": "Question and approval rounds on the Decision Desk close by themselves after the last decision; lesson memos stay open so they can be undone.",
+          "benefit_de": "Frage- und Freigaberunden im Decision Desk schließen nach der letzten Entscheidung von selbst; Lehren bleiben zum Zurücknehmen offen.",
           "group": "features"
         },
         {
@@ -6837,27 +6821,19 @@
           "group": "features"
         },
         {
-          "key": "AEON-1355",
-          "pill_en": "Snappier screens",
-          "pill_de": "Schnellere Ansichten",
-          "benefit_en": "Lists, filters and tickets respond at once instead of after a noticeable pause.",
-          "benefit_de": "Listen, Filter und Tickets reagieren sofort statt nach einer spürbaren Pause.",
-          "group": "features"
-        },
-        {
           "key": "AEON-1358",
           "pill_en": "Work at a glance",
           "pill_de": "Arbeit auf einen Blick",
-          "benefit_en": "Every view shows its work in hours at a glance: completed, done, in progress and open.",
-          "benefit_de": "Jede Ansicht zeigt ihre Arbeit in Stunden auf einen Blick: abgeschlossen, erledigt, in Arbeit und offen.",
+          "benefit_en": "Project work views show estimated hours by status at a glance.",
+          "benefit_de": "Arbeitsansichten im Projekt zeigen die geschätzten Stunden nach Status auf einen Blick.",
           "group": "features"
         },
         {
           "key": "AEON-1359",
-          "pill_en": "Time per status",
-          "pill_de": "Zeit pro Status",
-          "benefit_en": "See how long work typically stays in each status and where a ticket spent its time.",
-          "benefit_de": "Sichtbar, wie lange Arbeit typischerweise in jedem Status bleibt und wo ein Ticket seine Zeit verbracht hat.",
+          "pill_en": "Time per workflow step",
+          "pill_de": "Zeit pro Arbeitsschritt",
+          "benefit_en": "See how long work typically takes per workflow step, and a ticket's recorded status history.",
+          "benefit_de": "Sichtbar wird, wie lange Arbeit typischerweise pro Arbeitsschritt dauert, und die aufgezeichnete Statushistorie eines Tickets.",
           "group": "features"
         },
         {
@@ -6872,24 +6848,24 @@
           "key": "AEON-1363",
           "pill_en": "Clean lesson hint",
           "pill_de": "Sauberer Lektionen-Hinweis",
-          "benefit_en": "The lesson hint on the Knowledge page reads correctly and stays on one line.",
-          "benefit_de": "Der Lektionen-Hinweis auf der Wissensseite ist korrekt formuliert und bleibt in einer Zeile.",
+          "benefit_en": "The lesson hint on the Knowledge page uses the right singular or plural, and its arrow no longer wraps onto a line of its own.",
+          "benefit_de": "Der Lektionen-Hinweis auf der Wissensseite verwendet die richtige Ein- oder Mehrzahl; der Pfeil rutscht nicht mehr allein in eine neue Zeile.",
           "group": "fixes"
         },
         {
           "key": "AEON-1370",
           "pill_en": "Safe agent rollbacks",
           "pill_de": "Sichere Agenten-Rücknahmen",
-          "benefit_en": "Computers paired with Aeon keep working when an update is rolled back.",
-          "benefit_de": "Mit Aeon gekoppelte Computer arbeiten weiter, auch wenn ein Update zurückgenommen wird.",
+          "benefit_en": "Computers paired with Aeon keep state the previous version can still read, so an update can be rolled back; running or unconfirmed sessions still block the restart for safety.",
+          "benefit_de": "Mit Aeon gekoppelte Computer behalten einen Zustand, den auch die vorige Version lesen kann, sodass sich ein Update zurücknehmen lässt; laufende oder unbestätigte Sitzungen sperren den Neustart weiterhin zur Sicherheit.",
           "group": "fixes"
         },
         {
           "key": "AEON-1371",
           "pill_en": "Fix rounds unblocked",
           "pill_de": "Korrekturrunden frei",
-          "benefit_en": "Fix and merge-main rounds on an open pull request start again, while real rebuilds of finished work stay blocked.",
-          "benefit_de": "Korrektur- und Merge-Runden auf einem offenen Pull Request starten wieder; echte Neubauten fertiger Arbeit bleiben gesperrt.",
+          "benefit_en": "Fix and merge-main rounds can continue on the exact branch of the open pull request; permission, capacity and duplicate-builder checks still apply.",
+          "benefit_de": "Korrektur- und Merge-main-Runden können auf genau dem Branch des offenen Pull Requests weiterarbeiten; Berechtigungs-, Kapazitäts- und Doppelbau-Prüfungen gelten weiter.",
           "group": "fixes"
         },
         {
@@ -6904,8 +6880,8 @@
           "key": "AEON-1373",
           "pill_en": "Messaging-only helpers",
           "pill_de": "Helfer nur für Nachrichten",
-          "benefit_en": "Agents can give a helper exactly a messaging inbox, short-lived and audited, without asking a person to create keys.",
-          "benefit_de": "Agenten können einem Helfer genau ein Nachrichten-Postfach geben, kurzlebig und protokolliert, ohne dass ein Mensch Schlüssel anlegen muss.",
+          "benefit_en": "Authorized person-owned coordinator or full-access agents can create an audited, inbox-only helper for the same owner, with a key valid for at most 30 days.",
+          "benefit_de": "Berechtigte personeneigene Koordinator- oder Vollzugriffsagenten können für dieselbe Person einen protokollierten Helfer nur mit Postfach anlegen, mit einem höchstens 30 Tage gültigen Schlüssel.",
           "group": "features"
         }
       ]
