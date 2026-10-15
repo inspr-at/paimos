@@ -2,9 +2,10 @@
 // Historical selector proof. Unresolved and inherited rows are not causal proof.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { dirname, posix } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { select, key, semanticRegistryPattern, registryImpact, browserScopeNoneAllowlist, webGraph } from './core.mjs'
 import { schedulingDecision } from './diff.mjs'
@@ -18,6 +19,33 @@ const staticRow = row => !!(row.alwaysOnStatic || row.replay?.s2?.alwaysOnStatic
 const git = (args, options = {}) => execFileSync('git', args, { cwd: root, timeout: 30_000, maxBuffer: 128 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'], ...options })
 const blobs = new Map()
 const snapshots = new Map()
+const historicalSha = /^[a-f0-9]{40}$/
+
+// A depth-1 checkout can resolve an old commit through the commit graph and
+// still lack its tree. Fetch those commits; do not widen the workflow checkout.
+function treeReady(sha, gitFn) {
+  try {
+    gitFn(['rev-parse', '--verify', '--quiet', `${sha}^{tree}`])
+    return true
+  } catch (error) {
+    const text = `${error.stderr ?? ''}\n${error.message ?? ''}`
+    if (error.status === 1 || error.status === 128 || /not a (?:valid object name|tree object)|Needed a single revision|bad revision|ambiguous argument/.test(text)) return false
+    throw error
+  }
+}
+
+export function ensureTrees(shas, gitFn = git) {
+  const missing = []
+  for (const sha of new Set(shas)) {
+    if (!historicalSha.test(sha)) throw new Error(`refusing non-sha historical tree ${sha}`)
+    if (!treeReady(sha, gitFn)) missing.push(sha)
+  }
+  if (missing.length >= 64) throw new Error(`too many missing historical trees (${missing.length})`)
+  if (!missing.length) return
+  gitFn(['fetch', '--no-tags', '--depth=1', 'origin', ...missing], { timeout: 120_000 })
+  const still = missing.filter(sha => !treeReady(sha, gitFn))
+  if (still.length) throw new Error(`historical trees still missing after fetch: ${still.slice(0, 4).join(',')}`)
+}
 
 function snapshot(sha) {
   if (snapshots.has(sha)) {
@@ -110,6 +138,9 @@ test('AEON-1334 historical corpus replay has zero proof misses', { timeout: 300_
   }
   const missedFiles = new Set(rows.filter(row => !row.replay?.s2?.effectiveSelected && !staticRow(row)).map(row => fileOf(row.expectedFailureKey)).filter(Boolean))
   assert.deepEqual(new Set([...obligations.browserFiles, ...obligations.unitFiles]), missedFiles)
+  const trees = [...new Set(rows.filter(row => !staticRow(row)).map(row => row.treeBeforeFix))]
+  assert.ok(trees.length > 0 && trees.length < 64, `historical trees ${trees.length}`)
+  ensureTrees(trees)
   const plans = new Map()
   const counts = { proofMisses: [], rejectedAsProof: 0, staticObligations: 0, unregisteredProof: 0, fullLiteralMisses: [] }
   for (const row of rows) {
@@ -181,4 +212,56 @@ test('AEON-1334 historical corpus replay has zero proof misses', { timeout: 300_
   obligations.cost.typicalExtraNightlyCases = extraCases
   // The figure is reported from this assertion; the compact file stores the full-gate cost.
   assert.equal(extraCases, obligations.cost.typicalExtraNightlyCases)
+})
+
+function fixtureGit(cwd, args, options = {}) {
+  return execFileSync('git', args, {
+    cwd, timeout: options.timeout ?? 30_000, maxBuffer: 8 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.com', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.com' },
+    ...options,
+  })
+}
+
+test('AEON-1334 shallow checkout fetches a missing historical tree before ls-tree', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-1334-trees-'))
+  const origin = join(directory, 'origin')
+  const checkout = join(directory, 'checkout')
+  try {
+    fixtureGit(directory, ['init', '-b', 'main', origin])
+    writeFileSync(join(origin, 'note.txt'), 'a\n')
+    fixtureGit(origin, ['add', 'note.txt'])
+    fixtureGit(origin, ['commit', '-m', 'A'])
+    const sha = fixtureGit(origin, ['rev-parse', 'HEAD']).toString().trim()
+    writeFileSync(join(origin, 'note.txt'), 'b\n')
+    fixtureGit(origin, ['add', 'note.txt'])
+    fixtureGit(origin, ['commit', '-m', 'B'])
+    fixtureGit(origin, ['config', 'uploadpack.allowReachableSHA1InWant', 'true'])
+    fixtureGit(directory, ['clone', '--depth', '1', '--no-local', `file://${origin}`, checkout])
+    const calls = []
+    const gitFn = (args, options) => { calls.push(args); return fixtureGit(checkout, args, options) }
+    assert.throws(() => fixtureGit(checkout, ['ls-tree', '-r', '-z', sha]), /not a tree object|Not a valid object name/)
+    ensureTrees([sha], gitFn)
+    assert.deepEqual(calls.find(args => args[0] === 'fetch'), ['fetch', '--no-tags', '--depth=1', 'origin', sha])
+    fixtureGit(checkout, ['rev-parse', '--verify', '--quiet', `${sha}^{tree}`])
+    fixtureGit(checkout, ['ls-tree', '-r', '-z', sha])
+    const fetched = calls.length
+    ensureTrees([sha, sha], gitFn)
+    assert.ok(calls.slice(fetched).every(args => args[0] === 'rev-parse'))
+    assert.equal(calls.filter(args => args[0] === 'fetch').length, 1)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('AEON-1334 refuses a wide or non-sha set of missing historical trees', () => {
+  const absent = sha => {
+    const error = new Error(`fatal: not a tree object: ${sha}`)
+    error.status = 128
+    error.stderr = Buffer.from(`fatal: not a tree object: ${sha}\n`)
+    throw error
+  }
+  assert.throws(() => ensureTrees(['main'], absent), /refusing non-sha historical tree/)
+  const wide = Array.from({ length: 64 }, (_, index) => index.toString(16).padStart(40, '0'))
+  assert.throws(() => ensureTrees(wide, absent), /too many missing historical trees \(64\)/)
+  assert.deepEqual(ensureTrees([], absent), undefined)
 })

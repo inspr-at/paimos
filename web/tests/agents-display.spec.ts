@@ -257,17 +257,17 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     // Each action in the sheet's head keeps its whole label (AEON-1062): on a phone a row that is too
     // narrow wraps, so no label spills past its button or the sheet's edge (the panel overflow below).
     // AEON-1212 / #592 put the actions in the unified pane head.
-    const actions = panel.getByRole('group', { name: 'Session actions' }).getByRole('button')
+    const actions = panel.getByRole('group', { name: 'Panel actions' }).getByRole('button')
     expect(await actions.count()).toBeGreaterThan(0)
     for (const action of await actions.all()) expect(await action.evaluate(el => el.scrollWidth - el.clientWidth), await action.innerText()).toBeLessThanOrEqual(1)
     await panel.screenshot({ path: testInfo.outputPath(`session-sheet-${width}-${theme}.png`) })
     // The Messages tab is Chat since AEON-977.
     await expectStableControls({
-      controls: { overview: panel.getByRole('tab', { name: 'Overview' }), chat: panel.getByRole('tab', { name: 'Chat' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
+      controls: { details: panel.getByRole('tab', { name: 'Details' }), chat: panel.getByRole('tab', { name: 'Chat' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
       scrollAreas: { panel },
       interactions: [
         { name: 'show the chat', run: async () => { await panel.getByRole('tab', { name: 'Chat' }).click(); await expect(panel.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true') } },
-        { name: 'return to reported progress', run: async () => { await panel.getByRole('tab', { name: 'Overview' }).click(); await expect(panel.locator('.now-eta .report-source')).toBeVisible() } },
+        { name: 'return to reported progress', run: async () => { await panel.getByRole('tab', { name: 'Details' }).click(); await expect(panel.locator('.now-eta .report-source')).toBeVisible() } },
       ],
     })
     if (shots) await page.screenshot({ path: join(shots, `agents-session-details-${width}-${theme}.png`) })
