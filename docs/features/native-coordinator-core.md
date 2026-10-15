@@ -12,7 +12,11 @@ Managed coordinator registration uses the existing `/api/projects/{projectId}/ha
 
 The owner-only local pilot route is `POST /v1/native-sessions/start`. Requests and responses carry `X-Aeon-Session-Protocol: aeon-native-session/1`. Its strict envelope has `protocol`, `request_id`, `method: start`, `expected_binding: null`, and `params` containing the CLI start request with the same request ID. Input/control go through the already bound managed session ports. C0/I1 maps this pilot DTO to the frozen owned-session protocol; no new public server route or existing response schema is changed here.
 
-Local `lead-runtime-*.json` receipts move from schema 1 to schema 2. Explicit forward decoding preserves old launch/ownership evidence and grants no native authority. Version 1 rejects native fields; unknown future schemas refuse with a version error. Schema 2 carries root/resume provenance and bounded content-free input/control attempt digests, excluding prompt/final/tool content and child credentials. The released schema-1 daemon rejects these receipts before dispatch. A restart retains active or uncertain native ownership and never adopts a saved PID, automatically resumes, or replays uncertain input.
+Local `lead-runtime-*.json` receipts retain the version-1 envelope read by release 131 (`261012211543.0.0`). Release 133 (`261014191553.0.0`, AEON-1261) unconditionally wrote version 2 there; the released reader rejects `version != 1` even for settled receipts. AEON-1370 restores the legacy envelope and writes native major-2 root/resume provenance and bounded content-free input/control attempt digests beside it in `native-lead-v2-*.json`. These exclude prompt/final/tool content and child credentials. Readers ignore unknown fields and accept higher nonnegative `minor_version` values within a supported major; unknown majors still refuse. A future breaking major must use another adjacent file and preserve the prior reader’s safety fence.
+
+Release 131 loses access to native resume/input provenance while downgraded; that evidence stays in the adjacent file for the current daemon. Active native reservations and attempted or uncertain writers still block both versions, including reservations without a fork. Only abandoned or fully settled native receipts permit rollback. The compatibility fence is committed before native provenance and settlement last; partial writes, missing provenance and disagreeing files fail closed. Startup converts safe retained release-133 receipts into this compatible format after checking ownership. No saved PID is adopted, native session automatically resumed, or uncertain input replayed.
+
+`scripts/release-rehearsal-native.sh` runs `TestAgentdStateDowngradeRoundTrip`: the current writer, a frozen release-131 decoder/startup fence, and the current reader/restart consume scratch state under Go `t.TempDir()`. It also checks retained-owner refusal, additive minor versions, settled release-133 repair and an interrupted sidecar write. It never opens the real paired state or Keychain.
 
 The fake-SDK tests cover streamed input, exact correlation, local persistence/resume, grant/tool denial, void interrupt, confirmed close, managed root registration, the exit barrier, retained idle occupancy, CLI routing and schema refusal. Tests never call a real model/account or browser.
 
@@ -21,3 +25,21 @@ P1b/I1 still needs authorized server intents, managed generation/binding creatio
 The fake-SDK installation copies Node into each test's owned directory outside its workspace, preserving production dependency checks even when the host's Node prefix has unsafe permissions. Ownership migration fixtures use canonical UTC timestamps without weakening their equality assertion. A subprocess regression reruns all four affected behaviors with a world-writable Node prefix and `TZ=UTC`, requiring each named test to execute and pass.
 
 Validation for the P1a handoff (2026-10-13, fix round 2): the guarded remote run passed the full `internal/agentd`, `internal/cli`, `internal/harness`, `internal/localjournal`, and `internal/reportercontract` suites. The final focused native run passed again (`agentd` 4.150s). An isolated negative control retained the original `277b0eb8` fixtures and reproduced all four CI failures under the same host conditions; its diagnostic commit is outside the delivery branch. The guarded static check with `--merge-main` exited 0: 42 checks passed, zero optional skips. Earlier busy refusals were retried and were never counted as passes. Ten new behavior tests are registered in the Go tier manifest; existing S2/S3 source globs cover the new files. Browser specs are not applicable to this source-only slice. No public OpenAPI schema, SQL migration, permission registry, running session, push, deployment or model review gate was changed or executed by this package.
+
+AEON-1370 validation (2026-10-15): the focused Go run passed
+`TestAgentdStateDowngradeRoundTrip`,
+`TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion` and
+`TestLeadRuntimeUnattemptedReceiptDoesNotFreezeStartup` in 0.443 s. Restoring
+the pre-fix writer on a temporary scratch branch made all four safe receipt
+cases fail at the frozen release-131 startup fence; the scratch branch was
+removed and the committed fix restored. An isolated execution of the real
+native rehearsal script confirmed the new Go invocation and propagation of
+its nonzero exit. Canonical manifest checks passed 28 tests; the ownership
+audit passed 33. Existing S2 source globs cover the three new Go files; the
+only new registry row is the ESSENTIAL downgrade behavior test. The requested
+full Go suites were refused by the guarded remote runner for capacity, and
+the remote static check was paused by night protocol (both exit 3, neither
+counted as green). The broader tier/web tooling run exited 1 with missing Vue
+dependencies in this worktree. Full Go/static validation remains outstanding
+for the coordinator/CI. No real pairing state, Keychain item, model CLI,
+review gate, deployment or origin push was used.
