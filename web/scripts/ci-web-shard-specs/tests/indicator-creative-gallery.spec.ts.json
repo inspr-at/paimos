@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 7.177,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/indicator-creative-gallery.spec.ts",
+    "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.846,
+        "median": 1.596,
+        "min": 0.759
+      },
+      "seconds": 7.177,
+      "selectedTests": 5
+    },
+    "weightSeconds": 11.097561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

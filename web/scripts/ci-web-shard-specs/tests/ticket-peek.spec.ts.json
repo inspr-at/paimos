@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 61.943,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/ticket-peek.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 18.685,
+        "median": 5.733,
+        "min": 4.682
+      },
+      "seconds": 61.943,
+      "selectedTests": 7
+    },
+    "weightSeconds": 15.536585,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

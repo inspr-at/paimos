@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 65.078,
+    "selectedTests": 25
+  },
+  "spec": {
+    "file": "tests/agents-harness-status.spec.ts",
+    "listedTests": 26,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.92,
+        "median": 2.333,
+        "min": 2.258
+      },
+      "seconds": 65.078,
+      "selectedTests": 25
+    },
+    "weightSeconds": 57.707317,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

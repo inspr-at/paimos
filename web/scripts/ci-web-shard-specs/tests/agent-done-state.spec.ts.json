@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 9.204,
+    "selectedTests": 3
+  },
+  "spec": {
+    "file": "tests/agent-done-state.spec.ts",
+    "listedTests": 3,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.831,
+        "median": 3.776,
+        "min": 1.539
+      },
+      "seconds": 9.204,
+      "selectedTests": 3
+    },
+    "weightSeconds": 6.658537,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

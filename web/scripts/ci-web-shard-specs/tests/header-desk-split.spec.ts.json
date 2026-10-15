@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 323.713,
+    "selectedTests": 44
+  },
+  "spec": {
+    "file": "tests/header-desk-split.spec.ts",
+    "listedTests": 23,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 16.235,
+        "median": 5.23,
+        "min": 1.558
+      },
+      "seconds": 323.713,
+      "selectedTests": 44
+    },
+    "weightSeconds": 46,
+    "weightSource": "local-single-worker-AEON-1214-22s-plus-margin-and-fix3-cases"
+  }
+}

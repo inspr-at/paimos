@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 21.615,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/pi-openrouter.spec.ts",
+    "listedTests": 9,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.298,
+        "median": 2.378,
+        "min": 1.892
+      },
+      "seconds": 21.615,
+      "selectedTests": 9
+    },
+    "weightSeconds": 19.97561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

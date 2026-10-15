@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 18.808,
+    "selectedTests": 8
+  },
+  "spec": {
+    "file": "tests/graph-focus.spec.ts",
+    "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.725,
+        "median": 2.116,
+        "min": 1.946
+      },
+      "seconds": 18.808,
+      "selectedTests": 8
+    },
+    "weightSeconds": 17.756098,
+    "weightSource": "unmeasured-test-rate"
+  }
+}
