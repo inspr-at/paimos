@@ -9,7 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{ step: PersonStep; disabled?: boolean; ask?: boolean; headless?: boolean }>()
-const emit = defineEmits<{ changed: [result: PersonSteps]; close: [] }>()
+const emit = defineEmits<{ changed: [result: PersonSteps]; close: []; busy: [value: boolean] }>()
 const session = useSession(), anchor = ref<HTMLElement | null>(null), people = ref<StepPerson[]>([]), query = ref(''), after = ref<string | null>(null), busy = ref(false), error = ref(''), loading = ref(false)
 const mine = computed(() => props.step.owner.id === session.identity?.principal.id)
 let generation = 0, abort: AbortController | undefined, disposed = false
@@ -31,7 +31,7 @@ defineExpose({ openAt })
 async function choose(person: StepPerson) {
   if (busy.value || props.disabled || !props.step.can_tick) return
   const step = { ...props.step }, owner = identity(), sent = rowStore.mark()
-  busy.value = true; error.value = ''
+  busy.value = true; emit('busy', true); error.value = ''
   try {
     const result = await reassignPersonStep(step, person.id)
     if (disposed || owner !== identity() || props.step.id !== step.id || props.step.revision !== step.revision) return
@@ -39,11 +39,11 @@ async function choose(person: StepPerson) {
     emit('changed', result); close(true)
     try { const node = await getNode(step.node_id); if (!disposed && owner === identity() && node.id === step.node_id) rowStore.adoptNode(node, sent, { show: true }) } catch { /* The caller retains the confirmed server response. */ }
   } catch (e) { if (!disposed && owner === identity()) error.value = e instanceof Error ? e.message : 'The owner could not be changed.' }
-  finally { if (!disposed && owner === identity()) busy.value = false }
+  finally { if (!disposed && owner === identity()) { busy.value = false; emit('busy', false) } }
 }
 watch(query, () => { if (anchor.value) void load() })
 watch(() => [props.step.id, props.step.revision, identity()], () => { close(); people.value = []; error.value = ''; busy.value = false })
-onBeforeUnmount(() => { disposed = true; generation++; abort?.abort() })
+onBeforeUnmount(() => { disposed = true; generation++; abort?.abort(); emit('busy', false) })
 </script>
 <template>
   <span v-if="!headless" class="step-who">

@@ -48,7 +48,7 @@ const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided'
 let sources: DeskSources = emptySources(), generation = 0, alive = true
 let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
-const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>())
+const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>()), pendingSteps = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
 let followed = ''
 const fresh = computed(() => arrivals(items.value, roundBaseline.value))
@@ -153,7 +153,7 @@ async function refresh() {
 }
 function applyRead(result: DeskRead) {
   const present = new Set(result.items.map(item => item.id))
-  result.items.push(...items.value.filter(item => (item.kind === 'lesson' || item.personStep && settledSteps.value.has(item.id)) && item.decided && !present.has(item.id)))
+  result.items.push(...items.value.filter(item => !present.has(item.id) && (item.kind === 'lesson' && item.decided || item.personStep && (settledSteps.value.has(item.id) && item.decided || pendingSteps.value.has(item.id)))))
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
   projectNames.value = result.projectNames
@@ -284,6 +284,9 @@ function showLessonToast(item: DeskItem) {
 watch(opened, open => {
   if (!open && pendingLessonToast) { const item = pendingLessonToast; pendingLessonToast = undefined; showLessonToast(item) }
 })
+function stepBusy(id: string, value: boolean) {
+  const next = new Set(pendingSteps.value); if (value) next.add(id); else next.delete(id); pendingSteps.value = next
+}
 function stepSettled(item: DeskItem) {
   const next = new Set(settledSteps.value)
   if (item.decided) next.add(item.id); else next.delete(item.id)
@@ -305,7 +308,7 @@ function recorded(item: DeskItem) {
 }
 function resetDesk() {
   pendingLessonToast = undefined
-  settledSteps.value = new Set()
+  settledSteps.value = new Set(); pendingSteps.value = new Set()
   capabilityGeneration++
   ruleEdit.value = undefined
   generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
@@ -341,7 +344,7 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
     <nav v-if="nextKeyTrims[trimState] || trimCursors[trimState]" class="trim-pages" aria-label="Key trim pages"><button type="button" :disabled="loading || !trimCursors[trimState]" @click="pageKeyTrims(true)">First key trims</button><button type="button" :disabled="loading || !nextKeyTrims[trimState]" @click="pageKeyTrims()">Next key trims</button><span>Up to 100 key trims per page</span></nav>
     <p v-if="state === 'loading'" role="status">Reading the desk…</p>
     <p v-if="state === 'ready' && !visible.length">{{ emptyCopy }}</p>
-    <ol class="desk-list" aria-label="Desk items"><li v-for="item in visible" :key="item.id"><PersonStepRequest v-if="item.personStep" :item="item" @settled="stepSettled" /><component v-else :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="desk-row" :data-testid="`desk-row-${item.id}`" @click="item.linkOut || begin(item.id)"><span class="row-kind">{{ kindLabels[item.kind] }}</span><span class="row-topic"><strong :data-tip="item.title">{{ item.title }}</strong><small :data-tip="`${item.projectName} · ${item.decided ? item.answer : item.meanwhile}`"><span class="row-project" :style="{ '--pc': projectColor(deskProject(item)) }" data-testid="desk-row-project"><i aria-hidden="true" />{{ item.projectName }}</span> · {{ item.decided ? item.answer : item.meanwhile }}</small></span><span class="row-state">{{ item.decided ? outcomeLabels[item.outcome] : item.linkOut ? 'In Settings' : item.held ? 'Holding work' : 'Waiting' }}</span></component></li></ol>
+    <ol class="desk-list" aria-label="Desk items"><li v-for="item in visible" :key="item.id"><PersonStepRequest v-if="item.personStep" :item="item" @settled="stepSettled" @busy="value => stepBusy(item.id, value)" /><component v-else :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="desk-row" :data-testid="`desk-row-${item.id}`" @click="item.linkOut || begin(item.id)"><span class="row-kind">{{ kindLabels[item.kind] }}</span><span class="row-topic"><strong :data-tip="item.title">{{ item.title }}</strong><small :data-tip="`${item.projectName} · ${item.decided ? item.answer : item.meanwhile}`"><span class="row-project" :style="{ '--pc': projectColor(deskProject(item)) }" data-testid="desk-row-project"><i aria-hidden="true" />{{ item.projectName }}</span> · {{ item.decided ? item.answer : item.meanwhile }}</small></span><span class="row-state">{{ item.decided ? outcomeLabels[item.outcome] : item.linkOut ? 'In Settings' : item.held ? 'Holding work' : 'Waiting' }}</span></component></li></ol>
     <p v-if="more[filter === 'open' ? 'open' : 'answered']" class="incomplete">More questions are available. <button v-if="pages[filter === 'open' ? 'open' : 'answered'] < MAX_QUESTION_PAGES" type="button" :disabled="loading" @click="loadMore">Load 100 more</button><span v-else>The view is limited to 1,000 questions per state.</span></p>
     <div v-if="warnings.length || linkError" class="source-warnings" role="status"><button type="button" :disabled="loading" @click="refresh">Retry</button><p v-if="linkError">{{ linkError }}</p><p v-for="warning in warnings" :key="warning">{{ warning }}</p></div>
     <p class="readiness">Handover-question import is awaiting a verified source contract. Answers to existing questions keep their verified successor route.</p>

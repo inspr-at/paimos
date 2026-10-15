@@ -14,7 +14,7 @@ async function installSteps(page: Page, data: Fixtures, mode: 'owner' | 'admin' 
   const manualNode = data.nodes.find(node => node.id === 'n-4')!, humanNode = data.nodes.find(node => node.id === 'n-5')!
   manualNode.state = 'qa'; manualNode.is_leaf = true; manualNode.title = 'Freigabe mit dokumentierter Wiederherstellung und nachvollziehbarer Prüfung'
   humanNode.state = 'done'; humanNode.is_leaf = true; humanNode.human_check = 'Die veröffentlichte Freigabe und die Wiederherstellung auf einem Telefon prüfen'
-  const state = { owner: mode === 'owner' ? { ...me } : { ...mia }, humanOwner: mode === 'owner' ? { ...me } : { ...mia }, checked: false, humanChecked: false, fail: false, calls: [] as { path: string; body: Record<string, unknown> }[] }
+  const state = { owner: mode === 'owner' ? { ...me } : { ...mia }, humanOwner: mode === 'owner' ? { ...me } : { ...mia }, checked: false, humanChecked: false, fail: false, holdResponse: undefined as Promise<void> | undefined, committed: 0, calls: [] as { path: string; body: Record<string, unknown> }[] }
   const mayTick = (owner = state.owner) => mode === 'owner' && owner.id === me.id || mode === 'admin'
   const steps = (): PersonStep[] => [
     { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', node_id: manualNode.id, check_id: 'manual:release-reviewed', label: longLabel, to_status: 'done', owner: state.owner, checked: state.checked, active: !state.checked, can_tick: mayTick(), revision: manualNode.updated_at, definition_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', definition_revision: definitionRevision, created_at: manualNode.created_at, ticket_key: manualNode.key, ticket_title: manualNode.title, project_id: manualNode.project },
@@ -47,7 +47,8 @@ async function installSteps(page: Page, data: Fixtures, mode: 'owner' | 'admin' 
       if (path.endsWith('/owner')) state.owner = body.owner_id === me.id ? { ...me } : { ...mia }
       else if (node.id === manualNode.id) state.checked = body.checked === true
       else { state.humanChecked = body.checked === true; if (state.humanChecked) { node.fields.human_check_completed = { text: node.human_check, by: me.id }; node.human_check = null } else { node.human_check = String((node.fields.human_check_completed as { text: string }).text); delete node.fields.human_check_completed } }
-      node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString(); waiting()
+      node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString(); waiting(); state.committed++
+      if (state.holdResponse) await state.holdResponse
       return json({ node_id: node.id, revision: node.updated_at, steps: steps().filter(step => step.node_id === node.id), undo_reassignment: path.endsWith('/owner') ? 701 : undefined })
     }
     if (path === `/api/nodes/${node.id}` && method === 'GET') return json({ ...node, kind_id: 'k-ticket', position: '0', deleted_at: null })
@@ -123,7 +124,19 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
       state.fail = true
       await guard.check(async () => { await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(row.getByRole('alert')).toContainText('The ticket changed'); await expect(open).toHaveText('Open 2') })
       state.fail = false
-      await guard.check(async () => { await row.getByRole('button', { name: 'Mark checked' }).click(); await expect(row.getByText('Checked by you · moves to Decided')).toBeVisible(); await expect(open).toHaveText('Open 1') })
+      await guard.check(async () => {
+        let release!: () => void
+        state.holdResponse = new Promise<void>(resolve => { release = resolve })
+        await row.getByRole('button', { name: 'Mark checked' }).click()
+        await expect.poll(() => state.committed).toBe(1)
+        // The server has committed, but the action response is held. A normal
+        // polling/Refresh read must retain this pending row under the pointer.
+        await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+        await expect(open).toHaveText('Open 1')
+        await expect(row.getByRole('button', { name: 'Mark checked' })).toBeDisabled()
+        release(); state.holdResponse = undefined
+        await expect(row.getByText('Checked by you · moves to Decided')).toBeVisible()
+      })
       await expect(badge).toHaveAccessibleName(/1/)
       expect(state.calls.at(-1)?.body).toMatchObject({ checked: true, expected_revision: state.calls[0]!.body.expected_revision, definition_revision: definitionRevision })
       await guard.check(async () => { await row.getByRole('button', { name: 'Undo' }).click(); await expect(row.getByRole('button', { name: 'Mark checked' })).toBeVisible(); await expect(open).toHaveText('Open 2') })

@@ -23,6 +23,7 @@ export interface DeskOutcomeEffect {
 }
 export interface DeskItem {
   personStep?: PersonStep
+  personStepUndo?: { step: PersonStep; owner?: string; event?: number }
   id: string; kind: DeskKind; projectId: string; projectName: string; projectKey?: string; ticketId?: string; ticketKey?: string
   title: string; context: string; findings: string; meanwhile: string; destination: string
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
