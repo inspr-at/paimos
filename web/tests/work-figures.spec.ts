@@ -192,7 +192,7 @@ test('AEON-1358 Hide closed only hides rows: the figures stay, footers say incl.
   guard.done()
 })
 
-test('AEON-1358 column popups: the sort hint, then a fixed set of figure lines; keyboard opens them, touch never does', async ({ page }) => {
+test('AEON-1358 column popups: the sort hint, then a fixed set of figure lines; keyboard focus opens them', async ({ page }) => {
   await open(page, { comfortable: true })
   const columns: [string, string[], string][] = [
     ['Key', ['Parents2', 'Leaves166', 'KeysAIT-4 – AIT-177'], '168 incl. hidden rows · all rows'],

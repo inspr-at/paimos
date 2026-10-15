@@ -1164,6 +1164,8 @@
         ,
         {"file":"tests/wide.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/work-figures.spec.ts","listedTests":16,"weightSeconds":32.74,"weightSource":"AEON-1358 remote-spec 5c6992a7d: 16 cases, one worker on mbp2606, wall_ms 32740"}
+        ,
         {"file":"tests/work-integration.spec.ts","weightSeconds":70,"weightSource":"estimate"}
         ,
         {"file":"tests/work-kinds.spec.ts","listedTests":22,"weightSeconds":22.1,"weightSource":"AEON-997 fix2 local Chromium: 22 cases, one worker, wall 22.1 s"}
@@ -2161,6 +2163,8 @@
       "tests/wide.spec.ts": {"seconds":30.072,"selectedTests":8}
       ,
       "tests/work-aggregates.spec.ts": {"seconds":112.751,"selectedTests":29}
+      ,
+      "tests/work-figures.spec.ts": {"seconds":32.74,"selectedTests":16,"source":"AEON-1358 remote-spec 5c6992a7d: 16 cases, one worker on mbp2606, wall_ms 32740"}
       ,
       "tests/work-history-fix5.spec.ts": {"seconds":19.752,"selectedTests":6}
       ,
