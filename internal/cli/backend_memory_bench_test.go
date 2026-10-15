@@ -93,7 +93,7 @@ func BenchmarkBackendMemory(b *testing.B) {
 		}
 	}
 	var project struct{ ID string }
-	if err := json.Unmarshal(request("GET", "/api/projects/lookup?key=AEON", "", 200), &project); err != nil || project.ID == "" || workKind == "" {
+	if err := json.Unmarshal(request("GET", "/api/projects/lookup?ref=AEON", "", 200), &project); err != nil || project.ID == "" || workKind == "" {
 		b.Fatal("missing project or work kind fixture")
 	}
 	var workIDs []string
