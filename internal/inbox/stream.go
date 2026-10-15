@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -42,16 +40,12 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	conn, err := listenConn(r.Context(), m.pool)
+	conn, err := db.SubscribeNotifications(r.Context(), m.pool, "aeon_events", p.TenantID)
 	if err != nil {
 		failure(w, err)
 		return
 	}
 	defer closeListen(conn)
-	if _, err = conn.Exec(r.Context(), "LISTEN aeon_events"); err != nil {
-		failure(w, err)
-		return
-	}
 	batch, err := m.pendingVia(r.Context(), p, after, 200, sessionID, exact, SeenStream)
 	if err != nil {
 		failure(w, err)
@@ -128,7 +122,7 @@ func streamCursor(r *http.Request) (int64, error) {
 	return 0, nil
 }
 
-func (m *module) waitStream(ctx context.Context, conn *pgx.Conn, p tenant.Principal, nextBeat *time.Time, heartbeat time.Duration, flush func(string) error) error {
+func (m *module) waitStream(ctx context.Context, conn db.NotificationListener, p tenant.Principal, nextBeat *time.Time, heartbeat time.Duration, flush func(string) error) error {
 	for {
 		if !time.Now().Before(*nextBeat) {
 			if err := flush(": keepalive\n\n"); err != nil {
