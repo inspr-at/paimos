@@ -754,7 +754,11 @@ func TestDeliveryWebhookGitHubStatusPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyFile := filepath.Join(t.TempDir(), "synthetic-app.pem")
+	keyDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(keyDir, "synthetic-app.pem")
 	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
 		t.Fatal(err)
 	}
