@@ -3638,6 +3638,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAttach","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestAuthenticatedReviewerRuns","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationActivityRenewalKeepsLiveValidity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal","tier":"ESSENTIAL"}
@@ -5149,6 +5151,8 @@
     {"kind":"go","package":"internal/cli","name":"TestRejectedUsageReportDoesNotBlockQueue","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestResidentDeliveryRetriesContention","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestReviewRunCommandsKeepCredentialsPrivateAndReportRefusals","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRulesClientReceivesAndRendersByteCeiling","tier":"GATED-FULL"}
     ,

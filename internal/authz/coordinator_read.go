@@ -200,3 +200,21 @@ func coordinatorAllows(p tenant.Principal, own grants, creator *grants, permissi
 		return false
 	}
 }
+
+// RequireIndependentReviewerTx excludes a live coordinator principal even when
+// it presents a narrowed key. Only the designated reviewer run can use its
+// capability; dispatchers cannot also be approval producers.
+func RequireIndependentReviewerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	g, err := readGrants(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	coordinator := g.workspaceRole != nil
+	for _, permission := range CoordinatorBaseScopes {
+		coordinator = coordinator && (g.allows(permission, "") || permission == "nodes.read" && contains(g.anyProject, permission))
+	}
+	if coordinator || IsCoordinatorKey(p.Scopes) {
+		return ErrForbidden
+	}
+	return RequireTx(ctx, tx, p, "nodes.read", Scope{ProjectID: project})
+}

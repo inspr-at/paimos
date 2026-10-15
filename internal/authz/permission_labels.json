@@ -12,7 +12,8 @@
     "read": "See",
     "receive": "receive",
     "run": "Run",
-    "write": "Edit"
+    "write": "Edit",
+    "visual_approve": "Approve visual"
   },
   "resources": {
     "account": "agent accounts",
@@ -66,7 +67,8 @@
     "tags": "tags",
     "views": "saved views",
     "work_orders": "work orders",
-    "workspace": "the workspace"
+    "workspace": "the workspace",
+    "reviews": "review approvals"
   },
   "special": {
     "account.overview.read": "See all enrolled account capacity",

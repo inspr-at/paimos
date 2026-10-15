@@ -92,6 +92,18 @@
     }
   ],
   "registry": [
+    {
+      "key": "reviews.visual_approve",
+      "group": "Reviews",
+      "description": "Approve visual review verdicts",
+      "risk": "high",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "agent_grantable": true,
+      "owner_workstation_grantable": false
+    },
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"account.manage"},
     {"agent_grantable":true,"grantable_at":["workspace"],"key":"account.overview.read"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"account.probe"},
