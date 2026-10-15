@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 57.726,
+    "selectedTests": 22
+  },
+  "spec": {
+    "file": "tests/work-kinds.spec.ts",
+    "listedTests": 22,
+    "weightSeconds": 22.1,
+    "weightSource": "AEON-997 fix2 local Chromium: 22 cases, one worker, wall 22.1 s"
+  }
+}

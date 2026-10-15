@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 39.299,
+    "selectedTests": 16
+  },
+  "spec": {
+    "file": "tests/aeon-1071-chat-live.spec.ts",
+    "listedTests": 9,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.333,
+        "median": 1.9425,
+        "min": 1.631
+      },
+      "seconds": 38.567,
+      "selectedTests": 16
+    },
+    "weightSeconds": 14,
+    "weightSource": "local-single-worker-AEON-1071-9s-plus-margin"
+  }
+}

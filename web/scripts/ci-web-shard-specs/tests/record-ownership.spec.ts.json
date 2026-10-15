@@ -1,0 +1,13 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 11.234,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/record-ownership.spec.ts",
+    "listedTests": 2,
+    "weightSeconds": 4.439024,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

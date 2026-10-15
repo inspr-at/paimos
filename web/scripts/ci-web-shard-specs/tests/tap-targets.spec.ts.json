@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 232.797,
+    "selectedTests": 28
+  },
+  "spec": {
+    "file": "tests/tap-targets.spec.ts",
+    "listedTests": 28,
+    "weightSeconds": 62.146341,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

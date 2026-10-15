@@ -1,0 +1,22 @@
+{
+  "group": "lead-flow",
+  "nightlyTiming": {
+    "seconds": 65.325,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/lead-remove.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.918,
+        "median": 8.41,
+        "min": 2.178
+      },
+      "seconds": 51.715,
+      "selectedTests": 7
+    },
+    "weightSeconds": 25.5,
+    "weightSource": "measured-local-targeted"
+  }
+}

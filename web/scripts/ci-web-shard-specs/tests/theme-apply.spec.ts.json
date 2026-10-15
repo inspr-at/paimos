@@ -1,0 +1,22 @@
+{
+  "group": "theme-agents",
+  "nightlyTiming": {
+    "seconds": 65.938,
+    "selectedTests": 10
+  },
+  "spec": {
+    "file": "tests/theme-apply.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 9.252,
+        "median": 8.152,
+        "min": 1.804
+      },
+      "seconds": 60.268,
+      "selectedTests": 10
+    },
+    "weightSeconds": 19.5,
+    "weightSource": "local-serial-runtime-estimate"
+  }
+}

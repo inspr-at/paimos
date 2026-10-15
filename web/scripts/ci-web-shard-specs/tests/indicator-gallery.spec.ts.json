@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 4.572,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/indicator-gallery.spec.ts",
+    "listedTests": 5,
+    "weightSeconds": 11.097560833,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

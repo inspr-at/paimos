@@ -1,0 +1,22 @@
+{
+  "group": "footer",
+  "nightlyTiming": {
+    "seconds": 32.383,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/developer-settings.spec.ts",
+    "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.522,
+        "median": 3.431,
+        "min": 3.076
+      },
+      "seconds": 27.406,
+      "selectedTests": 7
+    },
+    "weightSeconds": 5.593496,
+    "weightSource": "footer-ui-2"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 5.752,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/ticket-placement.spec.ts",
+    "listedTests": 2,
+    "weightSeconds": 4.439024,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

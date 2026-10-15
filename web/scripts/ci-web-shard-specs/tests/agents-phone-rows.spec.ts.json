@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 23.147,
+    "selectedTests": 8
+  },
+  "spec": {
+    "file": "tests/agents-phone-rows.spec.ts",
+    "listedTests": 8,
+    "weightSeconds": 17.756098,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

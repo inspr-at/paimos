@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 199.053,
+    "selectedTests": 28
+  },
+  "spec": {
+    "file": "tests/agents-dial.spec.ts",
+    "listedTests": 23,
+    "weightSeconds": 66.585366,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

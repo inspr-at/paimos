@@ -1,0 +1,22 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 55.32,
+    "selectedTests": 24
+  },
+  "spec": {
+    "file": "tests/clip-tip-overflow.spec.ts",
+    "listedTests": 24,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.852,
+        "median": 1.7365,
+        "min": 1.094
+      },
+      "seconds": 44.254,
+      "selectedTests": 24
+    },
+    "weightSeconds": 29.032436,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

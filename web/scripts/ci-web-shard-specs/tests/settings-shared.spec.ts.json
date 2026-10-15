@@ -1,0 +1,22 @@
+{
+  "group": "settings-shared",
+  "nightlyTiming": {
+    "seconds": 32.482,
+    "selectedTests": 23
+  },
+  "spec": {
+    "file": "tests/settings-shared.spec.ts",
+    "listedTests": 23,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.609,
+        "median": 0.685,
+        "min": 0.399
+      },
+      "seconds": 32.482,
+      "selectedTests": 23
+    },
+    "weightSeconds": 20,
+    "weightSource": "unmeasured-test-count-estimate"
+  }
+}

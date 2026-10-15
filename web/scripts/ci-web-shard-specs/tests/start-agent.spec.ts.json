@@ -1,0 +1,22 @@
+{
+  "group": "dispatch",
+  "nightlyTiming": {
+    "seconds": 78.606,
+    "selectedTests": 27
+  },
+  "spec": {
+    "file": "tests/start-agent.spec.ts",
+    "listedTests": 20,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.051,
+        "median": 2.213,
+        "min": 1.746
+      },
+      "seconds": 49.674,
+      "selectedTests": 21
+    },
+    "weightSeconds": 36.078431,
+    "weightSource": "web-11"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "model-settings",
+  "nightlyTiming": {
+    "seconds": 1.883,
+    "selectedTests": 1
+  },
+  "spec": {
+    "file": "tests/model-refresh.spec.ts",
+    "listedTests": 1,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.449,
+        "median": 1.449,
+        "min": 1.449
+      },
+      "seconds": 1.449,
+      "selectedTests": 1
+    },
+    "weightSeconds": 3.5,
+    "weightSource": "e2e-4"
+  }
+}

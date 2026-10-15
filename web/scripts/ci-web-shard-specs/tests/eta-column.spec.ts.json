@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 102.21,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/eta-column.spec.ts",
+    "listedTests": 14,
+    "weightSeconds": 28.853659,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

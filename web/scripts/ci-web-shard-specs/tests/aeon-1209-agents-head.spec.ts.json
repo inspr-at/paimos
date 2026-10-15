@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 122.217,
+    "selectedTests": 28
+  },
+  "spec": {
+    "file": "tests/aeon-1209-agents-head.spec.ts",
+    "listedTests": 19,
+    "weightSeconds": 75,
+    "weightSource": "remote-one-worker-AEON-1209-60s-plus-margin"
+  }
+}

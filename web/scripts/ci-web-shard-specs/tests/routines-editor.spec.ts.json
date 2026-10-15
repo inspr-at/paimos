@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 31.985,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/routines-editor.spec.ts",
+    "listedTests": 5,
+    "weightSeconds": 40,
+    "weightSource": "AEON-1182 estimate: five mocked routine editor flows, one worker"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "model-settings",
+  "nightlyTiming": {
+    "seconds": 24.99,
+    "selectedTests": 3
+  },
+  "spec": {
+    "file": "tests/models-registry-shots.spec.ts",
+    "listedTests": 3,
+    "weightSeconds": 20,
+    "weightSource": "AEON-1163 mbp2606 single worker 12.8s for 3 cases plus margin"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 4.425,
+    "selectedTests": 3
+  },
+  "spec": {
+    "file": "tests/quote-editor-input.spec.ts",
+    "listedTests": 3,
+    "weightSeconds": 6.658537,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

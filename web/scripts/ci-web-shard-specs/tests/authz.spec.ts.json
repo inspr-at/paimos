@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 4.8,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/authz.spec.ts",
+    "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.167,
+        "median": 1.979,
+        "min": 1.791
+      },
+      "seconds": 3.958,
+      "selectedTests": 2
+    },
+    "weightSeconds": 4.439024,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

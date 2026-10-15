@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 8.108,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/ticket-outcomes.spec.ts",
+    "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.524,
+        "median": 3.3355,
+        "min": 2.147
+      },
+      "seconds": 6.671,
+      "selectedTests": 2
+    },
+    "weightSeconds": 4.959064,
+    "weightSource": "web-13"
+  }
+}

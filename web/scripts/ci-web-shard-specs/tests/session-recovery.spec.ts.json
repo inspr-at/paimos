@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 61.069,
+    "selectedTests": 15
+  },
+  "spec": {
+    "file": "tests/session-recovery.spec.ts",
+    "listedTests": 15,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.064,
+        "median": 3.02,
+        "min": 2.316
+      },
+      "seconds": 45.607,
+      "selectedTests": 15
+    },
+    "weightSeconds": 37.192982,
+    "weightSource": "web-13"
+  }
+}

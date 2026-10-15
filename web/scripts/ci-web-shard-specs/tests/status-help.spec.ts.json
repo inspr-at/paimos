@@ -1,0 +1,22 @@
+{
+  "group": "status-help",
+  "nightlyTiming": {
+    "seconds": 24.446,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/status-help.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.09,
+        "median": 2.346,
+        "min": 1.75
+      },
+      "seconds": 19.356,
+      "selectedTests": 7
+    },
+    "weightSeconds": 24,
+    "weightSource": "status-help-ui-2"
+  }
+}

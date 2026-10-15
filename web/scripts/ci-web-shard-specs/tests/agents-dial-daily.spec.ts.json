@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 231.5,
+    "selectedTests": 38
+  },
+  "spec": {
+    "file": "tests/agents-dial-daily.spec.ts",
+    "listedTests": 34,
+    "weightSeconds": 120,
+    "weightSource": "AEON-1036 targeted run, 86 seconds for 30 tests plus the 1024 captures"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 181.158,
+    "selectedTests": 18
+  },
+  "spec": {
+    "file": "tests/delivery-polish.spec.ts",
+    "listedTests": 18,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 14.382,
+        "median": 5.915,
+        "min": 1.697
+      },
+      "seconds": 74.446,
+      "selectedTests": 12
+    },
+    "weightSeconds": 45,
+    "weightSource": "aeon-1007-estimate"
+  }
+}

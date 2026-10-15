@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { browserIdentity, browserImpact, nightlyBrowserMap, gitTree } from './browser-impact.mjs'
 import { boundedText } from './inputs.mjs'
 import { validImpactPaths, isDocsLike, webGraph, graphIncomplete, reverseDependants, shard, key, tierRank, validate } from './core.mjs'
-import { tierWeights, validateManifest } from '../../web/scripts/ci-web-shard.mjs'
+import { tierWeights, validateManifest, loadManifest } from '../../web/scripts/ci-web-shard.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const browserRows = manifest => manifest.tests.filter(row => row.kind === 'browser' && row.active !== false)
@@ -152,7 +152,7 @@ export function main(env = process.env, { trustedRoot = root, browserCoverage = 
   const manifest = registry(trustedRoot, 'scripts/ci/web-test-tiers.json')
   const flaky = registry(trustedRoot, 'scripts/ci/known-flaky.json')
   validate(manifest, manifest.tests, flaky, { strict: true })
-  const policy = validateManifest(registry(trustedRoot, 'web/ci-web-shards.json'))
+  const policy = loadManifest(resolve(trustedRoot, 'web/ci-web-shards.json'))
   const owners = new Map(policy.groups.flatMap(group => group.specs.map(spec => [spec.file, group])))
   for (const row of browserRows(manifest)) {
     const owner = owners.get(row.file)
@@ -164,7 +164,9 @@ export function main(env = process.env, { trustedRoot = root, browserCoverage = 
   if (!output || output.endsWith('\0')) paths = output.split('\0').filter(Boolean)
   for (const file of paths ?? []) if (['scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json'].includes(file)) {
     try {
-      registries[file] = { before: registry(trustedRoot, file), after: registry(checkout, file) }
+      registries[file] = file === 'web/ci-web-shards.json'
+        ? { before: policy, after: loadManifest(resolve(checkout, file)) }
+        : { before: registry(trustedRoot, file), after: registry(checkout, file) }
       if (file.endsWith('web-test-tiers.json')) {
         const head = registries[file].after
         validate(head, head.tests, flaky, { strict: true }); tests = browserRows(head)

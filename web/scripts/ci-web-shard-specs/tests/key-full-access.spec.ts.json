@@ -1,0 +1,22 @@
+{
+  "group": "access-dialogs",
+  "nightlyTiming": {
+    "seconds": 166.082,
+    "selectedTests": 22
+  },
+  "spec": {
+    "file": "tests/key-full-access.spec.ts",
+    "listedTests": 20,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 13.044,
+        "median": 3.41,
+        "min": 2.097
+      },
+      "seconds": 135.007,
+      "selectedTests": 22
+    },
+    "weightSeconds": 53.064516,
+    "weightSource": "web-8"
+  }
+}

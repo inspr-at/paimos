@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 20.789,
+    "selectedTests": 10
+  },
+  "spec": {
+    "file": "tests/agent-rules-budget-clients.spec.ts",
+    "listedTests": 10,
+    "weightSeconds": 22.195122,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "aeon-624-dialogs",
+  "nightlyTiming": {
+    "seconds": 67.656,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/dialog-widths.spec.ts",
+    "listedTests": 9,
+    "weightSeconds": 19.97561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

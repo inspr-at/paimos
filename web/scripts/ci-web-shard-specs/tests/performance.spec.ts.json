@@ -1,0 +1,22 @@
+{
+  "group": "performance",
+  "nightlyTiming": {
+    "seconds": 60.334,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/performance.spec.ts",
+    "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.723,
+        "median": 5.768,
+        "min": 4.813
+      },
+      "seconds": 11.536,
+      "selectedTests": 2
+    },
+    "weightSeconds": 4.439024,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 62.694,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/project-status-counts.spec.ts",
+    "weightSeconds": 60,
+    "weightSource": "unmeasured-estimate"
+  }
+}

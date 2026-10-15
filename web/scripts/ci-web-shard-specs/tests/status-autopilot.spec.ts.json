@@ -1,0 +1,22 @@
+{
+  "group": "status-autopilot",
+  "nightlyTiming": {
+    "seconds": 35.905,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/status-autopilot.spec.ts",
+    "listedTests": 11,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.551,
+        "median": 1.728,
+        "min": 0.662
+      },
+      "seconds": 23.425,
+      "selectedTests": 11
+    },
+    "weightSeconds": 35.820513,
+    "weightSource": "AEON-696 proportional estimate from status-autopilot-ui-2"
+  }
+}

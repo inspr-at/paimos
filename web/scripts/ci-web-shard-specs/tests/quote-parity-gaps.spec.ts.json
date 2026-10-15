@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 35.47,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/quote-parity-gaps.spec.ts",
+    "listedTests": 9,
+    "weightSeconds": 19.97561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

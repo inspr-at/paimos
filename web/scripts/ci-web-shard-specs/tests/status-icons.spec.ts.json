@@ -1,0 +1,14 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 20.84,
+    "selectedTests": 12,
+    "source": "AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"
+  },
+  "spec": {
+    "file": "tests/status-icons.spec.ts",
+    "listedTests": 12,
+    "weightSeconds": 20.84,
+    "weightSource": "AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"
+  }
+}

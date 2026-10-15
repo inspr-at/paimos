@@ -12,6 +12,8 @@ import { manifestPaths, formatManifest, normalizeManifest, checkManifests, write
 import { classifyArgs, classify } from './cli.mjs'
 import { proveManifests, proveConversion } from './prove-manifests.mjs'
 import { command } from './collect.mjs'
+import { loadManifest, checkSpecInventory, discoverSpecs } from '../../web/scripts/ci-web-shard.mjs'
+import { specSource, formatSpecSource, loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const goFile = manifestPaths[0], webFile = manifestPaths[1], shardsFile = manifestPaths[2]
@@ -457,4 +459,68 @@ test('OPS-257 conflict markers fail the canonical checker before staging', t => 
   assert.throws(() => checkManifests(directory), error => error.message.includes(goFile) && error.message.includes('JSON'))
   assert.throws(() => writeManifests(directory), SyntaxError)
   assert.equal(readFileSync(resolve(directory, goFile), 'utf8'), result.output)
+})
+
+// Risk: GitHub does not install clone-local merge drivers. Concurrent new
+// specs must merge with ordinary Git, retain their owners and regenerate once.
+test('AEON-1389 independent spec sources merge canonically without custom drivers', t => {
+  const directory = fixtures(t)
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' }
+  const git = args => {
+    const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: directory, env, encoding: 'utf8', timeout: 10_000 })
+    assert.ifError(result.error); assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  const put = (file, source) => {
+    mkdirSync(resolve(directory, file, '..'), { recursive: true })
+    writeFileSync(resolve(directory, file), source)
+  }
+  const addSpec = (file, weightSeconds) => {
+    put(`web/${file}`, '// fixture\n')
+    put(`web/${specSource}/${file}.json`, formatSpecSource({ group: 'first', spec: spec(file, weightSeconds) }))
+  }
+  const initial = JSON.parse(readFileSync(resolve(directory, shardsFile)))
+  for (const row of initial.groups[0].specs) addSpec(row.file, row.weightSeconds)
+  const policy = { ...initial, specSource, groups: initial.groups.map(group => ({ ...group, specs: [] })) }
+  put(shardsFile, formatManifest(policy, shardsFile))
+  put('.gitattributes', readFileSync(resolve(root, '.gitattributes')))
+  writeManifests(directory)
+  git(['-c', 'init.templateDir=', 'init', '-q'])
+  assert.equal(git(['check-attr', 'merge', '--', shardsFile]), `${shardsFile}: merge: unspecified`)
+  assert.doesNotMatch(git(['config', '--local', '--list']), /^merge\./m)
+  git(['add', '.']); git(['commit', '-qm', 'base'])
+  const base = git(['rev-parse', 'HEAD'])
+  git(['checkout', '-qb', 'left'])
+  addSpec('tests/left.spec.ts', 7)
+  git(['add', '.']); git(['commit', '-qm', 'left adds spec'])
+  git(['checkout', '-qb', 'right', base])
+  addSpec('tests/right.spec.ts', 8)
+  git(['add', '.']); git(['commit', '-qm', 'right adds spec'])
+  git(['checkout', 'left']); git(['merge', '--no-edit', 'right'])
+  const expected = structuredClone(initial)
+  expected.groups[0].specs.push(spec('tests/left.spec.ts', 7), spec('tests/right.spec.ts', 8))
+  const assembled = loadManifest(resolve(directory, shardsFile))
+  assert.equal(formatManifest(assembled, shardsFile), formatManifest(expected, shardsFile))
+  assert.deepEqual(checkSpecInventory(assembled, discoverSpecs(resolve(directory, 'web'))), { specs: 4, excluded: 0 })
+  checkManifests(directory)
+  writeManifests(directory)
+  assert.equal(git(['status', '--porcelain']), '', 'regeneration after a plain merge is already canonical')
+  assert.equal(readFileSync(resolve(directory, shardsFile), 'utf8'), formatManifest(policy, shardsFile), 'shared policy never gained spec rows')
+  const record = resolve(directory, 'web', specSource, 'tests/left.spec.ts.json')
+  writeFileSync(record, JSON.stringify(JSON.parse(readFileSync(record)), null, 4))
+  assert.throws(() => checkManifests(directory), /Noncanonical CI manifests/)
+  writeManifests(directory)
+  checkManifests(directory)
+  assert.equal(git(['status', '--porcelain']), '', 'the canonical writer restores source layout')
+  for (const value of [
+    { group: 'unknown', spec: spec('tests/left.spec.ts', 7) },
+    { group: 'first', spec: spec('tests/right.spec.ts', 7) },
+    { group: 'first', spec: spec('tests/left.spec.ts', 0) },
+  ]) {
+    writeFileSync(record, formatSpecSource(value))
+    assert.throws(() => loadPolicy(resolve(directory, shardsFile)), /Unknown policy group|Invalid spec source identity/)
+    assert.throws(() => checkManifests(directory), /Noncanonical CI manifests/)
+  }
 })

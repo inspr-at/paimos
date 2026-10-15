@@ -1,0 +1,22 @@
+{
+  "group": "lead-flow",
+  "nightlyTiming": {
+    "seconds": 154.101,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/lead-start.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 18.801,
+        "median": 17.205,
+        "min": 5.636
+      },
+      "seconds": 111.049,
+      "selectedTests": 7
+    },
+    "weightSeconds": 10,
+    "weightSource": "unmeasured-test-count-estimate"
+  }
+}

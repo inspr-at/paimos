@@ -1,0 +1,22 @@
+{
+  "group": "coarse-hit-area",
+  "nightlyTiming": {
+    "seconds": 1.097,
+    "selectedTests": 3
+  },
+  "spec": {
+    "file": "tests/coarse-hit-area.spec.ts",
+    "listedTests": 3,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 0.367,
+        "median": 0.243,
+        "min": 0.23
+      },
+      "seconds": 0.84,
+      "selectedTests": 3
+    },
+    "weightSeconds": 6.658537,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 38.412,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/dead-screens.spec.ts",
+    "listedTests": 12,
+    "weightSeconds": 30,
+    "weightSource": "unmeasured-estimate"
+  }
+}

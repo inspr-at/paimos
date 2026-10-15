@@ -1,0 +1,22 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 25.085,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/aeon-632b-clip-touch.spec.ts",
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.596,
+        "median": 4.431,
+        "min": 4.102
+      },
+      "seconds": 27.409,
+      "selectedTests": 6
+    },
+    "weightSeconds": 8.023393,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

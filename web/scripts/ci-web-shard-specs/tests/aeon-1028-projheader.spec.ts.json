@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 115.817,
+    "selectedTests": 42
+  },
+  "spec": {
+    "file": "tests/aeon-1028-projheader.spec.ts",
+    "listedTests": 42,
+    "weightSeconds": 93.219512,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Independent conversion proof: do not use the formatter/normalizer under test.
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { spawnSync, execFileSync } from 'node:child_process'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -41,8 +43,17 @@ export function proveConversion(before, after, file) {
 export function proveManifests(base = git(['rev-parse', 'HEAD'])) {
   if (!/^[a-f0-9]{40}$/.test(base)) throw new Error('Proof base must be a full local commit SHA')
   return { base, files: files.map((file, i) => {
-    const before = JSON.parse(git(['show', `${base}:${file}`]))
-    const after = JSON.parse(readFileSync(resolve(root, file), 'utf8'))
+    let before = JSON.parse(git(['show', `${base}:${file}`]))
+    if (i === 2 && before.specSource !== undefined) {
+      const snapshot = mkdtempSync(resolve(tmpdir(), 'aeon-policy-proof-'))
+      try {
+        const archive = execFileSync('git', ['archive', base, file, 'web/scripts/ci-web-shard-specs'],
+          { cwd: root, timeout: 15_000, maxBuffer: 32 * 1024 * 1024 })
+        execFileSync('tar', ['-x', '-C', snapshot], { input: archive, timeout: 15_000 })
+        before = loadPolicy(resolve(snapshot, file))
+      } finally { rmSync(snapshot, { recursive: true, force: true }) }
+    }
+    const after = i === 2 ? loadPolicy(resolve(root, file)) : JSON.parse(readFileSync(resolve(root, file), 'utf8'))
     // Set-like list order alone may differ. Duplicates are NOT discarded, and
     // group order, flags, history arrays and every scalar remain significant.
     return proveConversion(before, after, file)

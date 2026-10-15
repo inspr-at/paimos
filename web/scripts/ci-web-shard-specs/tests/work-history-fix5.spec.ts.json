@@ -1,0 +1,21 @@
+{
+  "group": "work-node-integration",
+  "nightlyTiming": {
+    "seconds": 19.752,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/work-history-fix5.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.5,
+        "median": 4.244,
+        "min": 4.099
+      },
+      "seconds": 25.598,
+      "selectedTests": 6
+    },
+    "weightSeconds": 30.961454,
+    "weightSource": "hosted-tier-timing"
+  }
+}

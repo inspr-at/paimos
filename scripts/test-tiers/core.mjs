@@ -441,3 +441,52 @@ export function webGraph(root, { bounds = inputBounds, read = readInput } = {}) 
 export function counts(rows) {
   return Object.fromEntries(tiers.map(tier => [tier, rows.filter(row => row.tier === tier).length]))
 }
+
+// The tier runner executes with one worker, while some historical measured
+// steps used two. Convert those file allocations to serial scheduling estimates
+// without changing the original weights used by the exact-spec runner. Local
+// serial timings and unmeasured/test-count estimates already use a serial basis.
+export function tierWeights(manifest, rows) {
+  const sources = new Map((manifest.ciInventory ?? []).map(source => [source.id, source]))
+  return Object.fromEntries(manifest.groups.flatMap(group => group.specs.map(spec => {
+    if (spec.tierTiming) {
+      const { seconds, selectedTests } = spec.tierTiming
+      if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isSafeInteger(selectedTests) || selectedTests < 1) throw new Error(`Invalid tier timing: ${spec.file}`)
+      // Hosted reports measure the gated slice. Other selections are estimates
+      // proportional to that slice, without pretending nightly was measured.
+      const selected = rows ? rows.filter(row => row.file === spec.file).length : selectedTests
+      return [spec.file, seconds * selected / selectedTests]
+    }
+    const source = sources.get(spec.weightSource)
+    const workers = source?.flags?.map(flag => /^--workers=(\d+)$/.exec(flag)).find(Boolean)
+    const factor = source?.kind === 'browser-test' && source.measuredSeconds > 0 && workers ? Number(workers[1]) : 1
+    if (!Number.isSafeInteger(factor) || factor < 1 || factor > 64) throw new Error(`Invalid measured worker count: ${spec.file}`)
+    return [spec.file, spec.weightSeconds * factor]
+  })))
+}
+
+// Size the same whole-file LPT packing used by the runner. Reserve 25% of
+// the 20-minute job cap, including two minutes for setup and collection.
+// An indivisible heavy file cannot be fixed by adding bins: fail wide to the
+// established full gate and expose its projection rather than dropping cases.
+export function webShardPlan(rows, policy, { mode = 'essential', timeoutSeconds = 1200,
+  headroom = 0.25, overheadSeconds = 120, minimum = 4, maximum = 12 } = {}) {
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || !Number.isFinite(headroom) || headroom < 0 || headroom >= 1 ||
+      !Number.isFinite(overheadSeconds) || overheadSeconds < 0 || !Number.isInteger(minimum) || minimum < 1 ||
+      !Number.isInteger(maximum) || maximum < minimum || maximum > 64) throw new Error('Invalid web shard budget')
+  const selected = rows.filter(row => row.kind === 'browser')
+  const weights = tierWeights(policy, selected)
+  const files = new Set(selected.map(row => row.file))
+  for (const file of files) if (!Number.isFinite(weights[file]) || weights[file] <= 0) throw new Error(`Missing web shard weight: ${file}`)
+  const budgetSeconds = timeoutSeconds * (1 - headroom)
+  const project = count => Array.from({ length: count }, (_, i) => {
+    const tests = shard(selected, i + 1, count, weights)
+    return { shard: i + 1, cases: tests.length,
+      seconds: overheadSeconds + [...new Set(tests.map(row => row.file))].reduce((sum, file) => sum + weights[file], 0) }
+  })
+  let count = mode === 'essential' ? minimum : maximum, projections = project(count)
+  while (mode === 'essential' && count < maximum && Math.max(...projections.map(bin => bin.seconds)) > budgetSeconds) projections = project(++count)
+  const projectedMaxSeconds = Math.max(...projections.map(bin => bin.seconds))
+  return { shards: projections.map(bin => bin.shard), projections, projectedMaxSeconds, budgetSeconds, timeoutSeconds,
+    headroom, overheadSeconds, fitsBudget: projectedMaxSeconds <= budgetSeconds }
+}

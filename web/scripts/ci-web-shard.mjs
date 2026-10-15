@@ -4,6 +4,8 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rename
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runPlaywright } from '../../scripts/playwright-safe.mjs'
+import { tierWeights } from '../../scripts/test-tiers/core.mjs'
+import { loadPolicy } from './ci-web-shard-source.mjs'
 import { validatePath } from '../../scripts/ci-pr-plan.mjs'
 
 export const webRoot = fileURLToPath(new URL('../', import.meta.url))
@@ -84,7 +86,7 @@ export function checkSpecInventory(manifest, discovered) {
 }
 
 export function loadManifest(path = manifestPath) {
-  const manifest = validateManifest(JSON.parse(readFileSync(path, 'utf8')))
+  const manifest = validateManifest(loadPolicy(path))
   // `unlisted` is the synthetic group reconcileManifest adds for specs the manifest does not know.
   if (manifest.groups.some(group => group.id === 'unlisted')) throw new Error('Manifest must not declare the reserved group id: unlisted')
   return manifest
@@ -158,28 +160,8 @@ function lowerMakespan(shards, passes) {
   }
 }
 
-// The tier runner executes with one worker, while some historical measured
-// steps used two. Convert those file allocations to serial scheduling estimates
-// without changing the original weights used by the exact-spec runner. Local
-// serial timings and unmeasured/test-count estimates already use a serial basis.
-export function tierWeights(manifest, rows) {
-  const sources = new Map((manifest.ciInventory ?? []).map(source => [source.id, source]))
-  return Object.fromEntries(manifest.groups.flatMap(group => group.specs.map(spec => {
-    if (spec.tierTiming) {
-      const { seconds, selectedTests } = spec.tierTiming
-      if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isSafeInteger(selectedTests) || selectedTests < 1) throw new Error(`Invalid tier timing: ${spec.file}`)
-      // Hosted reports measure the gated slice. Other selections are estimates
-      // proportional to that slice, without pretending nightly was measured.
-      const selected = rows ? rows.filter(row => row.file === spec.file).length : selectedTests
-      return [spec.file, seconds * selected / selectedTests]
-    }
-    const source = sources.get(spec.weightSource)
-    const workers = source?.flags?.map(flag => /^--workers=(\d+)$/.exec(flag)).find(Boolean)
-    const factor = source?.kind === 'browser-test' && source.measuredSeconds > 0 && workers ? Number(workers[1]) : 1
-    if (!Number.isSafeInteger(factor) || factor < 1 || factor > 64) throw new Error(`Invalid measured worker count: ${spec.file}`)
-    return [spec.file, spec.weightSeconds * factor]
-  })))
-}
+// Shared by the lightweight planner and the tier runner.
+export { tierWeights } from '../../scripts/test-tiers/core.mjs'
 
 // Catalogue shards (nightly --all and schedule) pack from hosted wall time.
 // PR and merge-group lanes keep tierTiming. Files this run did not measure

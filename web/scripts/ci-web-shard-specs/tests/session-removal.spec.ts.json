@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 55.289,
+    "selectedTests": 17
+  },
+  "spec": {
+    "file": "tests/session-removal.spec.ts",
+    "listedTests": 17,
+    "weightSeconds": 37.731707,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

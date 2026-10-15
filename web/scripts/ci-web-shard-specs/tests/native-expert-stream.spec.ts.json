@@ -1,0 +1,13 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 40.214,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/native-expert-stream.spec.ts",
+    "listedTests": 12,
+    "weightSeconds": 10,
+    "weightSource": "aeon-1270-guarded-serial-wall"
+  }
+}

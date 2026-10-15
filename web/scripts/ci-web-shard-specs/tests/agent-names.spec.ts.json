@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 6.99,
+    "selectedTests": 3
+  },
+  "spec": {
+    "file": "tests/agent-names.spec.ts",
+    "listedTests": 3,
+    "weightSeconds": 6.658536,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

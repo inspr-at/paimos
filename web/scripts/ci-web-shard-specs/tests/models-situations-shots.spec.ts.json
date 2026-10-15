@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 16.932,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/models-situations-shots.spec.ts",
+    "listedTests": 12,
+    "weightSeconds": 8,
+    "weightSource": "AEON-1162 evidence screenshots, mbp2606 single-worker 6.5s plus margin"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 67.121,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/agents-worker-tree.spec.ts",
+    "listedTests": 12,
+    "weightSeconds": 80,
+    "weightSource": "nightly-38452339044-first-nine-cases-53.9s-plus-remaining-cases-margin"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 98.812,
+    "selectedTests": 18
+  },
+  "spec": {
+    "file": "tests/approval-feedback.spec.ts",
+    "listedTests": 18,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.05,
+        "median": 5.43,
+        "min": 2.155
+      },
+      "seconds": 86.557,
+      "selectedTests": 18
+    },
+    "weightSeconds": 32.233918,
+    "weightSource": "web-13"
+  }
+}

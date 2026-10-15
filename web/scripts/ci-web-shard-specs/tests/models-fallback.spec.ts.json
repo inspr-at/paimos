@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 23.584,
+    "selectedTests": 15
+  },
+  "spec": {
+    "file": "tests/models-fallback.spec.ts",
+    "listedTests": 13,
+    "weightSeconds": 14,
+    "weightSource": "AEON-1161 mbp2606 single worker: with models-simple and its shots (20s weight) the three specs ran in 30.1s; plus margin"
+  }
+}

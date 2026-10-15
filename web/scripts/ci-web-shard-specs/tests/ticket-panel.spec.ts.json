@@ -1,0 +1,22 @@
+{
+  "group": "dispatch",
+  "nightlyTiming": {
+    "seconds": 137.415,
+    "selectedTests": 46
+  },
+  "spec": {
+    "file": "tests/ticket-panel.spec.ts",
+    "listedTests": 46,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 94.816,
+        "median": 2.067,
+        "min": 1.65
+      },
+      "seconds": 156.256,
+      "selectedTests": 23
+    },
+    "weightSeconds": 34.509803565,
+    "weightSource": "web-11"
+  }
+}

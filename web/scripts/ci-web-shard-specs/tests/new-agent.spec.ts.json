@@ -1,0 +1,22 @@
+{
+  "group": "access-dialogs",
+  "nightlyTiming": {
+    "seconds": 39.101,
+    "selectedTests": 13
+  },
+  "spec": {
+    "file": "tests/new-agent.spec.ts",
+    "listedTests": 12,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.551,
+        "median": 1.817,
+        "min": 1.352
+      },
+      "seconds": 34.567,
+      "selectedTests": 13
+    },
+    "weightSeconds": 31.83871,
+    "weightSource": "web-8"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 65.317,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/agent-recovery.spec.ts",
+    "listedTests": 9,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.14,
+        "median": 5.111,
+        "min": 2.547
+      },
+      "seconds": 43.118,
+      "selectedTests": 9
+    },
+    "weightSeconds": 20
+  }
+}

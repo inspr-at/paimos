@@ -338,7 +338,7 @@ test('AEON-1333 depth-1 merge checkout publishes complete would-have-skipped evi
   git(full, ['config', 'uploadpack.allowReachableSHA1InWant', 'true'])
   for (const file of ['scripts/test-tiers/impact-plan.mjs', 'scripts/test-tiers/browser-impact.mjs', 'scripts/test-tiers/inputs.mjs',
     'scripts/test-tiers/core.mjs', 'scripts/test-tiers/migration.mjs', 'scripts/playwright-safe.mjs', 'scripts/playwright-global-setup.mjs',
-    'scripts/playwright-lock.mjs', 'scripts/playwright-processes.mjs', 'scripts/ci-pr-plan.mjs', 'web/scripts/ci-web-shard.mjs'])
+    'scripts/playwright-lock.mjs', 'scripts/playwright-processes.mjs', 'scripts/ci-pr-plan.mjs', 'web/scripts/ci-web-shard.mjs', 'web/scripts/ci-web-shard-source.mjs'])
     write(file, readFileSync(resolve(repository, file)))
   write('scripts/ci/web-test-tiers.json', JSON.stringify(manifest(tests)))
   write('scripts/ci/known-flaky.json', JSON.stringify({ version: 1, entries: [] }))

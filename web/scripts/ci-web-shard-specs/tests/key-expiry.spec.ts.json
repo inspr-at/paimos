@@ -1,0 +1,22 @@
+{
+  "group": "access-dialogs",
+  "nightlyTiming": {
+    "seconds": 52.592,
+    "selectedTests": 13
+  },
+  "spec": {
+    "file": "tests/key-expiry.spec.ts",
+    "listedTests": 13,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.646,
+        "median": 2.268,
+        "min": 1.755
+      },
+      "seconds": 42.265,
+      "selectedTests": 13
+    },
+    "weightSeconds": 34.491935,
+    "weightSource": "web-8"
+  }
+}

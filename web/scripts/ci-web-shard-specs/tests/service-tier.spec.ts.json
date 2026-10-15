@@ -1,0 +1,22 @@
+{
+  "group": "service-tier",
+  "nightlyTiming": {
+    "seconds": 148.146,
+    "selectedTests": 44
+  },
+  "spec": {
+    "file": "tests/service-tier.spec.ts",
+    "listedTests": 44,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.609,
+        "median": 2.166,
+        "min": 1.137
+      },
+      "seconds": 92.286,
+      "selectedTests": 41
+    },
+    "weightSeconds": 91,
+    "weightSource": "web-6"
+  }
+}

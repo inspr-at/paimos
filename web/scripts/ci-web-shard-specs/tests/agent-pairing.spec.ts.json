@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 83.036,
+    "selectedTests": 35
+  },
+  "spec": {
+    "file": "tests/agent-pairing.spec.ts",
+    "listedTests": 35,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.507,
+        "median": 1.507,
+        "min": 1.507
+      },
+      "seconds": 1.507,
+      "selectedTests": 1
+    },
+    "weightSeconds": 77.682927,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

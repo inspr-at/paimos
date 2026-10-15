@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 12.5,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/avatar-upload-bounds.spec.ts",
+    "listedTests": 5,
+    "weightSeconds": 11.097561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

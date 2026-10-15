@@ -1,0 +1,12 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 49.526,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/work-integration.spec.ts",
+    "weightSeconds": 70,
+    "weightSource": "estimate"
+  }
+}

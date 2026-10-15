@@ -1,0 +1,22 @@
+{
+  "group": "decision-desk",
+  "nightlyTiming": {
+    "seconds": 67.927,
+    "selectedTests": 8
+  },
+  "spec": {
+    "file": "tests/decision-desk-fix2.spec.ts",
+    "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 14.157,
+        "median": 13.709,
+        "min": 1.981
+      },
+      "seconds": 86.743,
+      "selectedTests": 8
+    },
+    "weightSeconds": 40,
+    "weightSource": "AEON-569 regression port; conservative initial estimate"
+  }
+}

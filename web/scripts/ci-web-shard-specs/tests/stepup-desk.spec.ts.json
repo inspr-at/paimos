@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 21.993,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/stepup-desk.spec.ts",
+    "listedTests": 9,
+    "weightSeconds": 12,
+    "weightSource": "local-single-worker-AEON-1048-9.1s-plus-margin"
+  }
+}

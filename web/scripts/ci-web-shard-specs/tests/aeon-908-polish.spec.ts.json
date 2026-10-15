@@ -1,0 +1,11 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 65.77,
+    "selectedTests": 13
+  },
+  "spec": {
+    "file": "tests/aeon-908-polish.spec.ts",
+    "weightSeconds": 120
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "decision-desk",
+  "nightlyTiming": {
+    "seconds": 377.254,
+    "selectedTests": 60
+  },
+  "spec": {
+    "file": "tests/decision-desk.spec.ts",
+    "listedTests": 60,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 15.827,
+        "median": 2.739,
+        "min": 1.449
+      },
+      "seconds": 324.203,
+      "selectedTests": 60
+    },
+    "weightSeconds": 128,
+    "weightSource": "web-14"
+  }
+}

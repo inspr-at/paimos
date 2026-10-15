@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 76.689,
+    "selectedTests": 15
+  },
+  "spec": {
+    "file": "tests/aeon-1213-agents-split.spec.ts",
+    "listedTests": 13,
+    "weightSeconds": 40,
+    "weightSource": "unmeasured-P5-one-worker-budget"
+  }
+}

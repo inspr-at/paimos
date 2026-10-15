@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 25.846,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/doctrine-inbox.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.195,
+        "median": 3.575,
+        "min": 3.161
+      },
+      "seconds": 28.941,
+      "selectedTests": 7
+    },
+    "weightSeconds": 4.439024,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

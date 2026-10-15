@@ -1,0 +1,11 @@
+{
+  "group": "work-queue",
+  "nightlyTiming": {
+    "seconds": 30,
+    "selectedTests": 1
+  },
+  "spec": {
+    "file": "tests/entry-checks.spec.ts",
+    "weightSeconds": 30
+  }
+}

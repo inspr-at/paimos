@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 27.397,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/display-language.spec.ts",
+    "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.094,
+        "median": 3.496,
+        "min": 2.679
+      },
+      "seconds": 18.086,
+      "selectedTests": 5
+    },
+    "weightSeconds": 35,
+    "weightSource": "AEON-998 targeted spot checks, five views with six sizes/themes each"
+  }
+}

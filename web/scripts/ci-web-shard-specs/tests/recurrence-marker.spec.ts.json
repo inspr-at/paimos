@@ -1,0 +1,22 @@
+{
+  "group": "recurrences",
+  "nightlyTiming": {
+    "seconds": 130.516,
+    "selectedTests": 37
+  },
+  "spec": {
+    "file": "tests/recurrence-marker.spec.ts",
+    "listedTests": 37,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 10.554,
+        "median": 9.7945,
+        "min": 9.035
+      },
+      "seconds": 19.589,
+      "selectedTests": 2
+    },
+    "weightSeconds": 45,
+    "weightSource": "estimate"
+  }
+}

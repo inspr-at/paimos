@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 68.572,
+    "selectedTests": 27
+  },
+  "spec": {
+    "file": "tests/accounts-quota-bar.spec.ts",
+    "listedTests": 25,
+    "weightSeconds": 62.5,
+    "weightSource": "AEON-1172 estimate: twenty-five mocked account list and panel flows, most at three widths, two themes"
+  }
+}

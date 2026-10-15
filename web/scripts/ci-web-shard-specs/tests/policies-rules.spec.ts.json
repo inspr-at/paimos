@@ -1,0 +1,13 @@
+{
+  "group": "model-settings",
+  "nightlyTiming": {
+    "seconds": 18.352,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/policies-rules.spec.ts",
+    "listedTests": 9,
+    "weightSeconds": 20,
+    "weightSource": "AEON-1165 estimate, 9 cases replacing the ladder editor spec"
+  }
+}

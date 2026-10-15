@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 58.695,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/settings-account-parts.spec.ts",
+    "listedTests": 13,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 9.733,
+        "median": 9.733,
+        "min": 9.733
+      },
+      "seconds": 9.733,
+      "selectedTests": 1
+    },
+    "weightSeconds": 30,
+    "weightSource": "AEON-1171 estimate: eleven mocked flows (14.5s on mbp2606 with two workers, plus margin), two skipped evidence runs"
+  }
+}

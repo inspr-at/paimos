@@ -1,0 +1,22 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 183.371,
+    "selectedTests": 72
+  },
+  "spec": {
+    "file": "tests/clip-tip.spec.ts",
+    "listedTests": 72,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.578,
+        "median": 1.591,
+        "min": 0.693
+      },
+      "seconds": 141.108,
+      "selectedTests": 72
+    },
+    "weightSeconds": 89.470907,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 491.1,
+    "selectedTests": 56
+  },
+  "spec": {
+    "file": "tests/aeon-1212-lead-panel.spec.ts",
+    "listedTests": 32,
+    "weightSeconds": 240,
+    "weightSource": "AEON-1212 fix4 estimate: viewport acceptance, G3/G6 evidence, bounded wide worker metadata and the original approved check"
+  }
+}

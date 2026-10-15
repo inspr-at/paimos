@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 41.799,
+    "selectedTests": 17
+  },
+  "spec": {
+    "file": "tests/routines-tab.spec.ts",
+    "listedTests": 11,
+    "weightSeconds": 22,
+    "weightSource": "AEON-1192 estimate: eleven mocked Routines page flows (seven measured in 12 s), one worker"
+  }
+}

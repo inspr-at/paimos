@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 30.156,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/delivery-flow-lanes.spec.ts",
+    "listedTests": 11,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.57,
+        "median": 2.643,
+        "min": 1.953
+      },
+      "seconds": 29.219,
+      "selectedTests": 11
+    },
+    "weightSeconds": 12,
+    "weightSource": "aeon-1005-estimate"
+  }
+}

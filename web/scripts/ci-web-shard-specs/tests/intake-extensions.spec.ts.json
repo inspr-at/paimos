@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 28.143,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/intake-extensions.spec.ts",
+    "listedTests": 12,
+    "weightSeconds": 37.731707,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 175.893,
+    "selectedTests": 27
+  },
+  "spec": {
+    "file": "tests/phone-controls.spec.ts",
+    "listedTests": 27,
+    "weightSeconds": 59.926829,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

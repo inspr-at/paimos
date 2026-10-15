@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 49.257,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/delivery-numbers.spec.ts",
+    "listedTests": 14,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.977,
+        "median": 2.8905,
+        "min": 1.378
+      },
+      "seconds": 41.343,
+      "selectedTests": 14
+    },
+    "weightSeconds": 30,
+    "weightSource": "aeon-1002-estimate"
+  }
+}

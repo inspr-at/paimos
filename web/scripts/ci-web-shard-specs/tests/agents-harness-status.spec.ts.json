@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 57.471,
+    "selectedTests": 25
+  },
+  "spec": {
+    "file": "tests/agents-harness-status.spec.ts",
+    "listedTests": 26,
+    "weightSeconds": 57.707317,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

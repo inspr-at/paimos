@@ -1,0 +1,13 @@
+{
+  "group": "project-header",
+  "nightlyTiming": {
+    "seconds": 52.285,
+    "selectedTests": 15
+  },
+  "spec": {
+    "file": "tests/project-header.spec.ts",
+    "listedTests": 15,
+    "weightSeconds": 33.292683,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

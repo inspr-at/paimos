@@ -1,0 +1,22 @@
+{
+  "group": "aeon-624-dialogs",
+  "nightlyTiming": {
+    "seconds": 159.569,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/dialog-scale.spec.ts",
+    "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 14.73,
+        "median": 12.795,
+        "min": 0.003
+      },
+      "seconds": 27.528,
+      "selectedTests": 3
+    },
+    "weightSeconds": 17.756098,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

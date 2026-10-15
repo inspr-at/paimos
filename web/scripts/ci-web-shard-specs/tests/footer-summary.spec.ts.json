@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 20.589,
+    "selectedTests": 16
+  },
+  "spec": {
+    "file": "tests/footer-summary.spec.ts",
+    "listedTests": 13,
+    "weightSeconds": 20,
+    "weightSource": "estimate"
+  }
+}

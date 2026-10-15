@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 27.08,
+    "selectedTests": 8
+  },
+  "spec": {
+    "file": "tests/aeon-1188-displayhome.spec.ts",
+    "listedTests": 8,
+    "weightSeconds": 20,
+    "weightSource": "local-single-worker-AEON-1188-15s-plus-margin"
+  }
+}

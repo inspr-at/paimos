@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 54.425,
+    "selectedTests": 20
+  },
+  "spec": {
+    "file": "tests/done-gate.spec.ts",
+    "listedTests": 20,
+    "weightSeconds": 44.390244,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

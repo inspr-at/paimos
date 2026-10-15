@@ -1,0 +1,13 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 19.889,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/native-expert-terminal.spec.ts",
+    "listedTests": 5,
+    "weightSeconds": 10,
+    "weightSource": "aeon-1289-guarded-serial-wall-5.3s-with-headroom"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 19.333,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/key-trim.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.65,
+        "median": 3.616,
+        "min": 1.756
+      },
+      "seconds": 22.35,
+      "selectedTests": 7
+    },
+    "weightSeconds": 15.536585,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

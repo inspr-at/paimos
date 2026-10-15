@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 63.434,
+    "selectedTests": 21
+  },
+  "spec": {
+    "file": "tests/quote-workspace.spec.ts",
+    "listedTests": 21,
+    "weightSeconds": 46.609756,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

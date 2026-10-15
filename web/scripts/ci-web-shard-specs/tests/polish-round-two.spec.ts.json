@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 2.74,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/polish-round-two.spec.ts",
+    "listedTests": 2,
+    "weightSeconds": 4.439024375,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

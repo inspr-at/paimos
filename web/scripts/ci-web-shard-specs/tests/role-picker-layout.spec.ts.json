@@ -1,0 +1,13 @@
+{
+  "group": "aeon-624-dialogs",
+  "nightlyTiming": {
+    "seconds": 275.315,
+    "selectedTests": 83
+  },
+  "spec": {
+    "file": "tests/role-picker-layout.spec.ts",
+    "listedTests": 83,
+    "weightSeconds": 184.219512,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

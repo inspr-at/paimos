@@ -1,0 +1,22 @@
+{
+  "group": "release",
+  "nightlyTiming": {
+    "seconds": 79.161,
+    "selectedTests": 92
+  },
+  "spec": {
+    "file": "tests/header-menus.spec.ts",
+    "listedTests": 92,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.984,
+        "median": 0,
+        "min": 0
+      },
+      "seconds": 63.63,
+      "selectedTests": 92
+    },
+    "weightSeconds": 114.861878,
+    "weightSource": "web-4"
+  }
+}

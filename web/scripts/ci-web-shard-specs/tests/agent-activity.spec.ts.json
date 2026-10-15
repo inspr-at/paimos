@@ -1,0 +1,22 @@
+{
+  "group": "status-autopilot",
+  "nightlyTiming": {
+    "seconds": 90,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/agent-activity.spec.ts",
+    "listedTests": 11,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 14.914,
+        "median": 6.647,
+        "min": 1.436
+      },
+      "seconds": 71.61,
+      "selectedTests": 11
+    },
+    "weightSeconds": 35.820513,
+    "weightSource": "status-autopilot-ui-2"
+  }
+}

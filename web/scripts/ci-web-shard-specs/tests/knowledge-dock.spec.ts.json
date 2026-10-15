@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 35.015,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/knowledge-dock.spec.ts",
+    "listedTests": 11,
+    "weightSeconds": 24.414634,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "decision-knowledge",
+  "nightlyTiming": {
+    "seconds": 94.583,
+    "selectedTests": 16
+  },
+  "spec": {
+    "file": "tests/knowledge.spec.ts",
+    "listedTests": 16,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 13.848,
+        "median": 2.828,
+        "min": 2.052
+      },
+      "seconds": 67.127,
+      "selectedTests": 15
+    },
+    "weightSeconds": 35.512195,
+    "weightSource": "unmeasured-test-rate"
+  }
+}
