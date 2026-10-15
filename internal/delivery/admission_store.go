@@ -126,9 +126,14 @@ func AdmissionTx(ctx context.Context, tx pgx.Tx, item Item) (AdmissionSnapshot, 
 	}
 	out.Decision = EvaluateAdmission(AdmissionInput{Binding: b, Revision: out.BindingRevision, Open: o.Open && !o.Merged, CIGreen: admissionCIGreen(o), ScopeVerified: diff.MergeBase == b.Base && reviewgate.ValidSHA(diff.MergeBase), Review: out.Review, Visual: out.Visual, Diff: diff, Holds: holds, Policy: out.Policy, Fix: out.Control.Fix})
 	out.Enforcement = "pending"
-	err = tx.QueryRow(ctx, `SELECT enforcement FROM delivery_admission_queue WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, item.Repository, *item.PR, item.Head).Scan(&out.Enforcement)
+	var quarantined bool
+	err = tx.QueryRow(ctx, `SELECT enforcement,quarantined FROM delivery_admission_queue WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, item.Repository, *item.PR, item.Head).Scan(&out.Enforcement, &quarantined)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
+	}
+	if quarantined {
+		out.Decision.Admissible = false
+		out.Decision.Reason = "queue_quarantined"
 	}
 	out.Effective = !out.Decision.Admissible && out.Enforcement == "removed"
 	return out, nil

@@ -50,7 +50,8 @@ under the tenant/tree fence, and holds that fence through the bounded mutation.
 One same-head retry is allowed after a verified infrastructure failure on a
 synthetic group. Replayed checks from that group do not buy another retry.
 Required-code failures, repeated infrastructure failures and unconfirmed queue
-ejections quarantine the head and create one held Desk notice. Policy removal
+ejections quarantine the head, surface `queue_quarantined` in admission, and
+create one held Desk notice. Policy removal
 is separate: lifting a hold resumes the same approved head without spending an
 infrastructure retry.
 
