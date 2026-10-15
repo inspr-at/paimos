@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 22.652,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/settings-account-pacing.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.494,
+        "median": 1.695,
+        "min": 1.36
+      },
+      "seconds": 22.652,
+      "selectedTests": 12
+    },
+    "weightSeconds": 22.19512,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

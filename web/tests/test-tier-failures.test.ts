@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { loadManifest as loadWebPolicy } from '../scripts/ci-web-shard.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -242,7 +243,7 @@ test('native planning regression reuses one collected snapshot for unchanged-tre
   const hook=resolve(directory,'fixture.mjs'),calls=resolve(directory,'collections.txt')
   const collector=new URL('../../scripts/test-tiers/collect.mjs',import.meta.url).href
   const manifest=JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url),'utf8'))
-  const policy=JSON.parse(readFileSync(new URL('../ci-web-shards.json',import.meta.url),'utf8'))
+  const policy=loadWebPolicy()
   const optional=new Set(policy.groups.filter(group=>group.gate===false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const essential=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
   const nightly=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&optional.has(row.file))

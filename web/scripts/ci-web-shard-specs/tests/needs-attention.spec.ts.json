@@ -1,0 +1,22 @@
+{
+  "group": "needs-attention",
+  "nightlyTiming": {
+    "seconds": 221.917,
+    "selectedTests": 42
+  },
+  "spec": {
+    "file": "tests/needs-attention.spec.ts",
+    "listedTests": 42,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 40.214,
+        "median": 2.912,
+        "min": 1.483
+      },
+      "seconds": 221.917,
+      "selectedTests": 42
+    },
+    "weightSeconds": 46.609756,
+    "weightSource": "estimate"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 16.712,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/agents-handover.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.987,
+        "median": 2.358,
+        "min": 1.98
+      },
+      "seconds": 16.712,
+      "selectedTests": 7
+    },
+    "weightSeconds": 15.536585,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

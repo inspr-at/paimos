@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { loadManifest as loadWebPolicy } from '../../web/scripts/ci-web-shard.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -94,7 +95,7 @@ test('AEON-1023 browser-only discovery preserves full/catalogue/changed-area dec
   const manifest = JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json', import.meta.url)))
   const inventory = { tests: manifest.tests.map((entry, index) => ({ ...entry, id: `native-${index}`, line: index + 1, active: true })) }
   const browser = { scope: 'browser', tests: inventory.tests.filter(row => row.kind === 'browser') }
-  const policies = JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json', import.meta.url)))
+  const policies = loadWebPolicy()
   const compare = options => {
     const before = plan('web', { ...options, inventory })
     const requested = []

@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 12.342,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/quote-showcase.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.494,
+        "median": 1.968,
+        "min": 0.003
+      },
+      "seconds": 12.342,
+      "selectedTests": 7
+    },
+    "weightSeconds": 15.536585,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

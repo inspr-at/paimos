@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 49.555,
+    "selectedTests": 17
+  },
+  "spec": {
+    "file": "tests/session-messages.spec.ts",
+    "listedTests": 17,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.348,
+        "median": 2.414,
+        "min": 2.174
+      },
+      "seconds": 49.555,
+      "selectedTests": 17
+    },
+    "weightSeconds": 37.731707,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

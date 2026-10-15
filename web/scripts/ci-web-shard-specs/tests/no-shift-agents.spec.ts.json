@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 183.881,
+    "selectedTests": 29
+  },
+  "spec": {
+    "file": "tests/no-shift-agents.spec.ts",
+    "listedTests": 29,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 16.308,
+        "median": 5.465,
+        "min": 2.122
+      },
+      "seconds": 183.881,
+      "selectedTests": 29
+    },
+    "weightSeconds": 67.322244,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

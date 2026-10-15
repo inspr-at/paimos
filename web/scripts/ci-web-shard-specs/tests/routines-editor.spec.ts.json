@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 28.818,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/routines-editor.spec.ts",
+    "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.055,
+        "median": 3.385,
+        "min": 1.742
+      },
+      "seconds": 28.818,
+      "selectedTests": 7
+    },
+    "weightSeconds": 40,
+    "weightSource": "AEON-1182 estimate: five mocked routine editor flows, one worker"
+  }
+}

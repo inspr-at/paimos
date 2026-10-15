@@ -1,0 +1,22 @@
+{
+  "group": "key-layout",
+  "nightlyTiming": {
+    "seconds": 46.668,
+    "selectedTests": 24
+  },
+  "spec": {
+    "file": "tests/key-layout.spec.ts",
+    "listedTests": 24,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.194,
+        "median": 1.915,
+        "min": 1.372
+      },
+      "seconds": 46.668,
+      "selectedTests": 24
+    },
+    "weightSeconds": 26.634146,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

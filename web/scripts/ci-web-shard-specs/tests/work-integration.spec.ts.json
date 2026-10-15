@@ -1,0 +1,21 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 37.995,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/work-integration.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.456,
+        "median": 3.315,
+        "min": 2.581
+      },
+      "seconds": 37.995,
+      "selectedTests": 12
+    },
+    "weightSeconds": 70,
+    "weightSource": "estimate"
+  }
+}

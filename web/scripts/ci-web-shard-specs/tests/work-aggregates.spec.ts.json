@@ -1,0 +1,20 @@
+{
+  "group": "work-node-integration",
+  "nightlyTiming": {
+    "seconds": 178.299,
+    "selectedTests": 29
+  },
+  "spec": {
+    "file": "tests/work-aggregates.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.397,
+        "median": 6.096,
+        "min": 3.618
+      },
+      "seconds": 178.299,
+      "selectedTests": 29
+    },
+    "weightSeconds": 60
+  }
+}

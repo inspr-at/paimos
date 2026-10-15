@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 27.333,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/aeon-1279-touch-scroll.spec.ts",
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.308,
+        "median": 3.684,
+        "min": 3.47
+      },
+      "seconds": 27.333,
+      "selectedTests": 6
+    },
+    "weightSeconds": 60,
+    "weightSource": "remote-one-worker-AEON-1279-30s-plus-margin"
+  }
+}

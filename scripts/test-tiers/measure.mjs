@@ -4,6 +4,46 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command } from './collect.mjs'
 import { measurementCauses, measurementErrorCause } from './measurement-causes.mjs'
+import { countCaseResults } from './report.mjs'
+
+export function newestAttemptReports(reports, { runId, attempt, sha } = {}) {
+  const excludedEvidence=[],groups=new Map(),notes=[]
+  for(const report of reports) {
+    const mismatched=Object.entries({runId,sha}).some(([field,value])=>value!==undefined&&String(report[field])!==String(value)) ||
+      attempt!==undefined&&(!/^[1-9][0-9]*$/.test(String(report.attempt))||!Number.isSafeInteger(Number(report.attempt))||Number(report.attempt)>Number(attempt))
+    if(mismatched) { excludedEvidence.push({job:report.job,reason:'different or missing run or SHA, or invalid/future attempt'});continue }
+    const group=groups.get(report.job)??[]
+    if(group.some(other=>String(other.attempt)===String(report.attempt))) throw new Error(`Invalid or duplicate measurement: ${report.job}`)
+    group.push(report);groups.set(report.job,group)
+  }
+  const selected=[]
+  for(const group of groups.values()) {
+    group.sort((a,b)=>Number(b.attempt??0)-Number(a.attempt??0))
+    const latest=group[0],cases=new Map()
+    let report=latest
+    if(group.every(row=>Array.isArray(row.caseResults))) {
+      for(const source of group) {
+        const classes=countCaseResults(source.caseResults)
+        if(Object.entries(classes).some(([tier,counts])=>Object.entries(counts).some(([field,value])=>source.classes?.[tier]?.[field]!==value))) throw new Error(`Invalid case count: ${source.job}`)
+        for(const row of source.caseResults) if(!cases.has(row.key)) cases.set(row.key,{row,source})
+      }
+      const caseResults=[...cases.values()].map(({row})=>row)
+      const flakeLedger=[...cases.values()].flatMap(({row,source})=>(source.flakeLedger??[]).filter(entry=>entry.key===row.key))
+      report={...latest,caseResults,classes:countCaseResults(caseResults),flakeLedger,
+        caseAttempts:Object.fromEntries([...cases].map(([key,{source}])=>[key,String(source.attempt)]))}
+    }
+    // Legacy artifacts have aggregate counts only. Keep the newest whole job
+    // intact; never invent per-case identities or combine its old tallies.
+    const sources=cases.size?[...cases.values()].map(({source})=>({attempt:source.attempt,count:1})):
+      [{attempt:latest.attempt,count:Object.values(latest.classes??{}).reduce((n,c)=>n+c.selected,0)}]
+    const older=new Map()
+    for(const source of sources) if(attempt!==undefined&&Number(source.attempt)<Number(attempt))
+      older.set(String(source.attempt),(older.get(String(source.attempt))??0)+source.count)
+    for(const [prior,count] of older) if(count) notes.push(`partial rerun: ${count} cases from attempt ${prior} (${latest.job})`)
+    selected.push(report)
+  }
+  return {reports:selected,excludedEvidence,notes}
+}
 
 export function jobMinutes(job) {
   // Actions returns completed/skipped jobs with a real started_at and Go's
@@ -21,12 +61,10 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
   if(layout!==undefined&&!['full','static',''].includes(layout)) throw new Error('Invalid tier layout')
   if(reusedFrom!==undefined && !/^[1-9][0-9]*$/.test(String(reusedFrom))) throw new Error("Invalid reused source run")
   if(reusedFrom!==undefined && reports.length && !(freshTiming&&reports.every(report=>report.job==='go-timing'))) throw new Error("Reused execution must not report fresh test passes")
-  const names=new Set(),classes={},excludedEvidence=[],incompleteEvidence=[],flakeLedger=[],flakeCounts=new Map()
-  reports=reports.filter(report=>{
-    const mismatched=Object.entries({runId,attempt,sha}).some(([field,value])=>value!==undefined&&String(report[field])!==String(value))
-    if(mismatched)excludedEvidence.push({job:report.job,reason:'different or missing run, attempt or SHA'})
-    return !mismatched
-  })
+  const selected=newestAttemptReports(reports,{runId,attempt,sha})
+  reports=selected.reports
+  const {excludedEvidence,notes}=selected
+  const names=new Set(),classes={},incompleteEvidence=[],flakeLedger=[],flakeCounts=new Map()
   for(const report of reports) {
     if(report.version!==1||names.has(report.job)) throw new Error(`Invalid or duplicate measurement: ${report.job}`)
     names.add(report.job)
@@ -90,9 +128,9 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
       incompleteEvidence.length?'interrupted or incomplete case evidence':undefined
   const runners=jobs.map(job=>({name:job.name,status:job.status,conclusion:job.conclusion,runnerMinutes:jobMinutes(job)}))
   const minutes=prefix=>runners.filter(job=>new RegExp(`^(?:nightly-)?${prefix}(?:-| |$)`).test(job.name)).reduce((sum,job)=>sum+(job.runnerMinutes??0),0)
-  return {version:1,runId,attempt,sha,classes,reports,flakeLedger,flakeCounts:Object.fromEntries(flakeCounts),jobs:runners,missingEvidence,excludedEvidence,incompleteEvidence,upstreamFailures,skippedJobs,coverageReason,
+  return {version:1,runId,attempt,sha,classes,reports,notes,flakeLedger,flakeCounts:Object.fromEntries(flakeCounts),jobs:runners,missingEvidence,excludedEvidence,incompleteEvidence,upstreamFailures,skippedJobs,coverageReason,
     reusedFrom,
-    coverage:missingEvidence.length||upstreamFailures.length||incompleteEvidence.length?'incomplete':reusedFrom!==undefined?'reused':lane==='spec-only'?'untiered':'reported',
+    coverage:missingEvidence.length||upstreamFailures.length||incompleteEvidence.length||excludedEvidence.length?'incomplete':reusedFrom!==undefined?'reused':lane==='spec-only'?'untiered':'reported',
     baselines:{goRunnerMinutes:22.5,webRunnerMinutes:42.17},
     measured:{goRunnerMinutes:minutes('go'),webRunnerMinutes:minutes('web'),sharedPlanningRunnerMinutes:minutes('tier-plan')},
     caseScope:reusedFrom!==undefined&&freshTiming?`Only freshly executed timing guard cases are counted; verified full PR run ${reusedFrom} supplies skipped tier execution. Current runner minutes include guards and proof overhead.`:reusedFrom!==undefined?`No tier tests executed in this run; verified full merge-group run ${reusedFrom} supplies execution evidence. Current runner minutes include reuse/cache overhead.`:lane==='spec-only'?'Spec-only: native unit checks and exact changed specs execute without tier case accounting; runner costs are reported, no tier passes are claimed.':'Top-level Go Test/Fuzz including isolated timing, and web unit/UI registrations selected by tiers; fixed static, release and e2e gates retain separate runner costs.'}
@@ -112,7 +150,7 @@ export function main(directory,env=process.env) {
   if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT??'')) throw new Error('Missing Actions run identity')
   const jobs=[]
   for(let page=1;page<=20;page++) {
-    const result=JSON.parse(command('gh',['api',`repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}/jobs?per_page=100&page=${page}`]))
+    const result=JSON.parse(command('gh',['api',`repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`]))
     jobs.push(...result.jobs)
     if(jobs.length>=result.total_count) break
     if(page===20) throw new Error('Job inventory exceeds measurement bound')
@@ -122,8 +160,9 @@ export function main(directory,env=process.env) {
   if(report.incompleteEvidence.length) report.measurementCauses.push('incomplete_case_execution')
   mkdirSync('tmp',{recursive:true})
   writeFileSync('tmp/test-tier-run-measurement.json',JSON.stringify(report,null,2)+'\n')
-  console.log(JSON.stringify({classes:report.classes,flakeCounts:report.flakeCounts,flakeLedger:report.flakeLedger,measured:report.measured,coverage:report.coverage,coverageReason:report.coverageReason,missingEvidence:report.missingEvidence,incompleteEvidence:report.incompleteEvidence,upstreamFailures:report.upstreamFailures,skippedJobs:report.skippedJobs,measurementCauses:report.measurementCauses}))
+  console.log(JSON.stringify({classes:report.classes,notes:report.notes,flakeCounts:report.flakeCounts,flakeLedger:report.flakeLedger,measured:report.measured,coverage:report.coverage,coverageReason:report.coverageReason,missingEvidence:report.missingEvidence,incompleteEvidence:report.incompleteEvidence,upstreamFailures:report.upstreamFailures,skippedJobs:report.skippedJobs,measurementCauses:report.measurementCauses}))
   const coverageLabel=report.coverage+(report.coverageReason?` — ${report.coverageReason}`:'')
+  if(env.GITHUB_STEP_SUMMARY&&report.notes.length)writeFileSync(env.GITHUB_STEP_SUMMARY,report.notes.join('\n')+'\n',{flag:'a'})
   if(env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,`\nTest tiers: ${coverageLabel}; Go ${report.measured.goRunnerMinutes.toFixed(2)} / web ${report.measured.webRunnerMinutes.toFixed(2)} runner-min. Baselines: 22.50 / 42.17.\n\n\`\`\`json\n${JSON.stringify({classes:report.classes,flakeCounts:report.flakeCounts,flakeLedger:report.flakeLedger},null,2)}\n\`\`\`\n${report.reusedFrom?`Verified execution source run: ${report.reusedFrom}. No fresh tier passes are claimed. `:''}Missing case evidence: ${report.missingEvidence.join(', ')||'none'}.\nIncomplete case evidence: ${report.incompleteEvidence.map(row=>`${row.job} (${row.reason})`).join(', ')||'none'}.\nUpstream jobs that did not succeed: ${report.upstreamFailures.map(job=>`${job.name} (${job.conclusion??job.status})`).join(', ')||'none'}.\n`,{flag:'a'})
   // Missing artifacts remain visibly incomplete, even after a failed setup.
   return report.coverage==='incomplete'?1:0
