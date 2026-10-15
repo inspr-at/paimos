@@ -19058,6 +19058,8 @@
     ,
     {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"state recovery keeps only the mounted editor copy, never an authorized project id","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"the page discard guard stays bound to the editors that opened its confirmation","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later close action","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later direct release action","tier":"GATED-FULL"}

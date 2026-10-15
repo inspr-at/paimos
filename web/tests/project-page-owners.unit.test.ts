@@ -230,3 +230,32 @@ it('render sections attach and clear the same page-owned ref', () => {
   attach(element); expect(target.value).toEqual(element)
   attach(null); expect(target.value).toBeNull()
 })
+
+it('the page discard guard stays bound to the editors that opened its confirmation', async () => {
+  const text = readFileSync(new URL('../src/views/project/useProjectPage.ts', import.meta.url), 'utf8')
+  const source = ts.createSourceFile('useProjectPage.ts', text, ts.ScriptTarget.Latest, true)
+  const page = source.statements.find(ts.isFunctionDeclaration)!
+  const guards = page.body!.statements.filter(statement => ts.isFunctionDeclaration(statement)
+    && ['dirty', 'confirmDiscard'].includes(statement.name?.text ?? ''))
+  expect(guards).toHaveLength(2)
+  const code = ts.transpileModule(guards.map(statement => statement.getText(source)).join('\n'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const outgoing = { isDirty: () => true, discard: vi.fn() }
+  const outgoingKnowledge = { isDirty: () => true, discard: vi.fn() }
+  const incoming = { isDirty: () => true, discard: vi.fn() }
+  const panel = ref(outgoing), knowledgeEntry = ref(outgoingKnowledge)
+  const reply = Promise.withResolvers<boolean>()
+  const confirmAction = vi.fn(() => reply.promise)
+  const context = { panel, knowledgeEntry, skipGuard: ref(false), confirmAction }
+  const guard = new Function('context', `const { panel, knowledgeEntry, skipGuard, confirmAction } = context; ${code}; return confirmDiscard`)(context)
+  const navigation = guard()
+  expect(confirmAction).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ title: 'Discard unsaved changes?' }))
+  panel.value = incoming
+  knowledgeEntry.value = incoming
+  reply.resolve(true)
+  expect(await navigation).toBe(true)
+  expect(outgoing.discard).toHaveBeenCalledExactlyOnceWith()
+  expect(outgoingKnowledge.discard).toHaveBeenCalledExactlyOnceWith()
+  expect(incoming.discard).not.toHaveBeenCalled()
+})
