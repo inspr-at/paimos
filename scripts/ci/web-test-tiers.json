@@ -6002,35 +6002,13 @@
     ,
     {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"panel and preview rows name the kind and project, and link back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"after the last decision of a round opened from the preview, the Desk returns to the page below it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"panel and preview rows name the kind and project, and link back 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"panel and preview rows name the kind and project, and link back 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"panel and preview rows name the kind and project, and link back 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"panel and preview rows name the kind and project, and link back 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15397,6 +15375,10 @@
     {"kind":"node","file":"tests/columns.test.ts","name":"wide tables stop Title near 960px and give the spare width to the text columns","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"widths clamp to each column’s bounds","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/control-stability-position.test.ts","name":"a nested scroll container still counts once","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/control-stability-position.test.ts","name":"a window scroll is not reported as control movement","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/crm.test.ts","name":"a customer is written back whole, with nothing extra","tier":"GATED-FULL"}
     ,

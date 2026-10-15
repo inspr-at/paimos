@@ -16,8 +16,10 @@ async function oneQuestion(page: Page, theme?: 'light' | 'dark') {
   return world
 }
 
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
-  test(`the memo matches the approved sheet and closes after the last decision ${width} ${theme}`, async ({ page }, testInfo) => {
+test('the memo matches the approved sheet and closes after the last decision', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const world = await oneQuestion(page, theme)
     await page.goto('/decision-desk')
@@ -82,10 +84,13 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expect(heading(page)).toHaveText('Which migration should carry the index?')
     await expect(page.getByTestId('desk-status')).toContainText('Change your answer')
     await expect(page.getByTestId('choice-0')).toBeEnabled()
-  })
-}
+  }
+})
 
-for (const theme of ['light', 'dark'] as const) test(`Decide is never a silent no-op: it says why beside the button and moves focus to what is missing ${theme}`, async ({ page }, testInfo) => {
+test('Decide is never a silent no-op: it says why beside the button and moves focus to what is missing', async ({ page }, testInfo) => {
+  test.setTimeout(90_000)
+  for (const theme of ['light', 'dark'] as const) {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
   await page.setViewportSize({ width: 1440, height: 1000 })
   const world = await mockDecisionDesk(page, { theme })
   world.questions[0]!.suggested_outcome = 'doctrine'; world.questions[0]!.suggestion_reason = 'agent_suggestion'
@@ -120,11 +125,15 @@ for (const theme of ['light', 'dark'] as const) test(`Decide is never a silent n
   await expect(page.getByTestId('desk-decide')).toHaveAccessibleName(/^Next/)
   await expect(page.getByTestId('choice-0')).toBeDisabled()
   await page.screenshot({ path: testInfo.outputPath(`decided-${theme}.png`) })
+  }
 })
 
 // The Agents panel and the header preview use the Desk row anatomy: a kind mark, the project with the
 // folder icon, and links that bring the person back after the last decision.
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) test(`panel and preview rows name the kind and project, and link back ${width} ${theme}`, async ({ page }, testInfo) => {
+test('panel and preview rows name the kind and project, and link back', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
   await page.setViewportSize({ width, height: 1000 })
   await mockDecisionDesk(page, { theme })
   await page.goto('/tests/desk-panel-harness.html')
@@ -140,9 +149,8 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   await expect(row.locator('.dp-ic.k-question')).toBeVisible()
   await expect(row.locator('.dp-project')).toHaveText('Paimos Aeon')
   await page.screenshot({ path: testInfo.outputPath(`preview-${width}-${theme}.png`) })
-})
-
-test('after the last decision of a round opened from the preview, the Desk returns to the page below it', async ({ page }) => {
+  }
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
   await page.setViewportSize({ width: 1440, height: 1000 })
   const world = await oneQuestion(page)
   await page.goto('/agents')
@@ -162,7 +170,10 @@ test('after the last decision of a round opened from the preview, the Desk retur
 // through both shoulder junctions and the sheet corner, with no fill seam under the tab (Markus 10-14 09:47).
 test.describe('sheet outline at device scale factor 2', () => {
   test.use({ deviceScaleFactor: 2 })
-  for (const theme of ['light', 'dark'] as const) test(`one even hairline from tab to sheet ${theme}`, async ({ page }, testInfo) => {
+  test('one even hairline from tab to sheet', async ({ page }, testInfo) => {
+    test.setTimeout(90_000)
+    for (const theme of ['light', 'dark'] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
     await page.setViewportSize({ width: 1440, height: 1000 })
     await oneQuestion(page, theme)
     await page.goto('/decision-desk')
@@ -225,5 +236,6 @@ test.describe('sheet outline at device scale factor 2', () => {
       expect(Math.abs(weight - 1), `${name} weight ${weight.toFixed(2)} px at sample ${at}`).toBeLessThanOrEqual(0.25)
     }
     expect(result.seam, 'no fill seam under the tab').toBeLessThanOrEqual(3)
+    }
   })
 })
