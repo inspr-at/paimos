@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1309: retain the panel authority and stability regressions in balanced ESSENTIAL files.
 import { expect, test } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 import { controlStability } from './control-stability'
 import { WORKER, setup, refresh, savedLayout, expectPanelIdentity, expectNativeMenu } from './native-session-program-fixtures'
 
@@ -63,7 +64,7 @@ for (const width of [1024]) for (const theme of ['light', 'dark']) {
       await resizing.check(async () => { await tabs.Details!.click(); await expect(tabs.Details!).toHaveAttribute('aria-selected', 'true') })
       resizing.done()
     }
-    await info.attach('header-label-measurement', { body: `Labels require a ${labelsAt}px header to retain a 200px title. Actions retain their row, size and right inset (±0.5px) across that threshold.`, contentType: 'text/plain' })
+    await writeFile(info.outputPath(`AEON-1309-${width}-${theme}-header-measurement.md`), `Labels require a ${labelsAt}px header to retain a 200px title. Actions retain their row, size and right inset (±0.5px) across that threshold.\n`)
     await page.setViewportSize({ width, height: 900 })
 
     // WebKit-style anchoring: disable the browser's own correction, scroll the

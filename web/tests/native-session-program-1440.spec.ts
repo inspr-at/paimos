@@ -19,6 +19,7 @@ for (const width of [1440]) for (const theme of ['light', 'dark']) {
       return Math.abs(el.getBoundingClientRect().width - (split.getBoundingClientRect().width - 320 - 16))
     }), 'the panel takes the remaining split width').toBeLessThanOrEqual(.5)
     for (const label of await panel.locator('.tab-label').all()) await expect(label).toBeVisible()
+    expect(await panel.locator('.pane-title').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(200)
     const tabs = Object.fromEntries(['Details', 'Chat', 'Events', 'Terminal'].map(name => [name, panel.getByRole('tab', { name, exact: true })]))
     const stable = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more: panel.getByRole('button', { name: 'More session actions' }), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel })
     for (const name of ['Chat', 'Events', 'Terminal', 'Details']) await stable.check(async () => { await tabs[name]!.click(); await expect(tabs[name]!).toHaveAttribute('aria-selected', 'true') })
