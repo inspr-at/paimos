@@ -61,6 +61,7 @@ infrastructure retry.
 | Restart retains uncertain intent and publishes the current revision | `TestAdmissionPublisherResumesUncertainPublicationAfterRestart` |
 | Timeout/5xx requires a read and current-state repost before acknowledgement | `TestAdmissionPublisherRepostsAfterUncertainOutcome` |
 | Every member, including preceding entries, is checked; hold/revocation/retarget/scope fail every group; effective waits for removal | `TestAdmissionGroupsValidatePrecedingEntriesAndInvalidateEveryGroup` |
+| Delayed green read cannot override newer red CI, hold or head facts | `TestAdmissionQueueRejectsStaleGreenReadAfterCurrentFactsChange` |
 | Exact-head enqueue, duplicate sweeps, policy resumption, one verified infra retry, quarantine/Desk notice, lost merge race | `TestAdmissionQueueBoundsInfrastructureRetryAndReportsMergedBeforeHold` |
 | Unchanged P2 observations seed intent after upgrade; partial queue sightings retain group identity without authorizing it | `TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem` |
 | Unresolved membership fails closed and stays retryable | `TestAdmissionUnknownGroupMembershipFailsClosed` |

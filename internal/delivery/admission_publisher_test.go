@@ -540,3 +540,56 @@ func TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem(t *tes
 		return err
 	})
 }
+
+type admissionRaceReader struct {
+	GitHub
+	after func()
+}
+
+func (g *admissionRaceReader) Pull(ctx context.Context, pr int64) (Pull, error) {
+	p, err := g.GitHub.Pull(ctx, pr)
+	after := g.after
+	g.after = nil
+	if after != nil {
+		after()
+	}
+	return p, err
+}
+func TestAdmissionQueueRejectsStaleGreenReadAfterCurrentFactsChange(t *testing.T) {
+	// Risk: a delayed green network read overwrites a newer red CI observation,
+	// hold or head during the final mutation. The callback is the read barrier.
+	for _, change := range []string{"ci", "hold", "head"} {
+		t.Run(change, func(t *testing.T) {
+			f := newAdmissionFixture(t)
+			p := f.gh.pulls[7]
+			f.m.github = &admissionRaceReader{GitHub: f.gh, after: func() {
+				switch change {
+				case "hold":
+					f.hold(t, true)
+				case "ci":
+					p.Checks = append([]Check{}, p.Checks...)
+					p.Checks[0].Conclusion = "failure"
+					f.gh.pulls[7] = p
+					f.webhook(t, "check_run", "completed", "new-red-ci", 204)
+				case "head":
+					p.Head = strings.Repeat("9", 40)
+					f.gh.pulls[7] = p
+					f.webhook(t, "pull_request", "synchronize", "new-head", 204)
+				}
+			}}
+			if err := f.m.admitQueueEntry(t.Context(), admissionQueueEntry{PR: 7, Head: strings.Repeat("b", 40)}); err != nil {
+				t.Fatal(err)
+			}
+			if len(f.writer.enqueues) != 0 {
+				t.Fatal("stale admission response enqueued", f.writer.enqueues)
+			}
+			current := f.item(t, 7)
+			if change == "ci" && current.Observation.Checks[0].Conclusion != "failure" {
+				t.Fatal("fixture lost newer red CI")
+			}
+			if change == "head" && current.Head != p.Head {
+				t.Fatal("fixture lost newer head")
+			}
+		})
+	}
+}

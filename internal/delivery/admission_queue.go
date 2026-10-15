@@ -247,11 +247,21 @@ func (m *Module) queueAdmissionTx(ctx context.Context, tx pgx.Tx, e admissionQue
 	if item.Head != e.Head || !live.Open || live.Merged || live.Target != item.Observation.Target || live.AdmissionDiff == nil || live.AdmissionDiff.MergeBase != item.Observation.Base {
 		return false, item, nil
 	}
+	// A network read may be older than a webhook that committed while it was
+	// in flight. Both the current stored decision and live read must admit;
+	// never overwrite a newly red stored CI fact with an older green response.
+	stored, err := AdmissionTx(ctx, tx, *item)
+	var problem *apiError
+	if errors.Is(err, pgx.ErrNoRows) || errors.As(err, &problem) {
+		return false, item, nil
+	}
+	if err != nil || !stored.Decision.Admissible {
+		return false, item, err
+	}
 	current := *item
 	current.Observation.Checks = live.Checks
 	current.Observation.AdmissionDiff = live.AdmissionDiff
 	snap, err := AdmissionTx(ctx, tx, current)
-	var problem *apiError
 	if errors.Is(err, pgx.ErrNoRows) || errors.As(err, &problem) {
 		return false, item, nil
 	}
