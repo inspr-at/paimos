@@ -553,7 +553,7 @@ type mintedKey struct {
 	TenantID    string
 }
 
-func mintAgent(t *testing.T, base, name string) mintedKey {
+func mintAgent(t testing.TB, base, name string) mintedKey {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -591,7 +591,7 @@ func mintAgent(t *testing.T, base, name string) mintedKey {
 	return mintedKey{Token: created.Token, PrincipalID: created.PrincipalID, TenantID: me.Tenant.ID}
 }
 
-func seedProject(t *testing.T, base, token string) {
+func seedProject(t testing.TB, base, token string) {
 	t.Helper()
 	hc := &http.Client{}
 	authz := http.Header{"Authorization": {"Bearer " + token}}
@@ -668,7 +668,7 @@ func seedCompletionDefinition(t *testing.T, base string) {
 	}
 }
 
-func doJSON(t *testing.T, hc *http.Client, method, url, body string, header http.Header) (int, []byte) {
+func doJSON(t testing.TB, hc *http.Client, method, url, body string, header http.Header) (int, []byte) {
 	t.Helper()
 	var rdr io.Reader
 	if body != "" {
