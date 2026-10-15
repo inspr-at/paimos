@@ -19,6 +19,7 @@ const ProjectWorkContextCard = defineAsyncComponent(() => import('./ProjectWorkC
 const ProjectAdvancedSettings = defineAsyncComponent(() => import('./ProjectAdvancedSettings.vue'))
 const ProjectRepositorySettings = defineAsyncComponent(() => import('./ProjectRepositorySettings.vue'))
 const ProjectDeliveryChecks = defineAsyncComponent(() => import('./ProjectDeliveryChecks.vue'))
+const ProjectDefinitionsSettings = defineAsyncComponent(() => import('./ProjectDefinitionsSettings.vue'))
 const props = defineProps<{ project: Project }>()
 const route = useRoute(), router = useRouter(), session = useSession()
 const root = ref<HTMLElement>(), navColumn = ref<HTMLElement>(), picker = ref<HTMLButtonElement>()
@@ -98,6 +99,7 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
     </div>
     <div class="settings-body">
       <ProjectGeneralSettings v-if="section === 'general'" :key="`${owner}/${project.id}`" :project="project" />
+      <ProjectDefinitionsSettings v-else-if="section === 'definitions'" :key="`${owner}/${project.id}`" :project="project" />
       <template v-else-if="section === 'agents'">
         <ProjectWorkContextCard v-if="contextAllowed" :key="`${owner}/${project.id}`" :project="project" />
         <SettingsCard v-else title="Work context" icon="shield" anchor="project-work-context" variant="project"><p class="owner-line">Owners and admins choose where accounts may work in Settings › Accounts.</p><RouterLink class="link-btn quiet" to="/settings/accounts">Settings › Accounts <AppIcon name="chevron-right" :size="12" /></RouterLink></SettingsCard>
