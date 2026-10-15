@@ -74,7 +74,7 @@ test('AEON-1318 owner controls and person-waiting views stay stable', async ({ b
       const row = page.locator('tr.ticket-row').filter({ hasText: manualNode.key })
       await expect(row.locator('.person-waiting svg')).toBeVisible()
       await expect(row.locator('.person-waiting')).toHaveAttribute('data-tip', `Waiting for ${me.name}: ${longLabel}`)
-      const rows = await controlStability(page, { row, otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
+      const rows = await controlStability(page, { row, title: row.locator('.title-text'), otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
       await rows.check(() => row.locator('.person-waiting').hover())
       await rows.check(async () => { state.checked = true; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toHaveCount(0) })
       await rows.check(async () => { state.checked = false; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toBeVisible() })
