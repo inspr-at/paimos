@@ -2,7 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
-import { draftFor, type DeskItem, type DeskOutcomeAvailability } from '../src/lib/decisionDesk'
+import { draftFor, type DeskItem, type DeskOutcomeAvailability, type DeskTicket } from '../src/lib/decisionDesk'
+import { approvalItem } from '../src/lib/decisionDeskApi'
 import DecisionDeskMemo from '../src/components/agents/DecisionDeskMemo.vue'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -34,10 +35,10 @@ function stubBrowser() {
     addEventListener() {}, removeEventListener() {},
   })
 }
-async function htmlFor(item: DeskItem) {
+async function htmlFor(item: DeskItem, extra: { ticket?: (row: DeskItem) => DeskTicket | undefined; runPending?: (row: DeskItem) => boolean } = {}) {
   stubBrowser()
   const app = Vue.createSSRApp({ render: () => Vue.h(DecisionDeskMemo, {
-    items: [item], round: [item.id], start: item.id, arrivalsCount: 0, allowed: () => true, decide: vi.fn(async () => item),
+    items: [item], round: [item.id], start: item.id, arrivalsCount: 0, allowed: () => true, decide: vi.fn(async () => item), ...extra,
   }) })
   app.component('RouterLink', { props: ['to'], setup: (_, { slots }) => () => slots.default?.() })
   return renderToString(app)
@@ -87,4 +88,29 @@ it('names a lasting restriction beside a muted Decide when no stamp can be used'
   expect(decide).toContain('aria-describedby="desk-status"')
   expect(text(blocked, 'desk-status')).toContain('A signed-in person chooses this outcome.')
   for (const outcome of ['once', 'always', 'requirement', 'doctrine']) expect(tag(blocked, `stamp-${outcome}`)).toContain('aria-disabled="true"')
+})
+
+// AEON-1339 fix round 7 risk: a run-scoped approval loses its target once the resource line is gone: it has no ticket
+// id, so Re read "Across tickets" and Approve was offered without naming the run it grants.
+it('names a run approval by the ticket its run works on and the run, with a fallback while unresolved', async () => {
+  const run = '7a1b2c3d-0000-4000-8000-000000000001'
+  const approval = approvalItem({ id: 'approval-run', agent_principal_id: 'agent-1', agent_name: 'Codex', scope: 'run.claim', resource_kind: 'run', resource_id: run,
+    rationale: 'Continue the run.', proposed_at: '2026-10-02T08:00:00Z', expires_at: '2999-01-01T00:00:00Z', decision: null })
+  expect(approval).toMatchObject({ runId: run, ticketId: undefined })
+  const re = (html: string) => { const at = html.indexOf(tag(html, 'desk-re')); return html.slice(at, html.indexOf('</dd>', at)) }
+  // Its work order resolved: the ticket chip and title, then the run, its full id in the tip.
+  const named = await htmlFor(approval, { ticket: row => row.runId === run ? { key: 'AEON-1', title: 'Aeon foundation' } : undefined })
+  expect(re(named)).toContain('>AEON-1<')
+  expect(re(named)).toContain('>Aeon foundation<')
+  expect(text(named, 'desk-re-run')).toBe('Run 7a1b2c3d')
+  expect(tag(named, 'desk-re-run')).toContain(`data-tip="Run ${run}"`)
+  expect(named).not.toContain('data-testid="desk-re-run-ticket"')
+  // Still reading, then unresolved: the run alone names the target, and says which.
+  const reading = await htmlFor(approval, { runPending: row => row.runId === run })
+  expect(text(reading, 'desk-re-run')).toBe('Run 7a1b2c3d')
+  expect(text(reading, 'desk-re-run-ticket')).toBe('Reading its ticket…')
+  const unresolved = await htmlFor(approval)
+  expect(text(unresolved, 'desk-re-run')).toBe('Run 7a1b2c3d')
+  expect(text(unresolved, 'desk-re-run-ticket')).toBe('Ticket not resolved')
+  for (const html of [named, reading, unresolved]) expect(re(html)).not.toContain('Across tickets')
 })

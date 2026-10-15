@@ -766,7 +766,7 @@
         ,
         {"file":"tests/aeon-1285-agent-rows.spec.ts","listedTests":5,"weightSeconds":30,"weightSource":"local-single-worker-AEON-1285-14s-plus-margin"}
         ,
-        {"file":"tests/aeon-1339-desk-polish.spec.ts","listedTests":5,"weightSeconds":120,"weightSource":"AEON-1339 fix4 estimate: 40s measured plus one stepped viewport-loop case, with margin"}
+        {"file":"tests/aeon-1339-desk-polish.spec.ts","listedTests":5,"weightSeconds":150,"weightSource":"AEON-1339 fix7 estimate: fix4 weight plus a four-pass run-approval step, with margin"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,

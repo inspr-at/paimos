@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { answerFor, CUSTOM_ANSWER, deskProject, draftFor, fieldTarget, kindLabels, projectSwitch, type DeskClose, type DeskProject, type DeskTicket, type DeskWho, macPlatform, outcomeLabels, outcomeUnavailable, stampDescription, stampWhy, submitModifier, suggestedUnavailableNote, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
+import { answerFor, CUSTOM_ANSWER, deskProject, draftFor, fieldTarget, kindLabels, projectSwitch, runRef, type DeskClose, type DeskProject, type DeskTicket, type DeskWho, macPlatform, outcomeLabels, outcomeUnavailable, stampDescription, stampWhy, submitModifier, suggestedUnavailableNote, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
 import { deliveryTime, lessonChangelogLabel, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
 import { RISK_LABEL, riskFor, scopeLabel } from '../../lib/agentState'
 import { contentUrl, fileKind, hasThumbnail } from '../../lib/attachments'
@@ -27,6 +27,8 @@ const props = defineProps<{
   who?: (item: DeskItem) => DeskWho | undefined
   /** The ticket an item is about, from the desk's one bounded lookup. */
   ticket?: (item: DeskItem) => DeskTicket | undefined
+  /** True while the desk still reads a run approval's work order; without it an unnamed run's ticket reads as not resolved. */
+  runPending?: (item: DeskItem) => boolean
   /** Opens this decided item ready to change (the Undo of the toast after closing). */
   change?: string
 }>()
@@ -717,7 +719,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <dl class="memo-meta" data-testid="desk-project-line">
                   <div v-if="project"><dt>Project</dt><dd><a v-if="project.href" class="proj-link" :href="project.href" target="_blank" rel="noopener" :data-tip="`Open ${project.name} in a new tab · key P`" data-testid="desk-project-link" ><AppIcon name="folder" :size="14" /><span>{{ project.name }}</span><AppIcon class="pj-open" name="external" :size="12" /></a><span v-else class="proj-quiet" data-testid="desk-project-link"><AppIcon name="folder" :size="13" />{{ project.name }}</span></dd></div>
                   <div v-if="asker || item.askers?.length"><dt>From</dt><dd><span class="from-one" :data-tip="asker?.model ? `${asker.model}` : undefined" data-testid="desk-from"><HarnessMark v-if="asker?.harness" :harness="asker.harness" :size="14" />{{ askerName }}</span></dd></div>
-                  <div><dt>Re</dt><dd data-testid="desk-re"><template v-if="ticketRef"><RouterLink v-if="context.ticket" class="res-key" :to="`/work/${context.ticket.id}`">{{ ticketRef.key }}</RouterLink><span v-else class="res-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else-if="item.ticketId || item.ticketKey" class="re-title faint">The ticket</span><span v-else class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span></dd></div>
+                  <div><dt>Re</dt><dd data-testid="desk-re"><template v-if="ticketRef"><RouterLink v-if="context.ticket" class="res-key" :to="`/work/${context.ticket.id}`">{{ ticketRef.key }}</RouterLink><span v-else class="res-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else-if="item.ticketId || item.ticketKey" class="re-title faint">The ticket</span><span v-else-if="!item.runId" class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span><template v-if="item.runId"><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-re-run">{{ runRef(item.runId) }}</span><span v-if="!ticketRef" class="re-title faint" data-testid="desk-re-run-ticket">{{ runPending?.(item) ? 'Reading its ticket…' : 'Ticket not resolved' }}</span></template></dd></div>
                   <div v-if="item.createdAt"><dt>Received</dt><dd>{{ ago(item.createdAt) }}</dd></div>
                 </dl>
               </div>
@@ -962,6 +964,8 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 .res-key { display: inline-flex; align-items: center; padding: 3px 6px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); font-variant-ligatures: none; text-decoration: none; white-space: nowrap; }
 a.res-key:hover { text-decoration: underline; }
 .re-title { color: var(--ink); overflow-wrap: anywhere; }
+/* A run approval's run, quiet after its ticket; the full id is in the tip (AEON-1339). */
+.run-ref { font: 500 12px/1.4 var(--mono); font-variant-ligatures: none; color: var(--ink-2); white-space: nowrap; }
 /* One line under the meta, the same slot open and decided: what the agent does meanwhile, then the delivery truth. */
 .memo-line { display: flex; align-items: flex-start; gap: 8px; min-height: 19.5px; margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .memo-line > svg { flex: none; margin-top: 3px; color: var(--ink-3); }

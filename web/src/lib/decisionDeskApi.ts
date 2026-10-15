@@ -116,7 +116,7 @@ export function approvalItem(approval: Approval, projectName = approval.resource
   return { ...base(`a:${approval.id}`, 'approval', `Allow ${approval.scope}?`, approval.rationale, [
     { id: 'approved', title: 'Approve', description: 'Grant this request through the approvals API.', answer: 'Approved' },
     { id: 'denied', title: 'Deny', description: 'Keep the permission unchanged.', answer: 'Denied' },
-  ]), askers: [{ principalId: approval.agent_principal_id, name: approval.agent_name?.trim() || undefined }], approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
+  ]), askers: [{ principalId: approval.agent_principal_id, name: approval.agent_name?.trim() || undefined }], approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, runId: approval.resource_kind === 'run' ? approval.resource_id || undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
 }
 export function actionItem(message: ProjectMessage, projectId: string, projectName: string): DeskItem {
   return { ...base(`m:${message.id}`, 'action', 'Action request', message.body, [
@@ -386,7 +386,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     const canonicalProjects = new Map((projection?.items ?? []).filter(row => row.kind === 'approval' && row.project_id).map(row => [row.id, row.project_id!]))
     const resources = new Map(approvalsResult.value.slice(0, 200).filter(row => row.resource_kind !== 'tenant' && row.resource_id && !canonicalProjects.has(row.id))
       .map(row => [`${row.resource_kind}:${row.resource_id}`, row]))
-    const owners = new Map<string, { id: string; title: string }>()
+    const owners = new Map<string, { id: string; title: string }>(), workOrders = new Map<string, string>()
     if (resources.size > 30) warnings.push('Project ownership for approval history is limited to 30 resources in this read.')
     const entries = [...resources.entries()].slice(0, 30)
     for (let at = 0; at < entries.length; at += 5) await Promise.all(entries.slice(at, at + 5).map(async ([resource, approval]) => {
@@ -396,6 +396,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
           const run = await adapters.approvalRun?.(id)
           if (!run || run.id !== id) return
           id = run.work_order_id
+          if (id) workOrders.set(resource, id)
         }
         for (let depth = 0; id && depth < 8; depth++) {
           const project = projects.find(project => project.id === id)
@@ -407,7 +408,8 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     for (const approval of approvalsResult.value.slice(0, 200)) {
       const owner = owners.get(`${approval.resource_kind}:${approval.resource_id}`)
       const projectId = canonicalProjects.get(approval.id) ?? owner?.id ?? ''
-      sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, projectId ? name(projectId) : owner?.title), projectId })
+      const workOrderId = workOrders.get(`${approval.resource_kind}:${approval.resource_id}`)
+      sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, projectId ? name(projectId) : owner?.title), projectId, ...(workOrderId ? { workOrderId } : {}) })
     }
   } else warnings.push('Approvals could not be read.')
   if (rulesResult.status === 'fulfilled') {

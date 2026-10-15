@@ -36,7 +36,11 @@ export interface DeskItem {
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
   outcomes?: DeskOutcomeAvailability[]; doctrine?: DeskDoctrineTarget; outcomeEffects?: DeskOutcomeEffect[]
   unavailable?: string; prUrl?: string; source?: string; linkOut?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest; lesson?: { learning: MethodLearning; outdated: boolean }; undoEvent?: number
+  /** A run-scoped approval's run, and the work order (ticket) it runs when a read named it (AEON-1339). */
+  runId?: string; workOrderId?: string
 }
+/** A run as the desk names it everywhere: the run-id convention of the agents pages, the full id in the tip. */
+export const runRef = (id: string) => `Run ${id.slice(0, 8)}`
 /** The asking agent as the memo names it: its session's name, harness mark and model. */
 export interface DeskWho { name: string; harness?: string; model?: string }
 /** The ticket an item is about, as one bounded lookup names it. */

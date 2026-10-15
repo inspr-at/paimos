@@ -177,7 +177,7 @@ test('panel and preview rows name the kind and project, and link back', async ({
 // stamp line runs two sentences together.
 // One test with steps: a row per case would push the shared desk fixture's browser fan-out past 300 cases.
 test('fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow bar and the Decided filter', async ({ page }, testInfo) => {
-  test.setTimeout(420_000)
+  test.setTimeout(480_000)
   await test.step('outcome-coloured stamps, the memo ticket on rows, one name and no raw ids', async () => {
     const tone = (id: string) => page.getByTestId(id).evaluate(element => getComputedStyle(element).borderTopColor)
     // A token as the memo resolves it, in the current theme.
@@ -307,6 +307,46 @@ test('fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow
       expect((await line()).rows).toBe(1)
       expect(Math.abs(await listTop() - top), 'the list starts where it did').toBeLessThanOrEqual(0.5)
       await page.screenshot({ path: testInfo.outputPath(`fix4-decided-filter-${width}-${theme}.png`) })
+    }
+  })
+  // Fix round 7 risk: a run-scoped approval has no ticket id, so without the resource line the memo's Re read
+  // "Across tickets" and the list named no target: Approve was offered without saying which run it grants.
+  // A step of this case, not a case of its own: the fixture's importers are at the tier planner's 300-case bound.
+  await test.step('fix round 7: a run approval names the ticket its run works on and the run, in the list and the memo', async () => {
+    const run = '7a1b2c3d-0000-4000-8000-000000000001'
+    for (const width of [1440, 390]) for (const answer of ['named', 'unresolved'] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      const world = await mockDecisionDesk(page)
+      Object.assign(world.approval, { scope: 'run.claim', resource_kind: 'run', resource_id: run })
+      // The run names its work order (the fixture ticket AEON-1), or its read fails.
+      const runReads: string[] = []
+      await page.route(`**/api/runs/${run}`, route => {
+        runReads.push(route.request().url())
+        return answer === 'named'
+          ? route.fulfill({ json: { id: run, work_order_id: 'n-a1', agent_principal_id: 'agent-1', status: 'running', model_evidence: 'vendor_reported', input_tokens: 0, output_tokens: 0, cost_micros: 0, created_at: '2026-10-02T08:00:00Z' } })
+          : route.fulfill({ status: 404, json: { error: 'Run not found' } })
+      })
+      await page.goto('/decision-desk')
+      const row = page.getByTestId('desk-row-a:approval-1')
+      await expect(row.getByTestId('desk-row-run')).toHaveText('Run 7a1b2c3d')
+      await expect(row.getByTestId('desk-row-run')).toHaveAttribute('data-tip', `Run ${run}`)
+      await expect.poll(() => runReads.length).toBe(1)
+      if (answer === 'named') await expect(row.locator('.res-key')).toHaveText('AEON-1')
+      else await expect(row.locator('.res-key')).toHaveCount(0)
+      await row.click()
+      await expect(heading(page)).toHaveText('Allow run.claim?')
+      const re = page.getByTestId('desk-re')
+      await expect(re.getByTestId('desk-re-run')).toHaveText('Run 7a1b2c3d')
+      await expect(re).not.toContainText('Across tickets')
+      if (answer === 'named') {
+        await expect(re.locator('.res-key')).toHaveText('AEON-1')
+        await expect(re).toContainText('Aeon foundation')
+        await expect(re.getByTestId('desk-re-run-ticket')).toHaveCount(0)
+      } else await expect(re.getByTestId('desk-re-run-ticket')).toHaveText('Ticket not resolved')
+      await page.screenshot({ path: testInfo.outputPath(`fix7-run-approval-${width}-${answer}.png`) })
+      expect(runReads, 'one run read per desk read').toHaveLength(1)
+      expect(world.calls).toHaveLength(0)
     }
   })
 })

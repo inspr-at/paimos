@@ -5,7 +5,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
-import { arrivals, deskItemID, deskLinkItem, draftFor, kindLabels, newRound, outcomeLabels, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
+import { arrivals, deskItemID, deskLinkItem, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
@@ -115,18 +115,33 @@ const readyRows = computed(() => visible.value.filter(item => !(item.held || ite
 const openRound = computed(() => items.value.filter(item => inScope(item) && !item.decided && !item.linkOut))
 // The ticket each open item is about, resolved as the memo resolves it (AEON-1339): bounded id and key lookups per read.
 const tickets = ref(new Map<string, DeskTicket>())
+// A run approval is about the ticket its run works on: the run's work order, read once per run ('' when no read
+// named it), at most 30 runs per read, five at a time (AEON-1339). The memo says "reading" only while that runs.
+const runTickets = ref(new Map<string, string>()), runsReading = ref(new Set<string>())
 let ticketTurn = 0
 async function readTickets(rows: readonly DeskItem[]) {
-  const turn = ++ticketTurn, identity = owner.value
+  const turn = ++ticketTurn, identity = owner.value, current = () => alive && turn === ticketTurn && identity === owner.value
+  const runs = [...new Set(rows.filter(row => row.runId && !row.ticketId && !row.workOrderId && !runTickets.value.has(row.runId)).map(row => row.runId!))]
+  const read = runs.slice(0, 30), named = new Map<string, string>(runs.slice(30).map(id => [id, '']))
+  runsReading.value = new Set(read)
   try {
-    const found = await readDeskTickets(rows, tickets.value)
-    if (!alive || turn !== ticketTurn || identity !== owner.value || !found.size) return
+    for (let at = 0; at < read.length; at += 5) await Promise.all(read.slice(at, at + 5).map(async id => {
+      try { const run = await adapters.approvalRun(id); named.set(id, run?.id === id ? run.work_order_id || '' : '') } catch { named.set(id, '') }
+    }))
+    if (!current()) return
+    if (named.size) runTickets.value = new Map([...runTickets.value, ...named])
+    const found = await readDeskTickets(rows.map(row => ({ ticketId: row.ticketId ?? workOrderOf(row), ticketKey: row.ticketKey })), tickets.value)
+    if (!current() || !found.size) return
     tickets.value = new Map([...tickets.value, ...found])
   } catch { /* The rows keep their project; a ticket chip waits for the next read. */ }
+  finally { if (turn === ticketTurn) runsReading.value = new Set() }
 }
+function workOrderOf(item: DeskItem) { return item.workOrderId || (item.runId ? runTickets.value.get(item.runId) : undefined) || undefined }
 function ticketOf(item: DeskItem): DeskTicket | undefined {
-  return (item.ticketId ? tickets.value.get(item.ticketId) : undefined) ?? (item.ticketKey ? tickets.value.get(`key:${item.ticketKey}`) ?? { key: item.ticketKey, title: '' } : undefined)
+  const id = item.ticketId ?? workOrderOf(item)
+  return (id ? tickets.value.get(id) : undefined) ?? (item.ticketKey ? tickets.value.get(`key:${item.ticketKey}`) ?? { key: item.ticketKey, title: '' } : undefined)
 }
+const runPending = (item: DeskItem) => !!item.runId && runsReading.value.has(item.runId)
 // The asking agent by its exact session when known, else its message address, else the name the source gave.
 function who(item: DeskItem): DeskWho | undefined {
   const asker = item.askers?.[0]
@@ -435,7 +450,7 @@ function resetDesk() {
   capabilityGeneration++
   ruleEdit.value = undefined
   generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
-  followed = ''; linkError.value = ''; revoked.value = new Set(); tickets.value = new Map(); ticketTurn++; rowForm.value = undefined; changeId.value = ''
+  followed = ''; linkError.value = ''; revoked.value = new Set(); tickets.value = new Map(); runTickets.value = new Map(); runsReading.value = new Set(); ticketTurn++; rowForm.value = undefined; changeId.value = ''
   sources = emptySources(); adapters = makeAdapters(); filter.value = route.query.view === 'decided' ? 'decided' : 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
   projectNames.value = new Map()
   trimCursors.value = {}; nextKeyTrims.value = {}
@@ -519,7 +534,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
               <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="16" /></span>
               <div class="body">
                 <p class="line1"><strong class="what"><span v-if="item.kind === 'lesson'">Lesson to adopt · </span>{{ item.title }}</strong><span class="meta"><time v-if="item.expiresAt" class="expiry" :class="{ soon: soon(item.expiresAt) }" :datetime="item.expiresAt">{{ expiry(item.expiresAt) }}</time><time v-else-if="item.createdAt" class="expiry" :datetime="item.createdAt">{{ ago(item.createdAt) }}</time><span v-if="item.approval" class="risk" :class="{ high: riskFor(item.approval) === 'high' }">{{ RISK_LABEL[riskFor(item.approval)] }}</span></span></p>
-                <p class="line2"><span v-if="who(item)" class="who" :data-tip="who(item)?.model || undefined"><HarnessMark v-if="who(item)?.harness" :harness="who(item)!.harness!" :size="14" /><span>{{ who(item)!.name }}</span></span><span class="phrase"><span v-if="item.kind === 'rule'" class="asks">{{ who(item) ? 'proposes' : 'An agent proposes' }} a rule change for</span><template v-else-if="item.kind === 'action'"><span class="asks">{{ who(item) ? 'to' : 'From an agent to' }}</span><span class="to">you</span><span class="asks">on</span></template><span v-else-if="who(item)" class="asks">on</span><span class="proj-quiet" data-testid="desk-row-project"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span class="res-key">{{ ticketOf(item)!.key }}</span><span v-if="ticketOf(item)!.title" class="res-title" :data-tip="ticketOf(item)!.title">{{ ticketOf(item)!.title }}</span></template></span></p>
+                <p class="line2"><span v-if="who(item)" class="who" :data-tip="who(item)?.model || undefined"><HarnessMark v-if="who(item)?.harness" :harness="who(item)!.harness!" :size="14" /><span>{{ who(item)!.name }}</span></span><span class="phrase"><span v-if="item.kind === 'rule'" class="asks">{{ who(item) ? 'proposes' : 'An agent proposes' }} a rule change for</span><template v-else-if="item.kind === 'action'"><span class="asks">{{ who(item) ? 'to' : 'From an agent to' }}</span><span class="to">you</span><span class="asks">on</span></template><span v-else-if="who(item)" class="asks">on</span><span class="proj-quiet" data-testid="desk-row-project"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span class="res-key">{{ ticketOf(item)!.key }}</span><span v-if="ticketOf(item)!.title" class="res-title" :data-tip="ticketOf(item)!.title">{{ ticketOf(item)!.title }}</span></template><span v-if="item.runId" class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-row-run">{{ runRef(item.runId) }}</span></span></p>
                 <p v-if="item.approval?.resource_kind === 'tenant'" class="target">The whole workspace</p>
                 <p v-if="item.kind !== 'question' && item.kind !== 'handover' && item.context" class="why" :class="{ 'body-text': item.kind === 'action' }">{{ item.context }}</p>
                 <p v-if="item.kind === 'question' || item.kind === 'handover'"><span class="status-line" :class="{ park: meanwhileLine(item).held }"><AppIcon :name="meanwhileLine(item).icon" :size="13" /><span>{{ meanwhileLine(item).title }}<span v-if="meanwhileLine(item).text" class="mt"> · {{ meanwhileLine(item).text }}</span></span></span></p>
@@ -548,7 +563,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
           <li v-for="item in visible" :key="item.id" class="dec desk-row" :data-testid="`desk-row-${item.id}`">
             <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" @click="item.linkOut || begin(item.id)" />
             <span class="mark" :class="outcomeOf(item).tone" aria-hidden="true"><AppIcon :name="outcomeOf(item).icon" :size="15" /></span>
-            <span class="dec-text"><span class="dec-q">{{ item.title }}</span><span v-if="item.answer" class="dec-a">{{ item.answer }}</span><span class="dec-meta"><template v-if="who(item)"><span>{{ who(item)!.name }}</span><span>·</span></template><span class="proj-quiet"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span>·</span><span>{{ ticketOf(item)!.key }}</span></template><template v-if="item.decidedAt || item.createdAt"><span>·</span><span>decided {{ ago(item.decidedAt || item.createdAt) }}</span></template><template v-if="graceLeft(item)"><span>·</span><span>sends in <span class="n">{{ graceLeft(item) }}</span> s</span></template><template v-else-if="item.deliveryState === 'failed'"><span>·</span><span class="dl-bad">not delivered</span></template><template v-else-if="item.deliveryState"><span>·</span><span>waiting for it to read</span></template></span></span>
+            <span class="dec-text"><span class="dec-q">{{ item.title }}</span><span v-if="item.answer" class="dec-a">{{ item.answer }}</span><span class="dec-meta"><template v-if="who(item)"><span>{{ who(item)!.name }}</span><span>·</span></template><span class="proj-quiet"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span>·</span><span>{{ ticketOf(item)!.key }}</span></template><template v-if="item.runId"><span>·</span><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-row-run">{{ runRef(item.runId) }}</span></template><template v-if="item.decidedAt || item.createdAt"><span>·</span><span>decided {{ ago(item.decidedAt || item.createdAt) }}</span></template><template v-if="graceLeft(item)"><span>·</span><span>sends in <span class="n">{{ graceLeft(item) }}</span> s</span></template><template v-else-if="item.deliveryState === 'failed'"><span>·</span><span class="dl-bad">not delivered</span></template><template v-else-if="item.deliveryState"><span>·</span><span>waiting for it to read</span></template></span></span>
             <span class="dec-side"><span class="dec-out" :class="outcomeOf(item).tone"><AppIcon :name="outcomeOf(item).icon" :size="13" />{{ outcomeOf(item).word }}</span><button v-if="graceLeft(item)" type="button" class="btn sm ghost" @click="undoRow(item)"><AppIcon name="rollback" :size="13" />Undo</button></span>
           </li>
         </ul>
@@ -559,7 +574,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
       </div>
     </section>
     <p v-if="opened && fresh.length" class="arrival-line" role="status">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
-    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" :who="who" :ticket="ticketOf" :change="changeId || undefined" @recorded="recorded" @close="closed" />
+    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" :who="who" :ticket="ticketOf" :run-pending="runPending" :change="changeId || undefined" @recorded="recorded" @close="closed" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
   </main>
 </template>
@@ -596,7 +611,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .row-open { position: absolute; inset: 0; z-index: 0; width: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
 .row-open:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .item > :not(.row-open), .dec > :not(.row-open) { position: relative; z-index: 1; pointer-events: none; }
-.item :is(.row-actions, form, .who[data-tip], .res-title, a, button:not(.row-open)), .dec :is(.dec-side) { pointer-events: auto; }
+.item :is(.row-actions, form, .who[data-tip], .res-title, .run-ref, a, button:not(.row-open)), .dec :is(.dec-side, .run-ref) { pointer-events: auto; }
 .mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: var(--agent-state-color); background: color-mix(in srgb, var(--agent-state-color) 10%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-state-color) 25%, transparent); }
 /* A question is teal while the agent carries on, amber when it holds something up. */
 .mark.k-question, .mark.k-handover { color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
@@ -621,6 +636,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .proj-quiet svg { color: var(--ink-3); }
 .res-key { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); font-variant-ligatures: none; white-space: nowrap; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+/* A run approval's run, quiet beside its ticket; the full id is in the tip (AEON-1339). */
+.run-ref { font: 500 11.5px/1.4 var(--mono); font-variant-ligatures: none; color: var(--ink-3); white-space: nowrap; }
 .why { margin-top: 2px !important; font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
 .why.body-text { -webkit-line-clamp: 3; line-clamp: 3; color: var(--ink); }
 .target { font: 12px var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }

@@ -17314,6 +17314,8 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"names a lasting restriction beside a muted Decide when no stamp can be used","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"names a run approval by the ticket its run works on and the run, with a fallback while unresolved","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"starts an unavailable suggestion on the scope default and keeps Decide decidable, with the reason in plain words","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}

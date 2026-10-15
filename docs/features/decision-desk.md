@@ -20,7 +20,11 @@ integration work. The unavailable stamps explain their restrictions in the memo.
 The memo follows the approved rev 11 artifact (AEON-1339). One SVG path draws the
 folder tab, its concave shoulder and the sheet, with one hairline. The tab carries
 the project key; the meta names the project with the Projects folder icon, then
-From, Re and Received. One line under the meta says what the agent does meanwhile
+From, Re and Received. A run approval's Re names the ticket its run works on (the
+run's work order) and the run as "Run 1a2b3c4d", its full id in the tip; while that
+read runs, or when it fails, the run alone names the target with "Reading its
+ticket…" or "Ticket not resolved". Desk and Decided rows carry the same run label.
+One line under the meta says what the agent does meanwhile
 and, once decided, the answer's delivery. Until the read receipt exists (AEON-1340),
 that line ends at "waiting for it to read". The draft never starts on an unavailable
 stamp: the agent's suggestion, then the scope default (Once for a ticket, Always
