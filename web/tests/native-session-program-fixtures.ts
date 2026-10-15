@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1309 risk: panel wiring changes a writer's authority, retargets a late
 // context read, moves controls, or moves the reader when live details grow.
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 import { mockLeadFlow, LEAD_SESSION } from './lead-flow-fixtures'
 import { me } from './work-fixtures'
 import type { NativeBinding, NativeSessionView, NativeStreamEvent } from '../src/lib/nativeSessionContract'
@@ -67,6 +67,45 @@ export async function setup(page: Page, theme = 'light') {
 
 export async function refresh(page: Page) {
   await page.evaluate(async () => { const { useAgents } = await import('/src/stores/agents.ts'); await useAgents().loadAll() })
+}
+
+// The long title yields first: checking textContent alone would pass even
+// when the key is painted as an ellipsis or clipped by its heading.
+export async function expectPanelIdentity(panel: Locator, key: string, title: string) {
+  const heading = panel.locator('.pane-title'), name = heading.locator('.name')
+  await expect(name).toHaveText(key)
+  await expect(heading.locator('.title-separator')).toHaveJSProperty('textContent', ' · ')
+  await expect(heading.locator('.title-detail')).toHaveText(title)
+  expect(await heading.evaluate(el => el.textContent?.startsWith(`${el.querySelector('.name')!.textContent} · `))).toBe(true)
+  await expect.poll(() => name.evaluate(el => {
+    const range = document.createRange(); range.selectNodeContents(el)
+    const text = range.getBoundingClientRect(), box = el.getBoundingClientRect()
+    const heading = el.closest('.pane-title')!.getBoundingClientRect()
+    const identity = el.closest('.pane-identity')!.getBoundingClientRect()
+    return text.width > 0 && text.left >= Math.max(box.left, heading.left, identity.left) - .5 &&
+      text.right <= Math.min(box.right, heading.right, identity.right) + .5 && el.scrollWidth <= el.clientWidth
+  }), 'the full key must be painted inside the heading').toBe(true)
+}
+
+export async function expectNativeMenu(page: Page) {
+  const menu = page.getByRole('menu', { name: 'More session actions' })
+  const browserReason = 'Not from the browser yet: use aeon on the computer that runs it'
+  for (const name of [/^Interrupt/, /^Stop…/, /^Take over/]) {
+    const action = menu.getByRole('menuitem', { name })
+    await expect(action).toBeDisabled()
+    await expect(action.locator('small')).toHaveText(browserReason)
+  }
+  const pause = menu.getByRole('menuitem', { name: /^Pause/ })
+  await expect(pause).toBeDisabled()
+  await expect(pause.locator('small')).toHaveText("Pause and resume aren't available here yet")
+  const disabled = menu.locator('.panel-menu-item:disabled')
+  expect(await disabled.count()).toBeGreaterThanOrEqual(4)
+  for (const action of await disabled.all()) {
+    const reason = action.locator('small')
+    const label = await action.innerText()
+    await expect(reason).toHaveText(label.startsWith('Pause') ? "Pause and resume aren't available here yet" : browserReason)
+    expect((await reason.innerText()).split('\n')).toHaveLength(1)
+  }
 }
 // Layout saves use a queued preference writer. Await each manual save's real
 // response before observing whether the later automatic layout sends a write.

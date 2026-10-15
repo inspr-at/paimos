@@ -222,7 +222,8 @@ const maxHandle = computed(() => workWidth.value - DIVIDER - DETAILS_MIN)
 const clampHandle = (width: number) => Math.round(Math.max(LIST_MIN, Math.min(maxHandle.value, width)))
 const savedHandle = computed(() => {
   const width = layoutPref.value.value?.handle
-  return typeof width === 'number' && Number.isFinite(width) ? width : workWidth.value - DIVIDER - OVERVIEW_DETAILS
+  // Sessions open in Focus; a width the person saved always takes precedence.
+  return typeof width === 'number' && Number.isFinite(width) ? width : FOCUS_WIDTH
 })
 const dragWidth = ref<number | null>(null)
 const pendingHandle = ref<number | null>(null)

@@ -72,6 +72,34 @@ stable, and no case is skipped or given a longer timeout.
 Core wiring, authoritative CI and Tick's visual check remain coordinator
 release responsibilities.
 
+## Fix round 10: opening width and readable header
+
+With no saved list width, opening a session uses Focus: a 320 px list and the
+remaining width for the panel. A saved divider width takes precedence, including
+after reopening. Overview remains available through the existing preset cycle.
+
+The header measures its complete menu, glyph, actions, spacing and padding on
+opening and resizing. `PANEL_HEAD_TITLE_MIN` reserves 200 px for the heading;
+the resulting header breakpoint is stored in `--panel-head-labels-at`. This
+accounts for the actual tab count and whether the sidebar action is present,
+instead of hiding labels below a fixed 1000 px container width. Selection,
+hover and unread changes do not choose another menu form. The key stays whole,
+followed by a literal ` · ` and the title; the title gives up space first.
+
+Owned actions remain disabled. Their menu reason reads “Not from the browser
+yet: use aeon on the computer that runs it”; Pause reads “Pause and resume
+aren't available here yet”. Existing permission, consent and ownership checks
+still determine the available actions.
+
+The existing `native-session-program-1440.spec.ts` cases add the unsaved Focus
+width, a real persisted divider drag and full-key checks. The existing
+`native-session-program-1024.spec.ts` cases add visible labels and measurements
+of the title and action geometry across the measured breakpoint. The existing
+`native-session-program-390.spec.ts` cases add the full key with a clipped long
+German title. All three files add exact disabled-menu copy and menu-opening
+stability through shared assertions in `native-session-program-fixtures.ts`,
+in light and dark. Earlier assertions, test names, tiers and timeouts remain.
+
 ## Fix round 4: approved test requalification
 
 The lead's AEON-1309 grant replaces retired panel expectations with the

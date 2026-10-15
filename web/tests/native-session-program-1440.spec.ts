@@ -2,19 +2,34 @@
 // AEON-1309: retain the panel authority and stability regressions in balanced ESSENTIAL files.
 import { expect, test } from '@playwright/test'
 import { controlStability } from './control-stability'
-import { WORKER, setup, refresh, savedLayout } from './native-session-program-fixtures'
+import { WORKER, setup, refresh, savedLayout, expectPanelIdentity, expectNativeMenu } from './native-session-program-fixtures'
 
 for (const width of [1440]) for (const theme of ['light', 'dark']) {
   test(`AEON-1309: ${width} ${theme} panel controls, layouts and live-reader anchor stay stable`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
     const { state, worker, errors, world } = await setup(page, theme)
+    expect(world.data.preferences['agents:layout']?.handle).toBeUndefined()
     await page.goto(`/agents/${WORKER}`)
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.getByRole('tab', { name: 'Details', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.agents-work')).toHaveAttribute('data-layout', 'focus')
+    await expect.poll(() => page.locator('.agents-list-pane').evaluate(el => el.getBoundingClientRect().width)).toBe(320)
+    expect(await panel.evaluate(el => {
+      const split = el.closest('.agents-split')!
+      return Math.abs(el.getBoundingClientRect().width - (split.getBoundingClientRect().width - 320 - 16))
+    }), 'the panel takes the remaining split width').toBeLessThanOrEqual(.5)
+    for (const label of await panel.locator('.tab-label').all()) await expect(label).toBeVisible()
     const tabs = Object.fromEntries(['Details', 'Chat', 'Events', 'Terminal'].map(name => [name, panel.getByRole('tab', { name, exact: true })]))
     const stable = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more: panel.getByRole('button', { name: 'More session actions' }), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel })
     for (const name of ['Chat', 'Events', 'Terminal', 'Details']) await stable.check(async () => { await tabs[name]!.click(); await expect(tabs[name]!).toHaveAttribute('aria-selected', 'true') })
+    await stable.check(async () => {
+      await panel.getByRole('button', { name: 'More session actions' }).click()
+      await expectNativeMenu(page)
+      await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-more.png`) })
+      await page.keyboard.press('Escape')
+    })
     stable.done()
+    await expectPanelIdentity(panel, worker.ticket!.key, worker.ticket!.title)
     const headHeight = await panel.locator('.panel-head').evaluate(el => el.getBoundingClientRect().height)
     expect(headHeight).toBeLessThanOrEqual(width <= 720 ? 93 : 45)
     if (width <= 720) {
@@ -75,6 +90,22 @@ for (const width of [1440]) for (const theme of ['light', 'dark']) {
     await expect(panel).toHaveAttribute('data-layout', 'full')
     expect(world.calls.slice(callsBeforeAuto).filter(call => call.method !== 'GET' && call.path.includes('agents:panel.layout'))).toEqual([])
     await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-short-full.png`) })
+
+    // A real divider drag survives reopening and wins over the new default.
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/agents/${WORKER}`)
+    await expect(page.locator('.agents-work')).toHaveAttribute('data-layout', 'focus')
+    await expect.poll(() => page.locator('.agents-list-pane').evaluate(el => el.getBoundingClientRect().width)).toBe(320)
+    const divider = page.getByRole('separator', { name: 'Resize the session list' })
+    const box = (await divider.boundingBox())!, left = await page.locator('.agents-list-pane').evaluate(el => el.getBoundingClientRect().left)
+    const save = page.waitForResponse(response => response.ok() && response.request().method() === 'PUT' &&
+      decodeURIComponent(new URL(response.url()).pathname) === '/api/preferences/agents:layout' && response.request().postDataJSON()?.value?.handle === 520)
+    await page.mouse.move(box.x + 8, box.y + 30); await page.mouse.down()
+    await page.mouse.move(left + 520 + 8, box.y + 30); await page.mouse.up()
+    await save
+    await page.goto(`/agents/${WORKER}`)
+    await expect.poll(() => page.locator('.agents-list-pane').evaluate(el => el.getBoundingClientRect().width)).toBe(520)
+    await expectPanelIdentity(panel, worker.ticket!.key, worker.ticket!.title)
     expect(errors).toEqual([])
   })
 }

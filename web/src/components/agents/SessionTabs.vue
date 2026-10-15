@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed } from 'vue'
-import { PANEL_TAB_LABEL, panelTabs, type LeadTab, type PanelTab } from '../../lib/leadPanel'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { PANEL_HEAD_TITLE_MIN, PANEL_TAB_LABEL, panelTabs, type LeadTab, type PanelTab } from '../../lib/leadPanel'
 import { shortcutHint } from '../../lib/shortcuts'
 import AppIcon from '../AppIcon.vue'
 const props = defineProps<{ selected: PanelTab; unread: number; lead?: boolean; terminal?: boolean; watch?: boolean; pinned?: LeadTab | null }>()
@@ -9,6 +9,32 @@ const emit = defineEmits<{ select: [tab: PanelTab] }>()
 const tabs = computed(() => panelTabs(!!props.lead, !!props.terminal, !!props.watch))
 const panelId = (tab: PanelTab) => tab === 'chat' ? 'messages' : tab === 'session' ? 'overview' : tab
 const icon = (tab: PanelTab) => tab === 'lead' ? 'tree' : tab === 'chat' ? 'message' : tab === 'events' ? 'list' : tab === 'terminal' ? 'terminal' : 'info'
+const menu = ref<HTMLElement>()
+let resize: ResizeObserver | undefined
+onMounted(() => {
+  const element = menu.value, head = element?.closest<HTMLElement>('.pane-bar')
+  const identity = head?.querySelector<HTMLElement>('.pane-identity')
+  if (!element || !head || !identity) return
+  const fit = () => {
+    // Measure the complete menu synchronously, then choose before paint. Only
+    // opening/resizing changes its form; selection and unread counts cannot.
+    element.classList.remove('icons')
+    const css = getComputedStyle(head), identityCSS = getComputedStyle(identity)
+    const siblings = [...head.children].filter(child => child !== identity)
+    const glyphs = [...identity.children].filter(child => !child.classList.contains('pane-title'))
+    const labelsAt = Math.ceil(PANEL_HEAD_TITLE_MIN + parseFloat(css.paddingLeft) + parseFloat(css.paddingRight) +
+      parseFloat(css.columnGap) * (head.children.length - 1) + parseFloat(identityCSS.columnGap) * glyphs.length +
+      [...siblings, ...glyphs].reduce((width, child) => width + child.getBoundingClientRect().width, 0))
+    // A measured design token: includes the actual tab count, font and actions
+    // (the sidebar button is absent when a split cannot fit).
+    head.style.setProperty('--panel-head-labels-at', `${labelsAt}px`)
+    element.classList.toggle('icons', head.getBoundingClientRect().width < labelsAt)
+  }
+  fit()
+  resize = new ResizeObserver(fit)
+  resize.observe(head)
+})
+onBeforeUnmount(() => resize?.disconnect())
 function move(event: KeyboardEvent) {
   if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault(); event.stopPropagation()
@@ -20,7 +46,7 @@ function move(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="session-tabs" role="tablist" :aria-label="lead ? 'Lead panel' : 'Session'" @keydown="move">
+  <div ref="menu" class="session-tabs" role="tablist" :aria-label="lead ? 'Lead panel' : 'Session'" @keydown="move">
     <button v-for="(tab, index) in tabs" :id="`session-tab-${panelId(tab)}`" :key="tab" type="button" role="tab" :data-tab="tab" :aria-label="PANEL_TAB_LABEL[tab]" :data-tip="[PANEL_TAB_LABEL[tab], shortcutHint(`agents.panel.tab.${(index + 1) as 1 | 2 | 3 | 4 | 5}`)].filter(Boolean).join(' · ')" :aria-selected="selected === tab" :aria-controls="`session-panel-${panelId(tab)}`" :tabindex="selected === tab ? 0 : -1" @click="emit('select', tab)">
       <AppIcon :name="icon(tab)" :size="15" /><span class="tab-label"><span class="label-width" aria-hidden="true">{{ PANEL_TAB_LABEL[tab] }}</span><span>{{ PANEL_TAB_LABEL[tab] }}</span></span>
       <span v-if="tab === 'chat' && unread" class="count" :aria-label="`${unread} unread`">{{ unread > 99 ? '99+' : unread }}</span>
@@ -40,8 +66,9 @@ button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .label-width { font-weight: 700; visibility: hidden; }
 .count { position: absolute; right: 1px; top: -2px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 9px var(--font); }
 .pinned { position: absolute; right: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); }
-@container pane (max-width: 1000px) { .tab-label { display: none; } button { padding-inline: 5px; } }
-@media (max-width: 720px) { .session-tabs { height: 44px; padding: 0 2px; } button { min-width: 44px; height: 44px; padding-inline: 5px; gap: 4px; font-size: 12px; } .tab-label { display: inline-grid; } }
+.icons .tab-label { display: none; }
+.icons button { padding-inline: 5px; }
+@media (max-width: 720px) { .session-tabs { height: 44px; padding: 0 2px; } button { min-width: 44px; height: 44px; padding-inline: 5px; gap: 4px; font-size: 12px; } .tab-label, .icons .tab-label { display: inline-grid; } }
 @media (max-width: 360px) { .tab-label { display: none; } }
 @media (pointer: coarse) { .session-tabs { height: 44px; padding-block: 0; } button { height: 44px; min-width: 44px; } }
 </style>

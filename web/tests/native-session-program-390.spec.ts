@@ -2,7 +2,7 @@
 // AEON-1309: retain the panel authority and stability regressions in balanced ESSENTIAL files.
 import { expect, test } from '@playwright/test'
 import { controlStability } from './control-stability'
-import { WORKER, setup, refresh, savedLayout } from './native-session-program-fixtures'
+import { WORKER, setup, refresh, savedLayout, expectPanelIdentity, expectNativeMenu } from './native-session-program-fixtures'
 
 for (const width of [390]) for (const theme of ['light', 'dark']) {
   test(`AEON-1309: ${width} ${theme} panel controls, layouts and live-reader anchor stay stable`, async ({ page }, info) => {
@@ -14,7 +14,15 @@ for (const width of [390]) for (const theme of ['light', 'dark']) {
     const tabs = Object.fromEntries(['Details', 'Chat', 'Events', 'Terminal'].map(name => [name, panel.getByRole('tab', { name, exact: true })]))
     const stable = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more: panel.getByRole('button', { name: 'More session actions' }), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel })
     for (const name of ['Chat', 'Events', 'Terminal', 'Details']) await stable.check(async () => { await tabs[name]!.click(); await expect(tabs[name]!).toHaveAttribute('aria-selected', 'true') })
+    await stable.check(async () => {
+      await panel.getByRole('button', { name: 'More session actions' }).click()
+      await expectNativeMenu(page)
+      await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-more.png`) })
+      await page.keyboard.press('Escape')
+    })
     stable.done()
+    await expectPanelIdentity(panel, worker.ticket!.key, worker.ticket!.title)
+    expect(await panel.locator('.title-detail').evaluate(el => el.scrollWidth - el.clientWidth), 'the long title truncates while the key stays complete').toBeGreaterThan(0)
     const headHeight = await panel.locator('.panel-head').evaluate(el => el.getBoundingClientRect().height)
     expect(headHeight).toBeLessThanOrEqual(width <= 720 ? 93 : 45)
     if (width <= 720) {

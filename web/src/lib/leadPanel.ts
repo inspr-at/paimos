@@ -19,6 +19,8 @@ export type PanelTab = LeadTab | 'overview' | 'events' | 'terminal'
 export const TAB_LABEL: Record<PanelTab, string> = { lead: 'Lead', session: 'Session', chat: 'Chat', overview: 'Overview', events: 'Events', terminal: 'Terminal' }
 export const PANEL_TAB_LABEL: Record<PanelTab, string> = { ...TAB_LABEL, session: 'Details', overview: 'Details' }
 export type PanelLayout = 'side' | 'wide' | 'full'
+// r5: labels fit only while the header leaves this much room for its title.
+export const PANEL_HEAD_TITLE_MIN = 200
 export function panelTabs(lead: boolean, terminal: boolean, watch = false): PanelTab[] {
   return [...(lead ? ['lead' as const] : []), lead ? 'session' : 'overview', ...(!watch ? ['chat' as const] : []), 'events', ...(terminal ? ['terminal' as const] : [])]
 }

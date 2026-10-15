@@ -182,12 +182,13 @@ const viewer = computed<ExpertViewer>(() => ({ tenantId: auth.identity?.tenant.i
   // Consent is never inferred from a capability or from the current person's ownership.
   canWatch: false, canReadStructured: !!s.value && can('harness.read', s.value.project_id) }))
 const terminalLink = computed(() => native.value ? liveTerminalLink(native.value, viewer.value) : null)
+const nativeBrowserReason = 'Not from the browser yet: use aeon on the computer that runs it'
 const nativeAction = computed<TerminalActionView | null>(() => {
   const current = native.value, binding = current?.current_binding
   if (!current || !binding || viewer.value.kind !== 'person') return null
   const kind = current.controller ? current.controller.actor_id === viewer.value.principalId ? 'return' : 'end' : 'take'
   return { kind, label: kind === 'return' ? 'Hand back' : kind === 'end' ? 'End control…' : 'Take over', disabled: true,
-    reason: 'Control handover requires the qualified local session client. Browser control is not available yet.', binding, revision: current.revision, controllerEpoch: current.controller?.epoch ?? null }
+    reason: nativeBrowserReason, binding, revision: current.revision, controllerEpoch: current.controller?.epoch ?? null }
 })
 
 let nativeRead = 0, nativePanel = ''
@@ -331,7 +332,7 @@ function editSetting(kind: 'rename' | 'model' | 'effort') {
   if (anchor && !nativeKnown.value) managed.value?.openSetting(kind, anchor)
 }
 function steer() { const anchor = actionsAnchor.value; closeActions(false); if (anchor && !nativeKnown.value) managed.value?.openSteer(anchor) }
-function settingReason(kind: 'rename' | 'model' | 'effort' | 'steer') { return nativeKnown.value ? 'Owned session settings are not available in this panel yet.' : managed.value?.settingReason(kind) ?? 'This setting is not available for this session.' }
+function settingReason(kind: 'rename' | 'model' | 'effort' | 'steer') { return nativeKnown.value ? nativeBrowserReason : managed.value?.settingReason(kind) ?? 'This setting is not available for this session.' }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0
 const nonnegativeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
@@ -490,7 +491,7 @@ const resumeOffered = computed(() => isLead.value ? lead.value?.state === 'pause
 const managedAccess = () => ({ now: props.now, grant: { person: auth.identity?.principal.kind === 'person', can }, runStatus: controlSession.value?.run_status ?? props.view?.run?.status })
 const interruptReason = computed(() => {
   const row = controlSession.value
-  if (nativeKnown.value) return 'Use the owned session’s qualified client for this action.'
+  if (nativeKnown.value) return nativeBrowserReason
   if (managed.value?.waiting) return 'A control is pending.'
   if (!row || !props.view) return 'No session is selected.'
   if (pausingSession(row)) return 'This session is handing over.'
@@ -500,14 +501,14 @@ const interruptReason = computed(() => {
   return tab.value === 'chat' && !chat.value?.working ? 'This session has no active turn to interrupt.' : ''
 })
 const pauseReason = computed(() => {
-  if (nativeKnown.value) return 'Owned session pause and resume are not available in this panel yet.'
+  if (nativeKnown.value) return "Pause and resume aren't available here yet"
   if (isLead.value) return leadActionReason(lead.value, resumeOffered.value ? 'resume' : 'pause')
   const row = controlSession.value
   return row && pause.eligible(row, resumeOffered.value ? 'resume' : 'pause') ? '' : 'This session cannot pause or resume now.'
 })
 const stopReason = computed(() => {
   const row = controlSession.value
-  if (nativeKnown.value) return 'Use the owned session’s qualified client for this action.'
+  if (nativeKnown.value) return nativeBrowserReason
   if (managed.value?.waiting) return 'A control is pending.'
   if (!row) return 'No session is selected.'
   if (managedControls.value) return managedControlAllowed(row, 'stop', managedAccess()) ? '' : 'This session cannot be stopped now.'
@@ -554,7 +555,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <div v-if="view && !loading" class="pane-identity">
           <AgentGlyph :view="view" :size="28" />
           <h2 class="pane-title" tabindex="0" :title="identityTitle" :data-tip="identityTitle">
-            <span class="name">{{ view.ticket?.key || view.name }}</span><span v-if="view.ticket?.title || isLead" class="title-detail"> · {{ view.ticket?.title || view.projectTitle }}</span>
+            <span class="name">{{ view.ticket?.key || view.name }}</span><template v-if="view.ticket?.title || isLead"><span class="title-separator"> · </span><span class="title-detail">{{ view.ticket?.title || view.projectTitle }}</span></template>
             <span class="sr-only"> · {{ view.status.label }} · {{ modelLine }}</span>
           </h2>
         </div>
@@ -585,10 +586,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           </template>
           <button v-if="terminalAtOpen" type="button" role="menuitem" class="panel-menu-item" disabled><AppIcon name="terminal" :size="16" /><span>{{ nativeAction?.label || 'Control unavailable' }}<small>{{ nativeAction?.reason || nativeReason }}</small></span></button>
           <a v-if="viewerAtOpen && viewer.kind === 'person'" role="menuitem" class="panel-menu-item" :href="terminalLink?.href" :aria-disabled="!terminalLink" :tabindex="terminalLink ? 0 : -1" target="_blank" rel="noopener noreferrer" @click="terminalLink ? closeActions(false) : $event.preventDefault()"><AppIcon name="terminal" :size="16" /><span>Open live terminal</span><AppIcon name="external" :size="14" /></a>
-          <button v-if="showRecover" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :title="nativeKnown ? 'Owned session recovery requires the qualified session client.' : undefined" @click="recovery?.open(actionsAnchor ?? undefined); closeActions(false)"><AppIcon name="wrench" :size="16" /><span>Recover<small v-if="nativeKnown">Owned session recovery requires the qualified session client.</small></span></button>
-          <button v-if="showRemove" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :aria-label="`Remove ${view.name}`" @click="removal?.remove(); closeActions(false)"><AppIcon name="trash" :size="16" /><span>{{ quick ? 'Remove' : 'Remove…' }}<small v-if="nativeKnown">Owned session removal is not available in this panel yet.</small></span></button>
+          <button v-if="showRecover" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :title="nativeKnown ? nativeBrowserReason : undefined" @click="recovery?.open(actionsAnchor ?? undefined); closeActions(false)"><AppIcon name="wrench" :size="16" /><span>Recover<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
+          <button v-if="showRemove" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :aria-label="`Remove ${view.name}`" @click="removal?.remove(); closeActions(false)"><AppIcon name="trash" :size="16" /><span>{{ quick ? 'Remove' : 'Remove…' }}<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
           <button v-if="isLead" type="button" role="menuitemcheckbox" :aria-checked="pinned === 'lead'" class="panel-menu-item" @click="pinTab(); closeActions(true)"><AppIcon name="pin" :size="16" /><span>Open on Lead by default</span><AppIcon v-if="pinned === 'lead'" name="check" :size="14" /></button>
-          <button v-if="!reported?.watch && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" @click="pickTier(actionsAnchor); closeActions(false)"><AppIcon name="gauge" :size="16" /><span>Change tier…<small v-if="nativeKnown">Owned session settings are not available in this panel yet.</small></span></button>
+          <button v-if="!reported?.watch && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" @click="pickTier(actionsAnchor); closeActions(false)"><AppIcon name="gauge" :size="16" /><span>Change tier…<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
           <template v-if="managedControls">
             <button v-for="setting in (['rename', 'model', 'effort'] as const)" :key="setting" type="button" role="menuitem" class="panel-menu-item" :disabled="!!settingReason(setting)" @click="editSetting(setting)"><AppIcon name="edit" :size="16" /><span>{{ setting === 'rename' ? 'Name…' : setting === 'model' ? 'Model…' : 'Effort…' }}<small>{{ settingReason(setting) || (setting === 'rename' ? view.name : setting === 'model' ? modelLine : view.session.reasoning_effort) }}</small></span></button>
           </template>
@@ -877,6 +878,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .pane-identity { display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; }
 .pane-title { display: flex; align-items: baseline; min-width: 0; overflow: hidden; font-size: 14.5px; font-weight: 650; margin: 0; white-space: nowrap; }
 .pane-title .name { flex: none; font: inherit; white-space: nowrap; }
+.title-separator { flex: none; white-space: pre; font-weight: 500; }
 .title-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .pane-title:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .pane-buttons { display: flex; align-items: center; flex: none; gap: 4px; margin-left: auto; }
@@ -902,7 +904,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .pane-bar { height: 92px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 48px 44px; gap: 0 8px; padding: env(safe-area-inset-top) 12px 0; box-sizing: content-box; }
   .pane-identity { min-width: 0; }
   .pane-title { font-size: 13px; }
-  .pane-title .name { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
   .pane-bar > :deep(.session-tabs) { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   .pane-buttons { grid-column: 2; grid-row: 1; }
   .pane-layout { display: none; }

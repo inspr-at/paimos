@@ -2,7 +2,7 @@
 // AEON-1309: retain the panel authority and stability regressions in balanced ESSENTIAL files.
 import { expect, test } from '@playwright/test'
 import { controlStability } from './control-stability'
-import { WORKER, setup, refresh, savedLayout } from './native-session-program-fixtures'
+import { WORKER, setup, refresh, savedLayout, expectPanelIdentity, expectNativeMenu } from './native-session-program-fixtures'
 
 for (const width of [1024]) for (const theme of ['light', 'dark']) {
   test(`AEON-1309: ${width} ${theme} panel controls, layouts and live-reader anchor stay stable`, async ({ page }, info) => {
@@ -11,10 +11,19 @@ for (const width of [1024]) for (const theme of ['light', 'dark']) {
     await page.goto(`/agents/${WORKER}`)
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.getByRole('tab', { name: 'Details', exact: true })).toHaveAttribute('aria-selected', 'true')
+    for (const label of await panel.locator('.tab-label').all()) await expect(label).toBeVisible()
+    expect(await panel.locator('.pane-title').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(200)
     const tabs = Object.fromEntries(['Details', 'Chat', 'Events', 'Terminal'].map(name => [name, panel.getByRole('tab', { name, exact: true })]))
     const stable = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more: panel.getByRole('button', { name: 'More session actions' }), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel })
     for (const name of ['Chat', 'Events', 'Terminal', 'Details']) await stable.check(async () => { await tabs[name]!.click(); await expect(tabs[name]!).toHaveAttribute('aria-selected', 'true') })
+    await stable.check(async () => {
+      await panel.getByRole('button', { name: 'More session actions' }).click()
+      await expectNativeMenu(page)
+      await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-more.png`) })
+      await page.keyboard.press('Escape')
+    })
     stable.done()
+    await expectPanelIdentity(panel, worker.ticket!.key, worker.ticket!.title)
     const headHeight = await panel.locator('.panel-head').evaluate(el => el.getBoundingClientRect().height)
     expect(headHeight).toBeLessThanOrEqual(width <= 720 ? 93 : 45)
     if (width <= 720) {
@@ -23,6 +32,39 @@ for (const width of [1024]) for (const theme of ['light', 'dark']) {
       }
     }
     await page.screenshot({ path: info.outputPath(`AEON-1309-${width}-${theme}-details.png`) })
+
+    // Cross the measured label threshold in both directions. Resizing may
+    // change available text, but actions keep their size, row and right inset.
+    const head = panel.locator('.pane-bar')
+    const labelsAt = await head.evaluate(el => parseFloat(getComputedStyle(el).getPropertyValue('--panel-head-labels-at')))
+    expect(labelsAt).toBeGreaterThan(700); expect(labelsAt).toBeLessThan(850)
+    const inset = width - await head.evaluate(el => el.getBoundingClientRect().width)
+    const actionGeometry = () => panel.locator('.pane-buttons').evaluate(el => {
+      const head = el.closest('.pane-bar')!.getBoundingClientRect()
+      return [...el.children].filter(child => child.getBoundingClientRect().width > 0).map(child => {
+        const rect = child.getBoundingClientRect()
+        return { name: child.getAttribute('aria-label'), right: head.right - rect.right, y: rect.y, width: rect.width, height: rect.height }
+      })
+    })
+    const beforeResize = await actionGeometry()
+    for (const showLabels of [true, false, true]) {
+      await page.setViewportSize({ width: Math.ceil(labelsAt + inset + (showLabels ? 1 : -1)), height: 900 })
+      await expect(panel.getByRole('tablist')).toHaveClass(showLabels ? /^session-tabs$/ : /\bicons\b/)
+      if (showLabels) expect(await panel.locator('.pane-title').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(200)
+      for (const label of await panel.locator('.tab-label').all()) {
+        if (showLabels) await expect(label).toBeVisible(); else await expect(label).toBeHidden()
+      }
+      const afterResize = await actionGeometry()
+      expect(afterResize.map(sample => sample.name)).toEqual(beforeResize.map(sample => sample.name))
+      for (let index = 0; index < beforeResize.length; index++) for (const dimension of ['right', 'y', 'width', 'height'] as const)
+        expect(Math.abs(afterResize[index]![dimension] - beforeResize[index]![dimension]), `${afterResize[index]!.name}.${dimension} during resize`).toBeLessThanOrEqual(.5)
+      const resizing = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more: panel.getByRole('button', { name: 'More session actions' }), close: panel.getByRole('button', { name: 'Close session details' }) })
+      await resizing.check(async () => { await tabs.Chat!.click(); await expect(tabs.Chat!).toHaveAttribute('aria-selected', 'true') })
+      await resizing.check(async () => { await tabs.Details!.click(); await expect(tabs.Details!).toHaveAttribute('aria-selected', 'true') })
+      resizing.done()
+    }
+    await info.attach('header-label-measurement', { body: `Labels require a ${labelsAt}px header to retain a 200px title. Actions retain their row, size and right inset (±0.5px) across that threshold.`, contentType: 'text/plain' })
+    await page.setViewportSize({ width, height: 900 })
 
     // WebKit-style anchoring: disable the browser's own correction, scroll the
     // facts into view, then grow a real activity line above the reader.
