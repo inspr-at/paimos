@@ -224,12 +224,11 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'visual_owner','Explicit visual owner') RETURNING id::text`, tid).Scan(&personRole); err != nil {
 			return err
 		}
-		permissions, _ := authz.BuiltinPermissions("owner")
-		permissions = append(permissions, "reviews.visual_approve")
+		permissions := []string{"reviews.visual_approve"}
 		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, tid, personRole, permissions); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, owner.ID, personRole); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, tid, owner.ID, personRole, project); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'reviews.visual_approve')`, tid, reviewerRole); err != nil {
