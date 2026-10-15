@@ -95,7 +95,9 @@ for (const width of [390, 1440]) {
         await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
         release()
         await expect(page.locator('.session-panel .facts')).toBeVisible()
-        await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('group', { name: 'Session actions' })).toBeVisible()
+        // AEON-1309 / #678 keeps the session's actions behind More session actions in the panel head.
+        await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('group', { name: 'Panel actions' })
+          .getByRole('button', { name: 'More session actions', exact: true })).toBeVisible()
         await expectStill(page)
         await page.screenshot({ path: test.info().outputPath(`session-loaded-${sampleWidth}-${theme}.png`) })
       }
