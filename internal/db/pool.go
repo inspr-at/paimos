@@ -23,6 +23,11 @@ import (
 // and <=1 agent-subscription admission session. No per-client/tenant backends.
 // CLI/admin/replicas require their own headroom. Listener sessions recycle at
 // ListenerMaxLifetime and close when their last subscriber leaves.
+// Retained advisory sessions for migrations, inbox sweeping, knowledge tagging,
+// crossreview reporting/head publication, status-autopilot attention, and
+// delivery observation/reconciliation, alerts, audit, metrics and webhook
+// receipts all borrow this pool. They last one sweep/request; server loops use
+// background permits and retain their connection across nested transactions.
 const DefaultMaxConns int32 = 16
 const ForegroundReserve int32 = 2
 const ProbeAcquireTimeout = 100 * time.Millisecond

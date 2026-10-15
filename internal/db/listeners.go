@@ -21,6 +21,16 @@ type NotificationListener interface {
 	Close(context.Context) error
 }
 
+// Serve origins (each <=1 session): aeon_events fans out to browser/agent
+// events, inbox streams/long polls, delivery flow, harness wakes, questions and
+// optional phone push; aeon_run_queue serves agent-run queue wakes;
+// aeon_routine_deliveries serves all tenant inbox routine loops; and
+// aeon_routine_intents serves routine execution recovery. Names are listed below.
+// They exist only while subscribed, recycle after 30 minutes, and rescan on
+// disconnect/reconnect or mailbox overflow. Admission uses one separate session
+// (aeon-events-admission) solely for cross-replica advisory slots; no tenant
+// transactions run outside the main pool.
+//
 // There is one session per channel per main pool, independent of tenant and
 // client count. The fixed allowlist also bounds accidental channel creation.
 func listenerName(channel string) string {
