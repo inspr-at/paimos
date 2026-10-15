@@ -94,6 +94,9 @@ it('a phone selection hold suppresses only its own row and pointer click', () =>
       '../../lib/authz': {}, '../../lib/workQueue': { queueable: () => false },
       '../../lib/planning': { planningPresent: () => ({}) }, '../../lib/eta': { etaFromTicket: () => null },
       '../../lib/readerAnchor': { useReaderAnchor },
+      // AEON-1358 column header figures: no figure tip open in this harness.
+      '../../lib/figureTip': { figureTip: { anchor: null, owner: '' }, cancelFigureTip() {}, closeFigureTip() {}, hoverFigureTip() {}, openFigureTip() {} },
+      '../../lib/workFigures': { figureColumn: () => null },
     })
     const state = view.state as { pressBegin: (event: unknown, row: unknown) => void; pressFinish: (up: boolean) => void; rowClick: (event: unknown, row: unknown) => void }
     const target = { closest: () => null }, preventDefault = vi.fn()
