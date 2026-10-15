@@ -27,6 +27,8 @@ import (
 // 30-second scan. Scheduler integration must retain quiet hours and escalation.
 const NearExpiry = 15 * time.Minute
 
+var ErrPersonStepCoverage = errors.New("desk person-step coverage exceeds 1000 candidate tickets")
+
 var ErrCoverage = errors.New("desk project coverage exceeds 1000 projects")
 
 type Item struct {
@@ -127,7 +129,7 @@ func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := m.Read(r.Context(), p, limit, after)
-	if errors.Is(err, ErrCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) || errors.Is(err, knowledge.ErrDeskLessonCoverage) {
+	if errors.Is(err, ErrCoverage) || errors.Is(err, ErrPersonStepCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) || errors.Is(err, knowledge.ErrDeskLessonCoverage) {
 		httpapi.WriteError(w, 422, err.Error())
 		return
 	}

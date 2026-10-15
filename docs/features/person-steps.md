@@ -47,7 +47,9 @@ The native endpoints are:
 
 The authored contract is in `api/areas/entry-checks.yaml`. Migration 1353 adds
 only invoker functions and an event lookup index. It adds no tables or columns;
-no new DSAR storage classification or permissions are needed. Existing tenant
+no new DSAR storage classification or permissions are needed. The Desk refuses
+coverage above 1000 candidate tickets with 422 rather than presenting partial
+totals. Existing tenant
 and project RLS still apply.
 
 The approved P2 Definitions settings editor is not present in this base.

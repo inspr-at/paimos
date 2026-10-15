@@ -41,6 +41,7 @@ paths:
         Their native person_step payload carries the ticket and definition revision; inline tick and reassignment use the person-step APIs.
         Manual items appear when their status is next; human checks appear on Done. Current access loss immediately routes to an admin.
         Source ticket and definition events audit request creation; native tick and reassignment events audit resolution and routing.
+        Person-step candidate coverage above 1000 tickets returns 422 before presenting any partial totals.
         The existing question-only decision-desk endpoint remains available.
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}

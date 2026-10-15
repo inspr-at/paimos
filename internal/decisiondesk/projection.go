@@ -122,11 +122,27 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
 ), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source
  FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
+), person_candidates AS MATERIALIZED (
+ SELECT n.id,n.project_id FROM nodes n
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ LEFT JOIN LATERAL (
+   SELECT d.fields FROM nodes d JOIN node_kinds dk ON dk.tenant_id=d.tenant_id AND dk.id=d.kind_id
+   WHERE dk.slug='definition' AND d.deleted_at IS NULL AND (d.parent_id=n.project_id OR d.parent_id IS NULL)
+   ORDER BY (d.parent_id IS NULL),d.id LIMIT 1
+ ) definition ON true
+ WHERE n.tenant_id=$1 AND n.project_id=ANY($28::uuid[]) AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')
+ AND (n.human_check IS NOT NULL AND btrim(n.human_check)<>'' AND aeon_work_status_category(n.state,k.field_schema)='done'
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(definition.fields->'checks')='object' THEN
+   coalesce(definition.fields->'checks'->CASE
+     WHEN replace(replace(lower(btrim(n.state)),' ','_'),'-','_')='qa' THEN 'done'
+     WHEN aeon_work_status_category(n.state,k.field_schema) IN ('in_progress','progress','active') THEN 'qa'
+     WHEN aeon_work_status_category(n.state,k.field_schema) IN ('new','backlog','open','blocked') THEN 'in_progress'
+   END,'[]'::jsonb) ELSE '[]'::jsonb END) rule WHERE rule->>'id' LIKE 'manual:%'))
+ ORDER BY n.id LIMIT 1001
 ), person_request_details AS MATERIALIZED (
- SELECT n.project_id,step FROM nodes n
+ SELECT n.project_id,step FROM person_candidates n
  CROSS JOIN LATERAL jsonb_array_elements(aeon_person_steps(n.id)) step
- WHERE n.tenant_id=$1 AND n.project_id=ANY($28::uuid[]) AND n.deleted_at IS NULL
- AND step->>'active'='true' AND step->'owner'->>'id'=$4::uuid::text
+ WHERE step->>'active'='true' AND step->'owner'->>'id'=$4::uuid::text
 ), person_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT (step->>'id')::uuid,'action_request'::text,project_id,
  (extract(epoch FROM (step->>'revision')::timestamptz)*1000000)::bigint,
@@ -168,7 +184,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  ORDER BY bucket,order_at,id,kind LIMIT $15
 )
 SELECT (SELECT at FROM clock),totals.open,totals.held,totals.chores,
- coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY bucket,order_at,id,kind) FROM page),'[]'::jsonb) FROM totals`
+ coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY bucket,order_at,id,kind) FROM page),'[]'::jsonb), (SELECT count(*) FROM person_candidates) FROM totals`
 
 // ReadTx serves the canonical HTTP projection for the future desk cutover.
 // NoticesTx reuses its source predicates for the pending phone integration.
@@ -229,6 +245,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		c = *after
 	}
 	var raw []byte
+	var personCandidates int
 	stepupVisibility, err := json.Marshal(stepupPermissions)
 	if err != nil {
 		return page, err
@@ -262,9 +279,12 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, projects["nodes.read"]).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, projects["nodes.read"]).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw, &personCandidates)
 	if err != nil {
 		return page, err
+	}
+	if personCandidates > 1000 {
+		return page, ErrPersonStepCoverage
 	}
 	// The internal order fields also form the opaque keyset cursor.
 	var records []struct {

@@ -100,8 +100,11 @@ func TestPersonStepsOwnershipRoutingAndAudit(t *testing.T) {
 		t.Fatalf("refusal does not name owner: %d %s", code, raw)
 	}
 
-	completedManual := write(owner, manual, map[string]any{"checked": true}, "")
+	completedManual := write(admin, manual, map[string]any{"checked": true}, "")
 	manual = find(completedManual, manual.CheckID)
+	if !find(read(owner), manual.CheckID).Checked {
+		t.Fatal("owner cannot read the admin completion")
+	}
 	desk(owner, 0)
 	repeatedManual := write(owner, manual, map[string]any{"checked": true}, "")
 	if !repeatedManual.Revision.Equal(completedManual.Revision) {
