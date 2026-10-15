@@ -47,6 +47,11 @@ func workspaceTx(t *testing.T, w *world, p tenant.Principal, fn func(pgx.Tx) err
 
 func TestProjectMessagesPagingThreadAndAddress(t *testing.T) {
 	w, m, project, _ := messagingWorld(t)
+	empty := workspaceCall(m, w.admin, "GET", "/api/projects/"+project+"/messages?pending=true&limit=100&newest_first=true", "", nil)
+	workspaceStatus(t, empty, 200)
+	if body := strings.TrimSpace(empty.Body.String()); !strings.Contains(body, `"items":[]`) || strings.Contains(body, `"items":null`) {
+		t.Fatalf("empty messages %s", empty.Body.String())
+	}
 	root := mustCompatSend(t, m, w.sender, project, compatInput(w.recipient.ID, "root"))
 	reply := compatInput(w.sender.ID, "reply")
 	reply.ReplyTo = &root.ID

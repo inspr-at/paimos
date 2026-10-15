@@ -157,6 +157,10 @@ func (m *Module) List(ctx context.Context, p tenant.Principal, state string, lim
 		if err := m.recordResults(ctx, tx, p, expired); err != nil {
 			return err
 		}
+		// A nil slice encodes as JSON null. The page contract is an array, including when nothing matches.
+		if candidates == nil {
+			candidates = []ApprovalRequest{}
+		}
 		out.Items = candidates
 		return nil
 	})

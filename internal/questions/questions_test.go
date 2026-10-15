@@ -358,9 +358,19 @@ func TestQuestionLifecycleAndIsolation(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
+	if body := strings.TrimSpace(w.Body.String()); !strings.Contains(body, `"items":[]`) || strings.Contains(body, `"items":null`) {
+		t.Fatalf("empty desk %s", w.Body.String())
+	}
 	_ = json.Unmarshal(w.Body.Bytes(), &page)
 	if len(page.Items) != 0 {
 		t.Fatal("another asker's desk leaked")
+	}
+	answered := request(t.Context(), f.mux, f.otherAgent, "GET", "/api/decision-desk?state=answered&order=desc&limit=100", nil)
+	if answered.Code != 200 {
+		t.Fatal(answered.Body.String())
+	}
+	if body := strings.TrimSpace(answered.Body.String()); !strings.Contains(body, `"items":[]`) || strings.Contains(body, `"items":null`) {
+		t.Fatalf("empty answered desk %s", answered.Body.String())
 	}
 	// A project-specific permission cannot authorize the same principal's other project.
 	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='viewer'`, f.agent.TenantID, f.agent.ID, f.hidden); err != nil {

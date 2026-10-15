@@ -89,7 +89,12 @@ func learningHTTPPage(t *testing.T, f fixture, p tenant.Principal) LearningPage 
 	t.Helper()
 	w := call(t, f, p, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
 	expect(t, w, 200)
-	return decode[LearningPage](t, w)
+	body := w.Body.String()
+	page := decode[LearningPage](t, w)
+	if strings.Contains(body, `"items":null`) || page.Items == nil || len(page.Items) == 0 && !strings.Contains(body, `"items":[]`) {
+		t.Fatalf("learnings page %s", body)
+	}
+	return page
 }
 
 // Risk: a large unprepared window hides a real, older prepared lesson; the

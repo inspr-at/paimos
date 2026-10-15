@@ -141,6 +141,9 @@ func TestDoctrineInboxLifecycle(t *testing.T) {
 	in := InboxInput{RequestID: "44400000-0000-4000-8000-000000000001", Repository: "inspr-modules", Path: file.Path, RuleKey: small.Key,
 		Source: strings.Replace(small.Source, "Small commits.", "Small, reviewed commits.", 1), Why: "Reviews catch more in small commits.", Ticket: "INB-2"}
 	const path = "/api/rules/doctrine/inbox"
+	if empty := string(f.call(owner, "GET", path, nil, 200)); !strings.Contains(empty, `"items":[]`) || strings.Contains(empty, `"items":null`) {
+		t.Fatalf("empty inbox %s", empty)
+	}
 
 	// A rule without a TL;DR needs one with the change.
 	f.call(agent, "POST", path, in, 400)
