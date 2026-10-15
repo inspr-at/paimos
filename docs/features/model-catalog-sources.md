@@ -15,11 +15,10 @@ shared by Gemini and OpenCode resolve to the same provider identity.
 
 The existing manual/scheduled refresh path fetches OpenRouter, models.dev and
 LiteLLM without keys. Explicit refreshes fetch public sources without a vault.
-`api_enabled` controls credentialed native requests and opts in to scheduled
-public discovery. Startup and interval workers make no catalog network requests
-with the default disabled setting; offline bootstrap and retirements still run.
-Opted-in public discovery uses the same refresh schedule and cooldown, and
-disabling discovery fences both subsequent requests and in-flight publication.
+`api_enabled` controls only credentialed native requests. Startup and interval
+workers fetch the three keyless public catalogs regardless of that setting,
+using the existing bounded refresh interval. Disabling credentialed discovery
+still fences subsequent native requests and their in-flight publication.
 Available OpenAI, Anthropic, xAI and Google account credentials add native facts.
 Google uses the same vault derivation and the credential endpoint's additive
 `google` vendor. Credentials are never returned by the catalog, logged, or stored
@@ -28,7 +27,12 @@ before publishing fetched data. A disabled/revoked account cannot publish its
 in-flight native result.
 
 Fetches use fixed origins, refuse redirects, share a 30-second refresh deadline,
-and bound response bytes, model count, pagination and fact values. Truncated or
+and bound response bytes, model count, pagination and fact values. Unsupported
+identifiers are skipped per source, including OpenRouter `~…-latest` moving
+aliases, models.dev `@cf/…` IDs, and LiteLLM IDs containing `@` or `*`.
+`last_result.sources[].skipped` and refresh output report the counts; valid
+models in the same source remain available. Skipped identifiers still count
+toward input bounds. Truncated or
 failed lists report `limited` or `stale`, rather than success or disappearance.
 The catalog read uses keyset pagination (`limit`, `cursor`, `next_cursor`) and
 explicit `truncated` flags for bounded evidence. Public discovery records facts
@@ -58,3 +62,22 @@ Source formats checked on 2026-10-11:
 - [models.dev reasoning options](https://github.com/anomalyco/models.dev/blob/dev/packages/core/src/schema.ts)
 - [OpenRouter Models](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
 - [LiteLLM model JSON](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)
+
+AEON-1409 updates the ID-only bootstrap to map the verified Claude `opus` and
+`sonnet` launch aliases to 5.5. Migration 1357 adds immutable `aeon-1409` pi pin
+revisions for `anthropic/claude-opus-5.5` and `anthropic/claude-sonnet-5.5`.
+Earlier profile IDs, displays and account grants remain intact. Successor grants,
+pauses and the owner's new-model activation policy still apply. Agent-triggered
+refresh permissions, cooldowns and enrolled-harness evidence requirements remain
+in force; no agent reporting authority is added.
+
+AEON-1427 binds a Codex review route to the exact command printed by
+`model resolve review-gate --author-family claude`:
+`codex exec --ignore-user-config -s read-only -m MODEL -c model_reasoning_effort=EFFORT '{prompt}'`.
+The CLI refuses a Codex review response without this isolation. This qualifies
+the printed local command only; pairing and managed verification adapters keep
+their existing qualification. Family exclusion, account approval, model grants,
+capacity and native Grok enrollment remain required. Local Grok sign-in alone
+creates no registry account: on PPM the 2026-10-15 diagnostic found no registered
+Grok accounts and capacity `offline`. The resolver names a missing account
+explicitly; account enrollment and approval remain with their existing owners.

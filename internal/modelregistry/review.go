@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
-	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -155,11 +154,11 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			reasons = append(reasons, "review requires frontier or strong at xhigh")
 		}
 		// Claude has a platform-independent qualified no-tools bridge. Native
-		// Grok is qualified only for an arm64 Mac enrollment; Cursor/pi/Codex
-		// are deliberately skipped until their release-owned boundary qualifies.
+		// Grok is qualified only for an arm64 Mac enrollment. Codex qualifies
+		// only through its generated isolated read-only command.
 		var account *agentaccounts.Account
 		if len(reasons) == 0 {
-			capability := agentverification.For(step.Profile.Harness, "darwin", "arm64")
+			capability := reviewCommandCapability(step.Profile)
 			if !capability.Supported {
 				reasons = append(reasons, capability.Reason)
 			} else {

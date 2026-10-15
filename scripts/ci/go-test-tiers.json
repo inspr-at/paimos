@@ -5026,6 +5026,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelResolveAuthorFamilyAliases","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestModelResolveCodexRequiresPrintedIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestModelResolveCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestModelResolveOwnerRequiredTranscript","tier":"GATED-FULL"}
@@ -5649,6 +5651,8 @@
     {"kind":"go","package":"internal/db","name":"TestAgentRoleModelsBackfillAcrossTenantsUnderRLS","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestAithemaContentMigrationLockReleaseAndUniqueRecovery","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestAnthropic55MigrationKeepsHistoryAndActivationPolicy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestAttentionEventsMigrationUpgradeAndReapply","tier":"GATED-FULL"}
     ,
@@ -7656,6 +7660,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogScheduledRefreshRequiresOptInAndRechecksIt","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogSkipsUnsupportedIdentifiers","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogSourcesPreserveNativePrecedenceAndUnknown","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}
@@ -7975,6 +7981,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestReviewOrderReadAndResolverSnapshotBarrier","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestReviewOrderSavedFallbackPreferencesAndQualification","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestReviewResolutionBindsCodexIsolationAndExplainsMissingGrok","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRevisionFollowsRoutes","tier":"GATED-FULL"}
     ,

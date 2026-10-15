@@ -16,6 +16,7 @@ import (
 type ProviderCatalog struct {
 	Facts   []CatalogFact
 	Models  []providerModel
+	Skipped int // Unsupported identifiers, never raw names or response bodies.
 	HasMore bool
 	Next    string
 }
@@ -148,12 +149,15 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 		row          map[string]json.RawMessage
 	}
 	entries := []entry{}
+	count := 0
 	add := func(provider, id string, row map[string]json.RawMessage) error {
-		if id == "" || len(id) > 128 || !modelRE.MatchString(id) {
-			return errors.New("invalid model identifier")
-		}
-		if len(entries) >= maxDiscoveryModels {
+		count++
+		if count > maxDiscoveryModels {
 			return errors.New("model list identifier limit")
+		}
+		if id == "" || len(id) > 128 || !modelRE.MatchString(id) || provider == "" || len(provider) > 64 || !modelRE.MatchString(provider) {
+			out.Skipped++
+			return nil
 		}
 		entries = append(entries, entry{provider, id, row})
 		return nil
@@ -166,7 +170,7 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 			if err != nil {
 				return out, err
 			}
-			models, err := boundedCatalogObject(provider["models"], maxDiscoveryModels-len(entries))
+			models, err := boundedCatalogObject(provider["models"], maxDiscoveryModels-count)
 			if err != nil {
 				return out, err
 			}
@@ -239,10 +243,10 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 			}
 			if source == "openrouter" {
 				parts := strings.SplitN(id, "/", 2)
-				if len(parts) != 2 {
-					return out, errors.New("invalid OpenRouter model")
+				p = ""
+				if len(parts) == 2 && parts[1] != "" {
+					p = parts[0]
 				}
-				p = parts[0]
 			}
 			if err := add(p, id, row); err != nil {
 				return out, err
@@ -267,6 +271,12 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 		provider, id = CatalogIdentity(provider, "", id, "")
 		if source == "litellm" && provider == "google" {
 			id = strings.TrimPrefix(strings.TrimPrefix(id, "gemini/"), "vertex_ai/")
+		}
+		// Canonical IDs are external input too. Do not let one invalid
+		// canonical override poison publication of otherwise usable facts.
+		if provider == "" || len(provider) > 64 || !modelRE.MatchString(provider) || id == "" || len(id) > 128 || !modelRE.MatchString(id) {
+			out.Skipped++
+			continue
 		}
 		harness := map[string]string{"openai": "codex", "anthropic": "claude", "xai": "grok", "google": "gemini"}[provider]
 		launch := id

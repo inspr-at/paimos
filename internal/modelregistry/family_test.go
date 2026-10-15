@@ -141,3 +141,44 @@ func TestProfileFamilyMustMatchProvider(t *testing.T) {
 		}
 	}
 }
+
+// Risk R1/R14: a cross-family route is unusable or inherits tools/hooks, while
+// fixing it accidentally admits same-family, unapproved or unenrolled routes.
+func TestReviewResolutionBindsCodexIsolationAndExplainsMissingGrok(t *testing.T) {
+	p, _ := boardFixture(t)
+	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+	pin := profileBySlug(profiles, "codex-6-1-sol-xhigh")
+	account := minimalAccount(t, p, pin)
+	got := decode[WorkResolution](t, &p, "GET", "/api/models/resolve?role=review-gate&author_family=claude&harness=codex", "", 200)
+	const want = "codex exec --ignore-user-config -s read-only -m gpt-6.1-sol -c model_reasoning_effort=xhigh '{prompt}'"
+	if got.OwnerRequired || got.Profile == nil || got.Profile.ID != pin.ID || got.CommandTemplate != want || len(got.Trace.QualifyingAccountIDs) != 1 || got.Trace.QualifyingAccountIDs[0] != account {
+		t.Fatalf("isolated route not usable: %+v", got)
+	}
+	for _, unsafe := range []string{"", strings.Replace(want, "--ignore-user-config ", "", 1), strings.Replace(want, "-s read-only ", "", 1), strings.Replace(want, "read-only", "workspace-write", 1)} {
+		if err := ValidateReviewCommand("codex", pin.Model, pin.Effort, unsafe); err == nil {
+			t.Fatalf("unsafe route accepted: %s", unsafe)
+		}
+	}
+	same := decode[WorkResolution](t, &p, "GET", "/api/models/resolve?role=review-gate&author_family=codex&harness=codex", "", 200)
+	if same.Profile != nil || !same.OwnerRequired || same.CommandTemplate != "" {
+		t.Fatalf("author family bypassed: %+v", same)
+	}
+	grok := decode[WorkResolution](t, &p, "GET", "/api/models/resolve?role=review-gate&author_family=claude&harness=grok", "", 200)
+	explained := false
+	for _, c := range grok.Ladder {
+		for _, r := range c.SkipReasons {
+			explained = explained || strings.Contains(r, "no registered Grok account")
+		}
+	}
+	if grok.Profile != nil || !grok.OwnerRequired || !explained {
+		t.Fatalf("missing Grok account reported as capacity: %+v", grok)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids='{}' WHERE id=$1`, account)
+		return err
+	})
+	denied := decode[WorkResolution](t, &p, "GET", "/api/models/resolve?role=review-gate&author_family=claude&harness=codex", "", 200)
+	if denied.Profile != nil || !denied.OwnerRequired || denied.CommandTemplate != "" {
+		t.Fatalf("isolation bypassed account model policy: %+v", denied)
+	}
+}

@@ -13,7 +13,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
-	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -231,7 +230,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			residencyOnly := false
 			if len(reasons) == 0 {
 				if review {
-					capability := agentverification.For(profile.Harness, "darwin", "arm64")
+					capability := reviewCommandCapability(profile)
 					if !capability.Supported {
 						reasons = append(reasons, capability.Reason)
 					} else {
@@ -268,7 +267,11 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					reasons = append(reasons, "not allowed: "+requirement)
 					residencyHeld = true
 				} else {
-					reasons = append(reasons, "no qualified account with available capacity")
+					if review && profile.Harness == "grok" && health[profile.Harness].Accounts == 0 {
+						reasons = append(reasons, "no registered Grok account; local CLI sign-in does not enroll an approved review account")
+					} else {
+						reasons = append(reasons, "no qualified account with available capacity")
+					}
 				}
 			}
 			stage := order.Stage

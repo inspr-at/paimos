@@ -1,7 +1,9 @@
 # Public catalog fixtures
 
 OpenRouter, models.dev, and LiteLLM are reduced public response recordings from
-2026-10-11, retaining only fields consumed by this package. Tests read these
+2026-10-11 with representative rows added from 2026-10-15: OpenRouter
+`~…-latest` aliases and Opus/Sonnet 5.5, models.dev `@cf/…`, and LiteLLM
+`@`/`*` identifiers. Only fields consumed by this package are retained. Tests read these
 files through an injected HTTP transport and never fetch the network.
 
 Native fixtures are reduced documentation response examples (OpenAI/Anthropic)
