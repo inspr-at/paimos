@@ -552,7 +552,8 @@
         "pull_request": "metadata",
         "repository": "metadata",
         "tenant_id": "metadata",
-        "workflow": "metadata"
+        "workflow": "metadata",
+        "group_sha": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -1911,6 +1912,48 @@
         "tenant_column": "tenant_id"
       },
       "table": "delivery_admission_settings"
+    },
+    {
+      "table": "delivery_admission_outbox",
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "sha": "metadata",
+        "context": "metadata",
+        "kind": "metadata",
+        "members": "metadata",
+        "active": "metadata",
+        "invalidated": "metadata",
+        "revision": "metadata",
+        "published_revision": "metadata",
+        "confirmed_state": "metadata",
+        "uncertain": "metadata",
+        "checked_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
+      "table": "delivery_admission_queue",
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "head_sha": "metadata",
+        "attempts": "metadata",
+        "infra_retries": "metadata",
+        "consumed_group": "metadata",
+        "policy_removed": "metadata",
+        "quarantined": "metadata",
+        "enforcement": "metadata",
+        "notice_sent": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
     }
   ],
   "version": 1

@@ -235,6 +235,17 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 			return webhookFailed, webhookClass("invalid_group")
 		}
 		if e.Action == "checks_requested" {
+			// Persist a fail-closed publication even when membership resolution
+			// fails. Receipt retries can fill the immutable member snapshot.
+			err = db.InTenant(db.AllProjects(ctx, "admission unknown group"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+					return err
+				}
+				return stageAdmissionGroupTx(ctx, tx, m.config.TenantID, m.config.Repository, head, nil, true)
+			})
+			if err != nil {
+				return webhookFailed, err
+			}
 			pulls, err = m.github.Group(ctx, head, e.Group.Base, e.Group.Ref)
 		} else {
 			err = db.InTenant(db.AllProjects(ctx, "delivery queue destroy subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {

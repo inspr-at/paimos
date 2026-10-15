@@ -68,19 +68,20 @@ type Config struct {
 	DoctrineGuardKey []byte
 	// Reviewed host configuration only: exact private-tree path -> SHA-256.
 	// Empty by default. Never supplied by a proposal or a source's HTTP API.
-	DoctrineBinaryAllowlist map[string]string
-	DoctrineAppID           string
-	DoctrineInstallationID  string
-	DoctrineAppKeyRef       string
-	DoctrineAppTenantID     string
-	DoctrineGateLogin       string
-	DoctrineDCOAcknowledged bool
-	ReviewAppID             string
-	ReviewInstallationID    string
-	ReviewAppKeyFile        string
-	ReviewAppTenantID       string
-	ReviewAppRepository     string
-	ReviewWebhookSecret     []byte // Host-owned HMAC key; never logged or tenant-writable.
+	DoctrineBinaryAllowlist  map[string]string
+	DoctrineAppID            string
+	DoctrineInstallationID   string
+	DoctrineAppKeyRef        string
+	DoctrineAppTenantID      string
+	DoctrineGateLogin        string
+	DoctrineDCOAcknowledged  bool
+	DeliveryAdmissionEnabled bool
+	ReviewAppID              string
+	ReviewInstallationID     string
+	ReviewAppKeyFile         string
+	ReviewAppTenantID        string
+	ReviewAppRepository      string
+	ReviewWebhookSecret      []byte // Host-owned HMAC key; never logged or tenant-writable.
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -101,19 +102,20 @@ func FromEnv() (Config, error) {
 		FilesDir:                       getenv("AEON_FILES_DIR", "data/files"),
 		HTMLSandboxOrigin:              os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
 		// Only the directory path is read here; a token is read at fetch time.
-		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
-		DoctrineMirrorDir:       os.Getenv("AEON_DOCTRINE_MIRROR_DIR"),
-		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),
-		DoctrineInstallationID:  os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
-		DoctrineAppKeyRef:       os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
-		DoctrineAppTenantID:     os.Getenv("AEON_DOCTRINE_APP_TENANT_ID"),
-		DoctrineGateLogin:       os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
-		DoctrineDCOAcknowledged: os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
-		ReviewAppID:             os.Getenv("AEON_REVIEW_APP_ID"),
-		ReviewInstallationID:    os.Getenv("AEON_REVIEW_INSTALLATION_ID"),
-		ReviewAppKeyFile:        os.Getenv("AEON_REVIEW_APP_KEY_FILE"),
-		ReviewAppTenantID:       os.Getenv("AEON_REVIEW_APP_TENANT_ID"),
-		ReviewAppRepository:     os.Getenv("AEON_REVIEW_APP_REPOSITORY"),
+		DoctrineCredentialsDir:   os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineMirrorDir:        os.Getenv("AEON_DOCTRINE_MIRROR_DIR"),
+		DoctrineAppID:            os.Getenv("AEON_DOCTRINE_APP_ID"),
+		DoctrineInstallationID:   os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
+		DoctrineAppKeyRef:        os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
+		DoctrineAppTenantID:      os.Getenv("AEON_DOCTRINE_APP_TENANT_ID"),
+		DoctrineGateLogin:        os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
+		DoctrineDCOAcknowledged:  os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
+		DeliveryAdmissionEnabled: os.Getenv("AEON_DELIVERY_ADMISSION_ENABLED") == "true",
+		ReviewAppID:              os.Getenv("AEON_REVIEW_APP_ID"),
+		ReviewInstallationID:     os.Getenv("AEON_REVIEW_INSTALLATION_ID"),
+		ReviewAppKeyFile:         os.Getenv("AEON_REVIEW_APP_KEY_FILE"),
+		ReviewAppTenantID:        os.Getenv("AEON_REVIEW_APP_TENANT_ID"),
+		ReviewAppRepository:      os.Getenv("AEON_REVIEW_APP_REPOSITORY"),
 	}
 	switch cfg.Env {
 	case "dev", "prod":

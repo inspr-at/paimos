@@ -255,7 +255,7 @@ func (g AppReader) Group(ctx context.Context, head, base, ref string) ([]Pull, e
 		// this observation, so an empty slice would project the open head as pushed.
 		matched := []Pull{}
 		for _, p := range ps {
-			if p.Base != base || !shas[p.Head] {
+			if !shas[p.Head] {
 				continue
 			}
 			if err = readAdmissionDiff(get, &p); err != nil {
