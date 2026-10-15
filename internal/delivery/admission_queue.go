@@ -305,7 +305,12 @@ func (m *Module) admissionNotice(ctx context.Context, e admissionQueueEntry) err
 		if _, err = tx.Exec(ctx, `UPDATE delivery_admission_queue SET notice_sent=true WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head); err != nil {
 			return err
 		}
-		_, err = events.Append(ctx, tx, actor, events.Change{NodeID: item.Project, Type: "delivery.admission.notice", After: map[string]string{"message_id": id, "body": body}})
+		ev, err := events.Append(ctx, tx, actor, events.Change{NodeID: item.Project, Type: "delivery.admission.notice", After: map[string]string{"message_id": id, "body": body}})
+		if err != nil {
+			return err
+		}
+		// This row was inserted and fenced above, before the event counter.
+		_, err = tx.Exec(ctx, `UPDATE inbox_compat_messages SET sent_event_id=$2 WHERE id=$1`, id, ev.ID)
 		return err
 	})
 }

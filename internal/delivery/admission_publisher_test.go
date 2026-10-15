@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
@@ -106,8 +107,13 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-admission", policy, 200, nil)
 	approve := func(p Pull, verdict string) {
 		t.Helper()
+		f.at = f.at.Add(time.Second)
 		f.tx(t, func(tx pgx.Tx) error {
 			if err := db.LockTree(ctx, tx, f.person.TenantID); err != nil {
+				return err
+			}
+			// P1 issues a run only for the ticket's latest delivery.
+			if _, err := tx.Exec(ctx, `UPDATE delivery_items SET updated_at=$3 WHERE repository=$1 AND pull_request=$2`, f.m.config.Repository, p.Number, f.at); err != nil {
 				return err
 			}
 			run, err := reviewgate.CreateRunTx(ctx, tx, f.person, f.ticket, reviewgate.RunCreate{Repository: f.m.config.Repository, PR: p.Number, Target: p.Target, Base: p.AdmissionDiff.MergeBase, Head: p.Head, Scope: p.AdmissionDiff.MergeBase + ".." + p.Head, AuthorSession: authorSession, ReviewerSession: reviewerSession, Kind: "review"}, f.at)
@@ -447,7 +453,7 @@ func TestAdmissionUnknownGroupMembershipFailsClosed(t *testing.T) {
 	// Risk: failed membership resolution acknowledges a group with no status.
 	f := newAdmissionFixture(t)
 	f.gh.err = errRead
-	f.webhook(t, "merge_group", "checks_requested", "unknown-group", 503)
+	f.webhook(t, "merge_group", "checks_requested", "unknown-group", 502)
 	sha := strings.Repeat("c", 40)
 	if err := f.m.publishAdmission(t.Context(), sha); err != nil {
 		t.Fatal(err)

@@ -5506,6 +5506,8 @@
     ,
     {"kind":"go","package":"internal/credentialguard","name":"TestSensitiveProviderForms","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestAdmissionAppPinsHeadContextAndRepository","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestAuthenticatedBaseChangeBypassesDirtyReporter","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestBindingRefreshRunsWhileDirtyPublicationIsBlocked","tier":"GATED-FULL"}
@@ -5898,9 +5900,21 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionDiffReadsMergeBaseAndRenameSides","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionGroupsValidatePrecedingEntriesAndInvalidateEveryGroup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherRepostsAfterUncertainOutcome","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherResumesUncertainPublicationAfterRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherSerializesStalledSuccessAndCurrentFailure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueBoundsInfrastructureRetryAndReportsMergedBeforeHold","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionRules","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionStoreAuthenticatedApprovalsAndInvalidation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionUnknownGroupMembershipFailsClosed","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAppReaderMergeGroupKeepsRequiredChecks","tier":"ESSENTIAL"}
     ,
