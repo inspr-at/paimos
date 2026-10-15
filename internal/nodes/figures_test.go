@@ -33,6 +33,9 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 			fields["estimate_hours"] = hours
 		}
 		fields["priority"], fields["tags"], fields["release"], fields["cost_unit"] = priority, []string{"figures"}, "134", "core"
+		// The default Ready gate refuses in_progress without acceptance criteria.
+		// The text is not part of any figure total; the later status move reads it back.
+		fields["acceptance_criteria"] = "The scoped figures match the leaves in this view"
 		raw, _ := json.Marshal(map[string]any{"kind_id": workKind.ID, "title": title, "state": state, "parent_id": parent, "fields": fields})
 		return mustNode(t, p, string(raw))
 	}
