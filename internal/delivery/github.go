@@ -140,7 +140,9 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 		return err
 	})
 	if missing {
-		return Pull{}, errMissing
+		// Reconciliation still recognizes confirmed absence while receipts keep
+		// the content-free HTTP class of the failed pull read.
+		return Pull{}, errors.Join(errMissing, err)
 	}
 	return out, err
 }
