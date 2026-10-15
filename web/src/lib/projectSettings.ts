@@ -5,6 +5,7 @@ import type { IconName } from '../components/AppIcon.vue'
 export const PROJECT_SETTINGS_SECTIONS = [
   { id: 'general', label: 'General', summary: 'Name, key, lifecycle', icon: 'folder' },
   { id: 'delivery', label: 'Repository & delivery', summary: 'Repository, checks, deadlines', icon: 'git-branch' },
+  { id: 'definitions', label: 'Definitions', summary: 'Ready, QA, Done', icon: 'circle-check' },
   { id: 'agents', label: 'Agents', summary: 'Lead, work context, review', icon: 'agent' },
   { id: 'access', label: 'Access', summary: 'People and agents', icon: 'users' },
   { id: 'routines', label: 'Routines', summary: 'Recurring work', icon: 'repeat' },
@@ -32,6 +33,7 @@ export function legacyProjectSettingsSection(hash: string, query: Record<string,
   if (hash === '#recurring-work' || typeof query.recurrence === 'string' || query.consent === '1') return 'routines'
   if (hash === '#lifecycle' || hash === '#f-name') return 'general'
   if (['#repository', '#checks', '#advanced'].includes(hash)) return 'delivery'
+  if (hash === '#definitions') return 'definitions'
   if (['#lead', '#review'].includes(hash)) return 'agents'
   if (hash === '#members') return 'access'
   return null
