@@ -10,6 +10,16 @@ const rows = (page: Page) => grid(page).locator('tr.ticket-row:not(.ghost)')
 const row = (page: Page, key: string) => grid(page).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const lastList = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes' && call.query.get('within') && call.query.get('limit') === '200').at(-1)!
 
+test('AEON-1415: section owners mount the project page without a fatal setup error', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('#project-title, .status-page')).toBeVisible()
+  expect(await page.locator('.status-details dd').allTextContents(), 'project setup must not reach the error boundary').toEqual([])
+  await expect(page.getByRole('heading', { name: 'Pharos', level: 1 })).toBeVisible()
+  await expect(rows(page)).toHaveCount(5)
+  await expect(page.getByRole('searchbox', { name: 'Search tickets in this project' })).toBeVisible()
+})
+
 test('the list asks for open work in the project and shows every column', async ({ page }) => {
   const errors = watchErrors(page)
   const calls = await mockWork(page, fixtures())
