@@ -6174,6 +6174,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneRefusesWaitingLifecycleAction","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestOpenPullCompareFailureStillObservesRepository","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestPreflightAdmissionMissingRedStaleAndLookupFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}

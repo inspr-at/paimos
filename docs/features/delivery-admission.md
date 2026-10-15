@@ -45,8 +45,12 @@ CI, named test harness tools, and an explicit list of database pool/timeout/
 metrics source files. It does not exempt arbitrary Go/backend changes, web
 source/assets or OpenAPI changes. Both sides of renames are classified. The
 read-only GitHub compare supplies the actual merge-base; reaching its 300-file
-boundary marks the diff incomplete and requires visual approval. Missing
-merge-base evidence refuses admission even when visual approval exists.
+boundary marks the diff incomplete and requires visual approval. A compare that
+fails or has no usable merge-base is missing evidence for that pull only, so
+sibling pulls are still observed and that pull is refused (`scope_unverified`).
+A filename that admission cannot accept marks that pull incomplete and requires
+visual review; it does not fail the repository read. Missing merge-base
+evidence refuses admission even when visual approval exists.
 Browser-test selection and visual-review scope remain separate decisions.
 
 Rule → test mapping:
@@ -55,7 +59,8 @@ Rule → test mapping:
 | --- | --- |
 | Each prerequisite; exact repository/PR/head/target/scope/ticket/revision; independent review; nightly policy and fix exception; hold precedence; visual verdict | `TestAdmissionRules` |
 | Proven visual classes; unknown/backend/web/API changes; invalid or incomplete diff; reviewer yes/uncertain | `TestVisualAdmissionClassifier` |
-| Actual merge-base; renamed presentation file; truncated file list; failed read | `TestAdmissionDiffReadsMergeBaseAndRenameSides` |
+| Actual merge-base; renamed presentation file; truncated file list; failed compare drops evidence | `TestAdmissionDiffReadsMergeBaseAndRenameSides` |
+| One damaged compare still observes the other pulls; that pull is refused | `TestOpenPullCompareFailureStillObservesRepository` |
 | Admission cannot depend on or bootstrap itself | `TestAdmissionCIExcludesOwnContext` |
 | Real P1 run submission → stored approvals → admission; route/family provenance; visual grant; replacement with changes; all hold types on/off; nightly/fix precedence; new head, retarget and scope A → B → A; stale controls; live CI requirements; permission revocation; projection replay; tenants and agent policy refusal | `TestAdmissionStoreAuthenticatedApprovalsAndInvalidation` |
 | Capability authentication, coordinator/worker forgery, same-family review with policy off, visual-grant revocation | Existing `internal/auth:TestAuthenticatedReviewerRuns` |
@@ -64,6 +69,6 @@ The expansion is migration `1356_delivery_admission.sql`: current bindings,
 per-revision approval references, project policy, and the nullable
 `review_runs.admission_revision` column. DSAR inventory classifies all additions.
 Shared registrations are additive: four delivery routes and two project-filter
-entries, one tenant/tree fence caller, five ESSENTIAL test rows, and ownership
+entries, one tenant/tree fence caller, six ESSENTIAL test rows, and ownership
 rows for the six delivery source/test files (S2), migration (S1) and contract
 area (S7). Existing permission and key-scope registries are reused.

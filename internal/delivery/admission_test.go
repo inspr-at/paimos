@@ -160,8 +160,8 @@ func TestAdmissionDiffReadsMergeBaseAndRenameSides(t *testing.T) {
 		t.Fatal("boundary not conservative", err)
 	}
 	unavailable := errors.New("read failed")
-	if err := readAdmissionDiff(func(string, any) error { return unavailable }, &p); !errors.Is(err, unavailable) {
-		t.Fatal("partial read lost", err)
+	if err := readAdmissionDiff(func(string, any) error { return unavailable }, &p); err != nil || p.AdmissionDiff != nil {
+		t.Fatal("compare failure aborted the read or kept stale evidence", err)
 	}
 }
 func TestAdmissionCIExcludesOwnContext(t *testing.T) {
