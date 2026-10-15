@@ -1674,8 +1674,6 @@
     ,
     "node:tests/agent-pause.test.ts:planning counts down from its report and stale or cleared snapshots never revive legacy ETA"
     ,
-    "node:tests/agent-pause.test.ts:selection separates host admission intent from individual agents and normalizes tri-state"
-    ,
     "node:tests/agent-pause.test.ts:wind-down chooses fitting wrap-up before quick pause and respects margins and uninterruptible commands"
     ,
     "node:tests/done-gate.test.ts:custom Done categories gate leaves, retain historical edits and honor category overrides"
@@ -1720,8 +1718,6 @@
     ,
     "node:tests/project-header.test.ts:physical Period works while Shift changes its character on English or German layouts"
     ,
-    "node:tests/project-status-counts.test.ts:Hide reads kind-aware buckets and supports a configurable hidden set"
-    ,
     "node:tests/project-status-counts.test.ts:all legacy variants map to one canonical status"
     ,
     "node:tests/project-status-counts.test.ts:automatic Hide restoration travels with links and saved views; manual shown work does not gain an override"
@@ -1733,8 +1729,6 @@
     "node:tests/project-status-counts.test.ts:single-status header links use canonical selectors; ordinary state filters stay exact"
     ,
     "node:tests/project-status-counts.test.ts:the grid includes all eleven statuses in the approved four groups"
-    ,
-    "node:tests/project-status-counts.test.ts:truncated custom categories cannot prove a selected status is visible under Hide"
     ,
     "node:tests/release-membership.test.ts:ambiguous parent create replay never confirms a backlog leaf as added"
     ,
@@ -1839,8 +1833,6 @@
     "vitest:tests/agents-working.unit.test.ts:honest account room (AEON-720) > rejects stale projections and never doubles shared quota aliases across groups"
     ,
     "vitest:tests/agents-working.unit.test.ts:honest account room (AEON-720) > reserves full for explicitly occupied slots and keeps absent accounts distinct"
-    ,
-    "vitest:tests/agents-working.unit.test.ts:honest account room (AEON-720) > retains server start advice while explaining unmeasured usage"
     ,
     "vitest:tests/agents-working.unit.test.ts:the one dial > accepts typed limits and totals, clamps large values, and rejects invalid drafts"
     ,
@@ -15182,8 +15174,6 @@
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"approval sends the reviewed digest and choice, never a secret or an allowance","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/agent-pairing.test.ts","name":"debounced lookup does not repeat itself or fire while a character is still being typed","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"deny is person-only and does not call the server once the request is already denied","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"disconnect defaults to finishing runs, and revoke is a separate confirmation","tier":"GATED-FULL"}
@@ -15260,8 +15250,6 @@
     ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"planning counts down from its report and stale or cleared snapshots never revive legacy ETA","tier":"NIGHTLY"}
     ,
-    {"kind":"node","file":"tests/agent-pause.test.ts","name":"selection separates host admission intent from individual agents and normalizes tri-state","tier":"NIGHTLY"}
-    ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"stop requests remain visible through stale heartbeats until a worker stop report","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"wind-down chooses fitting wrap-up before quick pause and respects margins and uninterruptible commands","tier":"NIGHTLY"}
@@ -15304,8 +15292,6 @@
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"a finished session sits with the ended ones; one that only went quiet at 100% keeps its heartbeat state (AEON-437)","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/agentState.test.ts","name":"a heartbeat never reorders a group; only start time and id do","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"agent names come from the message address, else the host","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"approvals: pending by urgency, history by recency, risk from what is allowed","tier":"GATED-FULL"}
@@ -15315,10 +15301,6 @@
     {"kind":"node","file":"tests/agentState.test.ts","name":"fresh and overdue starting sessions keep their live status groups","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"fresh session projection cannot be changed by a stale optional run or request cache","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/agentState.test.ts","name":"groups sort live sessions by start time and stopped ones by when they stopped","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/agentState.test.ts","name":"heartbeat waiting has its own group while real requests still need a person","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"held action requests stay until a person resolves or dismisses them","tier":"GATED-FULL"}
     ,
@@ -15345,8 +15327,6 @@
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a paused account says why and how to resume","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a revoked or never-confirmed computer can be removed by a person who manages accounts","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"the folded line counts computers and ready accounts, never filler","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"API requests use same-origin credentials, no cache and a timeout signal","tier":"ESSENTIAL"}
     ,
@@ -15438,15 +15418,9 @@
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"amounts display exactly with en-GB grouping and the currency scale","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/business.test.ts","name":"duration uses whole seconds","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/business.test.ts","name":"durations are typed the way people say them","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/business.test.ts","name":"formats exact decimals and minor units without binary floats","tier":"ESSENTIAL"}
-    ,
     {"kind":"node","file":"tests/business.test.ts","name":"installation write pins the compiled digest and declared permissions","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/business.test.ts","name":"line and tax amounts round half up at four places like the server","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"parseCatalog rejects a malformed plugin list","tier":"GATED-FULL"}
     ,
@@ -15457,8 +15431,6 @@
     {"kind":"node","file":"tests/business.test.ts","name":"sums exact amounts and rejects excess precision","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"typed amounts accept decimal separators and reject negative values","tier":"ESSENTIAL"}
-    ,
-    {"kind":"node","file":"tests/business.test.ts","name":"typed quantities, tax percentages and rates stay exact","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"weeks run Monday to Sunday in local time","tier":"GATED-FULL"}
     ,
@@ -15501,8 +15473,6 @@
     {"kind":"node","file":"tests/capacity.test.ts","name":"days off: rest, would expire, and unused capacity","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/capacity.test.ts","name":"displayed account command round trips in fish, zsh and bash with arbitrary labels","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/capacity.test.ts","name":"gauges show % left or % used, globally and per account","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/capacity.test.ts","name":"learned capacity stays honest about uncertainty and blind consumption","tier":"GATED-FULL"}
     ,
@@ -15946,10 +15916,6 @@
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"no lead: the band offers Start lead and counts queued work honestly","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/lead.test.ts","name":"start checks: a fresh reading of a full gate is full, and past readings never read as current","tier":"ESSENTIAL"}
-    ,
-    {"kind":"node","file":"tests/lead.test.ts","name":"start checks: the current wait reason wins, reported freshness follows, nothing is invented","tier":"ESSENTIAL"}
-    ,
     {"kind":"node","file":"tests/lead.test.ts","name":"the gate and today’s merges come from the latest reported decisions","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"the line shows counts, at most two keys and the rest as +n; unknown stays unknown","tier":"ESSENTIAL"}
@@ -16142,45 +16108,7 @@
     ,
     {"kind":"node","file":"tests/policies.test.ts","name":"twelve rules elsewhere; a link shows only when every permission of its place is held","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"403/permission_denied retains draft without auto-retry or success","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"409/stale_revision retains draft without auto-retry or success","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"422/locked_above retains draft without auto-retry or success","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 401 clears private snapshot and Undo","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 403 clears private snapshot and Undo","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context other-tenant/person/role","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context signout","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context tenant/other-person/role","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context tenant/person/other-role","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context tenant/person/project/other-kind","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"equal-revision person conflict discards old draft and Undo","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"level writes remain serialized across two row editors and retain each captured revision","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"local picker invalidation keeps its document while dropping drafts, Undo and late writes","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"older read cannot replace newer snapshot/draft","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"response byte bounds precede JSON parsing","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"retired-kind compensation has the specific honest refusal","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"same-identity preview refresh keeps the captured draft baseline and confirmed Undo revision","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"serializes writes, provisional display, actual confirmation and confirmed-revision Undo","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"unknown outcome and failed reconciliation block new writes without success/Undo","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"wrong-person confirmation cannot report success","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/preferences.test.ts","name":"preference writes a later save waits for the in-flight write and is what the server keeps","tier":"GATED-FULL"}
     ,
@@ -16234,8 +16162,6 @@
     ,
     {"kind":"node","file":"tests/project-order.test.ts","name":"sameOrder and nearestCell","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/project-status-counts.test.ts","name":"Hide reads kind-aware buckets and supports a configurable hidden set","tier":"NIGHTLY"}
-    ,
     {"kind":"node","file":"tests/project-status-counts.test.ts","name":"all legacy variants map to one canonical status","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/project-status-counts.test.ts","name":"automatic Hide restoration travels with links and saved views; manual shown work does not gain an override","tier":"NIGHTLY"}
@@ -16247,8 +16173,6 @@
     {"kind":"node","file":"tests/project-status-counts.test.ts","name":"single-status header links use canonical selectors; ordinary state filters stay exact","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/project-status-counts.test.ts","name":"the grid includes all eleven statuses in the approved four groups","tier":"NIGHTLY"}
-    ,
-    {"kind":"node","file":"tests/project-status-counts.test.ts","name":"truncated custom categories cannot prove a selected status is visible under Hide","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/queue-filter.test.ts","name":"Queued alternatives deduplicate, exclusions combine, and live reads restrict IDs","tier":"ESSENTIAL"}
     ,
@@ -16290,17 +16214,11 @@
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"a failed membership read is unknown, and ids are asked in batches of 100","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a missing availability is not addable","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a task is unsupported and not addable","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"account changes discard an old native release result and reset pending ownership","tags":[],"tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"ambiguous parent create replay never confirms a backlog leaf as added","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"another open release is a confirmable conflict; a stale revision is not","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"closed, released and included tickets cannot be picked; another planning release can","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"membership answer is the walker plus the event to undo","tier":"GATED-FULL"}
     ,
@@ -16311,8 +16229,6 @@
     {"kind":"node","file":"tests/release-membership.test.ts","name":"parent replay needs valid coverage and counts overlapping full scopes once","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"parents show actual ships-in summaries and deduplicate leaf counts","tier":"NIGHTLY"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"ticket option query keeps only the filters that are set","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-pending.test.ts","name":"a moved snapshot error is surfaced rather than replacing an incomplete list with success","tier":"ESSENTIAL"}
     ,
@@ -16419,8 +16335,6 @@
     {"kind":"node","file":"tests/rules.test.ts","name":"a 5xx after a committed write is uncertain and does not continue","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/rules.test.ts","name":"a layer cap refusal names the layer","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/rules.test.ts","name":"a lower layer does not treat a higher locked identity as its own switch","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/rules.test.ts","name":"a reviewed update replaces only that draft, skips identical sets and reports each set","tier":"GATED-FULL"}
     ,
@@ -16544,8 +16458,6 @@
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"the hook notice follows each pending send, including a terminal failure (AEON-369)","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/sessionChat.test.ts","name":"the last tab is remembered per viewer and a deep link wins","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"the read watermark only moves forward and is keyed by viewer and session","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"the server marker wins when it is ahead, and local stands when the server has none","tier":"GATED-FULL"}
@@ -16571,8 +16483,6 @@
     {"kind":"node","file":"tests/settings.test.ts","name":"Personal, Developer and Policies are for everyone; workspace sections follow their grants","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"agent keys read as active, expired or revoked","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/settings.test.ts","name":"the quote sender reads as one line of what is set","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"the sender saves what is filled in and keeps the logo it does not edit","tier":"GATED-FULL"}
     ,
@@ -16676,17 +16586,11 @@
     ,
     {"kind":"node","file":"tests/ticket-benefits.test.ts","name":"snapshot notes displace Git headlines and ticket guesses while archives stay readable","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/ticket-graph-renderer.test.ts","name":"Hide closed follows server categories including accepted, not only a done status","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/ticket-graph-renderer.test.ts","name":"adapter maps status tokens, epic ancestry, sizes and safe links without mutating API data","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-graph-renderer.test.ts","name":"all relation kinds retain direction and distinct calm styling; dangling links are dropped","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/ticket-graph-renderer.test.ts","name":"client filters combine AND across dimensions, OR includes, and exclusions; links never dangle","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/ticket-graph-renderer.test.ts","name":"filtered or cyclic parents are safe and an epic remains larger than a busy ordinary ticket","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/ticket-graph-renderer.test.ts","name":"unavailable list filters do not silently remove graph tickets; search never reads a body","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-graph.test.ts","name":"a failed load rejects","tier":"GATED-FULL"}
     ,
@@ -16705,8 +16609,6 @@
     {"kind":"node","file":"tests/usage-dashboard.test.ts","name":"compact counts shorten dense places and keep unknown apart from zero","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/usage-dashboard.test.ts","name":"exact USD keeps fractional digits and never treats unknown as zero","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/usage-dashboard.test.ts","name":"the trend covers every UTC day of the range, end exclusive","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/usageWork.test.ts","name":"a partial token total on the cost tile says what is missing","tier":"GATED-FULL"}
     ,
@@ -16809,8 +16711,6 @@
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"internal work types retain default names and custom spelling","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"links and saved views with Legacy type or Parents / Leaves read as Type","tier":"ESSENTIAL"}
-    ,
-    {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"list keys move within the options and stop at the ends","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"settings rows read top-down: top level first, the leaf last, with defaults per depth","tier":"ESSENTIAL"}
     ,
@@ -17276,8 +17176,6 @@
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice when usage is unmeasured","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice while explaining unmeasured usage","tier":"NIGHTLY"}
-    ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > accepts typed limits and totals, clamps large values, and rejects invalid drafts","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > caps a harness without its own limit by the total and measured account room","tier":"GATED-FULL"}
@@ -17438,8 +17336,6 @@
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"offline computer > says offline once, with the reason and the one fix","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"offline computer > the header pill names the computer","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"one state per account > a confirmed sign-out asks for the vendor sign-in command","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"one state per account > a disconnecting computer pauses its accounts","tier":"GATED-FULL"}
@@ -17479,8 +17375,6 @@
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"waits from the server routing > a residency wait explains allowed providers and keeps the account out of the ready count","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"waits from the server routing > a run still working makes the account busy, not ready","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"waits from the server routing > the only account busy is \"0 of 1 ready\", and a warning elsewhere still warns","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"words > caption, pacing summary and middle ellipsis","tier":"GATED-FULL"}
     ,
@@ -17599,8 +17493,6 @@
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"files expired undecided approvals in history","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"formats delivery deadlines and keeps a rule proposal PR link","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"freezes round IDs while arrivals and decided/skipped counts remain distinct","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"freezes round IDs while new arrivals remain distinct","tier":"ESSENTIAL"}
     ,
@@ -18554,19 +18446,9 @@
     ,
     {"kind":"vitest","file":"tests/model-estimates.unit.test.ts","name":"model picker history > names the work, complexity and sample count","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-estimates.unit.test.ts","name":"model picker history > passes the captured picker context and cancellation signal to the API","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/model-estimates.unit.test.ts","name":"model picker history > shows nothing for insufficient or invalid history","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > never removes system kinds and scopes add and project-only kinds correctly","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > supports freeze, tighten-only and the approved warn mode under locks","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses model versions rather than profile revisions for latest and pins","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses plain provenance, reset and summary copy","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"AEON-1163: discovery drafts stay bound to their account and cannot be submitted after management access is lost","tier":"ESSENTIAL"}
     ,
@@ -19702,8 +19584,6 @@
     ,
     {"kind":"vitest","file":"tests/sessionRow.unit.test.ts","name":"search reads the model as the row names it, and keeps the raw ids","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/sessionRow.unit.test.ts","name":"the execution-column base capture retains its session context helper","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})","tags":[],"tier":"GATED-FULL"}
@@ -19827,10 +19707,6 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > rechecks leaf eligibility at submission before remembering an account or launching","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > distinguishes missing daemon evidence from unavailable account capacity","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > does not round monetary headroom into eligibility","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > never presents queued or claimed as a registered managed session","tier":"ESSENTIAL"}
     ,
