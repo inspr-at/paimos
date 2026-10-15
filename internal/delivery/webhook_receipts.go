@@ -311,9 +311,10 @@ func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step
 	}
 	limited := class != nil && webhookLimited(*class)
 	permission := class != nil && webhookPermission(*class)
-	if limited {
+	if limited || permission && receipt.attempts >= webhookMaxAttempts {
 		// Reservation still fences crashes; a confirmed rate-limit wait refunds
 		// it atomically with the due time and never exhausts the retry budget.
+		// A permission pause at the cap retains one explicit repair attempt.
 		receipt.attempts = max(0, receipt.attempts-1)
 	}
 	exhausted := receipt.attempts >= webhookMaxAttempts && !permission

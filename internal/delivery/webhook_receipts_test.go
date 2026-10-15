@@ -1001,3 +1001,94 @@ func TestDeliveryWebhookRateHintBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveryWebhookPermissionNoticeAtomicity(t *testing.T) {
+	// Risk: pausing a receipt loses its notice on an inbox failure, notifies
+	// a revoked lead, or cannot recover routing without blindly reading GitHub.
+	for _, scenario := range []string{"inbox_failure", "no_lead", "revoked_lead", "last_attempt"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newFixture(t)
+			p := f.pull()
+			f.gh.pulls[7] = p
+			saveAlertObservation(t, f, alertObservation(f))
+			lead := func() {
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.person.TenantID, f.project, f.person.ID)
+					return err
+				})
+			}
+			if scenario != "no_lead" {
+				lead()
+			}
+			if scenario == "revoked_lead" {
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+					return err
+				})
+			}
+			g := &receiptGitHub{metricsFake: &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh}}}
+			f.m.github = g
+			f.gh.err = &crossreview.GitHubHTTPError{StatusCode: 403}
+			raw := receiptBody(t, f, map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "head": map[string]string{"sha": p.Head}, "base": map[string]any{"sha": p.Base, "repo": map[string]string{"full_name": f.m.config.Repository}}}})
+			var restore func()
+			if scenario == "inbox_failure" {
+				restore = receiptFault(t, f, "inbox_messages", "true")
+			}
+			if scenario == "last_attempt" {
+				if err := f.m.saveWebhook(t.Context(), "pull_request", "permission-notice", raw, envelope{Action: "opened"}); err != nil {
+					t.Fatal(err)
+				}
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE delivery_webhook_receipts SET attempts=$1 WHERE delivery_id='permission-notice'`, webhookMaxAttempts-1)
+					return err
+				})
+			}
+			if w := receiptSend(f, "pull_request", "permission-notice", raw); w.Code != 502 {
+				t.Fatalf("permission refusal: %d", w.Code)
+			}
+			_, next, finished, _, _, class := receiptState(t, f, "permission-notice")
+			if scenario == "inbox_failure" {
+				if class != nil || finished != nil {
+					t.Fatal("receipt pause committed without its refused notice")
+				}
+				restore()
+				if w := receiptSend(f, "pull_request", "permission-notice", raw); w.Code != 502 {
+					t.Fatalf("recovered notice status: %d", w.Code)
+				}
+				_, next, _, _, _, class = receiptState(t, f, "permission-notice")
+			} else if scenario == "no_lead" {
+				lead()
+			} else if scenario == "revoked_lead" {
+				_, _, count := auditCounts(t, f)
+				if count != 0 {
+					t.Fatal("revoked lead received receipt information")
+				}
+				dbtest.BindRole(t, f.d, f.person.TenantID, f.person.ID, "admin")
+			}
+			if class == nil || *class != "http_403" || finished != nil {
+				t.Fatal("permission pause did not preserve its refusal")
+			}
+			reads := g.pullReads
+			f.at = next
+			if err := f.m.retryWebhooks(t.Context()); err != nil || g.pullReads != reads {
+				t.Fatal("retrying notice routing performed a blind GitHub read")
+			}
+			_, _, count := auditCounts(t, f)
+			if count != 1 {
+				t.Fatalf("permission notice count %d, want one", count)
+			}
+			if scenario == "last_attempt" {
+				// The confirmed refusal at the cap must leave an explicit repair
+				// possible without reviving any exhausted transient receipt.
+				f.gh.err = nil
+				if err := f.m.processWebhook(t.Context(), "permission-notice", true); err != nil {
+					t.Fatal(err)
+				}
+				_, _, finished, checkpoints, _, _ := receiptState(t, f, "permission-notice")
+				if finished == nil || checkpoints["projection"] != webhookRecorded || checkpoints["metrics"] == webhookGaveUp {
+					t.Fatal("last-attempt permission repair could not resume")
+				}
+			}
+		})
+	}
+}
