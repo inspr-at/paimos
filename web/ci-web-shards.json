@@ -1900,6 +1900,8 @@
       ,
       "tests/performance.spec.ts": {"seconds":60.334,"selectedTests":2}
       ,
+      "tests/person-steps.spec.ts": {"basis":"Guarded remote-spec.sh complete file: 4 passed (36.0s), supervisor wall 36.336s. This is a pre-merge measurement, not a nightly run.","runner":"mbp2606","seconds":36.336,"selectedTests":4,"sourceCommit":"5164623d1ac448e4ffdadb9f4fc98da0948da751"}
+      ,
       "tests/phone-approvals.spec.ts": {"seconds":44.204,"selectedTests":11}
       ,
       "tests/phone-controls.spec.ts": {"seconds":175.893,"selectedTests":27}
