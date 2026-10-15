@@ -195,8 +195,8 @@ func TestGitHubReaderConfirmsMissingPull(t *testing.T) {
 		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
 	})}
 	reader := AppReader{App: &crossreview.GitHubApp{Config: crossreview.AppConfig{ID: "123", InstallationID: "456", TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Repository: "example/delivery", KeyFile: keyFile}, Client: client}}
-	if _, err = reader.Pull(t.Context(), 7); !errors.Is(err, errMissing) {
-		t.Fatal("deleted pull was not confirmed missing", err)
+	if _, err = reader.Pull(t.Context(), 7); !errors.Is(err, errMissing) || webhookErrorClass(err) != "http_404" {
+		t.Fatal("deleted pull lost its confirmed absence or HTTP diagnostic", err)
 	}
 	mode = "down"
 	if _, err = reader.Pull(t.Context(), 7); err == nil || errors.Is(err, errMissing) {

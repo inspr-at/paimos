@@ -8,13 +8,223 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: incidents close without durable lessons, agents bypass the check, or
+// stale/unrelated evidence satisfies it. Exercise the real status, comment and
+// Knowledge accept boundaries, including the existing human override audit.
+func TestEntryChecksLessonRecorded(t *testing.T) {
+	p := newPrincipal(t, "lesson-recorded")
+	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Lesson project"}`, kindBySlug(t, p, "project").ID))
+	work := kindBySlug(t, p, "work")
+	agent := estimateAgent(t, p)
+	newTicket := func(fields map[string]any, body string) nodeJSON {
+		t.Helper()
+		fields["hide_from_release_notes"] = true
+		return mustNode(t, p, string(entryJSON(map[string]any{"kind_id": work.ID, "parent_id": project.ID, "title": "Validate recovery before releasing", "body": body, "fields": fields})))
+	}
+	readChecks := func(n nodeJSON) workqueue.EntryChecks {
+		t.Helper()
+		code, raw := call(t, &p, "GET", "/api/nodes/"+n.ID+"/entry-checks", "")
+		return decode[workqueue.EntryChecks](t, code, raw, 200)
+	}
+	refuse := func(n nodeJSON, actor tenant.Principal, reason string) {
+		t.Helper()
+		code, raw := call(t, &actor, "PATCH", "/api/nodes/"+n.ID, string(entryJSON(map[string]any{"state": "done", "override_reason": reason})))
+		var failure struct {
+			Error string `json:"error"`
+			workqueue.EntryFailure
+		}
+		if json.Unmarshal(raw, &failure) != nil || code != 409 || failure.Error != "entry_checks_failed" || failure.ToStatus != "done" || failure.OverrideAllowed != (actor.Kind == tenant.Person) || len(failure.Failed) != 1 || failure.Failed[0].ID != "lesson_recorded" || !failure.Failed[0].Applicable || failure.Failed[0].Passed || failure.Failed[0].Reason == "" {
+			t.Fatalf("wrong lesson refusal: %d %s", code, raw)
+		}
+		if now := currentWorkTest(t, p, n.ID); now.State != n.State || !now.UpdatedAt.Equal(n.UpdatedAt) {
+			t.Fatalf("refusal changed ticket: %+v", now)
+		}
+	}
+	moveDone := func(n nodeJSON) {
+		t.Helper()
+		code, raw := call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"done"}`)
+		if got := decode[nodeJSON](t, code, raw, 200); got.State != "done" {
+			t.Fatalf("did not enter Done: %s", raw)
+		}
+	}
+	comment := func(n nodeJSON, text string) string {
+		t.Helper()
+		code, raw := callAs(t, activity.New(appPool), &p, "POST", "/api/nodes/"+n.ID+"/comments", string(entryJSON(map[string]any{"body_markdown": text})))
+		return decode[struct {
+			ID string `json:"id"`
+		}](t, code, raw, 201).ID
+	}
+
+	for _, tc := range []struct {
+		name   string
+		fields map[string]any
+	}{
+		{"incident", map[string]any{"tags": []string{"incident"}}},
+		{"regression", map[string]any{"tags": []string{"regression"}}},
+		{"non-obvious-field", map[string]any{"non_obvious_fix": true}},
+		{"non-obvious-label", map[string]any{"labels": []string{"non-obvious-fix"}}},
+		{"non-obvious-spaces", map[string]any{"labels": []string{"non-obvious fix"}}},
+		{"named-case-insensitive-tag", map[string]any{"tags": []map[string]string{{"name": "Regression"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := newTicket(tc.fields, "")
+			refuse(n, agent, "Agents cannot override")
+			checks := readChecks(n)
+			if checks.Blocks[2].Total != 1 || checks.LatestRefusal == nil || checks.LatestRefusal.Failed[0].ID != "lesson_recorded" {
+				t.Fatalf("missing default/refusal: %+v", checks)
+			}
+		})
+	}
+	t.Run("no-lesson-note", func(t *testing.T) {
+		for _, where := range []string{"body", "description", "comment"} {
+			t.Run(where, func(t *testing.T) {
+				fields := map[string]any{"tags": []string{"incident"}}
+				body := ""
+				note := "Investigation complete.\nNo lesson: Existing recovery guidance already covers this case."
+				if where == "body" {
+					body = note
+				}
+				if where == "description" {
+					fields[where] = note
+				}
+				n := newTicket(fields, body)
+				if where == "comment" {
+					comment(n, note)
+				}
+				moveDone(n)
+				checks := readChecks(n)
+				if len(checks.Entries) != 1 || checks.Entries[0].Passed != 1 || checks.Entries[0].OverrideReason != nil {
+					t.Fatalf("note did not satisfy recorded check: %+v", checks.Entries)
+				}
+			})
+		}
+	})
+	t.Run("blank-and-removed-notes", func(t *testing.T) {
+		n := newTicket(map[string]any{"tags": []string{"regression"}, "description": "We could write No lesson: later."}, "No lesson:   \n")
+		id := comment(n, "No lesson: \t\n")
+		refuse(n, agent, "Cannot bypass blank notes")
+		for _, update := range []struct {
+			method, body string
+			status       int
+		}{
+			{"PATCH", `{"body_markdown":"No lesson: Already documented."}`, 200},
+			{"PATCH", `{"body_markdown":"Still investigating."}`, 200},
+			{"PATCH", `{"body_markdown":"No lesson: Already documented."}`, 200},
+			{"DELETE", "", 204},
+		} {
+			code, raw := callAs(t, activity.New(appPool), &p, update.method, "/api/nodes/"+n.ID+"/comments/"+id, update.body)
+			if code != update.status {
+				t.Fatalf("comment update: %d %s", code, raw)
+			}
+			checks := readChecks(n)
+			want := update.method != "DELETE" && strings.Contains(update.body, "No lesson:")
+			if (checks.Blocks[2].Passed == 1) != want {
+				t.Fatalf("stale note counted: %+v", checks.Blocks[2])
+			}
+		}
+		refuse(n, agent, "Deleted notes cannot bypass")
+	})
+	t.Run("body-and-status-in-one-write", func(t *testing.T) {
+		n := newTicket(map[string]any{"tags": []string{"incident"}}, "No lesson: Already documented.")
+		code, raw := call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"done","body":"Still investigating."}`)
+		var failure workqueue.EntryFailure
+		if code != 409 || json.Unmarshal(raw, &failure) != nil || len(failure.Failed) != 1 || failure.Failed[0].ID != "lesson_recorded" {
+			t.Fatalf("removed body note bypassed check: %d %s", code, raw)
+		}
+		if now := currentWorkTest(t, p, n.ID); now.Body != n.Body || now.State != n.State {
+			t.Fatalf("refused write persisted body/status: %+v", now)
+		}
+		n = newTicket(map[string]any{"tags": []string{"incident"}}, "")
+		code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"done","body":"No lesson: Already documented."}`)
+		decode[nodeJSON](t, code, raw, 200)
+	})
+	t.Run("person-override", func(t *testing.T) {
+		n := newTicket(map[string]any{"tags": []string{"incident"}}, "")
+		code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"done"}`)
+		if code != 409 {
+			t.Fatalf("person bypassed without reason: %d %s", code, raw)
+		}
+		code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"done","override_reason":"Urgent closure; follow-up lesson assigned."}`)
+		decode[nodeJSON](t, code, raw, 200)
+		checks := readChecks(n)
+		if len(checks.Entries) != 1 {
+			t.Fatalf("missing override record: %+v", checks)
+		}
+		record := checks.Entries[0]
+		if record.By.ID != p.ID || record.OverrideReason == nil || *record.OverrideReason != "Urgent closure; follow-up lesson assigned." || record.Total != 1 || record.Passed != 0 || record.Checks[1].ID != "lesson_recorded" || record.Checks[1].Passed {
+			t.Fatalf("override evidence lost: %+v", record)
+		}
+	})
+	t.Run("accepted-knowledge", func(t *testing.T) {
+		for _, source := range []string{"ticket", "comment"} {
+			t.Run(source, func(t *testing.T) {
+				n := newTicket(map[string]any{"tags": []string{"incident", "process-learning"}}, "")
+				code, raw := callAs(t, knowledge.New(appPool), &p, "POST", "/api/knowledge", string(entryJSON(map[string]any{"project_id": project.ID, "type": "runbook", "slug": "recovery-" + source, "title": "Recovery", "body": "## Changelog\n"})))
+				entry := decode[knowledge.Entry](t, code, raw, 201)
+				id := "n-" + n.ID
+				if source == "comment" {
+					id = "c-" + n.ID + "-" + comment(n, "#process-learning Validate recovery before releasing.")
+				}
+				// A prepared recommendation is not an accepted lesson.
+				code, raw = callAs(t, knowledge.New(appPool), &p, "PUT", "/api/knowledge/learnings/"+id+"/recommendation", string(entryJSON(map[string]any{"decision": "accept", "knowledge_id": entry.ID, "lesson": "Validate recovery before releasing.", "source_summary": "The incident exposed a recovery gap."})))
+				if code != 200 {
+					t.Fatalf("recommendation: %d %s", code, raw)
+				}
+				refuse(n, agent, "A proposal is not recorded")
+				code, raw = callAs(t, knowledge.New(appPool), &p, "POST", "/api/knowledge/learnings/"+id+"/accept", string(entryJSON(map[string]any{"knowledge_id": entry.ID})))
+				accepted := decode[knowledge.LearningDecision](t, code, raw, 200)
+				if accepted.Line == "" {
+					t.Fatal("accept path wrote no line")
+				}
+				// An unrelated incident cannot borrow this ticket's lesson.
+				other := newTicket(map[string]any{"tags": []string{"incident"}}, "")
+				refuse(other, agent, "Another ticket's lesson is unrelated")
+				moveDone(n)
+				// The accepted record alone cannot outlive the actual line.
+				if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET body='## Changelog' WHERE tenant_id=$1 AND id=$2`, p.TenantID, entry.ID); err != nil {
+					t.Fatal(err)
+				}
+				if checks := readChecks(n); checks.Blocks[2].Passed != 0 {
+					t.Fatalf("removed changelog still passed: %+v", checks.Blocks[2])
+				}
+				if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET body=$3, deleted_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2`, p.TenantID, entry.ID, "## Changelog\n"+accepted.Line+"\n"); err != nil {
+					t.Fatal(err)
+				}
+				if checks := readChecks(n); checks.Blocks[2].Passed != 0 {
+					t.Fatalf("deleted Knowledge still passed: %+v", checks.Blocks[2])
+				}
+			})
+		}
+	})
+	t.Run("unaffected-work-and-saved-definitions", func(t *testing.T) {
+		for _, fields := range []map[string]any{{}, {"tags": []string{"incidentally"}}, {"non_obvious_fix": false}} {
+			moveDone(newTicket(fields, ""))
+		}
+		// Even an explicitly placed catalog item applies only on entry to Done.
+		code, raw := call(t, &p, "PUT", "/api/projects/"+project.ID+"/definitions", `{"expected_revision":null,"checks":{"in_progress":[{"id":"lesson_recorded"}]}}`)
+		d := decode[workqueue.EntryDefinition](t, code, raw, 200)
+		n := newTicket(map[string]any{"tags": []string{"incident"}}, "")
+		code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"in_progress"}`)
+		decode[nodeJSON](t, code, raw, 200)
+		code, raw = call(t, &p, "PUT", "/api/projects/"+project.ID+"/definitions", string(entryJSON(map[string]any{"expected_revision": d.Revision, "checks": map[string]any{"done": []map[string]string{{"id": "lesson_recorded"}}}})))
+		d = decode[workqueue.EntryDefinition](t, code, raw, 200)
+		n = currentWorkTest(t, p, n.ID)
+		refuse(n, agent, "Configured catalog check must enforce too")
+		code, raw = call(t, &p, "PUT", "/api/projects/"+project.ID+"/definitions", string(entryJSON(map[string]any{"expected_revision": d.Revision, "checks": map[string]any{}})))
+		decode[workqueue.EntryDefinition](t, code, raw, 200)
+		moveDone(n)
+	})
+}
 
 // Risk: an existing or new tenant loses its completion and queue guards when
 // no definition has been saved. Exercise both HTTP writes on an unconfigured

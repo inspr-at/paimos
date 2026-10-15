@@ -1444,6 +1444,16 @@
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 390 light"
     ,
+    "browser:tests/status-icons.spec.ts:AEON-1362 every one-off in the status menu (dark): timings, marks only, base never blanks, ends static, keyboard"
+    ,
+    "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 1440px dark: diagonal slide, one-offs once per entry, no shift"
+    ,
+    "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift"
+    ,
+    "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 960px dark: diagonal slide, one-offs once per entry, no shift"
+    ,
+    "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 960px light: diagonal slide, one-offs once per entry, no shift"
+    ,
     "browser:tests/stepup-desk.spec.ts:Approve on a request someone else settled first shows their outcome, not the pending memo"
     ,
     "browser:tests/stepup-desk.spec.ts:Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs"
@@ -13680,6 +13690,30 @@
     ,
     {"kind":"browser","file":"tests/status-help.spec.ts","name":"human-check filter is linked and removes tickets that do not need a check","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 bar form: diagonal stripes slide only live or under the pointer; Cancelled is one slash, never stripes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 budget: 24 sliding icons cost at most 1 ms of main-thread time per frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 every one-off in the status menu (dark): timings, marks only, base never blanks, ends static, keyboard","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 every one-off in the status menu (light): timings, marks only, base never blanks, ends static, keyboard","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 1440px dark: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 1440px light: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 390px dark: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 960px dark: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 960px light: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 reduced motion: nothing slides and no one-off plays","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 slides pause off-screen and in a hidden tab","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Approve on a request someone else settled first shows their outcome, not the pending memo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -19585,6 +19619,14 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > rejects a freshly read parent or unknown shape before any work-order write","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > reuses a ready order without resetting its status or budgets","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"a one-off starts every part once, eased and without a lasting fill, and a replay cancels the running one","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"every status and spelling has one bar fill read from its icon","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"every status but In progress has a one-off on its marks, with the design timings and cheap properties only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"reduced motion skips every one-off","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stepup-readiness.unit.test.ts","name":"Touch ID pairing readiness > requires a server pin and keeps unknown distinct from missing","tier":"ESSENTIAL"}
     ,

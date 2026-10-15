@@ -341,10 +341,12 @@ export function measuredWeights(manifest, rows) {
 
 // Split only explicitly measured Go owners. Unknown/new cases retain an
 // average-case estimate and still execute; overhead is charged to each launch.
+// AEON-1338 (LEAD 2026-10-15): a recorded count of three is legal. Two stays
+// legal for the AEON-1024 balancer fixture. Any other count is still invalid.
 export function splitOwner(rows, timing, limit) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw new Error('Invalid split shard limit')
   const split = timing?.split
-  if (!split || split.count !== 2 || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
+  if (!split || ![2, 3].includes(split.count) || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
       !split.caseSeconds || typeof split.caseSeconds !== 'object' || Array.isArray(split.caseSeconds) ||
       !Number.isFinite(timing.seconds) || timing.seconds <= 0 || !Number.isSafeInteger(timing.selectedTests) || timing.selectedTests < 1 ||
       Object.entries(split.caseSeconds).some(([name, seconds]) => !/^(?:Test|Fuzz)\w+$/.test(name) || !Number.isFinite(seconds) || seconds < 0))
@@ -382,8 +384,8 @@ export function shard(rows, index, count, weights = {}, { firstShardLast = false
   for (const { owner, rows: entries, weight, part } of batches.sort((a, b) => b.weight - a.weight || a.owner.localeCompare(b.owner) || a.part - b.part)) {
     // Zero-duration owners still need a shard. On equal loads prefer fewer
     // owners, then retain shard order for a deterministic final tie-break.
-    // Two halves of a package must use different shards, even if one bin is
-    // still cheapest after placing the first half.
+    // Parts of one package must use different shards, even if one bin is
+    // still cheapest after placing the first part.
     const used = assigned.get(owner) ?? new Set()
     const bin = preference.filter(bin => !used.has(bin)).reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
     used.add(bin); assigned.set(owner, used)

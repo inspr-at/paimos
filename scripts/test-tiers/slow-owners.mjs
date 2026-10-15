@@ -30,6 +30,9 @@ export function proveSlowOwners(browserRows, goRows) {
   const nodes = goRows.filter(row => row.package === 'internal/nodes' && row.active !== false)
   const goCases = provePartition(baseline.goCases, [nodes], row => JSON.stringify([key(row), row.tier, row.lane]))
   const manifest = load('go'), policy = loadManifest(), browserLoads = []
+  // AEON-1338: internal/nodes schedules this many parallel splits. A job with
+  // fewer shards keeps min(count, shards) parts; the cases do not change.
+  const nodeSplit = manifest.timingWeights.owners['internal/nodes'].split.count
   for (const [file, original] of Object.entries(baseline.browserOwners)) {
     const group = policy.groups.find(group => group.specs.some(spec => spec.file === file))
     if (!group) throw new Error(`Missing split launch policy: ${file}`)
@@ -49,7 +52,8 @@ export function proveSlowOwners(browserRows, goRows) {
       const bins = Array.from({ length: count }, (_, i) => plan('go', { ...options, index: i + 1 }).tests)
       provePartition(expected, bins)
       const halves = bins.map(bin => bin.filter(row => row.package === 'internal/nodes')).filter(bin => bin.length)
-      if (count > 1 && halves.length !== 2) throw new Error('Nodes must occupy exactly two shards')
+      const nodeParts = Math.min(nodeSplit, count)
+      if (count > 1 && halves.length !== nodeParts) throw new Error(`Nodes must occupy exactly ${nodeParts} shards`)
       const selectedNodes = expected.filter(row => row.package === 'internal/nodes')
       // Go -run is a real regex with slash semantics; all selected names are
       // top-level names, and these disjoint exact patterns retain all subtests.
@@ -71,7 +75,7 @@ export function proveSlowOwners(browserRows, goRows) {
     browserLoads.push({ event, seconds: loads.map(seconds => +seconds.toFixed(3)) })
   }
   const selectedNodes = nodes.filter(row => row.lane !== 'timing' && row.tier !== 'NIGHTLY')
-  const nodeLoads = splitOwner(selectedNodes, manifest.timingWeights.owners['internal/nodes'], 2).map(part => +part.weight.toFixed(3))
+  const nodeLoads = splitOwner(selectedNodes, manifest.timingWeights.owners['internal/nodes'], nodeSplit).map(part => +part.weight.toFixed(3))
   return { browserCases, goCases, nodeFullGateCases: selectedNodes.length, nodeSeconds: nodeLoads, browserLoads }
 }
 

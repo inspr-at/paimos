@@ -328,7 +328,7 @@ test('every cell of a row shares one centre line', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS')
   await expect(rows(page)).toHaveCount(5)
-  const centres = await row(page, 'PHAROS-11').evaluate(tr => ['.key', '.title-link', '.status-btn span', '.prio-label', '.person-name', 'time', '.kind-glyph', '.c-prio svg', '.c-status svg'].map(selector => {
+  const centres = await row(page, 'PHAROS-11').evaluate(tr => ['.key', '.title-link', '.status-btn > span:not(.status-icon)', '.prio-label', '.person-name', 'time', '.kind-glyph', '.c-prio svg', '.c-status .status-icon'].map(selector => {
     const box = tr.querySelector(selector)!.getBoundingClientRect()
     return box.top + box.height / 2
   }))
