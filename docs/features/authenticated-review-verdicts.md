@@ -40,7 +40,9 @@ aeon review run submit --run "$REVIEW_RUN" --ticket AEON-1391 \
 The CLI claims the credential in memory and submits without its regular key.
 It never prints the credential or follows credential-bearing redirects.
 An already claimed credential can instead be passed through
-`--credential-file PATH` or `--credential-file -` for stdin. A lost credential
+`--credential-file PATH` or `--credential-file -` for stdin. With a ticket UUID,
+this form needs only the instance URL and run credential, without an ordinary
+API key. A lost credential
 or changed head, target or scope requires a fresh run.
 
 Visual runs use `--kind visual` when created and require the separate

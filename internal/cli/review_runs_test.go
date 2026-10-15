@@ -91,7 +91,13 @@ func TestReviewRunCommandsKeepCredentialsPrivateAndReportRefusals(t *testing.T) 
 			t.Fatal("refused/redirected verdict reported success")
 		}
 	}
-	if claims != 3 || submissions != 3 {
+	t.Setenv("AEON_API_KEY", "")
+	status = 200
+	code, out, stderr = runCLI(append(args, "--credential-file", "-"), capability+"\n")
+	if code != 0 || stderr != "" || !strings.Contains(out, runID) || strings.Contains(out, capability) {
+		t.Fatal("claimed capability could not submit without an ordinary API key")
+	}
+	if claims != 3 || submissions != 4 {
 		t.Fatal("claims or verdicts were lost or retried")
 	}
 }

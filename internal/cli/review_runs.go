@@ -3,7 +3,9 @@ package cli
 
 import (
 	"fmt"
+	"github.com/inspr-at/paimos/internal/client"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -90,15 +92,13 @@ func (rt *runtime) reviewRunCommand(submit bool) *Command {
 					return fmt.Errorf("invalid run credential")
 				}
 				verdict.Binding.Ticket = n.ID
-				c, e := rt.api()
+				baseURL, e := rt.reviewRunURL()
 				if e != nil {
 					return e
 				}
 				// A capability never travels with the dispatcher's ordinary key,
 				// follows redirects, or enters CLI output or persistent config.
-				private := *c
-				private.Token = ""
-				private.SessionToken = ""
+				private := client.New(baseURL, "")
 				private.HTTP = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 				err = private.DoWithHeaders(rt.context(), http.MethodPost, "/api/review-runs/"+id+"/verdict", verdict, &out, map[string]string{reviewgate.CredentialHeader: token})
 				if err != nil {
@@ -114,4 +114,31 @@ func (rt *runtime) reviewRunCommand(submit bool) *Command {
 			fmt.Fprintf(rt.stdout, "Review run %s: %s %s (%s..%s)\n", out.ID, out.Kind, out.Verdict, out.Base, out.Head)
 			return nil
 		}}
+}
+
+// Resolve only instance URLs for a claimed capability; do not require, load or
+// migrate an ordinary agent key that this request must never send.
+func (rt *runtime) reviewRunURL() (string, error) {
+	var base string
+	if urlVar, _, _, ok := rt.envNames(); ok {
+		if rt.instance != "" {
+			return "", usagef("--instance conflicts with %s", urlVar)
+		}
+		base = os.Getenv(urlVar)
+	} else {
+		path, err := rt.configFile()
+		if err != nil {
+			return "", err
+		}
+		cfg, err := readPersonConfig(path)
+		if err != nil {
+			return "", err
+		}
+		_, inst, err := pickInstance(cfg, rt.instance)
+		if err != nil {
+			return "", err
+		}
+		base = inst.URL
+	}
+	return normalizeURL(base)
 }
