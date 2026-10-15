@@ -39,7 +39,7 @@ func (m *Module) Run(ctx context.Context) {
 	m.run(ctx, ticker.C, nil)
 }
 
-// The listener owns a separate connection, never a query-pool slot. A bounded
+// The listener joins the shared aeon_events connection. A bounded
 // queue drops excess hints; startup, reconnect and ticker scans recover them.
 func (m *Module) run(ctx context.Context, ticks <-chan time.Time, scanned func()) {
 	wakes := make(chan string, 64)
@@ -86,22 +86,11 @@ func (m *Module) listenPushConnection(ctx context.Context, wakes chan<- string) 
 	// durable requests committed while the dedicated backend was disconnected.
 	ctx, stop := context.WithTimeout(ctx, db.ListenerMaxLifetime)
 	defer stop()
-	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
-	if err == nil {
-		_, err = conn.Exec(connectCtx, "LISTEN aeon_events")
-	}
-	cancel()
-	if conn != nil {
-		defer func() {
-			closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			_ = conn.Close(closeCtx)
-		}()
-	}
+	conn, err := db.SubscribeNotifications(ctx, m.pool, "aeon_events", "")
 	if err != nil {
 		return err
 	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	wake := func(id string) {
 		select {
 		case wakes <- id:
@@ -114,6 +103,10 @@ func (m *Module) listenPushConnection(ctx context.Context, wakes chan<- string) 
 		n, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			return err
+		}
+		if db.IsResync(n) {
+			wake("")
+			continue
 		}
 		var hint struct {
 			Tenant string `json:"tenant_id"`

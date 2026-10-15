@@ -139,6 +139,7 @@
     "GET /api/nodes/{nodeId}/work-lifecycle": "nodes.read",
     "GET /api/projects": "nodes.read",
     "GET /api/projects/lookup": "nodes.read",
+    "GET /api/projects/{projectId}/figures": "nodes.read",
     "GET /api/projects/{projectId}/definitions": "nodes.read",
     "GET /api/projects/{projectId}/definitions/context": "nodes.read",
     "GET /api/settings/definitions": "nodes.read",

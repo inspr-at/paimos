@@ -102,7 +102,7 @@ func TestSubscriptionHeartbeatPreservesCursorAndRevocation(t *testing.T) {
 	ticks := make(chan struct{})
 	waiting := make(chan struct{}, 2)
 	m := New(d.App).(*module)
-	m.subscriptionWait = func(ctx context.Context, _ *pgx.Conn, _ time.Time) error {
+	m.subscriptionWait = func(ctx context.Context, _ db.NotificationListener, _ time.Time) error {
 		waiting <- struct{}{}
 		select {
 		case <-ticks:

@@ -28,6 +28,7 @@ func init() {
 		"GET /api/nodes/{nodeId}/work-lifecycle":                      "nodes.read",
 		"GET /api/projects":                                           "nodes.read",
 		"GET /api/projects/lookup":                                    "nodes.read",
+		"GET /api/projects/{projectId}/figures":                       "nodes.read",
 		"GET /api/settings/work-vocabulary":                           "nodes.read",
 		"GET /api/status/help":                                        "nodes.read", // Authenticated agents have a read-only exception in RequirePattern.
 		"GET /api/tickets/graph":                                      "nodes.read",
