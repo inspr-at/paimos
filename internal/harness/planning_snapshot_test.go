@@ -41,14 +41,17 @@ func TestQAAndBlockedSessionRegistrationPreserveWorkStartBaseline(t *testing.T) 
 	f := fixture(t)
 	nodes.New(f.db.App, nodes.SQLWriter{}).Mount(f.mux)
 	path := "/api/nodes/" + f.ticket
-	expect(t, f.call(f.person, "PATCH", path, map[string]any{"state": "in_progress", "fields": map[string]any{"estimate_hours": 2}}, ""), 200)
+	// Status writes must satisfy the default Ready checks while the test
+	// proves that neither later estimates nor session registrations reset it.
+	criteria := []string{"The original work-start baseline survives state changes and new session registrations"}
+	expect(t, f.call(f.person, "PATCH", path, map[string]any{"state": "in_progress", "fields": map[string]any{"estimate_hours": 2, "acceptance_criteria": criteria}}, ""), 200)
 	var first string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT id::text FROM ticket_estimate_snapshots WHERE ticket_node_id=$1`, f.ticket).Scan(&first)
 	})
 	for _, state := range []string{"qa", "blocked", "open", "active", "inprogress", "in_progress"} {
 		t.Run(state, func(t *testing.T) {
-			expect(t, f.call(f.person, "PATCH", path, map[string]any{"state": state, "fields": map[string]any{"estimate_hours": 4}}, ""), 200)
+			expect(t, f.call(f.person, "PATCH", path, map[string]any{"state": state, "fields": map[string]any{"estimate_hours": 4, "acceptance_criteria": criteria}}, ""), 200)
 			// A new generation binds after every transition, as in the real workflow.
 			f.registerSession(t, f.agent.ID, "worker", f.ticket, "episode-ref-"+uid(), "episode-lease-"+uid(), "Compare generation baselines across work state transitions")
 			var count, open int

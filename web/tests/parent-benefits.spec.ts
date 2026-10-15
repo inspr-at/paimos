@@ -151,7 +151,9 @@ for (const [state, category, completed] of [['custom-complete', 'done', true], [
     await expect(region).toContainText(guidance)
     await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
     if (completed) {
-      await expect(region).toContainText('Completing it again needs both languages and benefits.')
+      // Q1 (AEON-1248): completed context is retained, while the configured
+      // entry checks decide completion requirements rather than a second gate.
+      await expect(region).toContainText('The project’s entry checks determine what is needed before Done.')
       await expect(region).not.toContainText('Before Done')
     } else await expect(region).not.toContainText('This completed ticket')
 
@@ -191,7 +193,7 @@ for (const [state, category, completed] of [['custom-complete', 'done', true], [
     await page.getByRole('button', { name: 'Edit', exact: true }).click()
     await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
     await expect(region).not.toContainText('incomplete benefit fields')
-    if (completed) await expect(region).toContainText('Completing it again needs both languages and benefits.')
+    if (completed) await expect(region).toContainText('The project’s entry checks determine what is needed before Done.')
     expect(errors).toEqual([])
   })
 }

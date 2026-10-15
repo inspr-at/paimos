@@ -26,7 +26,7 @@ func TestProjectStatusCountsAndSelectors(t *testing.T) {
 		t.Helper()
 		body := map[string]any{"kind_id": kindBySlug(t, p, kind).ID, "title": kind + " " + state, "state": state, "parent_id": folder.ID}
 		if kind == "work" {
-			body["fields"] = json.RawMessage(benefitFields)
+			body["fields"] = workStatusFieldsTest(t)
 		}
 		raw, _ := json.Marshal(body)
 		return mustNode(t, p, string(raw))
