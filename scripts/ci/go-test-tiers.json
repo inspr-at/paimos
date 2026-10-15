@@ -3800,6 +3800,12 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestMePublicSignInConfig","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestMessagingAssistantLiveOwnerAndCallerBounds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestMessagingAssistantProvisioningBounds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestMessagingAssistantQuotaSerializes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestModelPreferenceReadsRetainOrdinaryKeyCeiling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestNativeCandidateArtifactAgentCeiling","tier":"GATED-FULL"}
@@ -3991,6 +3997,8 @@
     {"kind":"go","package":"internal/authz","name":"TestMeRequiresAuthenticationOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestMemberListPreviewHidesCreatorExceptForWorkspaceAdmins","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestMessagingAssistantDeniesEveryNonInboxRoute","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestMissingScopeNamesLabelAndCodeOnlyAfterAuthentication","tier":"GATED-FULL"}
     ,
@@ -4993,6 +5001,8 @@
     {"kind":"go","package":"internal/cli","name":"TestMessagePrivateFileAndErrorRedaction","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestMessagePrivatePostDoesNotRedirect","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestMessagingAssistantCLISecretOutput","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestMessagingBackoffCancellation","tier":"GATED-FULL"}
     ,
@@ -7245,6 +7255,10 @@
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAdapterValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAddressAuthSnapshotAndConcurrentSend","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestMessagingAssistantFinalWriteRechecksOwnerRights","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestMessagingAssistantProvisionedThroughProductionAuth","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestMessagingAtomicRollbackAndProjectBoundary","tier":"ESSENTIAL"}
     ,

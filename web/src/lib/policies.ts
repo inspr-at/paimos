@@ -20,6 +20,7 @@ export const AGENT_ASKS: Readonly<Record<AskRisk, readonly AgentAsk[]>> = {
     { title: 'Change roles and members', keys: ['roles.manage', 'members.manage'] },
     { title: 'Transfer workspace ownership', keys: ['ownership.transfer'] },
     { title: 'Create and revoke API keys', keys: ['keys.manage'] },
+    { title: 'Provision messaging assistants', keys: ['agents.create'] },
     { title: 'Change model choices and locks', keys: ['model_prefs.manage'] },
     { title: 'Change how accounts are used', keys: ['account.use.manage'] },
     { title: 'Publish agent rules', keys: ['rules.publish'] },

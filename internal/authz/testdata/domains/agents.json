@@ -2,6 +2,7 @@
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "builtin_roles": {
     "admin": [
+      "agents.create",
       "agents.plan.read"
     ],
     "guest": [
@@ -11,6 +12,7 @@
       "agents.plan.read"
     ],
     "owner": [
+      "agents.create",
       "agents.plan.read"
     ],
     "viewer": [
@@ -18,6 +20,17 @@
     ]
   },
   "registry": [
+    {
+      "key": "agents.create",
+      "agent_grantable": false,
+      "owner_workstation_grantable": false,
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Agents",
+      "risk": "high",
+      "description": "Provision messaging assistants"
+    },
     {
       "agent_grantable": true,
       "description": "Read the person's agent start plan and running counts",
@@ -35,7 +48,8 @@
       "agents": "agents"
     },
     "special": {
-      "agents.plan.read": "See their agent start plan"
+      "agents.plan.read": "See their agent start plan",
+      "agents.create": "Provision messaging assistants"
     }
   }
 }
