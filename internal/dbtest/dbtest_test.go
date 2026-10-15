@@ -9,8 +9,31 @@ import (
 
 func TestDatabasesAreIsolated(t *testing.T) {
 	ctx := context.Background()
-	a := Open(t)
-	b := Open(t)
+	// Risk: reusing an expensive seed must preserve fixture data, independent
+	// writes, FORCE RLS and ownership of SECURITY DEFINER functions in clones.
+	source := Open(t)
+	if _, err := source.Admin.Exec(ctx, `INSERT INTO tenants(slug,name) VALUES('seed','Seed')`); err != nil {
+		t.Fatal(err)
+	}
+	source.App.Close()
+	source.Admin.Close()
+	clone := func() *DB {
+		d, err := Clone(ctx, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { reportCleanup(t, d.Close()) })
+		var count int
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE slug='seed'`).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("clone lost seeded tenant: count=%d err=%v", count, err)
+		}
+		if err := d.App.QueryRow(ctx, `SELECT count(*) FROM principals`).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("clone leaked principals without tenant context: count=%d err=%v", count, err)
+		}
+		return d
+	}
+	a := clone()
+	b := clone()
 	if a.Name == b.Name || a.Role == b.Role || a.URL == b.URL {
 		t.Fatalf("handles overlap name=%s/%s role=%s/%s", a.Name, b.Name, a.Role, b.Role)
 	}

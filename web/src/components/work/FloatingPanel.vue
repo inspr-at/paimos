@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { isSettingsField } from '../../lib/settingsOverlays'
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // A popover anchored to a trigger. It is teleported to <body> so table cells
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
@@ -9,6 +9,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // a small form (`cycle`) keeps Tab among its own controls instead.
 const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false })
 defineOptions({ inheritAttrs: false })
+const floatingID = `floating-${getCurrentInstance()!.uid}`
+const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -55,9 +57,19 @@ function place(keepSide = false) {
   x.value = Math.round(Math.min(Math.max(8, left), innerWidth - width - 8))
   y.value = Math.round(above.value ? rect.top - Math.min(placedHeight.value ?? height, maxHeight.value) - 6 : rect.bottom + 6)
 }
+// Teleported child pickers belong to the trigger's overlay. Keep ancestors
+// open while interacting in a child, and let the top overlay consume Escape.
+function childOverlay(target: Node | null) {
+  let overlay = (target instanceof Element ? target : target?.parentElement)?.closest<HTMLElement>('[data-floating-id]')
+  for (let depth = 0; overlay?.dataset.floatingOwner && depth < 16; depth++) {
+    if (overlay.dataset.floatingOwner === floatingID) return true
+    overlay = document.querySelector<HTMLElement>(`[data-floating-id="${CSS.escape(overlay.dataset.floatingOwner)}"]`) ?? undefined
+  }
+  return false
+}
 function outside(event: PointerEvent) {
   const target = event.target as Node
-  if (panel.value?.contains(target) || props.anchor?.contains(target)) return
+  if (panel.value?.contains(target) || props.anchor?.contains(target) || childOverlay(target)) return
   emit('close', false)
 }
 // A full-page capture scrolls the page away and back inside one turn. Closing
@@ -90,6 +102,7 @@ const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElemen
 // Escape closes the popover wherever focus is, before any page shortcut sees it;
 // another dialog open above the popover's own layer handles its Escape itself.
 function escape(event: KeyboardEvent) {
+  if (childOverlay(document.activeElement)) return
   if (event.key !== 'Escape' || [...document.querySelectorAll('dialog[open]')].some(dialog => dialog !== layer)) return
   // Names loaded after this panel mounts register their Escape listener later.
   // Let the open disclosure consume Escape before dismissing its menu.
@@ -153,7 +166,7 @@ defineExpose({ place })
 
 <template>
   <Teleport :to="layer">
-    <div ref="panel" v-bind="$attrs" class="floating pop" :class="{ above, sheet }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>

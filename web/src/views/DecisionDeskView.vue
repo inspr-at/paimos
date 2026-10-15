@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
+import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
 import { arrivals, deskItemID, deskLinkItem, deskSourceLines, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
@@ -51,7 +52,7 @@ const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided'
 let sources: DeskSources = emptySources(), generation = 0, alive = true
 let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
-const linkError = ref(''), revoked = ref(new Set<string>())
+const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>()), pendingSteps = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
 let followed = ''
 const changeId = ref('')
@@ -98,21 +99,27 @@ const showAllTo = computed(() => {
   return { path: '/decision-desk', query }
 })
 // A scoped Open count matches the list. The header keeps the whole-desk total.
+const openSourceIDs = computed(() => desk.projection ? new Set(desk.projection.items.map(deskItemID)) : null)
+// Retained person-step slots keep Undo still, but only the canonical open
+// source counts them, including while a committed write response is pending.
+const openItems = computed(() => items.value.filter(item => !item.decided && inScope(item)
+  && (!item.personStep || !openSourceIDs.value || openSourceIDs.value.has(item.id))))
 const openCountLabel = computed(() => {
   if (!scopeActive.value) return desk.count ?? '?'
   if (state.value !== 'ready' || desk.count === null) return '?'
-  return items.value.filter(item => !item.decided && inScope(item)).length
+  return openItems.value.length
 })
+const groupOpenCount = (rows: DeskItem[]) => rows.filter(item => openItems.value.includes(item)).length
 const decidedCountLabel = computed(() => items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
-const visible = computed(() => items.value.filter(item => inScope(item) && item.decided === (filter.value === 'decided') && (filter.value === 'open' || !outcomeFilter.value
+const visible = computed(() => items.value.filter(item => inScope(item) && (item.decided === (filter.value === 'decided') || filter.value === 'open' && item.personStep && settledSteps.value.has(item.id)) && (filter.value === 'open' || !outcomeFilter.value
   || (outcomeFilter.value === 'approvals' ? item.kind === 'approval' : (item.kind === 'question' || item.kind === 'handover') && item.outcome === outcomeFilter.value))))
 // Link-out rows are decided on their settings page, so they never join a memo round.
-const reviewable = computed(() => visible.value.filter(item => !item.linkOut))
+const reviewable = computed(() => visible.value.filter(item => !item.linkOut && !item.personStep))
 const person = computed(() => session.identity?.principal.kind === 'person')
 // AEON-1339: the list in rev 11's two groups; what holds something up comes first.
 const heldRows = computed(() => visible.value.filter(item => item.held || item.kind === 'approval'))
 const readyRows = computed(() => visible.value.filter(item => !(item.held || item.kind === 'approval')))
-const openRound = computed(() => items.value.filter(item => inScope(item) && !item.decided && !item.linkOut))
+const openRound = computed(() => items.value.filter(item => inScope(item) && !item.decided && !item.linkOut && !item.personStep))
 // The ticket each open item is about, resolved as the memo resolves it (AEON-1339): bounded id and key lookups per read.
 const tickets = ref(new Map<string, DeskTicket>())
 // A run approval is about the ticket its run works on: the run's work order, read once per run ('' when no read
@@ -280,6 +287,15 @@ async function refresh() {
 }
 function applyRead(result: DeskRead) {
   const present = new Set(result.items.map(item => item.id))
+  // A server refresh can omit an already committed request while its write
+  // response is still in flight. Retain its old slot, then its resolved slot,
+  // until this visit ends; appending it would move every following control.
+  for (const [index, item] of items.value.entries()) {
+    if (present.has(item.id) || !item.personStep || !(settledSteps.value.has(item.id) && item.decided || pendingSteps.value.has(item.id))) continue
+    const successor = items.value.slice(index + 1).find(row => present.has(row.id))
+    const at = successor ? result.items.findIndex(row => row.id === successor.id) : Math.min(index, result.items.length)
+    result.items.splice(at, 0, item); present.add(item.id)
+  }
   result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
@@ -332,7 +348,7 @@ function followLink() {
   if (!item) { linkError.value = 'The linked source is unavailable or outside this page. Retry or load more before reviewing it.'; return }
   filter.value = item.decided ? 'decided' : 'open'; outcomeFilter.value = ''
   changeId.value = item.decided && route.query.change === '1' ? item.id : ''
-  followed = requested; linkError.value = ''; begin(item.id)
+  followed = requested; linkError.value = ''; if (!item.personStep) begin(item.id)
 }
 watch(() => route.fullPath, () => {
   if (route.query.view === 'decided') filter.value = 'decided'
@@ -412,6 +428,14 @@ function showLessonToast(item: DeskItem) {
 watch(opened, open => {
   if (!open && pendingLessonToast) { const item = pendingLessonToast; pendingLessonToast = undefined; showLessonToast(item) }
 })
+function stepBusy(id: string, value: boolean) {
+  const next = new Set(pendingSteps.value); if (value) next.add(id); else next.delete(id); pendingSteps.value = next
+}
+function stepSettled(item: DeskItem) {
+  const next = new Set(settledSteps.value)
+  if (item.decided) next.add(item.id); else next.delete(item.id)
+  settledSteps.value = next; recorded(item)
+}
 function recorded(item: DeskItem) {
   if (item.kind === 'lesson') {
     if (!item.decided && pendingLessonToast?.id === item.id) pendingLessonToast = undefined
@@ -428,6 +452,7 @@ function recorded(item: DeskItem) {
 }
 function resetDesk() {
   pendingLessonToast = undefined
+  settledSteps.value = new Set(); pendingSteps.value = new Set()
   capabilityGeneration++
   ruleEdit.value = undefined
   generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
@@ -504,13 +529,15 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
     <p v-if="scopeActive" class="scope-line" data-testid="desk-scope">{{ scopeCopy }} <RouterLink :to="showAllTo">Show all</RouterLink></p>
     <nav v-if="nextKeyTrims[trimState] || trimCursors[trimState]" class="trim-pages" aria-label="Key trim pages"><button type="button" class="btn sm ghost" :disabled="loading || !trimCursors[trimState]" @click="pageKeyTrims(true)">First key trims</button><button type="button" class="btn sm ghost" :disabled="loading || !nextKeyTrims[trimState]" @click="pageKeyTrims()">Next key trims</button><span>Up to 100 key trims per page</span></nav>
     <section class="queue glass-card list-only" :class="{ clear: filter !== 'open' || !visible.length }" :aria-label="filter === 'open' ? 'Open' : 'Decided'" :aria-busy="loading" data-testid="desk-list">
-      <p v-if="state === 'loading'" class="empty-line" role="status"><AppIcon name="clock" :size="16" /><span>Reading the desk…</span></p>
+      <p v-if="state === 'loading' && !items.length" class="empty-line" role="status"><AppIcon name="clock" :size="16" /><span>Reading the desk…</span></p>
       <template v-else-if="filter === 'open'">
         <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon :name="sourceLines.some(line => line.retry) ? 'alert' : 'check'" :size="16" /><span>{{ scopeActive ? emptyCopy : sourceLines.some(line => line.retry) ? 'Nothing to show from the sources that answered' : 'Nothing waits for you' }}</span></p>
         <div v-for="group in [{ key: 'held', label: 'Waiting on you', note: 'something is held up until you answer', rows: heldRows }, { key: 'ready', label: 'When you’re ready', note: 'the agents carry on meanwhile', rows: readyRows }].filter(group => group.rows.length)" :key="group.key" class="q-group" :class="group.key">
-          <p class="q-group-label">{{ group.label }}<span class="n">{{ group.rows.length }}</span><span class="group-note">{{ group.note }}</span></p>
+          <p class="q-group-label">{{ group.label }}<span class="n">{{ groupOpenCount(group.rows) }}</span><span class="group-note">{{ group.note }}</span></p>
           <ul class="items desk-list" :aria-label="group.label">
-            <li v-for="item in group.rows" :key="item.id" class="item desk-row" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }" :data-testid="`desk-row-${item.id}`" @click="rowClick($event, item)">
+            <template v-for="item in group.rows" :key="item.id">
+              <li v-if="item.personStep"><PersonStepRequest :item="item" @settled="stepSettled" @busy="value => stepBusy(item.id, value)" /></li>
+              <li v-else class="item desk-row" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }" :data-testid="`desk-row-${item.id}`" @click="rowClick($event, item)">
               <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="rowName(item)" @click="item.linkOut || begin(item.id)" />
               <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="16" /></span>
               <div class="body">
@@ -535,18 +562,22 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
                 <button v-else type="button" class="btn sm approve-soft" @click="begin(item.id)">{{ item.kind === 'question' || item.kind === 'handover' ? 'Answer…' : 'Review…' }}</button>
               </div>
             </li>
+            </template>
           </ul>
         </div>
       </template>
       <template v-else>
         <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon name="check" :size="16" /><span>{{ outcomeFilter ? 'Nothing decided with this stamp yet' : 'No decisions recorded yet' }}</span></p>
         <ul v-else class="dec-list desk-list" aria-label="Decided">
-          <li v-for="item in visible" :key="item.id" class="dec desk-row" :data-testid="`desk-row-${item.id}`">
+          <template v-for="item in visible" :key="item.id">
+              <li v-if="item.personStep"><PersonStepRequest :item="item" @settled="stepSettled" @busy="value => stepBusy(item.id, value)" /></li>
+              <li v-else class="dec desk-row" :data-testid="`desk-row-${item.id}`">
             <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" @click="item.linkOut || begin(item.id)" />
             <span class="mark" :class="outcomeOf(item).tone" aria-hidden="true"><AppIcon :name="outcomeOf(item).icon" :size="15" /></span>
             <span class="dec-text"><span class="dec-q">{{ item.title }}</span><span v-if="item.answer" class="dec-a">{{ item.answer }}</span><span class="dec-meta"><template v-if="who(item)"><span>{{ who(item)!.name }}</span><span>·</span></template><span class="proj-quiet"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span>·</span><span>{{ ticketOf(item)!.key }}</span></template><template v-if="item.runId"><span>·</span><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-row-run">{{ runRef(item.runId) }}</span></template><template v-if="item.decidedAt || item.createdAt"><span>·</span><span>decided {{ ago(item.decidedAt || item.createdAt) }}</span></template><template v-if="graceLeft(item)"><span>·</span><span>sends in <span class="n">{{ graceLeft(item) }}</span> s</span></template><template v-else-if="item.deliveryState === 'failed'"><span>·</span><span class="dl-bad">not delivered</span></template><template v-else-if="item.deliveryState"><span>·</span><span>waiting for it to read</span></template></span></span>
             <span class="dec-side"><span class="dec-out" :class="outcomeOf(item).tone"><AppIcon :name="outcomeOf(item).icon" :size="13" />{{ outcomeOf(item).word }}</span><button v-if="graceLeft(item)" type="button" class="btn sm ghost" @click="undoRow(item)"><AppIcon name="rollback" :size="13" />Undo</button></span>
           </li>
+            </template>
         </ul>
       </template>
       <div v-if="sourceLines.length || more[filter === 'open' ? 'open' : 'answered']" class="source-warnings" role="status">

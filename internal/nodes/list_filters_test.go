@@ -168,13 +168,7 @@ func TestList6000FiltersPerformance(t *testing.T) {
 }
 
 func TestList6000FiltersWithStaleKindStatistics(t *testing.T) {
-	// TRUNCATE resets relation estimates but retains column statistics from
-	// the previous tenant, just as it can between full-suite fixtures after
-	// autoanalyze. ANALYZE nodes alone does not refresh these join estimates.
-	newPrincipal(t, "previous-kind-statistics")
-	if _, err := appPool.Exec(t.Context(), `ANALYZE node_kinds`); err != nil {
-		t.Fatal(err)
-	}
+	// The cloned fixture retains node-kind statistics from a previous tenant.
 	p, path := testList6000FiltersPerformance(t)
 	plans := logListPerformancePlans(t, p, path)
 	for _, name := range []string{"list", "facets"} {
@@ -190,23 +184,7 @@ func TestList6000FiltersWithStaleKindStatistics(t *testing.T) {
 
 func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
 	t.Helper()
-	p := newPrincipal(t, "large-filters")
-	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "work")
-	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
-	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
-            SELECT $1::uuid,'PERF-'||g,$2::uuid,'Item '||g,
-                jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END,
-                    'tags',CASE g%5 WHEN 0 THEN '[]'::jsonb ELSE jsonb_build_array(jsonb_build_object('name','T'||(g%7)),'bug') END,
-                    'cost_unit',jsonb_build_object('label','CU '||(g%4))),
-                CASE g%4 WHEN 0 THEN 'new' WHEN 1 THEN 'active' WHEN 2 THEN 'qa' ELSE 'done' END,
-                $3::uuid,g FROM generate_series(1,6000) AS g`, p.TenantID, ticket.ID, root.ID)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	p, root := useList6000Fixture(t)
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes`); err != nil {
 		t.Fatal(err)
 	}

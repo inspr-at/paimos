@@ -143,22 +143,35 @@ func BindLegacyTx(ctx context.Context, tx interface {
 // New creates a migrated database. On failure the database and role are dropped.
 // The caller must Close a successful handle.
 func New(ctx context.Context) (opened *DB, err error) {
-	return newDatabase(ctx, true)
+	return newDatabase(ctx, true, nil)
+}
+
+// Clone copies a migrated, seeded fixture into an isolated database with its
+// own restricted app role. Close the source's pools before cloning and keep
+// the source database until all clones are created. No migrations or seeds
+// are replayed, and ownership is transferred just as for New's empty template.
+func Clone(ctx context.Context, source *DB) (*DB, error) {
+	if source == nil || source.Name == "" || source.maint == "" {
+		return nil, fmt.Errorf("clone requires a database from New")
+	}
+	return newDatabase(ctx, true, source)
 }
 
 // NewUnmigrated creates the same database, role and extension without applying
 // migrations. Migration tests use it to seed data between historical files.
 func NewUnmigrated(ctx context.Context) (opened *DB, err error) {
-	return newDatabase(ctx, false)
+	return newDatabase(ctx, false, nil)
 }
 
-func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
+func newDatabase(ctx context.Context, migrate bool, template *DB) (opened *DB, err error) {
 	base, maint, err := maintenanceURL()
 	if err != nil {
 		return nil, err
 	}
-	var template *DB
-	if migrate {
+	if template != nil && template.maint != maint {
+		return nil, fmt.Errorf("clone maintenance database differs from source")
+	}
+	if migrate && template == nil {
 		template, err = migratedTemplate(ctx, maint)
 		if err != nil {
 			return nil, err
