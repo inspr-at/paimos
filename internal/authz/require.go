@@ -240,14 +240,22 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 	// Linked people have no binding of their own. Their session retains its
 	// principal ID, but permissions come from the signed-in canonical person.
 	var status, kind, bindingID, canonicalStatus string
-	if err := tx.QueryRow(ctx, `SELECT p.status,p.kind,canonical.id::text,canonical.status
+	var messagingOnly bool
+	if err := tx.QueryRow(ctx, `SELECT p.status,p.kind,canonical.id::text,canonical.status,coalesce(p.messaging_only,false)
 		FROM principals p JOIN principals canonical
 		  ON canonical.tenant_id=p.tenant_id AND canonical.id=coalesce(p.linked_to,p.id)
-		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus); err != nil {
+		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus, &messagingOnly); err != nil {
 		return g, err
 	}
 	if status != "active" || canonicalStatus != "active" || kind != string(p.Kind) {
 		return g, ErrForbidden
+	}
+	if messagingOnly {
+		if p.Kind != tenant.Agent {
+			return g, ErrForbidden
+		}
+		g.workspace = MessagingAssistantScopes()
+		return g, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
           FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
