@@ -21,6 +21,44 @@ for (const width of [390]) for (const theme of ['light', 'dark']) {
       await page.keyboard.press('Escape')
     })
     stable.done()
+
+    // Keep the one-line rule at 360 px; only smaller phones may wrap a reason.
+    for (const phoneWidth of [360, 320]) {
+      await page.setViewportSize({ width: phoneWidth, height: 900 })
+      const more = panel.getByRole('button', { name: 'More session actions' })
+      const phoneStable = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more, close: panel.getByRole('button', { name: 'Close session details' }), frame: panel })
+      await phoneStable.check(async () => {
+        await more.click()
+        if (phoneWidth === 360) await expectNativeMenu(page)
+        else {
+          const menu = page.getByRole('menu', { name: 'More session actions' })
+          const floating = page.getByRole('dialog', { name: 'More session actions' })
+          await expect(floating).toHaveCSS('width', '304px')
+          const rows = await menu.getByRole('menuitem').all()
+          const menuStable = await controlStability(page, { menu, frame: floating, ...Object.fromEntries(rows.map((row, index) => [`row ${index}`, row])) })
+          const disabled = menu.locator('.panel-menu-item:disabled')
+          expect(await disabled.count()).toBeGreaterThanOrEqual(4)
+          for (const action of await disabled.all()) await menuStable.check(async () => {
+            await action.hover()
+            const reason = action.locator('small'), label = await action.innerText()
+            await expect(reason).toHaveText(label.startsWith('Pause') ? "Pause and resume aren't here yet" : 'Only via aeon on the computer that runs it')
+            const painted = await reason.evaluate(el => {
+              const range = document.createRange(); range.selectNodeContents(el)
+              const rects = [...range.getClientRects()], menu = el.closest('.panel-menu')!.getBoundingClientRect()
+              return { lines: new Set(rects.map(rect => rect.top)).size,
+                fits: rects.length > 0 && rects.every(rect => rect.width > 0 && rect.left >= menu.left - .5 && rect.right <= menu.right + .5) }
+            })
+            expect(painted.lines >= 1 && painted.lines <= 2 && painted.fits, `at 320 px each disabled reason paints within two lines inside the unchanged menu: ${JSON.stringify(painted)}`).toBe(true)
+          })
+          menuStable.done()
+        }
+        await page.screenshot({ path: info.outputPath(`AEON-1309-${phoneWidth}-${theme}-more.png`) })
+        await page.keyboard.press('Escape')
+      })
+      phoneStable.done()
+    }
+    await page.setViewportSize({ width, height: 900 })
+
     await expectPanelIdentity(panel, worker.ticket!.key, worker.ticket!.title)
     expect(await panel.locator('.title-detail').evaluate(el => el.scrollWidth - el.clientWidth), 'the long title truncates while the key stays complete').toBeGreaterThan(0)
     const headHeight = await panel.locator('.panel-head').evaluate(el => el.getBoundingClientRect().height)

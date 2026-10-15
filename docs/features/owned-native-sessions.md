@@ -86,10 +86,11 @@ instead of hiding labels below a fixed 1000 px container width. Selection,
 hover and unread changes do not choose another menu form. The key stays whole,
 followed by a literal ` · ` and the title; the title gives up space first.
 
-Owned actions remain disabled. Their menu reason reads “Not from the browser
-yet: use aeon on the computer that runs it”; Pause reads “Pause and resume
-aren't available here yet”. Existing permission, consent and ownership checks
-still determine the available actions.
+Owned actions remain disabled. Their menu reason reads “Only via aeon on the computer that runs it”;
+Pause reads “Pause and resume aren't here yet”. Existing permission, consent
+and ownership checks still determine the available actions. Reasons paint on
+one line from 360 px; at 320 px they may use up to two lines inside the existing
+menu width, without moving its controls.
 
 The existing `native-session-program-1440.spec.ts` cases add the unsaved Focus
 width, a real persisted divider drag and full-key checks. The existing
@@ -98,7 +99,9 @@ of the title and action geometry across the measured breakpoint. The existing
 `native-session-program-390.spec.ts` cases add the full key with a clipped long
 German title. All three files add exact disabled-menu copy and menu-opening
 stability through shared assertions in `native-session-program-fixtures.ts`,
-in light and dark. Earlier assertions, test names, tiers and timeouts remain.
+in light and dark. The phone cases retain the one-line assertion at 360 px and
+check the two-line limit and stable menu width at 320 px. Earlier assertions,
+test names, tiers and timeouts remain.
 
 ## Fix round 4: approved test requalification
 

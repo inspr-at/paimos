@@ -182,7 +182,7 @@ const viewer = computed<ExpertViewer>(() => ({ tenantId: auth.identity?.tenant.i
   // Consent is never inferred from a capability or from the current person's ownership.
   canWatch: false, canReadStructured: !!s.value && can('harness.read', s.value.project_id) }))
 const terminalLink = computed(() => native.value ? liveTerminalLink(native.value, viewer.value) : null)
-const nativeBrowserReason = 'Not from the browser yet: use aeon on the computer that runs it'
+const nativeBrowserReason = 'Only via aeon on the computer that runs it'
 const nativeAction = computed<TerminalActionView | null>(() => {
   const current = native.value, binding = current?.current_binding
   if (!current || !binding || viewer.value.kind !== 'person') return null
@@ -501,7 +501,7 @@ const interruptReason = computed(() => {
   return tab.value === 'chat' && !chat.value?.working ? 'This session has no active turn to interrupt.' : ''
 })
 const pauseReason = computed(() => {
-  if (nativeKnown.value) return "Pause and resume aren't available here yet"
+  if (nativeKnown.value) return "Pause and resume aren't here yet"
   if (isLead.value) return leadActionReason(lead.value, resumeOffered.value ? 'resume' : 'pause')
   const row = controlSession.value
   return row && pause.eligible(row, resumeOffered.value ? 'resume' : 'pause') ? '' : 'This session cannot pause or resume now.'

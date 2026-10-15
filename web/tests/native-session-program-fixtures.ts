@@ -89,7 +89,7 @@ export async function expectPanelIdentity(panel: Locator, key: string, title: st
 
 export async function expectNativeMenu(page: Page) {
   const menu = page.getByRole('menu', { name: 'More session actions' })
-  const browserReason = 'Not from the browser yet: use aeon on the computer that runs it'
+  const browserReason = 'Only via aeon on the computer that runs it'
   for (const name of [/^Interrupt/, /^Stop…/, /^Take over/]) {
     const action = menu.getByRole('menuitem', { name })
     await expect(action).toBeDisabled()
@@ -97,13 +97,13 @@ export async function expectNativeMenu(page: Page) {
   }
   const pause = menu.getByRole('menuitem', { name: /^Pause/ })
   await expect(pause).toBeDisabled()
-  await expect(pause.locator('small')).toHaveText("Pause and resume aren't available here yet")
+  await expect(pause.locator('small')).toHaveText("Pause and resume aren't here yet")
   const disabled = menu.locator('.panel-menu-item:disabled')
   expect(await disabled.count()).toBeGreaterThanOrEqual(4)
   for (const action of await disabled.all()) {
     const reason = action.locator('small')
     const label = await action.innerText()
-    await expect(reason).toHaveText(label.startsWith('Pause') ? "Pause and resume aren't available here yet" : browserReason)
+    await expect(reason).toHaveText(label.startsWith('Pause') ? "Pause and resume aren't here yet" : browserReason)
     expect((await reason.innerText()).split('\n')).toHaveLength(1)
     const painted = await reason.evaluate(el => {
       const range = document.createRange(); range.selectNodeContents(el)
