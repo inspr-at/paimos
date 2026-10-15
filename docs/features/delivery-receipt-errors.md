@@ -7,6 +7,9 @@ webhook failure logs distinguish `http_401`, `http_403`, `http_404`, `http_429`,
 `secondary_limit`, `http_5xx`, and `network`. Other failures retain their existing
 classes. Diagnostics never store upstream response bodies, header values,
 credentials, or request queries. Successful completion clears the last error.
+Previously unfinished `github_http` receipts continue from their stored
+checkpoints and receive a specific class on their next failed read. Existing
+terminal receipts are not reopened.
 
 An ordinary 401 or 403 pauses automatic GitHub reads. The existing Delivery
 notice path sends one permission notice per receipt to the currently authorized
