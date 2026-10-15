@@ -5,14 +5,26 @@ QA and Done. A definition is a `definition` node at workspace scope or directly
 under a project. A project copy replaces the whole workspace default, including
 an empty copy. Until either scope has a saved definition, a built-in workspace
 default requires an estimate, acceptance criteria and a named blocker (for
-blocked tickets) before In progress, and release text before Done. This preserves
-the existing completion and queue guards for existing and new tenants. A saved
-empty workspace or project definition deliberately allows free movement.
+blocked tickets) before In progress, and release text and `lesson_recorded`
+before Done. A saved empty workspace or project definition deliberately allows
+free movement.
 The catalog checks
 estimates, acceptance criteria, an approved attached design for UI work, a named
 blocker, another build in flight, CI against latest observed main, independent
 review, visual approval, release copy, merge and release facts. Conditions can
 restrict a check by kind and labels. Unknown or duplicate rules fail closed.
+
+`lesson_recorded` applies only before Done to tickets tagged or labelled
+`incident`, `regression` or `non-obvious-fix` (also `non-obvious fix` and
+`non_obvious_fix`), or marked with `fields.non_obvious_fix: true`. It passes
+when an accepted ticket or comment learning links a changelog line that remains
+in a live Knowledge entry in the ticket's current project, or an explicit
+`No lesson: <reason>` line is present in its body, description or a current
+comment. Recommendations, dismissed learnings, blank reasons and deleted or
+edited-away notes do not count. Agents receive the standard refusal; people
+can override with a reason recorded in the status entry. Saved definitions
+retain their whole-copy replacement semantics. Body and status changes, including
+Undo, evaluate the body that the mutation will write.
 
 `GET /api/nodes/{id}/entry-checks` returns current checks, the definition source,
 immutable entry records and the latest agent refusal. Status writes and queue

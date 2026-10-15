@@ -4,6 +4,7 @@ import { createPinia } from 'pinia'
 import './styles/tokens.css'
 import './styles/agent-states.css'
 import './styles/base.css'
+import './styles/status-icons.css'
 import App from './App.vue'
 import { router } from './router'
 

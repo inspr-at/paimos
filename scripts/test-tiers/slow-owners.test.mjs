@@ -9,7 +9,9 @@ test('AEON-1024 measured splits preserve native baseline cases, tiers and full s
   const result = proveSlowOwners(load('web').tests, load('go').tests)
   assert.equal(result.browserCases, baseline.browserCases.length)
   assert.equal(result.goCases, baseline.goCases.length)
-  assert.equal(result.nodeSeconds.length, 2)
+  // AEON-1338 schedules three parallel splits and retains the 250-second ceiling.
+  assert.equal(result.nodeSeconds.length, 3)
+  assert.ok(Math.max(...result.nodeSeconds) < 250)
   // AEON-1316 adds one independently measured case. Preserve the exact
   // historical 250-second bound for every prior case and charge only this add.
   const manifest = load('go'), timing = manifest.timingWeights.owners['internal/nodes']
@@ -19,7 +21,7 @@ test('AEON-1024 measured splits preserve native baseline cases, tiers and full s
   const seconds = timing.split.caseSeconds[addition]
   assert.ok(Number.isFinite(seconds) && seconds > 0 && seconds <= 2, 'Definitions must retain its independently bounded measured cost')
   const prior = manifest.tests.filter(row => row.package === 'internal/nodes' && row.tier !== 'NIGHTLY' && row.lane !== 'timing' && row.name !== addition)
-  assert.ok(Math.max(...splitOwner(prior, timing, 2).map(part => part.weight)) < 250, 'The historical split budget must remain unchanged')
+  assert.ok(Math.max(...splitOwner(prior, timing, timing.split.count).map(part => part.weight)) < 250, 'The historical split budget must remain unchanged')
   assert.ok(Math.max(...result.nodeSeconds) < 250 + seconds, 'Only the measured Definitions addition may grow the split budget')
 })
 
@@ -48,7 +50,8 @@ test('AEON-1024 owner splitter balances measured cases, charges both launches an
   assert.equal(splitOwner(rows.slice(0, 1), timing, 2).length, 1)
   assert.throws(() => splitOwner([...rows, rows[0]], timing, 2), /unique/)
   assert.throws(() => splitOwner(rows, timing, 0), /limit/)
-  for (const split of [{ ...timing.split, count: 3 }, { ...timing.split, overheadSeconds: -1 },
+  // AEON-1338 made a recorded count of three legal. Four stays invalid.
+  for (const split of [{ ...timing.split, count: 4 }, { ...timing.split, overheadSeconds: -1 },
     { ...timing.split, caseSeconds: { TestLarge: NaN } }, { ...timing.split, caseSeconds: { 'TestA/sub': 1 } }])
     assert.throws(() => splitOwner(rows, { ...timing, split }, 2), /Invalid/)
   const timingRows = rows.map(row => ({ ...row, lane: 'timing' }))

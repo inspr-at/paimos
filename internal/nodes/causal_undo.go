@@ -115,6 +115,7 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 			return events.Change{}, err
 		}
 		target.Fields = workqueue.Fields(fields)
+		target.Body = before.Body
 		to, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, before.State)
 		if err != nil {
 			return events.Change{}, err
