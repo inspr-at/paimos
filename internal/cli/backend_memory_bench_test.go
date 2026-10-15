@@ -48,6 +48,11 @@ func BenchmarkBackendMemory(b *testing.B) {
 	if err != nil || u.Hostname() != "127.0.0.1" || u.Port() != "55433" || !strings.HasPrefix(u.Path, "/aeon_run_") {
 		b.Fatal("requires the approved remote-test.sh disposable database on loopback port 55433")
 	}
+	// dbtest's binary-exit template watcher must outlive remote-test.sh's
+	// per-run maintenance database. Keep its maintenance connection on the same
+	// approved local test cluster; only dbtest's private databases hold fixtures.
+	u.Path = "/postgres"
+	b.Setenv(dbtest.EnvDatabaseURL, u.String())
 	ctx, cancel := context.WithTimeout(b.Context(), 15*time.Minute)
 	defer cancel()
 	priorLog := slog.Default()
@@ -124,9 +129,10 @@ func BenchmarkBackendMemory(b *testing.B) {
 	// two pool slots. Every sampled backend sees exactly the same request mix;
 	// unused cold connections cannot dilute the per-backend comparison.
 	variants := []struct{ name, params string }{
-		{"cache_statement_512", ""},
+		{"cache_statement_512", "default_query_exec_mode=cache_statement&statement_cache_capacity=512"},
 		{"cache_describe", "default_query_exec_mode=cache_describe"},
 		{"cache_statement_32", "statement_cache_capacity=32"},
+		{"cache_statement_48", "statement_cache_capacity=48"},
 	}
 	for run := range 3 {
 		// Rotate order to reduce systematic first-run/shared-buffer bias.
