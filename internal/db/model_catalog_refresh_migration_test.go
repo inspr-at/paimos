@@ -219,7 +219,7 @@ func TestAnthropic55MigrationKeepsHistoryAndActivationPolicy(t *testing.T) {
 					return err
 				}
 				if i == 1 {
-					if _, err := tx.Exec(t.Context(), `UPDATE account_use_rules SET new_models='deny',enforced_at=now()`); err != nil {
+					if _, err := tx.Exec(t.Context(), `UPDATE account_use_rules SET new_models='deny',enforced_at=coalesce(enforced_at,now())`); err != nil {
 						return err
 					}
 				}

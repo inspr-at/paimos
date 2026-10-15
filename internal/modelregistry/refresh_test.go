@@ -708,10 +708,16 @@ func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
 		t.Fatal("unsafe vendor error")
 	}
 	bad := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"unsafe;command"}]}`))}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"unsafe;command"},{"id":"grok-4.7"}]}`))}, nil
 	})}
-	if _, err := listVendorModels(t.Context(), bad, "xai", "fixture-key"); err == nil {
-		t.Fatal("unsafe identifier")
+	// AEON-1409 explicitly changes unsupported IDs from source failures to
+	// skips. The unsafe ID must remain excluded while the good one survives.
+	catalog, err := fetchProviderCatalog(t.Context(), bad, "xai", "fixture-key", time.Now())
+	if err != nil || catalog.Skipped != 1 {
+		t.Fatalf("unsupported identifier poisoned source: skipped=%d err=%v", catalog.Skipped, err)
+	}
+	if ids, err := listVendorModels(t.Context(), bad, "xai", "fixture-key"); err != nil || !reflect.DeepEqual(ids, []string{"grok-4.7"}) {
+		t.Fatalf("unsafe identifier was retained or good identifier lost: %v %v", ids, err)
 	}
 }
 

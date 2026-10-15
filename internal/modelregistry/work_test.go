@@ -575,7 +575,7 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 			}
 		}
 		for _, tc := range []struct{ role, author, family string }{
-			{"build", "", "anthropic"}, {"build-hard", "", "anthropic"}, {"scout", "", "openai"}, {"mechanical", "", "openai"}, {"review-gate", "openai", "anthropic"}, {"review-gate", "anthropic", ""}, {"review-gate-security", "openai", ""}, {"review-gate-security", "anthropic", ""},
+			{"build", "", "anthropic"}, {"build-hard", "", "anthropic"}, {"scout", "", "openai"}, {"mechanical", "", "openai"}, {"review-gate", "openai", "anthropic"}, {"review-gate", "anthropic", "openai"}, {"review-gate-security", "openai", ""}, {"review-gate-security", "anthropic", "openai"},
 		} {
 			got, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: tc.role, AuthorFamily: tc.author}, now)
 			if err != nil {
@@ -602,6 +602,12 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 			}
 			if strings.HasPrefix(tc.role, "review-gate") && (got.Profile.Family == tc.author || !qualifiedReviewProfile(*got.Profile)) {
 				t.Fatalf("review rule escaped: %+v", got)
+			}
+			// AEON-1427 qualifies Codex only through its printed isolation.
+			if strings.HasPrefix(tc.role, "review-gate") && got.Profile.Harness == "codex" {
+				if err := ValidateReviewCommand(got.Profile.Harness, got.Profile.Model, got.Profile.Effort, got.CommandTemplate); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'MV2-1','Models work','{"route_role":"build","area":"backend","estimate_hours":2,"fix_round":1}' FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID).Scan(&ticket)
