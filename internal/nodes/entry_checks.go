@@ -227,7 +227,7 @@ func (m *Module) handleEntryTick(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		mark := map[string]any{"check_id": check, "checked": *in.Checked, "definition_id": out.Definition.ID, "definition_revision": out.Definition.Revision, "by": workqueue.EntryPerson{ID: p.ID, Name: p.Name}, "at": at}
-		return m.record(ctx, tx, p.ID, &id, "entry_check.ticked", nil, mark)
+		return m.recordEntryTick(ctx, tx, p, id, mark)
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -406,6 +406,17 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, rules := range in.Checks {
 			for _, rule := range rules {
+				if rule.FallbackOwnerID != nil {
+					fallback := rule
+					fallback.OwnerID, fallback.FallbackOwnerID = rule.FallbackOwnerID, nil
+					owner, err := workqueue.EntryOwnerTx(ctx, tx, p, workqueue.EntryTicket{ProjectID: project}, fallback)
+					if err != nil {
+						return err
+					}
+					if owner == nil || owner.ID != *rule.FallbackOwnerID {
+						return badRequest("manual check fallback must be a person with current project access")
+					}
+				}
 				if rule.OwnerID != nil {
 					t := workqueue.EntryTicket{ProjectID: project}
 					owner, err := workqueue.EntryOwnerTx(ctx, tx, p, t, rule)
@@ -472,4 +483,14 @@ func entryFailedLabels(f *workqueue.EntryFailure) string {
 		labels = append(labels, label)
 	}
 	return "Missing entry checks: " + strings.Join(labels, ", ")
+}
+
+// Retain the released event for existing clients and add a public node-domain
+// pointer for project-only readers. Both pass the existing tenant/reference
+// policies; no event visibility policy is widened. No new locks follow either.
+func (m *Module) recordEntryTick(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, mark any) error {
+	if err := m.record(ctx, tx, p.ID, &id, "entry_check.ticked", nil, mark); err != nil {
+		return err
+	}
+	return m.record(ctx, tx, p.ID, &id, "node.entry_check_ticked", nil, mark)
 }

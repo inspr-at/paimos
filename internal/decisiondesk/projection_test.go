@@ -36,7 +36,7 @@ type stepupVisibilityTx struct {
 }
 
 func (tx *stepupVisibilityTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if sql == visibleSQL && len(args) == 27 {
+	if sql == visibleSQL && len(args) == 28 {
 		tx.visibility, _ = args[21].([]byte)
 	}
 	return tx.Tx.QueryRow(ctx, sql, args...)

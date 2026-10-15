@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,22 +27,25 @@ import (
 // 30-second scan. Scheduler integration must retain quiet hours and escalation.
 const NearExpiry = 15 * time.Minute
 
+var ErrPersonStepCoverage = errors.New("desk person-step coverage exceeds 1000 candidate tickets")
+
 var ErrCoverage = errors.New("desk project coverage exceeds 1000 projects")
 
 type Item struct {
-	ID        string     `json:"id"`
-	Kind      string     `json:"kind"`
-	ProjectID string     `json:"project_id,omitempty"`
-	Revision  int64      `json:"revision"`
-	Title     string     `json:"title"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Held      bool       `json:"held"`
-	CanDecide bool       `json:"can_decide"`
-	Href      string     `json:"href"`
-	Source    string     `json:"source"`
-	Bucket    int        `json:"-"`
-	OrderAt   time.Time  `json:"-"`
+	PersonStep *workorders.PersonStep `json:"person_step,omitempty"`
+	ID         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	ProjectID  string                 `json:"project_id,omitempty"`
+	Revision   int64                  `json:"revision"`
+	Title      string                 `json:"title"`
+	CreatedAt  time.Time              `json:"created_at"`
+	ExpiresAt  *time.Time             `json:"expires_at,omitempty"`
+	Held       bool                   `json:"held"`
+	CanDecide  bool                   `json:"can_decide"`
+	Href       string                 `json:"href"`
+	Source     string                 `json:"source"`
+	Bucket     int                    `json:"-"`
+	OrderAt    time.Time              `json:"-"`
 }
 
 // PushEligible is evaluated again just before dispatch. Answered questions,
@@ -125,7 +129,7 @@ func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := m.Read(r.Context(), p, limit, after)
-	if errors.Is(err, ErrCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) || errors.Is(err, knowledge.ErrDeskLessonCoverage) {
+	if errors.Is(err, ErrCoverage) || errors.Is(err, ErrPersonStepCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) || errors.Is(err, knowledge.ErrDeskLessonCoverage) {
 		httpapi.WriteError(w, 422, err.Error())
 		return
 	}

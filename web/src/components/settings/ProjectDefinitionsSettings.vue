@@ -19,6 +19,7 @@ import DefinitionEditor from './DefinitionEditor.vue'
 
 const props = defineProps<{ project: Project }>(), session = useSession(), scope = useIdentityScope(), reads = scope.lane()
 const context = ref<DefinitionContext | null>(null), loading = ref(true), busy = ref(false), error = ref(''), stale = ref(false), editorEpoch = ref(0)
+const editor = ref<InstanceType<typeof DefinitionEditor>>()
 const own = computed(() => context.value?.definition?.source === 'project')
 const checks = computed(() => context.value?.definition?.checks ?? {})
 const workspace = computed(() => context.value?.workspace_default?.checks ?? {})
@@ -44,6 +45,7 @@ function message(problem: unknown) { return problem instanceof APIError && probl
 function failed(problem: unknown, target: string) {
   if (props.project.id !== target) return
   error.value = message(problem)
+  if (editor.value?.formOpen || reset.value) return
   const owner = scope.owner.value
   toast(error.value, { tone: 'error', key: `definitions/${target}`, action: { label: 'Reload', run: () => { if (props.project.id === target && scope.owner.value === owner) load() } } })
 }
@@ -86,7 +88,7 @@ function confirmReset() {
 }
 watch([scope.owner, () => props.project.id], () => { scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; if (scope.owner.value) load() }, { immediate: true, flush: 'sync' })
 const stopAccess = onAccessRevalidate({ reset: () => { closeReset(false); context.value = null; busy.value = false; stale.value = true }, refresh: () => { if (!busy.value) load() } })
-watch(mayManage, allowed => { if (!allowed) closeReset(false) })
+watch(mayManage, allowed => { if (!allowed && !error.value) closeReset(false) })
 onBeforeUnmount(() => { stopAccess(); closeReset(false) })
 </script>
 
@@ -100,7 +102,7 @@ onBeforeUnmount(() => { stopAccess(); closeReset(false) })
         <button v-if="mayManage && own" type="button" class="link-btn" :disabled="busy" aria-haspopup="dialog" @click="showReset">{{ context?.workspace_default ? 'Reset to workspace default…' : 'Remove this definition…' }}</button></div>
         <RouterLink class="link-btn" to="/settings/policies#definitions"><template v-if="own">Workspace default</template><template v-else>Settings <AppIcon name="chevron-right" :size="12" /> Policies</template><AppIcon name="chevron-right" :size="12" /></RouterLink>
       </div></div>
-      <DefinitionEditor v-if="context" :key="editorEpoch" :checks="checks" :workspace="workspace" :base="context.copied_from_checks" :project-key="project.routeKey" :own="own" :editable="mayManage && (own || !context.definition)" :busy="busy" :error="error" :people="project.people" @change="save" />
+      <DefinitionEditor v-if="context" ref="editor" :key="editorEpoch" :checks="checks" :workspace="workspace" :base="context.copied_from_checks" :project-key="project.routeKey" :own="own" :editable="mayManage && (own || !context.definition)" :busy="busy" :error="error" :people="project.people" @change="save" />
     <FloatingPanel v-if="reset" :anchor="reset.anchor" :label="`Reset ${reset.key}’s definition`" :width="440" :tallest="650" sheet compact-sheet cycle settings-keys class="definition-reset" @close="closeReset">
       <div ref="resetBody" class="reset-dialog" tabindex="-1"><header><h3>{{ reset.context.workspace_default ? `Reset ${reset.key} to the workspace default?` : `Remove ${reset.key}’s definition?` }}</h3></header><div class="reset-content"><p>{{ reset.context.workspace_default ? `${reset.key} drops its own definition and follows the workspace default again.` : `There is no workspace default, so tickets in ${reset.key} move freely again.` }}</p><ul><li v-for="line in reset.lines" :key="line">{{ line }}</li></ul><p>Tickets keep their status; the new checks apply to their next move.</p></div><footer><p class="reset-feedback" role="status">{{ error }}</p><button type="button" class="btn" @click="closeReset()">Cancel</button><button type="button" class="btn primary" :disabled="busy || !mayManage" @click="confirmReset">{{ reset.context.workspace_default ? 'Reset' : 'Remove' }}<KeyCap k="mod" /><KeyCap k="enter" /></button></footer></div>
     </FloatingPanel>

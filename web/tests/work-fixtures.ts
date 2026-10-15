@@ -24,6 +24,7 @@ export interface MockNode {
   is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string; work_children_count?: number; status_derived?: boolean
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
+  person_waiting?: { check_id: string; label: string; owner: { id: string; name: string } }[]
   recurrence?: import('../src/lib/api').NodeRecurrence
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
@@ -177,6 +178,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const lead = hideLead ? undefined : leadOf(data, node)
   return {
     queue_stale: node.queue_stale,
+    person_waiting: node.person_waiting ?? (node.human_check?.trim() && node.state === 'done' ? [{ check_id: 'human', label: node.human_check, owner: me }] : []),
     ...(node.is_leaf === undefined ? {} : { is_leaf: node.is_leaf, depth: node.depth, level_name: node.level_name, level_icon: node.level_icon, work_children_count: node.work_children_count, status_derived: node.status_derived }),
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -370,6 +372,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
       .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(bucketOf(n)))
       .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
+      .filter(n => passes(listParam(query, 'person_waiting'), v => { const steps = n.person_waiting ?? (n.human_check?.trim() && n.state === 'done' ? [{ owner: me }] : []); return v === 'mine' ? steps.some(step => step.owner.id === me.id) : v === (steps.length ? 'pending' : 'none') }))
       .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
       .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
       .filter(n => passes(tags, v => v === 'none' ? !tagNames(n).length : tagNames(n).some(t => t.name.toLowerCase() === v)))
@@ -396,6 +399,12 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    const personStepNode = /^\/api\/nodes\/([^/]+)\/person-steps$/.exec(path)
+    if (personStepNode && method === 'GET') {
+      const node = data.nodes.find(n => n.id === personStepNode[1]), completion = node?.fields.human_check_completed as { text?: string } | undefined
+      const label = node?.human_check ?? completion?.text
+      return route.fulfill({ json: { node_id: personStepNode[1], revision: node?.updated_at ?? '', steps: label && node ? [{ id: `human-${node.id}`, node_id: node.id, check_id: 'human', label, to_status: 'delivered', owner: me, checked: !node.human_check, active: !!node.human_check && node.state === 'done', can_tick: options.principalKind !== 'agent' && !options.readOnly, revision: node.updated_at, definition_id: null, definition_revision: null, created_at: node.created_at, ticket_key: node.key, ticket_title: node.title, project_id: node.project }] : [] } })
+    }
     // AEON-1359: the lifeline and Delivery › Tickets (the AEON-1369 API). A node's lifeline is its current status since
     // it was created, and no ticket finished a step yet, so both show their ready, empty state.
     const lifelineNode = /^\/api\/nodes\/([^/]+)\/lifeline$/.exec(path)
@@ -748,7 +757,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       for (const facet of listParam(query, 'facets')) {
         facets[facet] = {}
         for (const n of rows) {
-          const values = facet === 'level' ? [levelOf(n)] : facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
+          const waiting = n.person_waiting ?? (n.human_check?.trim() && n.state === 'done' ? [{ owner: me }] : [])
+          const values = facet === 'person_waiting' ? (waiting.length ? ['pending', ...(waiting.some(step => step.owner.id === me.id) ? ['mine'] : [])] : ['none']) : facet === 'level' ? [levelOf(n)] : facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
             : facet === 'cost_unit' ? [costUnit(n) || 'none'] : facet === 'release' ? [release(n) || 'none']
             : [facet === 'state' ? n.state : facet === 'kind' ? n.kind_slug : facet === 'priority' ? (typeof n.fields.priority === 'string' ? n.fields.priority : 'none') : (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')]
           for (const value of values) facets[facet][value] = (facets[facet][value] ?? 0) + 1
