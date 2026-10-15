@@ -8532,6 +8532,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestServicePrincipalsCannotBeAssignees","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestSiblingPlacementOrdersPositionsNumerically","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestSortMicrosDecimal","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestStateSortFollowsWorkflow","tags":["delete-candidate"],"tier":"GATED-FULL"}

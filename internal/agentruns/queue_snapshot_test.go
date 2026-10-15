@@ -716,9 +716,27 @@ func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
 	if out.State != "applied" || out.Partial || out.Truncated || snapshotOutcomes(out)[second.Items[0].NodeID] != "queued" || snapshotOutcomes(out)[arrival] != "" || f.queuePage(t).Count != 101 {
 		t.Fatalf("continued apply: %+v", out)
 	}
+	// A replay captures the same frontier afresh. The arrival was appended after
+	// the remaining leaf, so it is offered as new pending work; the visited
+	// leaf keeps its shared membership and run, and nothing is queued twice.
 	replay := f.continueParent(t, parent, first)
-	if snapshotOutcomes(f.applyParent(t, replay))[second.Items[0].NodeID] != "already_queued" || f.queuePage(t).Count != 101 {
+	if len(replay.Items) != 2 || snapshotOutcomes(replay)[second.Items[0].NodeID] != "pending" || snapshotOutcomes(replay)[arrival] != "pending" {
+		t.Fatalf("replayed continuation frontier: %+v", replay)
+	}
+	runOf := func(s parentSnapshot, node string) string {
+		for _, item := range s.Items {
+			if item.NodeID == node {
+				return item.RunID
+			}
+		}
+		return ""
+	}
+	replayed := f.applyParent(t, replay)
+	if snapshotOutcomes(replayed)[second.Items[0].NodeID] != "already_queued" || runOf(replayed, second.Items[0].NodeID) == "" || runOf(replayed, second.Items[0].NodeID) != runOf(out, second.Items[0].NodeID) {
 		t.Fatal("replayed continuation lost identical membership")
+	}
+	if snapshotOutcomes(replayed)[arrival] != "queued" || f.queuePage(t).Count != 102 {
+		t.Fatalf("replayed continuation queue: %+v", replayed)
 	}
 }
 

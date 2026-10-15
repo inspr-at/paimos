@@ -170,3 +170,41 @@ func TestMovePreconditionCycleAndTenantIsolation(t *testing.T) {
 		t.Fatal("refused move changed root")
 	}
 }
+
+func TestSiblingPlacementOrdersPositionsNumerically(t *testing.T) {
+	// Risk: placement read sibling positions in text order ("10" before "9"),
+	// so every append from the eleventh child on tied at 10 and fell back to
+	// UUID order, and before_id and moves picked the wrong neighbours.
+	p := newPrincipal(t, "sibling-order")
+	project := kindBySlug(t, p, "project")
+	work := kindBySlug(t, p, "work")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
+	var want []string
+	for range 12 {
+		want = append(want, mustNode(t, p, `{"kind_id":"`+work.ID+`","title":"Child","parent_id":"`+root.ID+`"}`).ID)
+	}
+	// The eleventh child holds position 10, which sorts first as text.
+	inserted := mustNode(t, p, `{"kind_id":"`+work.ID+`","title":"Inserted","parent_id":"`+root.ID+`","before_id":"`+want[10]+`"}`)
+	want = append(want[:10:10], append([]string{inserted.ID}, want[10:]...)...)
+	status, body := call(t, &p, http.MethodPost, "/api/nodes/"+want[0]+"/move", `{"parent_id":"`+root.ID+`"}`)
+	decode[nodeJSON](t, status, body, http.StatusOK)
+	want = append(want[1:], want[0])
+
+	status, body = call(t, &p, http.MethodGet, "/api/nodes?parent_id="+root.ID, "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	got := make([]string, len(page.Items))
+	for i, n := range page.Items {
+		got[i] = n.ID
+		if i == 0 {
+			continue
+		}
+		previous, okPrevious := parseDecimal(page.Items[i-1].Position)
+		current, okCurrent := parseDecimal(n.Position)
+		if !okPrevious || !okCurrent || previous.Cmp(current) >= 0 {
+			t.Fatalf("positions not strictly increasing at %d: %s then %s", i, page.Items[i-1].Position, n.Position)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sibling order %v, want %v", got, want)
+	}
+}
