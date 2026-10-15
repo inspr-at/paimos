@@ -13,7 +13,7 @@ import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetw
 import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
-import { nightlyBrowserMap, gitTree, coverageSummary } from './browser-impact.mjs'
+import { nightlyBrowserMap, gitTree, coverageSummary, dependencyFingerprint } from './browser-impact.mjs'
 import { browserBatches, browserCaseSeconds } from './web-batches.mjs'
 import { createGoRunner } from './go-runner.mjs'
 import { inputSnapshot, listingKey, cacheEnabled } from './listing-cache.mjs'
@@ -49,6 +49,7 @@ export function runnerDecision(candidate,{mode,layout}={}) {
 }
 
 export function runnerSelection(tests,options,candidate,planner) {
+  if (options.impact === 'off') candidate = { mode: 'full', layout: 'full', reason: 'CI_IMPACT=off' }
   const decision=runnerDecision(candidate,planner)
   const selection=select(tests,{...options,forceFull:options.forceFull||decision.mode==='full'})
   selection.layout=selection.full?'full':decision.layout
@@ -80,9 +81,9 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
   const tree=on?sourceTree(root):undefined
   const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(base,{cwd:root,exec}):undefined
   const readFile=path=>boundedText(root,path)
-  const coverage=paths?.some(path=>path.startsWith('web/src/'))?browserCoverage(root,base,load('web').tests):{}
+  const coverage=env.CI_IMPACT !== 'off' && paths?.some(path=>path.startsWith('web/src/'))?browserCoverage(root,base,load('web').tests):{}
   const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions,imports:inventory.imports,...coverage})
-  const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
+  const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,impact:env.CI_IMPACT,
     forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile,...coverage},candidate,
     {mode:plannerMode,layout:plannerLayout})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
@@ -338,11 +339,16 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
           writeFileSync(listPath,descriptions.join('\n')+'\n')
           const groupEnv=Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',env.RUNNER_TEMP??evidence)]))
           const browserEnv={...env,...groupEnv,PW_RETRIES:'0'}
-          const observeCoverage=selection.scope==='catalogue'&&!retry&&env.GITHUB_WORKFLOW==='Nightly full'
+          const observeCoverage=env.CI_IMPACT !== 'off' && selection.scope==='catalogue'&&!retry&&env.GITHUB_WORKFLOW==='Nightly full'
           const coverageDirectory=resolve(evidence,`browser-coverage-${job}-${group.id}-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`)
           if(observeCoverage) {
             const casesPath=resolve(evidence,`browser-coverage-${job}-${group.id}-cases.json`)
             saveJSON(casesPath,rows)
+            if (group.config === 'playwright.perf.config.ts') {
+              const bundlePath=resolve(evidence,`browser-bundle-${job}-${group.id}.json`)
+              saveJSON(bundlePath,Object.keys(webGraph(web)).filter(file=>/^src\/.+\.(?:ts|js|mjs|vue)$/.test(file)))
+              browserEnv.AEON_BROWSER_BUNDLE_SOURCES=bundlePath
+            }
             Object.assign(browserEnv,{AEON_BROWSER_IMPACT_CASES:casesPath,AEON_BROWSER_IMPACT_DIRECTORY:coverageDirectory,
               NODE_OPTIONS:`${env.NODE_OPTIONS??''} --import=${new URL('./browser-coverage-hook.mjs',import.meta.url).href}`})
           }
@@ -428,8 +434,8 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
       outcomes.push(...final.values())
     }
     printFlakeWarnings(ledger,{log})
-    if(kind==='web'&&!unit&&selection.scope==='catalogue'&&env.GITHUB_WORKFLOW==='Nightly full') {
-      save(resolve(evidence,`browser-impact-${job}.json`),{version:1,tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,
+    if(env.CI_IMPACT !== 'off' && kind==='web'&&!unit&&selection.scope==='catalogue'&&env.GITHUB_WORKFLOW==='Nightly full') {
+      save(resolve(evidence,`browser-impact-${job}.json`),{version:1,tree:gitTree(root),fingerprint:dependencyFingerprint(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,
         complete:!interruption&&!runnerFailure&&coverageReports.length>0&&coverageReports.every(row=>row.complete)&&
           outcomes.length===selection.tests.filter(row=>row.kind==='browser'&&row.active!==false).length,
         cases:coverageReports.flatMap(row=>row.cases)})

@@ -170,7 +170,7 @@ test('AEON-1019 artifact loader accepts a complete exact-base nightly and refuse
     if(command==='git')return tree+'\n'
     if(command==='unzip')return args[0]==='-Z1'?'browser-impact-web-shard-1.json\n':JSON.stringify(partial?{...report,cases:observations.slice(1)}:report)
     if(args[0]==='repo')return JSON.stringify({nameWithOwner:'fixture/aeon'})
-    if(args[1].includes('/workflows/'))return JSON.stringify({workflow_runs:[{head_sha:base,conclusion:'success',event:'schedule',id:42,run_attempt:1}]})
+    if(args[1].includes('/workflows/'))return JSON.stringify({workflow_runs:[{head_sha:base,conclusion:'success',event:'schedule',id:42,run_attempt:1,head_branch:'main',repository:{full_name:'fixture/aeon'},head_repository:{full_name:'fixture/aeon'}}]})
     if(args[1].endsWith('/zip'))return Buffer.from('mock zip bytes')
     return JSON.stringify({total_count:1,artifacts:[{id:12,name:'web-shard-1-tier-measurements',expired:false,size_in_bytes:10}]})
   }

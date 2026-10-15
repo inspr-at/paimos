@@ -866,6 +866,8 @@
         ,
         {"file":"tests/delivery-simple.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":16.364,"median":2.53,"min":1.627},"seconds":46.322,"selectedTests":11},"weightSeconds":26,"weightSource":"aeon-1003-estimate"}
         ,
+        {"file":"tests/delivery-tab-switch.spec.ts","listedTests":2,"weightSeconds":30,"weightSource":"remote-one-worker-AEON-1352-estimate"}
+        ,
         {"file":"tests/delivery-ui.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":6.349,"median":5.584,"min":1.96},"seconds":81.395,"selectedTests":17},"weightSeconds":25,"weightSource":"aeon-853-estimate"}
         ,
         {"file":"tests/deploy-target.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
@@ -1707,6 +1709,8 @@
       "tests/delivery-rating.spec.ts": {"seconds":42.816,"selectedTests":5}
       ,
       "tests/delivery-simple.spec.ts": {"seconds":51.216,"selectedTests":11}
+      ,
+      "tests/delivery-tab-switch.spec.ts": {"seconds":20,"selectedTests":2}
       ,
       "tests/delivery-ui.spec.ts": {"seconds":72.927,"selectedTests":17}
       ,
