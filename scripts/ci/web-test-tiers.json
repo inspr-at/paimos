@@ -1598,6 +1598,26 @@
     ,
     "browser:tests/work-figures.spec.ts:AEON-1358 evidence 960 light"
     ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (1024 dark)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (1024 light)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (1440 dark)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (390 dark)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (390 light)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 dark)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 light)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1440 dark)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 dark)"
+    ,
+    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 light)"
+    ,
     "browser:tests/work-kinds.spec.ts:Advanced is folded, remembers its state, shows how kinds are recognised and saves limits with Undo"
     ,
     "browser:tests/work-kinds.spec.ts:Alt+↑/↓ on a focused row reorders; the ends and Everything else do not move"
@@ -14548,7 +14568,31 @@
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 960 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1440 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1440 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the header work bar shows the whole project in hours, drawn to scale, with opaque counts on hover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1440 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1440 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"phone › AEON-1358 on a phone the bar takes the full width and a tap pins the counts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -16663,6 +16707,8 @@
     {"kind":"node","file":"tests/work-figures.test.ts","name":"the hover footer is one fact per line; Hide closed and projects without releases add theirs","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-figures.test.ts","name":"the slots are sized from the whole project","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-figures.test.ts","name":"top-N popups keep their lines reserved but blank, and name models as the Model column does","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-icons.test.ts","name":"picker search matches names first, then search words, and keeps list order on ties","tier":"ESSENTIAL"}
     ,
