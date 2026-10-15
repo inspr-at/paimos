@@ -87,6 +87,17 @@ const chunk = (page: Page, sequence: number, text: string) => update(page, seque
 
 for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1071 streams in place, stops mid-stream and yields to the saved reply ${theme} ${width}`, async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      const trace: unknown[] = []
+      Object.assign(window, { panelScrollTrace: trace })
+      const record = (kind: string) => {
+        const main = document.querySelector('main'), panel = document.querySelector('.session-panel'), work = document.querySelector('.agents-work')
+        trace.push({ kind, main: main?.scrollTop, extent: main?.scrollHeight, panel: panel?.getBoundingClientRect().top, work: work?.getBoundingClientRect().top })
+        if (trace.length > 40) trace.shift()
+      }
+      document.addEventListener('scroll', event => { if ((event.target as Element)?.tagName === 'MAIN') record('scroll') }, true)
+      document.addEventListener('pointerdown', event => record(`pointer:${(event.target as Element)?.closest('button')?.getAttribute('aria-label')}`), true)
+    })
     const { worker, data, calls, lookups, chat } = await setup(page, { theme })
     await page.setViewportSize({ width, height: 860 })
     await page.goto(`/agents/${worker.id}?tab=messages`)
@@ -123,7 +134,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       for (let i = 0; i < 24; i++) await chunk(page, 5 + i, `Paragraph ${i + 1}: the gate stays green and the counts match the staging build.\n\n`)
       const last = panel.getByText('Paragraph 24: the gate stays green', { exact: false })
       await expect(last).toBeVisible()
-      const geometry = await panel.locator('.thread-scroll').evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop, layout: Object.fromEntries(['main', '.agents-page', '.agents-work', '.agents-split', '.session-panel'].map(selector => { const node = document.querySelector<HTMLElement>(selector)!; return [selector, { rect: node.getBoundingClientRect().toJSON(), height: node.clientHeight, content: node.scrollHeight, top: node.scrollTop, css: getComputedStyle(node).position }] })) }))
+      const geometry = await panel.locator('.thread-scroll').evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop, trace: (window as unknown as { panelScrollTrace?: unknown[] }).panelScrollTrace, layout: Object.fromEntries(['main', '.agents-page', '.agents-work', '.agents-split', '.session-panel'].map(selector => { const node = document.querySelector<HTMLElement>(selector)!; return [selector, { rect: node.getBoundingClientRect().toJSON(), height: node.clientHeight, content: node.scrollHeight, top: node.scrollTop, css: getComputedStyle(node).position }] })) }))
       await expect(last, JSON.stringify(geometry)).toBeInViewport()
     })
     // Interrupt works mid-stream from the pinned session header.
