@@ -177,7 +177,8 @@ func TestMessagingAssistantProvisioningBounds(t *testing.T) {
 			if strings.Contains(body, "aeon_") {
 				t.Fatal("notice includes credential")
 			}
-			if _, err := events.Append(ctx, tx, owner, events.Change{Type: "test.notice"}); err != nil {
+			// Append has required a snapshot since AEON-20. The injected failure is the notice error, after a real event write.
+			if _, err := events.Append(ctx, tx, owner, events.Change{Type: "test.notice", After: map[string]any{"notice": "failed"}}); err != nil {
 				return err
 			}
 			return failure
