@@ -119,8 +119,6 @@ export function fromUnits(units: bigint, scale: number): string {
   return negative ? `-${text}` : text
 }
 
-// a × b at their scales, rounded half up (away from zero) to `scale`.
-
 export function sumAmounts(values: readonly string[]): string {
   return fromUnits(values.reduce((sum, value) => sum + toUnits(value, AMOUNT_SCALE), 0n), AMOUNT_SCALE)
 }

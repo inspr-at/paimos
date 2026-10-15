@@ -2908,6 +2908,8 @@ func commitSubjects(t *testing.T, raw any) []string {
 	return out
 }
 
+// Test adapters keep single-window cases on the live stateful scanner without
+// shipping an extra scanner entry point.
 func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool) (map[string]usageSum, int64, []string, bool, error) {
 	return scanUsageWindowSource(ctx, path, fallback, offset, maxBytes, recent, discarding, "claude")
 }

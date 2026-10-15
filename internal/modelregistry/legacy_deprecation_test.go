@@ -234,6 +234,8 @@ func routesEqual(a, b []Route) bool {
 	return true
 }
 
+// These helpers reconstruct historical ladder fixtures. Production uses the
+// preference-order API and does not call the retired ladder writer.
 func roleRoutes(role string, rows []Route) []Route {
 	out := []Route{}
 	for _, row := range rows {
@@ -316,8 +318,7 @@ func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 	return out, nil
 }
 
-// Structural checks run before standalone setup. Expiry and profile existence
-// remain authoritative in the final transaction.
+// Historical fixture validation, retained only for the legacy seed builders.
 func normalizeRouteStructure(incoming []Route) ([]Route, error) {
 	if incoming == nil {
 		return nil, fail(http.StatusBadRequest, "routes must be an array")
