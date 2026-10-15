@@ -221,7 +221,7 @@ for (const target of ['text', 'action'] as const) {
     await page.getByTestId('desk-row-q:question-1').click()
     const decide = page.getByTestId('desk-decide')
     await expect(decide).toBeEnabled()
-    const elements = target === 'action' ? [decide] : [page.locator('.recommend'), page.getByTestId('stamp-once'), page.locator('.large-stamp.stamp-once')]
+    const elements = target === 'action' ? [decide] : [page.locator('.rec-tag'), page.getByTestId('stamp-once'), page.getByTestId('desk-stamp')]
     for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 950 })
       await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)

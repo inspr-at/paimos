@@ -58,8 +58,8 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       controls: { review: page.getByTestId('agents-desk-review'), history: page.getByTestId('agents-desk-history'), count },
       interactions: [
         { name: 'new question', run: async () => { world.questions.push(sampleQuestion('new-source')); await refresh(); await expect(count).toHaveText('6') } },
-        { name: 'failed source read', run: async () => { world.failProjection = true; await refresh(); await expect(count).toHaveText('?'); await expect(panel.getByRole('button', { name: 'Retry' })).toBeVisible() } },
-        { name: 'retry preserves the source count', run: async () => { world.failProjection = false; await panel.getByRole('button', { name: 'Retry' }).click(); await expect(count).toHaveText('6') } },
+        { name: 'failed source read', run: async () => { world.failProjection = true; await refresh(); await expect(count).toHaveText('?'); await expect(panel.getByRole('button', { name: 'Try again' })).toBeVisible() } },
+        { name: 'retry preserves the source count', run: async () => { world.failProjection = false; await panel.getByRole('button', { name: 'Try again' }).click(); await expect(count).toHaveText('6') } },
       ],
     })
     await page.screenshot({ path: testInfo.outputPath(`agents-desk-${width}-${theme}.png`), fullPage: true })

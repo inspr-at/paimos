@@ -69,8 +69,9 @@ test('Needs you names destinations and keeps target-less approvals usable', asyn
   expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/decision'))).toMatchObject([{ path: '/api/approvals/a9000000-0000-4000-8000-000000000092/decision', body: { decision: 'approved' } }])
   await page.getByTestId('desk-close').click()
   await expect(page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000092')).toHaveCount(0)
-  await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.getByRole('radio', { name: /^Decided/ }).click()
   await page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000093').click()
   await expect(request(page)).toContainText('app-02 · staging')
-  await expect(page.getByTestId('desk-body')).toContainText('Approved')
+  // AEON-1339: the decided line in the memo head says what happened.
+  await expect(page.getByTestId('desk-line')).toContainText('Approved')
 })

@@ -1006,12 +1006,14 @@ func loadNode(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (nodeJS
 	return node, nil
 }
 
+// A bare ORDER BY position would sort the text output column ("10" < "9"),
+// so every child after the tenth would append at rank 10. Qualify the inputs.
 func loadSiblings(ctx context.Context, tx pgx.Tx, parentID *string) ([]sibling, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, position::text
 		FROM nodes
 		WHERE deleted_at IS NULL AND parent_id IS NOT DISTINCT FROM $1::uuid
-		ORDER BY position, id
+		ORDER BY nodes.position, nodes.id
 		FOR UPDATE`, parentID)
 	if err != nil {
 		return nil, err

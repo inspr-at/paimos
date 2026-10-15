@@ -108,13 +108,14 @@ test('native doctrine proposals retain diff, notices, source links and protected
   await page.getByRole('button', { name: 'Review', exact: true }).click()
   await expect(page).toHaveURL('/decision-desk')
   await page.getByTestId(`desk-row-r:${ESTIMATE.id}`).click()
-  const details = page.getByRole('region', { name: 'Rule proposal details', exact: true })
-  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', `/settings/agent-rules#${ESTIMATE.id}`)
+  // AEON-1339: the diff reads line by line with full tints; the proposer is the memo's From.
+  const details = page.getByTestId('desk-rule-diff')
+  await expect(page.getByRole('link', { name: 'Source', exact: true })).toHaveAttribute('href', `/settings/agent-rules#${ESTIMATE.id}`)
   await expect(details.locator('ins')).toContainText('and a written estimate')
-  await expect(details).toContainText('Proposed by builder')
+  await expect(page.getByTestId('desk-from')).toHaveText('builder')
   await expect(page.getByTestId('desk-body')).toContainText('every heartbeat ETA honest')
-  const axe = await new AxeBuilder({ page }).include('.desk-dialog').analyze()
-  expect(axe.violations.map(v => v.id)).toEqual([])
+  const axe = await new AxeBuilder({ page }).include('.desk-dlg').analyze()
+  expect(axe.violations.map(v => `${v.id}: ${v.nodes.map(node => node.target.join(' ')).join(', ')}`)).toEqual([])
   // A bookmarked source reopens on reload; opening an overview row is local
   // round state and does not change the overview's URL.
   await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)
@@ -151,7 +152,10 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expect(page.getByTestId('desk-body')).toContainText('The rule changed since this was proposed.')
     await expect(page.getByTestId('choice-0')).toBeDisabled()
     await expect(page.getByTestId('desk-decide')).toBeDisabled()
-    await page.getByTestId('choice-1').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
+    // Not now needs a reason first (AEON-1339: Decide stays muted until it can decide).
+    await page.getByTestId('choice-1').click(); await expect(page.getByTestId('desk-decide')).toBeDisabled()
+    await page.getByRole('textbox', { name: 'Reason', exact: true }).fill('Rebase on the current rule first.')
+    await expect(page.getByTestId('desk-decide')).toBeEnabled()
     expect(mock.calls.filter(c => c.method === 'POST' && !c.path.endsWith('/notified'))).toHaveLength(0)
     await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)
     const edit = page.getByTestId('desk-edit-rule')

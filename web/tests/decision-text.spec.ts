@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page, type Locator } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
-import { mockDecisionDesk } from './decision-desk-fixtures'
+import { mockDecisionDesk, refreshDesk } from './decision-desk-fixtures'
 
 const title = 'Welche mandantenbezogene Datenbankmigration soll nach der vollständigen Sicherheitsprüfung und der Abstimmung mit allen Verantwortlichen den zusätzlichen Suchindex für die langfristige Nachvollziehbarkeit der Entscheidungen übernehmen?'
 const choiceTitle = 'Den ausschließlich mandantenbezogenen Teilindex mit nachvollziehbarer Sicherheitsprüfung und dauerhaft dokumentierter Freigabe verwenden'
@@ -11,7 +11,8 @@ const tail = 'Abschließende Bedingung: keine mandantenübergreifenden Schreibzu
 async function shot(page: Page, name: string) {
   await page.screenshot({ path: test.info().outputPath(`${name.replace(/[^a-z0-9_-]/gi, '-')}.png`) })
 }
-const scrollKeys = ['Home', 'ArrowDown', 'PageDown', 'Space', 'End', 'ArrowUp', 'PageUp', 'Shift+Space', 'Home', 'ArrowLeft', 'ArrowRight']
+// AEON-1339: the sheet is the one scroll container; arrows choose and move, the reading keys stay native.
+const scrollKeys = ['Home', 'PageDown', 'Space', 'End', 'PageUp', 'Shift+Space', 'Home']
 async function nativeScrollKey(area: Locator, key: string) {
   await area.focus()
   await area.evaluate(element => {
@@ -23,7 +24,7 @@ async function nativeScrollKey(area: Locator, key: string) {
   await area.press(key)
   await expect(area, `${key} retains native scrolling`).toHaveAttribute('data-scroll-key-prevented', 'false')
   if (key === 'Home') await expect.poll(() => area.evaluate(el => el.scrollTop)).toBe(0)
-  if (key === 'ArrowDown' || key === 'End') await expect.poll(() => area.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+  if (key === 'End') await expect.poll(() => area.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
 }
 // Include the shared pseudo target when checking adjacent coarse-pointer actions.
 async function hitBox(control: Locator) {
@@ -121,43 +122,39 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await page.goto('/decision-desk')
     await page.getByTestId('desk-row-q:question-1').click()
     await expect(page.getByTestId('desk-decide')).toBeEnabled()
-    const heading = page.locator('.memo-heading h2'), summary = page.getByTestId('desk-answer-summary')
-    await expect(heading).toHaveAttribute('data-tip', title)
-    await expect(page.getByTestId('desk-full-title')).toHaveText('Question in full' + title)
-    // The source link now precedes the heading in the keyboard path.
-    await page.getByTestId('desk-close').press('Tab')
-    for (let tabs = 0; tabs < 12 && !await heading.evaluate(el => el === document.activeElement); tabs++) await page.keyboard.press('Tab')
-    await expect(heading).toBeFocused()
-    await expect(page.locator('.tooltip')).toHaveText(title)
-    await page.getByTestId('desk-paper').focus()
-    await expect(summary).toContainText(choiceTitle)
-    await expect(summary).toContainText(description + tail)
-    await expect.poll(() => summary.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+    const heading = page.locator('.memo-heading h2'), paper = page.getByTestId('desk-paper')
+    // The approved artifact: the title wraps in full (no clamp, no tooltip, no "Question in full"),
+    // and the option's description wraps in its row, with no second copy of it.
+    await expect(heading).toHaveText(title)
+    await expect(heading).not.toHaveAttribute('data-tip')
+    await expect(page.getByTestId('desk-full-title')).toHaveCount(0)
+    await expect(page.getByTestId('desk-answer-summary')).toHaveCount(0)
+    await expect(page.getByTestId('choice-row-0')).toContainText(choiceTitle)
+    await expect(page.getByTestId('choice-row-0')).toContainText(description + tail)
+    expect(await page.getByTestId('choice-row-0').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    await paper.focus()
     await shot(page, `desk-${width}-${theme}`)
     const choices = page.getByTestId('desk-choices')
+    const bar = { actions: page.locator('.desk-toolbar .action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'), frame: page.getByTestId('desk-frame') }
     await expectStableControls({
-      controls: {
-        actions: page.locator('.desk-toolbar .action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
-        stamps: page.getByTestId('desk-stamps'), selectors: choices, first: page.getByTestId('choice-row-0'), second: page.getByTestId('choice-row-1'), custom: page.getByTestId('choice-row-2'), summary,
-        frame: page.getByTestId('desk-frame'),
-      },
-      scrollAreas: { body: page.getByTestId('desk-body'), summary },
+      controls: { ...bar, stamps: page.getByTestId('desk-stamps'), selectors: choices, first: page.getByTestId('choice-row-0'), second: page.getByTestId('choice-row-1'), custom: page.getByTestId('choice-row-2') },
+      scrollAreas: { body: page.getByTestId('desk-body'), paper },
       interactions: [
-        ...scrollKeys.map(key => ({ name: `read selected details with ${key}`, run: async () => {
-          await nativeScrollKey(summary, key)
+        ...scrollKeys.map(key => ({ name: `read the sheet with ${key}`, run: async () => {
+          await nativeScrollKey(paper, key)
           await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'true')
-          await expect(summary).toContainText(description + tail)
           expect(world.calls).toHaveLength(0)
         } })),
-        { name: 'read the full selected option', run: async () => { await summary.focus(); await summary.press('End'); await expect.poll(() => summary.evaluate(el => el.scrollTop)).toBeGreaterThan(0) } },
-        { name: 'select the second option', run: async () => { await page.getByTestId('choice-1').click(); await expect(summary).toContainText('Use a full index'); await expect(summary).not.toContainText(choiceTitle) } },
-        { name: 'select and write a custom answer', run: async () => { await page.getByTestId('choice-2').click(); const field = page.getByRole('textbox', { name: 'Something else' }); await field.fill('Ein mandantenbezogener Schreibzugriff.'); await field.press('Escape'); await expect(summary).toContainText('Ein mandantenbezogener Schreibzugriff.') } },
-        { name: 'select the first option again', run: async () => { await page.getByTestId('choice-0').click(); await expect(summary).toContainText(description + tail) } },
-        { name: 'skip to a short title', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-full-title')).toHaveCount(0); await expect(heading).not.toHaveAttribute('data-tip') } },
-        { name: 'return to the long title', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-full-title')).toContainText(title) } },
-        { name: 'decide and advance with focus retained', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); expect(world.calls[0]!.body.option_id).toBe(world.questions[0]!.input.options[0]!.id); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
+        { name: 'select the second option', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true'); await expect(page.getByTestId('choice-row-0')).toContainText(description + tail) } },
+        { name: 'select and write a custom answer', run: async () => { await page.getByTestId('choice-2').click(); const field = page.getByRole('textbox', { name: 'Something else' }); await field.fill('Ein mandantenbezogener Schreibzugriff.'); await field.press('Escape'); await expect(field).toHaveValue('Ein mandantenbezogener Schreibzugriff.') } },
+        { name: 'select the first option again', run: async () => { await page.getByTestId('choice-0').click(); await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'true') } },
       ],
     })
+    await expectStableControls({ controls: bar, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+      { name: 'skip to a short title', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(heading).not.toHaveText(title) } },
+      { name: 'return to the long title', run: async () => { await paper.press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(heading).toHaveText(title) } },
+      { name: 'decide and advance with focus retained', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); expect(world.calls[0]!.body.option_id).toBe(world.questions[0]!.input.options[0]!.id); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
+    ] })
   })
 
   test(`approval and held request reveals ${width} ${theme}`, async ({ page }) => {
@@ -182,8 +179,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       await page.getByTestId('desk-close').click()
     }
     world.approval.rationale = 'Kurz.'
-    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+    await refreshDesk(page, world)
     await page.getByTestId('desk-row-a:approval-1').click()
     await expect(page.locator('.context-column').getByText('Kurz.', { exact: true })).toBeVisible()
     await expect(page.locator('.context-column')).not.toContainText(tail)

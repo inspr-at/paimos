@@ -120,7 +120,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: join(dir, `preview-${width}-${theme}.png`) })
     // A row opens its item on the Desk, and the preview steps away.
     await firstRow.click()
-    await expect(page).toHaveURL('/decision-desk?item=a:approval-1')
+    await expect(page).toHaveURL('/decision-desk?from=preview&item=a:approval-1')
     await expect(preview(page)).toBeHidden()
     await expect(page.locator('.places .place.split')).toHaveClass(/active/)
     await page.screenshot({ path: join(dir, `desk-active-${width}-${theme}.png`), clip: { x: 0, y: 0, width, height: 120 } })
@@ -173,10 +173,11 @@ test('the preview says when it shows part of the Desk, nothing, or could not rea
   await page.reload()
   await chevron(page).click()
   await expect(preview(page)).toContainText('Count unavailable')
-  await expect(preview(page).getByRole('alert')).toContainText('Decision Desk could not be read (403).')
+  // One calm line with its action inline (AEON-1339), never the raw server sentence.
+  await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
   await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, count unavailable')
   control.failProjection = false
-  await preview(page).getByRole('button', { name: 'Retry', exact: true }).click()
+  await preview(page).getByRole('button', { name: 'Try again', exact: true }).click()
   await expect(preview(page)).toContainText('20 things for you')
   await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, 20 open')
 })
@@ -517,11 +518,12 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
       { name: 'a poll fails', run: async () => {
         control.failProjection = true
         await page.clock.runFor(30_000)
-        await expect(preview(page).getByRole('alert')).toContainText('Decision Desk could not be read (403).')
+        // One calm line with its action inline (AEON-1339), never the raw server sentence.
+        await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
       } },
       { name: 'Retry reads it again', run: async () => {
         control.failProjection = false
-        await preview(page).getByRole('button', { name: 'Retry', exact: true }).click()
+        await preview(page).getByRole('button', { name: 'Try again', exact: true }).click()
         await expect(preview(page)).toContainText('5 things for you')
       } },
     ],
@@ -586,7 +588,7 @@ for (const [width, where, path, away] of [[375, 'home', '/', true], [375, 'a tic
     await avatar.click()
     await entry.click()
     await preview(page).getByRole('link', { name: /^Approval · nodes\.read, / }).click()
-    await expect(page).toHaveURL('/decision-desk?item=a:approval-1')
+    await expect(page).toHaveURL('/decision-desk?from=preview&item=a:approval-1')
     await expect(preview(page)).toBeHidden()
   })
 }
