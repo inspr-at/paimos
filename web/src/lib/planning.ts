@@ -117,6 +117,18 @@ export interface ModelCell { text: string; tip: string; state: 'none' | 'planned
 function plannedRoute(row: PlanningRow): PlanningRoute | null | undefined {
   return row.planning?.estimate_snapshot ? row.planning.estimate_snapshot.route : row.planning?.route
 }
+// The view figures' Model popup (AEON-1358) names each model id exactly as the Model column shows it: the row's first
+// used model, otherwise its planned route (the one the server counts), with the person's display choices. An id that
+// no loaded row carries keeps its id.
+export function shownModelNames(rows: Iterable<PlanningRow>, prefs = DEFAULT_MODEL_DISPLAY): (id: string) => string {
+  const names = new Map<string, string>()
+  for (const row of rows) {
+    if (row.kind_slug === 'epic') continue
+    const model = row.planning?.models?.[0] ?? plannedRoute(row)
+    if (model?.model && !names.has(model.model)) names.set(model.model, shownModelName(model, prefs))
+  }
+  return id => names.get(id) ?? id
+}
 function shortModelLabel(label: string): string { return label.split(' · ')[0]!.replace(/\bgpt-\d+(?:\.\d+)?-/, '') }
 function shortModel(route: PlanningRoute): string { return shortModelLabel(route.label) }
 // Match aeon_session_model_key: profile models may carry a trailing effort,

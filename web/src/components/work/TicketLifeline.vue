@@ -15,7 +15,7 @@ import { lifelineView, typicalsOf, type LifelineView, type TipLine } from '../..
 import { readLifeline, readTypicals } from '../../lib/statusTiming'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { MARKER_SIZE, placeMarkers, stripWidths } from '../../lib/workFigures'
-import { workFiguresText } from '../../lib/workFiguresText'
+import { lifelineText as workFiguresText } from '../../lib/workFiguresText'
 import { useProfile } from '../../stores/profile'
 
 const props = defineProps<{ nodeId: string; projectId: string; revision: string }>()

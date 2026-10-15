@@ -6,8 +6,8 @@
   },
   "spec": {
     "file": "tests/graph-canvas.spec.ts",
-    "listedTests": 1,
-    "weightSeconds": 2.219512,
+    "listedTests": 2,
+    "weightSeconds": 4.439024,
     "weightSource": "unmeasured-test-rate"
   }
 }
