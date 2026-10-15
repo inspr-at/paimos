@@ -9,7 +9,7 @@ const EXPL = {
   definitions: { title: 'Definitions',
     what: 'A definition lists the checks a ticket must pass before it enters a status: Ready before In progress, QA before QA, Done before Done. Other statuses have no checks.',
     effect: 'A {K} ticket can enter In progress once its checks pass, for example an estimate and written acceptance criteria. Its next-status line shows how far it is, such as “Ready 1/2”.',
-    who: 'Admins set the workspace default in Settings › Policies. A project admin can give a project its own definition.' },
+    who: 'Admins set the workspace default under Policies in Settings. A project admin can give a project its own definition.' },
   enforce: { title: 'Agents and people',
     what: 'Agents and people meet the same checks. An agent is stopped when a check fails; a person can go ahead with a reason.',
     effect: 'If a {K} ticket requires an estimate and none is set, PAIMOS refuses an agent’s start and names the missing check in the ticket’s activity. A person can choose “Move anyway”, write why, and the move is logged with the missing checks.',

@@ -30,7 +30,7 @@ const originTitle = computed(() => own.value ? `${props.project.routeKey} has it
 const originText = computed(() => {
   if (empty.value) return own.value ? `No checks: tickets in ${props.project.routeKey} move freely, for people and agents. Add one below, or reset to the workspace default.` : context.value?.definition ? `The workspace default has no checks. Tickets in ${props.project.routeKey} move freely, for people and agents.` : `Tickets in ${props.project.routeKey} move freely, for people and agents. Add a check below to create this project’s own definition.`
   if (own.value && !context.value?.workspace_default) return `Made for ${props.project.routeKey}; there is no workspace default.`
-  if (!own.value) return `Changes in Settings › Policies apply to ${props.project.routeKey} at once.`
+  if (!own.value) return `Changes to Policies in Settings apply to ${props.project.routeKey} at once.`
   return differenceCount.value ? `Differs in ${differenceCount.value} ${differenceCount.value === 1 ? 'place' : 'places'}, marked below.` : 'Same as the workspace default so far.'
 })
 const reset = ref<{ context: DefinitionContext; projectID: string; key: string; anchor: HTMLElement; lines: string[] } | null>(null), resetBody = ref<HTMLElement>()
@@ -91,7 +91,7 @@ onBeforeUnmount(() => { stopAccess(); closeReset(false) })
       <div class="origin"><AppIcon :name="own ? 'copy' : 'folders'" :size="16" class="or-ic" /><div class="or-l"><b>{{ originTitle }}</b><small>{{ originText }}</small><ProjectSettingsExplainer id="copy" :project-key="project.routeKey" /></div><div class="or-r">
         <button v-if="mayManage && !own && context.definition" type="button" class="btn sm" :disabled="busy" @click="save(cloneChecks(checks))"><AppIcon name="copy" :size="13" />Change for this project</button>
         <button v-if="mayManage && own" type="button" class="link-btn" :disabled="busy" aria-haspopup="dialog" @click="showReset">{{ context.workspace_default ? 'Reset to workspace default…' : 'Remove this definition…' }}</button>
-        <RouterLink class="link-btn" to="/settings/policies#definitions">{{ own ? 'Workspace default' : 'Settings › Policies' }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
+        <RouterLink class="link-btn" to="/settings/policies#definitions"><template v-if="own">Workspace default</template><template v-else>Settings <AppIcon name="chevron-right" :size="12" /> Policies</template><AppIcon name="chevron-right" :size="12" /></RouterLink>
       </div></div>
       <DefinitionEditor :key="editorEpoch" :checks="checks" :workspace="workspace" :base="context.copied_from_checks" :project-key="project.routeKey" :own="own" :editable="mayManage && (own || !context.definition)" :busy="busy" :error="error" :people="project.people" @change="save" />
     </template>

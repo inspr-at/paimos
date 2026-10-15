@@ -37,11 +37,16 @@ async function navigate(page: Page, path: string) {
 
 // Risk: edits move the control under the pointer, remove a different check,
 // merge defaults into a copy, or show a reset which omits what will change.
+// The inherited policy breadcrumb must retain its destination and SVG icons.
 test('AEON-1316 project definitions copy, edit, undo, conditions and reset stay bound and stable', async ({ page }) => {
   const world = await setup(page)
   await page.goto('/p/PHAROS/settings/definitions')
   const card = page.locator('#definitions'), ready = card.locator('[data-block="in_progress"]'), add = ready.getByRole('button',{name:'Add check to Ready'})
   await expect(card.getByText('Uses the workspace default',{exact:true})).toBeVisible()
+  const policies = card.getByRole('link', { name: /Settings\s+Policies/ })
+  await expect(policies).toHaveAttribute('href', '/settings/policies#definitions')
+  await expect(policies).not.toContainText('›')
+  await expect(policies.locator('svg')).toHaveCount(2)
   await expect(card.getByRole('button',{name:/More for/})).toHaveCount(0)
   await card.getByRole('button',{name:'Change for this project',exact:true}).click()
   await expect(add).toBeVisible()
