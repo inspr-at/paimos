@@ -1114,7 +1114,7 @@
         ,
         {"file":"tests/status-icons.spec.ts","listedTests":12,"weightSeconds":20.84,"weightSource":"AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"}
         ,
-        {"file":"tests/status-time.spec.ts","listedTests":15,"weightSeconds":22.18,"weightSource":"AEON-1359 remote-spec e3612db79: 15 cases, one worker on mbp2606, wall_ms 22178"}
+        {"file":"tests/status-time.spec.ts","listedTests":16,"weightSeconds":26.42,"weightSource":"AEON-1359 remote-spec 39cdae150: 16 cases, one worker on mbp2606, wall_ms 26416"}
         ,
         {"file":"tests/stepup-desk.spec.ts","listedTests":9,"weightSeconds":12,"weightSource":"local-single-worker-AEON-1048-9.1s-plus-margin"}
         ,
@@ -2090,7 +2090,7 @@
       ,
       "tests/status-icons.spec.ts": {"seconds":20.84,"selectedTests":12,"source":"AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"}
       ,
-      "tests/status-time.spec.ts": {"seconds":22.18,"selectedTests":15,"source":"AEON-1359 remote-spec e3612db79: 15 cases, one worker on mbp2606, wall_ms 22178"}
+      "tests/status-time.spec.ts": {"seconds":26.42,"selectedTests":16,"source":"AEON-1359 remote-spec 39cdae150: 16 cases, one worker on mbp2606, wall_ms 26416"}
       ,
       "tests/stepup-desk.spec.ts": {"seconds":21.993,"selectedTests":11}
       ,
