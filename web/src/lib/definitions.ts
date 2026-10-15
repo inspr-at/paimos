@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { api } from './api'
-import { APIError } from './work'
+import { api, APIError } from './api'
 
 export const DEFINITION_BLOCKS = [
   { id: 'in_progress', name: 'Ready', to: 'In progress' },
@@ -48,7 +47,10 @@ export function definitionDiff(own: DefinitionChecks, workspace: DefinitionCheck
     return [
       ...rows.map(item => {
         const d = defaults.find(r => r.id === item.id), b = before.find(r => r.id === item.id)
-        const kind: DefinitionDifference['kind'] = d ? sameRule(item, d) ? shared.indexOf(item.id) === ordered.indexOf(item.id) ? 'same' : 'moved' : b && sameRule(item, b) && base ? 'waiting_changed' : 'changed' : b && base ? 'waiting_removed' : 'added'
+        let kind: DefinitionDifference['kind'] = 'added'
+        if (d && sameRule(item, d)) kind = shared.indexOf(item.id) === ordered.indexOf(item.id) ? 'same' : 'moved'
+        else if (d) kind = base && b && sameRule(item, b) ? 'waiting_changed' : 'changed'
+        else if (b && base) kind = 'waiting_removed'
         return { item, kind, default: d, block }
       }),
       ...defaults.filter(d => !rows.some(r => r.id === d.id)).map(item => ({ item, kind: (base && !before.some(r => r.id === item.id) ? 'waiting_new' : 'left') as DefinitionDifference['kind'], block })),

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, it, vi } from 'vitest'
-vi.mock('../src/lib/api', () => ({ api: vi.fn() }))
-vi.mock('../src/lib/work', () => ({ APIError: class extends Error {} }))
+vi.mock('../src/lib/api', () => ({ api: vi.fn(), APIError: class extends Error {} }))
 import { definitionDiff, resetChanges, ruleWords, sameRule, type DefinitionChecks } from '../src/lib/definitions'
 
 // Risk: a full copy is misrepresented as a partial merge, later changes look
