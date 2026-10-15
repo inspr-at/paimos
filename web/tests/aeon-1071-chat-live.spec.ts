@@ -123,7 +123,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       for (let i = 0; i < 24; i++) await chunk(page, 5 + i, `Paragraph ${i + 1}: the gate stays green and the counts match the staging build.\n\n`)
       const last = panel.getByText('Paragraph 24: the gate stays green', { exact: false })
       await expect(last).toBeVisible()
-      const geometry = await panel.locator('.thread-scroll').evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop }))
+      const geometry = await panel.locator('.thread-scroll').evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, content: el.scrollHeight, frame: el.getBoundingClientRect().toJSON(), main: document.querySelector('main')?.scrollTop, layout: Object.fromEntries(['main', '.agents-page', '.agents-work', '.agents-split', '.session-panel'].map(selector => { const node = document.querySelector<HTMLElement>(selector)!; return [selector, { rect: node.getBoundingClientRect().toJSON(), height: node.clientHeight, content: node.scrollHeight, top: node.scrollTop, css: getComputedStyle(node).position }] })) }))
       await expect(last, JSON.stringify(geometry)).toBeInViewport()
     })
     // Interrupt works mid-stream from the pinned session header.
