@@ -49,3 +49,14 @@ settings, recovery and removal cannot claim success through a legacy route.
 No provider/account qualification, release gate or live cutover is performed
 by this panel change. Core wiring and Tick's visual check remain owned by the
 coordinator.
+
+## Integration handoff
+
+The I2-UI implementation still needs its native-context read moved into a
+fixed operation in `web/src/lib/agentRows.ts`, as required by the AEON-449
+transport rule, and its JSON decoding changed to unknown values with
+validation. The central transport file is outside AEON-1309's current grant.
+The older lead-panel browser assertions also require requalification for the
+flat menu and overflow actions. This branch is an unfinished handoff until
+those checks and authoritative CI pass; it does not enable a native runtime
+or complete a release gate.
