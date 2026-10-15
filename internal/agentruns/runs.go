@@ -583,7 +583,7 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
 	}
-	if err = queueClaimable(ctx, tx, v); err != nil {
+	if err = queueClaimable(ctx, tx, p, v); err != nil {
 		return nil, err
 	}
 	if err = validatePickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {

@@ -24,7 +24,7 @@ export type IconName =
   | 'sticky-note' | 'scroll-text' | 'presentation' | 'palette' | 'pen-tool' | 'brush' | 'shapes' | 'puzzle' | 'beaker' | 'flask-conical'
   | 'telescope' | 'lightbulb' | 'triangle-alert' | 'siren' | 'flame' | 'shield-alert' | 'messages-square' | 'handshake' | 'megaphone'
   | 'gavel' | 'scale' | 'vote' | 'calendar-check' | 'timer' | 'hourglass' | 'trending-up' | 'sprout'
-  | 'wait' | 'hand' | 'route'
+  | 'wait' | 'hand' | 'route' | 'skip'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -34,6 +34,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
     <template v-if="name === 'repo'"><path d="M2.8 12.3V3.7c0-.7.6-1.3 1.3-1.3h9.1v9.6H4.1c-.7 0-1.3.6-1.3 1.3s.6 1.3 1.3 1.3h1.5" /><path d="M5.6 2.4V12M7.6 12.7v2.1l1.2-.8 1.2.8v-2.1" /></template>
     <circle v-else-if="name === 'circle'" cx="8" cy="8" r="6" />
+    <path v-else-if="name === 'skip'" d="M3.6 3.6 9 8l-5.4 4.4zM12.2 3.6v8.8" />
     <path v-else-if="name === 'signal-off'" d="M8 12.6h.01M5.6 10.2a3.4 3.4 0 0 1 4.8 0M3.2 7.8a6.8 6.8 0 0 1 5.6-2.1M12.8 7.8a6.8 6.8 0 0 0-1.4-1.1M2 2l12 12" />
     <path v-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
     <rect v-else-if="name === 'square'" x="2.2" y="2.2" width="11.6" height="11.6" rx="2" />

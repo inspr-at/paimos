@@ -46,6 +46,8 @@ export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'nam
   }
 }
 export interface MockOptions {
+  // AEON-1315's approved configurable replacement for the historical gate.
+  entryChecks?: boolean
   // The two-browser SSE server needs actual network requests and reconnects.
   nativeEvents?: boolean
   // Kind-specific status buckets, as configured on the server. Omitted
@@ -346,6 +348,15 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    const entryNode = /^\/api\/nodes\/([^/]+)\/entry-checks$/.exec(path)
+    if (entryNode && method === 'GET') {
+      const node = data.nodes.find(n => n.id === entryNode[1])
+      const applicable = node?.fields.hide_from_release_notes !== true && node?.fields.no_release_needed !== true
+      const issues = benefitIssues(node?.fields ?? {})
+      const check = { id: 'release_copy_set', label: 'Release text set (EN + DE)', condition: 'release_notes', applicable, passed: !issues.length, reason: issues.join('; '), can_tick: false }
+      const blocks = ['in_progress', 'qa', 'done'].map(to_status => ({ to_status, checks: options.entryChecks && to_status === 'done' ? [check] : [], total: options.entryChecks && to_status === 'done' && applicable ? 1 : 0, passed: options.entryChecks && to_status === 'done' && applicable && check.passed ? 1 : 0 }))
+      return route.fulfill({ json: { node_id: entryNode[1], revision: node?.updated_at ?? '', definition: options.entryChecks ? { id: 'definition', revision: node?.created_at, source: 'project', checks: { done: [{ id: 'release_copy_set' }] } } : null, blocks, entries: [], latest_refusal: null } })
+    }
     if (path === '/api/me/theme' && method === 'GET') return route.fulfill({ json: { theme: defaultTheme, default_theme_id: defaultTheme.id, selected_theme_id: null, revision: 0, fallback_notice: null } })
     if (path === '/api/themes' && method === 'GET') return route.fulfill({ json: { items: [defaultTheme], next_cursor: null } })
     if (path === '/api/status/help' && method === 'GET') return route.fulfill({ json: defaultStatusHelp() })
@@ -750,7 +761,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = forward(node.updated_at, now + 30_000); node.title = `${node.title} (edited elsewhere)` }
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
-        const patch = body as { state?: string; fields?: Record<string, unknown>; human_check?: string | null }
+        const patch = body as { state?: string; fields?: Record<string, unknown>; human_check?: string | null; override_reason?: string }
         if (options.principalKind === 'agent' && 'human_check' in patch) {
           if (patch.human_check === null && node.human_check) return route.fulfill({ status: 403, json: { error: 'only a person can mark a human check checked' } })
           if (patch.human_check && node.fields.human_check_completed) return route.fulfill({ status: 403, json: { error: 'only a person can undo a human check' } })
@@ -758,7 +769,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const nextState = typeof patch.state === 'string' ? patch.state : node.state
         const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
         const refusal = completionRefusal(node, nextState, nextFields)
-        if (refusal) return route.fulfill({ status: 422, json: refusal })
+        if (options.entryChecks) {
+          if (refusal && nextFields.hide_from_release_notes !== true && nextFields.no_release_needed !== true && (options.principalKind === 'agent' || typeof patch.override_reason !== 'string' || !patch.override_reason.trim())) {
+            return route.fulfill({ status: 409, json: { error: 'entry_checks_failed', code: 'entry_checks_failed', to_status: 'done', failed: [{ id: 'release_copy_set', label: 'Release text set (EN + DE)', applicable: true, passed: false, reason: benefitIssues(nextFields).join('; '), can_tick: false }], override_allowed: options.principalKind !== 'agent' } })
+          }
+        } else if (refusal) return route.fulfill({ status: 422, json: refusal })
         if ('human_check' in patch) {
           if (patch.human_check === null && node.human_check) nextFields.human_check_completed = { text: node.human_check, by: me.id, at: new Date(now).toISOString() }
           else if (patch.human_check) delete nextFields.human_check_completed
