@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
 import type { Definition, DefinitionChecks, DefinitionContext } from '../src/lib/definitions'
 
@@ -65,6 +65,7 @@ test('AEON-1316 project definitions copy, edit, undo, conditions and reset stay 
   const mod = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'Meta' : 'Control')
   await label.press(`${mod}+Enter`)
   await expect(form).toHaveCount(0)
+  await expect(row.locator('.dr-l small')).toContainText('workspace default: All tickets')
   expect((world.writes.at(-1)!.body.checks as DefinitionChecks).in_progress![0]).toMatchObject({id:'estimate_set',condition:'code',labels:['ui','security']})
   await more.click(); await page.getByRole('menuitem',{name:'Move down',exact:true}).click()
   await expect(ready.locator('[data-check]').nth(1)).toHaveAttribute('data-check','estimate_set')
@@ -73,10 +74,12 @@ test('AEON-1316 project definitions copy, edit, undo, conditions and reset stay 
     await add.click(); await page.getByRole('menuitem',{name:'Free-text item… Something a person confirms'}).click()
     const manual = page.getByRole('dialog',{name:'Add a free-text item',exact:true})
     await manual.getByRole('textbox',{name:'What a person confirms'}).fill('Release notes reviewed')
+    await manual.getByRole('combobox',{name:'Who ticks this'}).selectOption(me.id)
     await manual.getByRole('button',{name:/^Add/}).click()
     await expect(ready.getByText('Release notes reviewed',{exact:true})).toBeVisible()
   })
   addStable.done()
+  expect((world.writes.at(-1)!.body.checks as DefinitionChecks).in_progress!.at(-1)).toMatchObject({label:'Release notes reviewed',owner_id:me.id})
   await card.getByRole('button',{name:'Reset to workspace default…',exact:true}).click()
   const reset = page.getByRole('dialog',{name:'Reset PHAROS’s definition',exact:true})
   await expect(reset).toContainText('Dropped: Release notes reviewed.')

@@ -39,6 +39,19 @@ function note(rule: DefinitionRule, block: DefinitionStatus) {
   const row = diff.value.find(r => r.block === block && r.item.id === rule.id)
   return row?.kind === 'added' ? `Added for ${props.projectKey}` : row?.kind === 'moved' ? `Moved for ${props.projectKey}` : row?.kind === 'changed' ? `Changed for ${props.projectKey}` : row?.kind === 'waiting_changed' || row?.kind === 'waiting_removed' ? 'Workspace default changed; this copy is kept' : ''
 }
+function wordsOf(rule: DefinitionRule) {
+  const who = rule.owner_id ? props.people.find(person => person.id === rule.owner_id)?.name ?? 'a named person' : 'the ticket’s assignee, else a project admin'
+  return `${ruleWords(rule)}${manualRule(rule) ? ` · Who ticks: ${who}` : ''}`
+}
+function words(rule: DefinitionRule, block: DefinitionStatus) {
+  const row = diff.value.find(r => r.block === block && r.item.id === rule.id)
+  const current = wordsOf(rule)
+  if ((row?.kind === 'changed' || row?.kind === 'waiting_changed') && row.default) {
+    const label = ruleLabel(rule) === ruleLabel(row.default) ? '' : `${ruleLabel(row.default)} · `
+    return `${current} · workspace default: ${label}${wordsOf(row.default)}`
+  }
+  return current
+}
 const catalog = computed(() => DEFINITION_CATALOG.filter(item => !DEFINITION_BLOCKS.some(b => props.checks[b.id]?.some(r => r.id === item.id))).sort((a, b) => Number(b.block === panel.value?.block) - Number(a.block === panel.value?.block)))
 const panelTitle = computed(() => panel.value?.kind === 'add' ? `Add to ${DEFINITION_BLOCKS.find(b => b.id === panel.value?.block)?.name}` : panel.value?.kind === 'manual' ? 'Add a free-text item' : panel.value?.kind === 'owner' ? 'Who ticks this' : panel.value?.kind === 'conditions' ? `${ruleLabel(panel.value.rule!)} applies to` : panel.value?.rule ? ruleLabel(panel.value.rule) : '')
 const split = (value: string) => [...new Set(value.split(',').map(s => s.trim()).filter(Boolean))]
@@ -115,7 +128,7 @@ onBeforeUnmount(() => close(false))
       <ul class="drs">
         <li v-for="row in rows(block.id)" :key="row.item.id" class="dr" :class="{ ghost: row.ghost }" :style="row.height ? { height: `${row.height}px` } : undefined" :data-check="row.item.id">
           <AppIcon :name="manualRule(row.item) ? 'person-check' : 'list-checks'" :size="15" class="dr-ic" />
-          <span class="dr-l"><b>{{ ruleLabel(row.item) }}</b><small v-clip-tip="row.ghost ? 'Removed' : ruleWords(row.item)">{{ row.ghost ? 'Removed' : ruleWords(row.item) }}</small></span>
+          <span class="dr-l"><b>{{ ruleLabel(row.item) }}</b><small v-clip-tip="row.ghost ? 'Removed' : words(row.item, block.id)">{{ row.ghost ? 'Removed' : words(row.item, block.id) }}</small></span>
           <span v-clip-tip="note(row.item, block.id)" class="dr-note">{{ row.ghost ? '' : note(row.item, block.id) }}</span>
           <span class="dr-action"><button v-if="row.ghost && editable" type="button" class="link-btn undo" :disabled="busy" @click="undo(block.id, row.item)">Undo</button>
           <button v-else-if="editable" type="button" class="icon-btn sm flat" :disabled="busy" :aria-label="`More for ${ruleLabel(row.item)}`" aria-haspopup="menu" @click="open('menu', block.id, $event, row.item)"><AppIcon name="more" :size="15" /></button></span>
