@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -41,6 +40,10 @@ func (m *Module) handleEntryEvidence(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if in.Check == "review_ok_cross_family" || in.Check == "visual_ok" {
+		writeError(w, 403, "review and visual verdicts require an authenticated reviewer run")
+		return
+	}
 	if in.Revision.IsZero() || in.Check != "review_ok_cross_family" && in.Check != "visual_ok" && in.Check != "design_attached" {
 		writeError(w, 400, "invalid entry evidence")
 		return
@@ -66,55 +69,23 @@ func (m *Module) handleEntryEvidence(w http.ResponseWriter, r *http.Request) {
 		if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
 			return err
 		}
-		if p.Kind == tenant.Person {
-			if err = authz.RequireProjectAdminTx(ctx, tx, p, deref(t.ProjectID)); err != nil {
-				return err
-			}
-		} else {
-			if in.Check != "review_ok_cross_family" {
-				return authz.ErrForbidden
-			}
-			if err = authz.RequireQueueCoordinatorTx(ctx, tx, p, deref(t.ProjectID)); err != nil {
-				return err
-			}
+		if p.Kind != tenant.Person {
+			return authz.ErrForbidden
 		}
-		if in.Check == "design_attached" {
-			if !workorders.UUID(in.Attachment) {
-				return badRequest("attachment_id is required")
-			}
-			var present bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE id=$1 AND node_id=$2 AND deleted_at IS NULL)`, in.Attachment, id).Scan(&present); err != nil {
-				return err
-			}
-			if !present {
-				return badRequest("design attachment is not on this ticket")
-			}
-		} else {
-			if !reviewgate.ValidSHA(in.Head) || !reviewgate.ValidSHA(in.Base) || in.Head == in.Base {
-				return badRequest("exact build head and base are required")
-			}
-			var current bool
-			if err = tx.QueryRow(ctx, `SELECT coalesce((SELECT d.head_sha=$2 AND d.observation->>'base_sha'=$3 FROM delivery_items d JOIN delivery_metric_sources s ON s.tenant_id=d.tenant_id AND s.project_id=d.project_id AND s.repository=d.repository WHERE d.ticket_node_id=$1 ORDER BY d.updated_at DESC,d.id DESC LIMIT 1),false)`, id, in.Head, in.Base).Scan(&current); err != nil {
-				return err
-			}
-			if !current {
-				return conflict("delivery head or base has changed")
-			}
+		if err = authz.RequireProjectAdminTx(ctx, tx, p, deref(t.ProjectID)); err != nil {
+			return err
 		}
-		if in.Check == "review_ok_cross_family" {
-			if !workorders.UUID(in.AuthorSession) || !workorders.UUID(in.ReviewerSession) {
-				return badRequest("author and reviewer sessions are required")
-			}
-			v := reviewgate.CoordinatorReview{Head: in.Head, Base: in.Base, AuthorSession: in.AuthorSession, ReviewerSession: in.ReviewerSession, OK: in.OK}
-			valid, err := reviewgate.CoordinatorFamiliesTx(ctx, tx, id, deref(t.ProjectID), &v)
-			if err != nil {
-				return err
-			}
-			if !valid {
-				return conflict("recorded sessions must prove different known model families on this ticket")
-			}
-			return m.record(ctx, tx, p.ID, &id, "coordinator_review.recorded", nil, v)
+		if !workorders.UUID(in.Attachment) {
+			return badRequest("attachment_id is required")
 		}
+		var present bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE id=$1 AND node_id=$2 AND deleted_at IS NULL)`, in.Attachment, id).Scan(&present); err != nil {
+			return err
+		}
+		if !present {
+			return badRequest("design attachment is not on this ticket")
+		}
+
 		return m.record(ctx, tx, p.ID, &id, "entry_check.evidence", nil, map[string]any{"check_id": in.Check, "ok": in.OK, "head_sha": in.Head, "base_sha": in.Base, "attachment_id": in.Attachment})
 	})
 	if err != nil {

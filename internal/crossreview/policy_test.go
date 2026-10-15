@@ -74,8 +74,9 @@ func TestReviewPolicyUsesRunIdentityAndLiveProjectOverride(t *testing.T) {
 				return err
 			}
 			verified, err := reviewgate.VerifiedLatestTx(t.Context(), tx, v.OrderID, f.ticket)
-			if err == nil && verified != want {
-				t.Fatalf("verified consumer disagrees with policy: %v, wanted %v", verified, want)
+			independent := want && v.ReviewerFamily != nil && v.AuthorFamily != *v.ReviewerFamily
+			if err == nil && verified != independent {
+				t.Fatalf("verified consumer disagrees with policy: %v, wanted %v", verified, independent)
 			}
 			return err
 		})

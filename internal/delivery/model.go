@@ -77,6 +77,7 @@ type Check = evidence.Check
 // Observation is the replay source. It contains normalized platform facts at
 // observation time, not the raw webhook, PR title, body, author or review output.
 type Observation struct {
+	Target       string    `json:"target_branch"`
 	ID           string    `json:"id"`
 	Project      *string   `json:"project_id"`
 	Ticket       *string   `json:"ticket_node_id"`

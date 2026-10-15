@@ -14,11 +14,11 @@ import (
 )
 
 type Pull struct {
-	QueueHead                 string
-	Number                    int64
-	Title, Branch, Head, Base string
-	Open, Merged, Queued      bool
-	Checks                    []Check
+	QueueHead                         string
+	Number                            int64
+	Title, Branch, Head, Base, Target string
+	Open, Merged, Queued              bool
+	Checks                            []Check
 }
 
 // GitHub is deliberately read-only. Partial inventories are errors, never green.
@@ -39,7 +39,7 @@ func readPull(p crossreview.GitHubPull, repo string) (Pull, error) {
 	if p.Number < 1 || !reviewgate.ValidSHA(p.Head.SHA) || !reviewgate.ValidSHA(p.Base.SHA) || p.Base.Repo.FullName != repo || len(p.Title) > 4096 || len(p.Head.Ref) > 255 {
 		return Pull{}, errRead
 	}
-	return Pull{Number: p.Number, Title: p.Title, Branch: p.Head.Ref, Head: p.Head.SHA, Base: p.Base.SHA, Open: p.State == "open", Merged: p.Merged}, nil
+	return Pull{Number: p.Number, Title: p.Title, Branch: p.Head.Ref, Head: p.Head.SHA, Base: p.Base.SHA, Target: p.Base.Ref, Open: p.State == "open", Merged: p.Merged}, nil
 }
 func checks(get func(string, any) error, head string) ([]Check, error) {
 	// Filter latest attempts. Every configured context must independently succeed.

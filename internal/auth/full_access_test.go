@@ -72,6 +72,12 @@ func TestFullAccessModelsV2SimpleRead(t *testing.T) {
 // authority. Iterate the actual catalog through both single and bulk decisions.
 func TestFullAccessLiveCatalogAndBoundaries(t *testing.T) {
 	m, owner := keyFixture(t)
+	// This fixture deliberately covers every agent-grantable permission. Give
+	// its person creator an explicit visual grant instead of assuming a built-in
+	// owner role implicitly carries approval authority.
+	permissions, _ := authz.BuiltinPermissions("owner")
+	owner = keyScopeEditor(t, m, owner, append(permissions, "reviews.visual_approve")...)
+
 	narrow := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "catalog-worker", "scopes": []string{"nodes.read"}}))
 	ctx := dbtest.Seed(t.Context())
 	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {

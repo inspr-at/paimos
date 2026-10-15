@@ -47,7 +47,7 @@ func builtinPermissions(key string) []string {
 	out := make([]string, 0, len(Registry))
 	for _, p := range Registry {
 		// Conversation access is explicit even for workspace owners/admins.
-		if p.Key == "harness.watch" {
+		if p.Key == "harness.watch" || p.Key == "reviews.visual_approve" {
 			continue
 		}
 		allow := false

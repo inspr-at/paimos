@@ -363,6 +363,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	// Native routes use an exact matched allowlist. Existing role/key scopes
 	// are only the outer ceiling; future handlers must also fence actor grants.
 	switch r.Pattern {
+	case "POST /api/nodes/{nodeId}/review-runs", "POST /api/review-runs/{runId}/credential":
+		return "nodes.read", true
+	case "GET /api/nodes/{nodeId}/review-evidence":
+		return "nodes.read", true
+	case "POST /api/review-runs/{runId}/verdict":
+		return "", false
 	case "POST /api/agents/assistants", "POST /api/agents/assistants/{principalId}/rotate", "DELETE /api/agents/assistants/{principalId}":
 		return "agents.create", true
 	case "POST /api/agentd/native-sessions/claim", "POST /api/agentd/native-sessions/receipts",
