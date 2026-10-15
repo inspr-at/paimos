@@ -633,20 +633,30 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const projectDefinitions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions.spec.ts')
   assert.ok(projectDefinitions && projectDefinitions.listedTests === 9, 'Project Definitions regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
+  // AEON-1318 adds its four ownership flows after the historical baseline.
+  // Retain the five-minute bound for every prior case and charge only this
+  // independently measured, bounded addition, as for Project Definitions.
+  const personSteps = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/person-steps.spec.ts')
+  assert.ok(personSteps && personSteps.listedTests === 4, 'All four person-step ownership regressions must remain declared')
+  assert.equal(gated.filter(spec => spec.file === personSteps.file).length, 1, 'Person-step ownership must remain gated exactly once')
+  const personTiming = real.nightlyTiming.files[personSteps.file]
+  assert.equal(personTiming?.selectedTests, personSteps.listedTests, 'Person-step timing must cover the complete file')
+  assert.equal(personSteps.weightSeconds, personTiming?.seconds, 'Charge only the measured person-step scheduling cost')
+  assert.ok(personSteps.weightSeconds <= 40, 'The four person-step flows must retain their independently bounded measured cost')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== personSteps).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + projectDefinitions.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + projectDefinitions.weightSeconds + personSteps.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check and lesson decision specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision and person-step ownership specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
