@@ -182,18 +182,21 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
     pollTimer = setInterval(() => { if (options.active() && options.mode() === 'live') void load(none.value ? 'all' : 'view') }, LIVE_POLL_MS)
   }
 
-  watch(() => [options.active(), options.projectId()] as const, ([active], before) => {
-    if (!active) { disconnect(); clearInterval(pollTimer); clearTimeout(hintTimer); generation++; reading?.abort(); return }
-    if (before && before[1] !== options.projectId()) { list.value = null; live.value = null; single.value = null; loadedView.value = ''; phase.value = 'loading' }
+  function stop() { disconnect(); clearInterval(pollTimer); clearTimeout(hintTimer); pending = null; generation++; reading?.abort() }
+  // Sources, not one getter returning a new array: each value is compared on its own, so a parent
+  // render that hands over a fresh but equal project neither reads again nor reopens the stream (AEON-1352).
+  watch([options.active, options.projectId], ([active, projectId], before) => {
+    if (!active) { stop(); return }
+    if (before?.length && before[1] !== projectId) { list.value = null; live.value = null; single.value = null; loadedView.value = ''; phase.value = 'loading' }
     void load('all'); connect(); startPoll()
   }, { immediate: true })
-  watch(() => [options.mode(), options.run()] as const, (next, before) => {
-    if (!options.active() || !before) return
+  watch([options.mode, options.run], (next, before) => {
+    if (!options.active()) return
     // Explicit selection only. A list-derived run (the latest, or a list cleared after a failure) is not a new read.
     if (next[0] !== before[0]) void load('all')
     else if (next[1] !== before[1]) void load('view')
   })
-  onBeforeUnmount(() => { disconnect(); clearInterval(pollTimer); clearTimeout(hintTimer); generation++; reading?.abort() })
+  onBeforeUnmount(stop)
 
   return { status: status as Readonly<Ref<'loading' | 'ready' | 'error'>>, data, empty, choices, runId, key, truncated, retry }
 }

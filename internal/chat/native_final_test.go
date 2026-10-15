@@ -49,7 +49,7 @@ func TestNativeFinalStorageKeepsStoppedLeaseAndChatIsolation(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", "/api/chat-deliveries/final", finalSend{proof, outboxSend{ClientID: "stopped-legacy", Body: "must not persist"}}, lease), 404)
 	b := nativecontract.Binding{TenantID: f.agent.TenantID, ProjectID: f.project, OwnedSessionID: uid(), HarnessSessionID: session, RuntimeEpoch: uid(), DaemonID: "fixture", DaemonGeneration: "fixture", BindingRevision: 1}
 	final := nativecontract.FinalPublish{RequestID: uid(), ExpectedBinding: b, FinalID: uid(), InputID: uid(), TurnRef: "opaque-turn", Text: "private native final canary", DrainGrantID: uid()}
-	target := NativeFinalTarget{OwnerPersonID: f.alice.ID, ConversationID: thread.ID, RoleID: thread.Role.ID, SessionID: session, ExpiresAt: time.Now().Add(time.Hour)}
+	target := NativeFinalTarget{OriginalActor: f.alice, OwnerPersonID: f.alice.ID, ConversationID: thread.ID, RoleID: thread.Role.ID, SessionID: session, ExpiresAt: time.Now().Add(time.Hour)}
 	ctx := tenant.WithPrincipal(context.Background(), f.agent)
 	var first NativeFinalWrite
 	for i := 0; i < 2; i++ {

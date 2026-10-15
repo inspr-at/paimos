@@ -361,7 +361,7 @@ function observeChatFinal(message) {
     emit({ kind: "chat_dropped" });
     return;
   }
-  emit({ kind: "chat_final", text });
+  emit({ kind: "chat_final", text, ...(native ? { correlation_id: activeCorrelationID } : {}) });
 }
 
 // Project only the documented quota fields. Never forward arbitrary SDK data.

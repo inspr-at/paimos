@@ -707,6 +707,84 @@ it('selecting another run shows loading and keeps the run choices', async () => 
   expect(counts).toEqual({ list: 1, run: 2 })
 })
 
+// AEON-1352 risk: Project re-renders hand Delivery a fresh `project` object every time. The flow
+// treated that as a new project and read again and reopened its hint stream on each render, so
+// fast section switches stacked reads and streams until the tab stopped answering.
+interface FakeSource { url: string; closed: boolean; readyState: number; onerror: ((ev: Event) => unknown) | null; addEventListener(): void; close(): void }
+function fakeSources() {
+  const opened: FakeSource[] = []
+  const open = (url: string) => {
+    const source: FakeSource = { url, closed: false, readyState: 1, onerror: null, addEventListener() {}, close() { source.closed = true; source.readyState = 2 } }
+    opened.push(source)
+    return source
+  }
+  return { opened, open, live: () => opened.filter(source => !source.closed) }
+}
+function mountInProject(sources: ReturnType<typeof fakeSources>) {
+  const parent = Vue.reactive({ renders: 0, shown: true })
+  let loaded: ReturnType<typeof useDeliveryFlow> | null = null
+  const Child = Vue.defineComponent({
+    props: { project: { type: Object as Vue.PropType<{ id: string }>, required: true }, renders: { type: Number, required: true } },
+    setup(props) {
+      loaded = useDeliveryFlow({ projectId: () => props.project.id, mode: () => 'live', run: () => null, active: () => true, lang: () => 'en', open: sources.open, now: () => T0 + 60 * 60_000 })
+      return () => Vue.h('span', String(props.renders))
+    },
+  })
+  // Like ProjectView: a new object literal for the same project on every render.
+  const app = renderer.createApp({ render: () => parent.shown ? Vue.h(Child, { project: { id: 'p' }, renders: parent.renders }) : Vue.h('span') })
+  const root = node('root'); apps.push(app); app.mount(root)
+  return { parent, flow: () => loaded! }
+}
+
+it('a parent re-render with the same project neither reads again nor reopens the hint stream (AEON-1352)', async () => {
+  const reads: string[] = []
+  http.handle = async path => { reads.push(path.split('?')[0]!); return json(flowList()) }
+  const sources = fakeSources()
+  const view = mountInProject(sources)
+  await ticks(20)
+  expect(view.flow().status.value).toBe('ready')
+  const settled = reads.length
+  expect(settled).toBe(2)
+  expect(sources.opened).toHaveLength(1)
+  for (let render = 1; render <= 20; render++) {
+    view.parent.renders = render
+    await ticks(2)
+  }
+  await ticks(20)
+  expect(reads).toHaveLength(settled)
+  expect(sources.opened).toHaveLength(1)
+  expect(sources.live()).toHaveLength(1)
+  expect(view.flow().status.value).toBe('ready')
+})
+
+it('unmounting aborts the read in flight and closes the stream; a late answer changes nothing (AEON-1352)', async () => {
+  const pending: { signal: AbortSignal | undefined; release: (value: Response) => void }[] = []
+  http.handle = (_path, init) => new Promise<Response>(resolve => { pending.push({ signal: init?.signal ?? undefined, release: resolve }) })
+  const sources = fakeSources()
+  for (let cycle = 0; cycle < 20; cycle++) {
+    const view = mountInProject(sources)
+    await ticks(2)
+    const flow = view.flow()
+    expect(sources.live()).toHaveLength(1)
+    const inFlight = pending.at(-1)!
+    expect(inFlight.signal?.aborted).toBe(false)
+    view.parent.shown = false
+    await ticks(2)
+    expect(inFlight.signal?.aborted).toBe(true)
+    expect(sources.live()).toHaveLength(0)
+    // The answer still arrives (it was on the wire): nothing reads on, nothing turns ready.
+    const reads = pending.length
+    inFlight.release(json(flowList()))
+    await ticks(20)
+    expect(pending).toHaveLength(reads)
+    expect(flow.status.value).toBe('loading')
+    expect(flow.data.value).toBeNull()
+  }
+  expect(sources.opened).toHaveLength(20)
+  // No poll, hint or retry timer outlives its view.
+  expect(vi.getTimerCount()).toBe(0)
+})
+
 it('the run picker stays mounted through loading and errors', async () => {
   const view = mount({
     data: exampleReplay('r126'), dataKey: 'replay|r126', mode: 'replay',

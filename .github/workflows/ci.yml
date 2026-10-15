@@ -25,6 +25,7 @@ permissions:
 env:
   CI_AFFECTED_LANE: ${{ vars.CI_AFFECTED_LANE }}
   CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
+  CI_IMPACT: ${{ vars.CI_IMPACT }}
 
 jobs:
   # Read-only proof. Merge-group lookup is opt-in; failures retain full CI.
@@ -176,7 +177,7 @@ jobs:
           }
           # Never execute the candidate's classifier. A first-time adoption
           # without a base copy also retains full validation.
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+          if [ "${CI_IMPACT:-}" != off ] && [ "$GITHUB_EVENT_NAME" = pull_request ] &&
              [[ "$PR_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] &&
              git show "$PR_BASE_SHA:scripts/ci-pr-plan.mjs" > "$RUNNER_TEMP/ci-pr-plan.mjs"; then
             node "$RUNNER_TEMP/ci-pr-plan.mjs" || full_plan
@@ -207,6 +208,9 @@ jobs:
 
   tier-plan:
     needs: ci-plan
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -228,6 +232,10 @@ jobs:
         env:
           CI_PLAN_LANE: ${{ needs.ci-plan.outputs.lane }}
         run: |
+          if [ "${CI_IMPACT:-}" = off ]; then
+            printf 'mode=full\nlayout=full\nlane=full\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           case "$GITHUB_EVENT_NAME" in
             pull_request) node scripts/test-tiers/diff.mjs ;;
             # Enforce full merge-group coverage here: the candidate planner can be edited by a PR.
@@ -237,6 +245,66 @@ jobs:
               if [ "$CI_AFFECTED_LANE" != on ]; then lane="$CI_PLAN_LANE"; fi
               printf 'mode=full\nlayout=full\nlane=%s\n' "$lane" >> "$GITHUB_OUTPUT" ;;
           esac
+
+
+      - name: Publish trusted Impact CI shadow plan
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXECUTION_MODE: ${{ steps.tiers.outputs.mode }}
+          EXECUTION_LAYOUT: ${{ steps.tiers.outputs.layout }}
+          EXECUTION_LANE: ${{ steps.tiers.outputs.lane }}
+        run: |
+          set -euo pipefail
+          snapshot="$(mktemp -d "$RUNNER_TEMP/impact-base.XXXXXX")"
+          trap 'rm -rf "$snapshot"' EXIT
+          # The planner, selectors, graph and policy all come from immutable
+          # base code. Head files supply data only. Bootstrap fails wide.
+          # A depth-1 merge checkout records parent SHAs but does not have the
+          # parent objects, so merge-base cannot see the base or the head.
+          # Deepen this commit by one before planning. Fetching only the base
+          # leaves it unrelated to HEAD and still omits the head.
+          if [[ "$PR_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] &&
+             [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]] &&
+             git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" &&
+             git fetch --no-tags --depth=2 origin "$GITHUB_SHA" &&
+             git archive "$PR_BASE_SHA" scripts web/src web/tests web/e2e web/scripts web/ci-web-shards.json > "$snapshot/base.tar" &&
+             tar -xf "$snapshot/base.tar" -C "$snapshot" &&
+             [ -f "$snapshot/scripts/test-tiers/impact-plan.mjs" ] &&
+             AEON_IMPACT_CHECKOUT="$GITHUB_WORKSPACE" node "$snapshot/scripts/test-tiers/impact-plan.mjs"; then
+            exit 0
+          fi
+          # Adoption or missing inputs never fabricate a narrowed decision.
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+          const { PR_BASE_SHA: base, PR_HEAD_SHA: head, GITHUB_SHA: checkout,
+            CI_IMPACT: impact, EXECUTION_MODE: mode, EXECUTION_LAYOUT: layout, EXECUTION_LANE: lane } = process.env;
+          let cases = [];
+          try {
+            const manifest = JSON.parse(execFileSync('git', ['show', `${base}:scripts/ci/web-test-tiers.json`],
+              {encoding:'utf8',timeout:10000,maxBuffer:4*1024*1024}));
+            cases = manifest.tests.filter(row => row.kind === 'browser' && row.tier !== 'NIGHTLY' && row.active !== false)
+              .map(row => JSON.stringify([row.file,row.project??'',row.config??'',row.name,row.occurrence??null])).sort();
+          } catch {}
+          mkdirSync('tmp/test-tiers', {recursive:true});
+          writeFileSync('tmp/test-tiers/impact-plan.json', JSON.stringify({version:1,policy:'impact-ci-s1',
+            mode:impact === 'off' ? 'off' : 'shadow', complete:false,
+            identity:{base_sha:base,head_sha:head,checkout_sha:checkout},execution:{mode,layout,lane},
+            browser_scope:'gated-full',selected_cases:cases,shards:[],would_have_skipped:{count:0,cases:[]},
+            fallback_reasons:['trusted shadow planner unavailable; execution unchanged; shard accounting unavailable']}, null, 2)+'\n');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, 'Impact CI S1: trusted shadow planner unavailable; gated-full fallback, zero planned skips; execution unchanged.\n');
+          JS
+      - name: Preserve Impact CI shadow evidence
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: impact-ci-shadow-plan
+          path: tmp/test-tiers/impact-plan.json
+          if-no-files-found: error
+          retention-days: 8
 
   runner-route:
     uses: ./.github/workflows/test-runner-route.yml
@@ -483,6 +551,12 @@ jobs:
           GO_TIMING: ${{ needs.go-timing.result }}
         run: |
           set -euo pipefail
+          if [ "${CI_IMPACT:-}" = off ]; then
+            test "$CI_LANE" = full
+            test "$TIER_LAYOUT" = full
+            test "$REUSE" != pull_request
+            test "$REUSE" != merge_group
+          fi
           test "$TIER_PLAN" = success
           if [ "$REUSE" = merge_group ]; then
             test "$GITHUB_EVENT_NAME" = push
@@ -555,6 +629,12 @@ jobs:
           GO_TIMING: ${{ needs.go-timing.result }}
         run: |
           set -euo pipefail
+          if [ "${CI_IMPACT:-}" = off ]; then
+            test "$CI_LANE" = full
+            test "$TIER_LAYOUT" = full
+            test "$REUSE" != pull_request
+            test "$REUSE" != merge_group
+          fi
           test "$TIER_PLAN" = success
           test "$REUSE" = pull_request
           test "$GITHUB_EVENT_NAME" = merge_group
@@ -887,6 +967,12 @@ jobs:
           WEB_SHARD: ${{ needs.web-shard.result }}
         run: |
           set -euo pipefail
+          if [ "${CI_IMPACT:-}" = off ]; then
+            test "$CI_LANE" = full
+            test "$TIER_LAYOUT" = full
+            test "$REUSE" != pull_request
+            test "$REUSE" != merge_group
+          fi
           test "$TIER_PLAN" = success
           if [ "$REUSE" = pull_request ]; then
             test "$GITHUB_EVENT_NAME" = merge_group
@@ -992,6 +1078,12 @@ jobs:
           CHECK_RESULT: ${{ needs.release-check-run.result }}
         run: |
           set -euo pipefail
+          if [ "${CI_IMPACT:-}" = off ]; then
+            test "$CI_LANE" = full
+            test "$TIER_LAYOUT" = full
+            test "$REUSE" != pull_request
+            test "$REUSE" != merge_group
+          fi
           test "$TIER_PLAN" = success
           if [ "$REUSE" = pull_request ]; then
             test "$GITHUB_EVENT_NAME" = merge_group
@@ -1130,6 +1222,12 @@ jobs:
           CHECK_RESULT: ${{ needs.e2e-run.result }}
         run: |
           set -euo pipefail
+          if [ "${CI_IMPACT:-}" = off ]; then
+            test "$CI_LANE" = full
+            test "$TIER_LAYOUT" = full
+            test "$REUSE" != pull_request
+            test "$REUSE" != merge_group
+          fi
           test "$TIER_PLAN" = success
           if [ "$REUSE" = pull_request ]; then
             test "$GITHUB_EVENT_NAME" = merge_group

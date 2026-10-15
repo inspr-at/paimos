@@ -46,7 +46,8 @@ type ReceiptAuthority struct {
 type FinalAuthority struct {
 	Grant             nativecontract.FinalDrainGrant
 	CurrentBinding    nativecontract.Binding
-	Sender            tenant.Principal // immutable original actor and its current ceiling
+	Sender            tenant.Principal // exact authenticated paired daemon, attributed sender within its runtime ceiling
+	OriginalActor     tenant.Principal // immutable original start actor, independently revalidated by FinalTx
 	Target            chat.NativeFinalTarget
 	ConversationRef   string
 	IssuedAt          time.Time

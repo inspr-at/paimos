@@ -235,8 +235,8 @@ func TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	final := waitNativeEvent(t, events, func(event AdapterEvent) bool { return event.Chat != nil && event.Chat.SessionUpdate == "final" })
-	if final.Chat.Content.Text != "sdk:person message" {
-		t.Fatal("streamed input did not reach the same SDK Query", final.Chat)
+	if final.Chat.Content.Text != "sdk:person message" || final.InputID != id {
+		t.Fatal("explicit final did not name the input consumed by the same SDK Query", final.Chat, final.InputID)
 	}
 	waitNativeEvent(t, events, func(event AdapterEvent) bool {
 		return event.InputID == id && event.Chat != nil && event.Chat.State == "idle"

@@ -882,7 +882,11 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNamedDenialResetRestoresRealSlots","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootFencesLegacyHostAdmission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootHoldsCountUntilVerifiedRelease","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestNativeRootsFenceWorkerAliasAndProjectOwnClaim","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestNativeSessionFinalAdmissionRechecksIdentityContextAndCapacity","tier":"ESSENTIAL"}
     ,
@@ -2543,6 +2547,10 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestMissingRegistrationUsesRecoveryBudgetBeforeEligibilityReads","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestNativeGrokVerificationQualifiedOnlyOnMacOSArm64","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestNativePilotCannotExpandPairedRuntimeAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestNativeRootOwnershipSurvivesPairingDrainAndRemoval","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestNixGuideBelongsToDeploymentOnly","tier":"GATED-FULL"}
     ,
@@ -7964,6 +7972,8 @@
     ,
     {"kind":"go","package":"internal/nativedrain","name":"TestNativeDrainRetainsBackgroundAndUnconfirmedWriter","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeintegration","name":"TestPilotDefaultsOffAndRejectsIncompleteQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExactOnceAndRuntimeFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExpiryRevocationAndRestart","tier":"ESSENTIAL"}
@@ -8088,6 +8098,8 @@
     ,
     {"kind":"go","package":"internal/nativesessions","name":"TestDisabledNativeRoutesAuthenticateWithoutStarting","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions","name":"TestQualifiedNativeRoutesBindCallerAndTargetBeforeDispatch","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/interaction","name":"TestControllerEpochFencesConcurrentAttach","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/interaction","name":"TestDeskDecisionExactEffectExpiryAndRevocation","tier":"ESSENTIAL"}
@@ -8098,6 +8110,8 @@
     ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestFinalDrainRevocationWinsBeforeFinalWrite","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
@@ -8105,6 +8119,8 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestCoordinatorClaimsReserveQuotaBudgets","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestPairedNativeStartAndRevalidationKeepSeparateAuthorities","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestStartClaimRevocationBarrier","tier":"ESSENTIAL"}
     ,
