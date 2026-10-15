@@ -18,7 +18,7 @@ func TestAdmissionStoreAuthenticatedApprovalsAndInvalidation(t *testing.T) {
 	// Risk: a caller manufactures approvals, old verdicts return after retarget
 	// or new heads, visual grants are bypassed, or holds lose precedence. Use
 	// real P1 claim/submit functions and the production admission API/store.
-	f := newFixture(t)
+	f := newReviewFixture(t)
 	ctx := t.Context()
 	p := f.pull()
 	p.Target = "main"
