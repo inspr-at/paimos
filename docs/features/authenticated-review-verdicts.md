@@ -18,7 +18,8 @@ credential is bound to that key and run, stored only as a digest, and consumed
 by one submission. Submission accepts `X-Aeon-Review-Credential` without a
 session cookie or ordinary bearer key. The final transaction rechecks the
 reviewer session, key, project permissions, range and target. Responses carrying
-credentials use `Cache-Control: no-store`.
+credentials use `Cache-Control: no-store`. Paired daemon principals retain their
+existing runtime ceiling and cannot use this separate reviewer credential path.
 
 For example, the dispatcher runs:
 

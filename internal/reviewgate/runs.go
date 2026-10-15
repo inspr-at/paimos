@@ -233,7 +233,11 @@ func CredentialPrincipalTx(ctx context.Context, tx pgx.Tx, id, token string, now
 	err := tx.QueryRow(ctx, `SELECT k.principal_id::text,k.id::text,k.scopes,coalesce(k.full_access,false),coalesce(k.created_by_principal_id::text,'')
  FROM review_runs r JOIN agent_keys k ON k.tenant_id=r.tenant_id AND k.id=r.credential_key_id AND k.principal_id=r.reviewer_principal_id
  WHERE r.id=$1 AND r.credential_digest=$2 AND r.expires_at>$3 AND r.submitted_at IS NULL
- AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>$3)`, id, hash[:], now).Scan(&p.ID, &p.KeyID, &p.Scopes, &p.FullAccess, &p.KeyCreatorID)
+ AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>$3)
+ AND EXISTS(SELECT 1 FROM principals p WHERE p.tenant_id=k.tenant_id AND p.id=k.principal_id AND p.kind='agent' AND p.status='active'
+ AND NOT coalesce(p.messaging_only,false)
+ AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]))
+ AND NOT EXISTS(SELECT 1 FROM agent_pairing_computers c WHERE c.tenant_id=k.tenant_id AND c.principal_id=k.principal_id)`, id, hash[:], now).Scan(&p.ID, &p.KeyID, &p.Scopes, &p.FullAccess, &p.KeyCreatorID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrRunCredential
 	}

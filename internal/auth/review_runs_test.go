@@ -307,6 +307,17 @@ func TestAuthenticatedReviewerRuns(t *testing.T) {
 	if json.Unmarshal(raw, &provenance) != nil || !provenance.ReviewLegacy || !provenance.VisualLegacy {
 		t.Fatal("existing rows were not flagged legacy_unverified")
 	}
+	// Changing a reviewer into a service principal cannot bypass normal
+	// authentication restrictions through the already claimed capability.
+	txdo(func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE principals SET roles=ARRAY['system']::text[] WHERE id=$1`, reviewer.PrincipalID)
+		return err
+	})
+	request("", expiringCap, "POST", "/api/review-runs/"+expiring.ID+"/verdict", inputVerdict(expiring), 401)
+	txdo(func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE principals SET roles='{}' WHERE id=$1`, reviewer.PrincipalID)
+		return err
+	})
 	// Live key revocation fails credential lookup, rather than consuming it.
 	txdo(func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=now() WHERE id=$1`, reviewer.ID)
