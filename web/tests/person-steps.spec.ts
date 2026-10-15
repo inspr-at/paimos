@@ -191,7 +191,7 @@ test('AEON-1318 definition editor saves named and assignee-first owners without 
     try {
       const page = await context.newPage(), data = fixtures()
       data.people.find(person => person.id === mia.id)!.name = mia.name
-      await mockWork(page, data)
+      await mockWork(page, data, { admin: true })
       await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: theme } }))
       const manual = { id: 'manual:release-reviewed', label: longLabel, fallback_owner_id: me.id }
       const baseline: DefinitionChecks = { done: [manual, { id: 'merged' }] }
