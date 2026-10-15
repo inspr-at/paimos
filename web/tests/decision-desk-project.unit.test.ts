@@ -70,6 +70,11 @@ describe('Decision Desk project identity', () => {
       expect(item.unavailable).toBeUndefined()
     }
     expect(result.items.find(item => item.id === 'a:history')!.decided).toBe(true)
+    // AEON-1339 fix round 7: both name their run; the ownership read also names the history run's work order (its ticket),
+    // and the canonical one leaves its work order to the desk's ticket read instead of reading the run here.
+    expect(result.items.find(item => item.id === 'a:history')).toMatchObject({ runId: 'run-history', workOrderId: 'work-order' })
+    expect(result.items.find(item => item.id === 'a:open')!.runId).toBe('run-open')
+    expect(result.items.find(item => item.id === 'a:open')!.workOrderId).toBeUndefined()
     expect(reads).toContain('/api/runs/run-history')
     expect(reads).not.toContain('/api/runs/run-open')
   })

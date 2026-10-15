@@ -1454,6 +1454,34 @@
     ,
     "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 960px light: diagonal slide, one-offs once per entry, no shift"
     ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 dark"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 light"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 dark"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 light"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 dark"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 light"
+    ,
+    "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+    ,
+    "browser:tests/status-time.spec.ts:a failed lifeline keeps its height, says so, and retries"
+    ,
+    "browser:tests/status-time.spec.ts:a project that does not mark releases stops at QA → merged and reads Created → done"
+    ,
+    "browser:tests/status-time.spec.ts:a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket"
+    ,
+    "browser:tests/status-time.spec.ts:motion › the live segment slides, past segments and the step bar only under the pointer, swatches never"
+    ,
+    "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker"
+    ,
+    "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)"
+    ,
+    "browser:tests/status-time.spec.ts:with reduced motion nothing slides, not even the live segment"
+    ,
     "browser:tests/stepup-desk.spec.ts:Approve on a request someone else settled first shows their outcome, not the pending memo"
     ,
     "browser:tests/stepup-desk.spec.ts:Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs"
@@ -6016,6 +6044,16 @@
     ,
     {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow bar and the Decided filter","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"panel and preview rows name the kind and project, and link back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -7976,7 +8014,7 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the switch notice follows the item shown before, through J/K, the jump list and Decide & next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the filled key chip follows the item shown before, through J/K, the jump list and Decide & next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"Decided rounds count only items arriving after the round starts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13732,6 +13770,42 @@
     ,
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 slides pause off-screen and in a hidden tab","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 960 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 960 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"Delivery › Tickets in Expert: six tiles and Created → live as the first trend","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"a failed lifeline keeps its height, says so, and retries","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"a project that does not mark releases stops at QA → merged and reads Created → done","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"an open ticket reopened after a minute lands at once, then shows the time so far read again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"motion › the live segment slides, past segments and the step bar only under the pointer, swatches never","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"with reduced motion nothing slides, not even the live segment","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Approve on a request someone else settled first shows their outcome, not the pending memo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15441,6 +15515,10 @@
     {"kind":"node","file":"tests/columns.test.ts","name":"wide tables stop Title near 960px and give the spare width to the text columns","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"widths clamp to each column’s bounds","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/control-stability-position.test.ts","name":"a nested scroll container still counts once","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/control-stability-position.test.ts","name":"a window scroll is not reported as control movement","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/crm.test.ts","name":"a customer is written back whole, with nothing extra","tier":"GATED-FULL"}
     ,
@@ -17338,7 +17416,11 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"names a changelog lesson with the entry title and no text chevron","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"preselects Once for an unavailable suggestion and disables Decide with the reason","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"names a lasting restriction beside a muted Decide when no stamp can be used","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"names a run approval by the ticket its run works on and the run, with a fallback while unresolved","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"starts an unavailable suggestion on the scope default and keeps Decide decidable, with the reason in plain words","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}
     ,
@@ -17410,43 +17492,27 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"warns when the approvals read reaches its 200-row cap","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps   native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps End native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps ArrowDown native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Home native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps ArrowLeft native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps PageDown native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps ArrowRight native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps PageUp native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps ArrowUp native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Shift+End native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps End native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Shift+Home native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Home native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Shift+PageDown native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps PageDown native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Shift+PageUp native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps PageUp native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Shift+Space native without changing the answer or memo","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+  native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Shift+arrows native and lets plain arrows choose; Escape closes","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+ArrowDown native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+ArrowLeft native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+ArrowRight native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+ArrowUp native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+End native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+Home native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+PageDown native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > keeps Shift+PageUp native without changing the answer or memo","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > retains choice navigation outside the summary and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk sheet scrolling > keeps Space native without changing the answer or memo","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -19647,6 +19713,22 @@
     {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"every status but In progress has a one-off on its marks, with the design timings and cheap properties only","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"reduced motion skips every one-off","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"bridges a day without a release, keeps a gap for no data yet, and says which is which","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"crosses doing and done again after a reopen, and moves inside a group cross no gate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"follows the project: five steps to live with releases, three steps and Created → done without","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"keeps every marker on its notch unless a cluster moved it, and never lets two overlap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"keeps every slot while loading, and names no trend without a value","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"merges a final gate with the final status and pins a live ticket to now","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"says \"usually\" only above 1.5 × p50 and 10 minutes over it, and attention only above p90","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"writes every duration in the one format of the design","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stepup-readiness.unit.test.ts","name":"Touch ID pairing readiness > requires a server pin and keeps unknown distinct from missing","tier":"ESSENTIAL"}
     ,

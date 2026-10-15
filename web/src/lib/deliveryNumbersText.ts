@@ -15,7 +15,7 @@ export interface MetricText { label: string; definition: string; target: string;
 
 const EN = {
   title: 'Delivery',
-  sub: 'How fast changes move from pull request to live, measured all the time against the Project Arion targets.',
+  sub: 'How fast tickets go from created to live and changes from pull request to live, measured all the time; changes against the Project Arion targets.',
   views: { numbers: 'Numbers', flow: 'Flow' }, viewsLabel: 'Delivery views',
   windowLabel: 'Chart window', days: 'days',
   level: { simple: 'Simple', expert: 'Expert' }, levelLabel: 'Level of detail',
@@ -23,6 +23,8 @@ const EN = {
   srcApp: ['GitHub App events', ' · live'], srcAppOff: ['GitHub App', ' · not receiving events'],
   srcBack: ['Backfill', ' from the GitHub API · back to {d}'], srcRun: ['Backfill running', ' · complete since {d}'], srcRunNone: ['Backfill running', ' · older days still loading'],
   srcNone: ['No backfill yet', ' · only events from now on'], srcTool: ['Reported by tooling', ' · merge rounds, releases'],
+  // AEON-1359: the ticket steps come from the event log.
+  srcHistory: ['Status history', ' · every status change since {d}'], srcHistoryNone: ['Status history', ' · every status change'],
   nodataT: 'No delivery data yet.', nodataB: 'PAIMOS starts counting with the first pull request the GitHub App sees in {repo}. History is read once from the GitHub API.',
   norepoT: 'No repository is linked yet.', norepoB: 'Someone who manages delivery for this project links its GitHub repository; history is then read once from the GitHub API.',
   errT: 'Delivery numbers could not be loaded.', errB: 'Nothing on this page is stale: no old numbers are shown in place of new ones.', retry: 'Retry',
@@ -56,9 +58,11 @@ const EN = {
   flowSub: 'What is moving right now, what it waits for and when it will be done. Replay any run, or race it against the target.',
   defsTitle: 'How these numbers are counted',
   defs: [
+    ['Steps of a ticket', `New ${TO} picked up: from created until work starts. In progress: all time in In progress, rework included. QA ${TO} merged: all time in QA. Done ${TO} live: from merge until a release with it is live. Live ${TO} accepted: from live until accepted.`],
+    ['Went back from QA', 'The review asked for changes, so the ticket moved from QA back to In progress. Each ticket counts once per window.'],
     ['First attempt vs. time to green', 'PR CI run measures one run’s first attempt. Time to first green counts from the first run to the first green one, with every re-run and fix in between.'],
     ['Wall time vs. queue delay', `Wall time is run start ${TO} run end. Waiting for a runner or a merge-queue slot happens before the start and is not in it; PR opened ${TO} merged includes all waiting.`],
-    ['p50 and p90', 'p50 is the median: half were faster. p90: nine in ten were faster; it shows the slow tail.'],
+    ['p50 and p90', 'p50 is the median: half were faster. p90: nine in ten were faster; it shows the slow tail. The steps’ medians do not add up to the total’s median.'],
     ['Partial and no data yet', 'Partial: the source covers only part of the window (backfill limit, a review status on only some PRs, reports that started recently). No data yet: nothing recorded, never shown as 0.'],
     ['Change vs. the window before', 'The last {w} days against the {w} days before. Within 10 % (3 points for shares) counts as about the same.'],
     ['Confirmed and suspect flakes', 'Confirmed needs the same case, the same commit, the same workflow revision and the same runner class. This release does not store that evidence, so the share is withheld, never shown as 0%. A later attempt of the same run that passes is a workflow rescue, listed beside the share and not inside it. Suspect: a run failed on a commit and the next commit passed on the very same tree. Suspects never enter the share.'],
@@ -91,7 +95,7 @@ export type DeliveryText = typeof EN
 
 const DE: DeliveryText = {
   title: 'Lieferung',
-  sub: 'Wie schnell Änderungen vom Pull Request bis live kommen, laufend gemessen an den Zielen von Project Arion.',
+  sub: 'Wie schnell Tickets vom Anlegen bis live kommen und Änderungen vom Pull Request bis live, laufend gemessen; Änderungen an den Zielen von Project Arion.',
   views: { numbers: 'Zahlen', flow: 'Ablauf' }, viewsLabel: 'Ansichten der Lieferung',
   windowLabel: 'Zeitraum der Diagramme', days: 'Tage',
   level: { simple: 'Einfach', expert: 'Experte' }, levelLabel: 'Detailgrad',
@@ -99,6 +103,7 @@ const DE: DeliveryText = {
   srcApp: ['GitHub-App-Ereignisse', ' · live'], srcAppOff: ['GitHub-App', ' · empfängt keine Ereignisse'],
   srcBack: ['Nachgeladen', ' aus der GitHub-API · bis {d}'], srcRun: ['Nachladen läuft', ' · vollständig seit {d}'], srcRunNone: ['Nachladen läuft', ' · ältere Tage laden noch'],
   srcNone: ['Noch nicht nachgeladen', ' · nur Ereignisse ab jetzt'], srcTool: ['Vom Tooling gemeldet', ' · Merge-Runden, Releases'],
+  srcHistory: ['Statushistorie', ' · jede Statusänderung seit {d}'], srcHistoryNone: ['Statushistorie', ' · jede Statusänderung'],
   nodataT: 'Noch keine Lieferdaten.', nodataB: 'PAIMOS zählt ab dem ersten Pull Request, den die GitHub-App in {repo} sieht. Die Historie wird einmal aus der GitHub-API nachgeladen.',
   norepoT: 'Noch kein Repository verknüpft.', norepoB: 'Wer die Lieferung dieses Projekts verwaltet, verknüpft sein GitHub-Repository; die Historie wird dann einmal aus der GitHub-API nachgeladen.',
   errT: 'Die Lieferzahlen konnten nicht geladen werden.', errB: 'Nichts hier ist veraltet: Alte Zahlen werden nicht anstelle neuer gezeigt.', retry: 'Erneut versuchen',
@@ -131,9 +136,11 @@ const DE: DeliveryText = {
   flowSub: 'Was gerade läuft, worauf es wartet und wann es fertig ist. Jeden Lauf wiedergeben oder gegen das Ziel antreten lassen.',
   defsTitle: 'So werden die Zahlen gezählt',
   defs: [
+    ['Schritte eines Tickets', `Neu ${TO} aufgenommen: vom Anlegen, bis die Arbeit beginnt. In Arbeit: alle Zeit in In Arbeit, Nacharbeit inklusive. QA ${TO} gemergt: alle Zeit in QA. Erledigt ${TO} live: vom Merge, bis ein Release damit live ist. Live ${TO} abgenommen: von live bis zur Abnahme.`],
+    ['Aus QA zurück', 'Das Review verlangte Änderungen, also ging das Ticket von QA zurück in In Arbeit. Jedes Ticket zählt einmal pro Zeitraum.'],
     ['Erster Versuch vs. Zeit bis Grün', 'PR-CI-Lauf misst den ersten Versuch eines Laufs. Zeit bis erstes Grün zählt vom ersten Lauf bis zum ersten grünen, mit allen Wiederholungen und Fixes dazwischen.'],
     ['Wanduhrzeit vs. Wartezeit', `Wanduhrzeit ist Start ${TO} Ende eines Laufs. Das Warten auf einen Runner oder einen Platz in der Merge-Queue liegt davor und zählt nicht; „PR geöffnet ${TO} gemergt“ enthält alles Warten.`],
-    ['p50 und p90', 'p50 ist der Median: Die Hälfte war schneller. p90: Neun von zehn waren schneller; das zeigt die langsamen Ausreißer.'],
+    ['p50 und p90', 'p50 ist der Median: Die Hälfte war schneller. p90: Neun von zehn waren schneller; das zeigt die langsamen Ausreißer. Die Mediane der Schritte ergeben zusammen nicht den Median des Ganzen.'],
     ['Teilweise und noch keine Daten', 'Teilweise: Die Quelle deckt nur einen Teil des Zeitraums ab (Nachlade-Grenze, Review-Status nur auf manchen PRs, Meldungen erst seit Kurzem). Noch keine Daten: nichts erfasst, nie als 0 gezeigt.'],
     ['Änderung ggü. dem Zeitraum davor', 'Die letzten {w} Tage gegen die {w} Tage davor. Weniger als 10 % (bei Anteilen 3 Pp.) gilt als etwa gleich.'],
     ['Bestätigte und verdächtige Flakes', 'Bestätigt verlangt denselben Fall, denselben Commit, dieselbe Workflow-Revision und dieselbe Runner-Klasse. Diese Fassung speichert diese Belege nicht, daher bleibt der Anteil aus, nie als 0 % gezeigt. Ein späterer Versuch desselben Laufs, der durchläuft, ist eine Workflow-Rettung und steht neben dem Anteil, nicht darin. Verdächtig: Ein Lauf scheiterte auf einem Commit und der nächste Commit lief auf demselben Tree durch. Verdächtige zählen nie im Anteil.'],
