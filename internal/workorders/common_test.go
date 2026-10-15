@@ -160,8 +160,8 @@ func TestBuildDeliveryBindingBounds(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, _, err = CreateDeferred(t.Context(), nil, tenant.Principal{}, in)
-		var failure interface{ HTTPStatus() int }
-		if !errors.As(err, &failure) || failure.HTTPStatus() != 400 {
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Status != 400 || !strings.Contains(failure.Message, "build_delivery requires") {
 			t.Fatalf("invalid binding reached store: %v", err)
 		}
 	}

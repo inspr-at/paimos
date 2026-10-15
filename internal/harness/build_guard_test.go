@@ -41,6 +41,9 @@ func TestTicketDeliveryContinuationAdmissionAndAudit(t *testing.T) {
 					return err
 				}
 				if source == "pull" {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,branch,head_sha,state,state_since,owner,observation,updated_at) VALUES($1,$2,$3,$4,$5,$6,repeat('c',40),'built','2000-01-01','coordinator','{"open":false}',clock_timestamp())`, f.person.TenantID, uid(), f.project, f.ticket, repository, branch); err != nil {
+						return err
+					}
 					_, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,$2,42,$3,clock_timestamp(),'webhook',clock_timestamp())`, f.person.TenantID, repository, branch)
 					return err
 				}
@@ -61,6 +64,9 @@ func TestTicketDeliveryContinuationAdmissionAndAudit(t *testing.T) {
 			})
 			managed["branch"] = branch
 			buildRefusal(t, f.call(f.agent, "POST", base, managed, ""), "built_unmerged")
+			orderOnly := buildRegistration(f, "ticket-only order binding")
+			orderOnly["ticket_node_id"], orderOnly["branch"] = managed["work_order_id"], branch
+			buildRefusal(t, f.call(f.agent, "POST", base, orderOnly, ""), "built_unmerged")
 			body := buildRegistration(f, "fix round")
 			body["branch"] = branch
 			accepted := f.call(f.agent, "POST", base, body, "")
@@ -78,7 +84,7 @@ func TestTicketDeliveryContinuationAdmissionAndAudit(t *testing.T) {
 				}
 			}
 			expect(t, f.call(f.agent, "POST", base, body, ""), 201)
-			for _, next := range []string{branch, "work/hts-2-other"} {
+			for _, next := range []any{branch, "work/hts-2-other", nil} {
 				blocked := buildRegistration(f, "overlapping round")
 				blocked["branch"] = next
 				buildRefusal(t, f.call(f.agent, "POST", base, blocked, ""), "active_builder")

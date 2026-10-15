@@ -419,7 +419,7 @@ func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	conflict.Reason, conflict.Delivery = "built_unmerged", &delivery
 	if result != nil && result.Candidate != nil && delivery.Repository != "" &&
 		(result.Candidate.Repository == "" || result.Candidate.Repository == delivery.Repository) &&
-		strings.HasPrefix(delivery.Branch, "work/") && result.Candidate.Branch == delivery.Branch {
+		strings.HasPrefix(delivery.Branch, "work/") && len(delivery.Branch) > 5 && result.Candidate.Branch == delivery.Branch {
 		result.Continuation, result.ticket = &delivery, ticket
 		return nil
 	}
