@@ -182,7 +182,10 @@ func PrepareRoutineWorkTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 			}
 			continue
 		}
-		ready := readiness(t)
+		ready, err := entryReadiness(ctx, tx, p, t)
+		if err != nil {
+			return out, err
+		}
 		if workqueue.State(t.State) == "blocked" || !ready.Queueable || t.Stale {
 			out.WaitReason = "work_not_eligible"
 			continue

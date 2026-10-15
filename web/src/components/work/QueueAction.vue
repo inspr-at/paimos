@@ -44,7 +44,7 @@ async function toggle() {
   const current = () => props.row.id === id && props.projectId === project && session.identity?.principal.id === actor && allowed.value
   const queued = entry.value
   try {
-    if (!queued && gaps.value.length) {
+    if (!queued) {
       const ready = await queue.checkReadiness(row)
       if (!current() || props.row.updated_at !== revision) return
       if (!ready.ready) { readyAnchor.value = button.value ?? null; return }
