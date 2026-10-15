@@ -88,6 +88,8 @@ const lefts = computed(() => { let x = 0; return widths.value.map(w => { const l
 const places = computed(() => view.value && width.value ? placeMarkers(view.value.markerModels, widths.value, width.value) : [])
 
 // ---------- Tips: one at a time, fixed on the body, opaque ----------
+// Both kinds keep this far from the window's sides; their CSS width limit reads the same value (--lf-tip-edge).
+const TIP_EDGE = 16
 interface Tip { kind: 'strip' | 'gate'; anchor: HTMLElement; lines: TipLine[]; pinned: boolean; at: number }
 const tip = shallowRef<Tip | null>(null)
 const tipEl = ref<HTMLElement>()
@@ -106,7 +108,7 @@ function position() {
   const rect = current.anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight
   let y = rect.top - h - 8
   if (y < 8) y = rect.bottom + 8
-  place.value = { x: Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, rect.left + rect.width / 2 - w / 2))), y: Math.round(y), placed: true }
+  place.value = { x: Math.round(Math.max(TIP_EDGE, Math.min(window.innerWidth - w - TIP_EDGE, rect.left + rect.width / 2 - w / 2))), y: Math.round(y), placed: true }
 }
 function hideTip() { tip.value = null; selected.value = -1 }
 function outside(event: PointerEvent) {
@@ -247,8 +249,8 @@ const KEPT_OPEN_TTL = 60_000
     </p>
     <span class="sr-only" aria-live="polite">{{ live }}</span>
     <Teleport to="body">
-      <div v-if="tip" ref="tipEl" popover="manual" class="lf-tip" :class="{ 'one-line': tip.kind === 'gate', pinned: tip.pinned }" role="tooltip"
-        :style="{ left: `${place.x}px`, top: `${place.y}px`, visibility: place.placed ? undefined : 'hidden' }">
+      <div v-if="tip" ref="tipEl" popover="manual" class="lf-tip" :class="{ marker: tip.kind === 'gate', pinned: tip.pinned }" role="tooltip"
+        :style="{ '--lf-tip-edge': `${TIP_EDGE}px`, left: `${place.x}px`, top: `${place.y}px`, visibility: place.placed ? undefined : 'hidden' }">
         <p v-for="(line, i) in tip.lines" :key="i" :class="line.tone">{{ line.text }}</p>
       </div>
     </Teleport>
@@ -307,10 +309,10 @@ const KEPT_OPEN_TTL = 60_000
 
 <style>
 /* The tips live on body: fixed and opaque, so they never move the page or let it show through (AEON-541, r2 fix 1). */
-.lf-tip { position: fixed; z-index: 80; inset: auto; width: max-content; max-width: min(320px, calc(100vw - 16px)); margin: 0; padding: 5px 10px; border: 0; overflow: visible; border-radius: 8px; background: var(--tip-solid); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent); pointer-events: none; }
+.lf-tip { position: fixed; z-index: 80; inset: auto; width: max-content; max-width: min(320px, calc(100vw - 2 * var(--lf-tip-edge))); margin: 0; padding: 5px 10px; border: 0; overflow: visible; border-radius: 8px; background: var(--tip-solid); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; overflow-wrap: break-word; box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent); pointer-events: none; }
 .lf-tip.pinned { pointer-events: auto; }
-/* A marker's tip is one line, never wrapped. */
-.lf-tip.one-line { max-width: calc(100vw - 16px); white-space: nowrap; }
+/* A marker's tip is one line when it fits the window; otherwise it wraps like a segment's, inside the same edges. */
+.lf-tip.marker { max-width: calc(100vw - 2 * var(--lf-tip-edge)); }
 .lf-tip p { margin: 0; color: inherit; }
 .lf-tip p + p { margin-top: 1px; }
 .lf-tip .title { font-weight: 650; }

@@ -267,6 +267,52 @@ test.describe('on a phone', () => {
     // The 44 px reach of the end markers grows inwards: nothing pushes the sheet sideways.
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
   })
+
+  // Tick's F1: a marker's tip was one unbroken line clamped to the window, so at 390 its end was cut off.
+  for (const theme of ['light', 'dark'] as const) {
+    test(`every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (${theme})`, async ({ page }, info) => {
+      await page.setViewportSize({ width: 390, height: 860 })
+      await setup(page, { theme })
+      for (const key of ['PHAROS-11', 'PHAROS-15']) {
+        await page.goto(`/p/PHAROS/${key}`)
+        await expect(markers(page)).toHaveCount(key === 'PHAROS-11' ? 3 : 5)
+        const names = await markers(page).evaluateAll(els => els.map(el => el.getAttribute('aria-label') ?? ''))
+        const guard = await controlStability(page, { strip: strip(page), markerRow: life(page).locator('.gates') })
+        const lines: number[] = []
+        for (const [k, name] of names.entries()) {
+          const m = await box(markers(page).nth(k))
+          await guard.check(async () => {
+            await page.touchscreen.tap(m.x + m.width / 2, m.y + m.height / 2)
+            await expect(tip(page)).toHaveText(name)
+            await expect(tip(page)).toBeVisible()
+          })
+          const fit = await tip(page).evaluate(el => {
+            const r = el.getBoundingClientRect(), s = getComputedStyle(el), text = document.createRange()
+            text.selectNodeContents(el)
+            const t = text.getBoundingClientRect()
+            return {
+              left: r.left, right: r.right, scroll: el.scrollWidth, client: el.clientWidth,
+              textLeft: t.left, textRight: t.right, inner: [r.left + parseFloat(s.paddingLeft), r.right - parseFloat(s.paddingRight)],
+              lines: Math.round((el.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom)) / parseFloat(s.lineHeight)),
+            }
+          })
+          expect(fit.scroll, name).toBeLessThanOrEqual(fit.client)
+          expect(fit.textLeft, name).toBeGreaterThanOrEqual(fit.inner[0] - 0.5)
+          expect(fit.textRight, name).toBeLessThanOrEqual(fit.inner[1] + 0.5)
+          expect(fit.left, name).toBeGreaterThanOrEqual(16)
+          expect(fit.right, name).toBeLessThanOrEqual(374)
+          expect(fit.lines, name).toBeGreaterThanOrEqual(1)
+          expect(fit.lines, name).toBeLessThanOrEqual(2)
+          lines.push(fit.lines)
+        }
+        guard.done()
+        // The short "created" tip stays on one line; PHAROS-15's final one is too long for the window and takes two.
+        expect(lines[0]).toBe(1)
+        if (key === 'PHAROS-15') expect(lines.at(-1)).toBe(2)
+        await page.screenshot({ path: info.outputPath(`aeon-1359/lifeline-${key}-marker-tip-390-${theme}.png`) })
+      }
+    })
+  }
 })
 
 // ---------- Delivery › Tickets ----------
@@ -412,7 +458,7 @@ for (const width of [390, 960, 1440] as const) {
         await expect(tip(page)).toBeVisible()
         await shot(`lifeline-${key}-tip`)
         await markers(page).last().hover()
-        await expect(tip(page)).toHaveClass(/one-line/)
+        await expect(tip(page)).toHaveClass(/\bmarker\b/)
         await shot(`lifeline-${key}-marker`)
       }
       await page.goto('/p/AEON/delivery')

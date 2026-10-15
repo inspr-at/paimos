@@ -1474,6 +1474,8 @@
     ,
     "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker"
     ,
+    "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)"
+    ,
     "browser:tests/status-time.spec.ts:with reduced motion nothing slides, not even the live segment"
     ,
     "browser:tests/stepup-desk.spec.ts:Approve on a request someone else settled first shows their outcome, not the pending memo"
@@ -13745,6 +13747,10 @@
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"motion › the live segment slides, past segments and the step bar only under the pointer, swatches never","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
