@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, type Fixtures } from './work-fixtures'
-import { mockDecisionDesk } from './decision-desk-fixtures'
 import { controlStability } from './control-stability'
 import type { PersonStep } from '../src/lib/personSteps'
 import type { EntryChecks } from '../src/lib/entryChecks'
@@ -15,7 +14,7 @@ async function installSteps(page: Page, data: Fixtures, mode: 'owner' | 'admin' 
   const manualNode = data.nodes.find(node => node.id === 'n-4')!, humanNode = data.nodes.find(node => node.id === 'n-5')!
   manualNode.state = 'qa'; manualNode.is_leaf = true; manualNode.title = 'Freigabe mit dokumentierter Wiederherstellung und nachvollziehbarer Prüfung'
   humanNode.state = 'done'; humanNode.is_leaf = true; humanNode.human_check = 'Die veröffentlichte Freigabe und die Wiederherstellung auf einem Telefon prüfen'
-  const state = { owner: mode === 'owner' ? { ...me } : { ...mia }, humanOwner: mode === 'owner' ? { ...me } : { ...mia }, checked: false, humanChecked: false, fail: false, holdResponse: undefined as Promise<void> | undefined, committed: 0, calls: [] as { path: string; body: Record<string, unknown> }[] }
+  const state = { owner: mode === 'owner' ? { ...me } : { ...mia }, humanOwner: mode === 'owner' ? { ...me } : { ...mia }, checked: false, humanChecked: false, fail: false, holdResponse: undefined as Promise<void> | undefined, committed: 0, projectionReads: 0, calls: [] as { path: string; body: Record<string, unknown> }[] }
   const mayTick = (owner = state.owner) => mode === 'owner' && owner.id === me.id || mode === 'admin'
   const steps = (): PersonStep[] => [
     { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', node_id: manualNode.id, check_id: 'manual:release-reviewed', label: longLabel, to_status: 'done', owner: state.owner, checked: state.checked, active: !state.checked, can_tick: mayTick(), revision: manualNode.updated_at, definition_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', definition_revision: definitionRevision, created_at: manualNode.created_at, ticket_key: manualNode.key, ticket_title: manualNode.title, project_id: manualNode.project },
@@ -27,7 +26,16 @@ async function installSteps(page: Page, data: Fixtures, mode: 'owner' | 'admin' 
     const request = route.request(), path = decodeURIComponent(new URL(request.url()).pathname), method = request.method()
     const node = [manualNode, humanNode].find(node => path.startsWith(`/api/nodes/${node.id}`))
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body })
+    // Only native person-step requests participate in this fixture's Desk.
+    if (method === 'GET') {
+      if (['/api/decision-desk', '/api/key-trim-proposals', '/api/stepup-requests'].includes(path)) return json({ items: [], has_more: false })
+      if (path === '/api/rules/doctrine/inbox') return json({ items: [], pending: 0 })
+      if (path === '/api/approvals') return json([])
+      if (path.endsWith('/messages')) return json({ items: [], next_after: 0 })
+      if (path === '/api/me/phone-approvals') return json({ error: 'Not found' }, 404)
+    }
     if (path === '/api/decision-desk/projection') {
+      state.projectionReads++
       const rows = steps().filter(step => step.active && step.owner.id === me.id).map(step => ({ id: step.id, kind: 'action_request', revision: 1, project_id: step.project_id, title: `Confirm: ${step.label}`, created_at: step.created_at, held: false, can_decide: step.can_tick, source: `/api/nodes/${step.node_id}/person-steps/${step.check_id}`, href: `/decision-desk?item=m:${step.id}`, person_step: step }))
       return json({ items: rows, counts: { open: rows.length, held: 0, chores: 0 }, has_more: false, as_of: definitionRevision })
     }
@@ -113,7 +121,7 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
     const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height: 1000 }, hasTouch: width === 390, reducedMotion: 'reduce' })
     try {
       const page = await context.newPage(), data = fixtures()
-      await mockDecisionDesk(page)
+      await mockWork(page, data)
       const { state, steps, manualNode } = await installSteps(page, data)
       await page.goto('/decision-desk')
       await page.evaluate(value => document.documentElement.dataset.theme = value, theme)
@@ -131,8 +139,12 @@ test('AEON-1318 inline Desk checks and reassignment settle in place', async ({ b
         await row.getByRole('button', { name: 'Mark checked' }).click()
         await expect.poll(() => state.committed).toBe(1)
         // The server has committed, but the action response is held. A normal
-        // polling/Refresh read must retain this pending row under the pointer.
-        await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+        // focus refresh must retain this pending row under the pointer.
+        await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+        const before = state.projectionReads
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+        await expect.poll(() => state.projectionReads).toBeGreaterThan(before)
+        await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
         await expect(open).toHaveText('Open1')
         await expect(row.getByRole('button', { name: 'Mark checked' })).toBeDisabled()
         release(); state.holdResponse = undefined
