@@ -669,9 +669,35 @@ for (const scheme of ['light', 'dark'] as const) {
     await outlineEvent(page, added, [], 'created')
     const pill = page.getByRole('button', { name: '1 update · Show' })
     await expect(pill).toBeVisible()
+    await pill.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)))
     expect(Math.abs((await row(page, 'PHAROS-10').boundingBox())!.y - before.y)).toBeLessThan(1)
+    // AEON-1358's phone work bar (r4b: the bar and its line take the full width)
+    // brings the first outline row down to this floating pill. The pill stays
+    // over the list's visible area and covers no row that sits fully above it.
     const pillBox = (await pill.boundingBox())!
-    expect(pillBox.y).toBeGreaterThan(before.y + before.height)
+    const list = page.locator('#main')
+    const listBox = (await list.boundingBox())!
+    expect(pillBox.y).toBeGreaterThanOrEqual(listBox.y)
+    expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(listBox.y + listBox.height + 1)
+    expect(pillBox.x).toBeGreaterThanOrEqual(listBox.x - 1)
+    expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(listBox.x + listBox.width + 1)
+    expect(await pill.evaluate(el => getComputedStyle(el.closest('.live-dock') ?? el).position)).toBe('fixed')
+    // Scrolling the list moves the row under the pill; the pill stays put, and
+    // the row is uncovered once it sits in the visible area above the pill.
+    let cleared = false
+    for (let step = 0; step < 8 && !cleared; step++) {
+      const box = (await row(page, 'PHAROS-10').boundingBox())!
+      const chip = (await pill.boundingBox())!
+      expect(Math.abs(chip.y - pillBox.y)).toBeLessThan(1)
+      if (box.y >= listBox.y && box.y + box.height <= chip.y + 0.5) {
+        expect(chip.y).toBeGreaterThanOrEqual(box.y + box.height - 0.5)
+        cleared = true
+        break
+      }
+      if (box.y + box.height <= listBox.y) break
+      await list.evaluate(el => { el.scrollTop += 80 })
+    }
+    expect(cleared).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await pill.click()
     await expect(row(page, added.key)).toBeVisible()
