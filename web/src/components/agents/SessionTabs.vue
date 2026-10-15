@@ -69,6 +69,6 @@ button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .icons .tab-label { display: none; }
 .icons button { padding-inline: 5px; }
 @media (max-width: 720px) { .session-tabs { height: 44px; padding: 0 2px; } button { min-width: 44px; height: 44px; padding-inline: 5px; gap: 4px; font-size: 12px; } .tab-label, .icons .tab-label { display: inline-grid; } }
-@media (max-width: 360px) { .tab-label { display: none; } }
+@media (max-width: 360px) { .tab-label, .icons .tab-label { display: none; } }
 @media (pointer: coarse) { .session-tabs { height: 44px; padding-block: 0; } button { height: 44px; min-width: 44px; } }
 </style>
