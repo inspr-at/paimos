@@ -51,7 +51,13 @@ type listEpic struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
 }
+type waitingPersonStep struct {
+	CheckID string                `json:"check_id"`
+	Label   string                `json:"label"`
+	Owner   workqueue.EntryPerson `json:"owner"`
+}
 type listItem struct {
+	PersonWaiting []waitingPersonStep `json:"person_waiting,omitempty"`
 	nodeJSON
 	KindSlug      string       `json:"kind_slug"`
 	KindLabel     string       `json:"kind_label"`
@@ -127,14 +133,16 @@ type listQuery struct {
 	PrioritiesNot []string `json:"priorities_not,omitempty"`
 	AssigneesNot  []string `json:"assignees_not,omitempty"`
 	// Tags, cost units and releases match by name or label, case-insensitively.
-	Tags           []string `json:"tags,omitempty"`
-	TagsNot        []string `json:"tags_not,omitempty"`
-	CostUnits      []string `json:"cost_units,omitempty"`
-	CostUnitsNot   []string `json:"cost_units_not,omitempty"`
-	Releases       []string `json:"releases,omitempty"`
-	ReleasesNot    []string `json:"releases_not,omitempty"`
-	HumanChecks    []string `json:"human_checks,omitempty"`
-	HumanChecksNot []string `json:"human_checks_not,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	TagsNot          []string `json:"tags_not,omitempty"`
+	CostUnits        []string `json:"cost_units,omitempty"`
+	CostUnitsNot     []string `json:"cost_units_not,omitempty"`
+	Releases         []string `json:"releases,omitempty"`
+	ReleasesNot      []string `json:"releases_not,omitempty"`
+	HumanChecks      []string `json:"human_checks,omitempty"`
+	HumanChecksNot   []string `json:"human_checks_not,omitempty"`
+	PersonWaiting    []string `json:"person_waiting,omitempty"`
+	PersonWaitingNot []string `json:"person_waiting_not,omitempty"`
 	// Epics match everything below a named Work or legacy Epic ancestor;
 	// "none" excludes rows with any such ancestor in the selected scope.
 	Epics    []string `json:"epics,omitempty"`
@@ -189,7 +197,7 @@ type treeQuery struct {
 const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"shape": true, "depth": true, "level": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
+var validFacet = map[string]bool{"shape": true, "depth": true, "level": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true, "person_waiting": true}
 
 // levelSQL is a work row's level from its shape s: "leaf", else the depth.
 const levelSQL = `CASE WHEN s.is_leaf THEN 'leaf' ELSE s.depth::text END`
@@ -385,6 +393,11 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		return out, err
 	}
 	if err = parseDateFilter(r, &out); err != nil {
+		return out, err
+	}
+	if out.PersonWaiting, out.PersonWaitingNot, err = negatedList(r, "person_waiting", func(value string) (string, bool) {
+		return value, value == "pending" || value == "mine" || value == "none"
+	}); err != nil {
 		return out, err
 	}
 	if out.FacetNames, err = queryList(r, "facets"); err != nil {
@@ -700,6 +713,9 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				return err
 			}
 			page.NextCursor = &cursor
+		}
+		if err := loadPersonWaiting(ctx, tx, page.Items); err != nil {
+			return err
 		}
 		if len(q.FacetNames) > 0 {
 			page.Facets = map[string]map[string]int{}
@@ -1130,6 +1146,23 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	}
 	add(q.HumanChecks, checkMatch)
 	add(q.HumanChecksNot, not(checkMatch))
+	personMatch := func(values []string) string {
+		terms := []string{}
+		for _, v := range values {
+			exists := `EXISTS(SELECT 1 FROM jsonb_array_elements(aeon_person_steps(n.id)) step WHERE step->>'active'='true'`
+			if v == "mine" {
+				exists += ` AND step->'owner'->>'id'=ANY(SELECT x::text FROM unnest(aeon_current_principals()) x)`
+			}
+			exists += `)`
+			if v == "none" {
+				exists = `NOT ` + exists
+			}
+			terms = append(terms, exists)
+		}
+		return "(" + strings.Join(terms, " OR ") + ")"
+	}
+	add(q.PersonWaiting, personMatch)
+	add(q.PersonWaitingNot, not(personMatch))
 	// Named parents retain their subtree membership. Parent absence needs only
 	// a set of descendant IDs, not one overlapping subtree per Work ancestor.
 	epicCTE := ""
@@ -1528,6 +1561,10 @@ func facetSQL(q listQuery) (string, []any) {
 		extra += `
     UNION ALL SELECT 'human_check',CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END FROM filtered f JOIN nodes n ON n.id=f.id`
 	}
+	if want("person_waiting") {
+		extra += ` UNION ALL SELECT 'person_waiting',CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(aeon_person_steps(f.id)) step WHERE step->>'active'='true') THEN 'pending' ELSE 'none' END FROM filtered f
+        UNION ALL SELECT 'person_waiting','mine' FROM filtered f WHERE EXISTS(SELECT 1 FROM jsonb_array_elements(aeon_person_steps(f.id)) step WHERE step->>'active'='true' AND step->'owner'->>'id'=ANY(SELECT x::text FROM unnest(aeon_current_principals()) x))`
+	}
 	if want("tag") {
 		extra += `
     UNION ALL SELECT 'tag',coalesce(nullif(btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}' ELSE t->>'name' END),''),'none')
@@ -1886,4 +1923,36 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func loadPersonWaiting(ctx context.Context, tx pgx.Tx, items []listItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, len(items))
+	byID := map[string]int{}
+	for i := range items {
+		ids[i] = items[i].ID
+		byID[ids[i]] = i
+	}
+	rows, err := tx.Query(ctx, `SELECT n.id::text,coalesce((SELECT jsonb_agg(jsonb_build_object('check_id',step->>'check_id','label',step->>'label','owner',step->'owner')) FROM jsonb_array_elements(aeon_person_steps(n.id)) step WHERE step->>'active'='true'),'[]'::jsonb) FROM nodes n WHERE n.id=ANY($1::uuid[])`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var raw []byte
+		if err = rows.Scan(&id, &raw); err != nil {
+			return err
+		}
+		if len(raw) > 65536 {
+			return badRequest("person-step list coverage exceeded")
+		}
+		i := byID[id]
+		if err = json.Unmarshal(raw, &items[i].PersonWaiting); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }

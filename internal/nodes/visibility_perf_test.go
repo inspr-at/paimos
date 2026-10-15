@@ -20,19 +20,10 @@ import (
 // TestList6000Performance, both for a workspace member (every project) and
 // for a guest bound to that project (an explicit project list).
 func TestList6000WithProjectVisibility(t *testing.T) {
-	member := newPrincipal(t, "visible-large-list")
-	project := kindBySlug(t, member, "project")
-	ticket := kindBySlug(t, member, "work")
-	root := mustNode(t, member, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
+	member, root := useList6000Fixture(t)
+	project, ticket := kindBySlug(t, member, "project"), kindBySlug(t, member, "work")
 	other := mustNode(t, member, `{"kind_id":"`+project.ID+`","title":"Other project"}`)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, member.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
-            SELECT $1::uuid,'VIS-'||g,$2::uuid,'Item '||g,
-                jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END),
-                CASE g%4 WHEN 0 THEN 'new' WHEN 1 THEN 'active' WHEN 2 THEN 'qa' ELSE 'done' END,
-                $3::uuid,g FROM generate_series(1,6000) AS g`, member.TenantID, ticket.ID, root.ID); err != nil {
-			return err
-		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,state,parent_id,position)
             SELECT $1::uuid,'OTH-'||g,$2::uuid,'Hidden '||g,'new',$3::uuid,g FROM generate_series(1,300) AS g`, member.TenantID, ticket.ID, other.ID)
 		return err

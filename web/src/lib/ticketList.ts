@@ -64,7 +64,7 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: false, none: '', advanced: true },
   { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '', advanced: true },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
-  { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
+  { key: 'human_check', title: 'Waiting for a person', facet: 'person_waiting', primary: false, none: 'Not waiting' },
   { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
   // Imported fields.release only. The ticket Release column reads native release membership.
@@ -236,7 +236,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
     cost: list(query.cost),
     release: list(query.release),
-    human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
+    human_check: list(query.human_check).filter(value => ['pending', 'mine', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
     ...(typeof query.hide_states === 'string' ? { hideStates: parseHiddenStates(query.hide_states) } : {}),
@@ -405,7 +405,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     epic: take('epic'),
     cost_unit: take('cost'),
     release: take('release'),
-    ...(take('human_check').length ? { human_check: take('human_check') } : {}),
+    ...(take('human_check').length ? { person_waiting: take('human_check') } : {}),
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
     hide_closed: !filters.showClosed,
@@ -443,7 +443,7 @@ function labelOptions(dimension: Dimension, counts: Record<string, number>, sele
 }
 export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selectedValues: string[] = [], names: Map<string, string> = new Map(), me?: string, context: OptionContext = {}): FacetOption[] {
   const selected = selectedValues.map(bare)
-  if (dimension === 'human_check') return [{ value: 'pending', label: 'Needs a human check', count: counts.pending ?? 0 }, { value: 'none', label: 'No human check', count: counts.none ?? 0 }]
+  if (dimension === 'human_check') return [{ value: 'pending', label: 'Waiting for a person', count: counts.pending ?? 0 }, { value: 'mine', label: 'Waiting for you', count: counts.mine ?? 0 }, { value: 'none', label: 'Not waiting', count: counts.none ?? 0 }]
   if (dimension === 'status') {
     const byKey = new Map<string, FacetOption>()
     const seen = new Set<string>()
@@ -495,7 +495,7 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
 export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
   if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
   switch (dimension) {
-    case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'
+    case 'human_check': return value === 'pending' ? 'Waiting for a person' : value === 'mine' ? 'Waiting for you' : 'Not waiting'
     case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
     case 'shape': return value === 'parent' ? 'Parents' : 'Leaves'

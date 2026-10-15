@@ -383,6 +383,7 @@ for (const width of [390, 1024, 1440]) test(`partial errors leave adjacent actio
   const failedRow = table(page).locator('#row-attention-2'), adjacentRow = table(page).locator('#row-attention-3')
   await chooseRows(page, [1, 2, 3])
   await adjacentRow.evaluate(el => el.scrollIntoView({ block: 'center' }))
+  expect(await table(page).evaluate(el => { const card = el.closest('.table-card')!; return card.scrollWidth - card.clientWidth }), 'default attention columns keep actions inside the card').toBeLessThanOrEqual(1)
   const guard = await controlStability(page, { failedRow, failedActions: failedRow.locator('.action-stack'), adjacentRow, adjacentActions: adjacentRow.locator('.action-stack') })
   await guard.check(async () => {
    await page.getByRole('toolbar', { name: 'Selected tickets' }).getByRole('button', { name: 'Apply 3' }).click()
@@ -396,7 +397,7 @@ for (const width of [390, 1024, 1440]) test(`partial errors leave adjacent actio
   for (const control of [failedRow.getByRole('button', { name: /^Apply to/ }), failedRow.getByRole('button', { name: 'Dismiss for AEON-11' }), undo]) {
    const hit = await control.evaluate(el => {
     const box = el.getBoundingClientRect()
-    return [0.25, 0.5, 0.75].map(fraction => { const target = document.elementFromPoint(box.x + box.width * fraction, box.y + box.height / 2); return { ok: !!target && el.contains(target), target: target?.outerHTML.slice(0, 250), x: box.x, y: box.y, width: box.width, height: box.height } })
+    return [0.05, 0.25, 0.5, 0.75, 0.95].map(fraction => { const target = document.elementFromPoint(box.x + box.width * fraction, box.y + box.height / 2); return { ok: !!target && el.contains(target), target: target?.outerHTML.slice(0, 250), x: box.x, y: box.y, width: box.width, height: box.height } })
    })
    expect(hit.every(sample => sample.ok), `adjacent actions receive pointer hits while the error is visible: ${JSON.stringify(hit)}`).toBe(true)
   }

@@ -116,14 +116,82 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  AND ($2='' OR $2='account_matrix' AND r.tenant_id=$3::uuid)
 )`
 
+// The person-step bound applies after activity and current-owner filtering.
+// Keep these cheap predicates aligned with aeon_person_steps: unrelated work
+// must not consume coverage or invoke the full, all-block step projection.
 const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT id,'routine_consent'::text,project_id,revision,title,created_at,NULL::timestamptz,false,href
  FROM jsonb_to_recordset($26::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,href text)
 ), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source
  FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
+), person_candidates AS MATERIALIZED (
+ SELECT n.id,n.project_id FROM nodes n
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ LEFT JOIN LATERAL (
+   SELECT d.id,d.updated_at,d.fields FROM nodes d JOIN node_kinds dk ON dk.tenant_id=d.tenant_id AND dk.id=d.kind_id
+   WHERE d.tenant_id=n.tenant_id AND dk.slug='definition' AND d.deleted_at IS NULL AND (d.parent_id=n.project_id OR d.parent_id IS NULL)
+   ORDER BY (d.parent_id IS NULL),d.id LIMIT 1
+ ) definition ON true
+ CROSS JOIN LATERAL (SELECT CASE WHEN replace(replace(lower(btrim(n.state)),' ','_'),'-','_')='qa'
+   THEN 'qa' ELSE aeon_work_status_category(n.state,k.field_schema) END AS current_status,
+   CASE WHEN coalesce(n.fields->>'assignee','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+   THEN (n.fields->>'assignee')::uuid END AS assignee) work
+ CROSS JOIN LATERAL (SELECT coalesce(array_agg(lower(CASE WHEN jsonb_typeof(x)='object' THEN x->>'name' ELSE x#>>'{}' END)),'{}') AS labels
+   FROM jsonb_array_elements(
+     CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END ||
+     CASE WHEN jsonb_typeof(n.fields->'labels')='array' THEN n.fields->'labels' ELSE '[]'::jsonb END) x) tags
+ WHERE n.tenant_id=$1 AND n.project_id=ANY($28::uuid[]) AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')
+ AND (n.human_check IS NOT NULL AND btrim(n.human_check)<>'' AND work.current_status='done'
+   AND EXISTS(SELECT 1 FROM (SELECT (SELECT e.after FROM events e
+     WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type='node.person_step_reassigned'
+     AND e.after->>'check_id'='human' ORDER BY e.id DESC LIMIT 1) AS assignment) human
+     WHERE aeon_person_step_owner(n.project_id,CASE WHEN human.assignment IS NOT NULL
+       THEN (human.assignment->>'owner_id')::uuid ELSE work.assignee END,NULL)=$4::uuid)
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(definition.fields->'checks')='object' THEN
+   coalesce(definition.fields->'checks'->CASE
+     WHEN work.current_status='qa' THEN 'done'
+     WHEN work.current_status IN ('in_progress','progress','active') THEN 'qa'
+     WHEN work.current_status IN ('new','backlog','open','blocked') THEN 'in_progress'
+   END,'[]'::jsonb) ELSE '[]'::jsonb END) rule
+   LEFT JOIN LATERAL (SELECT e.after FROM events e
+     WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type='node.person_step_reassigned'
+     AND e.after->>'check_id'=rule->>'id' AND e.after->>'definition_id'=definition.id::text
+     AND (e.after->>'definition_revision')::timestamptz=definition.updated_at ORDER BY e.id DESC LIMIT 1) assigned ON true
+   LEFT JOIN LATERAL (SELECT e.after FROM events e
+     WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type IN ('entry_check.ticked','node.entry_check_ticked')
+     AND e.after->>'check_id'=rule->>'id' AND e.after->>'definition_id'=definition.id::text
+     AND (e.after->>'definition_revision')::timestamptz=definition.updated_at ORDER BY e.id DESC LIMIT 1) mark ON true
+   WHERE rule->>'id' LIKE 'manual:%' AND NOT coalesce((mark.after->>'checked')::boolean,false)
+   AND CASE coalesce(rule->>'condition','all')
+     WHEN 'ui' THEN 'ui'=ANY(tags.labels) OR n.fields->>'area'='frontend'
+     WHEN 'code' THEN coalesce(n.fields->>'no_release_needed','false')<>'true' AND NOT ('docs'=ANY(tags.labels) OR 'content'=ANY(tags.labels))
+     WHEN 'blocked' THEN work.current_status='blocked'
+     WHEN 'release_notes' THEN coalesce(n.fields->>'hide_from_release_notes','false')<>'true'
+     WHEN 'releases' THEN coalesce(n.fields->>'no_release_needed','false')<>'true' AND EXISTS(
+       SELECT 1 FROM nodes r JOIN node_kinds rk ON rk.tenant_id=r.tenant_id AND rk.id=r.kind_id
+       WHERE r.tenant_id=n.tenant_id AND r.project_id=n.project_id AND r.deleted_at IS NULL AND rk.slug='release')
+     ELSE true END
+   AND (jsonb_array_length(coalesce(rule->'kinds','[]'))=0 OR rule->'kinds' ? k.slug)
+   AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(rule->'labels','[]')) v WHERE NOT lower(v)=ANY(tags.labels))
+   AND aeon_person_step_owner(n.project_id,CASE
+     WHEN assigned.after IS NOT NULL THEN (assigned.after->>'owner_id')::uuid
+     WHEN rule->>'owner_id' IS NOT NULL THEN (rule->>'owner_id')::uuid
+     ELSE work.assignee END,
+     CASE WHEN assigned.after IS NULL AND rule->>'owner_id' IS NULL THEN (rule->>'fallback_owner_id')::uuid END)=$4::uuid))
+ ORDER BY n.id LIMIT 1001
+), person_request_details AS MATERIALIZED (
+ SELECT n.project_id,step FROM person_candidates n
+ CROSS JOIN LATERAL jsonb_array_elements(aeon_person_steps(n.id)) step
+ WHERE step->>'active'='true' AND step->'owner'->>'id'=$4::uuid::text
+), person_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT (step->>'id')::uuid,'action_request'::text,project_id,
+ (extract(epoch FROM (step->>'revision')::timestamptz)*1000000)::bigint,
+ 'Confirm: '||(step->>'label'),(step->>'created_at')::timestamptz,NULL::timestamptz,false,
+ '/api/nodes/'||(step->>'node_id')||'/person-steps/'||(step->>'check_id')
+ FROM person_request_details
 ), visible AS MATERIALIZED (
- SELECT *,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
+ SELECT *,(SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
  CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
  SELECT * FROM questions WHERE project_id=ANY($5::uuid[]) AND (NOT $16 OR project_id=ANY($20::uuid[]))
@@ -138,6 +206,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  UNION ALL SELECT * FROM account_matrix WHERE $25
  UNION ALL SELECT * FROM routine_consents
  UNION ALL SELECT * FROM lessons
+ UNION ALL SELECT * FROM person_requests
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -156,7 +225,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  ORDER BY bucket,order_at,id,kind LIMIT $15
 )
 SELECT (SELECT at FROM clock),totals.open,totals.held,totals.chores,
- coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY bucket,order_at,id,kind) FROM page),'[]'::jsonb) FROM totals`
+ coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY bucket,order_at,id,kind) FROM page),'[]'::jsonb), (SELECT count(*) FROM person_candidates) FROM totals`
 
 // ReadTx serves the canonical HTTP projection for the future desk cutover.
 // NoticesTx reuses its source predicates for the pending phone integration.
@@ -174,7 +243,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}}
+	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}, "nodes.read": {}, "nodes.write": {}}
 	stepupPermissions := map[string][]string{}
 	for _, permission := range stepup.TargetPermissions() {
 		stepupPermissions[permission] = []string{}
@@ -217,6 +286,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		c = *after
 	}
 	var raw []byte
+	var personCandidates int
 	stepupVisibility, err := json.Marshal(stepupPermissions)
 	if err != nil {
 		return page, err
@@ -250,9 +320,12 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, projects["nodes.read"]).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw, &personCandidates)
 	if err != nil {
 		return page, err
+	}
+	if personCandidates > 1000 {
+		return page, ErrPersonStepCoverage
 	}
 	// The internal order fields also form the opaque keyset cursor.
 	var records []struct {
@@ -296,7 +369,12 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 				return page, err
 			}
 		case "action_request":
-			i.CanDecide = check("inbox.manage", i.ProjectID)
+			if i.PersonStep != nil {
+				i.CanDecide = i.PersonStep.Owner.ID == p.ID && check("nodes.write", i.ProjectID)
+				i.PersonStep.CanTick = i.CanDecide
+			} else {
+				i.CanDecide = check("inbox.manage", i.ProjectID)
+			}
 		case "doctrine":
 			i.CanDecide = check("rules.write", "")
 		case "tier_request":

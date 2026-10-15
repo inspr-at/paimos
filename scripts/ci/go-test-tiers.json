@@ -5716,6 +5716,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestNestedAndNodelessEventReferences","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestNodeInsertSkipsEmptyReleaseReconciliation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestNodeProjectRootFollowsMoves","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestNotificationFanoutOverflowAndIsolation","tier":"ESSENTIAL"}
@@ -5865,6 +5867,8 @@
     {"kind":"go","package":"internal/decisiondesk","name":"TestMixedOrderCountsFanInAndKeyset","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestNotificationPointersAndNormalBriefingItem","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestPersonStepProjectionIgnoresIrrelevantCoverage","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPreparedLessonProjectionVisibilityAndDecision","tier":"ESSENTIAL"}
     ,
@@ -8425,6 +8429,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestPatchRefusesDifferentKind","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPeopleSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestPersonStepsOwnershipRoutingAndAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlaceRanks","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

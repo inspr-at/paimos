@@ -232,9 +232,11 @@ onBeforeUnmount(() => { if (figureTip.owner.startsWith(COLUMN_TIP)) closeFigureT
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
 const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({
   ...def,
-  // Keep the designed text room after reserving the extra arrow reach (26px)
-  // and action reach (40px). Saved tablet layouts can scroll inside the card.
-  min: def.min + (def.id === 'title' && coarse.value && !phone.value ? 66 : 0),
+  // Only the default title renders the person-waiting slot (16px plus its 8px
+  // gap). Custom titles keep their own room, without clipping host actions.
+  // Also reserve the extra touch arrow/action reach (26px + 40px).
+  // Saved tablet layouts can scroll inside the card.
+  min: def.min + (def.id === 'title' ? (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0) : 0),
   field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host',
 })))
 const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
@@ -283,8 +285,15 @@ const dragWidths = ref<Partial<Record<string, number>>>({})
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
 // min and max, so a fixed column never collapses.
-const liveWidths = computed(() => ({ ...Object.fromEntries(Object.entries(autoWidths.value).filter(([id]) => !Number.isFinite(props.prefs?.widths?.[id]))), ...dragWidths.value }))
-const layoutWidth = computed(() => customised.value ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? definitions.value.get(id)!.min : liveWidths.value[id] ?? widthOf(id, props.prefs, definitions.value)), 0)) : width.value)
+// Content fits can give room back before a custom table needs to scroll.
+// Budget them at the card width first; only saved/dragged widths and column
+// minima may force a wider table. Keep the measured key whole, as in normal
+// lists. Actions keep their minimum while the other text columns give way.
+const fittingWidths = computed(() => layoutWidths(ids.value, width.value, props.prefs, {
+  key: Number.isFinite(props.prefs?.widths?.key) ? widthOf('key', props.prefs, definitions.value) : autoWidths.value.key,
+  ...dragWidths.value,
+}, definitions.value, autoWidths.value))
+const layoutWidth = computed(() => customised.value ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? definitions.value.get(id)!.min : fittingWidths.value[id] ?? widthOf(id, props.prefs, definitions.value)), 0)) : width.value)
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
@@ -939,6 +948,7 @@ defineExpose({
                   ><AppIcon name="chevron-right" :size="13" /></button>
                   <span v-else class="twisty-spacer" />
                 </span>
+                <span class="person-waiting" :data-tip="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('\n')" :aria-label="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('. ')"><AppIcon v-if="entry.row.person_waiting?.length" name="person-wait" :size="14" /></span>
                 <TicketTypeIcon :kind="entry.row.kind_slug" :level-name="workLabel(entry.row)" :level-icon="workIcon(entry.row)" :recurrence="entry.row.recurrence" />
                 <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
@@ -1082,6 +1092,7 @@ defineExpose({
 </template>
 
 <style scoped>
+.person-waiting { display: inline-grid; place-items: center; flex: 0 0 16px; inline-size: 16px; block-size: 16px; color: var(--ink-3); }
 .table-card {
   --row-h: 36px;
   position: relative; border-radius: var(--radius); border: 1px solid var(--glass-edge); overflow: clip;
@@ -1478,11 +1489,15 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-title { grid-area: title; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
+  /* Phones keep main's title line when nothing waits. A waiting mark and its
+     gap share that line with the kind icon instead of wrapping the title. */
+  .person-waiting:empty { display: none; }
+  .title-cell:has(.person-waiting svg) { --person-wait-room: 24px; }
   .title-cell .kind-glyph, .title-cell .ticket-type-icon { margin-top: 2px; }
   /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
      so a third line never shows through the reach below (AEON-140). */
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */
-  .title-link { flex: 1 1 calc(100% - 30px); white-space: normal; font-size: 14.5px; line-height: 1.35; }
+  .title-link { flex: 1 1 calc(100% - 30px - var(--person-wait-room, 0px)); white-space: normal; font-size: 14.5px; line-height: 1.35; }
   .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
@@ -1505,7 +1520,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .tree-row .tree { display: contents; }
   /* The arrow slot (44), type marker (22) and two gaps (16) share one line.
      Reserve all three so a long title cannot wrap under the arrow's reach. */
-  .tree-row .title-link { flex-basis: calc(100% - 82px); }
+  .tree-row .title-link { flex-basis: calc(100% - 82px - var(--person-wait-room, 0px)); }
   .epic-progress { flex-basis: 100%; margin-left: 22px; padding-left: 0; }
   .epic-progress .bar { display: block; width: 96px; }
   .ticket-row.top td { border-top: 0; }
