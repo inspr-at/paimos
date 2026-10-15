@@ -20,6 +20,7 @@ interface Reading {
   clipped: boolean
   neighbours: { name: string; box: Box }[]
   overflow: number
+  spill: string
   rootFont: number
 }
 
@@ -72,6 +73,29 @@ async function readHeader(page: Page): Promise<Reading> {
       clipped: title.scrollWidth > title.clientWidth + 1,
       neighbours,
       overflow: document.querySelector('.project-page')!.scrollWidth - document.querySelector('.project-page')!.clientWidth,
+      spill: (() => {
+        const pageEl = document.querySelector('.project-page')!
+        const edge = pageEl.getBoundingClientRect().right
+        const found: { over: number; name: string }[] = []
+        const label = (el: Element) => {
+          const id = el.id ? `#${el.id}` : ''
+          const classes = String(el.className).split(' ').filter(Boolean).slice(0, 3).join('.')
+          return `${el.tagName.toLowerCase()}${id}${classes ? `.${classes}` : ''}`
+        }
+        const see = (el: Element) => {
+          for (const child of el.children) {
+            const rect = child.getBoundingClientRect()
+            const style = getComputedStyle(child)
+            const boxOver = rect.width > 0 ? rect.right - edge : 0
+            const inkOver = style.overflowX === 'visible' && child.scrollWidth > child.clientWidth + 1 ? rect.left + child.scrollWidth - edge : 0
+            const over = Math.max(boxOver, inkOver)
+            if (over > 1) found.push({ over, name: `${label(child)}+${Math.round(over)}` })
+            see(child)
+          }
+        }
+        see(pageEl)
+        return found.sort((a, b) => b.over - a.over).slice(0, 6).map(item => item.name).join(' ')
+      })(),
       rootFont: parseFloat(getComputedStyle(document.documentElement).fontSize) || 16,
     }
   })
@@ -95,7 +119,7 @@ function assertName(reading: Reading) {
   for (const neighbour of reading.neighbours) {
     expect(overlaps(reading.title, neighbour.box), `name overlaps ${neighbour.name}`).toBe(false)
   }
-  expect(reading.overflow, 'header does not spill sideways').toBeLessThanOrEqual(1)
+  expect(reading.overflow, `header does not spill sideways${reading.spill ? ` (${reading.spill})` : ''}`).toBeLessThanOrEqual(1)
 }
 
 async function shot(page: Page, width: number, theme: string, density: string, panel: string) {
@@ -115,8 +139,9 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     data.preferences['list:display'] = { headerGraph: false }
     data.projects[0]!.title = NAME
     data.projects[0]!.description = DESCRIPTION
-    await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: 0, warning: false } } }))
     await mockWork(page, data)
+    // Registered after mockWork: its catch-all would otherwise answer /api/queue with 404.
+    await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: 0, warning: false } } }))
     const row = page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-11$/ }) })
     const close = page.getByRole('button', { name: 'Close ticket details', exact: true })
     for (const density of DENSITIES) {

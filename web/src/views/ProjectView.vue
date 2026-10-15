@@ -2041,7 +2041,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .title-line .key-badge, .state-chip { flex: none; margin-top: 4px; }
 .state-chip { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.description-measure { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.description-measure { position: absolute; width: 0; height: 0; overflow: clip; visibility: hidden; pointer-events: none; contain: paint; }
 .description-probe { width: min(320px, calc(100vw - 16px)); padding: 5px 10px; font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
 .description-block { position: relative; display: flex; flex-direction: column; min-width: 0; }
 .description-block:has(.description-full) { z-index: 6; }
@@ -2168,11 +2168,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-page[class*="header-"] .title-line { width: 100%; max-width: none; min-width: 0; }
 .project-page[class*="header-"] .title-line h1 { font-size: 22px; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; overflow-wrap: normal; -webkit-line-clamp: unset; -webkit-box-orient: unset; }
 .project-page[class*="header-"] .description-block { min-width: 0; }
-.project-page[class*="header-"] .description { margin: 0; max-width: none; min-width: 0; }
+.project-page[class*="header-"] .description { margin: 0; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .project-page[class*="header-"] .activity { flex: 0 0 auto; white-space: nowrap; align-self: flex-start; }
-.project-page[class*="header-"] .head-stats { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; max-width: 100%; }
+.project-page[class*="header-"] .head-stats { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 12px; max-width: 100%; }
 .project-page[class*="header-"] .stat-line { gap: 10px; }
-.project-page[class*="header-"] .head-work { width: min(300px, 100%); }
+/* The bar keeps its 300px slot, and grows when the scope and total need more, so the row wraps instead of painting past the page. */
+.project-page[class*="header-"] .head-work { width: max(300px, max-content); max-width: 100%; min-width: 0; }
 .project-page.header-comfortable .title-line h1 { font-size: 34px; }
 .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.55; }
 .project-page.header-comfortable .head-stats { display: grid; align-content: start; align-items: stretch; justify-items: stretch; gap: 8px; }
