@@ -197,11 +197,19 @@ func (m *Module) RunAdmission(ctx context.Context) {
 	if m.admissionGitHub == nil {
 		return
 	}
+	// Queue removal is the enforcement lane. A stalled status publisher must
+	// never delay it or spend the time budget needed to confirm a removal.
+	done := make(chan struct{})
+	go func() { defer close(done); m.runAdmissionLane(ctx, m.reconcileAdmissionQueue) }()
+	m.runAdmissionLane(ctx, m.reconcileAdmission)
+	<-done
+}
+func (m *Module) runAdmissionLane(ctx context.Context, run func(context.Context) error) {
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	for {
 		op, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		if err := m.reconcileAdmission(op); err != nil && ctx.Err() == nil {
+		if err := run(op); err != nil && ctx.Err() == nil {
 			slog.Warn("admission reconciliation incomplete")
 		}
 		cancel()
@@ -251,5 +259,5 @@ func (m *Module) reconcileAdmission(ctx context.Context) error {
 		}
 		cursor = shas[len(shas)-1]
 	}
-	return errors.Join(append(failures, m.reconcileAdmissionQueue(ctx))...)
+	return errors.Join(failures...)
 }

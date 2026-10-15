@@ -27,8 +27,8 @@ also retain synthetic SHAs; their partial membership can invalidate a group but
 cannot grant success. A fresh webhook supplies complete membership.
 
 Holds, approval replacement/revocation, retargets and scope changes invalidate
-live groups transactionally. The worker posts failure and dequeues denied
-entries. The admission response separates policy intent from GitHub evidence:
+live groups transactionally. Separate publisher and enforcement lanes post failure and dequeue denied
+entries, so a stalled status request cannot starve queue removal. The admission response separates policy intent from GitHub evidence:
 `enforcement=pending` remains until a fresh read confirms removal;
 `effective=true` requires both denied admission and confirmed removal. Posting a
 failure commit status alone never establishes effective enforcement. A confirmed

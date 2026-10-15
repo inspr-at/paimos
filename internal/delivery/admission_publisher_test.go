@@ -182,6 +182,15 @@ func TestAdmissionPublisherSerializesStalledSuccessAndCurrentFailure(t *testing.
 	go func() { done <- f.m.publishAdmission(t.Context(), head) }()
 	<-entered
 	f.hold(t, true)
+	// Enforcement has its own worker lane and completes while POST is stalled.
+	if err := f.m.admitQueueEntry(t.Context(), admissionQueueEntry{PR: 7, Head: head}); err != nil {
+		t.Fatal(err)
+	}
+	var held AdmissionSnapshot
+	f.call(t, f.person, "GET", "/api/delivery/"+f.item(t, 7).ID+"/admission", nil, 200, &held)
+	if !held.Effective {
+		t.Fatal("stalled publisher blocked queue enforcement")
+	}
 	restarted := New(f.d.App, f.m.config, nil, f.gh, nil).WithAdmission(f.writer)
 	if err := restarted.publishAdmission(t.Context(), head); err != nil {
 		t.Fatal(err)

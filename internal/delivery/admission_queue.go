@@ -55,6 +55,9 @@ type admissionQueueEntry struct {
 }
 
 func (m *Module) reconcileAdmissionQueue(ctx context.Context) error {
+	if err := m.seedAdmission(db.AllProjects(ctx, "admission queue seed")); err != nil {
+		return err
+	}
 	cursorPR := int64(0)
 	cursorHead := ""
 	var failures []error

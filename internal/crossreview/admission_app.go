@@ -15,7 +15,7 @@ import (
 // admissionInstallation reuses the configured App secret-path reader. OPS owns
 // installation grants. Tokens are repository-limited, short-lived, and revoked;
 // the callback and credentials are private to this package.
-func (g *GitHubApp) admissionInstallation(ctx context.Context, permissions map[string]string, fn func(string) error) error {
+func (g *GitHubApp) admissionInstallation(ctx context.Context, permissions map[string]string, fn func(context.Context, string) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
@@ -51,7 +51,7 @@ func (g *GitHubApp) admissionInstallation(ctx context.Context, permissions map[s
 			return ErrUnavailable
 		}
 	}
-	return fn(token.Token)
+	return fn(ctx, token.Token)
 }
 
 // AdmissionStatus can write only the single admission context. It never uses
@@ -65,7 +65,7 @@ func (g *GitHubApp) AdmissionStatus(ctx context.Context, sha string, state *stri
 	if state != nil {
 		level = "write"
 	}
-	err := g.admissionInstallation(ctx, map[string]string{"statuses": level, "metadata": "read"}, func(token string) error {
+	err := g.admissionInstallation(ctx, map[string]string{"statuses": level, "metadata": "read"}, func(ctx context.Context, token string) error {
 		if state != nil {
 			return g.request(ctx, token, "POST", "/repos/"+g.Config.Repository+"/statuses/"+sha, map[string]string{"state": *state, "context": "aeon/admission", "description": "PAIMOS admission: " + *state}, nil)
 		}
@@ -95,7 +95,7 @@ func (g *GitHubApp) AdmissionQueue(ctx context.Context, number int64, head strin
 	if number < 1 || number > 2147483647 || enqueue && !reviewgate.ValidSHA(head) {
 		return ErrUnavailable
 	}
-	return g.admissionInstallation(ctx, map[string]string{"pull_requests": "write", "contents": "write", "metadata": "read"}, func(token string) error {
+	return g.admissionInstallation(ctx, map[string]string{"pull_requests": "write", "contents": "write", "metadata": "read"}, func(ctx context.Context, token string) error {
 		owner, name, _ := strings.Cut(g.Config.Repository, "/")
 		var response struct {
 			Data struct {
@@ -155,7 +155,7 @@ func (g *GitHubApp) AdmissionQueueMembers(ctx context.Context, sha string) ([]Ad
 		return nil, ErrUnavailable
 	}
 	var out []AdmissionQueueMember
-	err := g.admissionInstallation(ctx, map[string]string{"pull_requests": "read", "contents": "read", "metadata": "read"}, func(token string) error {
+	err := g.admissionInstallation(ctx, map[string]string{"pull_requests": "read", "contents": "read", "metadata": "read"}, func(ctx context.Context, token string) error {
 		owner, name, _ := strings.Cut(g.Config.Repository, "/")
 		var response struct {
 			Data struct {
