@@ -206,6 +206,48 @@ test('a failed lifeline keeps its height, says so, and retries', async ({ page }
   await expect(markers(page)).toHaveCount(3)
 })
 
+test('an open ticket reopened after a minute lands at once, then shows the time so far read again', async ({ page }) => {
+  // The gate's M1: the kept answer never aged, so "so far" froze at the first read for the whole session.
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const start = Date.parse(GENERATED)
+  await page.clock.setFixedTime(start)
+  await setup(page)
+  // The second read of PHAROS-11 comes 12 hours later: the open visit and the ticket's life are 12 hours longer.
+  const later = { ...REWORK, generated_at: new Date(start + 12 * H * 1000).toISOString(), visits: REWORK.visits.map(visit => visit.ongoing ? { ...visit, seconds: visit.seconds + 12 * H } : visit) }
+  const held = gate()
+  let reads = 0
+  await page.route('**/api/nodes/n-1/lifeline', async route => {
+    reads++
+    if (reads === 1) return route.fulfill({ json: REWORK })
+    await held.wait
+    return route.fulfill({ json: later })
+  })
+  const open = async (key: string) => {
+    await page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) }).locator('.title-text').click()
+    await expect(page).toHaveURL(new RegExp(`/${key}$`))
+  }
+  const caption = life(page).locator('.life-cap')
+  await page.goto('/p/PHAROS/PHAROS-11')
+  await expect(caption).toHaveText(/1\.4d so far$/)
+  // Within the minute the kept answer stands and nothing is read again.
+  await open('PHAROS-14')
+  await page.clock.setFixedTime(start + 30_000)
+  await open('PHAROS-11')
+  await expect(caption).toHaveText(/1\.4d so far$/)
+  // After it, the kept answer still lands at once, without a skeleton, while the lifeline is read again behind it.
+  await open('PHAROS-14')
+  await page.clock.setFixedTime(start + 61_000)
+  await open('PHAROS-11')
+  await expect.poll(() => reads).toBe(2)
+  await expect(caption).toHaveText(/1\.4d so far$/)
+  await expect(life(page)).not.toHaveAttribute('aria-busy', 'true')
+  await expect(markers(page)).toHaveCount(3)
+  held.open()
+  await expect(caption).toHaveText(/1\.9d so far$/)
+  await expect(life(page).locator('.life-line')).toHaveText('New 2h · In progress 5.4h, usually 2.4h · QA 36m · In progress again 1.6d so far, usually 2.4h')
+  expect(reads).toBe(2)
+})
+
 test.describe('on a phone', () => {
   test.use({ hasTouch: true })
   test('a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker', async ({ page }) => {

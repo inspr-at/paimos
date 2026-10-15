@@ -29,20 +29,28 @@ const scope = useIdentityScope(), reads = scope.lane()
 const status = ref<'loading' | 'ready' | 'error' | 'forbidden'>('loading')
 const answer = shallowRef<Answer | null>(null)
 const keyOf = () => `${scope.owner.value}|${props.nodeId}|${props.revision}`
+// A finished lifeline holds until the revision changes. An open one's "so far" grows with time alone, so an answer
+// older than a minute lands at once and is read again behind it.
+const due = (known: Kept | undefined) => !!known && !!known.answer.lifeline.visits.at(-1)?.ongoing && Date.now() - known.at >= KEPT_OPEN_TTL
 function load() {
-  const node = props.nodeId, project = props.projectId, key = keyOf()
+  const node = props.nodeId, project = props.projectId, owner = scope.owner.value, key = keyOf()
   const known = kept.get(key)
-  if (known) { reads.cancel(); answer.value = known; status.value = 'ready'; return }
-  if (answer.value?.lifeline.node_id !== node) { answer.value = null; status.value = 'loading' }
-  void reads.run(({ after, signal }) => after(Promise.all([readLifeline(node, signal), readTypicals(scope.owner.value, project).catch(() => null)]), ([lifeline, timing]) => {
-    if (node !== props.nodeId) return
+  if (known) {
+    reads.cancel(); answer.value = known.answer; status.value = 'ready'
+    if (!due(known)) return
+  } else if (answer.value?.lifeline.node_id !== node) { answer.value = null; status.value = 'loading' }
+  void reads.run(({ after, signal }) => after(Promise.all([readLifeline(node, signal), readTypicals(owner, project).catch(() => null)]), ([lifeline, timing]) => {
+    if (node !== props.nodeId || owner !== scope.owner.value) return
     const next = { lifeline, timing }
-    kept.set(key, next)
+    kept.delete(key)
+    kept.set(key, { at: Date.now(), answer: next })
     if (kept.size > 24) kept.delete(kept.keys().next().value!)
     answer.value = next
     status.value = 'ready'
   }), { failed: error => {
-    if (node !== props.nodeId) return
+    if (node !== props.nodeId || owner !== scope.owner.value) return
+    // A failed read again never leaves the old figures standing in.
+    kept.delete(key)
     answer.value = null
     status.value = error instanceof APIError && error.status === 403 ? 'forbidden' : 'error'
   } })
@@ -185,15 +193,17 @@ const lineId = `${uid}-line`
 
 // Last, so the first run finds every ref it touches. Another ticket, revision or person closes the tip and reads again.
 watch(() => [props.nodeId, props.revision, scope.owner.value], () => { hideTip(); load() }, { immediate: true })
-// A permission reset drops the read in flight with the scope; ask again in the new one.
-onBeforeUnmount(onAccessRevalidate({ reset: () => { if (status.value === 'loading') load() } }))
+// A permission reset drops the read in flight with the scope, the one behind a kept answer too; ask again in the new one.
+onBeforeUnmount(onAccessRevalidate({ reset: () => { if (status.value === 'loading' || due(kept.get(keyOf()))) load() } }))
 </script>
 
 <script lang="ts">
 import type { TicketLifeline as Lifeline, TicketStatusTiming as Timing } from '../../lib/statusTiming'
 type Answer = { lifeline: Lifeline; timing: Timing | null }
+type Kept = { at: number; answer: Answer }
 // Answers kept per person, ticket and revision, across sheets: reopening a ticket lands at once.
-const kept = new Map<string, Answer>()
+const kept = new Map<string, Kept>()
+const KEPT_OPEN_TTL = 60_000
 </script>
 
 <template>

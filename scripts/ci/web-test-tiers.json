@@ -13740,6 +13740,8 @@
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"an open ticket reopened after a minute lands at once, then shows the time so far read again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"motion › the live segment slides, past segments and the step bar only under the pointer, swatches never","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
