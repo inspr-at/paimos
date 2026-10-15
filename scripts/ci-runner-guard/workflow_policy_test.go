@@ -404,6 +404,9 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
+	add("web-shard-list-unpublished", "ci.yml", "publish the planned web shard list", func(w map[string]any) {
+		delete(mapping(mapping(mapping(w["jobs"])["tier-plan"])["outputs"]), "web_shards")
+	})
 	add("web-units-omitted-from-aggregate", "ci.yml", "web must gate setup, every unit shard", func(w map[string]any) {
 		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-catalogue", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}
 	})
@@ -613,19 +616,20 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	expression := mapping(mapping(shard["strategy"])["matrix"])["shard"].(string)
 	expression = strings.TrimPrefix(expression, "${{ fromJSON(")
 	expression = strings.TrimSuffix(expression, ") }}")
-	for _, lane := range []string{"full", "spec-only"} {
+	// AEON-1389: the planner owns PR sizing. Other events retain all twelve
+	// shards even if a candidate publishes an empty, one-row or essential list.
+	full := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
+	for _, planned := range []string{"", "[1]", "[1,2,3,4]", "[1,2,3,4,5,6]", full} {
 		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
-			for _, mode := range []string{"full", "essential"} {
-				got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"github.event_name": event, "needs.tier-plan.outputs.lane": lane, "needs.tier-plan.outputs.mode": mode})
-				want := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
-				if event == "pull_request" && lane == "spec-only" {
-					want = "[1]"
-				} else if mode == "essential" && event == "pull_request" {
-					want = "[1, 2, 3, 4]"
-				}
-				if got != want {
-					t.Fatalf("%s/%s/%s matrix = %s, want %s", lane, event, mode, got, want)
-				}
+			got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{
+				"github.event_name": event, "needs.tier-plan.outputs.web_shards": planned,
+			})
+			want := full
+			if event == "pull_request" && planned != "" {
+				want = planned
+			}
+			if got != want {
+				t.Fatalf("%s/%s matrix = %s, want %s", event, planned, got, want)
 			}
 		}
 	}
