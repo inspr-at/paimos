@@ -562,6 +562,11 @@ async function openLink(anchor: HTMLElement | null) {
   if (matchMedia('(max-width: 600px)').matches) {
     anchor.scrollIntoView({ block: 'start', behavior: 'instant' })
     await new Promise(requestAnimationFrame)
+  } else {
+    // The shortcut can open it while Link sits below the fold: bring Link into view first, or the picker opens off-screen.
+    // A visible Link does not move.
+    const rect = anchor.getBoundingClientRect()
+    if (rect.top < 0 || rect.bottom > window.innerHeight) { anchor.scrollIntoView({ block: 'nearest', behavior: 'instant' }); await new Promise(requestAnimationFrame) }
   }
   linkAnchor.value = anchor
 }
