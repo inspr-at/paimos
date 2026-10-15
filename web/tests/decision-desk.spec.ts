@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expectStableControls } from './helpers/stable'
-import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
+import { mockDecisionDesk, refreshDesk, sampleQuestion } from './decision-desk-fixtures'
 import { mockRules } from './rules-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { defaultSchedule } from './capacity-fixtures'
@@ -50,7 +50,7 @@ async function openFirst(page: Page, waitForPermission = true) {
   await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
   await page.getByTestId('desk-row-q:question-1').click()
   await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', '/api/questions/question-1')
+  await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText('Which migration should carry the index?')
   if (waitForPermission) await expect(page.getByTestId('desk-decide')).toBeEnabled()
 }
 for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
@@ -62,22 +62,26 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const captureDir = testInfo.outputPath('desk-shots')
     await mkdir(captureDir, { recursive: true })
     await page.screenshot({ path: join(captureDir, `memo-${width}-${theme}-start.png`) })
-    const controls = {
+    // AEON-1339 (approved rev 11): the bar and the frame stay put through the whole round; the
+    // selectors stay put through every interaction within one memo, whose head grows downward.
+    const bar = {
       actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
-      stamps: page.getByTestId('desk-stamps'), selector: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0'),
       frame: page.getByTestId('desk-frame'),
     }
-    await expectStableControls({ controls, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+    await expectStableControls({ controls: { ...bar, stamps: page.getByTestId('desk-stamps'), selector: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'select another answer', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },
       { name: 'write custom answer', run: async () => { await page.getByTestId('choice-2').click(); await page.getByRole('textbox', { name: 'Something else' }).fill('Keep the query scoped to this tenant.'); await page.getByRole('textbox', { name: 'Something else' }).press('Enter'); await expect(page.getByTestId('desk-status')).toContainText('answer is set') } },
-      { name: 'server-enabled Always stamp and shortcut', run: async () => { await expect(page.getByTestId('stamp-always')).toBeEnabled(); await page.getByTestId('desk-paper').press('a'); await expect(page.getByTestId('stamp-always')).toHaveAttribute('aria-pressed', 'true') } },
-      { name: 'return to Once and leave unmapped Doctrine unavailable', run: async () => { await page.getByTestId('stamp-once').click(); await expect(page.getByTestId('stamp-doctrine')).toBeDisabled(); await page.getByTestId('desk-paper').press('d'); await expect(page.getByTestId('stamp-once')).toHaveAttribute('aria-pressed', 'true') } },
+      { name: 'server-enabled Always stamp and shortcut', run: async () => { await expect(page.getByTestId('stamp-always')).toBeEnabled(); await page.getByTestId('desk-paper').press('a'); await expect(page.getByTestId('stamp-always')).toHaveAttribute('aria-checked', 'true'); await expect(page.getByTestId('desk-stamp')).toHaveText('Always') } },
+      { name: 'return to Once and leave unmapped Doctrine unavailable', run: async () => { await page.getByTestId('stamp-once').click(); await expect(page.getByTestId('stamp-doctrine')).toBeDisabled(); await page.getByTestId('desk-paper').press('d'); await expect(page.getByTestId('stamp-once')).toHaveAttribute('aria-checked', 'true') } },
       { name: 'type and finish P.S.', run: async () => { await page.getByRole('textbox', { name: 'P.S. for the agent' }).fill('Keep the acceptance criteria.'); await page.getByRole('textbox', { name: 'P.S. for the agent' }).press('Enter') } },
-      { name: 'skip to next', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-announcement')).toContainText('Skipped for this round') } },
+    ] })
+    await expectStableControls({ controls: bar, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+      { name: 'skip to next', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-announcement')).toContainText('Skipped. It stays on the desk.') } },
       { name: 'page back', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
+      // Deciding the skipped item takes it out of the skipped set; the round moves on to the next open item.
       { name: 'decide and advance', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
-      { name: 'revisit decision', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-decide')).toContainText('Next') } },
-      { name: 'correct and restart delivery', run: async () => { await page.getByTestId('choice-0').click(); await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('3 of') } },
+      { name: 'revisit decision', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-decide')).toContainText('Next'); await expect(page.getByTestId('desk-skip')).toContainText('Change'); await expect(page.getByTestId('desk-stamp')).toHaveText('Once') } },
+      { name: 'change and restart delivery', run: async () => { await page.getByTestId('desk-paper').press('c'); await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toContainText('Replace & next'); await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('3 of') } },
       { name: 'return to attachments', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByRole('button', { name: 'Open Index plan' })).toBeVisible() } },
       { name: 'lightbox and return focus', run: async () => { const attachment = page.getByRole('button', { name: 'Open Index plan' }); await attachment.click(); await expect(page.getByRole('dialog', { name: 'Index plan, attachment 1 of 1' })).toBeVisible(); await page.getByRole('button', { name: 'Close viewer' }).click(); await expect(attachment).toBeFocused(); await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible() } },
     ] })
@@ -108,7 +112,7 @@ test('keyboard editing, pager, IME and browser shortcuts stay separate', async (
   await page.getByTestId('desk-pager').click(); await page.getByRole('listbox').press('ArrowDown'); await page.getByRole('listbox').press('Enter')
   await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(page.getByTestId('desk-pager')).toBeFocused()
   await page.getByTestId('desk-paper').press('Escape'); await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).not.toBeVisible()
-  await expect(page.getByTestId('desk-row-q:question-1')).toBeFocused()
+  await expect(page.getByTestId('desk-row-q:question-1').locator('.row-open')).toBeFocused()
 })
 
 test('failed and stale writes keep drafts and announce failure without advancing', async ({ page }) => {
@@ -139,8 +143,9 @@ test('denied reads keep the memo blocked and inaccessible context explicit', asy
   await expect(page.getByTestId('desk-decide')).toBeDisabled()
   await expect(page.getByTestId('desk-body')).toContainText('Ticket context is unavailable or inaccessible')
   await page.getByTestId('desk-close').click(); world.failQuestions = true
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await expect(page.getByText('Questions could not be read.', { exact: false })).toBeVisible()
+  await refreshDesk(page, world)
+  await expect(page.locator('.source-warnings')).toContainText('Some questions couldn’t be loaded')
+  await expect(page.locator('.source-warnings').getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
   expect(world.calls).toHaveLength(0)
 })
 
@@ -164,19 +169,18 @@ test('native approval facts preserve requester, risk, target and expiry without 
   Object.assign(world.approval, { agent_name: 'Harbor Clerk', scope: 'stage.deploy', resource_kind: 'tenant', resource_id: null, risk: 'high', target: { hosts: ['qa-fixture'], environment: 'staging', service: 'fixture-service', image: 'fixture-image', change: 'fixture-change' } })
   await page.goto('/agents?needs=a:approval-1')
   const facts = page.getByRole('region', { name: 'Permission request', exact: true })
-  await expect(facts).toContainText('Asked by Harbor Clerk')
-  await expect(facts).toContainText('High risk')
-  await expect(facts).toContainText('The whole workspace')
-  await expect(facts.locator('time')).toHaveAttribute('datetime', world.approval.expires_at)
+  // AEON-1339: What it runs shows only what runs; requester, risk and expiry stay in the head, once.
+  await expect(page.getByTestId('desk-from')).toHaveText('Harbor Clerk')
+  await expect(page.getByTestId('desk-line')).toContainText(/Harbor Clerk waits for this\. Expires in \d+ min · High risk\./)
+  await expect(facts).toContainText('Across the whole workspace')
+  await expect(facts).not.toContainText(/Asked by|risk|expires/i)
   await expect(facts.getByRole('region', { name: /^Deploy target:/ })).toContainText('qa-fixture · staging')
   await expect(facts).toContainText('fixture-image')
-  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', '/agents?needs=a:approval-1')
   await page.getByTestId('desk-close').click()
   world.approval.agent_name = null
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+  await refreshDesk(page, world)
   await page.getByTestId('desk-row-a:approval-1').click()
-  await expect(facts).toContainText('Asked by Agent agent-1')
+  await expect(page.getByTestId('desk-from')).toHaveText('Agent agent-1')
   expect(world.calls).toHaveLength(0)
 })
 
@@ -205,7 +209,8 @@ test('wide screens reuse server-advertised request-bound phone verification', as
 test('tier requests use the original process ownership and tier revision', async ({ page }) => {
   const world = await mockDecisionDesk(page, { tier: true })
   await page.goto('/decision-desk'); await page.getByTestId('desk-row-t:tier-request-1').click(); await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
-  await expect(page.getByTestId('stamp-always')).toBeDisabled()
+  // Stamps belong to questions; a tier request decides through its own protected flow.
+  await expect(page.getByTestId('desk-stamps')).toHaveCount(0)
   await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1)
   expect(world.calls[0]?.path).toBe('/api/projects/p-aeon/harness-sessions/tier-session/tier/requests/tier-request-1/decision')
   expect(world.calls[0]?.body).toMatchObject({ tier: 'default', expected_revision: 2, expected_ownership: world.ownership, decision: 'approve' })
@@ -241,7 +246,7 @@ test('short memos stay short before a round requires a scrolling body', async ({
   await openFirst(page)
   const before = await page.getByTestId('desk-frame').boundingBox()
   expect(before!.height).toBeLessThan(900)
-  expect(await page.getByTestId('desk-body').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+  expect(await page.getByTestId('desk-paper').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
   await expectStableControls({ controls: { actions: page.getByTestId('desk-actions').locator('.action-buttons'), stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-0') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [{ name: 'select without growing a short memo', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } }] })
 })
 
@@ -277,19 +282,19 @@ for (const [kind, id] of [['approval', 'a:approval-1'], ['tier', 't:tier-request
     const paper = page.getByTestId('desk-paper')
     await paper.focus()
     await expectStableControls({
-      controls: { actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-1') },
+      controls: { actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), selectors: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-1') },
       scrollAreas: { body: page.getByTestId('desk-body') },
       interactions: [{ name: 'Enter without a choice', run: async () => {
         await paper.press('Enter')
-        await expect(page.getByTestId('desk-answer-summary')).toHaveText('Choose an answer above.')
-        await expect(page.getByTestId('desk-status')).toHaveText('Choose an answer above.')
-        await expect(paper).toBeFocused()
+        // Never a silent no-op: the reason beside the button, focus on what is missing.
+        await expect(page.getByTestId('desk-status')).toHaveText(kind === 'approval' ? 'Choose Approve or Deny first.' : 'Choose what to do first.')
+        await expect(page.getByTestId('choice-0')).toBeFocused()
         await expect(page.getByTestId('desk-decide')).toBeDisabled()
         expect(world.calls).toHaveLength(0)
       } }, { name: 'choose after validation', run: async () => {
         await paper.press('2')
         await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true')
-        await expect(page.getByTestId('desk-answer-summary')).not.toContainText('Editing')
+        await expect(page.getByTestId('desk-status')).toHaveText('')
         await expect(page.getByTestId('desk-decide')).toBeEnabled()
         expect(world.calls).toHaveLength(0)
       } }],
@@ -304,9 +309,8 @@ test('memo Enter on an empty custom answer still focuses its answer field', asyn
   await expect(field).toBeFocused(); await field.press('Enter')
   await expect(page.getByTestId('desk-paper')).toBeFocused()
   await page.getByTestId('desk-paper').press('Enter')
-  await expect(page.getByTestId('desk-status')).toHaveText('Set an answer before deciding.')
+  await expect(page.getByTestId('desk-status')).toHaveText('Write your answer first, or pick an option.')
   await expect(field).toBeFocused()
-  await expect(page.getByTestId('desk-answer-summary')).toContainText('Editing')
   expect(world.calls).toHaveLength(0)
 })
 test('open questions remain visible behind 100 older answered questions', async ({ page }) => {
@@ -329,24 +333,23 @@ for (const width of [1440, 390]) test(`newest answered questions and fresh corre
   await expect(page.getByTestId('desk-pager')).toContainText('2 of 5')
   await expectStableControls({ controls: {
     actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
-    stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0'), frame: page.getByTestId('desk-frame'),
+    frame: page.getByTestId('desk-frame'),
   }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
     { name: 'record the old question as a new decision', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('3 of 5') } },
     { name: 'return to the fresh answer', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of 5') } },
     { name: 'refresh the fresh answer among more than 100 decisions', run: async () => {
-      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-      await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+      await refreshDesk(page, world)
       await expect(page.getByTestId('desk-status')).not.toContainText('source could not be confirmed')
       await expect(page.getByTestId('desk-decide')).toBeEnabled()
     } },
-    { name: 'choose a correction', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },
+    { name: 'choose a correction', run: async () => { await page.getByTestId('desk-skip').click(); await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },
     { name: 'record the correction without moving controls', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('3 of 5') } },
   ] })
   expect(world.calls.map(call => call.body.expected_revision)).toEqual([1, 2])
   expect(world.calls[1]!.body.option_id).toBe('full')
   await page.getByTestId('desk-close').click()
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await page.getByRole('button', { name: /^Decided/ }).click()
+  await refreshDesk(page, world)
+  await page.getByRole('radio', { name: /^Decided/ }).click()
   const rows = page.locator('.desk-list .desk-row')
   await expect(rows).toHaveCount(100)
   await expect(rows.first()).toHaveAttribute('data-testid', 'desk-row-q:question-1')
@@ -358,16 +361,16 @@ for (const width of [1440, 390]) test(`newest answered questions and fresh corre
   await expect(rows.last()).toHaveAttribute('data-testid', 'desk-row-q:history-000')
   expect(world.reads.some(path => path.includes('state=answered&order=desc') && path.includes('&cursor='))).toBe(true)
   await page.reload()
-  await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.getByRole('radio', { name: /^Decided/ }).click()
   await expect(rows.first()).toHaveAttribute('data-testid', 'desk-row-q:question-1')
-  await rows.first().click(); await page.getByTestId('choice-0').click()
+  await rows.first().click(); await page.getByTestId('desk-paper').press('c'); await page.getByTestId('choice-0').click()
   await expect(page.getByTestId('desk-decide')).toBeEnabled()
 })
 test('Load 100 more resumes the answered cursor without rereading loaded pages', async ({ page }) => {
   const world = await mockDecisionDesk(page)
   world.questions.push(...Array.from({ length: 205 }, (_, at) => ({ ...sampleQuestion(`answered-${at}`), state: 'answered' as const })))
   await page.goto('/decision-desk')
-  await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.getByRole('radio', { name: /^Decided/ }).click()
   const rows = page.locator('.desk-list .desk-row'), load = page.getByRole('button', { name: 'Load 100 more' })
   await expect(rows).toHaveCount(100)
   const answeredReads = () => world.reads.filter(path => path.includes('state=answered'))
@@ -381,8 +384,7 @@ test('Load 100 more resumes the answered cursor without rereading loaded pages',
   expect(new URL(answeredReads().at(-1)!, 'https://test.invalid').searchParams.get('cursor')).not.toBe(secondCursor)
   await expect(load).toHaveCount(0)
   const beforeRefresh = answeredReads().length
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+  await refreshDesk(page, world)
   await expect(rows).toHaveCount(205)
   expect(answeredReads()).toHaveLength(beforeRefresh + 3)
   expect(new URL(answeredReads()[beforeRefresh]!, 'https://test.invalid').searchParams.has('cursor')).toBe(false)
@@ -391,12 +393,12 @@ test('Load 100 more resumes the answered cursor without rereading loaded pages',
 test('failed continuation retains loaded decisions and retries the same cursor', async ({ page }) => {
   const world = await mockDecisionDesk(page)
   world.questions.push(...Array.from({ length: 105 }, (_, at) => ({ ...sampleQuestion(`answered-${at}`), state: 'answered' as const })))
-  await page.goto('/decision-desk'); await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.goto('/decision-desk'); await page.getByRole('radio', { name: /^Decided/ }).click()
   const rows = page.locator('.desk-list .desk-row'), load = page.getByRole('button', { name: 'Load 100 more' })
   await expect(rows).toHaveCount(100)
   world.failQuestions = true
   await load.click()
-  await expect(page.locator('.source-warnings')).toContainText('More questions could not be read')
+  await expect(page.locator('.source-warnings')).toContainText('More questions couldn’t be loaded')
   await expect(rows).toHaveCount(100)
   await expect(load).toBeEnabled()
   const failed = world.reads.at(-1)
@@ -411,14 +413,14 @@ test('loaded open and answered pages survive focus refresh with their memo still
   world.questions.push(...Array.from({ length: 100 }, (_, at) => sampleQuestion(`open-${at}`)))
   world.questions.push(...Array.from({ length: 101 }, (_, at) => ({ ...sampleQuestion(`answered-${at}`), state: 'answered' as const })))
   await page.goto('/decision-desk'); await page.getByRole('button', { name: 'Load 100 more' }).click()
-  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
   await page.getByTestId('desk-row-q:open-99').click()
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect.poll(() => world.reads.filter(path => path.includes('offset=100') && path.includes('state=open')).length).toBeGreaterThanOrEqual(2)
   await expect(page.getByTestId('desk-decide')).toBeEnabled(); await page.getByTestId('desk-close').click()
-  await page.getByRole('button', { name: /^Decided/ }).click(); await page.getByRole('button', { name: 'Load 100 more' }).click()
+  await page.getByRole('radio', { name: /^Decided/ }).click(); await page.getByRole('button', { name: 'Load 100 more' }).click()
   await expect(page.getByTestId('desk-row-q:answered-100')).toBeVisible()
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await refreshDesk(page, world)
   await expect(page.getByTestId('desk-row-q:answered-100')).toBeVisible()
 })
 test('narrow desktop approvals use the native API when server verification is unavailable', async ({ page }) => {
@@ -430,7 +432,7 @@ test('narrow desktop approvals use the native API when server verification is un
 })
 test('Decided rounds count only items arriving after the round starts', async ({ page }) => {
   const world = await mockDecisionDesk(page); world.questions[0]!.state = 'answered'
-  await page.goto('/decision-desk'); await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.goto('/decision-desk'); await page.getByRole('radio', { name: /^Decided/ }).click()
   await page.getByTestId('desk-row-q:question-1').click()
   await expect(page.locator('.arrival-hint')).toHaveCount(0)
   world.questions.push(sampleQuestion('actual-arrival'))
@@ -486,7 +488,9 @@ test('approval project names and doctrine PR context stay visible', async ({ pag
   await page.getByTestId('desk-row-a:approval-1').click(); await expect(page.getByTestId('desk-project-link')).toHaveText(/^Paimos Aeon/)
   await page.getByTestId('desk-close').click(); await page.getByTestId('desk-row-r:rule-1').click()
   await expect(page.getByRole('link', { name: 'Open the doctrine pull request' })).toHaveAttribute('href', 'https://github.com/inspr-at/inspr-modules/pull/123')
-  await expect(page.getByRole('region', { name: 'Unavailable stamps' })).toContainText('own protected decision flow')
+  // Rule changes decide through their own flow: no stamps, and no implementer note about it.
+  await expect(page.getByTestId('desk-stamps')).toHaveCount(0)
+  await expect(page.getByTestId('desk-paper')).not.toContainText('own protected decision flow')
 })
 
 
@@ -501,7 +505,7 @@ test('legacy links select the canonical merged question and one server count', a
   await page.getByTestId('desk-close').click()
   await expect(page.getByTestId('desk-row-m:action-1')).toHaveCount(0)
   await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toBeVisible()
-  await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 4' })).toBeVisible()
+  await expect(page.locator('.view-tabs').getByRole('radio', { name: 'Open 4' })).toBeVisible()
   expect(world.calls).toHaveLength(0)
 })
 
@@ -513,21 +517,25 @@ test('history remains reachable without a live session and revokes through the n
   await expect(page).toHaveURL(/decision-desk/)
   await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
   await expect(page.getByTestId('desk-revoke')).toBeEnabled()
-  await expectStableControls({ controls: { revoke: page.getByTestId('desk-revoke'), next: page.getByTestId('desk-decide'), pager: page.getByTestId('desk-pager') }, interactions: [
+  // A round of one has no pager (AEON-1339).
+  await expect(page.getByTestId('desk-pager')).toHaveCount(0)
+  await expectStableControls({ controls: { revoke: page.getByTestId('desk-revoke'), next: page.getByTestId('desk-decide'), close: page.getByTestId('desk-close') }, interactions: [
     { name: 'revoke the original grant', run: async () => { await page.getByTestId('desk-revoke').click(); await expect(page.getByTestId('desk-status')).toContainText('grant was revoked'); await expect(page.getByTestId('desk-revoke')).toBeDisabled() } },
   ] })
   expect(world.calls.map(call => call.path)).toEqual(['/api/approvals/approval-1/revoke'])
-  await expect(page.getByTestId('desk-decide')).toContainText('Next')
+  // Nothing else is open in this round of history, so the primary reads Close.
+  await expect(page.getByTestId('desk-decide')).toContainText('Close')
+  await expect(page.getByTestId('desk-line')).toContainText('Revoked')
 })
 
 test('projection access errors show an unknown count and an actionable Retry', async ({ page }) => {
   const world = await mockDecisionDesk(page); world.failProjection = true
   await page.goto('/decision-desk')
-  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeEnabled()
   await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, count unavailable', exact: true })).toBeVisible()
-  await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open ?' })).toBeVisible()
+  await expect(page.locator('.view-tabs').getByRole('radio', { name: 'Open ?' })).toBeVisible()
   world.failProjection = false
-  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByRole('button', { name: 'Try again', exact: true }).click()
   await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 5 open', exact: true })).toBeVisible()
   await expect(page.getByTestId('desk-row-q:question-1')).toBeVisible()
 })
@@ -542,7 +550,7 @@ test('an exact question link recovers its canonical row beyond the bulk detail b
   expect(world.reads).toContain('/api/questions/overflow-200')
   await page.getByTestId('desk-close').click()
   await expect(page.getByTestId('desk-row-q:overflow-200')).toHaveCount(1)
-  await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 206' })).toBeVisible()
+  await expect(page.locator('.view-tabs').getByRole('radio', { name: 'Open 206' })).toBeVisible()
   expect(world.calls).toHaveLength(0)
 })
 
@@ -555,8 +563,11 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expect(page.getByTestId('desk-row-q:question-1')).toBeVisible()
     const dir = testInfo.outputPath('aeon-569-desk-cutover'); await mkdir(dir, { recursive: true })
     await page.screenshot({ path: join(dir, `overview-${width}-${theme}.png`) })
-    await expectStableControls({ controls: { refresh: page.getByRole('button', { name: 'Refresh', exact: true }), review: page.getByRole('button', { name: 'One at a time' }), open: page.locator('.view-tabs button').nth(0), decided: page.locator('.view-tabs button').nth(1), header: page.locator('.places') }, scrollAreas: { view: page.locator('.decision-desk') }, interactions: [
-      { name: 'switch to history', run: async () => { await page.locator('.view-tabs button').nth(1).click(); await expect(page.getByRole('combobox', { name: 'Filter decided by stamp' })).toBeVisible() } },
+    // AEON-1339: no tenant eyebrow, intro, Agents or Refresh links; the head keeps one action.
+    await expect(page.locator('.desk-page')).not.toContainText(/Handover-question import|Sign-ins and account setup|One topic at a time/)
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0)
+    await expectStableControls({ controls: { open: page.locator('.view-tabs button').nth(0), decided: page.locator('.view-tabs button').nth(1), header: page.locator('.places'), title: page.getByRole('heading', { level: 1, name: 'Decision Desk' }) }, scrollAreas: { view: page.locator('.decision-desk') }, interactions: [
+      { name: 'switch to history', run: async () => { await page.locator('.view-tabs button').nth(1).click(); await expect(page.getByRole('radiogroup', { name: 'Stamp' })).toBeVisible() } },
       { name: 'return to open', run: async () => { await page.locator('.view-tabs button').nth(0).click(); await expect(page.getByTestId('desk-row-q:question-1')).toBeVisible() } },
     ] })
     const account = { id: 'signin-account', account_key: 'fixture-account', harness: 'codex', daemon_id: 'fixture-host', host_label: 'Arbeitsrechner für mandantenspezifische Qualitätsprüfungen', label: 'Qualitätsprüfung', registered_by_principal_id: 'person', state: 'unavailable', last_probe_ok: false, created_at: new Date().toISOString() }

@@ -3,7 +3,7 @@
 import { acceptLearning, dismissLearning, draftLearning, getKnowledge, listLearnings, type MethodLearning } from './knowledge'
 import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
 import { approveStepup, declineStepup, readStepups, stepupAnswer, stepupDelivery, stepupTitle, type StepupDevices, type StepupRequest } from './stepup'
-import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
+import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, lookupNodes, type WorkNode } from './api'
 import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession, type AgentRun } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
 import { getDoctrineInbox, submitDoctrineInbox, dismissDoctrineInbox, type DoctrineInboxItem } from './doctrine'
@@ -11,7 +11,7 @@ import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
 import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
 import { readTierResponse, decideTierResponse } from './agentRows'
-import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect } from './decisionDesk'
+import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskTicket } from './decisionDesk'
 
 export interface QuestionInput {
   request_id: string; question: string; context?: string; findings?: string; options: DeskChoice[]
@@ -100,6 +100,12 @@ export function questionItem(question: Question, projectName: string): DeskItem 
     outcomes: question.outcomes?.map(row => ({ ...row })), doctrine: question.input.doctrine ? { ...question.input.doctrine } : undefined,
     outcomeEffects: question.pending.filter(effect => effect.revision === question.revision && effect.kind === 'outcome').map(effect => ({ ...effect, effect_data: effect.effect_data ? { ...effect.effect_data, review_required: effect.effect_data.review_required?.map(review => ({ ...review })) } : undefined })),
     fromRecord: reuse ? `${reuse.label} · revision ${reuse.revision}` : undefined,
+    askers: question.askers.slice(0, 20).map(asker => ({ principalId: asker.principal_id, sessionId: asker.session_id })),
+    meanwhileKind: question.input.meanwhile, suggested: question.suggested_outcome,
+    suggestedBy: question.suggestion_reason === 'agent_suggestion' ? 'agent' : question.suggestion_reason === 'ticket_default' ? 'ticket' : 'project',
+    decidedAt: question.answer?.created_at, deliverAfter: question.answer?.deliver_after ?? pending[0]?.deliver_after,
+    deliveryState: pending.some(effect => effect.state === 'failed' || effect.receipt_state === 'failed') ? 'failed'
+      : pending.some(effect => effect.state === 'pending') ? 'pending' : pending.some(effect => effect.state === 'delivered') ? 'delivered' : undefined,
   }
 }
 function base(id: string, kind: DeskItem['kind'], title: string, context: string, choices: DeskChoice[]): DeskItem {
@@ -110,20 +116,20 @@ export function approvalItem(approval: Approval, projectName = approval.resource
   return { ...base(`a:${approval.id}`, 'approval', `Allow ${approval.scope}?`, approval.rationale, [
     { id: 'approved', title: 'Approve', description: 'Grant this request through the approvals API.', answer: 'Approved' },
     { id: 'denied', title: 'Deny', description: 'Keep the permission unchanged.', answer: 'Denied' },
-  ]), approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
+  ]), askers: [{ principalId: approval.agent_principal_id, name: approval.agent_name?.trim() || undefined }], approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, runId: approval.resource_kind === 'run' ? approval.resource_id || undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
 }
 export function actionItem(message: ProjectMessage, projectId: string, projectName: string): DeskItem {
-  return { ...base(`m:${message.id}`, 'action', 'An agent needs your steer', message.body, [
+  return { ...base(`m:${message.id}`, 'action', 'Action request', message.body, [
     { id: 'reply', title: 'Reply to the agent', description: 'Steer the work with an inbox reply.', answer: '', field: true },
     { id: 'resolved', title: 'I did it myself', description: 'Resolve the request.', answer: 'Resolved' },
     { id: 'dismissed', title: 'Not needed', description: 'Dismiss the request.', answer: 'Dismissed' },
-  ]), projectId, projectName, createdAt: message.created_at ?? '', destination: 'Reply to the original request, or its native Resolve / Dismiss action.' }
+  ]), projectId, projectName, createdAt: message.created_at ?? '', askers: [{ principalId: message.sender_principal_id, sessionId: message.sender_session_id ?? undefined, name: message.sender_label?.trim() || undefined }], destination: 'Reply to the original request, or its native Resolve / Dismiss action.' }
 }
 export function ruleItem(rule: DoctrineInboxItem): DeskItem {
   return { ...base(`r:${rule.id}`, 'rule', rule.label, rule.why ?? '', [
     { id: 'propose', title: 'Propose the change', description: 'Open the existing doctrine pull request flow.', answer: 'Propose the change', unavailable: rule.outdated ? 'The rule changed since this was proposed. Edit against the current rule first.' : undefined },
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
-  ]), rule: { ...rule }, prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
+  ]), askers: rule.proposer ? [{ principalId: '', name: rule.proposer }] : undefined, rule: { ...rule }, prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
 /** The entry and its Changelog. The house separator is a word divider; a text chevron is an icon. */
 export function lessonChangelogLabel(title: string | undefined): string {
@@ -380,7 +386,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     const canonicalProjects = new Map((projection?.items ?? []).filter(row => row.kind === 'approval' && row.project_id).map(row => [row.id, row.project_id!]))
     const resources = new Map(approvalsResult.value.slice(0, 200).filter(row => row.resource_kind !== 'tenant' && row.resource_id && !canonicalProjects.has(row.id))
       .map(row => [`${row.resource_kind}:${row.resource_id}`, row]))
-    const owners = new Map<string, { id: string; title: string }>()
+    const owners = new Map<string, { id: string; title: string }>(), workOrders = new Map<string, string>()
     if (resources.size > 30) warnings.push('Project ownership for approval history is limited to 30 resources in this read.')
     const entries = [...resources.entries()].slice(0, 30)
     for (let at = 0; at < entries.length; at += 5) await Promise.all(entries.slice(at, at + 5).map(async ([resource, approval]) => {
@@ -390,6 +396,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
           const run = await adapters.approvalRun?.(id)
           if (!run || run.id !== id) return
           id = run.work_order_id
+          if (id) workOrders.set(resource, id)
         }
         for (let depth = 0; id && depth < 8; depth++) {
           const project = projects.find(project => project.id === id)
@@ -401,7 +408,8 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     for (const approval of approvalsResult.value.slice(0, 200)) {
       const owner = owners.get(`${approval.resource_kind}:${approval.resource_id}`)
       const projectId = canonicalProjects.get(approval.id) ?? owner?.id ?? ''
-      sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, projectId ? name(projectId) : owner?.title), projectId })
+      const workOrderId = workOrders.get(`${approval.resource_kind}:${approval.resource_id}`)
+      sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, projectId ? name(projectId) : owner?.title), projectId, ...(workOrderId ? { workOrderId } : {}) })
     }
   } else warnings.push('Approvals could not be read.')
   if (rulesResult.status === 'fulfilled') {
@@ -571,6 +579,7 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
       if (reply.status === 'held') throw new Error('The reply remains held. Delivery was not confirmed.')
       if (reply.status === 'pending' && (!reply.question_id || !reply.answer_revision || !reply.deliver_after)) throw new Error('The pending reply response is incomplete. Refresh before trying again.')
       return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason,
+        deliveryState: reply.status === 'pending' ? 'pending' : 'delivered', deliverAfter: reply.deliver_after,
         delivery: reply.status === 'pending' ? `Reply recorded; delivery scheduled for ${deliveryTime(reply.deliver_after)}.` : 'Reply accepted by the inbox; receiver confirmation is pending.' }
     } else await resolveMessage(item.projectId, source.id, draft.optionId === 'resolved' ? 'resolved' : 'dismissed', draft.reason.trim())
   } else if (item.kind === 'rule') {
@@ -582,6 +591,23 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
   return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason, delivery: 'Recorded by the native workflow.' }
 }
 export interface DeskContext { ticket?: WorkNode; attachments: Attachment[]; related: WorkNode[]; outcomes: OutcomeEvent[]; warnings: string[] }
+const NODE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, TICKET_REF = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/
+/** The tickets list rows are about, resolved as the memo resolves its own (AEON-1339): a key through the
+ * key lookup, an id through the bounded id lookup (it takes UUIDs only), any other id read on its own.
+ * Found tickets are keyed by id, and keys as `key:<KEY>`; a failed read leaves its rows without a chip. */
+export async function readDeskTickets(rows: readonly Pick<DeskItem, 'ticketId' | 'ticketKey'>[], known: ReadonlyMap<string, DeskTicket>): Promise<Map<string, DeskTicket>> {
+  const ids = [...new Set(rows.map(row => row.ticketId).filter((id): id is string => !!id && TICKET_REF.test(id) && !known.has(id)))]
+  const keys = [...new Set(rows.filter(row => !row.ticketId && row.ticketKey).map(row => row.ticketKey!).filter(key => TICKET_REF.test(key) && !known.has(`key:${key}`)))].slice(0, 100)
+  const uuids = ids.filter(id => NODE_UUID.test(id)).slice(0, 100), others = ids.filter(id => !NODE_UUID.test(id)).slice(0, 20)
+  const found = new Map<string, DeskTicket>()
+  if (!uuids.length && !keys.length && !others.length) return found
+  const [byId, byKey, ...single] = await Promise.allSettled([uuids.length ? lookupNodes(uuids) : Promise.resolve({ items: [] }), keys.length ? lookupNodeKeys(keys) : Promise.resolve({ items: [] }), ...others.map(id => getNode(id))])
+  const ticket = (node: { key?: unknown; title?: unknown }) => typeof node.key === 'string' && node.key ? { key: node.key, title: typeof node.title === 'string' ? node.title : '' } : undefined
+  if (byId?.status === 'fulfilled' && Array.isArray(byId.value?.items)) for (const node of byId.value.items.slice(0, 100)) { const row = uuids.includes(node.id) ? ticket(node) : undefined; if (row) found.set(node.id, row) }
+  if (byKey?.status === 'fulfilled' && Array.isArray(byKey.value?.items)) for (const node of byKey.value.items.slice(0, 100)) { const asked = node.requested_key ?? node.key, row = keys.includes(asked) ? ticket(node) : undefined; if (row) found.set(`key:${asked}`, row) }
+  single.forEach((read, at) => { const row = read.status === 'fulfilled' && read.value.id === others[at] ? ticket(read.value) : undefined; if (row) found.set(others[at]!, row) })
+  return found
+}
 export async function loadDeskContext(ticketId: string, ticketKey?: string): Promise<DeskContext> {
   if (ticketKey) {
     try {

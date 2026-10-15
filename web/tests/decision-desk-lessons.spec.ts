@@ -77,14 +77,14 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const row = page.getByTestId(`desk-row-l:${id}`)
     await expect(row).toContainText('Lesson to adopt'); await expect(row).toContainText(sentence)
     await page.screenshot({ path: testInfo.outputPath('list-row.png') })
-    await row.click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
+    await row.locator('.row-open').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
     await expect(page.getByTestId('lesson-line')).toHaveText(line)
     await expect(page.getByRole('link', { name: 'From Recovery failed during release' })).toHaveAttribute('href', '/p/AEON/AEON-1')
     await expect(page.getByTestId('desk-lesson-details')).toContainText('Adds this line to Ship an Aeon release · Changelog')
     await expect(page.getByTestId('lesson-outdated')).toHaveText('The entry changed since this was prepared. Accept writes against the current version.')
     await page.screenshot({ path: testInfo.outputPath('outdated.png') })
     const guard = await controlStability(page, {
-      decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), pager: page.getByTestId('desk-pager'),
+      decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), tab: page.getByTestId('desk-tab'),
       choices: page.getByTestId('desk-choices'), accept: page.getByTestId('choice-0'), dismiss: page.getByTestId('choice-1'),
       clickedRow: page.getByTestId('choice-row-1'), ...(width === 390 ? { frame: page.getByTestId('desk-frame') } : {}),
     })
@@ -186,7 +186,7 @@ test('AEON-1331 replaced proposal refuses the frozen lesson', async ({ page }) =
 })
 test('AEON-1331 lesson memo has no accessibility violations', async ({ page }) => {
   await mockLessons(page); await openLesson(page)
-  expect((await new AxeBuilder({ page }).include('.desk-dialog').analyze()).violations).toEqual([])
+  expect((await new AxeBuilder({ page }).include('.desk-dlg').analyze()).violations).toEqual([])
 })
 // Fails on 57da9c59: the desk filtered ?kind=lesson&project= without saying so,
 // and an empty lesson list claimed nothing was waiting while other items were.
@@ -208,14 +208,16 @@ test('AEON-1331 lesson scope names its filter and Show all restores other waitin
   await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible()
   await expect(page.getByTestId('desk-row-a:approval-1')).toHaveCount(0)
   await expect(page.getByText('Nothing is waiting in the available sources.')).toHaveCount(0)
-  await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 1' })).toBeVisible()
+  await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*1$/)
   await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 2 open', exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('scope-filtered.png') })
+  // The approved layout puts reload actions beside source errors; sample its
+  // persistent header along with both tabs and the round action.
   const guard = await controlStability(page, {
-    open: page.locator('.view-tabs').getByRole('button', { name: /^Open / }),
-    decided: page.locator('.view-tabs').getByRole('button', { name: /^Decided / }),
-    review: page.getByRole('button', { name: 'One at a time' }),
-    refresh: page.getByRole('button', { name: 'Refresh' }),
+    open: page.getByTestId('desk-tab-open'),
+    decided: page.getByTestId('desk-tab-decided'),
+    review: page.getByTestId('desk-one-by-one'),
+    heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }),
   })
   await guard.check(async () => {
     await showAll.click()
@@ -223,7 +225,7 @@ test('AEON-1331 lesson scope names its filter and Show all restores other waitin
     await expect(page.getByTestId('desk-scope')).toHaveCount(0)
     await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible()
     await expect(page.getByTestId('desk-row-a:approval-1')).toBeVisible()
-    await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 2' })).toBeVisible()
+    await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*2$/)
   })
   guard.done()
   await page.screenshot({ path: testInfo.outputPath('scope-restored.png') })
@@ -237,20 +239,20 @@ test('AEON-1331 lesson scope names its filter and Show all restores other waitin
   await expect(page.getByText('No lessons wait in Paimos Aeon.')).toBeVisible()
   await expect(page.getByText('Nothing is waiting in the available sources.')).toHaveCount(0)
   await expect(page.getByTestId('desk-row-a:approval-1')).toHaveCount(0)
-  await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 0' })).toBeVisible()
+  await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*0$/)
   await page.screenshot({ path: testInfo.outputPath('scope-empty-390.png') })
   const phone = await controlStability(page, {
-    open: page.locator('.view-tabs').getByRole('button', { name: /^Open / }),
-    decided: page.locator('.view-tabs').getByRole('button', { name: /^Decided / }),
-    review: page.getByRole('button', { name: 'One at a time' }),
-    refresh: page.getByRole('button', { name: 'Refresh' }),
+    open: page.getByTestId('desk-tab-open'),
+    decided: page.getByTestId('desk-tab-decided'),
+    review: page.getByTestId('desk-one-by-one'),
+    heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }),
   })
   await phone.check(async () => {
     await page.getByRole('link', { name: 'Show all' }).click()
     await expect(page.getByTestId('desk-scope')).toHaveCount(0)
     await expect(page.getByTestId('desk-row-a:approval-1')).toBeVisible()
     await expect(page.getByText('No lessons wait in Paimos Aeon.')).toHaveCount(0)
-    await expect(page.locator('.view-tabs').getByRole('button', { name: 'Open 1' })).toBeVisible()
+    await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*1$/)
   })
   phone.done()
 })

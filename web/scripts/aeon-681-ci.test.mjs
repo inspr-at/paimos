@@ -286,6 +286,32 @@ test('native browser selectors cover reconciled essentials and every collected f
   }
 })
 
+// AEON-1359: a title that contains the list separator must still be one real title path.
+// A partial run (the essential/full lanes, and any shard that does not take the whole file)
+// selects by that path. Selecting the file instead would hide a missed case.
+test('AEON-1359 a partial status-time run selects each Delivery case whose title contains the list separator',()=>{
+  const config='playwright.ui.config.ts', file='tests/status-time.spec.ts'
+  const names=[
+    'Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted',
+    'Delivery › Tickets in Expert: six tiles and Created → live as the first trend',
+  ]
+  const collected=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',config,file,
+    '--workers=1','--retries=0','--list','--reporter=json'],{cwd:web})),config)
+  mkdirSync(evidence,{recursive:true})
+  for(const [index,name] of names.entries()) {
+    const row=collected.find(item=>item.file===file&&item.name===name)
+    assert.ok(row,name)
+    const selectors=browserList([row],collected)
+    assert.equal(selectors.length,1,name)
+    assert.match(selectors[0],/status-time\.spec\.ts:\d+ › Delivery › Tickets/,name)
+    const list=resolve(evidence,`aeon-1359-status-time-partial-${index}.txt`)
+    writeFileSync(list,`${selectors[0]}\n`)
+    const selected=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',config,
+      '--workers=1','--retries=0','--test-list',list,'--list','--reporter=json'],{cwd:web})),config)
+    assert.deepEqual(selected.map(item=>item.id).sort(),[row.id],name)
+  }
+})
+
 test('routing and login registrations keep explicit gate tiers after native collection', t => {
   const directory=mkdtempSync(resolve(tmpdir(),'aeon-686-routing-tiers-'))
   t.after(()=>rmSync(directory,{recursive:true,force:true}))

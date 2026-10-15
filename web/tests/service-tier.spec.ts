@@ -359,7 +359,11 @@ for (const width of [1440, 390]) test(`${width}: the panel request points to sta
   await expect(request.getByRole('link', { name: 'Review in Decision Desk' })).toHaveAttribute('href', '/decision-desk?item=t:request-fixture')
   await request.getByRole('link', { name: 'Review in Decision Desk' }).click()
   await expect(page.getByTestId('choice-0')).toBeEnabled()
-  await expectStableControls({ controls: { approve: page.getByTestId('choice-0'), decline: page.getByTestId('choice-1'), decide: page.getByTestId('desk-decide') }, interactions: [{ name: 'choose the protected approval', run: async () => { await page.getByTestId('choice-0').click() } }, { name: 'approve through the native desk adapter', run: async () => { await page.getByTestId('desk-decide').click(); await expect(page.getByTestId('desk-announcement')).toContainText('application waits for the next safe point') } }] })
+  await expectStableControls({ controls: { approve: page.getByTestId('choice-0'), decline: page.getByTestId('choice-1'), decide: page.getByTestId('desk-decide') }, interactions: [{ name: 'choose the protected approval', run: async () => { await page.getByTestId('choice-0').click(); await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'true') } }] })
+  // The round's only item: after the decision the sheet says All decided, then the desk closes (AEON-1339).
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-announcement')).toContainText('application waits for the next safe point')
+  await expect(page.getByTestId('desk-all-decided')).toBeVisible()
   expect(writes[0]).toMatchObject({ decision: 'approve', tier: 'fast', expected_ownership: ownership })
 })
 test('the panel request can be declined in the desk without a tier change', async ({ page }) => {

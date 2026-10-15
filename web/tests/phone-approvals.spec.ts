@@ -150,6 +150,10 @@ test('device notifications replace Enable with state and stable Pause in both th
   await page.setViewportSize({ width, height: 1000 }); await page.goto('/settings/personal#phone-approvals')
   const card = page.getByRole('region', { name: 'Phone approvals', exact: true })
   await expect(card.getByRole('button', { name: 'Add device passkey' })).toBeEnabled()
+  // Profile and session-watching sit above this card and finish after the phone
+  // form. Measuring before they settle attributes their arrival to the tap.
+  await expect(page.getByLabel('First name')).toBeVisible()
+  await expect(page.getByRole('radio', { name: /Approve in/ })).toBeVisible()
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; document.querySelector('#phone-approvals .phone-settings > p')!.textContent = 'Benachrichtigungen zu Freigabeanfragen werden auf diesem Gerät angezeigt. Die ausführliche Anfrage bleibt im angemeldeten Arbeitsbereich und wird vor jeder Entscheidung mit dem Geräte-Passkey bestätigt.' }, theme)
   await card.scrollIntoViewIfNeeded()
   const action = card.locator('.notification-action')
