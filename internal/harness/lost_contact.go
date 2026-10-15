@@ -107,7 +107,7 @@ func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase
 	if taken {
 		return s, workorders.Fail(403, "harness worker proof rejected")
 	}
-	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, s.Branch, s.WorkOrderID, s.RunID)
+	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, s.Branch, s.TicketNodeID, s.WorkOrderID, s.RunID)
 	if err != nil {
 		return s, err
 	}

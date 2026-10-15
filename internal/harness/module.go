@@ -1022,7 +1022,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
-	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, in.Branch, in.WorkOrderID, in.RunID)
+	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, in.Branch, in.TicketNodeID, in.WorkOrderID, in.RunID)
 	if err != nil {
 		return nil, err
 	}
@@ -1089,6 +1089,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err = recordBuildContinuation(ctx, tx, p, admission, s.ID); err != nil {
 		return nil, err
 	}
+	s.BuildContinuation = admission.Continuation
 	return s, nil
 }
 func same(a, b *string) bool {
@@ -1358,7 +1359,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	before := s
 	var placement json.RawMessage
-	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, s.Branch, s.WorkOrderID, s.RunID)
+	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, s.Branch, in.TicketNodeID, s.WorkOrderID, s.RunID)
 	if err != nil {
 		return nil, err
 	}

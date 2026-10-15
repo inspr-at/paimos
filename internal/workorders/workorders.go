@@ -98,17 +98,18 @@ func (m *module) Mount(mux *http.ServeMux) {
 // request a row lock; all run mutations lock the order before locking a run.
 func Load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Order, error) {
 	q := `SELECT w.kind,w.node_id::text,w.status,w.revision,w.requested_by_principal_id::text,w.assignee_principal_id::text,
-	 w.max_cost_micros,w.max_duration_seconds,w.created_at,w.updated_at FROM work_orders w
+	 w.max_cost_micros,w.max_duration_seconds,w.created_at,w.updated_at,n.fields->'build_delivery' FROM work_orders w
 	 JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id WHERE w.node_id=$1 AND n.deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE OF w`
 	}
 	var o Order
-	err := tx.QueryRow(ctx, q, id).Scan(&o.Kind, &o.NodeID, &o.Status, &o.Revision, &o.RequestedBy, &o.Assignee, &o.MaxCost, &o.MaxDuration, &o.CreatedAt, &o.UpdatedAt)
+	var delivery json.RawMessage
+	err := tx.QueryRow(ctx, q, id).Scan(&o.Kind, &o.NodeID, &o.Status, &o.Revision, &o.RequestedBy, &o.Assignee, &o.MaxCost, &o.MaxDuration, &o.CreatedAt, &o.UpdatedAt, &delivery)
 	if err != nil {
 		return o, err
 	}
-	admission, err := OrderBuildAdmissionTx(ctx, tx, id)
+	admission, err := decodeBuildAdmission(delivery)
 	if err != nil {
 		return o, err
 	}

@@ -92,24 +92,30 @@ func ValidateBuildCandidate(candidate *BuildCandidate) error {
 // under the caller's RLS and fences; neither brief text nor a run's untrusted
 // trace is a repository/branch authority.
 func OrderBuildAdmissionTx(ctx context.Context, tx pgx.Tx, order string) (BuildAdmission, error) {
-	var admission BuildAdmission
 	var raw json.RawMessage
 	err := tx.QueryRow(ctx, `SELECT n.fields->'build_delivery' FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id WHERE w.node_id=$1 AND n.deleted_at IS NULL`, order).Scan(&raw)
-	if err == nil && len(raw) > 0 {
-		if len(raw) > 2048 {
-			return admission, Fail(400, "build_delivery exceeds size limit")
-		}
-		err = json.Unmarshal(raw, &admission.Candidate)
-		if err == nil {
-			err = ValidateBuildCandidate(admission.Candidate)
+	if err != nil {
+		return BuildAdmission{}, err
+	}
+	return decodeBuildAdmission(raw)
+}
+
+func decodeBuildAdmission(raw json.RawMessage) (BuildAdmission, error) {
+	var admission BuildAdmission
+	if len(raw) > 2048 {
+		return admission, Fail(400, "build_delivery exceeds size limit")
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &admission.Candidate); err != nil {
+			return admission, Fail(400, "invalid build_delivery binding")
 		}
 	}
-	return admission, err
+	return admission, ValidateBuildCandidate(admission.Candidate)
 }
 
 // Registration must name its actual branch even for an order-bound worker.
 // An order's explicit repository binding takes precedence over project context.
-func HarnessBuildAdmissionTx(ctx context.Context, tx pgx.Tx, branch, order, run *string) (BuildAdmission, error) {
+func HarnessBuildAdmissionTx(ctx context.Context, tx pgx.Tx, branch, ticket, order, run *string) (BuildAdmission, error) {
 	var admission BuildAdmission
 	if branch == nil || *branch == "" {
 		return admission, nil
@@ -120,6 +126,16 @@ func HarnessBuildAdmissionTx(ctx context.Context, tx pgx.Tx, branch, order, run 
 			return admission, err
 		}
 		order = &id
+	}
+	if order == nil && ticket != nil {
+		var id string
+		err := tx.QueryRow(ctx, `SELECT node_id::text FROM work_orders WHERE node_id=$1`, *ticket).Scan(&id)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return admission, err
+		}
+		if err == nil {
+			order = &id
+		}
 	}
 	if order != nil {
 		var err error
