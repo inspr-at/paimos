@@ -33,7 +33,7 @@ test('approved menu, hints, icons, live help and Queued in light and dark', asyn
     await expect(menu.getByRole('menuitemradio').locator('.label')).toHaveText(labels)
     await expect(menu.getByRole('menuitemradio', { name: 'Accepted', exact: true })).toHaveAttribute('data-tip', /45 days after delivery/)
     await expect(menu.locator('.st-new circle')).toHaveCount(2)
-    await expect(menu.locator('.st-open circle')).toHaveAttribute('stroke', 'var(--st-progress)')
+    await expect(menu.locator('.st-open .ring')).toHaveAttribute('stroke', 'var(--st-progress)')
     await expect(menu.locator('.st-done circle')).toHaveAttribute('stroke', 'var(--st-ok)')
     await expect(menu.locator('.st-delivered circle')).toHaveAttribute('fill', 'var(--st-ok)')
     await expect(menu.locator('.st-accepted path')).toHaveCount(2)

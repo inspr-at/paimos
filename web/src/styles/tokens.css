@@ -418,3 +418,8 @@
 :root { --st-ok-on: #ffffff; --paused-mark-ink: #ffffff; }
 :root[data-theme="dark"] { --st-ok-on: #102327; --paused-mark-ink: #102327; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --st-ok-on: #102327; --paused-mark-ink: #102327; } }
+
+/* AEON-1362: Accepted's bar fill, a step deeper than Delivered. */
+:root { --st-ok-deep: color-mix(in srgb, var(--st-ok) 72%, #000); }
+:root[data-theme="dark"] { --st-ok-deep: color-mix(in srgb, var(--st-ok) 78%, #fff); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --st-ok-deep: color-mix(in srgb, var(--st-ok) 78%, #fff); } }
