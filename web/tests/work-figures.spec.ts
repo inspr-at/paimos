@@ -7,6 +7,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
 import { viewFigures, wholeFigures } from './work-figures-fixture'
+import { statusFill } from '../src/lib/statusMotion'
 
 const bar = (page: Page) => page.locator('.head-work')
 const barButton = (page: Page) => page.getByRole('button', { name: 'Work by hours', exact: true })
@@ -89,9 +90,11 @@ test('AEON-1358 the header work bar shows the whole project in hours, drawn to s
     expect(Math.abs(segment.x - track.x - track.width * left / 728), `${id} left`).toBeLessThanOrEqual(1)
     left += h
   }
-  // The fills follow the status icons: Completed solid, Done, not live outlined with a tint, In progress 45° stripes.
+  // The fills are the status icons' bar form (AEON-1362's one map): Completed is Delivered's solid, Done, not live
+  // Done's outline with a tint, In progress the 45° stripes; the line's swatches use the same fills.
   const fills = await bar(page).locator('.wk-seg').evaluateAll(segs => segs.map(seg => ({ cls: seg.className, before: getComputedStyle(seg, '::before').backgroundImage })))
-  expect(fills.map(f => f.cls)).toEqual(['wk-seg f-solid fc-delivered', 'wk-seg f-tint fc-done', 'wk-seg f-diag fc-progress'])
+  expect(fills.map(f => f.cls)).toEqual(['delivered', 'done', 'in_progress'].map(state => `wk-seg ${statusFill(state)}`))
+  expect(await bar(page).locator('.wk-line .wk-sw').evaluateAll(swatches => swatches.map(sw => sw.className))).toEqual([...['delivered', 'done', 'in_progress'].map(state => `wk-sw ${statusFill(state)}`), 'wk-sw sw-open'])
   expect(fills[2].before).toContain('repeating-linear-gradient')
 
   // Hover after 380 ms: the counts, opaque, the label as the title, one fact per footer line.
