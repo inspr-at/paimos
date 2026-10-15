@@ -16,6 +16,8 @@ RETURNS uuid LANGUAGE sql STABLE AS $$
    AND (b.scope_type='project' AND b.scope_id=p_project AND r.key='admin'
      OR b.scope_type='workspace' AND r.key IN ('owner','admin'))))
  ORDER BY CASE WHEN p.id=p_preferred THEN 0 WHEN p.id=p_fallback THEN 1 ELSE 2 END,
+   CASE WHEN EXISTS(SELECT 1 FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+    WHERE b.tenant_id=p.tenant_id AND b.principal_id=p.id AND b.scope_type='project' AND b.scope_id=p_project AND r.key='admin') THEN 0 ELSE 1 END,
    (SELECT min(b.created_at) FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
     WHERE b.tenant_id=p.tenant_id AND b.principal_id=p.id
     AND (b.scope_type='project' AND b.scope_id=p_project AND r.key='admin'

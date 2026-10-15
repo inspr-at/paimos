@@ -19,7 +19,7 @@ import KeyCap from '../KeyCap.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import TicketBenefits from './TicketBenefits.vue'
 import PersonStepOwner from './PersonStepOwner.vue'
-import { usePersonSteps } from '../../lib/personSteps'
+import { markPersonStep, usePersonSteps } from '../../lib/personSteps'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 const props = withDefaults(defineProps<{ row: ListItem; projectId: string; anchor: HTMLElement; mode?: 'queue' | 'entry' | 'status' | 'record'; toStatus?: string; entryRecord?: EntryRecord; refusal?: EntryFailure }>(), { mode: 'queue', toStatus: 'in_progress' })
 const emit = defineEmits<{ close: [restore: boolean]; queued: [entry: QueueWireEntry]; changed: [] }>()
@@ -104,8 +104,12 @@ async function saveFix() {
 }
 async function tick(check: EntryCheck) {
   if (!check.can_tick || readonly.value) return
-  const revision = checks.data.value?.revision ?? current.value.updated_at
-  await run(async () => { await tickEntryCheck(originId, check.id, !check.passed, revision); await refresh(); void desk.refresh() })
+  const revision = checks.data.value?.revision ?? current.value.updated_at, step = ownerStep(check.id)
+  await run(async () => {
+    if (step) await markPersonStep({ ...step }, !check.passed)
+    else await tickEntryCheck(originId, check.id, !check.passed, revision)
+    await refresh(); void desk.refresh()
+  })
 }
 function openReason() { anyway.value = true; void nextTick(() => reasonField.value?.focus()) }
 async function move() {
