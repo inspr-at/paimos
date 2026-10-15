@@ -168,6 +168,13 @@ function meanwhileLine(item: DeskItem) {
   const title = kind === 'parked' ? (ticket ? `Parked ${ticket.key}` : 'Parked') : kind === 'stopped' ? 'Waits for this' : kind === 'paused' ? 'Paused' : 'Carries on'
   return { held: kind !== 'carries_on', icon: (kind === 'parked' ? 'park' : kind === 'stopped' ? 'stop' : kind === 'paused' ? 'hold' : 'arrow') as IconName, title, text }
 }
+// The whole row opens the item. Text that carries a tooltip (the agent, the ticket title) takes the
+// pointer for its tip, so its click is passed on here; controls and the row's own target act themselves.
+function rowClick(event: MouseEvent, item: DeskItem) {
+  if (!(event.target instanceof Element) || event.target.closest('button, a, form, input, textarea, select, label')) return
+  if (item.linkOut) void router.push(item.linkOut)
+  else begin(item.id)
+}
 // An action request is titled by its kind; its message names the row.
 const rowName = (item: DeskItem) => item.kind === 'action' && item.context ? `${kindLabels.action}: ${item.context.slice(0, 200)}` : `${kindLabels[item.kind]}: ${item.title}`
 const recommends = (item: DeskItem) => item.recommended ? item.choices.find(choice => choice.id === item.recommended)?.title ?? '' : ''
@@ -507,7 +514,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
         <div v-for="group in [{ key: 'held', label: 'Waiting on you', note: 'something is held up until you answer', rows: heldRows }, { key: 'ready', label: 'When you’re ready', note: 'the agents carry on meanwhile', rows: readyRows }].filter(group => group.rows.length)" :key="group.key" class="q-group" :class="group.key">
           <p class="q-group-label">{{ group.label }}<span class="n">{{ group.rows.length }}</span><span class="group-note">{{ group.note }}</span></p>
           <ul class="items desk-list" :aria-label="group.label">
-            <li v-for="item in group.rows" :key="item.id" class="item desk-row" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }" :data-testid="`desk-row-${item.id}`">
+            <li v-for="item in group.rows" :key="item.id" class="item desk-row" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }" :data-testid="`desk-row-${item.id}`" @click="rowClick($event, item)">
               <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="rowName(item)" @click="item.linkOut || begin(item.id)" />
               <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="16" /></span>
               <div class="body">
