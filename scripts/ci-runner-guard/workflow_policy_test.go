@@ -526,9 +526,44 @@ func TestWorkflowPolicyAllowsReviewedWorkflowsAndFilteredPRs(t *testing.T) {
 	}
 }
 
+// planningEnabledEnv clears the AEON-1333 kill switch for one gate simulation.
+// CI publishes CI_IMPACT=off on the test process. These cases prove classified
+// lanes, the static layout and reuse while planning stays enabled. Kill-switch
+// rejections stay in impact-plan.test.mjs, which sets CI_IMPACT=off itself.
+// Assigned keys replace inherited entries so the shell observes that value.
+func planningEnabledEnv(t *testing.T, values map[string]string) []string {
+	t.Helper()
+	assigned := make(map[string]string, len(values)+2)
+	for name, value := range values {
+		assigned[name] = value
+	}
+	assigned["CI_IMPACT"] = ""
+	assigned["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+	env := make([]string, 0, len(os.Environ())+len(assigned))
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, replaced := assigned[name]; replaced {
+			continue
+		}
+		env = append(env, entry)
+	}
+	names := make([]string, 0, len(assigned))
+	for name := range assigned {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+assigned[name])
+	}
+	return env
+}
+
 // Execute the actual YAML gate commands. A fabricated green/skipped fixture
 // must not conceal a failed, cancelled or unexpectedly omitted dependency.
 func TestCIClassifiedAggregateResults(t *testing.T) {
+	// 2ffd1aee accepted these lanes only when the test process had no kill
+	// switch. CI sets CI_IMPACT=off, and the gate then rejected them.
+	t.Setenv("CI_IMPACT", "off")
 	var workflow map[string]any
 	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
 		t.Fatal(err)
@@ -572,13 +607,15 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 					t.Helper()
 					cmd := exec.Command("bash", "-c", run)
 					cmd.Dir = root
-					cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-					for name, value := range values {
-						if name == changed {
-							value = result
+					current := values
+					if changed != "" {
+						current = make(map[string]string, len(values))
+						for name, value := range values {
+							current[name] = value
 						}
-						cmd.Env = append(cmd.Env, name+"="+value)
+						current[changed] = result
 					}
+					cmd.Env = planningEnabledEnv(t, current)
 					return cmd.Run()
 				}
 				if err := execute("", ""); err != nil {
@@ -696,6 +733,9 @@ func TestCIPlanUsesTrustedBaseClassifier(t *testing.T) {
 // aggregates accept exactly the skipped shard/timing/smoke jobs and still
 // require static checks, setup and units; any other layout value is rejected.
 func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
+	// Same inherited kill switch as TestCIClassifiedAggregateResults: a static
+	// PR layout is legitimate only while planning is enabled.
+	t.Setenv("CI_IMPACT", "off")
 	var workflow map[string]any
 	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
 		t.Fatal(err)
@@ -758,10 +798,7 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 			}
 			cmd := exec.Command("bash", "-c", run)
 			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-			for name, value := range values {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
+			cmd.Env = planningEnabledEnv(t, values)
 			return cmd.Run()
 		}
 		if err := execute(nil); err != nil {

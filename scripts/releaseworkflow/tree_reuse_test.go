@@ -210,7 +210,40 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 	}
 }
 
+// planningEnabledEnv clears the AEON-1333 kill switch for one gate simulation.
+// CI publishes CI_IMPACT=off on the test process. Reuse proof is a planning-
+// enabled path; impact-plan.test.mjs sets CI_IMPACT=off when it must reject reuse.
+func planningEnabledEnv(t *testing.T, values map[string]string) []string {
+	t.Helper()
+	assigned := make(map[string]string, len(values)+2)
+	for name, value := range values {
+		assigned[name] = value
+	}
+	assigned["CI_IMPACT"] = ""
+	assigned["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+	env := make([]string, 0, len(os.Environ())+len(assigned))
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, replaced := assigned[name]; replaced {
+			continue
+		}
+		env = append(env, entry)
+	}
+	names := make([]string, 0, len(assigned))
+	for name := range assigned {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+assigned[name])
+	}
+	return env
+}
+
 func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
+	// 2ffd1aee rejected verified merge-group reuse when the test process
+	// inherited CI_IMPACT=off from the workflow env.
+	t.Setenv("CI_IMPACT", "off")
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		steps := reuseSteps(treeMap(jobs[id]))
@@ -236,13 +269,15 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 		execute := func(changed, result string) error {
 			cmd := exec.Command("bash", "-c", s["run"].(string))
 			cmd.Dir = root(t)
-			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-			for key, value := range values {
-				if key == changed {
-					value = result
+			current := values
+			if changed != "" {
+				current = make(map[string]string, len(values))
+				for key, value := range values {
+					current[key] = value
 				}
-				cmd.Env = append(cmd.Env, key+"="+value)
+				current[changed] = result
 			}
+			cmd.Env = planningEnabledEnv(t, current)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("%w: %s", err, out)
@@ -972,6 +1007,8 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 }
 
 func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
+	// 2ffd1aee rejected confirmed PR reuse when CI_IMPACT=off leaked in.
+	t.Setenv("CI_IMPACT", "off")
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		j := treeMap(jobs[id])
@@ -996,13 +1033,15 @@ func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
 		}
 		execute := func(key, value string) error {
 			cmd := exec.Command("bash", "-c", gate["run"].(string))
-			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-			for name, result := range values {
-				if name == key {
-					result = value
+			current := values
+			if key != "" {
+				current = make(map[string]string, len(values))
+				for name, result := range values {
+					current[name] = result
 				}
-				cmd.Env = append(cmd.Env, name+"="+result)
+				current[key] = value
 			}
+			cmd.Env = planningEnabledEnv(t, current)
 			return cmd.Run()
 		}
 		if err := execute("", ""); err != nil {
