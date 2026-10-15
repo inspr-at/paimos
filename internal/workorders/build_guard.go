@@ -326,6 +326,9 @@ const activeBuildersSQL = `WITH builders AS (
 // except is only the generation being rebound/revived, never its parent.
 // A parallel reason is accepted only with live person/coordinator authority;
 // the admitting caller persists it and appends a ticket audit before commit.
+// Optional admission data identifies an exact continuation branch in the
+// linked repository. Active builders still block it; the mutation owner flushes
+// its continuation audit only after all writes and resource locks are complete.
 func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, except string, parallelReason *string, admission ...*BuildAdmission) error {
 	var result *BuildAdmission
 	if len(admission) > 0 {
