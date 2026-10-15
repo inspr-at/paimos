@@ -35,10 +35,11 @@ const focused = computed(() => !props.glimpse && route.query[props.focusQuery] =
 const { seconds: orbitSeconds } = useGraphMotion()
 const storageKey = computed(() => props.viewerKey ? `aeon:graph:${props.viewerKey}:labels` : '')
 const surfaceLabel = computed(() => `${props.title}: ${props.summary}. Left and right arrows select nodes; Enter opens; Escape ${focused.value ? 'exits focus' : 'clears selection'}.`)
-let renderer: GraphRenderer | null = null, controller: AbortController | undefined, resize: ResizeObserver | undefined, theme: MutationObserver | undefined
+let renderer: GraphRenderer | null = null, controller: AbortController | undefined, resize: ResizeObserver | undefined, theme: MutationObserver | undefined, pageBox: ResizeObserver | undefined
 let focusFrame = 0
 let mounted = false, beforeFocus: HTMLElement | null = null
 let requestNativeFocus = false, nativeFocused = false
+let placing = false, pointers = 0, holdScroll = false, userMoved = false
 let background: { el: HTMLElement; inert: boolean }[] = []
 function loadLabels(key: string, previous?: string) {
   // An empty key is "the person is not known yet", not "this person prefers Smart".
@@ -62,6 +63,9 @@ function emphasis() {
   renderer?.emphasis({ selected: props.selectedId, neighbours, matches: props.matches ?? new Set(), searching: props.searching, hovered: hovered.value })
 }
 function setPaused(value: boolean) { paused.value = value; renderer?.motion(value) }
+function footerInset() {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--footer-h')) || 0
+}
 function measure() {
   if (props.glimpse) { if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight); return }
   if (!stage.value || !root.value) return
@@ -69,10 +73,73 @@ function measure() {
   root.value.style.setProperty('--graph-overlay-bottom', `${(footer.value?.offsetHeight ?? 0) + 28}px`)
   if (!focused.value) {
     // Measure actual page chrome instead of a fixed project-header estimate.
-    const bottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--footer-h')) || 0
-    height.value = Math.max(props.minStageHeight, window.innerHeight - root.value.getBoundingClientRect().top - (header.value?.offsetHeight ?? 0) - (footer.value?.offsetHeight ?? 0) - bottom - 12)
+    // Write the height now: the placement loop reads the box in this same turn,
+    // before Vue flushes the bound style.
+    const next = Math.max(props.minStageHeight, window.innerHeight - root.value.getBoundingClientRect().top - (header.value?.offsetHeight ?? 0) - (footer.value?.offsetHeight ?? 0) - footerInset() - 12)
+    height.value = next
+    stage.value.style.height = `${next}px`
   }
   if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight)
+}
+// A tall header (the phone work bar wraps onto its own rows) clamps the stage
+// to its minimum and the rest continues below the viewport. Fit then centres
+// the node on that off-screen stage, so a tap at the canvas centre misses.
+// Bring the centre back above the footer, then measure again into the room
+// that is actually on screen. A later header growth scrolls only; it does not
+// resize under a pointer, and a person scrolling away is left where they are.
+function stageCentreHidden() {
+  const el = stage.value
+  if (!el || focused.value || props.glimpse) return false
+  const rect = el.getBoundingClientRect()
+  if (rect.width < 2 || rect.height < 2) return false
+  const centre = rect.top + rect.height / 2
+  return centre < 8 || centre > window.innerHeight - footerInset() - 8
+}
+function scrollParent(el: HTMLElement) {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight + 1) return node
+  }
+  return null
+}
+function revealStageCentre() {
+  const el = stage.value
+  if (!el || pointers) return false
+  const rect = el.getBoundingClientRect()
+  const centre = rect.top + rect.height / 2
+  const low = 8, high = window.innerHeight - footerInset() - 8
+  const delta = centre < low ? centre - low : centre > high ? centre - high : 0
+  const scroller = delta ? scrollParent(el) : null
+  if (!scroller) return false
+  const before = scroller.scrollTop
+  holdScroll = true
+  scroller.scrollTop = before + delta
+  holdScroll = false
+  return scroller.scrollTop !== before
+}
+function placeStageNow() {
+  if (placing || pointers || !mounted || props.glimpse || focused.value || !stage.value) return
+  placing = true
+  try {
+    for (let pass = 0; pass < 3; pass++) {
+      measure()
+      if (!stage.value || !stageCentreHidden()) return
+      if (!revealStageCentre()) return
+    }
+    measure()
+    revealStageCentre()
+  } finally { placing = false }
+}
+function onPageBox() {
+  if (placing || pointers || userMoved || !mounted || props.glimpse || focused.value) return
+  if (stageCentreHidden()) revealStageCentre()
+}
+function pointerDown() { pointers++ }
+function pointerUp() { pointers = Math.max(0, pointers - 1) }
+function onUserScroll() { if (!holdScroll && !placing) userMoved = true }
+function onResize() {
+  measure()
+  if (!placing && !pointers && !props.glimpse && !focused.value && stageCentreHidden()) revealStageCentre()
 }
 async function start() {
   controller?.abort(); renderer?.dispose(); renderer = null; ready.value = false; labelsReady.value = false
@@ -91,7 +158,9 @@ async function start() {
     if (request.signal.aborted || !mounted) { next.dispose(); return }
     renderer = next
     if (dimension.value === '3d' && next.dimension === '2d') { fallback.value = true; dimension.value = '2d' }
-    renderer.motion(paused.value); renderer.data(props.data); emphasis(); measure(); ready.value = true
+    renderer.motion(paused.value); renderer.data(props.data); emphasis(); placeStageNow()
+    if (request.signal.aborted || !mounted || renderer !== next) return
+    ready.value = true
     if (props.selectedId) renderer.focus(props.selectedId)
   } catch { if (!request.signal.aborted) error.value = 'The graph could not start. You can still explore every entry in the list.' }
 }
@@ -131,6 +200,7 @@ async function syncFocus(value: boolean) {
     focusFrame = requestAnimationFrame(() => { if (mounted) (beforeFocus?.isConnected ? beforeFocus : host.value)?.focus({ preventScroll: true }) })
   }
   measure()
+  if (!value && stageCentreHidden()) revealStageCentre()
   // Wait for Teleport to settle: moving a fullscreen element would exit it.
   // Deep links use in-app focus directly; native fullscreen needs a gesture.
   if (tryNative && root.value) void requestGraphFullscreen(root.value, () => mounted && focused.value)
@@ -171,9 +241,18 @@ onMounted(() => {
   mounted = true
   resize = new ResizeObserver(measure)
   for (const el of [root.value, host.value, header.value, footer.value]) if (el) resize.observe(el)
+  if (!props.glimpse) {
+    // Header growth above the graph (the work bar taking its rows) does not
+    // resize this canvas, so the stage observer never sees it.
+    pageBox = new ResizeObserver(onPageBox); pageBox.observe(document.body)
+    window.addEventListener('pointerdown', pointerDown, true)
+    window.addEventListener('pointerup', pointerUp, true)
+    window.addEventListener('pointercancel', pointerUp, true)
+    window.addEventListener('scroll', onUserScroll, true)
+  }
   theme = new MutationObserver(retheme); theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] })
   media.addEventListener('change', onReduced); scheme.addEventListener('change', retheme)
-  window.addEventListener('resize', measure); if (!props.glimpse) window.addEventListener('keydown', keydown, true)
+  window.addEventListener('resize', onResize); if (!props.glimpse) window.addEventListener('keydown', keydown, true)
   if (!props.glimpse) document.addEventListener('fullscreenchange', fullscreenChanged)
   if (focused.value) void syncFocus(true)
   measure(); void start()
@@ -181,9 +260,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   mounted = false; document.removeEventListener('fullscreenchange', fullscreenChanged)
   if (root.value) void exitGraphFullscreen(root.value)
-  cancelAnimationFrame(focusFrame); controller?.abort(); resize?.disconnect(); theme?.disconnect(); renderer?.dispose(); unlock()
+  cancelAnimationFrame(focusFrame); controller?.abort(); resize?.disconnect(); pageBox?.disconnect(); theme?.disconnect(); renderer?.dispose(); unlock()
   media.removeEventListener('change', onReduced); scheme.removeEventListener('change', retheme)
-  window.removeEventListener('resize', measure); window.removeEventListener('keydown', keydown, true)
+  window.removeEventListener('resize', onResize); window.removeEventListener('keydown', keydown, true)
+  window.removeEventListener('pointerdown', pointerDown, true); window.removeEventListener('pointerup', pointerUp, true); window.removeEventListener('pointercancel', pointerUp, true)
+  window.removeEventListener('scroll', onUserScroll, true)
 })
 defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNode: (id: string) => renderer?.focus(id), interact: () => renderer?.interact(), setPaused })
 </script>
