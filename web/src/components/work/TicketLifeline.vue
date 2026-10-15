@@ -201,8 +201,8 @@ const kept = new Map<string, Answer>()
     <div class="life-cap">
       <span>{{ text.caption }}</span>
       <span v-if="view" class="life-total">
-        <template v-if="view.caption.label">{{ view.caption.label }} <b>{{ view.caption.value }}</b></template>
-        <template v-else><b>{{ view.caption.value }}</b> {{ view.caption.after }}</template>
+        <template v-if="view.caption.label">{{ `${view.caption.label} ` }}<b>{{ view.caption.value }}</b></template>
+        <template v-else><b>{{ view.caption.value }}</b>{{ ` ${view.caption.after}` }}</template>
       </span>
     </div>
     <div ref="gatesEl" class="gates" role="group" :aria-label="text.gatesLabel" @pointerdown="rowDown">
@@ -228,7 +228,7 @@ const kept = new Map<string, Answer>()
     </div>
     <p :id="lineId" class="life-line">
       <template v-if="view">
-        <template v-for="(item, i) in view.items" :key="i"><span v-if="i" class="sep"> · </span><span class="it">{{ item.label }}<template v-if="item.value"> <b>{{ item.value }}</b></template><template v-if="item.soFar"> {{ text.soFar }}</template><span v-if="item.usual" class="usual" :class="{ attn: item.usual.attn }">{{ item.usual.text }}</span></span></template>
+        <template v-for="(item, i) in view.items" :key="i"><span v-if="i" class="sep"> · </span><span class="it">{{ item.label }}{{ item.value ? ' ' : '' }}<b v-if="item.value">{{ item.value }}</b>{{ item.soFar ? ` ${text.soFar}` : '' }}<span v-if="item.usual" class="usual" :class="{ attn: item.usual.attn }">{{ item.usual.text }}</span></span></template>
         <template v-if="view.partly"><span class="sep"> · </span><span class="it partly">{{ text.partly }}</span></template>
       </template>
       <template v-else-if="status === 'error'">{{ text.failed }} <button type="button" class="retry" @click="load">{{ text.retry }}</button></template>
@@ -237,7 +237,7 @@ const kept = new Map<string, Answer>()
     </p>
     <span class="sr-only" aria-live="polite">{{ live }}</span>
     <Teleport to="body">
-      <div v-if="tip" ref="tipEl" popover="manual" class="lf-tip" :class="{ gate: tip.kind === 'gate', pinned: tip.pinned }" role="tooltip"
+      <div v-if="tip" ref="tipEl" popover="manual" class="lf-tip" :class="{ 'one-line': tip.kind === 'gate', pinned: tip.pinned }" role="tooltip"
         :style="{ left: `${place.x}px`, top: `${place.y}px`, visibility: place.placed ? undefined : 'hidden' }">
         <p v-for="(line, i) in tip.lines" :key="i" :class="line.tone">{{ line.text }}</p>
       </div>
@@ -299,7 +299,8 @@ const kept = new Map<string, Answer>()
 /* The tips live on body: fixed and opaque, so they never move the page or let it show through (AEON-541, r2 fix 1). */
 .lf-tip { position: fixed; z-index: 80; inset: auto; width: max-content; max-width: min(320px, calc(100vw - 16px)); margin: 0; padding: 5px 10px; border: 0; overflow: visible; border-radius: 8px; background: var(--tip-solid); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent); pointer-events: none; }
 .lf-tip.pinned { pointer-events: auto; }
-.lf-tip.gate { max-width: calc(100vw - 16px); white-space: nowrap; }
+/* A marker's tip is one line, never wrapped. */
+.lf-tip.one-line { max-width: calc(100vw - 16px); white-space: nowrap; }
 .lf-tip p { margin: 0; color: inherit; }
 .lf-tip p + p { margin-top: 1px; }
 .lf-tip .title { font-weight: 650; }

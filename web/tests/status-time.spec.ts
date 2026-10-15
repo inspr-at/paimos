@@ -149,9 +149,15 @@ test('the lifeline lands without moving anything above it, says every visit, and
   })
   await expect(panel(page)).toBeVisible() // Esc closed the tip, not the ticket
   await guard.check(async () => {
-    await markers(page).nth(1).hover()
-    await expect(tip(page)).toHaveText('Entered doing · Tue 13 Oct 10:00 · by Harbor worker')
+    await markers(page).nth(2).hover()
+    await expect(tip(page)).toHaveText('In progress now · since Tue 13 Oct 16:00 · by Pharos lead')
   })
+  // The marker's tip is one opaque line, inside the window.
+  expect(await tip(page).evaluate(el => getComputedStyle(el).backgroundColor)).toMatch(/^rgb\(\d+, \d+, \d+\)$/)
+  const tipBox = await box(tip(page))
+  expect(tipBox.x).toBeGreaterThanOrEqual(0)
+  expect(tipBox.x + tipBox.width).toBeLessThanOrEqual(1440)
+  expect(tipBox.height).toBeLessThan(30)
   guard.done()
 })
 
@@ -354,6 +360,7 @@ for (const width of [390, 960, 1440] as const) {
         await expect(tip(page)).toBeVisible()
         await shot(`lifeline-${key}-tip`)
         await markers(page).last().hover()
+        await expect(tip(page)).toHaveClass(/one-line/)
         await shot(`lifeline-${key}-marker`)
       }
       await page.goto('/p/AEON/delivery')

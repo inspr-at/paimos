@@ -70,7 +70,9 @@ function drawPanel(panel: ChartPanel, box: Box, main: boolean) {
       else if (run.length > 1) bands.push(`M${run.map(([x, , high]) => `${x},${high}`).join('L')}L${run.slice().reverse().map(([x, low]) => `${x},${low}`).join('L')}Z`)
       run = []
     }
-    panel.band.forEach((pair, k) => { if (!pair) flush(); else run.push([X(k), Y(pair[0]), Y(pair[1])]) })
+    // A bridged line's band also spans observed buckets without a sample.
+    const bridged = panel.lines.some(line => line.bridge)
+    panel.band.forEach((pair, k) => { if (!pair) { if (!(bridged && buckets[k]?.status === 'empty')) flush() } else run.push([X(k), Y(pair[0]), Y(pair[1])]) })
     flush()
   }
   const sparse = props.model.sparse || props.model.kind === 'release' || props.model.kind === 'merge' || n.value <= 13
