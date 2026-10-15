@@ -605,15 +605,15 @@ func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 					v = strings.Replace(v, guard, "needs.tier-plan.outputs.layout != 'static'", 1)
 				}
 				if key == "shard" {
-					// AEON-1322: essential PRs run four web shards. Assert that
-					// width, then project the historical two-shard pin.
+					// AEON-1389: PR widths come from the budgeted planner. Validate
+					// that exact wiring and full-event fallback before projecting
+					// onto the immutable historical two-shard execution pin.
 					if id == "web-shard" {
-						const widened = "needs.tier-plan.outputs.mode == 'essential' && '[1, 2, 3, 4]'"
-						const historical = "needs.tier-plan.outputs.mode == 'essential' && '[1, 2]'"
-						if !strings.Contains(v, widened) {
-							t.Fatal("essential PR web shards must be four rows")
+						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}`
+						if v != planned {
+							t.Fatal("PR web shards must consume the planned list and retain twelve full-event rows")
 						}
-						v = strings.Replace(v, widened, historical, 1)
+						v = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}`
 					}
 					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential'`, 1)
 					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only'", "needs.tier-plan.outputs.lane == 'spec-only'", 1)
