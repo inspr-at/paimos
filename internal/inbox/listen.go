@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -58,16 +57,12 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// LISTEN is session state, not a tenant query, and must not hold a pool slot.
-	conn, err := listenConn(ctx, m.pool)
+	conn, err := db.SubscribeNotifications(ctx, m.pool, "aeon_events", p.TenantID)
 	if err != nil {
 		failure(w, err)
 		return
 	}
 	defer closeListen(conn)
-	if _, err = conn.Exec(ctx, "LISTEN aeon_events"); err != nil {
-		failure(w, err)
-		return
-	}
 	page, err := m.page(ctx, p, after, limit, sessionID, exact, via)
 	if err != nil {
 		failure(w, err)
@@ -220,13 +215,7 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 	return items, err
 }
 
-func listenConn(ctx context.Context, pool *pgxpool.Pool) (*pgx.Conn, error) {
-	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	return pgx.ConnectConfig(connectCtx, pool.Config().ConnConfig.Copy())
-}
-
-func closeListen(conn *pgx.Conn) {
+func closeListen(conn db.NotificationListener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = conn.Close(ctx)
@@ -234,7 +223,7 @@ func closeListen(conn *pgx.Conn) {
 
 var errWaitTimeout = errors.New("inbox wait elapsed")
 
-func waitTenantNotify(ctx context.Context, conn *pgx.Conn, tenantID string, deadline time.Time) error {
+func waitTenantNotify(ctx context.Context, conn db.NotificationListener, tenantID string, deadline time.Time) error {
 	for {
 		if !time.Now().Before(deadline) {
 			return errWaitTimeout

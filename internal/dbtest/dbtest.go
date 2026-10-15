@@ -247,6 +247,7 @@ func (d *DB) Close() error {
 
 func (d *DB) close() error {
 	if d.App != nil {
+		db.CloseNotificationConnections(d.App)
 		d.App.Close()
 	}
 	if d.Admin != nil {
@@ -340,6 +341,9 @@ func openApp(ctx context.Context, base *url.URL, dbName, role, password string, 
 	}
 	if !migrated {
 		cfg.MaxConns = 4
+	}
+	if _, err := db.ConfigurePool(cfg); err != nil {
+		return nil, err
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

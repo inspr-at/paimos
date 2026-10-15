@@ -59,7 +59,7 @@ type module struct {
 	undo             map[string]UndoFunc
 	causalUndo       map[string]UndoFunc
 	subscriptions    subscriptionLimits
-	subscriptionWait func(context.Context, *pgx.Conn, time.Time) error
+	subscriptionWait func(context.Context, db.NotificationListener, time.Time) error
 	listenTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 

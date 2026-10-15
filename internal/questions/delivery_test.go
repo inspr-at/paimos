@@ -23,8 +23,10 @@ import (
 )
 
 type deliveryWorkTrace struct {
-	registry, queue, commits atomic.Int64
-	listening                chan uint32
+	registry, queue, commits        atomic.Int64
+	listening                       chan uint32
+	listens                         atomic.Int32
+	reconnectPause, reconnectResume chan struct{}
 }
 
 func (tr *deliveryWorkTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
@@ -35,6 +37,13 @@ func (tr *deliveryWorkTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn
 		tr.queue.Add(1)
 	}
 	if data.SQL == "LISTEN aeon_events" && tr.listening != nil {
+		if tr.listens.Add(1) == 2 && tr.reconnectPause != nil {
+			close(tr.reconnectPause)
+			select {
+			case <-tr.reconnectResume:
+			case <-ctx.Done():
+			}
+		}
 		tr.listening <- conn.PgConn().PID()
 	}
 	return ctx
@@ -238,32 +247,13 @@ func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
 	})
 	t.Run("disconnect gap and missing hints reconcile", func(t *testing.T) {
 		f := deliveryFixtureFor(t)
-		trace := &deliveryWorkTrace{listening: make(chan uint32, 2)}
+		trace := &deliveryWorkTrace{listening: make(chan uint32, 2), reconnectPause: make(chan struct{}), reconnectResume: make(chan struct{})}
 		f.m.pool = deliveryTracedPool(t, f.d.App, trace)
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
 		wakes := make(chan struct{}, 1)
-		retrying, reconnect := make(chan struct{}), make(chan struct{})
 		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			f.m.listenDelivery(ctx, wakes, func(ctx context.Context, _ <-chan struct{}, delay time.Duration) bool {
-				if delay != time.Second {
-					t.Errorf("reconnect delay=%v", delay)
-				}
-				select {
-				case retrying <- struct{}{}:
-				case <-ctx.Done():
-					return false
-				}
-				select {
-				case <-reconnect:
-					return true
-				case <-ctx.Done():
-					return false
-				}
-			})
-		}()
+		go func() { defer close(done); f.m.listenDelivery(ctx, wakes, waitDelivery) }()
 		defer func() { cancel(); <-done }()
 		receive := func(ch <-chan struct{}, label string) {
 			t.Helper()
@@ -280,11 +270,11 @@ func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
 			t.Fatalf("terminate listener: %v, %v", terminated, err)
 		}
 		receive(wakes, "disconnect wake")
-		receive(retrying, "reconnect pause")
+		receive(trace.reconnectPause, "reconnect pause")
 		in := input()
 		in.SessionID = f.session
 		q := f.answer(t, f.ask(t, in), "committed in disconnect gap")
-		close(reconnect)
+		close(trace.reconnectResume)
 		receive(wakes, "reconnected LISTEN")
 		if pid := <-trace.listening; pid == oldPID {
 			t.Fatal("reconnect reused terminated backend")

@@ -246,11 +246,7 @@ func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) err
 		if !strings.HasPrefix(name, "lead-runtime-") {
 			continue
 		}
-		raw, e := s.state.Read(name, 32768)
-		if e != nil {
-			return e
-		}
-		r, e := decodeLeadRecord(raw)
+		r, _, e := readLeadState(s.state, name)
 		if e != nil || r.Pickup.DaemonID != s.daemonID || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" {
 			return ErrProcessesUnconfirmed
 		}
