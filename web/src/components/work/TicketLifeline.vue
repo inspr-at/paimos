@@ -11,7 +11,7 @@ import StatusIcon from './StatusIcon.vue'
 import { APIError } from '../../lib/api'
 import { deliveryLanguage } from '../../lib/delivery'
 import { lifelineView, typicalsOf, type LifelineView, type TipLine } from '../../lib/lifelineView'
-import { readLifeline, readTypicals, type TicketLifeline, type TicketStatusTiming } from '../../lib/statusTiming'
+import { readLifeline, readTypicals } from '../../lib/statusTiming'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { MARKER_SIZE, placeMarkers, stripWidths } from '../../lib/workFigures'
 import { workFiguresText } from '../../lib/workFiguresText'
@@ -24,12 +24,9 @@ const text = computed(() => workFiguresText(lang.value))
 const uid = useId()
 
 // ---------- Reads: the lifeline and the project's typicals together, so the "usually" notes land with the strip ----------
-type Answer = { lifeline: TicketLifeline; timing: TicketStatusTiming | null }
 const scope = useIdentityScope(), reads = scope.lane()
 const status = ref<'loading' | 'ready' | 'error' | 'forbidden'>('loading')
 const answer = shallowRef<Answer | null>(null)
-// Answers kept per person, ticket and revision: reopening a ticket lands at once.
-const kept = new Map<string, Answer>()
 const keyOf = () => `${scope.owner.value}|${props.nodeId}|${props.revision}`
 function load() {
   const node = props.nodeId, project = props.projectId, key = keyOf()
@@ -183,6 +180,13 @@ function rowDown(event: PointerEvent) {
 
 const live = computed(() => tip.value?.kind === 'strip' ? tip.value.lines.map(line => line.text).join('. ') : '')
 const lineId = `${uid}-line`
+</script>
+
+<script lang="ts">
+import type { TicketLifeline as Lifeline, TicketStatusTiming as Timing } from '../../lib/statusTiming'
+type Answer = { lifeline: Lifeline; timing: Timing | null }
+// Answers kept per person, ticket and revision, across sheets: reopening a ticket lands at once.
+const kept = new Map<string, Answer>()
 </script>
 
 <template>

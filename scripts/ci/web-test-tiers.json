@@ -1440,6 +1440,32 @@
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 390 light"
     ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 dark"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 light"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 dark"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 light"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 dark"
+    ,
+    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 light"
+    ,
+    "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+    ,
+    "browser:tests/status-time.spec.ts:a failed lifeline keeps its height, says so, and retries"
+    ,
+    "browser:tests/status-time.spec.ts:a project that does not mark releases stops at QA → merged and reads Created → done"
+    ,
+    "browser:tests/status-time.spec.ts:a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket"
+    ,
+    "browser:tests/status-time.spec.ts:motion › the live segment slides, past segments and the step bar only under the pointer, swatches never"
+    ,
+    "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker"
+    ,
+    "browser:tests/status-time.spec.ts:with reduced motion nothing slides, not even the live segment"
+    ,
     "browser:tests/stepup-desk.spec.ts:Approve on a request someone else settled first shows their outcome, not the pending memo"
     ,
     "browser:tests/stepup-desk.spec.ts:Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs"
@@ -13658,6 +13684,36 @@
     ,
     {"kind":"browser","file":"tests/status-help.spec.ts","name":"human-check filter is linked and removes tickets that do not need a check","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 960 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 960 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"Delivery › Tickets in Expert: six tiles and Created → live as the first trend","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"a failed lifeline keeps its height, says so, and retries","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"a project that does not mark releases stops at QA → merged and reads Created → done","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"motion › the live segment slides, past segments and the step bar only under the pointer, swatches never","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-time.spec.ts","name":"with reduced motion nothing slides, not even the live segment","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Approve on a request someone else settled first shows their outcome, not the pending memo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -19563,6 +19619,22 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > rejects a freshly read parent or unknown shape before any work-order write","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > reuses a ready order without resetting its status or budgets","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"bridges a day without a release, keeps a gap for no data yet, and says which is which","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"crosses doing and done again after a reopen, and moves inside a group cross no gate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"follows the project: five steps to live with releases, three steps and Created → done without","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"keeps every marker on its notch unless a cluster moved it, and never lets two overlap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"keeps every slot while loading, and names no trend without a value","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"merges a final gate with the final status and pins a live ticket to now","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"says \"usually\" only above 1.5 × p50 and 10 minutes over it, and attention only above p90","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"writes every duration in the one format of the design","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stepup-readiness.unit.test.ts","name":"Touch ID pairing readiness > requires a server pin and keeps unknown distinct from missing","tier":"ESSENTIAL"}
     ,
