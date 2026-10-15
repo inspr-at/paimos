@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 2.703,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/graph-canvas.spec.ts",
+    "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.294,
+        "median": 1.289,
+        "min": 1.285
+      },
+      "seconds": 2.703,
+      "selectedTests": 2
+    },
+    "weightSeconds": 4.439024,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "phone-approvals",
+  "nightlyTiming": {
+    "seconds": 47.049,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/phone-approvals.spec.ts",
+    "listedTests": 11,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 11.941,
+        "median": 2.143,
+        "min": 1.389
+      },
+      "seconds": 47.049,
+      "selectedTests": 11
+    },
+    "weightSeconds": 7.48,
+    "weightSource": "aeon-903-local-serial-wall"
+  }
+}

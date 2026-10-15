@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 36.608,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/delivery-arion-v5.spec.ts",
+    "listedTests": 14,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.641,
+        "median": 2.444,
+        "min": 1.962
+      },
+      "seconds": 36.608,
+      "selectedTests": 14
+    },
+    "weightSeconds": 20,
+    "weightSource": "aeon-1016-estimate"
+  }
+}

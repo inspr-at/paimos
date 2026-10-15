@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { loadManifest as loadWebPolicy } from '../web/scripts/ci-web-shard.mjs'
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -296,7 +297,7 @@ test("key dialog CI uses the hosted shards and covers the shared access markup",
   const shardJob = workflow.split("  web-shard:\n")[1].split("\n  web:")[0];
   assert.match(shardJob, /runs-on: ubuntu-latest/);
   assert.match(shardJob, /cli\.mjs run web --shard/);
-  const manifest = JSON.parse(readFileSync(new URL("../web/ci-web-shards.json", import.meta.url), "utf8"));
+  const manifest = loadWebPolicy();
   const layoutGroups = manifest.groups.filter(group => group.specs.some(spec => spec.file === "tests/key-layout.spec.ts"));
   assert.equal(layoutGroups.length, 1);
   const layout = layoutGroups[0];

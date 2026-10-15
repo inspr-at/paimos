@@ -6,8 +6,8 @@ import { dirname, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { browserIdentity, browserImpact, nightlyBrowserMap, gitTree } from './browser-impact.mjs'
 import { boundedText } from './inputs.mjs'
-import { validImpactPaths, isDocsLike, webGraph, graphIncomplete, reverseDependants, shard, key, tierRank, validate } from './core.mjs'
-import { tierWeights, validateManifest } from '../../web/scripts/ci-web-shard.mjs'
+import { validImpactPaths, isDocsLike, webGraph, graphIncomplete, reverseDependants, shard, key, tierRank, validate, specShardRecordPattern } from './core.mjs'
+import { tierWeights, validateManifest, loadManifest } from '../../web/scripts/ci-web-shard.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const browserRows = manifest => manifest.tests.filter(row => row.kind === 'browser' && row.active !== false)
@@ -95,10 +95,19 @@ export function shadowPlan({ event = 'pull_request', impact, paths, identity = {
   else if (!validImpactPaths(paths) || !paths.length) widen('missing, empty or invalid diff')
   else {
     const changed = [], promoted = []
+    // One assembled before/after pair covers the shared policy and every
+    // per-spec record. Timing stays reduced; group or ownership changes widen.
+    let browserPolicy
+    const browserPolicyImpact = () => browserPolicy ??= registryImpact('web/ci-web-shards.json', registries['web/ci-web-shards.json']?.before, registries['web/ci-web-shards.json']?.after)
     for (const file of paths) {
       if (isDocsLike(file)) { reasons.push(`documentation allowlist: ${file}`); continue }
-      if (['scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json'].includes(file)) {
+      if (file === 'scripts/ci/web-test-tiers.json') {
         const rule = registryImpact(file, registries[file]?.before, registries[file]?.after)
+        if (rule.full) { widen(`${file}: ${rule.reason}`); break }
+        promoted.push(...rule.promoted); reasons.push(`${file}: ${rule.reason}`); continue
+      }
+      if (file === 'web/ci-web-shards.json' || specShardRecordPattern.test(file)) {
+        const rule = browserPolicyImpact()
         if (rule.full) { widen(`${file}: ${rule.reason}`); break }
         promoted.push(...rule.promoted); reasons.push(`${file}: ${rule.reason}`); continue
       }
@@ -152,7 +161,7 @@ export function main(env = process.env, { trustedRoot = root, browserCoverage = 
   const manifest = registry(trustedRoot, 'scripts/ci/web-test-tiers.json')
   const flaky = registry(trustedRoot, 'scripts/ci/known-flaky.json')
   validate(manifest, manifest.tests, flaky, { strict: true })
-  const policy = validateManifest(registry(trustedRoot, 'web/ci-web-shards.json'))
+  const policy = loadManifest(resolve(trustedRoot, 'web/ci-web-shards.json'))
   const owners = new Map(policy.groups.flatMap(group => group.specs.map(spec => [spec.file, group])))
   for (const row of browserRows(manifest)) {
     const owner = owners.get(row.file)
@@ -164,12 +173,21 @@ export function main(env = process.env, { trustedRoot = root, browserCoverage = 
   if (!output || output.endsWith('\0')) paths = output.split('\0').filter(Boolean)
   for (const file of paths ?? []) if (['scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json'].includes(file)) {
     try {
-      registries[file] = { before: registry(trustedRoot, file), after: registry(checkout, file) }
+      registries[file] = file === 'web/ci-web-shards.json'
+        ? { before: policy, after: loadManifest(resolve(checkout, file)) }
+        : { before: registry(trustedRoot, file), after: registry(checkout, file) }
       if (file.endsWith('web-test-tiers.json')) {
         const head = registries[file].after
         validate(head, head.tests, flaky, { strict: true }); tests = browserRows(head)
       }
     } catch { registries[file] = {}; if (file.endsWith('web-test-tiers.json')) catalogueComplete = false }
+  }
+  // A record-only diff leaves the shared policy file untouched. Compare the
+  // assembled base and head policies, which already include every record.
+  if ((paths ?? []).some(file => specShardRecordPattern.test(file)) && registries['web/ci-web-shards.json'] === undefined) {
+    try {
+      registries['web/ci-web-shards.json'] = { before: policy, after: loadManifest(resolve(checkout, 'web/ci-web-shards.json')) }
+    } catch { registries['web/ci-web-shards.json'] = {} }
   }
   const identity = { base_sha: base, base_tree: gitTree(checkout, base), head_sha: env.PR_HEAD_SHA,
     checkout_sha: git(['rev-parse', 'HEAD']), checkout_tree: gitTree(checkout), run_id: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT }

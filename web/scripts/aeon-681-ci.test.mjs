@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { loadManifest as loadWebPolicy } from './ci-web-shard.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
@@ -100,7 +101,7 @@ export const collectWeb = () => { if (!inventory) { collections++; inventory = n
   }})
   t.after(()=>hook.deregister())
   const {plan,main}=await import(entry)
-  const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
+  const policy=loadWebPolicy()
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
   const selection=plan('web',options)
@@ -154,7 +155,7 @@ export const collectWeb = () => (${JSON.stringify(snapshot)});`
   }})
   try {
     const {plan,main}=await import('../../scripts/test-tiers/cli.mjs?native-planning-snapshot')
-    const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
+    const policy=loadWebPolicy()
     const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
     const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
     const selection=plan('web',options)
@@ -255,7 +256,7 @@ test('native browser selectors cover reconciled essentials and every collected f
   const tiers=new Map(reconciled.map(row=>[key(row),row.tier]))
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
-  const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
+  const groups=loadWebPolicy().groups
   // Full and catalogue modes often produce identical inputs. Collect each
   // distinct native selector once, while retaining every per-mode assertion.
   // Several groups select exactly the same cases in full and all modes.
