@@ -17,8 +17,21 @@ import (
 // must append these changes after all remaining writes. No event counter is
 // taken here. The same readiness, typed orders and rank helpers serve manual
 // queue entry; inert runs cannot be picked up before coordinator routing.
-func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string) ([]events.Change, error) {
-	if err := RequireBuildAdmissionTx(ctx, tx, p, nodeID, "", nil); err != nil {
+// An optional candidate binds the order to an exact pending delivery. Recurrence
+// occurrence creation supplies none: the new ticket has no pending delivery yet.
+func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, candidate ...*BuildCandidate) ([]events.Change, error) {
+	var binding *BuildCandidate
+	switch len(candidate) {
+	case 0:
+	case 1:
+		binding = candidate[0]
+	default:
+		return nil, fmt.Errorf("enqueue accepts at most one build delivery binding")
+	}
+	if err := workorders.ValidateBuildCandidate(binding); err != nil {
+		return nil, err
+	}
+	if err := RequireBuildAdmissionTx(ctx, tx, p, nodeID, "", nil, &BuildAdmission{Candidate: binding}); err != nil {
 		return nil, err
 	}
 	var title, body, kind, state string
@@ -61,7 +74,7 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 	if !inert {
 		return nil, fmt.Errorf("queue holder identity conflicts")
 	}
-	order, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: title, Body: body, Parent: &nodeID, Criteria: Criteria(Fields(fields))})
+	order, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: title, Body: body, Parent: &nodeID, Criteria: Criteria(Fields(fields)), BuildDelivery: binding})
 	if err != nil {
 		return nil, err
 	}

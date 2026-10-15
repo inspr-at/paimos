@@ -36,10 +36,19 @@ with repository, branch and nullable pull request, and atomically appends
 An absent, empty or different branch remains refused. Exact registration
 replay emits no further continuation history.
 
-Fix orders can bind `build_delivery: {repository, branch}` at creation. The
-binding is stored in the order's existing node fields and returned with the
-order. Queue routing and daemon pickup pass that binding to the same guard;
-the frozen lead assignment also retains it and rejects a changed binding.
+Fix orders can bind `build_delivery: {repository, branch}` at creation. Queue
+add (`POST /api/queue`) and parent-snapshot apply accept the same optional
+binding. The server validates it, admits the exact pending delivery, and stores
+it on the created order. Omitting it, or naming another repository or branch,
+still refuses with **already built — ship it** and creates no work. Replaying
+the same target and binding returns the existing queued run. Recurrence
+enqueue accepts a binding when its caller supplies one. A new occurrence has
+no pending delivery of its own, so occurrence creation does not invent one.
+The binding is stored in the order's existing node fields and returned with the
+order. Queue routing and daemon pickup pass that stored binding to the same
+guard; the frozen lead assignment also retains it and rejects a changed binding.
+Enqueue does not write the continuation comment. Routing, claim and registration
+still record it.
 Unknown or different repositories remain refused when a delivery is pending.
 An active builder, an unconfirmed earlier writer, stale assignment, revoked
 permission or unavailable capacity still prevents continuation. The audit is

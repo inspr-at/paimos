@@ -2832,6 +2832,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueCancellationInterruptsHTTPTransport","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueEnqueueRoutesAndClaimsBoundDelivery","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueEscalationCannotBypassBoundedRetry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueFixOrderContinuesDeliveryBranch","tier":"ESSENTIAL"}
@@ -2839,6 +2841,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestQueueOversizedBodyDoesNotWaitForTenantFence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueRouteContinuesBoundDelivery","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueSnapshotApplyContinuesBoundDelivery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueStalledBodyHoldsNoTenantFence","tier":"GATED-FULL"}
     ,

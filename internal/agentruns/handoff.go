@@ -152,7 +152,7 @@ func validatePickupHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v
 	if project == nil || *project != h.ProjectID || !revision.Equal(h.TicketRevision) || o.Revision != h.WorkOrderRevision || brief != h.BriefSHA256 || !sameBuildDelivery(h.BuildDelivery, o.BuildDelivery) {
 		return workorders.Fail(409, "assignment brief or ticket changed; queue again")
 	}
-	if err = requireWriterFree(ctx, tx, h.TicketID, v.ID); err != nil {
+	if err = requireWriterFree(ctx, tx, h.TicketID, v.ID, nil); err != nil {
 		return err
 	}
 	var workspaceBusy bool
@@ -195,9 +195,16 @@ func digest64(s string) bool {
 
 // Tenant/tree fence serializes this check with every queue/claim writer.
 // Lost heartbeat, administrative archival and terminal labels never free it.
-func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string) error {
+// An explicit candidate is the enqueue binding, which has no run to load yet.
+// Claim and later pickup pass nil and keep the stored order binding.
+func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string, candidate *workorders.BuildCandidate) error {
+	if err := workorders.ValidateBuildCandidate(candidate); err != nil {
+		return err
+	}
 	var admission workorders.BuildAdmission
-	if exclude != "" {
+	if candidate != nil {
+		admission.Candidate = candidate
+	} else if exclude != "" {
 		var order string
 		if err := tx.QueryRow(ctx, `SELECT work_order_id::text FROM agent_runs WHERE id=$1`, exclude).Scan(&order); err != nil {
 			return err

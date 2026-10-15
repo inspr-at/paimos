@@ -14,7 +14,7 @@ paths:
         '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     post:
       operationId: addWorkQueue
-      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; In progress with no assignee and no live run/session is stale and also becomes Open. Stale additions return a revision-bound Undo token. Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
+      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; In progress with no assignee and no live run/session is stale and also becomes Open. Stale additions return a revision-bound Undo token. Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Optional build_delivery names the exact repository and work/ branch of a pending delivery. The server validates it, admits that delivery, and stores the binding on the created order. Omitting it still refuses unmerged delivery. Replaying the same target and binding returns the existing queued run. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
       security: [{session: []}, {agentKey: []}]
       requestBody:
         required: true
@@ -29,13 +29,14 @@ paths:
                 agent_principal_id: {type: string, format: uuid}
                 model_profile_id: {type: string, format: uuid}
                 requested_account_id: {type: string, format: uuid}
+                build_delivery: {$ref: '#/components/schemas/BuildCandidate'}
       responses:
         '200': {description: Queued entry, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueueEntry'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409':
-          description: 'Active run or changed target conflicts. build_in_flight identifies an active builder or returns already built — ship it for unmerged delivery evidence in the linked repository; no work is created.'
+          description: 'Active run or changed target conflicts. build_in_flight identifies an active builder or returns already built — ship it for unmerged delivery evidence in the linked repository when build_delivery is omitted or does not match; no work is created. An exact build_delivery continues that delivery.'
           content:
             application/json:
               schema:

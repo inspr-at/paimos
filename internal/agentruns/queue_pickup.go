@@ -470,7 +470,7 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 	if !ready.Ready || workqueue.State(t.State) != "open" {
 		return out, workorders.Fail(409, "work_not_eligible")
 	}
-	if err = requireWriterFree(ctx, tx, t.ID, v.ID); err != nil {
+	if err = requireWriterFree(ctx, tx, t.ID, v.ID, nil); err != nil {
 		return out, err
 	}
 	wait, err := workqueue.BlockingTx(ctx, tx, t.ID)
