@@ -91,7 +91,7 @@ stay unchanged. No assertion is removed without checking its replacement.
 | `web/tests/agent-recovery.spec.ts` | Overview, the inline managed-control frame, and absent recovery buttons → Details and Panel actions remain stable; check actual Restart/Reconnect menu items are absent when unauthorized/offline. Exact requests and outcomes remain. |
 | `web/tests/lead-start.spec.ts` | Disabled standalone Resume with a tooltip → disabled overflow Resume with its visible reason; measure Resume, More and Close and prove the disabled click sends no write. |
 | `web/tests/managed-controls.spec.ts` | Inline Steer/settings, a second More menu and inline feedback → the one header More menu, anchored setting/steer editors or phone sheets, and header receipts. Check real action items remain disabled while pending/unauthorized; retain ownership payloads, drafts, retry IDs, request counts, confirmation and reported-value assertions. |
-| `web/tests/agents.spec.ts` | Session actions group → Panel actions; retain ticket text, full link, state, hover/focus and header/tab geometry assertions. |
+| `web/tests/agents.spec.ts` | Session actions, a session-name heading and raw model ID → Panel actions, the exact ticket-key/title heading and the registered full model name; retain the exact session URL, ticket link/state, hover/focus and geometry assertions. |
 | `web/tests/aeon-1213-agents-split.spec.ts` | A floating dock throughout an open split → the header More action while open and the original launcher when closed; retain registered preset keys, divider bounds, person isolation, shared preferences and geometry through layouts. Sheets expose More while the old dock stays hidden. |
 | `web/tests/attach-watch.spec.ts` | No More button for a watched session → More is available for view/layout choices, and its actual menu contains no mutation/settings actions, including Recover, Remove, Restart and Reconnect; no textbox or automatic watch is introduced. |
 
@@ -103,6 +103,15 @@ Managed retry controls sit above their feedback in the header. Feedback grows
 downward in normal flow, so an error cannot cover Retry or move the header's
 existing actions. The retained lost-response test clicks the real Retry
 button and proves that its request ID and payload are reused.
+
+An open desktop split or wide pane also clears the app main scroller's
+96-pixel page-anchor padding. Its toolbar already starts below the app
+header; applying that clearance again made scroll-into-view move More into
+the middle of the screen and hide the composer's newest lines. The same
+clearance displaced the history reader during Earlier messages. The scoped
+CSS correction passes the retained viewport assertions and the unchanged
+0.5-pixel history-anchor check through 231 messages. No chat-engine change,
+placement observer or deferred-placement retry is added.
 
 The nine new panel cases move, unchanged, into `native-session-program.spec.ts`
 (mode/identity/menu), `native-session-program-{390,1024,1440}.spec.ts` (two
@@ -140,5 +149,31 @@ syntax checks passed for all twenty changed test/fixture files. The nine
 split test bodies match the original bodies, and every foreign tier row is
 unchanged. The canonical manifest check and `git diff --check` passed.
 
-Guarded browser/static results are recorded in the worker handoff. The
-coordinator retains the cross-family gate, PR CI and Tick visual check.
+Final runtime/test implementation: `8a252cbf4`. The handoff commit changes
+documentation only.
+
+| Validation | Result |
+| --- | --- |
+| Full tier/shard suite on final source | 502 passed, zero skipped; 162.777 seconds. |
+| Recovery unit on final source | All six passed with one worker. |
+| Ownership audit on final source | All 33 passed. |
+| Targeted source ESLint, canonical manifests and diff checks | Passed. |
+| Final remote batch B | All 215 cases passed on `8a252cbf4`; 206212 ms supervisor wall. Covers agent pause, lead flow, session chat, live chat, Agents and attach/watch. |
+| Focused final scroll proof | Four streaming cases and all nine AEON-976 cases passed, including the unchanged history-anchor assertion. These are subsets of batch B. |
+| Earlier complete remote batch A | All 95 passed on `920f5cedd`; 157348 ms supervisor wall. Covers managed controls, no-shift, recovery, lead start/adoption and split. This precedes the final scroll-padding change. |
+| Earlier split panel proof | All nine passed on `5b12c8084`; 12103 ms supervisor wall, with 26 viewport/theme screenshots. This precedes the source follow-ups. |
+
+**BLOCKED-REMOTE-CAPACITY:** the final batch A replay was refused by the
+browser supervisor because another live suite owns its machine-wide lock.
+The lock and its owner were left untouched. Per the brief, no further browser
+attempt was made. Therefore batch A on the final source, a fresh replay of
+the nine split panel cases/screenshots, and the prior approved 56-case
+`aeon-1212-lead-panel.spec.ts` remain unproven in this round. Every completed
+guarded run reports zero remaining owned browser processes.
+
+The guarded static wrapper also returned exit 3: remote static checks are
+paused by the night protocol while mbp2606 is shared with the CI pool. This
+is incomplete, not a passing static result. PR CI is authoritative. Worker
+progress remains 95%; the coordinator retains static CI, the cross-family
+gate and Tick's visual check. No origin push, merge, deployment, model CLI
+or review gate was run by this worker.
