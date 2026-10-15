@@ -154,6 +154,13 @@ func TestReviewResolutionBindsCodexIsolationAndExplainsMissingGrok(t *testing.T)
 	if got.OwnerRequired || got.Profile == nil || got.Profile.ID != pin.ID || got.CommandTemplate != want || len(got.Trace.QualifyingAccountIDs) != 1 || got.Trace.QualifyingAccountIDs[0] != account {
 		t.Fatalf("isolated route not usable: %+v", got)
 	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		managed, err := ResolveReviewFor(t.Context(), tx, p, WorkQuery{AuthorFamily: "claude", Harness: "codex"}, time.Now())
+		if err == nil && (managed.Profile != nil || !managed.OwnerRequired) {
+			t.Fatalf("printed command widened managed adapter qualification: %+v", managed)
+		}
+		return err
+	})
 	for _, unsafe := range []string{"", strings.Replace(want, "--ignore-user-config ", "", 1), strings.Replace(want, "-s read-only ", "", 1), strings.Replace(want, "read-only", "workspace-write", 1)} {
 		if err := ValidateReviewCommand("codex", pin.Model, pin.Effort, unsafe); err == nil {
 			t.Fatalf("unsafe route accepted: %s", unsafe)
@@ -172,6 +179,11 @@ func TestReviewResolutionBindsCodexIsolationAndExplainsMissingGrok(t *testing.T)
 	}
 	if grok.Profile != nil || !grok.OwnerRequired || !explained {
 		t.Fatalf("missing Grok account reported as capacity: %+v", grok)
+	}
+	minimalAccount(t, p, profileBySlug(profiles, "grok-4-7-xhigh"))
+	unenrolled := decode[WorkResolution](t, &p, "GET", "/api/models/resolve?role=review-gate&author_family=claude&harness=grok", "", 200)
+	if unenrolled.Profile != nil || !unenrolled.OwnerRequired {
+		t.Fatalf("Grok account bypassed native enrollment: %+v", unenrolled)
 	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids='{}' WHERE id=$1`, account)

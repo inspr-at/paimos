@@ -158,7 +158,7 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		// only through its generated isolated read-only command.
 		var account *agentaccounts.Account
 		if len(reasons) == 0 {
-			capability := reviewCommandCapability(step.Profile)
+			capability := reviewCommandCapability(step.Profile, q.printedReviewCommand)
 			if !capability.Supported {
 				reasons = append(reasons, capability.Reason)
 			} else {

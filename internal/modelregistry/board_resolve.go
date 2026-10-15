@@ -230,7 +230,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			residencyOnly := false
 			if len(reasons) == 0 {
 				if review {
-					capability := reviewCommandCapability(profile)
+					capability := reviewCommandCapability(profile, q.printedReviewCommand)
 					if !capability.Supported {
 						reasons = append(reasons, capability.Reason)
 					} else {

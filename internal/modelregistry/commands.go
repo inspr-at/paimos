@@ -67,8 +67,8 @@ func ValidateReviewCommand(harness, model, effort, command string) error {
 	return nil
 }
 
-func reviewCommandCapability(p Profile) agentverification.Capability {
-	if p.Harness == "codex" {
+func reviewCommandCapability(p Profile, printedCommand bool) agentverification.Capability {
+	if p.Harness == "codex" && printedCommand {
 		command, err := commandTemplate(p.Harness, p.Model, p.Effort, true)
 		if err == nil {
 			err = ValidateReviewCommand(p.Harness, p.Model, p.Effort, command)
