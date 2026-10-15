@@ -461,7 +461,7 @@ export function slowness(segment: Pick<LifeVisit, 'status' | 'seconds'>, typical
   return { p50: typical.p50, p90: typical.p90, attn: typical.p90 != null && segment.seconds > typical.p90 }
 }
 
-// Gates are the header's four status groups; a marker sits where the ticket entered durationOne (again after a backward move).
+// Gates are the header's four status groups; a marker sits where the ticket entered one (again after a backward move).
 export type GateId = HeaderStatusGroup['id']
 export const gateOf = (status: string): HeaderStatusGroup | undefined => HEADER_STATUS_GROUPS.find(group => (group.states as readonly string[]).includes(status))
 export interface Gate { group: HeaderStatusGroup; index: number; at: number; by: StatusTimingActor | null; again: boolean }
@@ -479,8 +479,8 @@ export function gatesOf(visits: readonly LifeVisit[]): Gate[] {
 
 export type MarkerKind = 'gate' | 'final' | 'now'
 export interface Marker { kind: MarkerKind; index: number; at: number; by: StatusTimingActor | null; icon: string; gate: Gate | null; status: string | null }
-/** The gates plus one marker at the right end: the final status (finished) or the current durationOne (open, a "now" notch).
- * When the final status is itself a gate, the two are durationOne marker with the final status's icon. */
+/** The gates plus one marker at the right end: the final status (finished) or the current one (open, a "now" notch).
+ * When the final status is itself a gate, the two are one marker with the final status's icon. */
 export function markersOf(life: Life): Marker[] {
   const markers: Marker[] = gatesOf(life.visits).map(gate => ({ kind: 'gate', index: gate.index, at: gate.at, by: gate.by, icon: gate.group.icon, gate, status: null }))
   const lastIndex = life.visits.length - 1
