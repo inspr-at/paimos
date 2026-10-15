@@ -237,6 +237,7 @@ const willClose = computed(() => dragWidth.value !== null && workWidth.value - D
 const layoutSaveFailed = computed(() => preferenceSaves.failed.has(`${person.value}/agents:layout`))
 let lastSession = '', layoutResize: ResizeObserver | undefined, layoutFrame: number | undefined
 let layoutWrite = 0
+let pendingWorkPlacement: { session: string; owner: string; scrollTop: number } | null = null
 let rowAnchor: { id: string; top: number } | null = null
 let drag: { pointer: number; x: number; width: number; person: string } | null = null
 function rememberHandle(width: number) {
@@ -252,7 +253,13 @@ function rememberHandle(width: number) {
 }
 function ensureWorkTop() {
   const main = work.value?.closest('main')
-  if (main && work.value) main.scrollTo({ top: main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top, behavior: 'instant' })
+  if (!main || !work.value) return
+  main.scrollTo({ top: main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top, behavior: 'instant' })
+  // The first render can still have the short list's scroll extent. Retry
+  // when the pane gives the page its full height, while the same person and
+  // session are open and the person has not scrolled elsewhere.
+  pendingWorkPlacement = (split.value || panelOnly.value) && Math.abs(work.value.getBoundingClientRect().top - main.getBoundingClientRect().top) > .5
+    ? { session: sessionId.value, owner: person.value, scrollTop: main.scrollTop } : null
 }
 function placeRow() {
   if (!split.value) return
@@ -596,6 +603,9 @@ onMounted(() => {
     // paint; deferring it lets the old split move controls during interaction.
     measureWidth()
     preserveWorkPosition()
+    const pending = pendingWorkPlacement
+    pendingWorkPlacement = null
+    if (pending && main && pending.session === sessionId.value && pending.owner === person.value && (split.value || panelOnly.value) && Math.abs(main.scrollTop - pending.scrollTop) <= .5) ensureWorkTop()
     // The main viewport's height is independent of the split. Its resize can
     // settle immediately too, without briefly opening a zero-height pane.
     if (entries.some(entry => entry.target === main)) measureHeight()
@@ -620,6 +630,7 @@ onMounted(() => {
   clock = setInterval(() => agents.tick(), 1000)
 })
 onBeforeUnmount(() => {
+  pendingWorkPlacement = null
   panelLayoutWrite++; panelMedia.removeEventListener('change', syncPanelClass)
   layoutResize?.disconnect(); drag = null; dragWidth.value = null
   if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
@@ -780,7 +791,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
    Cap the pane at the row and let the divider yield so that frame cannot widen main. */
 .agents-list-pane { flex: 0 0 100%; min-width: 0; max-width: 100%; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
-.split, .panel-only { padding-bottom: 8px; overflow-anchor: none; }
+.split, .panel-only { padding-bottom: 8px; }
 .panel-only .agents-divider { display: none; }
 .agents-divider { position: relative; flex: 0 0 0; align-self: stretch; transition: flex-basis 240ms ease; }
 .split .agents-divider { flex-basis: 16px; flex-shrink: 1; min-width: 0; cursor: col-resize; touch-action: none; }
