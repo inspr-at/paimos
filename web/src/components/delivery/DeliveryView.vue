@@ -15,6 +15,7 @@ import ExpertTile from './ExpertTile.vue'
 import FlowView from './FlowView.vue'
 import LevelSwitch from './LevelSwitch.vue'
 import SimpleNumbers from './SimpleNumbers.vue'
+import TicketsSection from './TicketsSection.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
@@ -31,6 +32,9 @@ import { useProfile } from '../../stores/profile'
 import { can } from '../../lib/authz'
 import { projectSettingsPath } from '../../lib/projectSettings'
 import { repositoryState } from '../../lib/projectDeliverySettings'
+import { ticketsModel, type TicketTileModel } from '../../lib/deliveryTickets'
+import { NO_FILTERS, type TimingFilters } from '../../lib/statusTiming'
+import { useTicketTiming } from '../../lib/useTicketTiming'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
 // The project page hands over a new object on every render. Everything here follows the id and
@@ -124,6 +128,15 @@ onBeforeUnmount(() => { poller.stop(); reading?.abort() })
 watch(projectId, () => { data.value = null; status.value = 'loading'; poller.restart() })
 
 const state = computed<'loading' | 'error' | 'ready'>(() => status.value === 'ready' && !prefsReady.value ? 'loading' : status.value)
+
+// ---------- Tickets (AEON-1359): status timing from the event log, per window and filters ----------
+// The filters belong to this page visit; another project starts without them.
+const ticketFilters = ref<TimingFilters>({ ...NO_FILTERS })
+watch(projectId, () => { ticketFilters.value = { ...NO_FILTERS } })
+const tickets = useTicketTiming({ projectId: () => projectId.value, window: () => prefs.value.window, filters: () => ticketFilters.value, active: () => view.value === 'numbers' && prefsReady.value })
+const ticketState = computed<'loading' | 'error' | 'ready'>(() => !prefsReady.value ? 'loading' : tickets.status.value)
+const ticketView = computed(() => ticketsModel(ticketState.value === 'ready' ? tickets.data.value : null, prefs.value.window, lang.value, tickets.final.value))
+function setTicketFilters(next: TimingFilters) { closeTip(); ticketFilters.value = next }
 const numbers = computed(() => data.value ? numbersOf(data.value, prefs.value.window, lang.value) : null)
 // Placeholders keep every tile and chart in its slot while loading or after a failed read.
 const empty = computed(() => numbersOf({ project_id: projectId.value, generated_at: '', source: null, metrics: [] }, prefs.value.window, lang.value))
@@ -159,8 +172,16 @@ const chips = computed(() => {
     { icon: s.app_connected ? 'pulse' as const : 'signal-off' as const, b: s.app_connected ? t.srcApp[0] : t.srcAppOff[0], rest: stale ? lang.value === 'de' ? ` · letztes Ereignis ${day(s.last_event_at ?? null)}` : ` · last event ${day(s.last_event_at ?? null)}` : s.app_connected ? t.srcApp[1] : t.srcAppOff[1], problem: !s.app_connected || stale },
     { ...back, problem: s.backfill !== 'done' || !!s.last_read_error },
     { icon: 'merge' as const, b: t.srcTool[0], rest: t.srcTool[1], problem: false },
+    ...(history.value ? [{ icon: 'ticket' as const, b: history.value[0], rest: history.value[1], problem: false }] : []),
   ]
 })
+// The status-history chip says since when every status change is known; it stands with the others once both reads settled.
+const history = computed<[string, string] | null>(() => {
+  const t = text.value, since = tickets.data.value?.coverage.since
+  if (tickets.status.value === 'loading') return null
+  return since ? [t.srcHistory[0], fill(t.srcHistory[1], { d: shortDate(since.slice(0, 10), lang.value) })] : [t.srcHistoryNone[0], t.srcHistoryNone[1]]
+})
+const chipsReady = computed(() => tickets.status.value !== 'loading')
 const unit = computed(() => bucketOf(prefs.value.window))
 const trendCaption = computed(() => {
   const t = text.value
@@ -168,10 +189,10 @@ const trendCaption = computed(() => {
 })
 
 // ---------- Definition popover: hover or focus shows it, a click pins it, Esc or scrolling closes it ----------
-const tip = ref<{ tile: TileModel; x: number; y: number; pinned: boolean; placed: boolean } | null>(null)
+const tip = ref<{ tile: TileModel | TicketTileModel; x: number; y: number; pinned: boolean; placed: boolean } | null>(null)
 const tipEl = ref<HTMLElement>()
 let tipAnchor: HTMLElement | null = null
-function openTip(tile: TileModel, anchor: HTMLElement, pin: boolean) {
+function openTip(tile: TileModel | TicketTileModel, anchor: HTMLElement, pin: boolean) {
   if (!pin && tip.value?.pinned) return
   if (pin && tip.value?.pinned && tipAnchor === anchor) { closeTip(); return }
   tipAnchor = anchor
@@ -249,8 +270,8 @@ watch(state, (next, prev) => {
 
     <template v-if="view === 'numbers'">
       <div ref="statusEl" class="dl-status" :class="{ veiled: prefFailed && state !== 'error' }" :style="statusHold > 0 ? { minHeight: `${statusHold}px` } : undefined">
-        <div v-if="state === 'loading'" class="sources" aria-hidden="true">
-          <span class="sk chip-sk" style="width: 210px" /><span class="sk chip-sk" style="width: 250px" /><span class="sk chip-sk" style="width: 230px" />
+        <div v-if="state === 'loading' || (state === 'ready' && source && !noData && !chipsReady)" class="sources" aria-hidden="true">
+          <span class="sk chip-sk" style="width: 210px" /><span class="sk chip-sk" style="width: 250px" /><span class="sk chip-sk" style="width: 230px" /><span class="sk chip-sk" style="width: 260px" />
         </div>
         <div v-else-if="state === 'error'" class="banner err half" role="alert" data-testid="delivery-load-error">
           <AppIcon name="alert" :size="16" />
@@ -272,9 +293,16 @@ watch(state, (next, prev) => {
         </div>
       </div>
 
-      <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang" />
+      <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang">
+        <template #tickets>
+          <TicketsSection :model="ticketView" :state="ticketState" :busy="tickets.busy.value" :filters="ticketFilters" level="simple" :window="prefs.window" :lang="lang"
+            @filters="setTicketFilters" @retry="tickets.retry" />
+        </template>
+      </SimpleNumbers>
       <div v-else class="expert">
-        <p class="tiles-cap">{{ fill(text.cap, { w: prefs.window }) }}</p>
+        <TicketsSection :model="ticketView" :state="ticketState" :busy="tickets.busy.value" :filters="ticketFilters" level="expert" :window="prefs.window" :lang="lang"
+          :open-tile="tip?.tile.def.key ?? null" @filters="setTicketFilters" @retry="tickets.retry" @info="openTip" @info-leave="leaveTip" />
+        <p class="tiles-cap sub">{{ fill(text.cap, { w: prefs.window }) }}</p>
         <div class="tiles" role="list" data-testid="delivery-tiles">
           <ExpertTile v-for="tile in tiles" :key="tile.def.key" :tile="tile" :state="state" :text="text" :info-open="tip?.tile.def.key === tile.def.key"
             @info="(anchor, pin) => openTip(tile, anchor, pin)" @info-leave="leaveTip" />
@@ -291,6 +319,7 @@ watch(state, (next, prev) => {
           <span class="tr-cap">{{ trendCaption }}</span>
         </div>
         <div class="charts" data-testid="delivery-charts">
+          <TrendChart :model="ticketView.chart" :state="ticketState" :text="text" />
           <TrendChart v-for="chart in charts" :key="chart.key" :model="chart" :state="state" :text="text" />
         </div>
         <div class="defs">
@@ -366,6 +395,7 @@ watch(state, (next, prev) => {
 .banner.flow-pref-warn { margin: 0; min-height: 40px; padding-block: 0; flex-wrap: nowrap; }
 .banner.flow-pref-warn .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .tiles-cap { margin: 18px 0 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.tiles-cap.sub { margin-top: 22px; }
 .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
 .trends-head { display: flex; align-items: center; gap: 10px 20px; flex-wrap: wrap; margin-top: 26px; }
 .trends-head h3 { margin: 0; font: 650 15px/1.3 var(--font); color: var(--ink); }

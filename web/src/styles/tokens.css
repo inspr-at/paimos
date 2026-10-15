@@ -377,6 +377,11 @@
 /* AEON-522: full amber tint and hairline for capacity/blocker waits. */
 :root { --queue-wait-ink: color-mix(in srgb, var(--warn-ink) 75%, var(--ink) 25%); --queue-wait-bg: color-mix(in srgb, var(--gold) 12%, transparent); --queue-wait-line: color-mix(in srgb, var(--gold) 42%, transparent); }
 
+/* AEON-1359 (design r4b): tips at full opacity, their muted and attention inks, and Accepted's bar fill a step deeper than Delivered. */
+:root { --tip-solid: #203c3d; --tip-muted: rgba(243, 247, 245, 0.74); --tip-attn: #f0c674; --tip-line: rgba(237, 244, 240, 0.2); --st-ok-deep: color-mix(in srgb, var(--st-ok) 72%, #000); }
+:root[data-theme="dark"] { --tip-solid: #061214; --st-ok-deep: color-mix(in srgb, var(--st-ok) 78%, #fff); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tip-solid: #061214; --st-ok-deep: color-mix(in srgb, var(--st-ok) 78%, #fff); } }
+
 /* AEON-1036: the daily limit's two states that need attention. Over pace is gold, at today's limit is red; each is a full tint plus a bar fill and an ink, always used with an icon and words. */
 :root { --cap-over-bg: color-mix(in srgb, var(--gold) 16%, transparent); --cap-over-fill: color-mix(in srgb, var(--gold) 70%, var(--surface-raised)); --cap-over-ink: var(--warn-ink); --cap-lim-bg: color-mix(in srgb, var(--danger) 11%, transparent); --cap-lim-fill: color-mix(in srgb, var(--danger) 55%, var(--surface-raised)); --cap-lim-ink: var(--danger); }
 

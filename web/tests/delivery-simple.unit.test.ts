@@ -18,6 +18,8 @@ import * as simple from '../src/lib/deliverySimple'
 import { simpleNumbersOf, sparkGeometry, verdictOf, type SparkModel } from '../src/lib/deliverySimple'
 import { TILES } from '../src/lib/deliveryNumbers'
 import * as numbersText from '../src/lib/deliveryNumbersText'
+import * as ticketsLib from '../src/lib/deliveryTickets'
+import * as statusTiming from '../src/lib/statusTiming'
 import * as flowLib from '../src/lib/deliveryFlow'
 import * as flowModes from '../src/lib/deliveryFlowModes'
 import * as flowTextLib from '../src/lib/deliveryFlowText'
@@ -227,7 +229,10 @@ for (const lang of ['en', 'de'] as const) {
       'vue-router': { useRoute: () => Vue.reactive({ query: {}, path: '/p/AEON/delivery', hash: '' }), useRouter: () => ({ replace: () => {} }) },
       '../AppIcon.vue': sfc({ props: ['name', 'size'], render: () => Vue.h('svg') }),
       '../work/ProjectTabs.vue': stub, './ExpertTile.vue': stub, './LevelSwitch.vue': stub,
-      './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub, './FlowView.vue': stub,
+      './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub, './FlowView.vue': stub, './TicketsSection.vue': stub,
+      // AEON-1359: Delivery › Tickets reads on its own; answered (with no figures), so the source chips stand.
+      '../../lib/deliveryTickets': ticketsLib, '../../lib/statusTiming': statusTiming,
+      '../../lib/useTicketTiming': { useTicketTiming: () => ({ data: Vue.shallowRef(null), status: Vue.ref('ready'), busy: Vue.ref(false), final: Vue.ref('delivered'), retry() {} }) },
       '../../lib/delivery': delivery, '../../lib/deliveryNumbersText': numbersText,
       '../../lib/authz': { can: () => true }, '../../lib/projectSettings': projectSettings, '../../lib/projectDeliverySettings': projectDeliverySettings,
       '../../lib/deliveryFlow': flowLib, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowTextLib, '../../lib/useDeliveryFlow': useFlow,
