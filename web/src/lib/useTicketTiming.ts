@@ -5,6 +5,7 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { Final } from './deliveryTickets'
 import type { WindowDays } from './deliveryNumbers'
+import { onAccessRevalidate } from './authz'
 import { keepTypicals, readTicketTiming, type TicketStatusTiming, type TimingFilters } from './statusTiming'
 import { usePoller } from './usePolledData'
 import { useIdentityScope } from './useIdentityScope'
@@ -55,6 +56,8 @@ export function useTicketTiming(options: { projectId: () => string; window: () =
   const poller = usePoller(load, 60_000, { enabled: options.active, invalidate: () => reads.cancel() })
   onMounted(() => poller.start(false))
   onBeforeUnmount(() => { poller.stop(); reads.cancel() })
+  // A permission reset drops the read in flight with the scope; ask again in the new one.
+  onBeforeUnmount(onAccessRevalidate({ reset: () => { if (status.value === 'loading' || busy.value) void load() } }))
   watch(() => [options.projectId(), scope.owner.value], () => {
     data.value = null; shown = ''; status.value = 'loading'; busy.value = false; cache.clear()
     final.value = finals.get(options.projectId()) ?? 'delivered'

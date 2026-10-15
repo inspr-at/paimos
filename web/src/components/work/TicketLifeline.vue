@@ -9,6 +9,7 @@ import { computed, nextTick, onBeforeUnmount, onBeforeUpdate, onMounted, ref, sh
 import '../../styles/status-fills.css'
 import StatusIcon from './StatusIcon.vue'
 import { APIError } from '../../lib/api'
+import { onAccessRevalidate } from '../../lib/authz'
 import { deliveryLanguage } from '../../lib/delivery'
 import { lifelineView, typicalsOf, type LifelineView, type TipLine } from '../../lib/lifelineView'
 import { readLifeline, readTypicals } from '../../lib/statusTiming'
@@ -47,6 +48,8 @@ function load() {
   } })
 }
 watch(() => [props.nodeId, props.revision, scope.owner.value], () => { hideTip(); load() }, { immediate: true })
+// A permission reset drops the read in flight with the scope; ask again in the new one.
+onBeforeUnmount(onAccessRevalidate({ reset: () => { if (status.value === 'loading') load() } }))
 const view = computed<LifelineView | null>(() => answer.value ? lifelineView(answer.value.lifeline, typicalsOf(answer.value.timing?.steps), lang.value) : null)
 
 // ---------- Layout: widths from the strip's measured width, markers on whole-pixel notches ----------

@@ -45,8 +45,9 @@ function timing(window: number, final: 'delivered' | 'done' = 'delivered', scale
   const steps = final === 'delivered'
     ? [step('created_to_live', 108, 1.5 * D, 5.9 * D, 90, 2.8 * D), step('new_to_picked_up', 128, 6.7 * H, 30 * H, 120, 9 * H), step('in_progress', 117, 2.4 * H, 8 * H, 100, 2.5 * H), step('qa_to_merged', 117, 51 * 60, 2.5 * H, 95, 40 * 60), step('done_to_live', 108, 19 * H, 2 * D), step('live_to_accepted', 80, D, 2 * D, 70, D)]
     : [step('created_to_done', 129, 1.2 * D, 4 * D), step('new_to_picked_up', 140, 6 * H, 30 * H), step('in_progress', 129, 2 * H, 9 * H), step('qa_to_merged', 129, 40 * 60, 2 * H)]
-  const buckets = Array.from({ length: Math.min(window, 30) }, (_, k, all) => {
-    const day = new Date(Date.parse('2026-10-14T00:00:00Z') - (all.length - 1 - k) * D * 1000).toISOString().slice(0, 10)
+  const count = Math.min(window, 30)
+  const buckets = Array.from({ length: count }, (_, k) => {
+    const day = new Date(Date.parse('2026-10-14T00:00:00Z') - (count - 1 - k) * D * 1000).toISOString().slice(0, 10)
     const before = day < '2026-09-08', quiet = k % 5 === 2
     return { from: `${day}T00:00:00Z`, to: `${day}T23:59:59Z`, state: before ? 'no_data' : 'observed', n: before || quiet ? 0 : 3 + (k % 4), p50: before || quiet ? null : (1 + (k % 3) * 0.3) * D * scale, p90: before || quiet ? null : (3 + (k % 2)) * D * scale }
   })

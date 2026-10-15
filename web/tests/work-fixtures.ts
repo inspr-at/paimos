@@ -789,6 +789,23 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { items: hits, next_cursor: null } })
     }
     if (path === '/api/outcomes' && method === 'GET') return route.fulfill({ json: { outcomes: [] } })
+    // AEON-1359: the lifeline and Delivery › Tickets (the AEON-1369 API). A node's lifeline is its current status since
+    // it was created, and no ticket finished a step yet, so both show their ready, empty state.
+    const lifelineNode = /^\/api\/nodes\/([^/]+)\/lifeline$/.exec(path)
+    if (lifelineNode && method === 'GET') {
+      const node = data.nodes.find(n => n.id === lifelineNode[1])
+      if (!node) return route.fulfill({ status: 404, json: { error: 'node not found' } })
+      const state = canonicalWorkStatus(node.state), closed = ['done', 'delivered', 'accepted', 'cancelled', 'archived'].includes(state)
+      return route.fulfill({ json: { node_id: node.id, generated_at: new Date().toISOString(), complete: true, inferred: false, gap_count: 0, initial_offset_seconds: 0,
+        visits: [{ status: state, from: node.created_at, to: closed ? node.created_at : null, seconds: closed ? 0 : Math.max(0, (Date.now() - Date.parse(node.created_at)) / 1000),
+          moved_by: { name: me.name, kind: 'person' }, next_status: null, ended_by: null, release: null, source: 'event', again: false, ongoing: !closed }] } })
+    }
+    const timingProject = /^\/api\/projects\/([^/]+)\/delivery\/tickets$/.exec(path)
+    if (timingProject && method === 'GET') {
+      const steps = ['created_to_live', 'new_to_picked_up', 'in_progress', 'qa_to_merged', 'done_to_live', 'live_to_accepted'].map(step => ({ step, n: 0, p50: null, p90: null, prev_n: 0, prev_p50: null, prev_p90: null }))
+      return route.fulfill({ json: { project_id: timingProject[1], generated_at: new Date().toISOString(), window: Number(query.get('window') ?? 90), final_status: 'delivered', steps, rework: 0,
+        coverage: { tickets: 0, complete: 0, inferred: 0, gaps: 0, since: null, partial: true }, buckets: [] } })
+    }
     return route.fulfill({ status: 404, json: { error: 'Unmocked route' } })
   })
   return calls
