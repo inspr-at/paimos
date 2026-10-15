@@ -14568,6 +14568,8 @@
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 960 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 no popup clips a footer at the largest counts, and a box that grows is placed again over its header","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
