@@ -38,7 +38,9 @@ The chosen stamp takes its outcome's colour. Rows resolve their ticket as the me
 does, and action requests are named "Action request" on the Desk, in the header
 preview and in the Agents panel. On narrow desks the bar is pinned at the foot:
 Revoke, Edit or Undo appears as a row above Skip and Decide only when the item has
-one, and the folder tab is sized once per round to fit its longest kind label.
+one, and the folder tab is sized once per round to fit its longest kind label. On a
+390 px phone the close button sits beside the tab's shoulder, so a six-character key,
+"Handover question" and the pager fit in full, also in wider system fonts.
 
 Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
 --option '["Title","Description","Answer"]' "Question"` stores a bounded,
