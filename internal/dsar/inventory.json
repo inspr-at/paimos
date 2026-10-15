@@ -1340,6 +1340,18 @@
     {
       "classification": "personal",
       "columns": {
+        "messaging_only": "metadata",
+        "messaging_owner_id": "personal"
+      },
+      "locator": {
+        "person_column": "id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "principals"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "automatic_launch_enabled": "personal",
         "project_id": "metadata",
         "qualification_id": "metadata",

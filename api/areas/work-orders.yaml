@@ -123,6 +123,7 @@ components:
         node_id: {type: string, format: uuid}
         kind: {type: string, enum: [build, review]}
         review: {$ref: '#/components/schemas/ReviewBinding'}
+        build_delivery: {$ref: '#/components/schemas/BuildCandidate'}
         status: {type: string, enum: [draft, ready, running, blocked, done, cancelled]}
         revision: {type: integer, format: int64}
         requested_by_principal_id: {type: string, format: uuid}
@@ -136,6 +137,7 @@ components:
       type: object
       required: [title, criteria]
       properties:
+        build_delivery: {$ref: '#/components/schemas/BuildCandidate'}
         title: {type: string, minLength: 1}
         body: {type: string}
         parent_id: {type: string, format: uuid}
