@@ -5,6 +5,7 @@ import { existsSync, globSync, readFileSync, statSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@vue/compiler-sfc'
+import { initSync, parse as parseImports } from 'es-module-lexer'
 import ts from 'typescript'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ref, type App } from 'vue'
@@ -30,32 +31,38 @@ const removed = [
 // Reproduce the AEON-1138 inventory: trace both app/print roots through static,
 // dynamic and barrel imports, including LiveBot's import.meta.glob. Tests are
 // deliberately outside this graph. Type-only dependencies and assets are kept.
+// Inline import('./x').T type queries stay out, as they did when the walk
+// followed call expressions only. A full Vue/TS parse of every module missed
+// vitest's 5s hang guard on a busy runner (AEON-1387); unresolved imports are
+// still one failure.
 function productionGraph() {
+  initSync()
   const reached = new Set<string>(), pending = ['main.ts', 'print/main.ts'].map(path => resolve(root, path))
+  const resolved = new Map<string, string>()
+  const missing: string[] = []
   const enqueue = (owner: string, specifier: string) => {
     if (!specifier.startsWith('.')) return
     const base = resolve(dirname(owner), specifier.split('?')[0]!)
-    const target = [base, ...['.ts', '.js', '.mjs', '.vue', '/index.ts', '/index.js'].map(suffix => base + suffix)]
-      .find(path => existsSync(path) && statSync(path).isFile())
-    expect(target, `${owner} imports missing ${specifier}`).toBeDefined()
-    pending.push(target!)
-  }
-  while (pending.length) {
-    const path = pending.pop()!
-    if (reached.has(path)) continue
-    reached.add(path)
-    if (!/\.(?:vue|ts|js|mjs)$/.test(path)) continue
-    let source = readFileSync(path, 'utf8')
-    if (path.endsWith('.vue')) {
-      const { descriptor } = parse(source)
-      source = [descriptor.script?.content, descriptor.scriptSetup?.content].filter(Boolean).join('\n')
+    let target = resolved.get(base)
+    if (target === undefined) {
+      target = [base, ...['.ts', '.js', '.mjs', '.vue', '/index.ts', '/index.js'].map(suffix => base + suffix)]
+        .find(path => existsSync(path) && statSync(path).isFile()) ?? ''
+      resolved.set(base, target)
     }
-    const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    if (target === '') missing.push(`${owner} imports missing ${specifier}`)
+    else pending.push(target)
+  }
+  const followParsed = (path: string, source: string, kind: 'all' | 'calls') => {
+    const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
     const visit = (node: ts.Node) => {
-      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) enqueue(path, node.moduleSpecifier.text)
+      if (kind === 'all' && (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) enqueue(path, node.moduleSpecifier.text)
       if (ts.isCallExpression(node) && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
         if (node.expression.kind === ts.SyntaxKind.ImportKeyword) enqueue(path, node.arguments[0].text)
-        if (node.expression.getText(ast) === 'import.meta.glob') {
+        const expr = node.expression
+        const glob = ts.isPropertyAccessExpression(expr) && expr.name.text === 'glob'
+          && ts.isMetaProperty(expr.expression) && expr.expression.keywordToken === ts.SyntaxKind.ImportKeyword
+          && expr.expression.name.text === 'meta'
+        if (glob) {
           const matches = globSync(node.arguments[0].text, { cwd: dirname(path) })
           expect(matches.length, `${path}: production glob is not empty`).toBeGreaterThan(0)
           pending.push(...matches.map(match => resolve(dirname(path), match)))
@@ -65,7 +72,58 @@ function productionGraph() {
     }
     visit(ast)
   }
+  while (pending.length) {
+    const path = pending.pop()!
+    if (reached.has(path)) continue
+    reached.add(path)
+    if (!/\.(?:vue|ts|js|mjs)$/.test(path)) continue
+    let source = readFileSync(path, 'utf8')
+    if (path.endsWith('.vue')) {
+      const scripts = scriptSource(source)
+      if (scripts === null) {
+        const { descriptor } = parse(source)
+        source = [descriptor.script?.content, descriptor.scriptSetup?.content].filter(Boolean).join('\n')
+      } else source = scripts
+    }
+    if (!source.includes('import') && !source.includes('export')) continue
+    let specifiers: string[] | undefined
+    try {
+      specifiers = parseImports(source)[0].flatMap(item => item.d === -1 && item.n ? [item.n] : [])
+    } catch {
+      specifiers = undefined
+    }
+    if (!specifiers) followParsed(path, source, 'all')
+    else {
+      for (const specifier of specifiers) enqueue(path, specifier)
+      // import() calls and import.meta.glob are the runtime edges the lexer
+      // does not name. Only those files pay for a TypeScript parse.
+      if (source.includes('import(') || source.includes('import.meta.glob')) followParsed(path, source, 'calls')
+    }
+  }
+  expect(missing, missing.join('\n')).toEqual([])
   return reached
+}
+
+// Script bodies in file order. Null when a block is cut by another script tag,
+// so the caller uses the Vue parser instead of dropping an import.
+function scriptSource(source: string) {
+  const parts: string[] = []
+  let cursor = 0
+  while (cursor < source.length) {
+    const start = source.indexOf('<script', cursor)
+    if (start < 0) break
+    const openEnd = source.indexOf('>', start)
+    if (openEnd < 0) return null
+    const open = source.slice(start, openEnd + 1)
+    if (/\bsrc\s*=/.test(open)) { cursor = openEnd + 1; continue }
+    const close = source.indexOf('</script>', openEnd + 1)
+    if (close < 0) return null
+    const body = source.slice(openEnd + 1, close)
+    if (body.includes('<script') || body.includes('</script>')) return null
+    parts.push(body)
+    cursor = close + '</script>'.length
+  }
+  return parts.join('\n')
 }
 
 it('both production roots have no imports of the named retired UI and retain live glob and collaboration dependencies', () => {
