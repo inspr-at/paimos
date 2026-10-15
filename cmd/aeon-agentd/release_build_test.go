@@ -52,7 +52,7 @@ func TestReleaseNativeRehearsalChecksVersionAndLedgerCapability(t *testing.T) {
 					t.Fatalf("native rehearsal rejected current --version output: %v\n%s", err, result)
 				}
 				calls, err := os.ReadFile(filepath.Join(root, "go-calls"))
-				if err != nil || strings.Count(string(calls), "test -p 2") != 2 {
+				if err != nil || strings.Count(string(calls), "test -p 2") != 3 || !strings.Contains(string(calls), "./internal/agentd -run ^TestAgentdStateDowngradeRoundTrip$ -count=1") {
 					t.Fatal("native rehearsal skipped its Go guards", err)
 				}
 			} else if err == nil {

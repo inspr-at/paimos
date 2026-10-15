@@ -523,7 +523,7 @@ func TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion(t *t
 	if err := s.writeLead(migrated, true); err != nil {
 		t.Fatal(err)
 	}
-	raw, err = s.state.Read("lead-runtime-"+old.Pickup.Demand.ID+".json", 32768)
+	raw, err = s.state.Read(nativeLeadStateName(old.Pickup.Demand.ID), 32768)
 	if err != nil {
 		t.Fatal(err)
 	}

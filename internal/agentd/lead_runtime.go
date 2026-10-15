@@ -71,17 +71,19 @@ type leadRuntimeAPI interface {
 }
 
 type leadRecord struct {
-	Native       *nativeLeadRecord      `json:"native,omitempty"`
-	Version      int                    `json:"version"`
-	Pickup       agentsetup.LeadPickup  `json:"pickup"`
-	Launch       *agentsetup.LeadLaunch `json:"launch,omitempty"`
-	Workspace    RoutineWorkspace       `json:"workspace"`
-	Group        string                 `json:"group"`
-	Attempted    bool                   `json:"attempted"`
-	Ownership    *ownedprocess.Identity `json:"ownership,omitempty"`
-	ExitObserved bool                   `json:"exit_observed"`
-	ExitReported bool                   `json:"exit_reported"`
-	Abandoned    bool                   `json:"abandoned,omitempty"`
+	Native           *nativeLeadRecord      `json:"native,omitempty"`
+	Version          int                    `json:"version"`
+	MinorVersion     int                    `json:"minor_version,omitempty"`
+	NativeStateMajor int                    `json:"native_state_major,omitempty"`
+	Pickup           agentsetup.LeadPickup  `json:"pickup"`
+	Launch           *agentsetup.LeadLaunch `json:"launch,omitempty"`
+	Workspace        RoutineWorkspace       `json:"workspace"`
+	Group            string                 `json:"group"`
+	Attempted        bool                   `json:"attempted"`
+	Ownership        *ownedprocess.Identity `json:"ownership,omitempty"`
+	ExitObserved     bool                   `json:"exit_observed"`
+	ExitReported     bool                   `json:"exit_reported"`
+	Abandoned        bool                   `json:"abandoned,omitempty"`
 }
 
 type localLead struct {
@@ -101,12 +103,7 @@ type leadRuntime struct {
 }
 
 func (s *Supervisor) writeLead(record leadRecord, exclusive bool) error {
-	record.Version = leadRecordSchemaVersion
-	raw, err := json.Marshal(record)
-	if err != nil || len(raw) > 32768 {
-		return ErrRoutineUnavailable
-	}
-	return s.state.Write("lead-runtime-"+record.Pickup.Demand.ID+".json", raw, exclusive)
+	return writeLeadState(s.state, record, exclusive)
 }
 
 // PollLeadRuntime is called after workers, retaining their pickup priority.
@@ -182,12 +179,7 @@ func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRu
 		if len(name) < len("lead-runtime-.json") || name[:13] != "lead-runtime-" {
 			continue
 		}
-		raw, e := s.state.Read(name, 32768)
-		if e != nil {
-			return e
-		}
-		var r leadRecord
-		r, e = decodeLeadRecord(raw)
+		r, _, e := readLeadState(s.state, name)
 		if e != nil || !uuidPattern.MatchString(r.Pickup.Demand.ID) || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" || r.Pickup.DaemonID != s.daemonID {
 			return ErrProcessesUnconfirmed
 		}
@@ -421,12 +413,10 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 		return err
 	}
 	name := "lead-runtime-" + demand.ID + ".json"
-	var record leadRecord
 	var resources RoutineResourceLease
-	raw, err := s.state.Read(name, 32768)
+	record, _, err := readLeadState(s.state, name)
 	if err == nil {
-		record, err = decodeLeadRecord(raw)
-		if err != nil || record.Native != nil || record.Pickup.Demand != demand || record.Pickup.DaemonGeneration != s.generation || record.Pickup.LedgerGeneration != s.ledgerBinding.Generation || record.Attempted {
+		if record.Native != nil || record.Pickup.Demand != demand || record.Pickup.DaemonGeneration != s.generation || record.Pickup.LedgerGeneration != s.ledgerBinding.Generation || record.Attempted {
 			return ErrProcessesUnconfirmed
 		}
 		local := s.leads.leads[demand.ID]
@@ -618,16 +608,19 @@ func checkRetainedLeads(store *agentsetup.Store) error {
 		if len(name) < len("lead-runtime-.json") || name[:13] != "lead-runtime-" {
 			continue
 		}
-		raw, err := store.Read(name, 32768)
-		if err != nil {
-			return ErrProcessesUnconfirmed
-		}
-		r, err := decodeLeadRecord(raw)
+		r, major, err := readLeadState(store, name)
 		if err != nil {
 			return err
 		}
 		if r.Native != nil && !r.ExitReported && !r.Abandoned || r.Attempted && (!r.ExitReported || !r.ExitObserved || r.Ownership == nil) || !r.Attempted && (r.Ownership != nil || r.ExitObserved || r.ExitReported) {
 			return ErrProcessesUnconfirmed
+		}
+		// Repair released 133 receipts only after the retained-process fence
+		// succeeds. Active or uncertain owners never become downgrade-safe.
+		if major == leadRecordSchemaVersion {
+			if err := writeLeadState(store, r, false); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
