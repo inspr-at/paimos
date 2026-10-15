@@ -627,18 +627,23 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
   assert.ok(deskLessons && deskLessons.listedTests === 26, 'Lesson decision regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
+  // AEON-1316 adds its project Definitions spec after the historical budget.
+  // Keep the old budget and charge only this independently bounded addition.
+  const projectDefinitions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions.spec.ts')
+  assert.ok(projectDefinitions && projectDefinitions.listedTests === 3, 'Project Definitions regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + projectDefinitions.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
     'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check and lesson decision specs')
 })
