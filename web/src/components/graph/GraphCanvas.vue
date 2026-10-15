@@ -35,7 +35,7 @@ const focused = computed(() => !props.glimpse && route.query[props.focusQuery] =
 const { seconds: orbitSeconds } = useGraphMotion()
 const storageKey = computed(() => props.viewerKey ? `aeon:graph:${props.viewerKey}:labels` : '')
 const surfaceLabel = computed(() => `${props.title}: ${props.summary}. Left and right arrows select nodes; Enter opens; Escape ${focused.value ? 'exits focus' : 'clears selection'}.`)
-let renderer: GraphRenderer | null = null, controller: AbortController | undefined, resize: ResizeObserver | undefined, theme: MutationObserver | undefined, pageBox: ResizeObserver | undefined
+let renderer: GraphRenderer | null = null, controller: AbortController | undefined, resize: ResizeObserver | undefined, theme: MutationObserver | undefined
 let focusFrame = 0
 let mounted = false, beforeFocus: HTMLElement | null = null
 let requestNativeFocus = false, nativeFocused = false
@@ -66,18 +66,18 @@ function setPaused(value: boolean) { paused.value = value; renderer?.motion(valu
 function footerInset() {
   return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--footer-h')) || 0
 }
-function measure() {
+function measure(immediate = false) {
   if (props.glimpse) { if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight); return }
   if (!stage.value || !root.value) return
   root.value.style.setProperty('--graph-overlay-top', `${(header.value?.offsetHeight ?? 0) + 34}px`)
   root.value.style.setProperty('--graph-overlay-bottom', `${(footer.value?.offsetHeight ?? 0) + 28}px`)
   if (!focused.value) {
     // Measure actual page chrome instead of a fixed project-header estimate.
-    // Write the height now: the placement loop reads the box in this same turn,
-    // before Vue flushes the bound style.
+    // The placement loop writes the height itself so it can read the box in
+    // this turn. A resize observer must not: writing it there loops.
     const next = Math.max(props.minStageHeight, window.innerHeight - root.value.getBoundingClientRect().top - (header.value?.offsetHeight ?? 0) - (footer.value?.offsetHeight ?? 0) - footerInset() - 12)
-    height.value = next
-    stage.value.style.height = `${next}px`
+    if (next !== height.value) height.value = next
+    if (immediate && stage.value.style.height !== `${next}px`) stage.value.style.height = `${next}px`
   }
   if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight)
 }
@@ -122,17 +122,20 @@ function placeStageNow() {
   placing = true
   try {
     for (let pass = 0; pass < 3; pass++) {
-      measure()
+      measure(true)
       if (!stage.value || !stageCentreHidden()) return
       if (!revealStageCentre()) return
     }
-    measure()
+    measure(true)
     revealStageCentre()
   } finally { placing = false }
 }
-function onPageBox() {
-  if (placing || pointers || userMoved || !mounted || props.glimpse || focused.value) return
-  if (stageCentreHidden()) revealStageCentre()
+function settleStage() {
+  // One follow-up after the header finishes its own layout. A body observer
+  // loops: measuring the stage changes the page box that the observer watches.
+  const follow = () => { if (!placing && !pointers && !userMoved && mounted && stageCentreHidden()) revealStageCentre() }
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(follow, { timeout: 700 })
+  else setTimeout(follow, 0)
 }
 function pointerDown() { pointers++ }
 function pointerUp() { pointers = Math.max(0, pointers - 1) }
@@ -158,7 +161,7 @@ async function start() {
     if (request.signal.aborted || !mounted) { next.dispose(); return }
     renderer = next
     if (dimension.value === '3d' && next.dimension === '2d') { fallback.value = true; dimension.value = '2d' }
-    renderer.motion(paused.value); renderer.data(props.data); emphasis(); placeStageNow()
+    renderer.motion(paused.value); renderer.data(props.data); emphasis(); placeStageNow(); settleStage()
     if (request.signal.aborted || !mounted || renderer !== next) return
     ready.value = true
     if (props.selectedId) renderer.focus(props.selectedId)
@@ -239,12 +242,9 @@ watch(() => props.selectedId, id => { if (id) { renderer?.interact(); renderer?.
 watch(focused, syncFocus)
 onMounted(() => {
   mounted = true
-  resize = new ResizeObserver(measure)
+  resize = new ResizeObserver(() => { if (!placing) measure() })
   for (const el of [root.value, host.value, header.value, footer.value]) if (el) resize.observe(el)
   if (!props.glimpse) {
-    // Header growth above the graph (the work bar taking its rows) does not
-    // resize this canvas, so the stage observer never sees it.
-    pageBox = new ResizeObserver(onPageBox); pageBox.observe(document.body)
     window.addEventListener('pointerdown', pointerDown, true)
     window.addEventListener('pointerup', pointerUp, true)
     window.addEventListener('pointercancel', pointerUp, true)
@@ -260,7 +260,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   mounted = false; document.removeEventListener('fullscreenchange', fullscreenChanged)
   if (root.value) void exitGraphFullscreen(root.value)
-  cancelAnimationFrame(focusFrame); controller?.abort(); resize?.disconnect(); pageBox?.disconnect(); theme?.disconnect(); renderer?.dispose(); unlock()
+  cancelAnimationFrame(focusFrame); controller?.abort(); resize?.disconnect(); theme?.disconnect(); renderer?.dispose(); unlock()
   media.removeEventListener('change', onReduced); scheme.removeEventListener('change', retheme)
   window.removeEventListener('resize', onResize); window.removeEventListener('keydown', keydown, true)
   window.removeEventListener('pointerdown', pointerDown, true); window.removeEventListener('pointerup', pointerUp, true); window.removeEventListener('pointercancel', pointerUp, true)
@@ -291,7 +291,7 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
 .graph-header { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 16px; padding: 22px 24px 16px; position: relative; z-index: 5; }
 .graph-heading h2 { font-size: 17px; font-weight: 580; letter-spacing: -.025em; }
 .graph-heading p { font: 11px/1.6 var(--mono); color: var(--ink-3); margin-top: 5px; }
-.graph-stage { position: relative; min-height: 480px; min-width: 0; }
+.graph-stage { position: relative; min-height: 480px; min-width: 0; overflow-anchor: none; }
 .graph-surface { position: relative; width: 100%; height: 100%; overflow: hidden; outline: none; }
 .graph-surface:focus-visible { box-shadow: inset 0 0 0 2px var(--teal); border-radius: 8px; }
 .graph-surface :deep(canvas) { display: block; }
