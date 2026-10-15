@@ -246,8 +246,13 @@ test('fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow
       await page.setViewportSize({ width, height })
       await mockDecisionDesk(page, { theme })
       await page.goto('/decision-desk')
+      // CI's Linux sans (DejaVu Sans Bold) sets "Handover question" ~15 % wider than macOS does and cut it at 390
+      // beside "PRJ-35" and "5 of 5". Verdana Bold is as wide, so every platform meets CI's metrics; key and pager
+      // use the bundled JetBrains Mono everywhere.
+      await page.addStyleTag({ content: '.folder-tab .ft-kind { font-family: Verdana, "DejaVu Sans", sans-serif !important; }' })
       await page.getByTestId('desk-one-by-one').click()
       await expect(heading(page)).toHaveText('Allow nodes.read?')
+      expect(await page.getByTestId('desk-tab-kind').evaluate(element => getComputedStyle(element).fontFamily), 'the tab uses the wide font').toContain('Verdana')
       await expect(page.getByTestId('desk-native')).toBeHidden()
       const frame = (await page.getByTestId('desk-frame').boundingBox())!, decide = (await page.getByTestId('desk-decide').boundingBox())!
       expect(frame.y + frame.height - (decide.y + decide.height), 'Decide sits at the foot of the sheet').toBeLessThanOrEqual(16)

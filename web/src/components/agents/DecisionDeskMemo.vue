@@ -1159,5 +1159,9 @@ a.res-key:hover { text-decoration: underline; }
 @media (max-width: 560px) {
   .desk-dlg { width: 100vw; height: 100dvh; margin: 0; }
   .desk { height: 100%; max-height: 100dvh; padding: env(safe-area-inset-top) 10px calc(10px + env(safe-area-inset-bottom)); border-radius: 0; }
+  /* A phone tab holds key, kind and pager in ~300 px: × moves up to the shoulder and the pager's tint is even,
+     so a 6-character key, "Handover question" and "5 of 5" fit in full with wider fonts too (CI, Android). */
+  .desk { column-gap: 4px; }
+  .ft-pager { padding: 0 8px; }
 }
 </style>
