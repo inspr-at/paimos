@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /projects/{projectId}/delivery/tickets:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getTicketStatusTiming
+      description: 'Leaf work only, from authorized status changes in the event log including preserved import.history snapshots. Requires nodes.read and events.read. Durations are seconds and quantiles use nearest rank. Each ticket contributes once per step, in the window where that step ended; rework is included. Unfinished and inferred samples are excluded. If no leaf reached Delivered or Accepted in the last 90 days, Done is the final step. Reads have a five-second deadline and reject scopes exceeding 5000 tickets or 100000 relevant events with 503, without partial figures.'
+      security: *auth
+      parameters:
+        - {name: window, in: query, schema: {type: integer, enum: [7, 30, 90, 180, 365], default: 90}}
+        - {name: type, in: query, description: 'Work kind slug, or bug/other by the bug tag for the generic work kind; all means no filter.', schema: {type: string, maxLength: 64}}
+        - {name: priority, in: query, schema: {type: string, enum: [all, high, medium, low]}}
+        - {name: worked_by, in: query, description: 'Kind of the principal that first moved the ticket into In progress.', schema: {type: string, enum: [all, agent, person]}}
+      responses:
+        '200':
+          description: 'Status timing for the selected window and immediately preceding window.'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TicketStatusTiming'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/lifeline:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getTicketLifeline
+      description: 'Requires nodes.read and events.read for the current ticket project. One visit per recorded status change, including reopen and backward moves. Final Done, Delivered, Accepted, Cancelled and Archived visits have zero duration; open visits end at generated_at. Source snapshots near imported creation are aligned to creation with the offset disclosed. Missing history is explicitly inferred and excluded from percentiles. Chain gaps are disclosed rather than silently joined. At most 2000 relevant events, with a five-second read deadline; over-budget reads return 503.'
+      security: *auth
+      responses:
+        '200':
+          description: 'The ticket lifeline, including provenance and coverage.'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TicketLifeline'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/tickets/backfill:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: backfillTicketStatusBaselines
+      description: 'Explicit, idempotent baseline backfill for live work leaves without any creation, imported history, status transition or previous backfill evidence. Requires nodes.write and events.read under the tenant/tree access fence in the final transaction. Does not change ticket status or invent historical actors. Records the documented assumption that the current status held since creation as node.status_history_backfilled; inferred intervals never enter timing percentiles. UUID keyset batches contain at most 200 leaves; continue until next_cursor is null. No automatic backfill on GET.'
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                cursor: {type: string, format: uuid}
+                limit: {type: integer, minimum: 1, maximum: 200, default: 100}
+      responses:
+        '200':
+          description: 'Number of recorded baselines and the exclusive UUID continuation cursor.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recorded, next_cursor]
+                properties:
+                  recorded: {type: integer, minimum: 0}
+                  next_cursor: {type: [string, 'null'], format: uuid}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    StatusTimingActor:
+      type: object
+      required: [name, kind]
+      properties:
+        name: {type: string, maxLength: 200}
+        kind: {type: string, enum: [agent, person, unknown]}
+    StatusTimingVisit:
+      type: object
+      required: [status, from, to, seconds, moved_by, next_status, ended_by, release, source, again, ongoing]
+      properties:
+        status: {type: string}
+        from: {type: string, format: date-time}
+        to: {type: [string, 'null'], format: date-time}
+        seconds: {type: number, minimum: 0}
+        moved_by: {oneOf: [{$ref: '#/components/schemas/StatusTimingActor'}, {type: 'null'}]}
+        next_status: {type: [string, 'null']}
+        ended_by: {oneOf: [{$ref: '#/components/schemas/StatusTimingActor'}, {type: 'null'}]}
+        release: {type: [string, 'null'], maxLength: 128}
+        source: {type: string, enum: [event, imported, inferred]}
+        again: {type: boolean}
+        ongoing: {type: boolean}
+    TicketLifeline:
+      type: object
+      required: [node_id, generated_at, visits, complete, inferred, gap_count, initial_offset_seconds]
+      properties:
+        node_id: {type: string, format: uuid}
+        generated_at: {type: string, format: date-time}
+        visits: {type: array, maxItems: 2001, items: {$ref: '#/components/schemas/StatusTimingVisit'}}
+        complete: {type: boolean}
+        inferred: {type: boolean}
+        gap_count: {type: integer, minimum: 0}
+        initial_offset_seconds: {type: number, minimum: 0}
+    StatusTimingStep:
+      type: object
+      required: [step, n, p50, p90, prev_n, prev_p50, prev_p90]
+      properties:
+        step: {type: string, enum: [created_to_live, created_to_done, new_to_picked_up, in_progress, qa_to_merged, done_to_live, live_to_accepted]}
+        n: {type: integer, minimum: 0}
+        p50: {type: [number, 'null'], minimum: 0, description: 'Nearest-rank median in seconds; null without samples.'}
+        p90: {type: [number, 'null'], minimum: 0}
+        prev_n: {type: integer, minimum: 0}
+        prev_p50: {type: [number, 'null'], minimum: 0}
+        prev_p90: {type: [number, 'null'], minimum: 0}
+    TicketStatusTiming:
+      type: object
+      required: [project_id, generated_at, window, final_status, steps, rework, coverage, buckets]
+      properties:
+        project_id: {type: string, format: uuid}
+        generated_at: {type: string, format: date-time}
+        window: {type: integer}
+        final_status: {type: string, enum: [done, delivered]}
+        steps: {type: array, maxItems: 6, items: {$ref: '#/components/schemas/StatusTimingStep'}}
+        rework: {type: integer, minimum: 0}
+        coverage:
+          type: object
+          required: [tickets, complete, inferred, gaps, since, partial]
+          properties:
+            tickets: {type: integer, minimum: 0}
+            complete: {type: integer, minimum: 0}
+            inferred: {type: integer, minimum: 0}
+            gaps: {type: integer, minimum: 0}
+            since: {type: [string, 'null'], format: date-time}
+            partial: {type: boolean}
+        buckets:
+          type: array
+          maxItems: 54
+          items:
+            type: object
+            required: [from, to, state, n, p50, p90]
+            properties:
+              from: {type: string, format: date-time}
+              to: {type: string, format: date-time}
+              state: {type: string, enum: [observed, partial, no_data]}
+              n: {type: integer, minimum: 0}
+              p50: {type: [number, 'null'], minimum: 0}
+              p90: {type: [number, 'null'], minimum: 0}
