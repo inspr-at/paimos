@@ -1,0 +1,7 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "Replace": {
+    "internal/nodes/entry_evidence.go": "internal/auth/testdata/review-legacy/entry_evidence.go.txt",
+    "internal/reviewgate/coordinator.go": "internal/auth/testdata/review-legacy/coordinator.go.txt"
+  }
+}

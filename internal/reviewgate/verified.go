@@ -60,6 +60,10 @@ func VerifiedLatestTx(ctx context.Context, tx pgx.Tx, order, ticket string) (boo
 		return false, err
 	}
 	b.AuthorFamily = *authorFamily
+	// Evidence used for Done/admission always proves independence, including when generic review policy is off.
+	if b.ReviewerFamily == nil || !ValidFamily(b.AuthorFamily) || b.AuthorFamily == *b.ReviewerFamily {
+		return false, nil
+	}
 	ok, _ := Gate(status, evidence, effective, *b, result, policy.Effective)
 	return ok, nil
 }

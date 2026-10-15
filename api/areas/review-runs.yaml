@@ -1,0 +1,313 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /nodes/{nodeId}/review-runs:
+    post:
+      operationId: "createReviewerRun"
+      description: "Dispatcher creates an immutable run for the current PR, target, head and scope. Model and route come from the recorded sessions. No credential is returned to the dispatcher; the assigned independent reviewer claims it. Runs expire after 30 minutes."
+      security: [{"session":[]},{"agentKey":[]}]
+      parameters: [{"name":"nodeId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewRunCreate"
+      responses:
+        "201":
+          description: "Run created"
+          headers:
+            Aeon-Contract:
+              $ref: "#/components/headers/ReviewRunContract"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRun"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+  /review-runs/{runId}/credential:
+    post:
+      operationId: "claimReviewerRunCredential"
+      description: "Only the assigned reviewer principal with its own live agent key can claim the one-time credential. Coordinators and the run creator are refused. Visual runs additionally require the explicit reviews.visual_approve grant. The credential is returned once and must never be logged."
+      security: [{"agentKey":[]}]
+      parameters: [{"name":"runId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+      responses:
+        "200":
+          description: "Private run credential"
+          headers:
+            Aeon-Contract:
+              $ref: "#/components/headers/ReviewRunContract"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRunCredential"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+  /review-runs/{runId}/verdict:
+    post:
+      operationId: "submitReviewerRunVerdict"
+      description: "Accepts only this run credential, without a session or ordinary agent key. Binds the verdict to the exact immutable ticket, PR, target, head and scope; identity is read from the run. Credentials expire and are single-use. Current access and the visual grant are checked inside the final write. This records evidence and grants no merge authority."
+      security: [{"reviewRunCredential":[]}]
+      parameters: [{"name":"runId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewRunSubmit"
+      responses:
+        "200":
+          description: "Authenticated verdict recorded"
+          headers:
+            Aeon-Contract:
+              $ref: "#/components/headers/ReviewRunContract"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRun"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+  /nodes/{nodeId}/review-evidence:
+    get:
+      operationId: "getReviewerEvidenceProvenance"
+      description: "Flags existing review and visual evidence without authenticated run provenance. Flagged rows remain in the append-only audit log and cannot satisfy Done or admission."
+      security: [{"session":[]},{"agentKey":[]}]
+      parameters: [{"name":"nodeId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+      responses:
+        "200":
+          description: "Legacy evidence flags"
+          headers:
+            Aeon-Contract:
+              $ref: "#/components/headers/ReviewRunContract"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewEvidenceProvenance"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    reviewRunCredential:
+      type: "apiKey"
+      in: "header"
+      name: "X-Aeon-Review-Credential"
+      description: "Short-lived single-use capability claimed by the assigned reviewer."
+  headers:
+    ReviewRunContract:
+      description: "Authenticated reviewer run contract."
+      schema:
+        type: "string"
+        enum: ["review-run/1.0"]
+  schemas:
+    ReviewRunBinding:
+      type: "object"
+      additionalProperties: false
+      required: ["ticket_node_id","repository","pull_request","target_branch","base_sha","head_sha","scope"]
+      properties:
+        ticket_node_id:
+          type: "string"
+          format: "uuid"
+        repository:
+          type: "string"
+          maxLength: 200
+        pull_request:
+          type: "integer"
+          minimum: 1
+        target_branch:
+          type: "string"
+          minLength: 1
+          maxLength: 255
+        base_sha:
+          type: "string"
+          pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        head_sha:
+          type: "string"
+          pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        scope:
+          type: "string"
+          maxLength: 130
+          description: "Exact merge-base(target)..head SHA range."
+    ReviewRunCreate:
+      type: "object"
+      additionalProperties: false
+      required: ["repository","pull_request","target_branch","base_sha","head_sha","scope","author_session_id","reviewer_session_id","kind"]
+      properties:
+        repository:
+          type: "string"
+          maxLength: 200
+        pull_request:
+          type: "integer"
+          minimum: 1
+        target_branch:
+          type: "string"
+          minLength: 1
+          maxLength: 255
+        base_sha:
+          type: "string"
+          pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        head_sha:
+          type: "string"
+          pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        scope:
+          type: "string"
+          maxLength: 130
+          description: "Exact merge-base(target)..head SHA range."
+        author_session_id:
+          type: "string"
+          format: "uuid"
+        reviewer_session_id:
+          type: "string"
+          format: "uuid"
+        kind:
+          type: "string"
+          enum: ["review","visual"]
+    ReviewRun:
+      type: "object"
+      additionalProperties: false
+      required: ["ticket_node_id","repository","pull_request","target_branch","base_sha","head_sha","scope","id","project_id","author_session_id","reviewer_session_id","reviewer_principal_id","author_family","reviewer_family","harness","model","reasoning_effort","kind","created_by","created_at","expires_at","verdict","visual_impact","reason"]
+      properties:
+        ticket_node_id:
+          type: "string"
+          format: "uuid"
+        repository:
+          type: "string"
+          maxLength: 200
+        pull_request:
+          type: "integer"
+          minimum: 1
+        target_branch:
+          type: "string"
+          minLength: 1
+          maxLength: 255
+        base_sha:
+          type: "string"
+          pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        head_sha:
+          type: "string"
+          pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        scope:
+          type: "string"
+          maxLength: 130
+          description: "Exact merge-base(target)..head SHA range."
+        id:
+          type: "string"
+          format: "uuid"
+        project_id:
+          type: "string"
+          format: "uuid"
+        author_session_id:
+          type: "string"
+          format: "uuid"
+        reviewer_session_id:
+          type: "string"
+          format: "uuid"
+        reviewer_principal_id:
+          type: "string"
+          format: "uuid"
+        author_family:
+          type: "string"
+        reviewer_family:
+          type: "string"
+        harness:
+          type: "string"
+        model:
+          type: "string"
+        reasoning_effort:
+          type: "string"
+        kind:
+          type: "string"
+          enum: ["review","visual"]
+        created_by:
+          type: "string"
+          format: "uuid"
+        created_at:
+          type: "string"
+          format: "date-time"
+        expires_at:
+          type: "string"
+          format: "date-time"
+        verdict:
+          type: "string"
+          enum: ["","ok","changes"]
+        visual_impact:
+          type: "string"
+          enum: ["","yes","no","uncertain"]
+        reason:
+          type: "string"
+          maxLength: 2000
+    ReviewRunCredential:
+      type: "object"
+      additionalProperties: false
+      required: ["credential","expires_at"]
+      properties:
+        credential:
+          type: "string"
+        expires_at:
+          type: "string"
+          format: "date-time"
+    ReviewRunSubmit:
+      type: "object"
+      additionalProperties: false
+      required: ["binding","verdict","visual_impact","reason"]
+      properties:
+        binding:
+          $ref: "#/components/schemas/ReviewRunBinding"
+        verdict:
+          type: "string"
+          enum: ["ok","changes"]
+        visual_impact:
+          type: "string"
+          enum: ["yes","no","uncertain"]
+        reason:
+          type: "string"
+          minLength: 1
+          maxLength: 2000
+    ReviewEvidenceProvenance:
+      type: "object"
+      additionalProperties: false
+      required: ["review_legacy_unverified","visual_legacy_unverified"]
+      properties:
+        review_legacy_unverified:
+          type: "boolean"
+        visual_legacy_unverified:
+          type: "boolean"

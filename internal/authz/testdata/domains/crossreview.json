@@ -1,8 +1,37 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_filtered": {
+    "POST /api/review-runs/{runId}/credential": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Approve visual review verdicts",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Reviews",
+      "key": "reviews.visual_approve",
+      "owner_workstation_grantable": false,
+      "risk": "high"
+    }
+  ],
   "routes": {
+    "GET /api/nodes/{nodeId}/review-evidence": "nodes.read",
     "GET /api/nodes/{nodeId}/reviews": "work_orders.read",
+    "POST /api/nodes/{nodeId}/review-runs": "nodes.read",
     "POST /api/nodes/{nodeId}/reviews": "work_orders.write",
+    "POST /api/review-runs/{runId}/credential": "nodes.read",
+    "POST /api/review-runs/{runId}/verdict": "public",
     "POST /api/reviews/github": "public"
+  },
+  "words": {
+    "actions": {
+      "visual_approve": "Approve visual"
+    },
+    "resources": {
+      "reviews": "review approvals"
+    }
   }
 }

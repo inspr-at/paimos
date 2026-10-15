@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativesessions"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 )
@@ -24,6 +25,10 @@ func TestReporterRoutesDeclareHeaderBeforeAuthentication(t *testing.T) {
 		mount                       func(*http.ServeMux)
 	}
 	cases := []routeCase{
+		{"review run create", "POST", "/api/nodes/00000000-0000-4000-8000-000000000001/review-runs", reportercontract.ReviewRun, nodes.New(nil, nil).Mount},
+		{"review run credential", "POST", "/api/review-runs/00000000-0000-4000-8000-000000000001/credential", reportercontract.ReviewRun, nodes.New(nil, nil).Mount},
+		{"review run verdict", "POST", "/api/review-runs/00000000-0000-4000-8000-000000000001/verdict", reportercontract.ReviewRun, nodes.New(nil, nil).Mount},
+		{"review evidence provenance", "GET", "/api/nodes/00000000-0000-4000-8000-000000000001/review-evidence", reportercontract.ReviewRun, nodes.New(nil, nil).Mount},
 		{"handoff create", "POST", "/api/stage-handoffs", reportercontract.StageHandoffs, stagehandoff.New(nil, nil).Mount},
 		{"handoff get", "GET", "/api/stage-handoffs/00000000-0000-4000-8000-000000000001", reportercontract.StageHandoffs, stagehandoff.New(nil, nil).Mount},
 		{"evidence", "POST", "/api/stage-handoffs/00000000-0000-4000-8000-000000000001/evidence", reportercontract.StageEvidence, stagehandoff.New(nil, nil).Mount},

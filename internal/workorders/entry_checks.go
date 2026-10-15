@@ -418,9 +418,12 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 				r.Passed, err = reviewgate.CoordinatorOKTx(ctx, tx, t.ID)
 			}
 			r.Reason = "Record a passing review from another model family for the current build"
-		case "design_attached", "visual_ok":
+		case "visual_ok":
+			r.Passed, err = reviewgate.AuthenticatedOKTx(ctx, tx, t.ID, "visual")
+			r.Reason = "Record an authenticated visual verdict with the separate visual approval grant"
+		case "design_attached":
 			r.Passed, err = entryEvidenceTx(ctx, tx, t, rule.ID)
-			r.Reason = "A project admin records approval for the attached design or current build"
+			r.Reason = "A project admin records approval for the attached design"
 		default:
 			r.Owner, err = EntryOwnerTx(ctx, tx, p, t, rule)
 			if err != nil {
@@ -451,6 +454,16 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 		}
 		if err != nil {
 			return out, err
+		}
+		if err == nil && !r.Passed && (rule.ID == "review_ok_cross_family" || rule.ID == "visual_ok") {
+			var provenance reviewgate.EvidenceProvenance
+			provenance, err = reviewgate.EvidenceProvenanceTx(ctx, tx, t.ID)
+			if rule.ID == "review_ok_cross_family" && provenance.ReviewLegacy || rule.ID == "visual_ok" && provenance.VisualLegacy {
+				r.Reason += "; legacy_unverified: existing evidence has no authenticated run provenance"
+			}
+			if err != nil {
+				return out, err
+			}
 		}
 		if r.Passed {
 			out.Passed++
