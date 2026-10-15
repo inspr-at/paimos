@@ -5,6 +5,7 @@ package approvals
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -76,6 +77,9 @@ func TestApprovalRiskProjection(t *testing.T) {
 		response = f.do(principal, "", "GET", "/api/approvals", "")
 		if response.Code != 200 {
 			t.Fatal(response.Body.String())
+		}
+		if p.want == 0 && strings.TrimSpace(response.Body.String()) != "[]" {
+			t.Fatalf("empty approvals encoded as %s", response.Body.String())
 		}
 		if err = json.Unmarshal(response.Body.Bytes(), &items); err != nil {
 			t.Fatal(err)

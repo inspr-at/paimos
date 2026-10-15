@@ -16,7 +16,7 @@ export function sampleQuestion(id = 'question-1', input: Partial<Question['input
     askers: [{ id: 'asker-1', principal_id: 'agent-1', reply_root_id: 'root-1', comment_node_id: 'n-a1', input: { request_id: id, question: 'Which index?', options: [], meanwhile: 'parked' } }], pending: [],
   }
 }
-export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; short?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean; html?: boolean; projectedSources?: () => DeskProjectionItem[] } = {}) {
+export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; short?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean; html?: boolean; emptyDesk?: boolean; projectedSources?: () => DeskProjectionItem[] } = {}) {
   const data = fixtures()
   data.projects.find(project => project.id === 'p-aeon')!.title = 'Paimos Aeon'
   if (options.theme) data.preferences.theme = { choice: options.theme }
@@ -41,6 +41,16 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method()
     if (method === 'GET') reads.push(new URL(request.url()).pathname + new URL(request.url()).search)
+    if (options.emptyDesk) {
+      if (path === '/api/decision-desk/projection') return route.fulfill({ json: { items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: new Date().toISOString() } })
+      if (path === '/api/decision-desk') return route.fulfill({ json: { items: [], has_more: false } })
+      if (path === '/api/approvals') return route.fulfill({ json: [] })
+      if (path === '/api/rules/doctrine/inbox') return route.fulfill({ json: { items: [], pending: 0 } })
+      if (path === '/api/stepup-requests' && method === 'GET') return route.fulfill({ json: { items: null, has_more: false } })
+      if (path === '/api/key-trim-proposals' && method === 'GET') return route.fulfill({ json: { items: [], has_more: false } })
+      if (path === '/api/harness-sessions') return route.fulfill({ json: { items: [], next_cursor: null } })
+      if (path.endsWith('/messages') && method === 'GET') return route.fulfill({ json: { items: [], next_after: 0 } })
+    }
     if (path === '/api/decision-desk/projection') {
       if (control.failProjection) return route.fulfill({ status: 403, json: { error: 'Access changed' } })
       const rows: DeskProjectionItem[] = questions.filter(q => q.state === 'open').map(q => ({ id: q.id, kind: 'question', project_id: q.project_id, revision: q.revision, title: q.input.question, created_at: q.created_at, held: q.input.meanwhile !== 'carries_on', href: `/decision-desk?item=q:${q.id}`, source: `/api/questions/${q.id}` }))

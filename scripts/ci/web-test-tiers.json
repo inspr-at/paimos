@@ -19866,11 +19866,17 @@
     ,
     {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"declines without a step-up and keeps another decider’s first outcome honest","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"labels a step-up read failure before the generic approval warning","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"refuses unsafe sign-in addresses, cancelled passkeys and changed sources without approving","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"rejects a step-up page whose items are not a list","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"shows the feature change as Before → After and reads both states bounded","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"starts the fresh sign-in by navigation and never reports a decision","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"treats a null step-up page as empty","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"a silent stream recovers at 45 seconds; events and pings extend that deadline","tier":"ESSENTIAL"}
     ,

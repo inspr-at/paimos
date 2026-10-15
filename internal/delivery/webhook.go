@@ -253,7 +253,7 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 						return err
 					}
 					if o.PR != nil {
-						pulls = append(pulls, Pull{Number: *o.PR, Branch: o.Branch, Head: o.Head, Base: o.Base, Open: o.Open, Checks: o.Checks})
+						pulls = append(pulls, Pull{Number: *o.PR, Branch: o.Branch, Head: o.Head, Base: o.Base, Target: o.Target, Open: o.Open, Checks: o.Checks})
 					}
 				}
 				if len(pulls) > 100 {
