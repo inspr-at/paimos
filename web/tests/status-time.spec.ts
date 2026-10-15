@@ -222,22 +222,22 @@ test('an open ticket reopened after a minute lands at once, then shows the time 
     await held.wait
     return route.fulfill({ json: later })
   })
-  const open = async (key: string) => {
-    await page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) }).locator('.title-text').click()
-    await expect(page).toHaveURL(new RegExp(`/${key}$`))
-  }
+  // Leave and come back through the sheet's own Next and Previous, so the page (and the kept answers) stays.
+  const here = () => panel(page).getByRole('button', { name: 'Copy PHAROS-11', exact: true })
+  const leave = async () => { await panel(page).getByRole('button', { name: 'Next ticket', exact: true }).click(); await expect(here()).toHaveCount(0) }
+  const back = async () => { await panel(page).getByRole('button', { name: 'Previous ticket', exact: true }).click(); await expect(here()).toBeVisible() }
   const caption = life(page).locator('.life-cap')
   await page.goto('/p/PHAROS/PHAROS-11')
   await expect(caption).toHaveText(/1\.4d so far$/)
   // Within the minute the kept answer stands and nothing is read again.
-  await open('PHAROS-14')
+  await leave()
   await page.clock.setFixedTime(start + 30_000)
-  await open('PHAROS-11')
+  await back()
   await expect(caption).toHaveText(/1\.4d so far$/)
   // After it, the kept answer still lands at once, without a skeleton, while the lifeline is read again behind it.
-  await open('PHAROS-14')
+  await leave()
   await page.clock.setFixedTime(start + 61_000)
-  await open('PHAROS-11')
+  await back()
   await expect.poll(() => reads).toBe(2)
   await expect(caption).toHaveText(/1\.4d so far$/)
   await expect(life(page)).not.toHaveAttribute('aria-busy', 'true')
