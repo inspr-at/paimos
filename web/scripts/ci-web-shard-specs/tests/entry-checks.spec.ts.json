@@ -1,0 +1,20 @@
+{
+  "group": "work-queue",
+  "nightlyTiming": {
+    "seconds": 32.913,
+    "selectedTests": 3
+  },
+  "spec": {
+    "file": "tests/entry-checks.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 16.054,
+        "median": 13.617,
+        "min": 3.007
+      },
+      "seconds": 32.913,
+      "selectedTests": 3
+    },
+    "weightSeconds": 30
+  }
+}

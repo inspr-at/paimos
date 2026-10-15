@@ -1,0 +1,22 @@
+{
+  "group": "planning",
+  "nightlyTiming": {
+    "seconds": 61.322,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/planning-columns.spec.ts",
+    "listedTests": 14,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.734,
+        "median": 3.995,
+        "min": 2.247
+      },
+      "seconds": 61.322,
+      "selectedTests": 14
+    },
+    "weightSeconds": 31,
+    "weightSource": "web-9"
+  }
+}

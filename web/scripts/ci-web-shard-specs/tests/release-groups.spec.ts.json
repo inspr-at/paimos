@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 21.893,
+    "selectedTests": 10
+  },
+  "spec": {
+    "file": "tests/release-groups.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.521,
+        "median": 2.016,
+        "min": 1.741
+      },
+      "seconds": 21.893,
+      "selectedTests": 10
+    },
+    "weightSeconds": 22.195122,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

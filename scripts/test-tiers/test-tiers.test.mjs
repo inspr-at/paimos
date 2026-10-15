@@ -8,17 +8,17 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, webShardPlan } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
-import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween } from './diff.mjs'
+import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween, sizeWebDecision } from './diff.mjs'
 import { runnerDecision, runnerSelection, browserRunnerIdentity, run } from './cli.mjs'
 import { createGoRunner } from './go-runner.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { buildBrowserMap } from './browser-impact.mjs'
-import { nightlyWeights, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import { nightlyWeights, tierWeights, loadManifest as loadWebPolicy } from '../../web/scripts/ci-web-shard.mjs'
 import './browser-impact.test.mjs'
 import './impact-plan.test.mjs'
 import './manifests.test.mjs'
@@ -160,8 +160,9 @@ test('AEON-1313 interrupted shards checkpoint completed failures and keep measur
     assert.equal(output.classes.NIGHTLY.failed,1)
     assert.match(readFileSync(summary,'utf8'),/Incomplete case evidence: web-shard-1 \(Execution interrupted by SIGTERM\)/)
     const otherAttempt=aggregate([report],[job],{...aggregateOptions,attempt:'3'})
-    assert.deepEqual(otherAttempt.missingEvidence,['web-shard-1'])
-    assert.deepEqual(otherAttempt.classes,{})
+    assert.deepEqual(otherAttempt.missingEvidence,[])
+    assert.equal(otherAttempt.coverage,'incomplete','an earlier interruption must remain incomplete')
+    assert.equal(otherAttempt.classes.NIGHTLY.failed,1)
 
     const green=reportCases(rows,rows.map(row=>({key:key(row),status:'passed',started:true})),1,'web-shard-1')
     Object.assign(green,{runId:'1313',attempt:'2',sha:identity.GITHUB_SHA,execution:{status:'completed'}})
@@ -678,6 +679,42 @@ test('R1 manifest-only diffs take the static layout; promotions must execute and
   assert.equal(same.count,0,'identical manifests promote nothing')
 })
 
+test('AEON-1389 shard records stay R1 and a new spec does not go full because of its record',()=>{
+  const record='web/scripts/ci-web-shard-specs/tests/needs-attention.spec.ts.json'
+  assert.equal(machineryPattern.test(record),false,record)
+  assert.equal(affectedRisk(record).rule,'R1')
+  const weight=on([record])
+  assert.equal(weight.full,false)
+  assert.ok(essentialOnly(weight),'a weight record runs essentials only')
+  assert.match(weight.reason,/R1: manifest\/static checks: /)
+  assert.deepEqual([decide([record]).mode,decide([record]).layout],['essential','static'])
+  const spec='web/tests/needs-attention.spec.ts'
+  const changed=on([spec])
+  assert.equal(changed.full,false,'an existing spec stays reduced')
+  const withRecord=on([spec,record])
+  assert.equal(withRecord.full,false,'its shard record must not widen the spec')
+  assert.deepEqual(withRecord.tests,changed.tests)
+  assert.equal(decide([spec,record]).mode,'essential')
+  const fresh='tests/aeon-1389-fresh.spec.ts'
+  const freshRecord=`web/scripts/ci-web-shard-specs/${fresh}.json`
+  const graph={...replayGraph,[fresh]:[]}
+  const rows=[...replayRows,{kind:'browser',file:fresh,name:'fresh',tier:'GATED-FULL',config:'playwright.ui.config.ts',project:''}]
+  const options={event:'pull_request',affectedLane:'on',webImports:graph,imports:replay.goImports,tree:repoTree,promotions:noPromotions,readFile:readRepo}
+  const specOnly=select(rows,{...options,paths:[`web/${fresh}`]})
+  const both=select(rows,{...options,paths:[`web/${fresh}`,freshRecord]})
+  assert.equal(specOnly.full,false)
+  assert.equal(both.full,false,'a new spec record is not CI machinery')
+  assert.deepEqual(both.tests,specOnly.tests)
+  assert.ok(both.tests.some(row=>row.file===fresh))
+  const planned=schedulingDecision('pull_request',[`web/${fresh}`,freshRecord],()=>true,{affectedLane:'on',graph,tree:repoTree,promotions:noPromotions,tests:rows})
+  assert.equal(planned.mode,'essential')
+  assert.doesNotMatch(planned.reason,/CI machinery/)
+  assert.equal(on(['web/scripts/ci-web-shard-source.mjs']).full,true,'the assembler stays machinery')
+  assert.equal(on(['web/scripts/ci-web-shard-specs/notes.json']).full,true,'a non-record under the source directory stays machinery')
+  assert.equal(machineryPattern.test('web/scripts/ci-web-shard.mjs'),true)
+  assert.equal(machineryPattern.test('web/scripts/ci-web-shard.test.mjs'),false)
+})
+
 test('R2 contract diffs run the Go packages that read the contract and keep web at essentials',()=>{
   assert.equal(on(['api/openapi.yaml']).full,true,'real consumer fan-out keeps the full gate')
   const selected=on(['api/openapi.yaml'],{imports:{}})
@@ -1040,6 +1077,8 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   for(const name of ['core.mjs','diff.mjs','collect.mjs','listing-cache.mjs','inputs.mjs','browser-impact.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
   file('scripts/ci/go-test-tiers.json',JSON.stringify({tests:[]}))
+  file('web/scripts/ci-web-shard-source.mjs',readFileSync(new URL('../../web/scripts/ci-web-shard-source.mjs',import.meta.url),'utf8'))
+  file('web/ci-web-shards.json',JSON.stringify({version:1,groups:[{id:'fixture',specs:[{file:'tests/promoted.spec.ts',weightSeconds:1}]}]}))
   file('web/src/unused.ts','export {}')
   file('web/e2e/unused.ts','export {}')
   file('web/tests/helpers/shared.ts','export const value=1')
@@ -1139,11 +1178,11 @@ test('merge-group planner writes full without needing payload, checkout history 
   for(const affectedLane of ['','off','on']) {
     const output=resolve(directory,`output-${affectedLane}`)
     assert.equal(tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output}),0)
-    assert.equal(readFileSync(output,'utf8'),'mode=full\nlayout=full\nlane=full\n')
+    assert.equal(readFileSync(output,'utf8'),'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12]\n')
     for(const raw of ['full','spec-only','docs-only']) {
       writeFileSync(output,'')
       tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_PLAN_LANE:raw,CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output})
-      assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=${affectedLane==='on'?'full':raw}\n`)
+      assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=${affectedLane==='on'?'full':raw}\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12]\n`)
     }
   }
 })
@@ -1431,8 +1470,8 @@ test('lean tier-plan skips setup, deep checkout and non-premerge checkout work',
   assert.doesNotMatch(planner,/setup-node|setup-go|npm ci|fetch-depth: 0/)
   assert.match(planner,/if: contains\(fromJSON\('\["pull_request","merge_group"\]'\), github.event_name\)/)
   assert.match(planner,/pull_request\) node scripts\/test-tiers\/diff.mjs/)
-  assert.match(planner,/merge_group\) printf 'mode=full\\nlayout=full\\nlane=full\\n' >> "\$GITHUB_OUTPUT" ;;/)
-  assert.match(planner,/printf 'mode=full\\nlayout=full\\nlane=%s\\n'/)
+  assert.match(planner,/merge_group\) printf 'mode=full\\nlayout=full\\nlane=full\\nweb_shards=\[1,2,3,4,5,6,7,8,9,10,11,12\]\\n' >> "\$GITHUB_OUTPUT" ;;/)
+  assert.match(planner,/printf 'mode=full\\nlayout=full\\nlane=%s\\nweb_shards=\[1,2,3,4,5,6,7,8,9,10,11,12\]\\n'/)
   assert.match(planner,/CI_PLAN_LANE: \$\{\{ needs.ci-plan.outputs.lane \}\}/)
   assert.match(planner,/^      layout: \$\{\{ steps.tiers.outputs.layout \}\}$/m)
 })
@@ -1459,7 +1498,7 @@ test('workflow merge-group planner writes only full outputs without executing ca
       const result=spawnSync('/bin/bash',['-e','-c',run],{cwd:directory,encoding:'utf8',timeout:10_000,
         env:{PATH:process.env.PATH,GITHUB_EVENT_NAME:event,GITHUB_OUTPUT:output,CI_AFFECTED_LANE:flag,CI_PLAN_LANE:lane,CANDIDATE_STATUS:code}})
       assert.equal(result.status,event==='merge_group'?0:Number(code),result.stderr)
-      assert.equal(readFileSync(output,'utf8'),event==='merge_group'?'mode=full\nlayout=full\nlane=full\n':'mode=essential\nlayout=static\nlane=full\n')
+      assert.equal(readFileSync(output,'utf8'),event==='merge_group'?'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12]\n':'mode=essential\nlayout=static\nlane=full\n')
       assert.equal(result.stdout,event==='merge_group'?'':'candidate planner executed\n')
     }
 })
@@ -1721,7 +1760,7 @@ test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary a
     if(fixture.reuse==='pull_request')writeFileSync(resolve(fixtureEvidence,'go-timing-measurement.json'),JSON.stringify({version:1,job:'go-timing',classes:{},runId:'123',attempt:'2',sha:'a'.repeat(40)}))
     const fixtureJobs=jobs.map(job=>fixture.reuse==='pull_request'&&job.name==='go-timing'?{...job,...finished,conclusion:'success'}:fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
       ? {...job,...finished,conclusion:'success'}:job)
-    writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/attempts/2/jobs?per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
+    writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/jobs?filter=latest&per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
     writeFileSync(summary,'')
     const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),fixtureEvidence],{
       cwd:root,encoding:'utf8',timeout:10_000,
@@ -1778,7 +1817,7 @@ test('four unit shards partition the existing ledger by file with every identity
 })
 
 test('serial tier weights rebalance the twelve browser shards without changing full or changed-area coverage',()=>{
-  const manifest=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
+  const manifest=loadWebPolicy()
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
   const graph=Object.fromEntries([...new Set(rows.map(row=>row.file))].map(file=>[file,[]]))
   for(const options of [
@@ -1807,7 +1846,7 @@ test('AEON-1325 nightly shards retain every browser case and require all 24 meas
   assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
   const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
-  const policy=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
+  const policy=loadWebPolicy()
   const declared=new Set(policy.groups.flatMap(group=>group.specs.map(spec=>spec.file)))
   for(const file of Object.keys(policy.nightlyTiming.files)) assert.ok(declared.has(file),`stale nightly timing: ${file}`)
   for(const file of new Set(selected.map(row=>row.file))) assert.ok(policy.nightlyTiming.files[file],`missing nightly timing: ${file}`)
@@ -1896,14 +1935,47 @@ test('unit measurement artifacts are required for every executed shard and legac
   assert.deepEqual(aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'full'}).missingEvidence,['web-unit-1','web-shard-1'])
 })
 
-test('rerun measurements reject earlier-attempt artifacts instead of replaying case passes',()=>{
-  const job={name:'go-test (1)',status:'completed',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:01:00Z'}
-  const earlier={...reportCases([cases[0]],[{key:key(cases[0]),status:'passed',started:true}],1,'go-test-1'),runId:'123',attempt:'1',sha:'a'}
-  const report=aggregate([earlier],[job],{runId:'123',attempt:'2',sha:'a'})
-  assert.equal(report.coverage,'incomplete');assert.deepEqual(report.classes,{})
-  assert.deepEqual(report.missingEvidence,['go-test-1']);assert.equal(report.excludedEvidence.length,1)
-  const fresh=aggregate([{...earlier,attempt:'2'}],[job],{runId:'123',attempt:'2',sha:'a'})
-  assert.equal(fresh.coverage,'reported');assert.equal(fresh.classes.ESSENTIAL.passed,1)
+test('AEON-1384 partial reruns accept same-run same-SHA evidence and select the newest attempt per case',()=>{
+  const job={name:'go-test (1)',status:'completed',conclusion:'success',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:01:00Z'}
+  const selected=[{...cases[0],active:true},{...cases[0],name:'TestSibling',active:true}]
+  const make=(rows,attempt,status='passed')=>({...reportCases(rows,rows.map(row=>({key:key(row),status,started:true})),1,'go-test-1'),
+    runId:'123',attempt,sha:'a',execution:{status:'completed'}})
+  const earlier=make(selected,'1'),fresh=make([selected[0]],'2')
+  const options={runId:'123',attempt:'2',sha:'a'}
+  for(const reports of [[earlier],[fresh,earlier],[earlier,fresh]]) {
+    const report=aggregate(reports,[job],options)
+    assert.equal(report.coverage,'reported')
+    assert.equal(report.classes.ESSENTIAL.passed,2)
+    assert.equal(report.classes.ESSENTIAL.selected,2)
+    assert.deepEqual(report.missingEvidence,[])
+    assert.deepEqual(report.excludedEvidence,[])
+    assert.match(report.notes.join('\n'),/partial rerun: [12] cases from attempt 1/)
+  }
+  const failedEarlier=make(selected,'1','failed')
+  const newest=aggregate([failedEarlier,make(selected,'2')],[job],options)
+  assert.equal(newest.classes.ESSENTIAL.failed,0)
+  assert.equal(newest.classes.ESSENTIAL.passed,2)
+  assert.deepEqual(newest.notes,[])
+  const failure=aggregate([earlier,make([selected[0]],'2','failed')],[job],options)
+  assert.equal(failure.classes.ESSENTIAL.failed,1,'a newer failure must supersede an old pass')
+  assert.equal(failure.classes.ESSENTIAL.passed,1)
+  assert.deepEqual(failure.reports[0].caseAttempts,{[key(selected[0])]:'2',[key(selected[1])]:'1'})
+  const interrupted=make([selected[0]],'2');interrupted.caseResults[0].status='notRun';interrupted.caseResults[0].started=false
+  interrupted.classes=reportCases([selected[0]],[],1,'go-test-1').classes
+  assert.equal(aggregate([earlier,interrupted],[job],options).coverage,'incomplete','newer notRun cannot borrow an old pass')
+  for(const change of [{sha:'b'},{runId:'999'},{attempt:'3'},{attempt:'0'},{attempt:undefined},{sha:undefined},{runId:undefined}]) {
+    const report=aggregate([{...earlier,...change}],[job],options)
+    assert.equal(report.coverage,'incomplete',JSON.stringify(change))
+    assert.deepEqual(report.classes,{})
+    assert.equal(report.excludedEvidence.length,1)
+    assert.equal(aggregate([fresh,{...earlier,...change}],[job],options).coverage,'incomplete','foreign artifacts remain a failure beside valid evidence')
+  }
+  const {caseResults,...legacy}=earlier
+  const legacyReport=aggregate([legacy],[job],options)
+  assert.equal(legacyReport.coverage,'reported','legacy artifacts retain whole-job accounting')
+  assert.equal(legacyReport.classes.ESSENTIAL.passed,2)
+  assert.throws(()=>aggregate([fresh,fresh],[job],options),/duplicate measurement/)
+  assert.equal(aggregate([earlier],[{...job,conclusion:'cancelled'}],options).coverage,'incomplete')
 })
 
 test('exact-SHA reuse records provenance and current costs without fabricating fresh case passes',()=>{
@@ -2081,7 +2153,7 @@ test('AEON-686 host-capacity bound and fence cases run in every PR gate',()=>{
 })
 
 test('three-tier manifests allow new NIGHTLY cases and never promote ungated browser cases',()=>{
-  const policy=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
+  const policy=loadWebPolicy()
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
@@ -2370,8 +2442,9 @@ test('AEON-980 merge-group Go retry and quarantine preserve the blocking gate an
     const repeated=aggregate([report,{...report,job:"another-shard"}],[])
     assert.deepEqual(repeated.flakeCounts,{[key(rows[0])]:2,[key(rows[2])]:2})
     const stale=aggregate([report],[],{runId:'123',attempt:'3',sha:identity.GITHUB_SHA})
-    assert.deepEqual(stale.flakeLedger,[])
-    assert.deepEqual(stale.flakeCounts,{})
+    assert.deepEqual(stale.flakeLedger,measured.flakeLedger)
+    assert.deepEqual(stale.flakeCounts,measured.flakeCounts)
+    assert.match(stale.notes.join('\n'),/partial rerun:/)
   })
   await t.test('PR, push, schedule, manual and absent event retain the original failure',async()=>{
     for(const event of ['pull_request','push','schedule','workflow_dispatch',null]) {
@@ -2554,4 +2627,55 @@ test('AEON-980 web retry uses exact browser registrations and native unit patter
       assert.equal(report.flakeLedger.length,event==='merge_group'?1:0)
     }
   })
+})
+
+// Risk: a changed heavy area can overload the former fixed four shards even
+// while remaining below the selector's case-count fan-out guard.
+test('AEON-1389 web shard sizing keeps small essential at four and reserves timeout headroom',()=>{
+  const rows=Array.from({length:8},(_,i)=>({kind:'browser',file:`tests/size-${i}.spec.ts`,name:`case-${i}`,tier:'ESSENTIAL'}))
+  const policy=seconds=>({groups:[{specs:rows.map(row=>({file:row.file,weightSeconds:seconds}))}]})
+  const small=webShardPlan(rows,policy(10))
+  assert.deepEqual(small.shards,[1,2,3,4])
+  const heavy=webShardPlan(rows,policy(600))
+  assert.ok(heavy.shards.length>4)
+  for(const plan of [small,heavy]) {
+    assert.equal(plan.timeoutSeconds,1200)
+    assert.equal(plan.budgetSeconds,900)
+    assert.ok(plan.projectedMaxSeconds<=plan.budgetSeconds)
+    assert.equal(plan.projections.reduce((sum,bin)=>sum+bin.cases,0),rows.length)
+    assert.equal(plan.projections.reduce((sum,bin)=>sum+bin.seconds-plan.overheadSeconds,0),rows.length*(plan===small?10:600))
+  }
+  const impossible=webShardPlan(rows,policy(1000))
+  assert.equal(impossible.fitsBudget,false,'an indivisible spec cannot be made cheap by extra bins')
+  assert.equal(impossible.shards.length,12)
+  assert.throws(()=>webShardPlan(rows,{groups:[]}),/Missing web shard weight/)
+  const decision=sizeWebDecision({mode:'essential',layout:'full'},['web/tests/size-0.spec.ts'],{
+    tests:rows,policy:policy(1000),graph:Object.fromEntries(rows.map(row=>[row.file,[]]))})
+  assert.equal(decision.mode,'full','an over-budget essential projection must widen to the full gate')
+})
+
+test('AEON-1389 PR 684 diff plans more web shards within budget without losing selected cases',()=>{
+  const fixture=JSON.parse(readFileSync(new URL('./pr-684-diff.json',import.meta.url)))
+  const tests=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
+  const policy=loadWebPolicy()
+  const graph=webGraph(fileURLToPath(new URL('../../web',import.meta.url)))
+  const candidate=schedulingDecision('pull_request',fixture.paths,()=>true,{graph})
+  assert.equal(candidate.mode,'essential','replay must exercise the formerly overloaded lane')
+  const planned=sizeWebDecision(candidate,fixture.paths,{tests,policy,graph})
+  assert.ok(planned.webShards.length>4)
+  assert.ok(planned.webShardSizing.projectedMaxSeconds<=900)
+  assert.ok(planned.webShardSizing.projectedMaxSeconds<20*60)
+  const loads=planned.webShardSizing.projections.map(bin=>bin.seconds).sort((a,b)=>a-b)
+  const middle=Math.floor(loads.length/2),median=loads.length%2?loads[middle]:(loads[middle-1]+loads[middle])/2
+  assert.ok(loads.at(-1)/median<=1.25,'concept-v2 longest/median bound')
+  const selected=select(tests,{event:'pull_request',paths:fixture.paths,webImports:graph}).tests.filter(row=>row.kind==='browser')
+  const weights=tierWeights(policy,selected)
+  const assigned=planned.webShards.flatMap(index=>shard(selected,index,planned.webShards.length,weights))
+  assert.deepEqual(assigned.map(key).sort(),selected.map(key).sort(),'every selected registration executes once')
+  const full=Array.from({length:12},(_,i)=>i+1)
+  for(const event of ['merge_group','push','schedule']) {
+    const decision=sizeWebDecision(schedulingDecision(event,fixture.paths,()=>true),fixture.paths,{event,tests,policy,graph})
+    assert.equal(decision.mode,'full')
+    assert.deepEqual(decision.webShards??full,full)
+  }
 })

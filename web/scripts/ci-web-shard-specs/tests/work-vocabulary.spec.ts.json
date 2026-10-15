@@ -1,0 +1,20 @@
+{
+  "group": "work-node-integration",
+  "nightlyTiming": {
+    "seconds": 179.923,
+    "selectedTests": 24
+  },
+  "spec": {
+    "file": "tests/work-vocabulary.spec.ts",
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 16.401,
+        "median": 5.424,
+        "min": 3.066
+      },
+      "seconds": 179.923,
+      "selectedTests": 24
+    },
+    "weightSeconds": 60
+  }
+}

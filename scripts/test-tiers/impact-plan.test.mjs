@@ -70,6 +70,60 @@ test('AEON-1333 registry exclusions, flags, environment, project, ownership, con
   assert.equal(registryImpact('web/ci-web-shards.json', undefined, policy()).full, true)
 })
 
+test('AEON-1389 shard records follow the assembled browser policy: timing stays reduced and ownership widens', t => {
+  const record = 'web/scripts/ci-web-shard-specs/tests/import.spec.ts.json'
+  const before = policy(), timed = structuredClone(before)
+  timed.groups[0].specs[0].weightSeconds = 12
+  const timing = plan({ paths: [record], registries: { 'web/ci-web-shards.json': { before, after: timed } } })
+  assert.equal(timing.browser_scope, 'none')
+  assert.equal(timing.fallback_reasons.length, 0)
+  const renamed = structuredClone(before)
+  renamed.groups[0].specs[0].file = 'tests/renamed.spec.ts'
+  const ownership = plan({ paths: [record], registries: { 'web/ci-web-shards.json': { before, after: renamed } } })
+  assert.equal(ownership.browser_scope, 'gated-full')
+  assert.match(ownership.fallback_reasons.join(), /ownership, exclusion or execution policy/)
+  const grouped = structuredClone(before)
+  grouped.groups[0].id = 'moved'
+  assert.equal(plan({ paths: [record], registries: { 'web/ci-web-shards.json': { before, after: grouped } } }).browser_scope, 'gated-full')
+  assert.equal(plan({ paths: [record] }).browser_scope, 'gated-full', 'missing assembled policies fail closed')
+
+  const checkout = mkdtempSync(resolve(tmpdir(), 'aeon-1389-record-'))
+  const trusted = mkdtempSync(resolve(tmpdir(), 'aeon-1389-base-'))
+  t.after(() => { rmSync(checkout, { recursive: true, force: true }); rmSync(trusted, { recursive: true, force: true }) })
+  const write = (file, text) => { mkdirSync(resolve(checkout, file, '..'), { recursive: true }); writeFileSync(resolve(checkout, file), text) }
+  const git = args => execFileSync('git', args, { cwd: checkout, encoding: 'utf8', timeout: 10_000 }).trim()
+  const recordOf = (file, group, weightSeconds) => JSON.stringify({ group, spec: { file, weightSeconds } })
+  const launch = { version: 1, specSource: 'scripts/ci-web-shard-specs', exclusions: [], groups: ['ui', 'other'].map(id => ({
+    id, config: 'playwright.ui.config.ts', project: null, flags: [], env: {}, hostedOnly: true, specs: [] })) }
+  const catalogue = manifest([row('tests/import.spec.ts'), row('tests/stay.spec.ts'), row('tests/other.spec.ts')])
+  write('scripts/ci/web-test-tiers.json', JSON.stringify(catalogue))
+  write('scripts/ci/known-flaky.json', JSON.stringify({ version: 1, entries: [] }))
+  write('web/ci-web-shards.json', JSON.stringify(launch))
+  write('web/scripts/ci-web-shard-specs/tests/import.spec.ts.json', recordOf('tests/import.spec.ts', 'ui', 10))
+  write('web/scripts/ci-web-shard-specs/tests/stay.spec.ts.json', recordOf('tests/stay.spec.ts', 'ui', 10))
+  write('web/scripts/ci-web-shard-specs/tests/other.spec.ts.json', recordOf('tests/other.spec.ts', 'other', 10))
+  for (const dir of ['web/src', 'web/tests', 'web/e2e']) mkdirSync(resolve(checkout, dir), { recursive: true })
+  git(['init', '-q']); git(['config', 'user.name', 'Fixture']); git(['config', 'user.email', 'fixture@example.invalid'])
+  git(['add', '.']); git(['commit', '-qm', 'base'])
+  execFileSync('tar', ['-x', '-C', trusted], { input: execFileSync('git', ['archive', 'HEAD'], { cwd: checkout }), timeout: 10_000 })
+  const base = git(['rev-parse', 'HEAD'])
+  write('web/scripts/ci-web-shard-specs/tests/import.spec.ts.json', recordOf('tests/import.spec.ts', 'ui', 12))
+  git(['add', 'web/scripts/ci-web-shard-specs/tests/import.spec.ts.json']); git(['commit', '-qm', 'weight'])
+  const head = git(['rev-parse', 'HEAD'])
+  const envFor = sha => ({ AEON_IMPACT_CHECKOUT: checkout, PR_BASE_SHA: base, PR_HEAD_SHA: sha, GITHUB_SHA: sha,
+    GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', GITHUB_EVENT_NAME: 'pull_request', EXECUTION_MODE: 'full', EXECUTION_LAYOUT: 'full', EXECUTION_LANE: 'full' })
+  const weighted = planMain(envFor(head), { trustedRoot: trusted, browserCoverage: () => { throw new Error('a weight record must not fetch observations') } })
+  assert.equal(weighted.browser_scope, 'none')
+  assert.equal(weighted.fallback_reasons.length, 0)
+  assert.match(weighted.reasons.join(), /timing-only browser registry/)
+  write('web/scripts/ci-web-shard-specs/tests/import.spec.ts.json', recordOf('tests/import.spec.ts', 'other', 12))
+  git(['add', 'web/scripts/ci-web-shard-specs/tests/import.spec.ts.json']); git(['commit', '-qm', 'group'])
+  const moved = git(['rev-parse', 'HEAD'])
+  const regrouped = planMain(envFor(moved), { trustedRoot: trusted, browserCoverage: () => { throw new Error('a group change must not fetch observations') } })
+  assert.equal(regrouped.browser_scope, 'gated-full')
+  assert.match(regrouped.fallback_reasons.join(), /ownership, exclusion or execution policy/)
+})
+
 test('AEON-1333 browser selectors fail wide on missing evidence, bad fingerprints, incomplete graphs, new/deleted inputs, assets and shared inputs', () => {
   const variants = [{ paths: undefined }, { paths: [] }, { paths: ['../escape'] }, { paths: Array(10001).fill('README.md') },
     { paths: ['web/src/new.ts'] }, { paths: ['web/src/style.css'] }, { paths: ['web/src/image.svg'] }, { paths: ['web/src/data.json'] },
@@ -338,7 +392,7 @@ test('AEON-1333 depth-1 merge checkout publishes complete would-have-skipped evi
   git(full, ['config', 'uploadpack.allowReachableSHA1InWant', 'true'])
   for (const file of ['scripts/test-tiers/impact-plan.mjs', 'scripts/test-tiers/browser-impact.mjs', 'scripts/test-tiers/inputs.mjs',
     'scripts/test-tiers/core.mjs', 'scripts/test-tiers/migration.mjs', 'scripts/playwright-safe.mjs', 'scripts/playwright-global-setup.mjs',
-    'scripts/playwright-lock.mjs', 'scripts/playwright-processes.mjs', 'scripts/ci-pr-plan.mjs', 'web/scripts/ci-web-shard.mjs'])
+    'scripts/playwright-lock.mjs', 'scripts/playwright-processes.mjs', 'scripts/ci-pr-plan.mjs', 'web/scripts/ci-web-shard.mjs', 'web/scripts/ci-web-shard-source.mjs'])
     write(file, readFileSync(resolve(repository, file)))
   write('scripts/ci/web-test-tiers.json', JSON.stringify(manifest(tests)))
   write('scripts/ci/known-flaky.json', JSON.stringify({ version: 1, entries: [] }))

@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 39.504,
+    "selectedTests": 15
+  },
+  "spec": {
+    "file": "tests/aeon-974-typefilter.spec.ts",
+    "listedTests": 14,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.324,
+        "median": 2.37,
+        "min": 1.539
+      },
+      "seconds": 39.504,
+      "selectedTests": 15
+    },
+    "weightSeconds": 24,
+    "weightSource": "local-single-worker-AEON-974-11.8s-plus-margin"
+  }
+}

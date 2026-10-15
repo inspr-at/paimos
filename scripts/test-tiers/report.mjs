@@ -1,31 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { key, tiers } from './core.mjs'
 
+// Per-case identity makes partial Actions reruns composable without counting
+// a case twice or allowing an old pass to hide a newer failure/interruption.
+export function countCaseResults(results) {
+  const classes = Object.fromEntries(tiers.map(tier => [tier,
+    {selected:0,run:0,passed:0,skipped:0,failed:0,notRun:0,platformInactive:0,flaky:0,quarantined:0}]))
+  const seen = new Set()
+  for (const row of results) {
+    if (!row || typeof row.key !== 'string' || !row.key || seen.has(row.key) || !tiers.includes(row.tier) ||
+        !['passed','failed','skipped','notRun','platformInactive','quarantined'].includes(row.status) ||
+        typeof row.started !== 'boolean' || typeof row.flaky !== 'boolean') throw new Error('Invalid case result')
+    seen.add(row.key)
+    const counts=classes[row.tier]
+    counts.selected++
+    if(row.started)counts.run++
+    if(row.flaky)counts.flaky++
+    if(row.status==='platformInactive') { counts.platformInactive++;counts.skipped++ }
+    else counts[row.status]++
+  }
+  return classes
+}
+
 export function reportCases(selected, outcomes, seconds, job) {
   const seen = new Map()
   for (const outcome of outcomes) {
     if (seen.has(outcome.key)) throw new Error(`Duplicate result: ${outcome.key}`)
     seen.set(outcome.key,outcome)
   }
-  const classes = {}
-  for (const tier of tiers) {
-    const rows = selected.filter(row=>row.tier===tier)
-    const tally = { selected:rows.length,run:0,passed:0,skipped:0,failed:0,notRun:0,platformInactive:0,flaky:0,quarantined:0 }
-    for (const row of rows) {
-      if (!row.active && row.kind==='go') { tally.platformInactive++;tally.skipped++;continue }
-      const outcome = seen.get(key(row))
-      if (!outcome) { tally.notRun++;continue }
-      if (outcome.started) tally.run++
-      if (outcome.flaky) tally.flaky++
-      if (outcome.status==='quarantined') tally.quarantined++
-      else if (outcome.status==='passed') tally.passed++
-      else if (outcome.status==='skipped') tally.skipped++
-      else tally.failed++
-    }
-    classes[tier]=tally
-  }
+  const caseResults=selected.map(row=>{
+    const outcome=seen.get(key(row)),inactive=!row.active&&row.kind==='go'
+    return {key:key(row),tier:row.tier,status:inactive?'platformInactive':outcome?.status??'notRun',
+      started:!inactive&&!!outcome?.started,flaky:!inactive&&!!outcome?.flaky}
+  })
+  const classes=countCaseResults(caseResults)
   return {version:1,job,executionMinutes:seconds/60,runnerMinutes:null,
-    runnerMinutesNote:'Complete job duration comes from Actions job metadata; executionMinutes excludes setup.',classes}
+    runnerMinutesNote:'Complete job duration comes from Actions job metadata; executionMinutes excludes setup.',classes,caseResults}
 }
 
 export function goOutcomes(text) {

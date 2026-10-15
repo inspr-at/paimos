@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 37.073,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/agents-mission.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.496,
+        "median": 2.405,
+        "min": 2.285
+      },
+      "seconds": 37.073,
+      "selectedTests": 11
+    },
+    "weightSeconds": 22.195122,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "group": "footer",
+  "nightlyTiming": {
+    "seconds": 78.518,
+    "selectedTests": 39
+  },
+  "spec": {
+    "file": "tests/footer-release-pill.spec.ts",
+    "listedTests": 40,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.93,
+        "median": 2.113,
+        "min": 0.945
+      },
+      "seconds": 78.518,
+      "selectedTests": 39
+    },
+    "weightSeconds": 27.96748,
+    "weightSource": "footer-ui-2"
+  }
+}
