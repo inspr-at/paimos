@@ -213,6 +213,17 @@ function drop(part: HTMLElement) {
   if (tab) part.tabIndex = -1
   part.dataset.dropped = tab ? 'tab' : ''
 }
+// A project name may end in an ellipsis. Under three em it is a sliver and steps
+// aside (the same rule the trail probe uses). A name that is already out of sight,
+// or whose box is still the 1px stand-in, is not one.
+function nameSliver(name: HTMLElement | null): name is HTMLElement {
+  if (!name || name.dataset.dropped !== undefined || name.closest('[data-dropped]')) return false
+  const style = getComputedStyle(name)
+  if (style.display === 'none' || style.visibility === 'hidden') return false
+  if (name.getBoundingClientRect().width <= 1) return false
+  const font = parseFloat(style.fontSize) || 13.5
+  return name.scrollWidth > name.clientWidth && name.clientWidth < 3 * font
+}
 function fitTrail(trail: HTMLElement | null, wide: boolean) {
   if (!trail) return
   delete trail.dataset.empty
@@ -221,8 +232,12 @@ function fitTrail(trail: HTMLElement | null, wide: boolean) {
     delete part.dataset.dropped
   }
   if (!wide) return
+  // Restoring a dropped name puts it back in the row only after layout. Measuring
+  // in the same turn still sees the 1px box (scrollWidth === clientWidth), so the
+  // sliver check keeps a name that then shrinks under three em.
+  void trail.offsetWidth
   const name = trail.querySelector<HTMLElement>('.crumb-name')
-  if (name && name.scrollWidth > name.clientWidth && name.clientWidth < 3 * (parseFloat(getComputedStyle(name).fontSize) || 13.5)) drop(name)
+  if (nameSliver(name)) drop(name)
   const parts = [...trail.children] as HTMLElement[]
   const crumbs = parts.filter(part => part.classList.contains('crumb') && getComputedStyle(part).display !== 'none')
   // A trail that continues from a place keeps the separator before its first crumb.
@@ -233,6 +248,9 @@ function fitTrail(trail: HTMLElement | null, wide: boolean) {
     parts.slice(0, from).forEach(drop)
     if (!first) trail.dataset.empty = ''
   }
+  // The segment pass lays the row out for real. A name that still comes back under
+  // three em was missed by the check above, which can run before that shrink.
+  if (nameSliver(name)) drop(name)
 }
 // Phones (AEON-1240): a key, the project's chip or a ticket's, shows whole or not at all. It is never clipped by its
 // slot, never half under Search and never ends in an ellipsis; a name may end in one but keeps three characters' room.
@@ -294,12 +312,41 @@ function fitHeader() {
   awaySteps.value = n
 }
 let fitFrame = 0
+let fitGeneration = 0
+// The chips the trail probe waits on. A name can shrink inside a crumb without
+// the header's own box changing, so a resize observer never comes back for it.
+function trailSignature() {
+  const trail = header.value?.querySelector<HTMLElement>('.crumbs')
+  if (!trail) return 'none'
+  const chips = [...trail.querySelectorAll<HTMLElement>('.sep, .key-badge, .crumb-name, .mono-crumb')].map(el => {
+    const box = el.getBoundingClientRect()
+    return `${el.className}:${el.dataset.dropped ?? ''}:${Math.round(box.width * 2)}:${el.scrollWidth}:${el.clientWidth}`
+  }).join('|')
+  return `${trail.scrollWidth}:${trail.clientWidth}:${chips}`
+}
 function refit() {
   cancelAnimationFrame(fitFrame)
-  // Fit the updated navigation before paint, and once more after it: a newly
-  // rendered ticket key may only reach its width in the next frame.
-  fitHeader()
-  fitFrame = requestAnimationFrame(fitHeader)
+  const generation = ++fitGeneration
+  // Fit before paint, and once more on the next frame: a newly rendered ticket
+  // key may only reach its width then. Keep going while the row that arrives is
+  // not the row just fitted, or a project name is still a sliver. A confirming
+  // frame that already matches does not fit again — restoring a dropped name to
+  // remeasure it is what left the sliver on screen. A handful of frames is the cap.
+  let frames = 0
+  let left = ''
+  const tick = () => {
+    if (generation !== fitGeneration) return
+    const name = header.value?.querySelector<HTMLElement>('.crumbs .crumb-name') ?? null
+    if (frames >= 2 && trailSignature() === left && !nameSliver(name)) { fitFrame = 0; return }
+    if (frames >= 6) { fitFrame = 0; return }
+    fitHeader()
+    // A resize during the fit starts a new follow-up. This one must not replace it.
+    if (generation !== fitGeneration) return
+    left = trailSignature()
+    frames++
+    fitFrame = requestAnimationFrame(tick)
+  }
+  tick()
 }
 const resized = new ResizeObserver(refit)
 const crumbsChanged = new MutationObserver(refit)
