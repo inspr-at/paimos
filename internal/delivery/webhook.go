@@ -241,7 +241,7 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 				if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 					return err
 				}
-				return stageAdmissionGroupTx(ctx, tx, m.config.TenantID, m.config.Repository, head, nil, true)
+				return stageAdmissionGroupTx(ctx, tx, m.config.TenantID, m.config.Repository, head, nil, true, false)
 			})
 			if err != nil {
 				return webhookFailed, err
@@ -331,7 +331,7 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 			}
 			os = append(os, o)
 		}
-		rec := record{ID: id, Event: name, Action: e.Action, Repository: m.config.Repository, Head: head, Hash: digest(raw), At: at, Observations: os, Fanout: name == "pull_request"}
+		rec := record{ID: id, Event: name, Action: e.Action, Repository: m.config.Repository, Head: head, Hash: digest(raw), At: at, Observations: os, Fanout: name == "pull_request", AdmissionGroupResolved: m.admissionGitHub != nil}
 		if len(pulls) == 1 {
 			n := pulls[0].Number
 			rec.PR = &n

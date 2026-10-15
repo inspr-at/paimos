@@ -235,6 +235,7 @@ type record struct {
 	At                                        time.Time
 	Observations                              []Observation
 	Fanout                                    bool
+	AdmissionGroupResolved                    bool
 }
 
 // recordTx requires the tenant fence, and writes the ledger before the event counter.
@@ -303,7 +304,7 @@ func recordTx(ctx context.Context, tx pgx.Tx, tid string, r record) (bool, error
 				pulls = append(pulls, Pull{Number: *o.PR, Head: o.Head})
 			}
 		}
-		if err := stageAdmissionGroupTx(ctx, tx, tid, r.Repository, r.Head, pulls, r.Action == "checks_requested"); err != nil {
+		if err := stageAdmissionGroupTx(ctx, tx, tid, r.Repository, r.Head, pulls, r.Action == "checks_requested", r.AdmissionGroupResolved); err != nil {
 			return false, err
 		}
 	}

@@ -465,6 +465,22 @@ func TestAdmissionUnknownGroupMembershipFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireAdmissionState(t, f, sha, "success")
+	// Observations collected with the authority disabled cannot bootstrap a
+	// green group without a fresh, fully resolved checks_requested event.
+	dormant := strings.Repeat("1", 40)
+	f.m.admissionGitHub = nil
+	body := map[string]any{"action": "checks_requested", "merge_group": map[string]string{"head_sha": dormant, "base_sha": f.gh.pulls[7].Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-dormant"}}
+	auditSend(t, f.fixture, "merge_group", "dormant-group", body, 204)
+	f.m.WithAdmission(f.writer)
+	if err := f.m.publishAdmission(t.Context(), dormant); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, f, dormant, "failure")
+	auditSend(t, f.fixture, "merge_group", "active-group", body, 204)
+	if err := f.m.publishAdmission(t.Context(), dormant); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, f, dormant, "success")
 }
 
 func TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem(t *testing.T) {

@@ -42,7 +42,7 @@ type admissionPublication struct {
 
 // All writers hold the tenant fence. Group membership is immutable for this
 // synthetic SHA; a duplicate cannot clear an invalidation or revive a group.
-func stageAdmissionGroupTx(ctx context.Context, tx pgx.Tx, tid, repository, sha string, pulls []Pull, active bool) error {
+func stageAdmissionGroupTx(ctx context.Context, tx pgx.Tx, tid, repository, sha string, pulls []Pull, active, resolved bool) error {
 	members := []admissionMember{}
 	seen := map[int64]bool{}
 	if len(pulls) > 100 {
@@ -68,7 +68,7 @@ func stageAdmissionGroupTx(ctx context.Context, tx pgx.Tx, tid, repository, sha 
  resolved=delivery_admission_outbox.resolved OR EXCLUDED.resolved,
  active=delivery_admission_outbox.active AND EXCLUDED.active,
  invalidated=delivery_admission_outbox.invalidated OR NOT EXCLUDED.active,
- revision=delivery_admission_outbox.revision+1`, tid, repository, sha, AdmissionContext, raw, active, !active, len(pulls) > 0)
+ revision=delivery_admission_outbox.revision+1`, tid, repository, sha, AdmissionContext, raw, active, !active, resolved && len(pulls) > 0)
 	return err
 }
 
