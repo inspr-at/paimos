@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
+import type { IconName } from '../components/AppIcon.vue'
 
 export const DEFINITION_BLOCKS = [
   { id: 'in_progress', name: 'Ready', to: 'In progress' },
@@ -12,22 +13,32 @@ export interface DefinitionRule { id: string; label?: string; label_de?: string;
 export type DefinitionChecks = Partial<Record<DefinitionStatus, DefinitionRule[]>>
 export interface Definition { id: string; revision: string; source: 'project' | 'workspace'; copied_from_revision: string | null; checks: DefinitionChecks }
 export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean }
-export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition: DefinitionCondition; block: DefinitionStatus }[] = [
-  { id: 'estimate_set', en: 'Estimate set', de: 'Schätzung gesetzt', condition: 'all', block: 'in_progress' },
-  { id: 'acceptance_present', en: 'Acceptance criteria written', de: 'Abnahmekriterien beschrieben', condition: 'all', block: 'in_progress' },
-  { id: 'design_attached', en: 'Approved design attached', de: 'Freigegebenes Design angehängt', condition: 'ui', block: 'in_progress' },
-  { id: 'blocker_named', en: 'Blocker named', de: 'Blocker benannt', condition: 'blocked', block: 'in_progress' },
-  { id: 'no_active_build', en: 'No other build in flight', de: 'Kein anderer Build aktiv', condition: 'all', block: 'in_progress' },
-  { id: 'ci_green_latest_main', en: 'Full CI green on latest main', de: 'Volle CI grün auf aktuellem main', condition: 'code', block: 'qa' },
-  { id: 'review_ok_cross_family', en: 'Cross-family review ok', de: 'Review durch andere Modellfamilie ok', condition: 'code', block: 'qa' },
-  { id: 'visual_ok', en: 'Visual check ok', de: 'Visuelle Prüfung ok', condition: 'ui', block: 'qa' },
-  { id: 'pills_benefits_set', en: 'Pills and benefits set', de: 'Pills und Nutzen beschrieben', condition: 'release_notes', block: 'done' },
-  { id: 'release_copy_set', en: 'Release text set (EN + DE)', de: 'Release-Text gesetzt (EN + DE)', condition: 'release_notes', block: 'done' },
-  { id: 'merged', en: 'Merged to main', de: 'In main gemergt', condition: 'code', block: 'done' },
-  { id: 'released', en: 'Shipped in a release', de: 'In einem Release ausgeliefert', condition: 'releases', block: 'done' },
+export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition: DefinitionCondition; block: DefinitionStatus; icon: IconName }[] = [
+  { id: 'estimate_set', en: 'Estimate set', de: 'Schätzung gesetzt', condition: 'all', block: 'in_progress', icon: 'clock' },
+  { id: 'acceptance_present', en: 'Acceptance criteria written', de: 'Abnahmekriterien beschrieben', condition: 'all', block: 'in_progress', icon: 'list' },
+  { id: 'design_attached', en: 'Approved design attached', de: 'Freigegebenes Design angehängt', condition: 'ui', block: 'in_progress', icon: 'image' },
+  { id: 'blocker_named', en: 'Blocker named', de: 'Blocker benannt', condition: 'blocked', block: 'in_progress', icon: 'not' },
+  { id: 'no_active_build', en: 'No other build in flight', de: 'Kein anderer Build aktiv', condition: 'all', block: 'in_progress', icon: 'workflow' },
+  { id: 'ci_green_latest_main', en: 'Full CI green on latest main', de: 'Volle CI grün auf aktuellem main', condition: 'code', block: 'qa', icon: 'workflow' },
+  { id: 'review_ok_cross_family', en: 'Cross-family review ok', de: 'Review durch andere Modellfamilie ok', condition: 'code', block: 'qa', icon: 'shield' },
+  { id: 'visual_ok', en: 'Visual check ok', de: 'Visuelle Prüfung ok', condition: 'ui', block: 'qa', icon: 'eye' },
+  { id: 'pills_benefits_set', en: 'Pills and benefits set', de: 'Pills und Nutzen beschrieben', condition: 'release_notes', block: 'done', icon: 'sentence' },
+  { id: 'release_copy_set', en: 'Release text set (EN + DE)', de: 'Release-Text gesetzt (EN + DE)', condition: 'release_notes', block: 'done', icon: 'sentence' },
+  { id: 'merged', en: 'Merged to main', de: 'In main gemergt', condition: 'code', block: 'done', icon: 'merge' },
+  { id: 'released', en: 'Shipped in a release', de: 'In einem Release ausgeliefert', condition: 'releases', block: 'done', icon: 'layers' },
 ]
-export const DEFINITION_CONDITIONS: Record<DefinitionCondition, string> = { all: 'All tickets', ui: 'UI tickets', code: 'Code tickets', blocked: 'Blocked tickets', release_notes: 'Tickets shown in release notes', releases: 'Projects that use releases' }
+export const DEFINITION_CONDITIONS: Record<DefinitionCondition, string> = { all: 'All tickets', ui: 'UI tickets', code: 'Code tickets', blocked: 'Blocked tickets', release_notes: 'Unless hidden from release notes', releases: 'If the project uses releases' }
+export const DEFINITION_CONDITION_OPTIONS = [
+  { value: 'all', detail: 'Every ticket' },
+  { value: 'code', detail: 'Tickets that change code' },
+  { value: 'ui', detail: 'Tickets labelled ui' },
+] as const
 export const manualRule = (rule: DefinitionRule) => rule.id.startsWith('manual:')
+export const ruleIcon = (rule: DefinitionRule): IconName => manualRule(rule) ? 'person-check' : DEFINITION_CATALOG.find(c => c.id === rule.id)?.icon ?? 'list-checks'
+export function fixedRuleCondition(rule: DefinitionRule): DefinitionCondition | undefined {
+  const condition = DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition
+  return condition && !DEFINITION_CONDITION_OPTIONS.some(option => option.value === condition) ? condition : undefined
+}
 export const ruleLabel = (rule: DefinitionRule, language = 'en') => (language === 'de' ? rule.label_de : rule.label) || (language === 'de' ? DEFINITION_CATALOG.find(c => c.id === rule.id)?.de : DEFINITION_CATALOG.find(c => c.id === rule.id)?.en) || rule.label || rule.id
 export const ruleCondition = (rule: DefinitionRule): DefinitionCondition => rule.condition || DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition || 'all'
 export function ruleWords(rule: DefinitionRule): string {

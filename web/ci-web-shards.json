@@ -264,7 +264,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/definitions.spec.ts","listedTests":3,"weightSeconds":30,"weightSource":"AEON-1316 estimate: editor, responsive state matrix, failed and stale writes"}
+        {"file":"tests/definitions.spec.ts","listedTests":9,"weightSeconds":120,"weightSource":"AEON-1316 FIX4 estimate: original flows plus six verdict regressions at 390/1024/1440 in light/dark"}
         ,
         {"file":"tests/entry-checks.spec.ts","weightSeconds":30}
         ,
