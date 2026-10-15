@@ -160,8 +160,9 @@ test('AEON-1313 interrupted shards checkpoint completed failures and keep measur
     assert.equal(output.classes.NIGHTLY.failed,1)
     assert.match(readFileSync(summary,'utf8'),/Incomplete case evidence: web-shard-1 \(Execution interrupted by SIGTERM\)/)
     const otherAttempt=aggregate([report],[job],{...aggregateOptions,attempt:'3'})
-    assert.deepEqual(otherAttempt.missingEvidence,['web-shard-1'])
-    assert.deepEqual(otherAttempt.classes,{})
+    assert.deepEqual(otherAttempt.missingEvidence,[])
+    assert.equal(otherAttempt.coverage,'incomplete','an earlier interruption must remain incomplete')
+    assert.equal(otherAttempt.classes.NIGHTLY.failed,1)
 
     const green=reportCases(rows,rows.map(row=>({key:key(row),status:'passed',started:true})),1,'web-shard-1')
     Object.assign(green,{runId:'1313',attempt:'2',sha:identity.GITHUB_SHA,execution:{status:'completed'}})
@@ -1721,7 +1722,7 @@ test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary a
     if(fixture.reuse==='pull_request')writeFileSync(resolve(fixtureEvidence,'go-timing-measurement.json'),JSON.stringify({version:1,job:'go-timing',classes:{},runId:'123',attempt:'2',sha:'a'.repeat(40)}))
     const fixtureJobs=jobs.map(job=>fixture.reuse==='pull_request'&&job.name==='go-timing'?{...job,...finished,conclusion:'success'}:fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
       ? {...job,...finished,conclusion:'success'}:job)
-    writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/attempts/2/jobs?per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
+    writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/jobs?filter=latest&per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
     writeFileSync(summary,'')
     const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),fixtureEvidence],{
       cwd:root,encoding:'utf8',timeout:10_000,
@@ -1896,14 +1897,47 @@ test('unit measurement artifacts are required for every executed shard and legac
   assert.deepEqual(aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'full'}).missingEvidence,['web-unit-1','web-shard-1'])
 })
 
-test('rerun measurements reject earlier-attempt artifacts instead of replaying case passes',()=>{
-  const job={name:'go-test (1)',status:'completed',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:01:00Z'}
-  const earlier={...reportCases([cases[0]],[{key:key(cases[0]),status:'passed',started:true}],1,'go-test-1'),runId:'123',attempt:'1',sha:'a'}
-  const report=aggregate([earlier],[job],{runId:'123',attempt:'2',sha:'a'})
-  assert.equal(report.coverage,'incomplete');assert.deepEqual(report.classes,{})
-  assert.deepEqual(report.missingEvidence,['go-test-1']);assert.equal(report.excludedEvidence.length,1)
-  const fresh=aggregate([{...earlier,attempt:'2'}],[job],{runId:'123',attempt:'2',sha:'a'})
-  assert.equal(fresh.coverage,'reported');assert.equal(fresh.classes.ESSENTIAL.passed,1)
+test('AEON-1384 partial reruns accept same-run same-SHA evidence and select the newest attempt per case',()=>{
+  const job={name:'go-test (1)',status:'completed',conclusion:'success',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:01:00Z'}
+  const selected=[{...cases[0],active:true},{...cases[0],name:'TestSibling',active:true}]
+  const make=(rows,attempt,status='passed')=>({...reportCases(rows,rows.map(row=>({key:key(row),status,started:true})),1,'go-test-1'),
+    runId:'123',attempt,sha:'a',execution:{status:'completed'}})
+  const earlier=make(selected,'1'),fresh=make([selected[0]],'2')
+  const options={runId:'123',attempt:'2',sha:'a'}
+  for(const reports of [[earlier],[fresh,earlier],[earlier,fresh]]) {
+    const report=aggregate(reports,[job],options)
+    assert.equal(report.coverage,'reported')
+    assert.equal(report.classes.ESSENTIAL.passed,2)
+    assert.equal(report.classes.ESSENTIAL.selected,2)
+    assert.deepEqual(report.missingEvidence,[])
+    assert.deepEqual(report.excludedEvidence,[])
+    assert.match(report.notes.join('\n'),/partial rerun: [12] cases from attempt 1/)
+  }
+  const failedEarlier=make(selected,'1','failed')
+  const newest=aggregate([failedEarlier,make(selected,'2')],[job],options)
+  assert.equal(newest.classes.ESSENTIAL.failed,0)
+  assert.equal(newest.classes.ESSENTIAL.passed,2)
+  assert.deepEqual(newest.notes,[])
+  const failure=aggregate([earlier,make([selected[0]],'2','failed')],[job],options)
+  assert.equal(failure.classes.ESSENTIAL.failed,1,'a newer failure must supersede an old pass')
+  assert.equal(failure.classes.ESSENTIAL.passed,1)
+  assert.deepEqual(failure.reports[0].caseAttempts,{[key(selected[0])]:'2',[key(selected[1])]:'1'})
+  const interrupted=make([selected[0]],'2');interrupted.caseResults[0].status='notRun';interrupted.caseResults[0].started=false
+  interrupted.classes=reportCases([selected[0]],[],1,'go-test-1').classes
+  assert.equal(aggregate([earlier,interrupted],[job],options).coverage,'incomplete','newer notRun cannot borrow an old pass')
+  for(const change of [{sha:'b'},{runId:'999'},{attempt:'3'},{attempt:'0'},{attempt:undefined},{sha:undefined},{runId:undefined}]) {
+    const report=aggregate([{...earlier,...change}],[job],options)
+    assert.equal(report.coverage,'incomplete',JSON.stringify(change))
+    assert.deepEqual(report.classes,{})
+    assert.equal(report.excludedEvidence.length,1)
+    assert.equal(aggregate([fresh,{...earlier,...change}],[job],options).coverage,'incomplete','foreign artifacts remain a failure beside valid evidence')
+  }
+  const {caseResults,...legacy}=earlier
+  const legacyReport=aggregate([legacy],[job],options)
+  assert.equal(legacyReport.coverage,'reported','legacy artifacts retain whole-job accounting')
+  assert.equal(legacyReport.classes.ESSENTIAL.passed,2)
+  assert.throws(()=>aggregate([fresh,fresh],[job],options),/duplicate measurement/)
+  assert.equal(aggregate([earlier],[{...job,conclusion:'cancelled'}],options).coverage,'incomplete')
 })
 
 test('exact-SHA reuse records provenance and current costs without fabricating fresh case passes',()=>{
@@ -2370,8 +2404,9 @@ test('AEON-980 merge-group Go retry and quarantine preserve the blocking gate an
     const repeated=aggregate([report,{...report,job:"another-shard"}],[])
     assert.deepEqual(repeated.flakeCounts,{[key(rows[0])]:2,[key(rows[2])]:2})
     const stale=aggregate([report],[],{runId:'123',attempt:'3',sha:identity.GITHUB_SHA})
-    assert.deepEqual(stale.flakeLedger,[])
-    assert.deepEqual(stale.flakeCounts,{})
+    assert.deepEqual(stale.flakeLedger,measured.flakeLedger)
+    assert.deepEqual(stale.flakeCounts,measured.flakeCounts)
+    assert.match(stale.notes.join('\n'),/partial rerun:/)
   })
   await t.test('PR, push, schedule, manual and absent event retain the original failure',async()=>{
     for(const event of ['pull_request','push','schedule','workflow_dispatch',null]) {
