@@ -18,22 +18,23 @@ import (
 // event history. The run ID is the assignment ID: no second queue or lease.
 // Local process ownership remains in the daemon's durable journal.
 type WorkerHandoff struct {
-	RunID             string     `json:"run_id"`
-	WorkOrderID       string     `json:"work_order_id"`
-	WorkerPrincipalID string     `json:"worker_principal_id"`
-	ProjectID         string     `json:"project_id"`
-	LeadSessionID     string     `json:"lead_session_id"`
-	LeadGeneration    int64      `json:"lead_generation"`
-	TicketID          string     `json:"ticket_id"`
-	TicketRevision    time.Time  `json:"ticket_revision"`
-	WorkOrderRevision int64      `json:"work_order_revision"`
-	BriefSHA256       string     `json:"brief_sha256"`
-	WorktreeID        string     `json:"worktree_id,omitempty"`
-	State             string     `json:"state"`
-	AcceptedAt        *time.Time `json:"accepted_at,omitempty"`
-	LaunchedAt        *time.Time `json:"launched_at,omitempty"`
-	CompletedAt       *time.Time `json:"completed_at,omitempty"`
-	Outcome           string     `json:"outcome,omitempty"`
+	BuildDelivery     *workorders.BuildCandidate `json:"build_delivery,omitempty"`
+	RunID             string                     `json:"run_id"`
+	WorkOrderID       string                     `json:"work_order_id"`
+	WorkerPrincipalID string                     `json:"worker_principal_id"`
+	ProjectID         string                     `json:"project_id"`
+	LeadSessionID     string                     `json:"lead_session_id"`
+	LeadGeneration    int64                      `json:"lead_generation"`
+	TicketID          string                     `json:"ticket_id"`
+	TicketRevision    time.Time                  `json:"ticket_revision"`
+	WorkOrderRevision int64                      `json:"work_order_revision"`
+	BriefSHA256       string                     `json:"brief_sha256"`
+	WorktreeID        string                     `json:"worktree_id,omitempty"`
+	State             string                     `json:"state"`
+	AcceptedAt        *time.Time                 `json:"accepted_at,omitempty"`
+	LaunchedAt        *time.Time                 `json:"launched_at,omitempty"`
+	CompletedAt       *time.Time                 `json:"completed_at,omitempty"`
+	Outcome           string                     `json:"outcome,omitempty"`
 }
 
 type WorkerPickup struct {
@@ -87,6 +88,7 @@ func freezeHandoff(ctx context.Context, tx pgx.Tx, t queueTicket, v Run, agent s
 		return err
 	}
 	h := &WorkerHandoff{RunID: v.ID, WorkOrderID: v.OrderID, WorkerPrincipalID: agent, ProjectID: *t.ProjectID, LeadSessionID: binding.SessionID, LeadGeneration: binding.Generation, TicketID: t.ID, WorkOrderRevision: o.Revision, State: "assigned"}
+	h.BuildDelivery = o.BuildDelivery
 	if err = tx.QueryRow(ctx, `SELECT updated_at FROM nodes WHERE id=$1`, t.ID).Scan(&h.TicketRevision); err != nil {
 		return err
 	}
@@ -147,10 +149,10 @@ func validatePickupHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v
 	if err != nil {
 		return err
 	}
-	if project == nil || *project != h.ProjectID || !revision.Equal(h.TicketRevision) || o.Revision != h.WorkOrderRevision || brief != h.BriefSHA256 {
+	if project == nil || *project != h.ProjectID || !revision.Equal(h.TicketRevision) || o.Revision != h.WorkOrderRevision || brief != h.BriefSHA256 || !sameBuildDelivery(h.BuildDelivery, o.BuildDelivery) {
 		return workorders.Fail(409, "assignment brief or ticket changed; queue again")
 	}
-	if err = requireWriterFree(ctx, tx, h.TicketID, v.ID); err != nil {
+	if err = requireWriterFree(ctx, tx, h.TicketID, v.ID, nil); err != nil {
 		return err
 	}
 	var workspaceBusy bool
@@ -193,8 +195,27 @@ func digest64(s string) bool {
 
 // Tenant/tree fence serializes this check with every queue/claim writer.
 // Lost heartbeat, administrative archival and terminal labels never free it.
-func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string) error {
-	if err := workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, ticket, "", nil); err != nil {
+// An explicit candidate is the enqueue binding, which has no run to load yet.
+// Claim and later pickup pass nil and keep the stored order binding.
+func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string, candidate *workorders.BuildCandidate) error {
+	if err := workorders.ValidateBuildCandidate(candidate); err != nil {
+		return err
+	}
+	var admission workorders.BuildAdmission
+	if candidate != nil {
+		admission.Candidate = candidate
+	} else if exclude != "" {
+		var order string
+		if err := tx.QueryRow(ctx, `SELECT work_order_id::text FROM agent_runs WHERE id=$1`, exclude).Scan(&order); err != nil {
+			return err
+		}
+		var err error
+		admission, err = workorders.OrderBuildAdmissionTx(ctx, tx, order)
+		if err != nil {
+			return err
+		}
+	}
+	if err := workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, ticket, "", nil, &admission); err != nil {
 		return err
 	}
 	var busy bool
@@ -211,6 +232,13 @@ func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string) e
 		return workorders.Fail(409, "previous writer exit or launch outcome is unconfirmed")
 	}
 	return nil
+}
+
+func sameBuildDelivery(a, b *workorders.BuildCandidate) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func reportHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, t Telemetry, status string) error {

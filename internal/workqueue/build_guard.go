@@ -13,6 +13,8 @@ import (
 type BuildConflict = workorders.BuildConflict
 type BuildStarter = workorders.BuildStarter
 type BuildDelivery = workorders.BuildDelivery
+type BuildAdmission = workorders.BuildAdmission
+type BuildCandidate = workorders.BuildCandidate
 
 func NormalizeParallelReason(reason *string) error {
 	return workorders.NormalizeParallelReason(reason)
@@ -22,6 +24,6 @@ func BuildTicketTx(ctx context.Context, tx pgx.Tx, ticket, order, run *string) (
 	return workorders.BuildTicketTx(ctx, tx, ticket, order, run)
 }
 
-func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, except string, parallelReason *string) error {
-	return workorders.RequireBuildAdmissionTx(ctx, tx, p, ticket, except, parallelReason)
+func RequireBuildAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, except string, parallelReason *string, admission ...*BuildAdmission) error {
+	return workorders.RequireBuildAdmissionTx(ctx, tx, p, ticket, except, parallelReason, admission...)
 }

@@ -479,6 +479,53 @@ func TestTicketQueueBlockedTargetCapacityAndPickup(t *testing.T) {
 		})
 	}
 }
+
+// Risk: routing drops the fix order's binding or writes continuation history
+// before capacity admission. Repeated selection must not duplicate its audit.
+func TestQueueRouteContinuesBoundDelivery(t *testing.T) {
+	f := setup(t)
+	f.queueAccount(t, 1000000)
+	var project string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Fix project','{"project_key":"FIX"}' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project)
+	})
+	id := f.ticket(t, "open", "high", nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, id, project)
+		return err
+	})
+	e := f.addQueue(t, id, nil)
+	var key string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT key FROM nodes WHERE id=$1`, id).Scan(&key)
+	})
+	branch := "work/" + strings.ToLower(key) + "-fix"
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		raw, err := json.Marshal(map[string]string{"repository": "owner/linked", "branch": branch})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{build_delivery}',$2::jsonb) WHERE id=$1`, e.Run.OrderID, raw); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/linked','CI','Nightly',clock_timestamp())`, f.person.TenantID, project); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,'owner/linked',42,$2,clock_timestamp(),'webhook',clock_timestamp())`, f.person.TenantID, branch)
+		return err
+	})
+	target := map[string]string{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}
+	for range 2 {
+		var picked struct{ Entry *qEntry }
+		f.call(t, f.person, "POST", "/api/queue/next", target, 200, &picked)
+		if picked.Entry == nil || picked.Entry.Run.ID != e.Run.ID || picked.Entry.Run.QueueRoutedAt == nil {
+			t.Fatalf("bound fix was not routed: %+v", picked)
+		}
+	}
+	if got := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='delivery.continued' AND after->>'run_id'=$2`, id, e.Run.ID); got != 1 {
+		t.Fatalf("route continuation/replay audit count = %d", got)
+	}
+}
 func TestTicketQueueTargetedStartNowAndAllowance(t *testing.T) {
 	f := setup(t)
 	account := f.queueAccount(t, 1)

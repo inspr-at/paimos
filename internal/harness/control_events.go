@@ -47,16 +47,31 @@ func deferControlEvents(r *http.Request, tx pgx.Tx) (*http.Request, func(*error)
 		if *result != nil {
 			return
 		}
-		for _, event := range batch.events {
-			if err := workorders.Record(r.Context(), tx, event.principal, event.project, "harness."+event.kind, event.before, event.after); err != nil {
-				*result = err
-				return
-			}
+		if err := flushControlEvents(r.Context(), tx, batch); err != nil {
+			*result = err
 		}
 	}
 }
 
+// flushControlEvents records each buffered event once. add and addEvent already
+// store the full type, including the harness. prefix; a second prefix hides the
+// delivery from every consumer of harness.pause_requested.
+func flushControlEvents(ctx context.Context, tx pgx.Tx, batches ...*controlEventBatch) error {
+	for _, batch := range batches {
+		for _, event := range batch.events {
+			if err := workorders.Record(ctx, tx, event.principal, event.project, event.kind, event.before, event.after); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (b *controlEventBatch) add(p tenant.Principal, s Session, kind string, before, after any) error {
+	return b.addEvent(p, s.ProjectID, "harness."+kind, before, after)
+}
+
+func (b *controlEventBatch) addEvent(p tenant.Principal, node, kind string, before, after any) error {
 	if len(b.events) >= maxControlEvents {
 		return workorders.Fail(429, "control event batch limit reached")
 	}
@@ -72,7 +87,7 @@ func (b *controlEventBatch) add(p tenant.Principal, s Session, kind string, befo
 	if size > maxControlEventBytes-b.bytes {
 		return workorders.Fail(429, "control event batch byte limit reached")
 	}
-	b.events = append(b.events, controlEvent{p, s.ProjectID, kind, old, next})
+	b.events = append(b.events, controlEvent{p, node, kind, old, next})
 	b.bytes += size
 	return nil
 }
