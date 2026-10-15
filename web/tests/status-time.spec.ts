@@ -117,9 +117,17 @@ test('the lifeline lands without moving anything above it, says every visit, and
   // Fills follow the status icons; the live segment always slides (f-now), past ones only under the pointer.
   expect(await segments(page).evaluateAll(els => els.map(el => [...el.classList].filter(c => c.startsWith('f') && c !== 'f-short').sort().join(' ')))).toEqual(['f-ring fc-new', 'f-diag fc-progress', 'f-halo fc-qa', 'f-diag f-now fc-progress'])
   // Every marker a cluster did not move is centred exactly on its notch, and the strip runs the full width.
+  // AEON-1362 draws In progress as an HTML shape (span.status-icon.st-ip), not an svg. The Doing gate and the
+  // current marker are that shape; Open stays an svg. Measure the icon box either way. The 0.01 px bound stays.
   const notches = await life(page).locator('.gate-notch').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return r.left + r.width / 2 }))
-  const centres = await markers(page).evaluateAll(els => els.map(el => { const r = el.querySelector('svg')!.getBoundingClientRect(); return { x: r.left + r.width / 2, moved: el.hasAttribute('data-displaced') } }))
-  centres.forEach((centre, k) => { if (!centre.moved) expect(Math.abs(centre.x - notches[k]), `marker ${k}`).toBeLessThanOrEqual(0.01) })
+  const centres = await markers(page).evaluateAll(els => els.map(el => {
+    const icon = el.querySelector('.status-icon')
+    if (!icon) return null
+    const r = icon.getBoundingClientRect()
+    return { x: r.left + r.width / 2, moved: el.hasAttribute('data-displaced'), kind: `${icon.tagName}:${icon.classList.contains('st-ip')}` }
+  }))
+  expect(centres.map(centre => centre?.kind ?? null)).toEqual(['svg:false', 'SPAN:true', 'SPAN:true'])
+  centres.forEach((centre, k) => { if (centre && !centre.moved) expect(Math.abs(centre.x - notches[k]), `marker ${k}`).toBeLessThanOrEqual(0.01) })
   const stripBox = await box(strip(page)), lastSegment = await box(segments(page).last())
   expect(Math.abs(lastSegment.x + lastSegment.width - (stripBox.x + stripBox.width))).toBeLessThanOrEqual(1)
 
