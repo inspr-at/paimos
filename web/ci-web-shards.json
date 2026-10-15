@@ -268,7 +268,7 @@
         ,
         {"file":"tests/entry-checks.spec.ts","weightSeconds":30}
         ,
-        {"file":"tests/person-steps.spec.ts","listedTests":4,"weightSeconds":135,"weightSource":"AEON-1318: owner, Desk, permission and editor flows with 390/1024/1440 light/dark evidence"}
+        {"file":"tests/person-steps.spec.ts","listedTests":4,"weightSeconds":36.336,"weightSource":"AEON-1318: guarded mbp2606 single-worker complete file, 4 passed in 36.0s (supervisor wall 36.336s), source 5164623d1"}
         ,
         {"file":"tests/work-queue.spec.ts","listedTests":30,"tierTiming":{"caseSeconds":{"max":11.202,"median":1.5205,"min":1.024},"seconds":53.363,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
       ]
