@@ -185,7 +185,7 @@ func (m *Module) handleReviewEvidenceProvenance(w http.ResponseWriter, r *http.R
 	defer cancel()
 	var out reviewgate.EvidenceProvenance
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
-		n, err := loadNode(ctx, tx, id, false)
+		n, err := workorders.EntryTicketTx(ctx, tx, id)
 		if err != nil {
 			return err
 		}
