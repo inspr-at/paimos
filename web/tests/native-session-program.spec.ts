@@ -145,22 +145,25 @@ test('AEON-1309: malformed native JSON and invalid shapes stay incomplete withou
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel.getByRole('tab', { name: 'Terminal', exact: true })).toBeVisible()
   await panel.getByRole('tab', { name: 'Events', exact: true }).click()
+  const watch = panel.getByRole('button', { name: 'Watch live', exact: true })
+  await expect(watch).toBeEnabled()
 
   let context = ''
   await page.route(`**/api/projects/p-pharos/harness-sessions/${WORKER}/native-context`, route => route.fulfill({ contentType: 'application/json', body: context }))
   for (const [index, body] of ['{', 'null', JSON.stringify({ ...makeNative(), capabilities: { ...makeNative().capabilities, take_supported: 'true' } })].entries()) {
-    context = body; worker.heartbeat_at = `2026-10-06T10:01:0${index}Z`
+    context = body; worker.heartbeat_at = `2026-10-06T10:01:0${index * 2}Z`
     await refresh(page)
     await expect(panel.locator('#session-panel-events')).toContainText('The session’s live capabilities could not be read.')
     await panel.getByRole('tab', { name: 'Chat', exact: true }).click()
     await expect(panel.locator('#session-panel-messages')).toContainText('Owned session input from this panel is not available yet.')
     await expect(panel.locator('textarea')).toHaveCount(0)
     await panel.getByRole('tab', { name: 'Events', exact: true }).click()
+    // Restore a proven readable context between failures, so a previous error
+    // cannot satisfy the next malformed-response assertion.
+    context = JSON.stringify(state.native); worker.heartbeat_at = `2026-10-06T10:01:0${index * 2 + 1}Z`
+    await refresh(page)
+    await expect(watch).toBeEnabled()
   }
-  context = JSON.stringify(state.native); worker.heartbeat_at = '2026-10-06T10:01:03Z'
-  await refresh(page)
-  const watch = panel.getByRole('button', { name: 'Watch live', exact: true })
-  await expect(watch).toBeEnabled()
 
   const emptyPage = { generation: 1, items: [], next_before: null, truncated: false }
   const grant = { viewer_id: 'viewer-fixture', mode: 'view', control_capability: null, binding, expires_in_ms: 30_000 }
