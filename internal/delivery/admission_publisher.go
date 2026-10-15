@@ -38,6 +38,8 @@ type admissionPublication struct {
 	Members                                  []admissionMember
 	Revision                                 int64
 	Invalidated, Active, Uncertain, Resolved bool
+	PublishedRevision                        int64
+	ConfirmedState                           string
 }
 
 // All writers hold the tenant fence. Group membership is immutable for this
@@ -75,7 +77,7 @@ func stageAdmissionGroupTx(ctx context.Context, tx pgx.Tx, tid, repository, sha 
 func (m *Module) admissionStateTx(ctx context.Context, tx pgx.Tx, sha string) (admissionPublication, string, error) {
 	p := admissionPublication{SHA: sha}
 	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT kind,members,revision,invalidated,active,uncertain,resolved FROM delivery_admission_outbox WHERE repository=$1 AND sha=$2 AND context=$3`, m.config.Repository, sha, AdmissionContext).Scan(&p.Kind, &raw, &p.Revision, &p.Invalidated, &p.Active, &p.Uncertain, &p.Resolved)
+	err := tx.QueryRow(ctx, `SELECT kind,members,revision,invalidated,active,uncertain,resolved,published_revision,confirmed_state FROM delivery_admission_outbox WHERE repository=$1 AND sha=$2 AND context=$3`, m.config.Repository, sha, AdmissionContext).Scan(&p.Kind, &raw, &p.Revision, &p.Invalidated, &p.Active, &p.Uncertain, &p.Resolved, &p.PublishedRevision, &p.ConfirmedState)
 	if err != nil {
 		return p, "", err
 	}
@@ -157,13 +159,15 @@ func (m *Module) publishAdmission(ctx context.Context, sha string) error {
 		if err != nil {
 			return err
 		}
-		// After an uncertain outcome the first operation is a read, followed by an
-		// unconditional current-state POST. An old timed-out success may arrive late.
-		if p.Uncertain {
-			_, _ = m.admissionGitHub.Status(ctx, sha)
-		}
-		postErr := m.admissionGitHub.PostStatus(ctx, sha, state)
+		// Reconcile confirmed revisions with a read. Avoid consuming GitHub's
+		// per-SHA/context status limit with identical periodic POSTs. An
+		// uncertain dispatch always reads and reposts, even if the state agrees.
 		observed, readErr := m.admissionGitHub.Status(ctx, sha)
+		var postErr error
+		if p.Uncertain || p.PublishedRevision != p.Revision || p.ConfirmedState != state || readErr != nil || observed != state {
+			postErr = m.admissionGitHub.PostStatus(ctx, sha, state)
+			observed, readErr = m.admissionGitHub.Status(ctx, sha)
+		}
 		if postErr != nil || readErr != nil || observed != state {
 			continue
 		}
