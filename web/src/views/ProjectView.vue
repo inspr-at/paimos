@@ -2166,7 +2166,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-page[class*="header-"] .head-flex { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-start; gap: 8px 16px; }
 .project-page[class*="header-"] .head-main { display: flex; flex-direction: column; flex: 1 1 20rem; min-width: min(100%, 20rem); max-width: 100%; }
 .project-page[class*="header-"] .title-line { width: 100%; max-width: none; min-width: 0; }
-.project-page[class*="header-"] .title-line h1 { font-size: 22px; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; overflow-wrap: normal; -webkit-line-clamp: unset; -webkit-box-orient: unset; }
+/* Don't grow: the edit control stays against the words, and the line still shrinks to an ellipsis. */
+.project-page[class*="header-"] .title-line h1 { flex: 0 1 auto; width: auto; max-width: 100%; font-size: 22px; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; overflow-wrap: normal; -webkit-line-clamp: unset; -webkit-box-orient: unset; }
 .project-page[class*="header-"] .description-block { min-width: 0; }
 .project-page[class*="header-"] .description { margin: 0; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .project-page[class*="header-"] .activity { flex: 0 0 auto; white-space: nowrap; align-self: flex-start; }
