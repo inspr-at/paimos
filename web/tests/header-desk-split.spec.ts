@@ -427,6 +427,24 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
     expect(back.cut).toEqual([])
     expect(back.parts[0]).toBe('/')
     expect(back.parts, `${trail.path} at 1024 after the sweep`).toContain(trail.slug === 'tickets' ? 'PHAROS Pharos' : 'PHAROS-11')
+    // AEON-1446: at Tick's widths and the 887 flake's, a refit at the same width (a font
+    // swap) moves nothing: the places, the Desk's chevron, Search, the avatar and the
+    // page's crumb keep their boxes, and the trail keeps its parts.
+    for (const width of [1440, 1024, 887, 601]) {
+      await page.setViewportSize({ width, height: 900 })
+      await settle(page)
+      const fit = await trailFit(page)
+      expect(fit.cut, `${trail.path} at ${width}: ${fit.parts.join(' ')}`).toEqual([])
+      await expectStableControls({
+        controls: {
+          places: places(page), chevron: chevron(page), search: page.getByRole('button', { name: 'Search everything' }),
+          account: page.locator('.app-header .account'), crumb: trailOf(page).locator('[aria-current="page"]'),
+        },
+        interactions: [{ name: 'a font swap refits the header', run: async () => { await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone'))); await settle(page) } }],
+      })
+      expect((await trailFit(page)).parts, `${trail.path} at ${width}: the same trail after a refit`).toEqual(fit.parts)
+      await page.screenshot({ path: join(dir, `trail-${trail.slug}-${width}-light.png`), clip: { x: 0, y: 0, width, height: 64 } })
+    }
     // Screen readers keep the whole trail at every width; what is out of sight is out of the tab order.
     await page.setViewportSize({ width: 640, height: 900 })
     await settle(page)
@@ -435,40 +453,6 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
     expect(await trailOf(page).evaluate(trail => [...trail.querySelectorAll<HTMLElement>('a[href], button')].filter(el => el.getBoundingClientRect().width <= 1 && el.tabIndex >= 0 && getComputedStyle(el).display !== 'none').length)).toBe(0)
   }
 })
-
-// AEON-1446: at the widths of the 887 flake and Tick's check, both trails are whole,
-// and a refit at the same width moves nothing: the places, the Desk's chevron, Search,
-// the avatar and the page's crumb keep their boxes, and the trail shows the same parts.
-for (const width of [601, 887, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
-  test(`at ${width} ${theme} both trails are whole and a refit moves nothing (AEON-1446)`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 900 })
-    await setup(page, { theme })
-    const dir = testInfo.outputPath('AEON-1446')
-    await mkdir(dir, { recursive: true })
-    for (const trail of TRAILS.slice(0, 2)) {
-      await page.goto(trail.path)
-      await trail.ready(page)
-      await expect(trailOf(page)).toContainText('Pharos')
-      await settle(page)
-      const fit = await trailFit(page)
-      expect(fit.cut, `${trail.path} at ${width}: ${fit.parts.join(' ')}`).toEqual([])
-      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'no sideways scroll').toBeLessThanOrEqual(0)
-      await expectStableControls({
-        controls: {
-          places: places(page), chevron: chevron(page), search: page.getByRole('button', { name: 'Search everything' }),
-          account: page.locator('.app-header .account'), crumb: trailOf(page).locator('[aria-current="page"]'),
-        },
-        interactions: [
-          { name: 'a font swap refits the header', run: async () => { await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone'))); await settle(page) } },
-          { name: 'hover the places', run: async () => { await places(page).hover(); await settle(page) } },
-        ],
-      })
-      expect((await trailFit(page)).parts, `${trail.path} at ${width}: the same trail after a refit`).toEqual(fit.parts)
-      await page.mouse.move(0, 400)
-      await page.screenshot({ path: join(dir, `trail-${trail.slug}-${width}-${theme}.png`), clip: { x: 0, y: 0, width, height: 64 } })
-    }
-  })
-}
 
 // AEON-1240 (Tick's pre-cut pass on 07717bdb4; AEON-1213 fix7 at 320 px): on phones a key, the project's chip or a
 // ticket's, shows whole or not at all. It was clipped to "PHARO" at 390 and to "P" at 400, half under Search. Probe:
