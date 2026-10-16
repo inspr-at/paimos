@@ -3,6 +3,7 @@ import type { ListItem } from './api.ts'
 import type { IconName } from '../components/AppIcon.vue'
 import { kindLabel } from './work.ts'
 import { isWorkIcon } from './workIcons.ts'
+
 export { WORK_ICONS } from './workIcons.ts'
 export interface WorkLevel { name: string; icon: string }
 export interface LeadNames { singular: string; plural: string }
@@ -22,15 +23,6 @@ export function workIconChoice(icon: string, fallback: IconName): IconName {
 /** Settings label of a level: levels[0] is the top level, the leaf comes last. */
 export function vocabularyLabel(index: number, leaf = false): string {
   return leaf ? 'Leaf (work item)' : index === 0 ? 'Top level' : `Level ${index + 1}`
-}
-/** Where Arrow, Home and End keys move in a list of `count` options (-1: focus is outside the list); undefined for any other key. */
-export function listKeyTarget(key: string, at: number, count: number): number | undefined {
-  if (!count) return undefined
-  if (key === 'Home') return 0
-  if (key === 'End') return count - 1
-  if (key === 'ArrowDown') return Math.min(count - 1, at + 1)
-  if (key === 'ArrowUp') return Math.max(0, at - 1)
-  return undefined
 }
 export interface VocabularyRow { key: string; leaf: boolean; index: number; depth: number; label: string; level: WorkLevel; placeholder: string; fallback: IconName }
 /** The configured levels as they nest: top level first, the leaf last. */

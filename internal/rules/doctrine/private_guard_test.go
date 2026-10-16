@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -731,4 +732,17 @@ func smallCapitalAttack(s string) string {
 		}
 		return r
 	}, strings.ToLower(s))
+}
+
+func corpusFrom(key []byte, docs map[string]string) *guardCorpus {
+	c := newGuardCorpus(key)
+	paths := make([]string, 0, len(docs))
+	for path := range docs {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		c.add(path, docs[path])
+	}
+	return c
 }

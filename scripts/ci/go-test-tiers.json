@@ -7740,8 +7740,6 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorExactRowAndBodyBounds","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/modelregistry","name":"TestEditorExpiryBoundaryNewAndRetainedHolds","tier":"GATED-FULL"}
-    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorExpiryTokensAndCompensation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorIdentityChangeWaitsBehindFencedMutation","tier":"GATED-FULL"}

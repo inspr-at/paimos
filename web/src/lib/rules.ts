@@ -249,16 +249,6 @@ export function scopeMatches(scope: RuleScope, ctx: RuleContext): boolean {
   return true
 }
 
-export function layerInColumn(scope: RuleScope, column: LayerName, ctx: RuleContext, mode: AgentMode): boolean {
-  if (scope.layer !== column) return false
-  if (column === 'company') return true
-  if (column === 'project') return scope.project_id === ctx.projectId && ctx.projectId !== ''
-  if (column === 'person') return scope.owner_id === ctx.personId && ctx.personId !== ''
-  if (mode === 'role') return scope.role === ctx.role && !scope.agent_id && !scope.task_id
-  if (mode === 'named') return scope.agent_id === ctx.agentId && ctx.agentId !== '' && scope.owner_id === ctx.personId && !scope.task_id
-  return scope.task_id === ctx.taskId && ctx.taskId !== '' && scope.agent_id === ctx.agentId && scope.project_id === ctx.projectId && scope.owner_id === ctx.personId
-}
-
 export function scopeFor(column: LayerName, ctx: RuleContext, mode: AgentMode): { scope: RuleScope } | { error: string } {
   if (column === 'company') return { scope: { layer: 'company' } }
   if (column === 'project') {
@@ -371,10 +361,6 @@ export function groupsState(groups: readonly CheckGroup[]): CheckState {
 
 export function hasMovable(groups: readonly CheckGroup[]): boolean {
   return groups.some(group => group.rules.some(rule => canFlip(rule, group.held)))
-}
-
-export function groupState(rules: AgentRule[], held: ReadonlySet<string>): CheckState {
-  return groupsState([{ rules, held }])
 }
 
 /** A tick turns the group on unless it is already fully on. */
@@ -613,15 +599,6 @@ export function mergeQuery(ctx: RuleContext): { query: string } | { error: strin
   return { query: params.toString() }
 }
 
-export function heldIdentities(sets: { scope: RuleScope; rules: AgentRule[] }[], ctx: RuleContext, belowRank: number): Set<string> {
-  const held = new Set<string>()
-  for (const set of sets) {
-    if (scopeRank(set.scope) >= belowRank || !scopeMatches(set.scope, ctx)) continue
-    for (const rule of set.rules) if (rule.strength === 'locked') held.add(rule.identity)
-  }
-  return held
-}
-
 export type PreviewReason = 'not_key_creator' | 'key_revoked' | 'key_expired' | 'agent_inactive'
 export interface NamedAgent {
   id: string
@@ -702,7 +679,6 @@ export const listSets = async (layerId: string) => {
   return { sets: body.sets.map(set => ({ ...set, rules: (set.rules ?? []).map(clean) })) }
 }
 export const createSet = (layerId: string, name: string) => send<RuleSet>('/rules/sets', 'POST', { layer_id: layerId, name }).then(set => ({ ...set, rules: (set.rules ?? []).map(clean) }))
-export const getSet = (setId: string) => send<RuleSet>(`/rules/sets/${encodeURIComponent(setId)}`).then(set => ({ ...set, rules: (set.rules ?? []).map(clean) }))
 const cleanSet = (set: RuleSet): RuleSet => ({ ...set, rules: (set.rules ?? []).map(clean) })
 /** Writes explanations only (AEON-314). set: undefined keeps, null removes; rules: identity → text or null. */
 export const saveTldrs = (setId: string, body: { expected_revision: number; set?: { en: string; de?: string } | null; rules?: Record<string, { en: string; de?: string } | null> }) =>
@@ -710,14 +686,12 @@ export const saveTldrs = (setId: string, body: { expected_revision: number; set?
 export const saveDraft = (setId: string, body: { expected_revision: number; name: string; rules: AgentRule[] }) => send<RuleSet>(`/rules/sets/${encodeURIComponent(setId)}/draft`, 'PUT', {
   expected_revision: body.expected_revision, name: body.name, rules: body.rules.map(rulePayload),
 }).then(set => ({ ...set, rules: (set.rules ?? []).map(clean) }))
-export const publishSet = (setId: string, body: { expected_revision: number; version: string; note?: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/publish`, 'POST', withNote(body)).then(cleanSnapshot)
 export const listVersions = async (setId: string) => {
   const body = await send<{ versions: RuleSnapshot[] }>(`/rules/sets/${encodeURIComponent(setId)}/versions`)
   return { versions: (body.versions ?? []).map(cleanSnapshot) }
 }
 export const getVersion = (setId: string, version: string) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/versions/${encodeURIComponent(version)}`).then(cleanSnapshot)
 export const restoreSet = (setId: string, body: { expected_revision: number; version: string; new_version: string; note?: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/restore`, 'POST', withNote(body)).then(cleanSnapshot)
-export const mergeRules = (query: string) => send<MergedRules>(`/rules/merged?${query}`)
 
 export interface RulesComparisonCounts {
   both: number
@@ -786,10 +760,6 @@ export function budgetParts(usage: LayerBytes, total: number, budget: RuleBudget
   return parts
 }
 export const budgetLine = (usage: LayerBytes, total: number, budget: RuleBudget) => budgetParts(usage, total, budget).map(part => part.label).join(' · ')
-/** True when the file or one layer is over its limit. */
-export function overBudget(usage: LayerBytes, total: number, budget: RuleBudget): boolean {
-  return total > budget.max_bytes || LAYERS.some(layer => (budget.layer_max_bytes[layer] ?? 0) > 0 && (usage[layer] ?? 0) > (budget.layer_max_bytes[layer] ?? 0))
-}
 
 /** One entry of a batch publication; version is 'auto' or an explicit calendar version. */
 export interface BatchItem { set_id: string; expected_revision: number; version: string }
@@ -832,13 +802,7 @@ function projectedWithLayer(sets: MergeInput[], ctx: MergeContext, now: Date): P
   }
   return [...chosen.keys()].sort().map(key => chosen.get(key)!).filter(item => item.rule.enabled || item.rule.strength === 'locked')
 }
-export function projectedRules(sets: MergeInput[], ctx: MergeContext, now = new Date()): AgentRule[] {
-  return projectedWithLayer(sets, ctx, now).map(item => item.rule)
-}
 const lineBytes = (rule: AgentRule) => utf8Length(`- [${rule.identity}] ${rule.text}\n`)
-export function projectedBytes(sets: MergeInput[], ctx: MergeContext, now = new Date()): number {
-  return projectedUsage(sets, ctx, now).bytes
-}
 /** The file's size and each layer's share of it, as the server counts them. */
 export function projectedUsage(sets: MergeInput[], ctx: MergeContext, now = new Date()): { bytes: number; usage: LayerBytes } {
   const usage: LayerBytes = {}

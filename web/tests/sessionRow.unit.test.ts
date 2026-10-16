@@ -4,7 +4,6 @@ import { test } from 'vitest'
 import type { ModelProfile } from '../src/lib/agents'
 import type { SessionView } from '../src/stores/agents'
 import { explicitOutcome, intendedResult, modelNames, modelProvider, sessionExecution, sessionEtaEligible, sessionSearchText } from '../src/components/agents/sessionRow'
-import * as rowCopy from '../src/components/agents/sessionRow'
 
 function view(partial: Partial<SessionView> & { session?: Partial<SessionView['session']> } = {}): SessionView {
   const session = {
@@ -46,14 +45,6 @@ test('intended result prefers an explicit phrase, then the bound ticket title, t
   assert.equal(intendedResult(plain).includes('heartbeat'), false)
 })
 
-test('the execution-column base capture retains its session context helper', () => {
-  assert.equal(typeof rowCopy.sessionContext, 'function', 'the base SessionList calls this helper during render')
-  assert.equal(rowCopy.sessionContext(view(), 'Ship'), 'hausv')
-  assert.equal(rowCopy.sessionContext(view(), 'hausv'), 'mba')
-  assert.equal(rowCopy.sessionContext(view({ session: { host: '' } }), 'hausv'), 'Aeon')
-  assert.equal(rowCopy.sessionContext(view({ session: { host: '' }, projectTitle: '', projectKey: '' }), 'hausv'), 'hausv')
-})
-
 test('execution names the reported model and effort, and omits what is not reported', () => {
   const known = view({ harness: 'Codex', session: { harness: 'codex', model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro' } })
   const exec = sessionExecution(known)
@@ -78,7 +69,6 @@ test('execution names the reported model and effort, and omits what is not repor
   assert.equal(empty.accountLine, 'Grok')
   assert.equal(empty.provider, 'unknown')
 })
-
 
 test('media and terminal use their execution label and never infer an AI vendor', () => {
   for (const [harness, label] of [['media', 'higgsfield/kling3_0'], ['terminal', 'ffmpeg']] as const) {

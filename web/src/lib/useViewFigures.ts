@@ -19,7 +19,6 @@ function remember(key: string, value: ProjectFigures) {
   cache.set(key, { value, at: Date.now() })
   while (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value!)
 }
-export function forgetViewFigures() { cache.clear() }
 
 export interface ViewFiguresOptions {
   // The signed-in identity (tenant/principal): cached figures belong to the person who read them.

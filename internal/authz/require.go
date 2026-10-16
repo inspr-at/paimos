@@ -9,11 +9,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrForbidden = errors.New("permission denied")
@@ -459,12 +458,6 @@ func EffectiveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID s
 	return loadTx(ctx, tx, p, projectID)
 }
 
-func nullUUID(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
 func unique(in []string) []string {
 	sort.Strings(in)
 	out := in[:0]

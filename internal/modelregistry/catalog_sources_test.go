@@ -110,9 +110,7 @@ func TestCatalogSourcesPreserveNativePrecedenceAndUnknown(t *testing.T) {
 			t.Fatalf("%s manufactured dispatch efforts", source)
 		}
 	}
-	if len(discoveryObservations("openai", "fixture", []string{"gpt-6.1-sol"})) != 0 {
-		t.Fatal("ID-only discovery borrowed seed levels")
-	}
+
 	xai, err := ParseProviderCatalog("xai", catalogFixture(t, "xai"), at)
 	if err != nil {
 		t.Fatal(err)

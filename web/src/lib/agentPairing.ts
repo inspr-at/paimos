@@ -15,7 +15,6 @@ function product(): string {
 }
 
 export const PUBLIC_PAIRING_GUIDE_PATH = '/agents/register-agent'
-export const LOOKUP_DEBOUNCE_MS = 400
 export const MIN_POLL_INTERVAL_MS = 5_000
 export const MAX_REQUEST_POLL_MS = 10 * 60 * 1000
 export const DEFAULT_REVIEW_CHOICE = 'one_per_harness' as const
@@ -306,16 +305,6 @@ export function isPublicPairingGuide(path: string): boolean {
   return path === PUBLIC_PAIRING_GUIDE_PATH || path.startsWith(`${PUBLIC_PAIRING_GUIDE_PATH}/`)
 }
 
-/** Paths that must be registered before `/agents/:sessionId`, or that param captures them. */
-export function agentRouteKind(path: string): 'index' | 'usage' | 'routines' | 'register-agent' | 'session' | 'other' {
-  if (path === '/agents' || path === '/agents/') return 'index'
-  if (path === '/agents/usage' || path.startsWith('/agents/usage/')) return 'usage'
-  if (path === '/agents/routines' || path.startsWith('/agents/routines/')) return 'routines'
-  if (isPublicPairingGuide(path)) return 'register-agent'
-  if (path.startsWith('/agents/')) return 'session'
-  return 'other'
-}
-
 /** The signed-out freeze keeps protected drafts. The anonymous guide stays usable. */
 export function sessionFreezeApplies(path: string, requiresSignIn: boolean): boolean {
   if (!requiresSignIn || path === '/signin' || isPublicPairingGuide(path)) return false
@@ -340,8 +329,6 @@ export function takePairingCode(): string | null {
   try { sessionStorage.removeItem(PAIRING_CODE_KEY) } catch { /* Storage may be disabled. */ }
   return code
 }
-
-export interface GuideSection { heading: string; paragraphs: string[] }
 
 export type InstallMethod = 'homebrew' | 'manual' | 'nix'
 
@@ -445,21 +432,6 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     targets: guide && publishedInstall ? [...guide.install_targets] : [],
     managedSetup: guide?.managed_setup ?? null,
   }
-}
-
-/** Lead copy for the public page. Install commands stay on presentPublicGuide.targets. */
-export function publicGuideSections(guide: PairingGuide | null): GuideSection[] {
-  const presented = presentPublicGuide(guide)
-  return [
-    {
-      heading: 'Connect your machine',
-      paragraphs: [
-        ...presented.steps,
-        presented.address ? `Setting up another computer, or letting an agent do it? Share this address: ${presented.address}` : `This ${product()} has not published its address yet.`,
-        presented.note,
-      ],
-    },
-  ]
 }
 
 export function canonicalUserCode(input: string): string | null {
@@ -662,43 +634,6 @@ export function applyComputerListRefresh(
 ): { computers: PairingView[]; failed: boolean } {
   if (!result.ok) return { computers: [...previous], failed: true }
   return { computers: [...result.computers], failed: false }
-}
-
-export function planLookup(input: {
-  raw: string
-  explicit: boolean
-  now: number
-  typedAt: number
-  inFlight: boolean
-  retryAfterUntil?: number | null
-  lastSentCode?: string | null
-}): { action: 'send'; code: string } | { action: 'wait'; delayMs: number } | { action: 'idle' } | { action: 'blocked'; message: string; next: string } {
-  if (input.inFlight) return { action: 'wait', delayMs: 0 }
-  if (input.retryAfterUntil != null && input.now < input.retryAfterUntil) {
-    const seconds = Math.max(1, Math.ceil((input.retryAfterUntil - input.now) / 1000))
-    return {
-      action: 'blocked',
-      message: 'Too many attempts.',
-      next: `Wait ${seconds} seconds, then look up the same code. Do not start a new pairing from this page.`,
-    }
-  }
-  const code = canonicalUserCode(input.raw)
-  if (!code) {
-    if (!input.explicit && input.now - input.typedAt < LOOKUP_DEBOUNCE_MS) {
-      return { action: 'wait', delayMs: LOOKUP_DEBOUNCE_MS - (input.now - input.typedAt) }
-    }
-    if (!input.explicit && input.raw.trim() === '') return { action: 'idle' }
-    return {
-      action: 'blocked',
-      message: 'Enter the 9-digit code from the computer, with or without dashes.',
-      next: 'A code match does not grant access. Review the request after you are signed in, then connect the computer.',
-    }
-  }
-  if (!input.explicit && input.now - input.typedAt < LOOKUP_DEBOUNCE_MS) {
-    return { action: 'wait', delayMs: input.typedAt + LOOKUP_DEBOUNCE_MS - input.now }
-  }
-  if (!input.explicit && input.lastSentCode === code) return { action: 'idle' }
-  return { action: 'send', code }
 }
 
 export function planApproval(input: {
@@ -1095,11 +1030,6 @@ function harnessFix(harness: string, reason?: HarnessReason, detail?: string): H
   if (reason === 'binding_missing') return { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
   if (['harness_failed', 'cli_unavailable', 'profile_permissions', 'probe_timeout', 'probe_failed', 'capacity_timeout'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
   if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : harness === 'gemini' ? 'gemini' : harness === 'opencode' ? 'opencode auth login' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
-}
-
-/** The repair kind and exact command for one reason; exported for the shared-vocabulary test. */
-export function harnessRecovery(harness: string, reason: string): HarnessFix | undefined {
-  return harnessFix(harness, reason)
 }
 
 interface AttentionReport { accounts: AccountAttention[]; count: number; truncated: boolean }

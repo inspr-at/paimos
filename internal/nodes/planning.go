@@ -14,12 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
+	"github.com/jackc/pgx/v5"
 )
 
 // Planning columns (AEON-329). A list row carries the model its role and area
@@ -141,9 +140,6 @@ func planningStatesCTE() string {
 func planningOpenChild(c string) string {
 	return ` JOIN node_kinds ` + c + `k ON ` + c + `k.tenant_id=` + c + `.tenant_id AND ` + c + `k.id=` + c + `.kind_id AND ` + c + `k.slug IN ('work','ticket','task')
     LEFT JOIN plan_states ` + c + `s ON ` + c + `s.kind_id=` + c + `.kind_id AND ` + c + `s.norm=` + workStateNormSQL(c+".state")
-}
-func planningOpenWhere(c string) string {
-	return c + `.deleted_at IS NULL AND ` + workCountBucketSQL(c+".state", c+"s") + ` NOT IN ('cancelled','archived')`
 }
 
 // planningSubtreeSQL lists each historical work node once per requested root.

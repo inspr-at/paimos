@@ -1115,18 +1115,18 @@ func TestHeartbeatNameSources(t *testing.T) {
 	if err := os.WriteFile(index, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	label, ok := codexSessionLabel(index, id)
+	label, ok := readCodexSessionLabel(context.Background(), index, id)
 	if !ok || label != "Second" {
 		t.Fatalf("codex label %q %v", label, ok)
 	}
-	if _, ok := codexSessionLabel(filepath.Join(dir, "missing.jsonl"), id); ok {
+	if _, ok := readCodexSessionLabel(context.Background(), filepath.Join(dir, "missing.jsonl"), id); ok {
 		t.Fatal("missing codex index returned a label")
 	}
 	blank := filepath.Join(dir, "blank.jsonl")
 	if err := os.WriteFile(blank, []byte(`{"id":"`+id+`","thread_name":"Named"}`+"\n"+`{"id":"`+id+`","thread_name":""}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := codexSessionLabel(blank, id); ok {
+	if _, ok := readCodexSessionLabel(context.Background(), blank, id); ok {
 		t.Fatal("blank current name was treated as a label")
 	}
 
@@ -1140,11 +1140,11 @@ func TestHeartbeatNameSources(t *testing.T) {
 	if err := os.WriteFile(transcript, []byte(claude), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := claudeSessionLabel(heartbeatOptions{ClaudeProjects: projects}, id)
+	got, ok := readClaudeSessionLabel(context.Background(), heartbeatOptions{ClaudeProjects: projects}, id)
 	if !ok || got != "Mine" {
 		t.Fatalf("claude title %q %v", got, ok)
 	}
-	if _, ok := claudeSessionLabel(heartbeatOptions{ClaudeProjects: filepath.Join(dir, "absent")}, id); ok {
+	if _, ok := readClaudeSessionLabel(context.Background(), heartbeatOptions{ClaudeProjects: filepath.Join(dir, "absent")}, id); ok {
 		t.Fatal("missing claude projects returned a label")
 	}
 }
@@ -2515,7 +2515,7 @@ func TestClaudeTitleSkipsOversizedLine(t *testing.T) {
 			if err := os.WriteFile(transcript, []byte(body.String()), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			got, ok := claudeSessionLabel(heartbeatOptions{ClaudeProjects: projects}, id)
+			got, ok := readClaudeSessionLabel(context.Background(), heartbeatOptions{ClaudeProjects: projects}, id)
 			if !ok || got != "After" {
 				t.Fatalf("title %q ok %v", got, ok)
 			}
@@ -2906,4 +2906,18 @@ func commitSubjects(t *testing.T, raw any) []string {
 		out = append(out, subject)
 	}
 	return out
+}
+
+// Test adapters keep single-window cases on the live stateful scanner without
+// shipping an extra scanner entry point.
+func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool) (map[string]usageSum, int64, []string, bool, error) {
+	return scanUsageWindowSource(ctx, path, fallback, offset, maxBytes, recent, discarding, "claude")
+}
+
+// scanUsageWindowSource scans one window with a fresh Codex cursor. It is the
+// single-window form; the heartbeat uses scanUsageWindowState so the Codex
+// model and baseline carry over between beats.
+func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string) (map[string]usageSum, int64, []string, bool, error) {
+	sums, next, ring, disc, _, err := scanUsageWindowState(ctx, path, fallback, offset, maxBytes, recent, discarding, source, nil)
+	return sums, next, ring, disc, err
 }

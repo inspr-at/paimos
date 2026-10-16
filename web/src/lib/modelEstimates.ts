@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { api } from './api'
 
 export interface ModelEstimateHistory {
   state: 'calibrated' | 'uncalibrated'
@@ -9,14 +8,6 @@ export interface ModelEstimateHistory {
   tokens: number | null
   speed_factor: number | null
   speed_tickets: number
-}
-
-export async function modelEstimateHistory(profileId: string, kind: string, bucket: 'normal' | 'complex', projectId?: string, signal?: AbortSignal): Promise<ModelEstimateHistory> {
-  const params = new URLSearchParams({ profile_id: profileId, kind, bucket })
-  if (projectId) params.set('project_id', projectId)
-  const response = await api(`/usage/model-estimates?${params}`, { signal })
-  if (!response.ok) throw new Error('Model history could not be loaded')
-  return response.json() as Promise<ModelEstimateHistory>
 }
 
 // A picker may render only measured history, never the planning fallback.

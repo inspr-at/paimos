@@ -144,10 +144,6 @@ func captureHeartbeatModelBaseline(ctx context.Context, o heartbeatOptions, s *h
 	return heartbeatModelFileBaseline(target, kind)
 }
 
-func readHeartbeatModelFile(ctx context.Context, path, source string, kind harnessFileKind, id string) (string, string) {
-	return readHeartbeatModelFileSince(ctx, path, source, kind, id, 0)
-}
-
 func readHeartbeatModelFileSince(ctx context.Context, path, source string, kind harnessFileKind, id string, offset int64) (string, string) {
 	f, err := openHarnessFile(kind, path)
 	if err != nil {

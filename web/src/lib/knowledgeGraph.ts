@@ -58,11 +58,6 @@ export function graphMatches(nodes: GraphNode[], query: string): Set<string> {
   const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
   return new Set(nodes.filter(n => words.every(word => `${n.title} ${n.slug} ${n.key} ${n.type}`.toLowerCase().includes(word))).map(n => n.id))
 }
-export function graphNeighbours(edges: GraphEdge[], id: string): Set<string> {
-  const ids = new Set<string>([id])
-  for (const edge of edges) { if (edge.source === id) ids.add(edge.target); if (edge.target === id) ids.add(edge.source) }
-  return ids
-}
 export function graphLayout(data: KnowledgeGraphData): { nodes: LayoutNode[]; links: LayoutEdge[] } {
   return { nodes: data.nodes.map(n => ({ ...n })), links: data.edges.map(e => ({ ...e })) }
 }

@@ -28,13 +28,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -242,11 +241,6 @@ func inboxSource(ctx context.Context, tx pgx.Tx, in InboxInput) (Source, error) 
 	return Source{}, errNoSource
 }
 
-func findRule(views []FileView, path, key string) (FileView, RuleView, bool) {
-	file, rule, _, ok := locateRule(views, path, key, "", -1)
-	return file, rule, ok
-}
-
 // locateRule finds a rule by key. A text-derived key changes with its text, so
 // a waiting proposal also finds its rule by section and position, and an
 // edit names the pinned rule by its digest.
@@ -372,16 +366,6 @@ func inboxRequestDigest(in InboxInput) string {
 
 func jsonData(p Proposal) ([]byte, error) {
 	return json.Marshal(proposalData{Proposal: p, InboxRequestDigest: p.InboxRequestDigest})
-}
-
-func scanStored(ctx context.Context, m *Module, actor tenant.Principal, id string) (Proposal, error) {
-	var p Proposal
-	err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-		var err error
-		p, err = scanProposal(tx.QueryRow(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals WHERE id=$1`, id))
-		return err
-	})
-	return p, err
 }
 
 // listInbox shows a person every waiting proposal, and an agent (or a key)

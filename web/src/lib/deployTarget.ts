@@ -30,8 +30,3 @@ export function readDeployTarget(approval: DeployApproval | null | undefined) {
     aria: where ? `Deploy target: ${[where, service, image, change].filter(Boolean).join(', ')}` : 'Target not named',
   }
 }
-export function deployTargetSentence(approval: DeployApproval | null | undefined) {
-  const view = readDeployTarget(approval)
-  if (view.standing !== 'named') return 'Target not named.'
-  return [`Server: ${view.where}.`, view.service && `Service: ${view.service}.`, view.image && `Image: ${view.image}.`, view.change && `Change: ${view.change}.`].filter(Boolean).join(' ')
-}

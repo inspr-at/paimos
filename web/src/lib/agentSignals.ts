@@ -4,7 +4,8 @@
 export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'done' | 'stopped' | 'pausing' | 'paused'
 import { normalizeAgentPalette, type AgentPalette } from './agentPalettes.ts'
 import { LOST_CONTACT, problemReason, stopReasonSentence } from './stopReasons.ts'
-export type { AgentPalette }
+
+export type { AgentPalette };
 export interface AgentStatePreference {
   palette: AgentPalette; dimInactive: boolean; inactiveOpacity: number
   yellowMinutes: number; redMinutes: number
@@ -17,7 +18,6 @@ export const STATE_LABEL: Record<AgentState, string> = {
   unresponsive: 'No heartbeat', idle: 'Idle', stale: 'Idle · no heartbeat', done: 'Done', stopped: 'Ended',
 }
 export const inactiveState = (state: AgentState) => state === 'idle' || state === 'stale' || state === 'stopped'
-export const movingState = (state: AgentState) => state === 'working'
 export const STATE_PRIORITY: Record<AgentState, number> = { pausing: 5, paused: 8, problem: 0, unresponsive: 1, waiting: 2, awaiting: 3, throttled: 4, working: 5, idle: 6, stale: 7, done: 8, stopped: 9 }
 export function leadingState(states: (AgentState | undefined)[]): AgentState {
   return states.reduce<AgentState>((lead, state) => STATE_PRIORITY[state ?? 'working'] < STATE_PRIORITY[lead] ? state ?? 'working' : lead, 'stopped')
@@ -71,7 +71,7 @@ export interface StateEvidence {
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
 }
 // How a session ended lives in stopReasons.ts: what counts as a failure, and its words (AEON-1285).
-export { LOST_CONTACT, problemReason, stopReasonLabel, stopReasonSentence } from './stopReasons.ts'
+export { LOST_CONTACT,problemReason,stopReasonLabel,stopReasonSentence } from './stopReasons.ts';
 // AEON-437: Done is positive evidence: the worker reported all of its work AND its
 // launcher recorded a clean exit. The server derives `finished` from exactly that
 // (aeon_session_finished) and puts it in every session, live and event payload, so

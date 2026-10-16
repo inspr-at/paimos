@@ -470,3 +470,17 @@ func reviewOrderSave(t *testing.T, tx pgx.Tx, p tenant.Principal, profiles ...st
 	}
 	return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", profiles...)
 }
+
+// Read and write the retained historical order-mode fixture; live writes use
+// model preference orders instead.
+func storedReviewOrder(ctx context.Context, tx pgx.Tx) (string, error) {
+	var mode string
+	err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT ordinary_review_order_mode FROM model_review_order), 'legacy')`).Scan(&mode)
+	return mode, err
+}
+
+func saveReviewOrder(ctx context.Context, tx pgx.Tx, tenantID, mode string) error {
+	_, err := tx.Exec(ctx, `INSERT INTO model_review_order(tenant_id,ordinary_review_order_mode)
+        VALUES($1,$2) ON CONFLICT(tenant_id) DO UPDATE SET ordinary_review_order_mode=EXCLUDED.ordinary_review_order_mode`, tenantID, mode)
+	return err
+}

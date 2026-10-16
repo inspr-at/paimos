@@ -3,17 +3,18 @@ import type { DeployTarget } from './deployTarget'
 import { agentEventIdentity, type AgentEventIdentity } from './tierEvidenceLive.ts'
 import { watchStreamHealth } from './streamHealth.ts'
 import { eventNode, PROJECTION_EVENTS } from './agentProjection.ts'
-// The agents workspace HTTP surface for a person's session: harness sessions and
-// their typed controls, runs, approvals, accounts with allowance windows, models
-// and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
 import { api, APIError } from './api.ts'
 import { stamp, tick } from './position.ts'
 import type { Admitted } from './ledger.ts'
 import { sendSessionControl, requestManagedSessionControl, readSessionControl, type AgentRunRow, type HarnessSessionRow } from './agentRows.ts'
 
+// The agents workspace HTTP surface for a person's session: harness sessions and
+// their typed controls, runs, approvals, accounts with allowance windows, models
+// and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
+
 // Sessions and runs are fetched only by agentRows.ts and shown only after the ledger
 // admitted them (AEON-449): the types a component works with are the admitted ones.
-export type { Harness, MetadataChange, ProcessOwnership, NodeSummary, Paged, HarnessSessionRow, AgentRunRow } from './agentRows.ts'
+export type { AgentRunRow,Harness,HarnessSessionRow,MetadataChange,NodeSummary,Paged,ProcessOwnership } from './agentRows.ts'
 export type HarnessSession = Admitted<HarnessSessionRow>
 export type AgentRun = Admitted<AgentRunRow>
 export interface SessionChangeRequest {
@@ -68,7 +69,7 @@ export interface Approval {
 }
 // The registry also sends its display fields; the session list names models by them (AEON-1211).
 export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; display_name?: string; short_name?: string; model_version?: string }
-export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
+
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
   optimistic?: boolean; send_failed?: boolean; client_id?: string; resend_of?: string; queue_pending?: boolean; cancelled?: boolean
@@ -131,16 +132,6 @@ export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
 export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
 export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
 export const listModels = () => request<ModelProfile[]>('/models')
-// Task-appropriate profile for a work role on one harness. A miss is "routing did not answer", not a guessed model.
-// The start cascade must not call this to fill models an account did not grant.
-export async function resolveModelRole(role: string, harness: string): Promise<ModelProfile | null> {
-  try {
-    const data = await request<ModelResolution>(`/models/resolve${query({ role, harness })}`)
-    return data?.profile?.id ? data.profile : null
-  } catch {
-    return null
-  }
-}
 export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)
 export const listMessages = (projectId: string, params: { session?: string; newest_first?: boolean; pending?: boolean; address?: string; thread?: string; after?: number; limit?: number } = {}) =>
   request<MessagePage>(`/projects/${enc(projectId)}/messages${query({ limit: 200, newest_first: true, ...params })}`)
@@ -173,7 +164,6 @@ export const markChatSeen = (threadId: string, ids: string[]) => request<unknown
 export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
-
 
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the

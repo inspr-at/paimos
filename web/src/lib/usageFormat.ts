@@ -167,10 +167,6 @@ export interface UsageDashboard {
   }
   work: UsageWork
 }
-
-export const costStateLabel: Record<CostState, string> = {
-  known: 'Known', provisional: 'Provisional', unknown: 'Unknown', partial: 'Partial',
-}
 export const billingLabel: Record<BillingMode, string> = {
   subscription: 'Reported subscription',
   api: 'Reported API',
@@ -197,11 +193,6 @@ function groupDigits(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-export function formatInteger(value: string | null): string {
-  if (value === null || !intPattern.test(value)) return 'Unknown'
-  return groupDigits(value)
-}
-
 export function formatUSD(value: string | null): string {
   const match = value === null ? null : usdPattern.exec(value)
   if (!match) return 'Unknown'
@@ -211,27 +202,8 @@ export function formatUSD(value: string | null): string {
   return `${groupDigits(match[1] ?? '0')}.${shown} USD`
 }
 
-export function formatTokens(value: string | null, known: number, unknown: number): string {
-  if (value === null || known === 0) return 'Unknown'
-  const text = formatInteger(value)
-  if (text === 'Unknown') return text
-  if (unknown === 0) return text
-  return `${text} from ${known} of ${known + unknown}`
-}
-
-export function usdUnits(value: string | null): bigint {
-  const match = value === null ? null : usdPattern.exec(value)
-  if (!match) return 0n
-  return BigInt(match[1] ?? '0') * 1_000_000_000_000n + BigInt(match[2] ?? '0')
-}
-
 export function formatCount(n: number): string {
   return n.toLocaleString('en-US')
-}
-
-export function formatOptionalCount(value: number | null): string {
-  if (value === null || !Number.isSafeInteger(value)) return 'Unknown'
-  return formatCount(value)
 }
 
 export function formatWhen(iso: string): string {
@@ -257,35 +229,8 @@ export function dayKey(value: string): string {
   return value.slice(0, 10)
 }
 
-/** Every UTC day in [from, to), as YYYY-MM-DD. */
-export function rangeDays(from: string, to: string): string[] {
-  const start = Date.parse(`${dayKey(from)}T00:00:00Z`)
-  const end = Date.parse(to)
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return []
-  const days: string[] = []
-  for (let t = start; t < end && days.length < 400; t += day) days.push(new Date(t).toISOString().slice(0, 10))
-  return days
-}
-
 export function formatDay(iso: string): string {
   const date = new Date(`${dayKey(iso)}T00:00:00Z`)
   if (Number.isNaN(date.getTime())) return iso
   return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(date)
-}
-
-/** USD as a plain number for chart geometry only; display keeps formatUSD. */
-export function usdNumber(value: string | null): number | null {
-  const match = value === null ? null : usdPattern.exec(value)
-  if (!match) return null
-  return Number(`${match[1]}.${match[2]}`)
-}
-
-/** Allowance amounts in their unit. Cost micros read as USD (1,000,000 is 1 USD). */
-export function formatAllowanceAmount(value: number | null, unit: AllowanceWindow['unit']): string | null {
-  if (value === null || !Number.isSafeInteger(value)) return null
-  if (unit === 'cost_micros') {
-    const usd = value / 1_000_000
-    return `${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
-  }
-  return compactCount(value)
 }
