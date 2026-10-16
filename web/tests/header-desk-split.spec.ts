@@ -384,6 +384,11 @@ for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as co
 // 1181 px: the trail never shows a cut chip, and it returns whole when the window
 // widens. What steps aside stays in the trail for screen readers, out of the tab order.
 test('from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
+  // Two trails, every 7 px from 1440 down to 601, each settled on a rendering
+  // update, then a refit at four widths. On the two-worker CI shard the 30s
+  // default ran out during the reviewer's shot, after fonts had loaded
+  // (PR 711, job 117000751930). 180s still only stops a hang. The assertions stay.
+  test.setTimeout(180_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
