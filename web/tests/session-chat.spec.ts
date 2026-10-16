@@ -1242,7 +1242,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
   await expect(row.locator('.queue-when')).toContainText('Can’t be delivered yet')
   const field = panel.locator('.compose textarea')
   await field.fill('Status der Freigabeprüfung')
-  const guard = await controlStability(page, { field, send: panel.locator('.send'), edit: row.locator('button').nth(0), cancel: row.locator('button').nth(1), tab: messagesTab(page), frame: panel })
+  // AEON-1438: a queued send waits at the end of the thread, as in the approved
+  // design. It is scroll content there (AEON-541: content may move inside the
+  // scroll area), so the refusal line above it may move it; the composer's
+  // controls and the tabs stay still, and its actions keep working below.
+  const guard = await controlStability(page, { field, send: panel.locator('.send'), tab: messagesTab(page), frame: panel })
   await guard.check(async () => {
    worker.inbox_binding_error = 'principal_mismatch'
    await signal976(page)
@@ -1257,7 +1261,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
    await expect(live).toHaveCount(0)
    await expect(row.locator('.queue-when')).toHaveText('At its next step')
    await expect(panel.locator('.hook-notice')).toHaveCount(0)
+   await expect(row).toBeInViewport()
    await row.locator('button').nth(0).click({ trial: true })
+   await row.locator('button').nth(1).click({ trial: true })
   })
   guard.done()
   await expect(panel.getByText('Start of the conversation', { exact: true })).toHaveCount(0)
