@@ -57,7 +57,7 @@ for (const width of [320, 360, 390, 1440]) {
             }
           }
           return {
-            title: right('.title-link'), status: right('.status-btn'), card: tr.getBoundingClientRect().right - parseFloat(getComputedStyle(tr).paddingRight),
+            title: right('.title-link'), status: right('.status-btn'), statusCell: right('.c-status'), card: tr.getBoundingClientRect().right - parseFloat(getComputedStyle(tr).paddingRight),
             label: label.textContent?.trim() ?? '',
             labelWhole: label.scrollWidth <= label.clientWidth + 1,
             priority,
@@ -66,6 +66,9 @@ for (const width of [320, 360, 390, 1440]) {
         })
         expect(fit.title, `the title gives way inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
         expect(fit.status, `the status stays inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
+        // On a phone card the status chip owns its whole slot. A hidden cue
+        // that keeps room beside it squeezes the label on wider fonts.
+        if (width <= 720) expect(fit.statusCell - fit.status, `nothing hidden keeps room beside the status; ${fit.why}`).toBeLessThanOrEqual(.5)
         // Only the narrowest phones shorten the status label; from 360px it reads whole.
         if (width >= 360) expect(fit.labelWhole, `the status label reads whole; ${fit.why}`).toBe(true)
         // "In progress" still fits at 320; a shorter label is what gives way first.

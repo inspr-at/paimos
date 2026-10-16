@@ -1481,6 +1481,11 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
      before that label. The priority mark never shrinks below the icon and
      carries no negative margin. */
   .c-status { min-width: 0; }
+  /* The stale cue keeps a hidden slot beside every status (the cell gap, its
+     margin and the word). A compact card has no hover and no queue action, so
+     that slot only squeezed the label: with wider Linux fonts "In progress" no
+     longer fit at 320px. The ticket's properties still show the cue (AEON-1379). */
+  .table-card:not(.customised) .c-status .stale-hint { display: none; }
   /* The icon sits at the end of its slot, so the gap to the date is the column
      gap plus the date's margin, not whatever free space the track absorbed. */
   .table-card:not(.customised) .c-prio .cell { min-width: 0; margin: 0; gap: 0; justify-content: flex-end; }
