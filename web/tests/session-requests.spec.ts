@@ -53,16 +53,21 @@ async function openRequest(page: Page, item: 'Rename session…' | 'Change model
 }
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`${theme} ${width}: request stays pending until session completion`, async ({ page }) => {
+  test(`${theme} ${width}: request stays pending until session completion`, async ({ page }, testInfo) => {
     const { worker, controls, submissions } = await setup(page, theme)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto(`/agents/${worker.id}?tab=messages`)
     const panel = panelOf(page)
     await expect(panel.getByRole('textbox', { name: 'Message to Release checks' })).toBeVisible()
     await expect(panel.getByText('Ask this session to…')).toHaveCount(0)
+    await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+    await expect(page.getByRole('menuitem', { name: /^Rename session…/ })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1438/requests-menu-${width}-${theme}.png`) })
+    await page.keyboard.press('Escape')
     const rename = await openRequest(page, 'Rename session…')
     const name = rename.getByRole('textbox', { name: 'New session name' })
     await expect(name).toHaveValue('Release checks')
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1438/rename-${width}-${theme}.png`) })
     await expect(rename.getByRole('button', { name: 'Send request' })).toBeDisabled()
     await name.fill('Ready for release')
     await rename.getByRole('button', { name: 'Send request' }).click()
@@ -72,6 +77,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const requests = panel.getByRole('region', { name: 'Session requests' })
     await expect(requests).toContainText('Rename to Ready for release')
     await expect(requests).toContainText('Requested · waiting for the session')
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1438/requests-details-${width}-${theme}.png`) })
     // The pending rename must not replace the current name. AEON-1212 keeps that
     // name in the identity span; the heading's accessible name also includes status.
     await expect(panel.locator('h2.pane-title .name')).toHaveText('Release checks')

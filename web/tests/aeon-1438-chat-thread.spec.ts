@@ -214,6 +214,7 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
       await expect(send).toHaveAccessibleName('After this turn')
       if (!phone) await expect(panel.getByRole('button', { name: 'Send now', exact: true })).toBeVisible()
       if (!phone) await expect(panel.locator('.compose-hint')).toContainText('After this turn')
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1438/turn-${width}-${theme}.png`) })
     })
     await guard.check(async () => {
       await turn(page, 2, 'idle')
@@ -231,6 +232,12 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
     })
     guard.done()
     await page.screenshot({ path: testInfo.outputPath(`AEON-1438/sent-${width}-${theme}.png`) })
+    // A reply: the reply line sits above the field.
+    const asking = thread.locator('.msg.agent', { hasText: 'Shall I start the release check' })
+    await asking.hover()
+    await asking.getByRole('button', { name: 'Reply', exact: true }).click()
+    await expect(panel.locator('.replying')).toContainText('Replying to “Merged AEON-1182.')
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1438/reply-${width}-${theme}.png`) })
   })
 }
 
@@ -328,7 +335,7 @@ test.describe('touch', () => {
     await expect(panel.locator('.composer')).toHaveClass(/two/)
     await expect(panel.getByRole('button', { name: 'Send now', exact: true })).toBeVisible()
     await expect(send).toHaveAccessibleName('After this turn')
-    await page.screenshot({ path: testInfo.outputPath('AEON-1438/phone-two-row-390.png') })
+    await page.screenshot({ path: testInfo.outputPath('AEON-1438/two-row-390-light.png') })
     // The turn ends with the draft present: Send now hides, its slot stays.
     const choice = await controlStability(page, { composer, send, plus, slot: panel.locator('.compose-row .choice') })
     await choice.check(async () => {
