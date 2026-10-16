@@ -11,7 +11,7 @@ import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
 import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
 import { readTierResponse, decideTierResponse } from './agentRows'
-import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskTicket } from './decisionDesk'
+import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskSource, type DeskTicket } from './decisionDesk'
 
 export interface QuestionInput {
   request_id: string; question: string; context?: string; findings?: string; options: DeskChoice[]
@@ -218,7 +218,7 @@ export interface ProtectedDeskAdapters {
   // AEON-455 owns user verification and the approval write together.
   phoneApproval?: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   // AEON-436's exact generation, revision and native permission contract.
-  tiers?: { read: (pending?: readonly DeskProjectionItem[]) => Promise<{ items: DeskItem[]; warnings: string[] }>; allowed: (item: DeskItem) => boolean; decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem> }
+  tiers?: { read: (pending?: readonly DeskProjectionItem[]) => Promise<{ items: DeskItem[]; warnings: string[]; failed?: boolean }>; allowed: (item: DeskItem) => boolean; decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem> }
   // AEON-1048: the browser's passkey prompt and navigation, injectable for tests.
   stepup?: StepupDevices
 }
@@ -293,8 +293,9 @@ export function nativeTierAdapter(sessions: () => Promise<readonly HarnessSessio
         }
       }
       records = next
-      if (reads.some(read => read.status === 'rejected')) warnings.push('Some tier requests could not be read. Open Agents to inspect their source.')
-      return { items, warnings }
+      const failed = reads.some(read => read.status === 'rejected')
+      if (failed) warnings.push('Some tier requests could not be read. Open Agents to inspect their source.')
+      return { items, warnings, failed }
     },
     allowed: item => can('harness.control', item.projectId),
     async decide(item, draft, requestId) {
@@ -327,6 +328,8 @@ export interface DeskRead {
   projectKeys?: Map<string, string>
   nextKeyTrims: KeyTrimCursors
   canonical?: boolean
+  /** Sources that did not answer this read (AEON-1406). */
+  unanswered?: DeskSource[]
 }
 /** One permission-checked, bounded ticket lookup shared by the desk and panel. */
 export async function readDoctrineProjects(rules: readonly DoctrineInboxItem[]): Promise<Map<string, string>> {
@@ -369,14 +372,14 @@ export async function loadMoreQuestions(previous: DeskRead, state: QuestionState
 export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}, trimCursorsOrProjection: KeyTrimCursors | DeskProjection | null = {}, suppliedProjection?: DeskProjection | null): Promise<DeskRead> {
   const projection = trimCursorsOrProjection === null || 'items' in trimCursorsOrProjection ? trimCursorsOrProjection : suppliedProjection
   const trimCursors: KeyTrimCursors = trimCursorsOrProjection && !('items' in trimCursorsOrProjection) ? trimCursorsOrProjection : {}
-  const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
+  const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = [], unanswered = new Set<DeskSource>()
   const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult, stepupsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims(trimCursors), readStepups()])
   const projects = projectsResult.status === 'fulfilled' ? projectsResult.value.items : []
-  if (projectsResult.status === 'rejected') warnings.push('Project names unavailable; source access could not be confirmed.')
+  if (projectsResult.status === 'rejected') { warnings.push('Project names unavailable; source access could not be confirmed.'); unanswered.add('projects') }
   const name = (id: string) => projects.find(project => project.id === id)?.title ?? 'Project name unavailable'
   for (const result of [openResult, answeredResult]) {
     if (result.status === 'fulfilled') for (const question of result.value.items) { sources.questions.set(`q:${question.id}`, question); items.push(questionItem(question, name(question.project_id))) }
-    else warnings.push('Questions could not be read. They may be inaccessible; this is not an empty desk.')
+    else { warnings.push('Questions could not be read. They may be inaccessible; this is not an empty desk.'); unanswered.add('questions') }
   }
   if (approvalsResult.status === 'fulfilled') {
     if (approvalsResult.value.length >= 200) warnings.push('Approvals may be incomplete: the source limit is 200 requests.')
@@ -411,7 +414,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       const workOrderId = workOrders.get(`${approval.resource_kind}:${approval.resource_id}`)
       sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, projectId ? name(projectId) : owner?.title), projectId, ...(workOrderId ? { workOrderId } : {}) })
     }
-  } else warnings.push('Approvals could not be read.')
+  } else { warnings.push('Approvals could not be read.'); unanswered.add('approvals') }
   if (rulesResult.status === 'fulfilled') {
     // A rule change names its project through its ticket: one bounded key lookup.
     let ticketProjects = new Map<string, string>()
@@ -421,11 +424,11 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       const project = rule.ticket ? projects.find(project => project.id === ticketProjects.get(rule.ticket!)) : undefined
       sources.rules.set(`r:${rule.id}`, rule); items.push(project ? { ...ruleItem(rule), projectId: project.id, projectName: project.title } : ruleItem(rule))
     }
-  } else warnings.push('Rule changes could not be read.')
+  } else { warnings.push('Rule changes could not be read.'); unanswered.add('rules') }
   if (projects.length > 30) warnings.push('Action requests are limited to the first 30 visible projects in this read.')
   const actionReads = await Promise.allSettled(projects.slice(0, 30).map(async project => ({ project, page: await listMessages(project.id, { pending: true, limit: 100 }) })))
   for (const read of actionReads) {
-    if (read.status === 'rejected') { warnings.push('Some action requests could not be read.'); continue }
+    if (read.status === 'rejected') { warnings.push('Some action requests could not be read.'); unanswered.add('actions'); continue }
     if (read.value.page.items.length === 100) warnings.push(`Action requests for ${read.value.project.title} may be incomplete.`)
     const projected = new Set([...sources.questions.values()].flatMap(question => [question.input.source_request_id, ...question.askers.map(asker => asker.input.source_request_id)]).filter(Boolean))
     for (const message of read.value.page.items.filter(message => message.is_action_request && message.status === 'held' && !message.human_resolution_outcome && !projected.has(message.id))) {
@@ -435,23 +438,26 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
   if (trimsResult.status === 'fulfilled') {
     warnings.push(...trimsResult.value.warnings)
     for (const proposal of trimsResult.value.items) { const item = keyTrimItem(proposal); sources.keyTrims.set(item.id, proposal); items.push(item) }
-  } else warnings.push('Key trim proposals could not be read; key management rights are required.')
+  } else { warnings.push('Key trim proposals could not be read; key management rights are required.'); unanswered.add('keyTrims') }
   if (stepupsResult.status === 'fulfilled') {
     warnings.push(...stepupsResult.value.warnings)
     for (const request of stepupsResult.value.items) { const item = stepupItem(request, request.project_id ? name(request.project_id) : 'Workspace'); sources.stepups.set(item.id, request); items.push(item) }
-  } else warnings.push('Step-up approvals could not be read.')
+  } else { warnings.push('Step-up approvals could not be read.'); unanswered.add('stepups') }
   if (adapters.tiers) {
     try {
       const read = await adapters.tiers.read(projection?.items)
       const pending = read.items.filter(item => !item.decided), history = read.items.filter(item => item.decided)
       items.push(...[...pending, ...history.slice(0, 100)].map(item => ({ ...item, kind: 'tier' as const })))
       warnings.push(...read.warnings)
+      if (read.failed) unanswered.add('tiers')
       if (history.length > 100) warnings.push('Only the first 100 tier history records are shown; pending requests have a separate budget.')
     }
-    catch { warnings.push('Tier requests could not be read.') }
+    catch { warnings.push('Tier requests could not be read.'); unanswered.add('tiers') }
   }
   const lessonRead = await readLessons(projection?.items ?? [], name)
   warnings.push(...lessonRead.warnings)
+  // Every lesson warning is a project whose lessons did not answer.
+  if (lessonRead.warnings.length) unanswered.add('lessons')
   for (const item of lessonRead.items) { sources.lessons.set(item.id, item.lesson!.learning); items.push(item) }
   // Canonical membership suppresses every linked source, even beyond the
   // question pages loaded for history. One source has one position and count.
@@ -496,15 +502,16 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
         projectId: row.project_id ?? '', projectName: row.project_id ? name(row.project_id) : 'Workspace', revision: row.revision, createdAt: row.created_at,
         held: row.held, source: row.source, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }
     })
-    if (!projection) warnings.push('The canonical desk could not be read. Retry before deciding; the count is unknown.')
-    else if (projection.has_more || open.length !== projection.counts.open) warnings.push('The canonical desk is partial or changed while reading. Retry for current coverage.')
+    // A missing or partial canonical desk is unanswered: zero listed rows then prove nothing (AEON-1406).
+    if (!projection) { warnings.push('The canonical desk could not be read. Retry before deciding; the count is unknown.'); unanswered.add('desk') }
+    else if (projection.has_more || open.length !== projection.counts.open) { warnings.push('The canonical desk is partial or changed while reading. Retry for current coverage.'); unanswered.add('desk') }
     items.splice(0, items.length, ...open, ...history.filter(item => !open.some(row => row.id === item.id)))
   }
   const projectKeys = new Map(projects.map(project => [project.id, project.key]))
   for (const item of items) if (item.projectId) item.projectKey = projectKeys.get(item.projectId)
   return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more },
     questionPositions: { open: openResult.status === 'fulfilled' ? openResult.value.position : undefined, answered: answeredResult.status === 'fulfilled' ? answeredResult.value.position : undefined },
-    projectNames: new Map(projects.map(project => [project.id, project.title])), projectKeys, nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined }
+    projectNames: new Map(projects.map(project => [project.id, project.title])), projectKeys, nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined, unanswered: [...unanswered] }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.personStep) return item.personStep.can_tick && can('nodes.write', item.projectId)

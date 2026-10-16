@@ -8474,6 +8474,14 @@
     ,
     {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"Needs you names destinations and keeps target-less approvals usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
@@ -17747,6 +17755,10 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"reviewer rules stay through a project switch and never land for another person","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > chooses reading, all clear, a silent source or the scope line, and nothing while rows are listed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > names the source that did not answer, so an empty read is never all clear","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
     ,

@@ -200,6 +200,26 @@ export function deskSourceLines(warnings: readonly string[], linkMissing = false
   return [...lines.entries()].map(([text, retry]) => ({ text, retry }))
 }
 
+// AEON-1406: the reads behind one desk read. A source that did not answer is
+// named here by loadDesk, so an empty Open tab never claims the desk is clear.
+export type DeskSource = 'desk' | 'projects' | 'questions' | 'approvals' | 'rules' | 'actions' | 'keyTrims' | 'stepups' | 'tiers' | 'lessons'
+const SOURCE_NAMES: Record<DeskSource, string> = { desk: 'The desk', projects: 'Projects', questions: 'Questions', approvals: 'Approvals', rules: 'Rule changes',
+  actions: 'Action requests', keyTrims: 'Key trims', stepups: 'Step-up approvals', tiers: 'Tier requests', lessons: 'Lessons' }
+export type DeskEmptyState = 'reading' | 'clear' | 'incomplete' | 'scoped'
+/** The Open tab with nothing to show: reading (D), all clear (A), a source
+ * did not answer (B) or a narrowed view (C). Null while rows are listed. */
+export function deskEmptyState(desk: { reading: boolean; open: number; scoped: boolean; unanswered: readonly DeskSource[]; failed: boolean }): DeskEmptyState | null {
+  if (desk.reading) return 'reading'
+  if (desk.open > 0) return null
+  if (desk.scoped) return 'scoped'
+  return desk.unanswered.length || desk.failed ? 'incomplete' : 'clear'
+}
+export function deskUnansweredLine(unanswered: readonly DeskSource[]): string {
+  const named = [...new Set(unanswered)]
+  const who = named.includes('desk') ? SOURCE_NAMES.desk : named.length === 1 ? SOURCE_NAMES[named[0]!] : 'Some sources'
+  return `${who} didn’t answer, so this may be incomplete`
+}
+
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || (cursor?.length ?? 0) > 512) throw new Error('Invalid Decision Desk page.')
   const params = new URLSearchParams({ limit: String(limit), ...(cursor ? { cursor } : {}) })

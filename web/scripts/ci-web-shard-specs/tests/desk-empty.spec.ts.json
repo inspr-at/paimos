@@ -1,0 +1,9 @@
+{
+  "group": "decision-desk",
+  "spec": {
+    "file": "tests/desk-empty.spec.ts",
+    "listedTests": 4,
+    "weightSeconds": 8.878049,
+    "weightSource": "unmeasured-test-rate"
+  }
+}
