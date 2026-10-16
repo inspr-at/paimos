@@ -196,6 +196,8 @@ function cutTrail(trail: HTMLElement | null) {
     }
     return true
   }
+  // A trail that has stepped aside entirely is not a cut. The probe ignores it too.
+  if (!shown(trail)) return false
   const own = headerEl.getBoundingClientRect(), pad = getComputedStyle(headerEl)
   const room = (node: Node) => {
     let left = own.left + (parseFloat(pad.paddingLeft) || 0), right = own.right - (parseFloat(pad.paddingRight) || 0)
@@ -231,7 +233,8 @@ function cutTrail(trail: HTMLElement | null) {
   for (let index = 0; index < parts.length; index++) {
     if (parts[index].matches('.sep') && !parts[index + 1]?.matches('.crumb')) return true
   }
-  return parts.length > 0 && !parts.some(part => part.matches('.crumb'))
+  // The probe calls a shown trail with no crumb a cut, including when every child has stepped aside.
+  return !parts.some(part => part.matches('.crumb'))
 }
 // What steps aside leaves sight and the tab order; screen readers keep it (the last rule below).
 function drop(part: HTMLElement) {
@@ -393,8 +396,12 @@ function refit() {
     const name = header.value?.querySelector<HTMLElement>('.crumbs .crumb-name') ?? null
     const trail = header.value?.querySelector<HTMLElement>('.crumbs') ?? null
     keepSliver(name)
-    if (trail) void trail.offsetWidth
-    if (trail && cutTrail(trail)) dropSegments(trail)
+    // The first frame still has the restored 1px boxes. Drop a cut only once a fit
+    // has laid the row out, or a settings trail that fits gets emptied and held.
+    if (frames >= 1 && trail) {
+      void trail.offsetWidth
+      if (cutTrail(trail)) dropSegments(trail)
+    }
     // A stable row can still be a cut chip: the width did not change, the letters did
     // (AEON-1439). Keep fitting until the trail probe would agree. A drop just made
     // is not stable yet: the next frame is the one that shows the clip.
