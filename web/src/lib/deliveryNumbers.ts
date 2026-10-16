@@ -125,8 +125,6 @@ export const TILES: readonly TileDef[] = [
   { key: 'review_audits', kind: 'count', src: 'audit' },
   { key: 'escaped_defects', kind: 'count', src: 'defects' },
 ]
-/** A percent that is not "green": the unit is % and lower is better. */
-export const isRate = (kind: TileKind) => kind === 'rate'
 /** Shares move in points; counts and per-100 readings move in plain numbers. */
 const movesInPoints = (kind: TileKind) => kind === 'share' || kind === 'merge' || kind === 'nightly' || kind === 'rate'
 export const windowOf = (metric: Metric | undefined, days: number) => metric?.windows.find(window => window.days === days) ?? null

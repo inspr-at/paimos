@@ -583,38 +583,6 @@ func (rt *runtime) cmdMessageTargetList() *Command {
 	}
 }
 
-func stubCommand(name, use, reason string, subs ...string) *Command {
-	if len(subs) == 0 {
-		return &Command{
-			Name:  name,
-			Short: "Not available on Aeon",
-			Use:   use,
-			run: func(args []string) error {
-				return notYet(reason)
-			},
-		}
-	}
-	children := make([]*Command, 0, len(subs))
-	for _, sub := range subs {
-		subName := sub
-		children = append(children, &Command{
-			Name:    subName,
-			Short:   "Not available on Aeon",
-			Use:     name + " " + subName,
-			maxArgs: -1,
-			run: func(args []string) error {
-				return notYet(reason)
-			},
-		})
-	}
-	return &Command{
-		Name:  name,
-		Short: "Not available on Aeon",
-		Use:   use,
-		subs:  children,
-	}
-}
-
 func (rt *runtime) compatStubs() []*Command {
 	return []*Command{
 		rt.cmdAnchors(),

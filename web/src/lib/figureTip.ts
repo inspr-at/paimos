@@ -35,7 +35,6 @@ export function closeFigureTip(anchor?: HTMLElement) {
   if (anchor && figureTip.anchor !== anchor) return
   Object.assign(figureTip, { anchor: null, owner: '', pinned: false })
 }
-export const figureTipOpen = (owner: string) => !!figureTip.anchor && figureTip.owner === owner
 // Esc closes the tip and gives focus back to its anchor; that returned focus must not open it again.
 let escaped: HTMLElement | null = null
 export function escapeFigureTip() {

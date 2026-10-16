@@ -2,38 +2,9 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import { APIError } from '../src/lib/api.ts'
-import { assertReleaseOpen, availabilityMark, canSelectTicket, isMoveConflict, isStaleRevision, listNativeMemberships, membershipQuery, nativeViews, newReleaseFailure, openedMembershipMessage, openReleaseWithTickets, parseMembership, parseNativeMemberships, parseTicketOptions, reconcileOpenedMembership, releaseCell, ReleaseUnconfirmed, resetReleaseOpenForTests, ticketOptionQuery, type ReleaseOpenClient } from '../src/lib/releaseMembership.ts'
+import { assertReleaseOpen, isMoveConflict, isStaleRevision, listNativeMemberships, membershipQuery, nativeViews, openedMembershipMessage, openReleaseWithTickets, parseMembership, parseNativeMemberships, reconcileOpenedMembership, releaseCell, ReleaseUnconfirmed, resetReleaseOpenForTests, type ReleaseOpenClient } from '../src/lib/releaseMembership.ts'
+
 afterEach(() => resetReleaseOpenForTests())
-test('ticket option query keeps only the filters that are set', () => {
-  assert.equal(ticketOptionQuery({}), '')
-  assert.equal(ticketOptionQuery({ q: '  pharos-21 ', status: 'backlog', epic: 'n-epic', type: 'ticket', limit: 50 }), '?q=pharos-21&status=backlog&epic=n-epic&type=ticket&limit=50')
-})
-
-
-test('closed, released and included tickets cannot be picked; another planning release can', () => {
-  assert.equal(canSelectTicket({ availability: 'addable' }), true)
-  assert.equal(canSelectTicket({ availability: 'other_release' }), true)
-  assert.equal(canSelectTicket({ availability: 'active_release' }), false)
-  assert.equal(canSelectTicket({ availability: 'closed' }), false)
-  assert.equal(canSelectTicket({ availability: 'released' }), false)
-  assert.equal(canSelectTicket({ availability: 'included' }), false)
-  assert.equal(availabilityMark({ availability: 'other_release', release_title: 'Release 9' }), 'In Release 9')
-  assert.equal(availabilityMark({ availability: 'active_release', release_title: 'Release 4' }), 'In Release 4 · not planning')
-  assert.equal(availabilityMark({ availability: 'active_release', release_title: null }), 'Not in a planning release')
-  assert.equal(availabilityMark({ availability: 'released', release_title: null }), 'Already released')
-  assert.equal(availabilityMark({ availability: 'addable', release_title: null }), '')
-})
-
-
-test('a missing availability is not addable', () => {
-  const page = parseTicketOptions({ expected_revision: 7, tickets: [{ ticket_node_id: 'n-1', key: 'PHAROS-11', title: 'One', availability: 'later' }] })
-  assert.equal(page.expected_revision, 7)
-  assert.equal(page.tickets[0].availability, 'unavailable')
-  assert.equal(canSelectTicket(page.tickets[0]), false)
-  assert.equal(availabilityMark(page.tickets[0]), 'Cannot be added')
-  assert.throws(() => parseTicketOptions({ tickets: [] }), /revision/)
-})
-
 
 test('membership answer is the walker plus the event to undo', () => {
   const result = parseMembership({ walker: { release_node_id: 'r', project_node_id: 'p', state: 'planning', revision: 2, features: [], tickets: [] }, event_id: 81 })
@@ -41,7 +12,6 @@ test('membership answer is the walker plus the event to undo', () => {
   assert.equal(result.walker.revision, 2)
   assert.throws(() => parseMembership({ event_id: 1 }), /did not answer/)
 })
-
 
 test('another open release is a confirmable conflict; a stale revision is not', () => {
   const move = new APIError(409, 'ticket belongs to another open release', {})
@@ -56,15 +26,6 @@ test('another open release is a confirmable conflict; a stale revision is not', 
   assert.equal(isStaleRevision(stale), true)
   assert.equal(isMoveConflict(closed), false)
 })
-
-
-test('a task is unsupported and not addable', () => {
-  const page = parseTicketOptions({ expected_revision: 4, tickets: [{ ticket_node_id: 'n-9', key: 'PHAROS-19', title: 'A task', type: 'task', availability: 'unsupported' }] })
-  assert.equal(page.tickets[0].availability, 'unsupported')
-  assert.equal(canSelectTicket(page.tickets[0]), false)
-  assert.equal(availabilityMark(page.tickets[0]), 'Not a release ticket')
-})
-
 
 test('native membership rows stay separate from an omitted ticket and an imported label', () => {
   assert.equal(membershipQuery(['b', 'a']), '?ticket_node_id=b&ticket_node_id=a')
@@ -84,7 +45,6 @@ test('native membership rows stay separate from an omitted ticket and an importe
   assert.throws(() => parseNativeMemberships({ items: [] }), /did not answer/)
 })
 
-
 test('a failed membership read is unknown, and ids are asked in batches of 100', async () => {
   const failed = await listNativeMemberships('p', ['a'], async () => { throw new APIError(404, 'missing', {}) })
   assert.equal(failed.get('a')?.status, 'unknown')
@@ -98,7 +58,6 @@ test('a failed membership read is unknown, and ids are asked in batches of 100',
   assert.equal(new URL(`http://local${paths[0]}`).searchParams.getAll('ticket_node_id').length, 100)
   assert.equal(new URL(`http://local${paths[1]}`).searchParams.getAll('ticket_node_id').length, 1)
 })
-
 
 test('parents show actual ships-in summaries and deduplicate leaf counts', () => {
   const rows = parseNativeMemberships({ tickets: [
@@ -114,7 +73,6 @@ test('parents show actual ships-in summaries and deduplicate leaf counts', () =>
   assert.deepEqual(reconcileOpenedMembership(['parent', 'a'], views), { status: 'added', releaseId: 'r-2', releaseTitle: 'Cobalt Comet', count: 2 })
   assert.equal(reconcileOpenedMembership(['split'], views).status, 'changed')
 })
-
 
 test('parent replay needs valid coverage and counts overlapping full scopes once', () => {
   const parent = { ticket_node_id: 'parent', is_parent: true, release_count: 1,

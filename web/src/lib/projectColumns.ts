@@ -72,11 +72,3 @@ export function projectColumnTrack(id: ProjectColumnId): string {
   if (id === 'people') return 'minmax(92px, max-content)'
   return 'max-content'
 }
-
-export function moveProjectColumn(order: ProjectColumnId[], id: ProjectColumnId, step: -1 | 1): ProjectColumnId[] {
-  const index = order.indexOf(id), to = index + step
-  if (index === -1 || to < 0 || to >= order.length) return order
-  const next = [...order]
-  ;[next[index], next[to]] = [next[to], next[index]]
-  return next
-}

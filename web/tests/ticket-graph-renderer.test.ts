@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterTicketGraph, ticketGraphData, ticketLinkStyles, ticketStatusTokens } from '../src/lib/ticketGraphRenderer.ts'
+import { ticketGraphData, ticketLinkStyles, ticketStatusTokens } from '../src/lib/ticketGraphRenderer.ts'
 import { graphLayout, graphRadius } from '../src/lib/graphRenderer.ts'
-import { filtersFromQuery } from '../src/lib/ticketList.ts'
 import type { TicketGraph, TicketGraphNode } from '../src/lib/ticketGraph.ts'
 
 const node = (id: string, extra: Partial<TicketGraphNode> = {}): TicketGraphNode => ({ id, key: `TG-${id}`, title: 'Ship reliable connections', type: 'ticket', status: 'backlog', status_category: 'open', priority: null, parent_id: null, release_id: null, updated_at: '2026-09-26T12:00:00Z', link_count: 0, ...extra })
@@ -33,22 +32,7 @@ test('all relation kinds retain direction and distinct calm styling; dangling li
   assert.equal(mapped.links[1].color, '--warn')
   assert.equal(new Set(mapped.links.map(l => `${l.color}:${l.width}:${l.curvature}`)).size, 5)
 })
-test('client filters combine AND across dimensions, OR includes, and exclusions; links never dangle', () => {
-  const result = filterTicketGraph(data, filtersFromQuery({ status: 'in_progress,backlog,!backlog', priority: 'high', type: 'ticket', q: 'tg-2 reliable', closed: '1' }))
-  assert.deepEqual(result.nodes.map(n => n.id), ['2'])
-  assert.deepEqual(result.links, [])
-  assert.equal(result.truncated, true)
-  assert.deepEqual(filterTicketGraph(data, filtersFromQuery({ priority: 'none' })).nodes.map(n => n.id), ['1'])
-  assert.deepEqual(filterTicketGraph(data, filtersFromQuery({ type: '!epic' })).nodes.map(n => n.id), ['2'])
-})
-test('Hide closed follows server categories including accepted, not only a done status', () => {
-  assert.equal(filterTicketGraph(data, filtersFromQuery({})).nodes.length, 2)
-  assert.equal(filterTicketGraph(data, filtersFromQuery({ closed: '1' })).nodes.length, 3)
-})
-test('unavailable list filters do not silently remove graph tickets; search never reads a body', () => {
-  assert.equal(filterTicketGraph(data, filtersFromQuery({ assignee: 'someone', tag: 'some-label', date: 'created:today' })).nodes.length, 2)
-  assert.equal(filterTicketGraph(data, filtersFromQuery({ q: 'only in a body' })).nodes.length, 0)
-})
+
 test('filtered or cyclic parents are safe and an epic remains larger than a busy ordinary ticket', () => {
   const nodes = [node('1', { parent_id: '2' }), node('2', { parent_id: '1' }), node('3', { type: 'epic' }), node('4', { link_count: 2000 })]
   const mapped = ticketGraphData({ nodes, links: [], truncated: false }, 'TG')

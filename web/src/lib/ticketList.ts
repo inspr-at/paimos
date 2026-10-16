@@ -331,7 +331,6 @@ export function localInstant(date: Date): string {
   const abs = Math.abs(offset)
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
 }
-export function isoDay(date: Date): string { return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` }
 export function dateBounds(date: DateFilter | null, now = new Date()): { from: string | null; to: string | null } | null {
   if (!date) return null
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())

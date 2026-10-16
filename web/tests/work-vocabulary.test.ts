@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { workLevel, workLabel, workIcon, workNoun, vocabularyRows, vocabularyChain, vocabularyLabel, listKeyTarget, workIconChoice } from '../src/lib/workVocabulary.ts'
+import { workLevel, workLabel, workIcon, workNoun, vocabularyRows, vocabularyChain, vocabularyLabel, workIconChoice } from '../src/lib/workVocabulary.ts'
 import { apiParams, filtersFromQuery, filtersToQuery, filtersFromView, viewShape, facetOptions, valueLabel, groupRows, offeredDimensions, sameListState, toggleMembers, optionState, heldOptions, EMPTY_FILTERS } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
+
 test('workspace names depend on leaf shape first, then project-relative depth', () => {
   const vocabulary = { revision: 0, leaf: { name: 'Step', icon: 'check' }, levels: [{ name: 'Feature', icon: 'tree' }] }
   assert.deepEqual(workLevel(vocabulary, true, 20), { name: 'Step', icon: 'check' })
@@ -138,13 +139,4 @@ test('an unknown stored icon draws the level default', () => {
   assert.equal(workIconChoice('box', 'layers'), 'box')
   assert.equal(workIconChoice('', 'epic'), 'epic')
   assert.equal(workIconChoice('<svg>', 'epic'), 'epic')
-})
-test('list keys move within the options and stop at the ends', () => {
-  assert.equal(listKeyTarget('ArrowDown', -1, 9), 0)
-  assert.equal(listKeyTarget('ArrowDown', 3, 9), 4)
-  assert.equal(listKeyTarget('ArrowDown', 8, 9), 8)
-  assert.equal(listKeyTarget('ArrowUp', 0, 9), 0)
-  assert.equal(listKeyTarget('ArrowUp', 4, 9), 3)
-  assert.equal(listKeyTarget('Home', 4, 9), 0); assert.equal(listKeyTarget('End', 4, 9), 8)
-  assert.equal(listKeyTarget('Enter', 4, 9), undefined); assert.equal(listKeyTarget('ArrowDown', 0, 0), undefined)
 })

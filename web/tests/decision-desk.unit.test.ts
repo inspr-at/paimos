@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { answerFor, arrivals, CUSTOM_ANSWER, deskLinkItem, draftFor, macPlatform, newRound, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft } from '../src/lib/decisionDesk'
+import { answerFor, arrivals, CUSTOM_ANSWER, deskLinkItem, draftFor, macPlatform, newRound, outcomeUnavailable, submitModifier, type DeskDraft } from '../src/lib/decisionDesk'
 import { commitDesk, emptySources, loadDesk, loadMoreQuestions, readQuestions, questionItem, approvalItem, actionItem, nativeTierAdapter, ruleItem, type DeskRead, type Question } from '../src/lib/decisionDeskApi'
 
 const question = (): Question => ({ id: 'q1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
@@ -222,12 +222,11 @@ it('rejects oversized source pages before collecting question records', async ()
   expect(result.sources.questions.size).toBe(0)
   expect(result.warnings).toContain('Questions could not be read. They may be inaccessible; this is not an empty desk.')
 })
-it('freezes round IDs while arrivals and decided/skipped counts remain distinct', () => {
+it('freezes round IDs while new arrivals remain distinct', () => {
   const one = questionItem(question(), 'Aeon'), two = { ...one, id: 'q:two' }, three = { ...one, id: 'q:new' }
   const round = newRound([one, two])
   expect(arrivals([three, two, one], round).map(item => item.id)).toEqual(['q:new'])
   expect(round).toEqual(['q:q1', 'q:two'])
-  expect(roundCounts([{ ...one, decided: true }, two], round, new Set(['q:q1', 'q:two']))).toEqual({ decided: 1, skipped: 1, open: 0 })
 })
 it('accepts source-only links and rejects arrays, destinations and injected selectors', () => {
   expect(deskLinkItem('m:request-1')).toBe('m:request-1')

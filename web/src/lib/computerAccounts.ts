@@ -274,26 +274,3 @@ function enrollmentRow(e: PairingEnrollment, computer: PairingView): AccountRow 
     ...(e.state === 'draining' ? { disconnecting: true } : {}),
   }
 }
-
-/** The header pill: "2 of 2 ready", "0 of 2 ready · build-7 offline". */
-export function readySummary(cards: ComputerCard[]): { text: string; tone: Tone } | null {
-  const lines = cards.flatMap(c => c.accounts)
-  if (!lines.length) return null
-  const ready = lines.filter(l => l.readiness.kind === 'ready').length
-  const offline = cards.filter(c => c.offline && c.accounts.length)
-  const tail = offline.length === 1 ? ` · ${offline[0].name} offline` : offline.length > 1 ? ` · ${offline.length} computers offline` : ''
-  // Busy or waiting is not a problem: the pill warns only when something needs fixing.
-  const tone: Tone = ready === lines.length ? 'ok' : offline.length || lines.some(l => l.readiness.tone === 'warn') ? 'warn' : 'mute'
-  return { text: `${ready} of ${lines.length} ready${tail}`, tone }
-}
-
-/**
- * Middle ellipsis for an identity that does not fit: the start and the domain
- * stay readable ("admin@exam…mple.com"). Short ones are returned whole.
- */
-export function middleEllipsis(text: string, max: number): string {
-  if (text.length <= max || max < 5) return text
-  const keep = max - 1
-  const tail = Math.ceil(keep / 2)
-  return `${text.slice(0, keep - tail)}…${text.slice(text.length - tail)}`
-}

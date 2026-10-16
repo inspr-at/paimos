@@ -6,7 +6,6 @@ import type { CapacityWait } from './capacityWait.ts'
 import { cloneDaily, type DailyMap, type DailyPlanFields } from './dailyLimits.ts'
 
 export const CAP_MAX = 30
-export const DEFAULT_TOTAL = 15
 export type HarnessLimit = 'no_limit' | 'off' | number
 export type LimitMode = 'none' | 'max' | 'off'
 /** `daily` rides along only on a write that changes a daily setting; older dial writes omit it and the server keeps it. */
@@ -86,9 +85,6 @@ export function accountRoomWords(accounts: WorkingAccountRoom, harness: string):
   else if (slots > 0) value = `room for ${slots} more`
   else if (!reason) value = 'no start slots available'
   return [value, reason].filter(Boolean).join(' — ')
-}
-export function accountRoomDetail(accounts: WorkingAccountRoom, harness: string): string {
-  return `${HARNESS_NAME[harness] ?? harness} ${accountRoomWords(accounts, harness)}`
 }
 export const limitMode = (limit: HarnessLimit | undefined): LimitMode => limit === 'off' ? 'off' : typeof limit === 'number' ? 'max' : 'none'
 const clamp = (n: number) => Math.max(0, Math.min(CAP_MAX, n))

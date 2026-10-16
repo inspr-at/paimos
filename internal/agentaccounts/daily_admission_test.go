@@ -225,3 +225,5 @@ func TestDailyAdmissionCurrentFactSurvivesPreLinkWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func timePtr(t time.Time) *time.Time { return &t }

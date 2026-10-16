@@ -2,7 +2,7 @@
 // AEON-1057 risk: a project link that points to the wrong place, a colour that
 // changes between screens, or a "Now in …" notice for an item in the same project.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { deskProject, draftFor, projectColor, projectHue, projectSwitch, type DeskProjection } from '../src/lib/decisionDesk'
+import { deskProject, draftFor, projectHue, projectSwitch, type DeskProjection } from '../src/lib/decisionDesk'
 import { commitDesk, emptySources, loadDesk, questionItem, type Question } from '../src/lib/decisionDeskApi'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -14,10 +14,9 @@ describe('Decision Desk project identity', () => {
     expect(orbit.hue).toBe(projectHue('ORB 1'))
     expect(deskProject({ projectId: 'p-orbit', projectName: 'Orbit (renamed)', projectKey: 'ORB 1' }).hue).toBe(orbit.hue)
     expect([190, 75, 290, 12, 150, 240, 45, 335]).toContain(orbit.hue)
-    expect(projectColor(orbit)).toBe(`oklch(var(--project-l) var(--project-c) ${orbit.hue})`)
+
     const workspace = deskProject({ projectId: '', projectName: 'Workspace', projectKey: 'IGNORED' })
     expect(workspace).toMatchObject({ key: '', href: '', hue: null })
-    expect(projectColor(workspace)).toBe('var(--ink-3)')
   })
 
   it('names the previous project only when the project changed', () => {

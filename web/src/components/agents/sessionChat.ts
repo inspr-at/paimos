@@ -11,24 +11,11 @@ import type { MessageGroup } from './sessionMessages.ts'
 export type SessionTab = 'overview' | 'messages'
 export interface ReadMark { event: number; id: string; at: number }
 
-const TAB_KEY = 'aeon.session-tab'
 const READ_KEY = 'aeon.session-read.v1'
 const MAX_MARKS = 200
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>
 const storage = (): Store | null => { try { return globalThis.localStorage ?? null } catch { return null } }
-
-export function loadTab(store: Store | null = storage()): SessionTab {
-  try { return store?.getItem(TAB_KEY) === 'messages' ? 'messages' : 'overview' } catch { return 'overview' }
-}
-export function saveTab(tab: SessionTab, store: Store | null = storage()) {
-  try { store?.setItem(TAB_KEY, tab) } catch { /* The choice holds for this visit. */ }
-}
-// A deep link wins over the remembered tab.
-export function initialTab(query: unknown, store: Store | null = storage()): SessionTab {
-  const value = Array.isArray(query) ? query[0] : query
-  return value === 'messages' || value === 'overview' ? value : loadTab(store)
-}
 
 function readAll(store: Store | null): Record<string, ReadMark> {
   try {
@@ -118,7 +105,6 @@ export function statusTip(status: MessageStatus, format: (iso: string) => string
     default: return 'On its way to the agent.'
   }
 }
-export const statusDone = (status?: MessageStatus) => status?.status === 'read' || status?.status === 'not_delivered'
 
 // The status route accepts at most this many ids. Delivered, read and
 // not_delivered are terminal for the outstanding queue. A missing receipt, or
@@ -166,10 +152,6 @@ export function receiptQueryBatches(
   }
   return batches
 }
-
-// A live session with neither a stored vendor reference nor a hook read so far
-// cannot take the message until its inbox hook runs (AEON-369).
-export const hookDeliveryNotice = "Delivered when the session's inbox hook runs."
 // Only the worker's value-free refusal codes are displayed, never a local or
 // remote error body. Delivery receipts remain authoritative after handoff.
 export function inboxBindingReason(code: string | null | undefined, language: 'en' | 'de'): string {

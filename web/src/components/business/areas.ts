@@ -79,14 +79,6 @@ export const partLabel = (id: BusinessPartId) => businessParts.find(part => part
 // The one place that sets Business up, as the overview and the closed pages name it.
 export const SETUP_PLACE = 'Settings › Business'
 
-// Routed business pages. Quotes are parked until the quote editor is ported.
-export const businessViews = {
-  overview: { path: '/business', title: 'Business', view: 'web/src/views/business/BusinessHome.vue' },
-  crm: { path: '/business/customers', title: 'Customers', view: 'web/src/views/business/CustomersView.vue' },
-  costs: { path: '/business/rates', title: 'Rates', view: 'web/src/views/business/CostUnitsView.vue' },
-  hours: { path: '/business/hours', title: 'Hours', view: 'web/src/views/business/HoursView.vue' },
-} as const
-
 export function pluginLabel(pluginId: string): string {
   return businessAreas.find(area => area.pluginId === pluginId)?.label ?? pluginId
 }

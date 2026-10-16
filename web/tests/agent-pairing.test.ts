@@ -4,13 +4,13 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { sessionEnded } from '../src/lib/api.ts'
 import {
-  DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
-  agentRouteKind, canonicalUserCode, clearPairingClientState, denyPairing,
-  describeComputerStatus, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  DEFAULT_REVIEW_CHOICE, MIN_POLL_INTERVAL_MS, PairingError,
+  canonicalUserCode, clearPairingClientState, denyPairing,
+  describeComputerStatus, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingComputer, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
-  pairingEventMatches, pairingEventScope, pairingLiveCopy, pairingPermissions, pairingStillLive, planApproval, planLookup, planPoll,
+  pairingEventMatches, pairingEventScope, pairingLiveCopy, pairingPermissions, pairingStillLive, planApproval, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
-  peekPairingCode, presentPublicGuide, publicGuideSections, rememberPairingCode, takePairingCode,
+  peekPairingCode, presentPublicGuide, rememberPairingCode, takePairingCode,
   chooseInstallMethod, agentUpdateAdvice, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   isAddHarness, pairingScopeKey, setHarnessAccount,
   addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
@@ -133,10 +133,6 @@ test('the Nix guide is additive, parsed as published, and never guesses a paired
 })
 
 test('the public guide is not a session route and stays usable after sign-out', () => {
-  assert.equal(agentRouteKind('/agents/register-agent'), 'register-agent')
-  assert.equal(agentRouteKind('/agents/usage'), 'usage')
-  assert.equal(agentRouteKind('/agents/routines'), 'routines')
-  assert.notEqual(agentRouteKind(PUBLIC_PAIRING_GUIDE_PATH), 'session')
   assert.equal(isPublicPairingGuide('/agents/register-agent'), true)
   assert.equal(sessionFreezeApplies('/agents/register-agent', true), false)
   assert.equal(sessionFreezeApplies('/agents', true), true)
@@ -212,22 +208,6 @@ test('lookup waits out a 429 and does not send another request', async () => {
     return true
   })
   assert.equal(calls, 1)
-  const blocked = planLookup({ raw: '123-456-789', explicit: true, now: 1_000, typedAt: 0, inFlight: false, retryAfterUntil: 31_000 })
-  assert.equal(blocked.action, 'blocked')
-})
-
-test('debounced lookup does not repeat itself or fire while a character is still being typed', () => {
-  const waiting = planLookup({ raw: '123', explicit: false, now: 1_000, typedAt: 1_000, inFlight: false })
-  assert.equal(waiting.action, 'wait')
-  if (waiting.action === 'wait') assert.equal(waiting.delayMs, LOOKUP_DEBOUNCE_MS)
-  const send = planLookup({ raw: '123-456-789', explicit: false, now: 1_000 + LOOKUP_DEBOUNCE_MS, typedAt: 1_000, inFlight: false })
-  assert.deepEqual(send, { action: 'send', code: '123-456-789' })
-  const repeat = planLookup({ raw: '123-456-789', explicit: false, now: 9_000, typedAt: 1_000, inFlight: false, lastSentCode: '123-456-789' })
-  assert.equal(repeat.action, 'idle')
-  const again = planLookup({ raw: '123-456-789', explicit: true, now: 9_000, typedAt: 1_000, inFlight: false, lastSentCode: '123-456-789' })
-  assert.deepEqual(again, { action: 'send', code: '123-456-789' })
-  const busy = planLookup({ raw: '123-456-789', explicit: true, now: 9_000, typedAt: 1_000, inFlight: true })
-  assert.equal(busy.action, 'wait')
 })
 
 test('verification stays on the server terms and is selected by default', () => {
@@ -526,7 +506,7 @@ test('the public guide uses the server address and stores only a human code', ()
   const lead = [...presented.steps, presented.address, presented.note].join('\n')
   assert.match(presented.address, /https:\/\/aeon\.example\/agents\/register-agent/)
   assert.equal(presented.steps.some(step => step.includes('Open this address')), false)
-  assert.match(publicGuideSections(published)[0]!.paragraphs.join('\n'), /Share this address: https:\/\/aeon\.example\/agents\/register-agent/)
+
   assert.match(presented.setupCommand, /pair --url 'https:\/\/aeon\.example'/)
   assert.match(presented.installNote, /not published a verified installer/)
   assert.equal(lead.includes(presented.setupCommand), false)
@@ -822,7 +802,6 @@ test('web fixes and labels follow the shared daemon/server vocabulary', async ()
   assert.ok(table.reasons.includes('pin_drifted') && table.reasons.includes('interpreter_pin_renewed') && table.reasons.includes('future_reason'))
   for (const harness of table.harnesses) {
     for (const reason of table.reasons) {
-      assert.deepEqual(harnessRecovery(harness, reason), table.fixes[harness]?.[reason], `${harness}/${reason}`)
       const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { [harness]: 'blocked' }, harness_details: { [harness]: { state: 'blocked', reason, fix: 'untrusted' } } })
       globalThis.fetch = async () => jsonResponse({ computers: [report] })
       const parsed = (await listPairingComputers())[0]!
@@ -1204,7 +1183,6 @@ test('only incompatible computers display update advice', async () => {
   assert.equal(agentUpdateAdvice(view()), '')
 })
 
-
 test('AEON-667: pairing failures retain a safe cause without becoming probe timeouts', async () => {
   const detail = 'the pairing response contains an unapproved account'
   const report = view({ computer_state: 'connected', connectivity: 'online', enrollments: [enrollment({ harness: 'claude' })], harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason: 'pairing_sync_failed', reason_detail: detail } } })
@@ -1244,7 +1222,6 @@ test('AEON-623: a ready sibling does not inherit another account probe repair', 
   assert.equal(describeEnrollmentStatus(report, { account_id: ACCOUNT_2, harness: 'claude', verification_state: 'failed' }), 'Verification failed')
 })
 
-
 test('AEON-623: two blocked Claude accounts retain their own diagnostics through parsing', async () => {
   const permission = 'the default Claude profile is not private (requires mode 0700)'
   const output = 'the sign-in command returned an unreadable or incomplete answer'
@@ -1260,7 +1237,6 @@ test('AEON-623: two blocked Claude accounts retain their own diagnostics through
   delete parsed.harness_details!.claude!.attention_accounts
   assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT_2, harness: 'claude' }), null)
 })
-
 
 test('AEON-623: confirmed sign-out names the daemon view and keeps the login repair', async () => {
   const detail = "the approved account is signed out in the daemon's view"

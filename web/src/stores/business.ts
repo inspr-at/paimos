@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { createNode, getKinds, getRelations, listNodes, type Kind, type ListItem, type Relation } from '../lib/api'
-import { listPrincipals, listQuotes, listRates, type CostRate, type Principal, type Quote, type Unit } from '../lib/business'
+import { getKinds, listNodes, type Kind, type ListItem } from '../lib/api'
+import { listPrincipals, listRates, type CostRate, type Principal, type Unit } from '../lib/business'
 import { availability, configurePlugin, installationWrite, listPlugins, type BusinessPlugin } from '../components/business/catalog'
 import { can } from '../lib/authz'
 import { businessSections } from '../components/business/areas'
 import { api } from '../lib/api'
-import { useProjects } from './projects'
 import { useSession } from './session'
 
 export type AreaId = 'costs' | 'crm' | 'quotes' | 'hours'
 export interface CostUnit { node: ListItem; rates: CostRate[] }
-export interface OrgLinks { contacts: string[]; projects: string[]; quotes: string[] }
 
 // Tenant kinds the business screens create when an admin sets Business up.
 // Kinds are tenant configuration: contacts get email, phone and role besides
@@ -32,25 +30,16 @@ const KIND_SETUP: Record<string, { label: string; short_prefix: string; icon: st
 const AREA_PLUGIN: Record<AreaId, string> = { costs: 'business_costs', crm: 'business_crm', quotes: 'business_quotes', hours: 'business_hours' }
 const AREA_KINDS: Record<AreaId, string[]> = { costs: ['cost_unit'], crm: ['organisation', 'contact'], quotes: ['quote'], hours: [] }
 
-// Business data shared by the overview, quotes, hours, organisations and rates.
+// Business setup, people and rates shared by the current business screens.
 // Every list is a read model; the server checks every change again.
 export const useBusiness = defineStore('business', () => {
   const session = useSession()
-  const projectStore = useProjects()
   const plugins = ref<BusinessPlugin[] | null>(null)
   const pluginsError = ref('')
   const kinds = ref<Kind[]>([])
   const principals = ref<Principal[]>([])
   const costUnits = ref<CostUnit[]>([])
   const costUnitsLoaded = ref(false)
-  const organisations = ref<ListItem[]>([])
-  const contacts = ref<ListItem[]>([])
-  const crmLoaded = ref(false)
-  const links = ref(new Map<string, OrgLinks>())
-  const contactOrg = ref(new Map<string, string>())
-  const quotes = ref<Quote[]>([])
-  const quotesLoaded = ref(false)
-  const quotesError = ref('')
   const admin = computed(() => can('plugins.manage'))
   const staff = computed(() => can('crm.write'))
 
@@ -177,95 +166,8 @@ export const useBusiness = defineStore('business', () => {
       && entry.rates.some(rate => (!unit || rate.unit === unit) && (!currency || rate.currency === currency) && rate.effective_from <= (day ?? new Date().toISOString().slice(0, 10)) && (!rate.effective_until || rate.effective_until > (day ?? new Date().toISOString().slice(0, 10)))))
   }
 
-  // ---------- Organisations and contacts ----------
-  let crmRequest: Promise<void> | null = null
-  function loadCRM(force = false) {
-    if (crmRequest) return crmRequest
-    if (crmLoaded.value && !force) return Promise.resolve()
-    crmRequest = (async () => {
-      try {
-        const [orgs, people] = await Promise.all([
-          listNodes({ kind: ['organisation'], sort: 'title', limit: 500 }),
-          listNodes({ kind: ['contact'], sort: 'title', limit: 500 }),
-        ])
-        organisations.value = orgs.items
-        contacts.value = people.items
-        crmLoaded.value = true
-      } finally { crmRequest = null }
-    })()
-    return crmRequest
-  }
-  // One relations request per organisation gives its contacts, projects and quotes.
-  async function loadLinks(ids: string[]) {
-    await projectStore.load()
-    const queue = [...ids]
-    const next = new Map(links.value)
-    const owners = new Map(contactOrg.value)
-    async function worker() {
-      for (let orgId = queue.shift(); orgId; orgId = queue.shift()) {
-        try {
-          const { items } = await getRelations(orgId)
-          next.set(orgId, linksFrom(orgId, items))
-          for (const rel of items) if (rel.type === 'contact_for' && rel.target_node_id === orgId) owners.set(rel.source_node_id, orgId)
-        } catch { /* counts show a dash */ }
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker))
-    links.value = next
-    contactOrg.value = owners
-  }
-  // customer_of points at a project or a quote; projects are the ones the project list knows.
-  function linksFrom(orgId: string, relations: Relation[]): OrgLinks {
-    const customerOf = relations.filter(rel => rel.type === 'customer_of' && rel.source_node_id === orgId).map(rel => rel.target_node_id)
-    return {
-      contacts: relations.filter(rel => rel.type === 'contact_for' && rel.target_node_id === orgId).map(rel => rel.source_node_id),
-      projects: customerOf.filter(id => !!projectStore.byId(id)),
-      quotes: customerOf.filter(id => !projectStore.byId(id)),
-    }
-  }
-  const organisation = (id: string) => organisations.value.find(org => org.id === id)
-  const contact = (id: string) => contacts.value.find(c => c.id === id)
-  const contactsOf = (orgId: string) => (links.value.get(orgId)?.contacts ?? []).map(contact).filter((c): c is ListItem => !!c)
-  function upsertNode(list: 'organisations' | 'contacts', node: ListItem) {
-    const target = list === 'organisations' ? organisations : contacts
-    const index = target.value.findIndex(item => item.id === node.id)
-    target.value = index === -1 ? [...target.value, node].sort((a, b) => a.title.localeCompare(b.title)) : target.value.map(item => item.id === node.id ? node : item)
-  }
-  function removeNode(list: 'organisations' | 'contacts', id: string) {
-    const target = list === 'organisations' ? organisations : contacts
-    target.value = target.value.filter(item => item.id !== id)
-  }
-  function setLinks(orgId: string, next: OrgLinks) { links.value = new Map(links.value).set(orgId, next) }
-  function setContactOrg(contactId: string, orgId: string) { contactOrg.value = new Map(contactOrg.value).set(contactId, orgId) }
-  async function createCRMNode(slug: 'organisation' | 'contact', title: string, fields: Record<string, unknown> = {}) {
-    await loadKinds()
-    const kind = kindBySlug(slug)
-    if (!kind) throw new Error(`This workspace has no ${slug} type yet. An admin sets Business up first.`)
-    const node = await createNode({ kind_id: kind.id, title, fields, parent_id: null })
-    return { ...node, kind_slug: slug, kind_label: kind.label, priority: null, assignee: null, parent: null, children_count: 0, project: null } as ListItem
-  }
-
-  // ---------- Quotes ----------
-  let quoteRequest: Promise<void> | null = null
-  function loadQuotes(force = false) {
-    if (quoteRequest) return quoteRequest
-    if (quotesLoaded.value && !force) return Promise.resolve()
-    quoteRequest = (async () => {
-      try { quotes.value = await listQuotes(); quotesLoaded.value = true; quotesError.value = '' }
-      catch (e) { quotesError.value = e instanceof Error ? e.message : 'Quotes could not be loaded.' }
-      finally { quoteRequest = null }
-    })()
-    return quoteRequest
-  }
-  function upsertQuote(next: Quote) {
-    const index = quotes.value.findIndex(q => q.quote_node_id === next.quote_node_id)
-    quotes.value = index === -1 ? [next, ...quotes.value] : quotes.value.map(q => q.quote_node_id === next.quote_node_id ? next : q)
-  }
-  const quoteByKey = (key: string) => quotes.value.find(q => q.key.toLowerCase() === key.toLowerCase())
-
   function reset() {
     plugins.value = null; kinds.value = []; principals.value = []; costUnits.value = []; costUnitsLoaded.value = false
-    organisations.value = []; contacts.value = []; crmLoaded.value = false; links.value = new Map(); quotes.value = []; quotesLoaded.value = false
   }
 
   return {
@@ -273,8 +175,6 @@ export const useBusiness = defineStore('business', () => {
     kinds, loadKinds, kindBySlug, fieldsOf,
     principals, loadPrincipals, nameOf, people, timeKeepers,
     costUnits, costUnitsLoaded, loadCostUnits, setRates, addCostUnit, costUnit, rateOn, currencies, usable,
-    organisations, contacts, crmLoaded, links, contactOrg, loadCRM, loadLinks, organisation, contact, contactsOf, upsertNode, removeNode, setLinks, setContactOrg, createCRMNode,
-    quotes, quotesLoaded, quotesError, loadQuotes, upsertQuote, quoteByKey,
     reset,
   }
 })

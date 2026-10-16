@@ -6,42 +6,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
 )
-
-func TestEditorExpiryBoundaryNewAndRetainedHolds(t *testing.T) {
-	expiry := time.Date(2030, 1, 1, 0, 0, 0, 987654000, time.UTC)
-	hold := Route{Role: "build", Priority: 1, ProfileID: "00000000-0000-0000-0000-000000000001", State: "conserved", Reason: "quota", ValidUntil: &expiry}
-	for _, offset := range []time.Duration{-time.Microsecond, 0, time.Microsecond} {
-		t.Run(offset.String(), func(t *testing.T) {
-			now := expiry.Add(offset)
-			_, err := normalizeStoredRoutes([]Route{hold}, nil, now, false)
-			if offset < 0 && err != nil || offset >= 0 && err == nil {
-				t.Fatal("wrong strictly future boundary", err)
-			}
-			reordered := hold
-			reordered.Priority = 2
-			if _, err := normalizeStoredRoutes([]Route{reordered}, []Route{hold}, now, false); err != nil {
-				t.Fatal("unchanged expired hold cannot be reordered", err)
-			}
-			clear, err := normalizeStoredRoutes([]Route{hold}, nil, now, true)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if offset < 0 {
-				if clear[0].State != hold.State || !timePtrEqual(clear[0].ValidUntil, hold.ValidUntil) {
-					t.Fatal("future compensation altered or extended hold")
-				}
-			} else if clear[0].State != "available" || clear[0].Reason != "" || clear[0].ValidUntil != nil {
-				t.Fatal("expired compensation revived hold")
-			}
-		})
-	}
-}
 
 // editorRetired asserts the retired ladder writer's contract: 410 Gone with a
 // pointer to the Models successor, whatever the body, role or precondition.

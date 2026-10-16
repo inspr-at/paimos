@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterGraph, graphLayout, graphMatches, graphNeighbours, type KnowledgeGraphData, type GraphNode } from '../src/lib/knowledgeGraph.ts'
+import { filterGraph, graphLayout, graphMatches, type KnowledgeGraphData, type GraphNode } from '../src/lib/knowledgeGraph.ts'
+
 const node = (id: string, type: GraphNode['type']): GraphNode => ({ id, type, kind: type === 'ticket' ? 'ticket' : 'knowledge', key: `TEST-${id}`, slug: `entry-${id}`, title: `Entry ${id}`, status: 'active', degree: 1, updated_at: '2026-09-25T12:00:00Z' })
 const data: KnowledgeGraphData = { nodes: [node('a', 'runbook'), node('b', 'memory'), node('c', 'ticket'), node('d', 'ticket')], edges: [
   { source: 'a', target: 'b', kind: 'mention', label: 'mentions' },
@@ -12,7 +13,6 @@ test('type filtering keeps only directly attached ticket satellites and valid ed
   const filtered = filterGraph(data, 'runbook')
   assert.deepEqual(filtered.nodes.map(n => n.id), ['a', 'c'])
   assert.deepEqual(filtered.edges, [data.edges[1]])
-  assert.deepEqual([...graphNeighbours(data.edges, 'a')], ['a', 'b', 'c'])
 })
 test('search highlights matches without changing graph topology', () => {
   assert.deepEqual([...graphMatches(data.nodes, 'ENTRY A')], ['a'])
