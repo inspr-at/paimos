@@ -132,43 +132,46 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
 }
 
 for (const [state, category, completed] of [['custom-complete', 'done', true], ['done', 'open', false]] as const) {
-  test(`leaf benefit guidance resolves ${state} as ${category}`, async ({ page }, testInfo) => {
-    const data = fixtures()
-    const node = data.nodes.find(n => n.key === 'PHAROS-12')!
-    node.kind_slug = 'work'; node.state = state
-    node.estimate = { is_parent: false, hours: null, estimated_children: 0, open_children: 0 }
-    node.fields = { ...node.fields, pill_en: '', pill_de: '', benefit_en: '', benefit_de: '' }
-    const child = data.nodes.find(n => n.parent_id === node.id)!
-    child.parent_id = node.parent_id
-    const errors = watchErrors(page)
-    await mockWork(page, data)
-    await page.route('**/api/kinds', route => route.fulfill({ json: { items: [{ id: 'k-work', slug: 'work', label: 'Work', short_prefix: 'WRK', icon: 'work', allowed_child_kinds: null, field_schema: { states: [{ state, category }] } }] } }))
-    await page.goto('/p/PHAROS/PHAROS-12')
-    const region = page.getByRole('region', { name: 'User benefit' })
-    const guidance = completed ? 'This completed ticket has incomplete benefit fields.' : 'Before Done'
-    await expect(region).toContainText(guidance)
-    await page.getByRole('button', { name: 'Edit', exact: true }).click()
-    await expect(region).toContainText(guidance)
-    await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
-    if (completed) {
-      // Q1 (AEON-1248): completed context is retained, while the configured
-      // entry checks decide completion requirements rather than a second gate.
-      await expect(region).toContainText('The project’s entry checks determine what is needed before Done.')
-      await expect(region).not.toContainText('Before Done')
-    } else await expect(region).not.toContainText('This completed ticket')
-
-    // Risk: restoring completed-ticket context must not move the fields as the
-    // draft becomes valid, or describe the next complete edit as incomplete.
-    const englishPill = region.getByLabel('Pill · English')
-    const germanPill = region.getByLabel('Pill · Deutsch')
-    const englishBenefit = region.getByLabel('Benefit · English')
-    const germanBenefit = region.getByLabel('Benefit · Deutsch')
-    const save = page.getByRole('button', { name: 'Save', exact: true })
-    const contexts = completed
-      ? [390, 1024, 1440].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme })))
-      : [{ width: 1440, theme: 'light' }]
-    for (const { width, theme } of contexts) {
+  // Independent fixtures keep the complete six-layout matrix inside the
+  // existing per-test budget, including save and reopen assertions in each one.
+  const contexts = completed
+    ? [390, 1024, 1440].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme })))
+    : [{ width: 1440, theme: 'light' }]
+  for (const [index, { width, theme }] of contexts.entries()) {
+    const layout = index === 0 ? '' : ` at ${width} ${theme}`
+    test(`leaf benefit guidance resolves ${state} as ${category}${layout}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 })
+      const data = fixtures()
+      const node = data.nodes.find(n => n.key === 'PHAROS-12')!
+      node.kind_slug = 'work'; node.state = state
+      node.estimate = { is_parent: false, hours: null, estimated_children: 0, open_children: 0 }
+      node.fields = { ...node.fields, pill_en: '', pill_de: '', benefit_en: '', benefit_de: '' }
+      const child = data.nodes.find(n => n.parent_id === node.id)!
+      child.parent_id = node.parent_id
+      const errors = watchErrors(page)
+      await mockWork(page, data)
+      await page.route('**/api/kinds', route => route.fulfill({ json: { items: [{ id: 'k-work', slug: 'work', label: 'Work', short_prefix: 'WRK', icon: 'work', allowed_child_kinds: null, field_schema: { states: [{ state, category }] } }] } }))
+      await page.goto('/p/PHAROS/PHAROS-12')
+      const region = page.getByRole('region', { name: 'User benefit' })
+      const guidance = completed ? 'This completed ticket has incomplete benefit fields.' : 'Before Done'
+      await expect(region).toContainText(guidance)
+      await page.getByRole('button', { name: 'Edit', exact: true }).click()
+      await expect(region).toContainText(guidance)
+      await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
+      if (completed) {
+        // Q1 (AEON-1248): completed context is retained, while the configured
+        // entry checks decide completion requirements rather than a second gate.
+        await expect(region).toContainText('The project’s entry checks determine what is needed before Done.')
+        await expect(region).not.toContainText('Before Done')
+      } else await expect(region).not.toContainText('This completed ticket')
+
+      // Risk: restoring completed-ticket context must not move the fields as the
+      // draft becomes valid, or describe the next complete edit as incomplete.
+      const englishPill = region.getByLabel('Pill · English')
+      const germanPill = region.getByLabel('Pill · Deutsch')
+      const englishBenefit = region.getByLabel('Benefit · English')
+      const germanBenefit = region.getByLabel('Benefit · Deutsch')
+      const save = page.getByRole('button', { name: 'Save', exact: true })
       await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
       await englishPill.fill('')
       await germanPill.fill('')
@@ -186,14 +189,14 @@ for (const [state, category, completed] of [['custom-complete', 'done', true], [
         ],
       })
       if (completed) await region.screenshot({ path: testInfo.outputPath(`completed-edit-${width}-${theme}.png`) })
-    }
-    await save.click()
-    await expect(region).toContainText(longGerman)
-    await expect(region).not.toContainText('incomplete benefit fields')
-    await page.getByRole('button', { name: 'Edit', exact: true }).click()
-    await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
-    await expect(region).not.toContainText('incomplete benefit fields')
-    if (completed) await expect(region).toContainText('The project’s entry checks determine what is needed before Done.')
-    expect(errors).toEqual([])
-  })
+      await save.click()
+      await expect(region).toContainText(longGerman)
+      await expect(region).not.toContainText('incomplete benefit fields')
+      await page.getByRole('button', { name: 'Edit', exact: true }).click()
+      await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
+      await expect(region).not.toContainText('incomplete benefit fields')
+      if (completed) await expect(region).toContainText('The project’s entry checks determine what is needed before Done.')
+      expect(errors).toEqual([])
+    })
+  }
 }

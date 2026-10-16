@@ -184,9 +184,15 @@ test('on phones the places are round buttons and nothing in the header is cut', 
       return r.left < -0.5 || r.right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1
     }).map(el => ({ tag: el.tagName, class: el.className, text: el.textContent, width: el.clientWidth, contentWidth: el.scrollWidth, html: el.outerHTML }))), { message: path }).toEqual([])
   }
-  // AEON-1313: platform font differences hid the clipped Customers label on
-  // macOS. Exercise intrinsic label room with German length stress as well.
-  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+})
+
+// Each layout has its own fixture and budget; none of the phone clipping or
+// German-label stability checks share one cumulative 30 s deadline.
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`Business tab labels fit and controls stay still at ${width} ${theme}`, async ({ page }, testInfo) => {
+    await setup(page)
+    // AEON-1313: platform font differences hid the clipped Customers label on
+    // macOS. Exercise intrinsic label room with German length stress as well.
     await page.setViewportSize({ width, height: 1000 })
     await page.goto('/business/customers')
     const tabs = page.getByRole('navigation', { name: 'Business' })
@@ -204,9 +210,9 @@ test('on phones the places are round buttons and nothing in the header is cut', 
       controls: { tabs, ...Object.fromEntries(links.map((link, index) => [`tab ${index}`, link])) },
       interactions: links.map((link, index) => ({ name: `hover tab ${index}`, run: () => link.hover() })),
     })
-    await page.screenshot({ path: test.info().outputPath(`business-nav-${width}-${theme}.png`) })
-  }
-})
+    await page.screenshot({ path: testInfo.outputPath(`business-nav-${width}-${theme}.png`) })
+  })
+}
 
 test('at 390 the ticket fits: previous and next fold into More, chips and screens wrap', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })

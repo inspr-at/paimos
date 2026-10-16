@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/nav.spec.ts",
-    "listedTests": 11,
+    "listedTests": 17,
     "tierTiming": {
       "caseSeconds": {
         "max": 24.037,
