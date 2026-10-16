@@ -232,7 +232,21 @@ func runBackendMemoryWorkload(t testing.TB, diagnostics bool) {
 			out := map[string]any{"migration": migration, "postgres": version, "policies": policies, "backend": slot, "endpoint": endpoint, "cold": backendMemorySummary(t, cold), "idle": backendMemorySummary(t, warm), "p50_ms": values[7], "p95_ms": values[15]}
 			if diagnostics {
 				out["process"] = backendProcessMemory(t, ctx, pid)
-				out["plans"] = trace.explain(t, ctx, held[2].Conn())
+			}
+			if diagnostics || endpoint == 5 {
+				plans := trace.explain(t, ctx, held[2].Conn())
+				out["plans"] = plans
+				for _, raw := range plans {
+					var plan struct {
+						UsedKiB int64 `json:"Memory Used"`
+					}
+					if err := json.Unmarshal(raw, &plan); err != nil {
+						t.Fatal(err)
+					}
+					if plan.UsedKiB > 32*1024 {
+						t.Fatalf("backend %d endpoint %d: planner memory %d KiB exceeds 32 MiB budget", slot, endpoint, plan.UsedKiB)
+					}
+				}
 			}
 			raw, err := json.Marshal(out)
 			if err != nil {
@@ -313,7 +327,28 @@ func (m *backendMemoryTrace) explain(t testing.TB, ctx context.Context, conn *pg
 		if err := json.Unmarshal(raw, &plan); err != nil {
 			t.Fatal(err)
 		}
-		clean, err := json.Marshal(backendPlanSummary(q.sql, plan))
+		summary := backendPlanSummary(q.sql, plan)
+		if strings.Contains(q.sql, "WITH RECURSIVE scope") || strings.Contains(q.sql, "WITH clock AS") {
+			busyTx, err := conn.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := busyTx.Exec(ctx, `SELECT set_config('aeon.tenant_id',(SELECT id::text FROM tenants WHERE slug='aeon'),true),set_config('aeon.visible_projects','*',true)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := busyTx.Exec(ctx, `SET LOCAL statement_timeout='5s'`); err != nil {
+				t.Fatal(err)
+			}
+			var busy json.RawMessage
+			var resultBytes int
+			err = busyTx.QueryRow(ctx, "SELECT public.aeon1382_memory(),octet_length(to_jsonb(observed)::text) FROM ("+q.sql+") observed LIMIT 1", append([]any{pgx.QueryExecModeDescribeExec}, q.args...)...).Scan(&busy, &resultBytes)
+			_ = busyTx.Rollback(ctx)
+			if err != nil {
+				t.Fatalf("busy memory diagnostics: %v", err)
+			}
+			summary["instrumented_execution_contexts"] = backendMemorySummary(t, busy)
+		}
+		clean, err := json.Marshal(summary)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -352,6 +387,14 @@ func backendMemorySummary(t testing.TB, raw json.RawMessage) map[string]any {
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
+	}
+	if contexts, ok := m["contexts"].([]any); ok {
+		for _, value := range contexts {
+			c, ok := value.(map[string]any)
+			if ok && c["name"] == "Relcache by OID" {
+				m["relcache_bytes"] = c["total_bytes"]
+			}
+		}
 	}
 	delete(m, "contexts")
 	return m
