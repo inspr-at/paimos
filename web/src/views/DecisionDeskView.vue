@@ -489,7 +489,7 @@ watch(owner, () => {
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
 const stopAccess = onAccessRevalidate({ reset: resetDesk })
-// On a narrow phone the tab row's container query shows the arrow alone (AEON-1448); its name then also comes as a tip.
+// Below a 384 px viewport the arrow shows alone (AEON-1448); its name then also comes as a tip.
 const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), iconOnly = ref(false)
 function readIconOnly() { const label = oneByOne.value?.querySelector('.label'); iconOnly.value = !!label && getComputedStyle(label).display === 'none' }
 watch(oneByOne, readIconOnly, { flush: 'post' })
@@ -631,6 +631,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 /* AEON-1339: the Desk page as the approved rev 11 artifact draws it. */
 .scope-line { display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; min-height: 44px; margin: 0; font-size: 12px; color: var(--ink-3); }.scope-line a { color: var(--teal-ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }.scope-line a:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .desk-page { width: 100%; max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }
+/* At the label's edge a classic scrollbar gutter would eat the 16 px inset. 8 px keeps the row wide enough. */
+@media (max-width: 399.98px) { .desk-page { padding-left: 8px; padding-right: 8px; } }
 .dp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 18px; }
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }
 .dp-head .head-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
@@ -651,17 +653,24 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-bar .dec-filter { grid-area: 1 / 2; justify-self: start; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .dp-bar .dec-filter::-webkit-scrollbar { display: none; }
 .dp-bar .dec-filter button { flex: none; white-space: nowrap; }
-@container desk-tabs (max-width: 859.98px) {
+/* 910 px: a 960 px window with a classic gutter still wraps; 1024 stays on one line, where the filter fits. */
+@container desk-tabs (max-width: 909.98px) {
   .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
   .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
 }
-/* The label needs about 345 px beside the tabs. On a narrower row (phones below about 384 px, such as 360 and 375)
-   the arrow alone, a 44 px target; the accessible name stays. */
-@container desk-tabs (max-width: 351.98px) {
+/* Below about 420 px the view tabs and the round action give up a little padding so the label still clears the tabs.
+   The stamp filter is unchanged: on a phone it keeps scrolling (AEON-1339). */
+@container desk-tabs (max-width: 419.98px) {
+  .dp-bar .view-tabs button { padding: 0 6px; gap: 4px; }
+  .one-by-one { padding: 0 6px; gap: 4px; }
+}
+/* The label shows from a 384 px viewport. A container query cannot: the same viewport is a narrower row once a
+   classic scrollbar gutter is reserved. Below that, the arrow alone (44 px on a coarse pointer); the name stays. */
+@media (max-width: 383.98px) {
   .one-by-one { width: 32px; padding: 0; }
   .one-by-one .label { display: none; }
 }
-@media (pointer: coarse) { @container desk-tabs (max-width: 351.98px) { .one-by-one { width: 44px; } } }
+@media (pointer: coarse) and (max-width: 383.98px) { .one-by-one { width: 44px; } }
 .trim-pages { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 /* The list card: a warm full tint and a soft gold ring while something waits, never an edge bar. */
 .queue { --agent-state-color: var(--agent-waiting); overflow: clip; container: queue / inline-size; }

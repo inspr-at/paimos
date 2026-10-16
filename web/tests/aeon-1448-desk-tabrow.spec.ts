@@ -94,6 +94,18 @@ function rowGeometry(page: Page) {
   })
 }
 
+// CI's Linux Chromium keeps a classic scrollbar gutter (~15 px) and a wider sans (DejaVu Sans Bold, about
+// 15 % wider than macOS). Verdana Bold is as wide (AEON-1339). Where the overlay gutter is 0, 15 px of
+// inset stands in for it, so these assertions meet the same row the gate measured.
+async function useLinuxDeskMetrics(page: Page) {
+  await page.addStyleTag({ content: '.dp-tabrow, .dp-tabrow .seg button, .dp-tabrow .one-by-one { font-family: Verdana, "DejaVu Sans", sans-serif !important; }' })
+  const gutter = await page.evaluate(() => {
+    const main = document.getElementById('main')
+    return main ? main.getBoundingClientRect().width - main.clientWidth : 0
+  })
+  if (gutter < 8) await page.addStyleTag({ content: '#main { padding-right: 15px; }' })
+}
+
 // One row at every width: tabs at its start on one line, the button at its end, never taller, never overlapping.
 function expectOneRow(geometry: Awaited<ReturnType<typeof rowGeometry>>, step: string) {
   expect(new Set(geometry.tabTops).size, `${step}: the tabs stay on one line`).toBe(1)
@@ -116,6 +128,7 @@ async function deskRow(page: Page, locale: string, widths: number[]) {
     await page.setViewportSize({ width, height: width < 400 ? 844 : 1000 })
     const world = await mockDesk(page, theme)
     await page.goto('/decision-desk')
+    await useLinuxDeskMetrics(page)
     await expect(page.getByRole('heading', { level: 1, name: 'Decision Desk' })).toBeVisible()
     await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*0$/)
     await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
@@ -206,6 +219,7 @@ test('AEON-1448: one tab row from 320 to 1440 px, the stamp filter never pushed 
   world.arrived = true
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/decision-desk')
+  await useLinuxDeskMetrics(page)
   await expect(button(page)).toBeVisible()
   await page.getByTestId('desk-tab-decided').click()
   // The document column is information only: right after a live resize the app header may still be re-fitting.
@@ -242,6 +256,7 @@ test.describe('touch', () => {
       await page.setViewportSize({ width, height: 844 })
       const world = await mockDesk(page, 'light')
       await page.goto('/decision-desk')
+      await useLinuxDeskMetrics(page)
       await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*0$/)
       await expect(button(page)).toHaveCount(0)
       const empty = await rowGeometry(page)
