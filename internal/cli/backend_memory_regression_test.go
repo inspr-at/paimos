@@ -208,7 +208,31 @@ func runBackendMemoryWorkload(t testing.TB, diagnostics bool) {
 				if endpoint >= 5 {
 					client, token = person, ""
 				}
-				backendMemoryRequest(t, ctx, client, srv.URL, token, "GET", path, "", 200)
+				body := backendMemoryRequest(t, ctx, client, srv.URL, token, "GET", path, "", 200)
+				if endpoint == 0 || endpoint == 1 || endpoint == 5 {
+					var page struct {
+						Items []struct {
+							PersonStep json.RawMessage `json:"person_step"`
+						} `json:"items"`
+					}
+					if err := json.Unmarshal(body, &page); err != nil {
+						t.Fatal(err)
+					}
+					if endpoint < 2 && len(page.Items) != 50 {
+						t.Fatal("list workload did not retain its 50-row page")
+					}
+					if endpoint == 5 && hasAdmission {
+						steps := 0
+						for _, item := range page.Items {
+							if len(item.PersonStep) > 0 && string(item.PersonStep) != "null" {
+								steps++
+							}
+						}
+						if steps != 3 {
+							t.Fatalf("Desk workload lost its three active person steps: got %d", steps)
+						}
+					}
+				}
 				values = append(values, float64(time.Since(start))/float64(time.Millisecond))
 			}
 			held[slot], err = pool.Acquire(ctx)
@@ -236,16 +260,27 @@ func runBackendMemoryWorkload(t testing.TB, diagnostics bool) {
 			if diagnostics || endpoint == 5 {
 				plans := trace.explain(t, ctx, held[2].Conn())
 				out["plans"] = plans
+				sawDesk := false
 				for _, raw := range plans {
 					var plan struct {
-						UsedKiB int64 `json:"Memory Used"`
+						UsedKiB int64  `json:"Memory Used"`
+						Kind    string `json:"query_kind"`
 					}
 					if err := json.Unmarshal(raw, &plan); err != nil {
 						t.Fatal(err)
 					}
+					if plan.Kind == "desk" {
+						sawDesk = true
+						if plan.UsedKiB <= 0 {
+							t.Fatal("Desk planner memory sample missing")
+						}
+					}
 					if plan.UsedKiB > 32*1024 {
 						t.Fatalf("backend %d endpoint %d: planner memory %d KiB exceeds 32 MiB budget", slot, endpoint, plan.UsedKiB)
 					}
+				}
+				if endpoint == 5 && !sawDesk {
+					t.Fatal("Desk plan was not measured")
 				}
 			}
 			raw, err := json.Marshal(out)
@@ -402,7 +437,14 @@ func backendMemorySummary(t testing.TB, raw json.RawMessage) map[string]any {
 
 func backendPlanSummary(sql string, value any) map[string]any {
 	hash := sha256.Sum256([]byte(sql))
-	result := map[string]any{"query_sha256": fmt.Sprintf("%x", hash)}
+	kind := "other"
+	if strings.Contains(sql, "WITH clock AS") {
+		kind = "desk"
+	}
+	if strings.Contains(sql, "WITH RECURSIVE scope") {
+		kind = "scope"
+	}
+	result := map[string]any{"query_sha256": fmt.Sprintf("%x", hash), "query_kind": kind}
 	relations := map[string]float64{}
 	var walk func(any)
 	walk = func(value any) {
