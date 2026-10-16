@@ -784,11 +784,19 @@
     ,
     "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1440"
     ,
+    "browser:tests/header-desk-split.spec.ts:at 1024 dark both trails are whole and a refit moves nothing (AEON-1446)"
+    ,
     "browser:tests/header-desk-split.spec.ts:at 1024 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 1024 light both trails are whole and a refit moves nothing (AEON-1446)"
     ,
     "browser:tests/header-desk-split.spec.ts:at 1024 light the header shows a key whole or not at all and fits the window (AEON-1240)"
     ,
+    "browser:tests/header-desk-split.spec.ts:at 1440 dark both trails are whole and a refit moves nothing (AEON-1446)"
+    ,
     "browser:tests/header-desk-split.spec.ts:at 1440 dark the header shows a key whole or not at all and fits the window (AEON-1240)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 1440 light both trails are whole and a refit moves nothing (AEON-1446)"
     ,
     "browser:tests/header-desk-split.spec.ts:at 1440 light the header shows a key whole or not at all and fits the window (AEON-1240)"
     ,
@@ -812,7 +820,11 @@
     ,
     "browser:tests/header-desk-split.spec.ts:at 420 light the header shows a key whole or not at all and fits the window (AEON-1240)"
     ,
+    "browser:tests/header-desk-split.spec.ts:at 601 dark both trails are whole and a refit moves nothing (AEON-1446)"
+    ,
     "browser:tests/header-desk-split.spec.ts:at 601 dark the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 601 light both trails are whole and a refit moves nothing (AEON-1446)"
     ,
     "browser:tests/header-desk-split.spec.ts:at 601 light the trail drops whole segments and never cuts a chip"
     ,
@@ -823,6 +835,10 @@
     "browser:tests/header-desk-split.spec.ts:at 721 dark the trail drops whole segments and never cuts a chip"
     ,
     "browser:tests/header-desk-split.spec.ts:at 721 light the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 887 dark both trails are whole and a refit moves nothing (AEON-1446)"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 887 light both trails are whole and a refit moves nothing (AEON-1446)"
     ,
     "browser:tests/header-desk-split.spec.ts:from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens"
     ,
@@ -9042,11 +9058,19 @@
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"a long request wraps inside the preview at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1024 dark both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1024 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1024 light both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1024 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1440 dark both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1440 dark the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1440 light both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 1440 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9070,7 +9094,11 @@
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 420 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 dark both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 light both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9081,6 +9109,10 @@
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 887 dark both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 887 light both trails are whole and a refit moves nothing (AEON-1446)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

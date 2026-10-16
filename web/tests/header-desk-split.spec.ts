@@ -258,8 +258,8 @@ for (const width of [601, 640, 721, 768, 1024]) test(`on a project's tickets at 
 // separator with its crumb, and never cuts a chip. Probe: every separator, key,
 // icon and text run still shown lies whole inside each box that clips it, up to the
 // header's padding; a name that ends in an ellipsis keeps three characters' room;
-// no separator stands alone.
-const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => {
+// no separator stands alone. The same probe also runs inside the page (AEON-1446).
+const probeTrail = (header: Element) => {
   // In sight: the element and every box up to the header has room; a visually hidden (1 px) box hides all inside it.
   const shown = (el: Element) => {
     for (let at: Element | null = el; at && at !== header; at = at.parentElement) {
@@ -307,7 +307,8 @@ const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => 
   })
   if (!parts.some(part => part.matches('.crumb'))) cut.push('a trail without a crumb')
   return { parts: parts.map(label), cut }
-})
+}
+const trailFit = (page: Page) => page.locator('.app-header').evaluate(probeTrail)
 // The trail element itself, whatever it shows; the probe judges only what is in sight.
 const trailOf = (page: Page) => page.locator('.app-header .crumbs')
 // The header fits in the resize callback and once more on the next frame: dropping
@@ -316,10 +317,20 @@ const trailOf = (page: Page) => page.locator('.app-header .crumbs')
 // continuations can run before the header's own frame callback. Sample in a task
 // after rendering, including positions and the surrounding slots: equal chip
 // widths alone do not mean that a resize or a newly loaded place has settled.
+// AEON-1446: and a frame is not always a rendering update. After a resize Chromium can
+// run animation frames at the new width before the update that lays it out, with no
+// resize event, media query or resize observer yet. Two samples in such frames agree
+// on a row that is never painted, the header's fit still to come (887: a 38 px
+// 'Pharos'). So sampling starts after a rendering update: a new observer's first
+// callback comes in one, after the header's own observer, which was made first.
 const settle = async (page: Page) => {
   await page.waitForFunction(({ width, height }) => innerWidth === width && innerHeight === height, page.viewportSize()!)
   await page.evaluate(async () => {
     await document.fonts.ready
+    await new Promise<void>(done => {
+      const rendered = new ResizeObserver(() => { rendered.disconnect(); done() })
+      rendered.observe(document.querySelector('.app-header') ?? document.documentElement)
+    })
     const signature = () => {
       const trail = document.querySelector<HTMLElement>('.app-header .crumbs')
       if (!trail) return 'none'
@@ -376,6 +387,7 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
+  await page.addInitScript(`window.__trailProbe = ${probeTrail}`)
   const dir = testInfo.outputPath('AEON-1214')
   await mkdir(dir, { recursive: true })
   for (const trail of TRAILS.slice(0, 2)) {
@@ -384,6 +396,18 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
     await trail.ready(page)
     await expect(trailOf(page)).toContainText('Pharos')
     await page.evaluate(() => document.fonts.ready.then(() => undefined))
+    // AEON-1446: what is painted is whole too. Each width's rendering update runs the
+    // header's resize observer, then this one (made later), then paints; the probe
+    // runs between the header's fit and the paint.
+    await page.evaluate(() => {
+      const w = window as unknown as { __trailProbe: (header: Element) => { parts: string[]; cut: string[] }; __trailPainted: string[] }
+      const header = document.querySelector('.app-header')!
+      w.__trailPainted = []
+      new ResizeObserver(() => {
+        const fit = w.__trailProbe(header)
+        if (fit.cut.length) w.__trailPainted.push(`${innerWidth}: ${fit.cut.join(', ')} (${fit.parts.join(' ')})`)
+      }).observe(header)
+    })
     const seen: string[] = []
     for (let width = 1440; width >= 601; width -= 7) {
       await page.setViewportSize({ width, height: 900 })
@@ -394,6 +418,7 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
       if (fit.parts.join(' ') !== seen.at(-1)) await page.screenshot({ path: join(dir, `trail-step-${trail.slug}-${width}.png`), clip: { x: 0, y: 0, width, height: 64 } })
       seen.push(fit.parts.join(' '))
     }
+    expect(await page.evaluate(() => (window as unknown as { __trailPainted: string[] }).__trailPainted), `${trail.path}: a cut chip at the paint of a width`).toEqual([])
     // The sweep saw the trail whole and saw whole segments go; they come back with the room.
     expect(new Set(seen).size, seen.join(' | ')).toBeGreaterThan(1)
     await page.setViewportSize({ width: 1024, height: 900 })
@@ -410,6 +435,40 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
     expect(await trailOf(page).evaluate(trail => [...trail.querySelectorAll<HTMLElement>('a[href], button')].filter(el => el.getBoundingClientRect().width <= 1 && el.tabIndex >= 0 && getComputedStyle(el).display !== 'none').length)).toBe(0)
   }
 })
+
+// AEON-1446: at the widths of the 887 flake and Tick's check, both trails are whole,
+// and a refit at the same width moves nothing: the places, the Desk's chevron, Search,
+// the avatar and the page's crumb keep their boxes, and the trail shows the same parts.
+for (const width of [601, 887, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`at ${width} ${theme} both trails are whole and a refit moves nothing (AEON-1446)`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    await setup(page, { theme })
+    const dir = testInfo.outputPath('AEON-1446')
+    await mkdir(dir, { recursive: true })
+    for (const trail of TRAILS.slice(0, 2)) {
+      await page.goto(trail.path)
+      await trail.ready(page)
+      await expect(trailOf(page)).toContainText('Pharos')
+      await settle(page)
+      const fit = await trailFit(page)
+      expect(fit.cut, `${trail.path} at ${width}: ${fit.parts.join(' ')}`).toEqual([])
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'no sideways scroll').toBeLessThanOrEqual(0)
+      await expectStableControls({
+        controls: {
+          places: places(page), chevron: chevron(page), search: page.getByRole('button', { name: 'Search everything' }),
+          account: page.locator('.app-header .account'), crumb: trailOf(page).locator('[aria-current="page"]'),
+        },
+        interactions: [
+          { name: 'a font swap refits the header', run: async () => { await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone'))); await settle(page) } },
+          { name: 'hover the places', run: async () => { await places(page).hover(); await settle(page) } },
+        ],
+      })
+      expect((await trailFit(page)).parts, `${trail.path} at ${width}: the same trail after a refit`).toEqual(fit.parts)
+      await page.mouse.move(0, 400)
+      await page.screenshot({ path: join(dir, `trail-${trail.slug}-${width}-${theme}.png`), clip: { x: 0, y: 0, width, height: 64 } })
+    }
+  })
+}
 
 // AEON-1240 (Tick's pre-cut pass on 07717bdb4; AEON-1213 fix7 at 320 px): on phones a key, the project's chip or a
 // ticket's, shows whole or not at all. It was clipped to "PHARO" at 390 and to "P" at 400, half under Search. Probe:
