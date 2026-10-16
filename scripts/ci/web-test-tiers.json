@@ -11618,6 +11618,8 @@
     ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"? opens the shortcut sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-list.spec.ts","name":"AEON-1415: inactive section tabs hide their labels at 1024 px and stay 44 px wide at 360 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"AEON-1415: section owners mount the project page without a fatal setup error","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"a rejected status change rolls back and explains why","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

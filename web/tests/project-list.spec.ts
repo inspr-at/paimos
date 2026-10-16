@@ -20,6 +20,36 @@ test('AEON-1415: section owners mount the project page without a fatal setup err
   await expect(page.getByRole('searchbox', { name: 'Search tickets in this project' })).toBeVisible()
 })
 
+test('AEON-1415: inactive section tabs hide their labels at 1024 px and stay 44 px wide at 360 px', async ({ page }) => {
+  await mockWork(page, fixtures())
+  const sections = page.getByRole('tablist', { name: 'Project sections' })
+  const inactive = () => sections.locator('button[aria-selected="false"]')
+  await page.setViewportSize({ width: 1024, height: 800 })
+  await page.goto('/p/PHAROS/tickets')
+  await expect(sections.getByRole('tab')).toHaveText(['Tickets', 'Knowledge', 'Settings'])
+  const selected = sections.getByRole('tab', { name: 'Tickets', exact: true })
+  await expect(selected).toHaveAttribute('aria-selected', 'true')
+  await expect(selected.locator('.tab-label')).toBeVisible()
+  await expect(inactive()).toHaveCount(2)
+  for (const tab of await inactive().all()) {
+    const label = tab.locator('.tab-label')
+    await expect(label).toHaveCount(1)
+    await expect(label).toBeHidden()
+    expect(await label.evaluate(el => getComputedStyle(el).display)).toBe('none')
+  }
+  await page.setViewportSize({ width: 360, height: 800 })
+  await expect(selected.locator('.tab-label')).toBeVisible()
+  await expect.poll(async () => inactive().evaluateAll(tabs => tabs.map(tab => getComputedStyle(tab).width))).toEqual(['44px', '44px'])
+  for (const tab of await inactive().all()) {
+    const box = await tab.boundingBox()
+    expect(box, 'inactive section tab is on screen').not.toBeNull()
+    expect(box!.width).toBeCloseTo(44, 0)
+    expect(await tab.evaluate(el => getComputedStyle(el).paddingLeft)).toBe('0px')
+    expect(await tab.evaluate(el => getComputedStyle(el).paddingRight)).toBe('0px')
+  }
+  expect((await selected.boundingBox())!.width).toBeGreaterThan(44.5)
+})
+
 test('the list asks for open work in the project and shows every column', async ({ page }) => {
   const errors = watchErrors(page)
   const calls = await mockWork(page, fixtures())

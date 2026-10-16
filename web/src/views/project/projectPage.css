@@ -177,7 +177,7 @@
 .project-page.header-comfortable :deep(:where(.project-head) .head-work) { width: 100%; }
 .project-page.header-comfortable :deep(.project-navigation) { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
 @media (min-width: 601px) and (max-width: 1100px) {
-:deep(.project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label)) { display: none; }
+:deep(.project-navigation .sections button:not([aria-selected="true"]) .tab-label) { display: none; }
 .project-page.header-comfortable :deep(:where(.project-head) .head-work) { width: 100%; }
 .project-page[class*="header-"] :deep(:where(.project-head) .head-flex) { column-gap: 8px; }
 .project-page[class*="header-"] :deep(:where(.project-head) .stat-line) { gap: 8px; }
@@ -214,8 +214,8 @@
   /* Saved views keep their own scrollable row below the project navigation. */
 :deep(.project-navigation .view-bar) { flex-basis: 100%; }
 :deep(.project-navigation .nav-divider) { display: none; }
-:deep(.project-navigation :deep(.sections button:not([aria-selected="true"]))) { flex: none; width: 44px; padding: 0; }
-:deep(.project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label)) { display: none; }
+:deep(.project-navigation .sections button:not([aria-selected="true"])) { flex: none; width: 44px; padding: 0; }
+:deep(.project-navigation .sections button:not([aria-selected="true"]) .tab-label) { display: none; }
 :deep(.project-navigation .view-bar) { padding: 0; }
 }
 :deep(.project-navigation.legacy-navigation) { display: block; border: 0; padding: 0; }
