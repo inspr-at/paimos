@@ -82,9 +82,10 @@ type GoalView struct {
 	Done      *bool          `json:"done,omitempty"`
 	Stall     *Stall         `json:"stall,omitempty"`
 	Watermark
-	created time.Time
-	targets []string
-	node    storedNode
+	created        time.Time
+	movingProjects []string
+	targets        []string
+	node           storedNode
 }
 
 type leafFact struct {
@@ -193,6 +194,25 @@ func readGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, n storedNode, 
 		}
 		return out, err
 	}
+	history, err := loadReconstruction(ctx, nested, n.ID, now)
+	if err == nil {
+		var since time.Time
+		_, since, err = history.project(ctx, now, "24h")
+		if err == nil {
+			stall := DeriveStall(expanded.States.Moving, since, now)
+			expanded.Stall = &stall
+		}
+	}
+	if err != nil {
+		if rollback := nested.Rollback(ctx); rollback != nil {
+			return out, rollback
+		}
+		if tooLarge(err) {
+			out.Expansion = "too_large"
+			return out, nil
+		}
+		return out, err
+	}
 	if err := nested.Commit(ctx); err != nil {
 		return out, err
 	}
@@ -228,6 +248,7 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 	if err != nil {
 		return out, err
 	}
+	movingTargets := []string{}
 	inputs := []ProgressOutcome{}
 	out.Items = []OutcomeView{}
 	states := StateCounts{}
@@ -258,6 +279,7 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 		switch state.State {
 		case Moving:
 			states.Moving++
+			movingTargets = append(movingTargets, n.Targets...)
 		case Queued:
 			states.Queued++
 		case Paused:
@@ -318,6 +340,15 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 	out.Projects, err = projectBadges(ctx, tx, out.node.Project, out.targets)
 	if err != nil {
 		return out, err
+	}
+	if states.Moving > 0 {
+		badges, e := projectBadges(ctx, tx, out.node.Project, movingTargets)
+		if e != nil {
+			return out, e
+		}
+		for _, b := range badges {
+			out.movingProjects = append(out.movingProjects, b.ID)
+		}
 	}
 	out.Waits, err = goalWaits(ctx, tx, p, out.ID, out.targets)
 	return out, err

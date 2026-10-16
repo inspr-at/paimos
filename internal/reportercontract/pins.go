@@ -34,7 +34,7 @@ type surface struct {
 }
 
 var surfaces = map[string]surface{
-	"goals":          {Goals, "GoalsContract", []operation{{"/goals", "post", "200"}, {"/goals/{goalId}", "patch", "200"}, {"/goals", "get", "200"}, {"/goals/{goalId}", "get", "200"}, {"/goals/{goalId}/history", "get", "200"}}},
+	"goals":          {Goals, "GoalsContract", []operation{{"/goals", "post", "200"}, {"/goals/{goalId}", "patch", "200"}, {"/goals", "get", "200"}, {"/goals/{goalId}", "get", "200"}, {"/goals/{goalId}/history", "get", "200"}, {"/goals/{goalId}/series", "get", "200"}}},
 	"review-run":     {ReviewRun, "ReviewRunContract", []operation{{"/nodes/{nodeId}/review-runs", "post", "201"}, {"/review-runs/{runId}/credential", "post", "200"}, {"/review-runs/{runId}/verdict", "post", "200"}, {"/nodes/{nodeId}/review-evidence", "get", "200"}}},
 	"stage-handoffs": {StageHandoffs, "StageHandoffsContract", []operation{{"/stage-handoffs", "post", "201"}, {"/stage-handoffs/{handoffId}", "get", "200"}}},
 	"stage-evidence": {StageEvidence, "StageEvidenceContract", []operation{{"/stage-handoffs/{handoffId}/evidence", "post", "201"}}},

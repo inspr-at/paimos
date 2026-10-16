@@ -699,8 +699,8 @@
     }
   },
   "goals": {
-    "version": "goals/1.1",
-    "sha256": "d2ef773acd629f7b3076dfd11c2c94c740987d5f40a48606b83bc2829f974384",
+    "version": "goals/1.2",
+    "sha256": "4bb5b3aabf6bbde37d6c3f1add51cafa2ddce0cd0ec8d8b6a4305d0f990e8c5c",
     "shape": {
       "GET /goals 200": {
         "properties": {
@@ -1062,6 +1062,22 @@
                   "format": "int64",
                   "minimum": 0,
                   "type": "integer"
+                },
+                "stall": {
+                  "properties": {
+                    "since": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "stalled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "stalled",
+                    "since"
+                  ],
+                  "type": "object"
                 },
                 "states": {
                   "properties": {
@@ -1594,6 +1610,22 @@
             "minimum": 0,
             "type": "integer"
           },
+          "stall": {
+            "properties": {
+              "since": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "stalled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "stalled",
+              "since"
+            ],
+            "type": "object"
+          },
           "states": {
             "properties": {
               "done": {
@@ -1836,6 +1868,91 @@
         },
         "required": [
           "items",
+          "read_through",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "GET /goals/{goalId}/series 200": {
+        "properties": {
+          "expansion": {
+            "enum": [
+              "full",
+              "too_large"
+            ],
+            "type": "string"
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "properties": {
+                "basis": {
+                  "enum": [
+                    "count",
+                    "mixed",
+                    "estimate"
+                  ],
+                  "type": "string"
+                },
+                "delta": {
+                  "maximum": 100,
+                  "minimum": -100,
+                  "type": "integer"
+                },
+                "keys": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 200,
+                  "type": "array"
+                },
+                "keys_truncated": {
+                  "type": "boolean"
+                },
+                "pct": {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "t": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "t",
+                "pct",
+                "basis",
+                "delta",
+                "keys",
+                "keys_truncated"
+              ],
+              "type": "object"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "range": {
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          },
+          "read_through": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "range",
+          "expansion",
           "read_through",
           "generation"
         ],

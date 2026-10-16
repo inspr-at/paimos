@@ -160,6 +160,12 @@ func TestGoalTooLargeDetailKeepsOnlyVisibleCounts(t *testing.T) {
 	if g.Expansion != "too_large" || g.Counts.Outcomes != 10 || g.Counts.Tickets != 200 || g.Progress != nil || g.ETA != nil || g.States != nil || len(g.Items) != 0 {
 		t.Fatalf("oversize result %+v", g)
 	}
+	response := apiRequest(t, f, "GET", "/api/goals/"+f.secondGoal+"/series?range=24h", "", "")
+	var series SeriesResult
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &series) != nil || series.Expansion != "too_large" || len(series.Points) > 0 {
+		t.Fatalf("oversized series %d %s", response.Code, response.Body)
+	}
+
 }
 
 // Risk: page/search/state filters alter totals, project filters omit workspace

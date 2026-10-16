@@ -61,3 +61,14 @@ func (rt *runtime) cmdGoalList() *Command {
 			return rt.goalRead("/api/goals?" + q.Encode())
 		}}
 }
+
+func (rt *runtime) cmdGoalSeries() *Command {
+	var span string
+	return &Command{Name: "series", Short: "Read event-backed goal progress", Use: "goal series KEY --range 24h|7d|30d [--json]", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) { fs.string(&span, "range", 0, "24h, 7d or 30d (default 24h)") }, run: func(args []string) error {
+		q := url.Values{}
+		if span != "" {
+			q.Set("range", span)
+		}
+		return rt.goalRead("/api/goals/" + url.PathEscape(args[0]) + "/series?" + q.Encode())
+	}}
+}
