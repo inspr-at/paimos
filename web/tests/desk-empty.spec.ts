@@ -4,7 +4,38 @@
 // source still reads as all clear; both theme pictures show; a narrow phone scrolls sideways.
 import { expect, test, type Page } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
-import { mockDecisionDesk, refreshDesk } from './decision-desk-fixtures'
+import { fixtures, mockWork } from './work-fixtures'
+
+// Every Desk source answers with an empty page. Kept here rather than in
+// decision-desk-fixtures.ts, whose importers are at the 15-spec impact bound.
+async function mockEmptyDesk(page: Page, theme: 'light' | 'dark') {
+  const data = fixtures()
+  data.preferences.theme = { choice: theme }
+  await mockWork(page, data)
+  const reads: string[] = []
+  await page.route('**/api/**', route => {
+    const url = new URL(route.request().url()), path = url.pathname, read = route.request().method() === 'GET'
+    if (read) reads.push(path + url.search)
+    if (path === '/api/decision-desk/projection') return route.fulfill({ json: { items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: new Date().toISOString() } })
+    if (path === '/api/decision-desk') return route.fulfill({ json: { items: [], has_more: false } })
+    if (path === '/api/approvals') return route.fulfill({ json: [] })
+    if (path === '/api/rules/doctrine/inbox') return route.fulfill({ json: { items: [], pending: 0 } })
+    if (read && (path === '/api/stepup-requests' || path === '/api/key-trim-proposals')) return route.fulfill({ json: { items: [], has_more: false } })
+    if (path === '/api/harness-sessions') return route.fulfill({ json: { items: [], next_cursor: null } })
+    if (read && path.endsWith('/messages')) return route.fulfill({ json: { items: [], next_after: 0 } })
+    return route.fallback()
+  })
+  return reads
+}
+// A focus refresh, awaited by its question read; one already in flight would swallow the event.
+async function refreshDesk(page: Page, reads: string[]) {
+  const count = () => reads.filter(path => path.startsWith('/api/decision-desk?state=open')).length
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+  const before = count()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(count).toBeGreaterThan(before)
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+}
 
 async function noSideways(page: Page, step: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${step}: horizontal scroll`).toBeLessThanOrEqual(0)
@@ -25,7 +56,7 @@ async function onePicture(page: Page, theme: 'light' | 'dark') {
 for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1406 empty desk states keep the card still ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
-    const world = await mockDecisionDesk(page, { emptyDesk: true, theme })
+    const reads = await mockEmptyDesk(page, theme)
     // D: the first read is held at a barrier, so the reading state is on screen until released.
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
@@ -70,7 +101,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       interactions: [
         { name: 'A → B a source did not answer', run: async () => {
           approvalsFail = true
-          await refreshDesk(page, world)
+          await refreshDesk(page, reads)
           await expect(frame).toHaveAttribute('data-state', 'incomplete')
           await expect(quiet).toHaveText(/^Approvals didn’t answer, so this may be incomplete\s*·\s*Try again$/)
           // The calm line replaces the source list; there is one Try again, and no alert look.
