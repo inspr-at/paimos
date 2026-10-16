@@ -179,32 +179,57 @@ function overflow(el: HTMLElement) {
 // rather than show a sliver. What steps aside leaves sight and the tab order, but
 // screen readers keep the whole trail. Each fit starts from the whole trail, so
 // one width always gives one trail.
-function cutTrail(trail: HTMLElement) {
-  const frame = trail.getBoundingClientRect(), range = document.createRange()
-  for (const part of trail.children) {
-    if (!(part instanceof HTMLElement)) continue
-    const box = part.getBoundingClientRect(), style = getComputedStyle(part)
-    if (box.width <= 1 || style.display === 'none') continue
-    const inset = (side: 'Left' | 'Right') => parseFloat(style[`padding${side}`]) || 0
-    // A crumb clips to its own box, the trail to its. What must show whole: the
-    // crumb's keys, icons and names, or its text; an ellipsis by design, its box.
-    const left = Math.max(frame.left, style.overflowX === 'hidden' ? box.left : -Infinity)
-    const right = Math.min(frame.right, style.overflowX === 'hidden' ? box.right : Infinity)
-    let atoms: { left: number; right: number }[]
-    if (style.textOverflow === 'ellipsis') atoms = [{ left: box.left + inset('Left'), right: box.right - inset('Right') }]
-    else if (part.children.length) atoms = [...part.children].map(child => child.getBoundingClientRect()).filter(rect => rect.width > 1 && rect.height > 1)
-    else { range.selectNodeContents(part); atoms = [range.getBoundingClientRect()] }
-    if (atoms.some(atom => atom.left < left - 0.5 || atom.right > right + 0.5)) return true
-    // A key can be squeezed inside its own box (the border stays in the crumb
-    // while the letters clip). That is a cut chip, same rule as on a phone.
-    for (const key of part.querySelectorAll<HTMLElement>('.key-badge')) {
-      if (key.dataset.dropped !== undefined || getComputedStyle(key).display === 'none') continue
-      const rect = key.getBoundingClientRect()
-      if (rect.width <= 1 || rect.height <= 1) continue
-      if (key.scrollWidth > key.clientWidth) return true
+// The room is the header inside its padding, then every box up from the chip that
+// hides its overflow. A chip can sit inside the trail and still cross that padding
+// (AEON-1439: PHAROS at 1412px, the trail only `/ PHAROS`). The same rules as the
+// trail probe, so a fit never settles on a chip the probe calls cut.
+function cutTrail(trail: HTMLElement | null) {
+  if (!trail) return false
+  const headerEl = trail.closest('.app-header')
+  if (!(headerEl instanceof HTMLElement)) return false
+  const shown = (el: Element) => {
+    for (let at: Element | null = el; at && at !== headerEl; at = at.parentElement) {
+      const box = at.getBoundingClientRect(), style = getComputedStyle(at)
+      if (box.width <= 1 || box.height <= 1 || style.display === 'none' || style.visibility === 'hidden') return false
+    }
+    return true
+  }
+  const own = headerEl.getBoundingClientRect(), pad = getComputedStyle(headerEl)
+  const room = (node: Node) => {
+    let left = own.left + (parseFloat(pad.paddingLeft) || 0), right = own.right - (parseFloat(pad.paddingRight) || 0)
+    for (let el = node.parentElement; el && el !== headerEl; el = el.parentElement) {
+      if (getComputedStyle(el).overflowX === 'visible') continue
+      const box = el.getBoundingClientRect()
+      left = Math.max(left, box.left); right = Math.min(right, box.right)
+    }
+    return { left, right }
+  }
+  const outside = (box: { left: number; right: number }, node: Node) => {
+    const edge = room(node)
+    return box.left < edge.left - 0.5 || box.right > edge.right + 0.5
+  }
+  const range = document.createRange()
+  for (const el of [trail, ...trail.querySelectorAll('*')].filter(el => shown(el) && !el.matches('svg *'))) {
+    const style = getComputedStyle(el), box = el.getBoundingClientRect()
+    if (el.matches('.sep, .key-badge, svg') && (outside(box, el) || (el instanceof HTMLElement && el.scrollWidth > el.clientWidth))) return true
+    const ellipsis = style.textOverflow === 'ellipsis' && style.overflowX !== 'visible'
+    if (ellipsis && el instanceof HTMLElement) {
+      const inner = { left: box.left + (parseFloat(style.paddingLeft) || 0), right: box.right - (parseFloat(style.paddingRight) || 0) }
+      if (outside(inner, el)) return true
+      if (el.scrollWidth > el.clientWidth && el.clientWidth < 3 * (parseFloat(style.fontSize) || 13.5)) return true
+      continue
+    }
+    for (const node of el.childNodes) {
+      if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue
+      range.selectNodeContents(node)
+      if (outside(range.getBoundingClientRect(), node)) return true
     }
   }
-  return false
+  const parts = [...trail.children].filter(part => part instanceof HTMLElement && shown(part))
+  for (let index = 0; index < parts.length; index++) {
+    if (parts[index].matches('.sep') && !parts[index + 1]?.matches('.crumb')) return true
+  }
+  return parts.length > 0 && !parts.some(part => part.matches('.crumb'))
 }
 // What steps aside leaves sight and the tab order; screen readers keep it (the last rule below).
 function drop(part: HTMLElement) {
@@ -337,7 +362,10 @@ function refit() {
   const tick = () => {
     if (generation !== fitGeneration) return
     const name = header.value?.querySelector<HTMLElement>('.crumbs .crumb-name') ?? null
-    if (frames >= 2 && trailSignature() === left && !nameSliver(name)) { fitFrame = 0; return }
+    const trail = header.value?.querySelector<HTMLElement>('.crumbs') ?? null
+    // A stable row can still be a cut chip: the width did not change, the letters did
+    // (AEON-1439). Keep fitting until the trail probe would agree.
+    if (frames >= 2 && trailSignature() === left && !nameSliver(name) && !cutTrail(trail)) { fitFrame = 0; return }
     if (frames >= 6) { fitFrame = 0; return }
     fitHeader()
     // A resize during the fit starts a new follow-up. This one must not replace it.
@@ -542,7 +570,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .crumbs > .crumb:not(.current) { flex-shrink: 1; overflow: hidden; }
 .crumbs > .crumb.current, .crumbs > .sep, .crumbs > .crumb.fixed-crumb { flex-shrink: 0; }
 /* The key stays whole. The crumb may shrink; the chip does not, so its letters are never clipped inside the badge. */
-.crumbs .key-badge { flex-shrink: 0; }
+.crumbs .key-badge { flex-shrink: 0; min-width: max-content; }
 /* A long knowledge slug gives way first, with an ellipsis and the full slug as a tip. */
 .crumbs > .crumb.slug-crumb { display: block; flex-shrink: 1; min-width: 48px; overflow: hidden; text-overflow: ellipsis; line-height: 30px; }
 .crumb.current:hover { background: transparent; }
