@@ -199,8 +199,9 @@ function click(event: MouseEvent) {
 .markdown-body :deep(code) { font-family: var(--mono); font-size: .92em; font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
 /* Inline code is a quiet tint that stays inside the line box; only code blocks keep a frame.
    Block padding stays at most 1 px, the line-height is the parent's, and the chip sits on the baseline,
-   so a chip line is the same height as a line without one. The tint clones onto each wrapped fragment. */
-.markdown-body :deep(:not(pre) > code) { padding-block: .5px; padding-inline: 4px; border-radius: 4px; background: var(--code-bg); box-decoration-break: clone; -webkit-box-decoration-break: clone; color: var(--ink); line-height: inherit; vertical-align: baseline; }
+   so a chip line is the same height as a line without one. The tint clones onto each wrapped fragment.
+   The prefixed break comes first: the minifier keeps the last spelling of a paired property. */
+.markdown-body :deep(:not(pre) > code) { padding-block: .5px; padding-inline: 4px; border-radius: 4px; background: var(--code-bg); -webkit-box-decoration-break: clone; box-decoration-break: clone; color: var(--ink); line-height: inherit; vertical-align: baseline; }
 .markdown-body :deep(pre code) { font-size: .88em; }
 /* A quote reads as typography: indented on a quiet tint, no coloured rule (rule 11). */
 .markdown-body :deep(blockquote) { margin: 0 0 1em 12px; padding: 8px 14px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); }

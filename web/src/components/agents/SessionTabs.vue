@@ -10,9 +10,11 @@ const tabs = computed(() => panelTabs(!!props.lead, !!props.terminal, !!props.wa
 const panelId = (tab: PanelTab) => tab === 'chat' ? 'messages' : tab === 'session' ? 'overview' : tab
 const icon = (tab: PanelTab) => tab === 'lead' ? 'tree' : tab === 'chat' ? 'message' : tab === 'events' ? 'list' : tab === 'terminal' ? 'terminal' : 'info'
 const menu = ref<HTMLElement>()
-const phone = window.matchMedia('(max-width: 720px)')
 let resize: ResizeObserver | undefined
 onMounted(() => {
+  // After mount: this setup also runs while the recovery evidence is rendered
+  // on the server, where window does not exist.
+  const phone = window.matchMedia('(max-width: 720px)')
   const element = menu.value, head = element?.closest<HTMLElement>('.pane-bar')
   const identity = head?.querySelector<HTMLElement>('.pane-identity')
   if (!element || !head || !identity) return

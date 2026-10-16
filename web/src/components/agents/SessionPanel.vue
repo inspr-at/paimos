@@ -663,7 +663,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <div class="pane-buttons" role="group" aria-label="Panel actions">
           <button v-if="sidebarAvailable" type="button" class="pane-icon pane-layout" aria-label="Sessions list" :aria-pressed="panelLayout === 'side'" :data-tip="panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list'" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side')"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="18" /></button>
           <button type="button" class="pane-icon pane-layout" aria-label="Full screen" :aria-pressed="panelLayout === 'full'" :data-tip="fullScreenTip" :aria-keyshortcuts="shortcutKeys('agents.panel.fullscreen').join(' ') || undefined" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full')"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="18" /></button>
-          <button v-if="view && !loading && menuReady" type="button" class="pane-icon pane-more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = actionsAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" :size="18" /></button>
+          <!-- On a phone the other buttons in this group are hidden, so ⋯ is here from the first paint and stays disabled until the menu is known. -->
+          <button v-if="view && !loading" type="button" class="pane-icon pane-more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" :disabled="!menuReady" @click="actionsAnchor = actionsAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" :size="18" /></button>
           <button type="button" class="pane-icon pane-close" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="18" /></button>
         </div>
       </div>
@@ -1021,10 +1022,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .live-pane :deep(.expert-bar) { height: 44px; padding-block: 4px; border-bottom: 0; }
 @container pane (max-width: 450px) { .pane-layout { display: none; } .pane-bar { gap: 16px; } }
 /* AEON-1286 phone head (A4): ← · avatar · name over "state · model" · ⋯, then the flat
-   menu on its own row. Everything else lives in ⋯, which opens as a sheet from the bottom. */
+   menu on its own row. Everything else lives in ⋯, which opens as a sheet from the bottom.
+   The menu row is 60px from the first paint (6px margin, the 48px track, 6px margin). The tabs
+   mount once the menu is known; reserving the row keeps the thread from jumping. */
 @media (max-width: 720px) {
   .panel-head { padding-top: env(safe-area-inset-top); }
-  .pane-bar { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; grid-template-rows: 56px auto; gap: 0 8px; height: auto; padding: 0 4px 0 0; }
+  .pane-bar { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; grid-template-rows: 56px 60px; gap: 0 8px; height: auto; padding: 0 4px 0 0; }
   .pane-back { display: inline-grid; grid-column: 1; grid-row: 1; color: var(--ink); }
   .pane-identity { grid-column: 2; grid-row: 1; gap: 10px; min-width: 0; }
   .pane-title { font-size: 15px; line-height: 20px; }
