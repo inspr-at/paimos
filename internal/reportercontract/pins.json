@@ -698,6 +698,78 @@
       }
     }
   },
+  "goals": {
+    "version": "goals/1.0",
+    "sha256": "74314eb76a642931183af898c29a780be23b8f3aaf6a827b1bbebd7bcc806250",
+    "shape": {
+      "PATCH /goals/{goalId} 200": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "read_through": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "changed",
+          "read_through",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "POST /goals 200": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "read_through": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "changed",
+          "read_through",
+          "generation"
+        ],
+        "type": "object"
+      }
+    }
+  },
   "harness-session": {
     "version": "harness-session/3.3",
     "sha256": "7f2dd47614a2c7b04edb57abcc6e7ce88cd40150bfb5eea5a7b331a5b82c5110",

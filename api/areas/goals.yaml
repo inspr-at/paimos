@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/goals
+paths:
+  /goals:
+    post:
+      operationId: createGoal
+      summary: Create a project or workspace goal
+      description: "Creates a goal node and lazily restores the tenant goal/outcome kinds. Requires nodes.write in the destination. Replay rechecks the current created target."
+      security: *auth
+      parameters:
+        - {$ref: '#/components/parameters/GoalIdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GoalCreate'}
+      responses:
+        '200':
+          description: "Created goal or authorized receipt replay"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalWriteResult'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /goals/{goalId}:
+    parameters:
+      - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}, description: "Goal key or UUID; release nodes are also goals"}
+    patch:
+      operationId: updateGoal
+      summary: Atomically update a goal and its outcomes
+      description: "Omitted fields stay unchanged; null clears them. Every upsert requires a client ref. Receipts bind tenant, actor, key, method, immutable target and canonical body. Current target authorization precedes replay. Replace requires the latest goal event watermark. Limits apply before writes."
+      security: *auth
+      parameters:
+        - {$ref: '#/components/parameters/GoalIdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GoalUpdate'}
+      responses:
+        '200':
+          description: "Committed result or authorized receipt replay, retaining its original watermark and changed flag"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalWriteResult'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+components:
+  parameters:
+    GoalIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: "8–200 permitted characters; auto: is reserved. Reuse the exact key and body after a lost response."
+      schema: {type: string, minLength: 8, maxLength: 200, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{7,199}$'}
+  headers:
+    GoalsContract:
+      description: "Goals API contract"
+      schema: {type: string, enum: [goals/1.0]}
+  schemas:
+    GoalCreate:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        project_id: {type: [string, 'null'], format: uuid, description: "Null or omitted creates a workspace goal"}
+    GoalWriteResult:
+      type: object
+      additionalProperties: false
+      required: [id, key, changed, read_through, generation]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        changed: {type: boolean}
+        read_through: {type: integer, format: int64, minimum: 0}
+        generation: {type: integer, format: int64, minimum: 1}
+    GoalETAInput:
+      type: [object, 'null']
+      additionalProperties: false
+      properties:
+        text: {type: string, maxLength: 40}
+        at: {type: [string, 'null'], format: date-time}
+    GoalStep:
+      type: object
+      additionalProperties: false
+      required: [id, text, state]
+      properties:
+        id: {type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'}
+        text: {type: string, minLength: 1, maxLength: 200}
+        state: {type: string, enum: [done, now, later]}
+    GoalOutcomeUpsert:
+      type: object
+      additionalProperties: false
+      required: [ref]
+      properties:
+        ref: {type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        label: {type: string, minLength: 1, maxLength: 300, description: "Required for a new outcome"}
+        keys: {type: [array, 'null'], maxItems: 20, uniqueItems: true, items: {type: string, maxLength: 64}}
+        state: {type: [string, 'null'], enum: [moving, queued, paused, done, null]}
+        note: {type: [string, 'null'], maxLength: 200}
+        eta: {$ref: '#/components/schemas/GoalETAInput'}
+        position: {type: [number, 'null'], exclusiveMinimum: -1000000000000000, exclusiveMaximum: 1000000000000000, multipleOf: 0.000000000000001}
+    GoalOutcomeMove:
+      type: object
+      additionalProperties: false
+      required: [outcome_id, to_goal]
+      properties:
+        outcome_id: {type: string, format: uuid}
+        to_goal: {type: string, maxLength: 64}
+        to_ref: {type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+    GoalUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        if_read_through: {type: integer, format: int64, minimum: 0}
+        eta: {$ref: '#/components/schemas/GoalETAInput'}
+        steps: {type: [array, 'null'], maxItems: 20, items: {$ref: '#/components/schemas/GoalStep'}}
+        progress_override:
+          type: [object, 'null']
+          additionalProperties: false
+          required: [pct]
+          properties:
+            pct: {type: integer, minimum: 0, maximum: 100}
+            note: {type: string, maxLength: 200}
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            mode: {type: string, enum: [merge, replace], default: merge}
+            upsert: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/GoalOutcomeUpsert'}}
+            remove: {type: array, maxItems: 200, uniqueItems: true, items: {type: string, maxLength: 64}}
+            move: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/GoalOutcomeMove'}}
+            handed_over:
+              type: [object, 'null']
+              additionalProperties: false
+              required: [ref]
+              properties:
+                ref: {type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+                detail: {type: string, maxLength: 2000}

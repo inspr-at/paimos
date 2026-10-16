@@ -15,6 +15,8 @@ import (
 // the real verbs and compare their requests to this table, including the key
 // alias fallback. Permissions always come from the server's route map.
 var commandScopeRoutes = map[string][]string{
+	"goal create":   {"GET /api/nodes", "GET /api/kinds", "GET /api/node-keys/{key}", "POST /api/goals"},
+	"goal update":   {"PATCH /api/goals/{goalId}"},
 	"issue get":     {"GET /api/nodes", "GET /api/node-keys/{key}", "GET /api/kinds", "GET /api/nodes/{nodeId}/activity"},
 	"issue list":    {"GET /api/kinds", "GET /api/nodes"},
 	"issue create":  {"GET /api/kinds", "GET /api/nodes", "GET /api/node-keys/{key}", "POST /api/nodes"},
@@ -74,7 +76,7 @@ func scopeCommands(args []string) ([]string, error) {
 		}
 		root := words[0]
 		words = words[1:]
-		if root == "issue" {
+		if root == "issue" || root == "goal" {
 			if len(words) == 0 {
 				return nil, usagef("issue needs a verb: get/create/update/comment/list/search")
 			}
