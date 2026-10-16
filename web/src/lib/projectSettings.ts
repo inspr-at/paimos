@@ -17,8 +17,11 @@ export function projectSettingsSection(value: unknown): ProjectSettingsSection {
 export function projectSettingsPath(key: string, section: ProjectSettingsSection = 'general'): string {
   return `/p/${encodeURIComponent(key)}/settings${section === 'general' ? '' : `/${section}`}`
 }
+// German letters are spelt out first (ä → AE, ß → SS), so "für" stays one word
+// and "Vorbestell-App für die Bäckerei" suggests VAFDB, not VAFRDB.
+const SPELT: Record<string, string> = { ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss', ẞ: 'SS' }
 export function suggestProjectKey(name: string): string {
-  const words = name.toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').trim().split(/\s+/).filter(Boolean)
+  const words = name.replace(/[äöüÄÖÜßẞ]/g, letter => SPELT[letter]!).toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').trim().split(/\s+/).filter(Boolean)
   if (!words.length) return ''
   if (words.length >= 3) return words.map(word => word[0]).join('').slice(0, 6)
   return words[0]!.length <= 6 ? words[0]! : words[0]!.slice(0, 3)

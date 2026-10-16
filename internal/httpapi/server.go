@@ -156,6 +156,9 @@ func (s *Server) build() {
 	spa := commonMiddleware(view)
 	if publicMounted {
 		root.Handle("GET /aithema/preview/{design_rev}", commonMiddleware(publicMux))
+		// AEON-1441: START's form POST. Public and cookie-free: it never
+		// passes the API middleware, so no session is read or renewed here.
+		root.Handle("POST /import/project-draft", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/catalog.json", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json", commonMiddleware(publicMux))
