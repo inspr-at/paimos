@@ -27,7 +27,7 @@ const JARGON = [/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
 const REPLY_PATH = 'M6.4 3.6 2.6 7.4l3.8 3.8M2.6 7.4h6.8a4 4 0 0 1 4 4v1'
 const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; today?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; today?: boolean; lineProbe?: boolean } = {}) {
   // A scripted EventSource: the agents feed opens quietly; the chat-live stream takes frames from the test.
   await page.addInitScript(() => {
     class Stream extends EventTarget {
@@ -72,6 +72,11 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: 
     deskRoot(waiting, 5),
     agentPost(`The image digest is ${longWord} and matches the staging build.`, 4),
     myPost('Start it now. Keep the CI fixes in their own PR.', 2),
+    // AEON-1286: two wrapped paragraphs, one with an inline code chip on its first line.
+    ...(options.lineProbe ? [
+      agentPost('Without a chip, the nightly gate stayed green through the morning and the queue held only the release notes already written for the train.', 1),
+      agentPost('With a chip, `origin/main` stayed green through the morning and the queue held only the release notes already written for the train.', 0),
+    ] : []),
   ]
   data.messages.splice(0, data.messages.length, ...messages)
   const calls = await mockAgents(page, data)
@@ -548,4 +553,48 @@ test.describe('touch', () => {
     await expect(composer).toHaveValue('Look at AEON-1182 ')
     await expect(composer).toBeFocused()
   })
+})
+
+// Risk: an inline code chip's padding or line-height grows its line box, so the next line sits lower than in a paragraph without a chip.
+test('AEON-1286 inline code keeps the line box at 390 light', async ({ page }) => {
+  const { worker } = await setup(page, { theme: 'light', lineProbe: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const thread = panelOf(page).getByRole('list', { name: 'Messages', exact: true })
+  const plain = thread.locator('.chat-markdown p', { hasText: 'Without a chip, the nightly gate' })
+  const chip = thread.locator('.chat-markdown p', { hasText: 'With a chip,' })
+  await expect(plain).toBeVisible()
+  await expect(chip.locator('code')).toHaveText('origin/main')
+  const measured = await page.evaluate(() => {
+    const heights = (paragraph: Element) => {
+      const box = paragraph.getBoundingClientRect()
+      const samples: number[] = []
+      const take = (x: number, y: number) => {
+        const caret = document.caretRangeFromPoint(x, y)
+        if (!caret || !paragraph.contains(caret.startContainer)) return
+        const text = caret.startContainer.textContent ?? ''
+        if (caret.startOffset >= text.length) return
+        const range = caret.cloneRange()
+        range.setEnd(caret.startContainer, caret.startOffset + 1)
+        const rect = range.getBoundingClientRect()
+        if (rect.height > 0) samples.push(rect.top)
+      }
+      for (let y = Math.floor(box.top) + 1; y < box.bottom; y++) take(box.left + 4, y)
+      for (const code of paragraph.querySelectorAll('code')) for (const rect of code.getClientRects()) if (rect.height > 0) samples.push(rect.top)
+      const tops = [...new Set(samples.map(value => Math.round(value * 2) / 2))].sort((a, b) => a - b)
+      const lines: number[] = []
+      for (const top of tops) if (!lines.length || top - lines[lines.length - 1]! > 3) lines.push(top)
+      const lineHeights = lines.slice(1).map((top, index) => top - lines[index]!)
+      if (lines.length) lineHeights.push(box.bottom - lines[lines.length - 1]!)
+      return lineHeights
+    }
+    const paragraph = (text: string) => [...document.querySelectorAll('.chat-markdown p')].find(item => item.textContent?.includes(text))
+    const plainP = paragraph('Without a chip, the nightly gate')
+    const chipP = paragraph('With a chip,')
+    return { plain: plainP ? heights(plainP) : [], chip: chipP ? heights(chipP) : [] }
+  })
+  expect(measured.plain.length, 'the plain paragraph wraps').toBeGreaterThan(1)
+  expect(measured.chip.length, 'the chip paragraph wraps').toBeGreaterThan(1)
+  const basis = measured.plain[0]!
+  for (const height of [...measured.plain, ...measured.chip]) expect(Math.abs(height - basis), `line box ${height} px`).toBeLessThanOrEqual(1)
 })

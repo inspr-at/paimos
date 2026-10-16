@@ -6106,6 +6106,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1286 inline code keeps the line box at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1024: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1440: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
