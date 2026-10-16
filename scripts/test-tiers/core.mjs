@@ -152,9 +152,26 @@ export function behaviourObligation(tests, paths, { allDrift = false } = {}) {
   return wanted
 }
 
+// AEON-1431: this nightly case is the proof that a workflow diff still defers
+// browser cases outside the drift files. A planner or fixture edit has to run
+// it on the PR lane. Every other full gate leaves it nightly.
+const plannerRegressionName = 'native planning regression reuses one collected snapshot for unchanged-tree CLI checks'
+const plannerRegressionPath = path => typeof path === 'string' && (path.startsWith('scripts/test-tiers/') ||
+  path === 'web/tests/test-tier-failures.test.ts' || path === 'web/scripts/aeon-681-ci.test.mjs')
+function plannerRegressionKeys(tests, paths) {
+  if (!Array.isArray(paths) || !paths.some(plannerRegressionPath)) return new Set()
+  const wanted = new Set()
+  for (const row of tests) {
+    if (row.kind === 'node' && row.file === 'tests/test-tier-failures.test.ts' && row.name === plannerRegressionName)
+      wanted.add(key(row))
+  }
+  return wanted
+}
+
 export function fullGateTests(tests, paths) {
   const extra = behaviourObligation(tests, paths, { allDrift: true })
-  return tests.filter(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL' || extra.has(key(row)))
+  const regression = plannerRegressionKeys(tests, paths)
+  return tests.filter(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL' || extra.has(key(row)) || regression.has(key(row)))
 }
 export const tierRank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
 // Two essential Go shards carry about one full hosted shard each; wider
@@ -498,8 +515,9 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
   if (tests.filter(t => t.kind === 'browser' && web.has(t.file)).length > 300) return full('browser fan-out exceeds 300 cases')
   const reason = 'essential plus changed area and reverse dependencies'
   const extra = affectedLane === 'on' ? behaviourObligation(tests, paths) : new Set()
+  const regression = plannerRegressionKeys(tests, paths)
   return { full: false, reason: risk.reasons.length ? `${reason}; ${risk.reasons.join('; ')}` : reason,
-    tests: tests.filter(t => t.tier === 'ESSENTIAL' || risk.promoted.has(key(t)) || extra.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
+    tests: tests.filter(t => t.tier === 'ESSENTIAL' || regression.has(key(t)) || risk.promoted.has(key(t)) || extra.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
 }
 
 export function measuredWeights(manifest, rows) {
