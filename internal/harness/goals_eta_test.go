@@ -30,7 +30,7 @@ func TestGoalETAHeartbeatAndDirectWriteTransitions(t *testing.T) {
 		return err
 	})
 	lease := "worker-goal-eta-lease-01234567890123456789"
-	session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "goal-eta-worker", lease)
+	session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "goal-eta-worker-0001", lease)
 	a, b := time.Now().Add(time.Hour).UTC().Truncate(time.Second), time.Now().Add(2*time.Hour).UTC().Truncate(time.Second)
 	for i, at := range []time.Time{a, b, a} {
 		f.beat(t, session, lease, i+1, map[string]any{"eta_ready_at": at.Format(time.RFC3339)})

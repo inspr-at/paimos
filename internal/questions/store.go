@@ -233,7 +233,7 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 			return err
 		}
 		stamp, why := suggestion(in)
-		if _, err = tx.Exec(ctx, `INSERT INTO desk_questions(tenant_id,project_id,node_id,input,suggested_outcome,suggestion_reason) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, project, id, body, stamp, why); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO desk_questions(tenant_id,project_id,node_id,input,suggested_outcome,suggestion_reason) VALUES($1,$2,$3,$4::jsonb-'goal_id',$5,$6)`, p.TenantID, project, id, body, stamp, why); err != nil {
 			return err
 		}
 		_, err = addAsker(ctx, tx, p, project, id, in, hash, body, questionMatch{})

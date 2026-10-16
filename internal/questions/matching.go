@@ -51,7 +51,7 @@ func liveAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Princ
 // bypasses the incoming lookup; a subsequently approved Always may be reused.
 func matchQuestion(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, body []byte) (questionMatch, error) {
 	var fingerprint *string
-	if err := tx.QueryRow(ctx, `SELECT CASE WHEN coalesce($1::jsonb->>'anyway_reason','')='' THEN aeon_desk_fingerprint($1::jsonb) END`, body).Scan(&fingerprint); err != nil || fingerprint == nil {
+	if err := tx.QueryRow(ctx, `SELECT CASE WHEN coalesce($1::jsonb->>'anyway_reason','')='' THEN aeon_desk_fingerprint($1::jsonb-'goal_id') END`, body).Scan(&fingerprint); err != nil || fingerprint == nil {
 		return questionMatch{}, err
 	}
 	// Two active records are ambiguous, even if the text looks similar. Limit
