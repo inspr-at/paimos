@@ -129,7 +129,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source
  FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
 ), person_work AS MATERIALIZED (
- SELECT n.id,n.project_id,n.state,n.fields,n.human_check,k.slug,k.field_schema
+ SELECT n.tenant_id,n.id,n.project_id,n.state,n.fields,n.human_check,k.slug,k.field_schema
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  WHERE n.tenant_id=$1 AND n.project_id=ANY($28::uuid[]) AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')
 ), person_definitions AS MATERIALIZED (
