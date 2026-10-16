@@ -24,6 +24,8 @@ import (
 // delivery goes dead, the receipt fails, the message leaves every read path and
 // one system notice reaches the sender (plus the recipient session's
 // coordinator). A late acknowledgement cannot move a failed receipt back.
+// Desk replies are the AEON-1432 exception: no_listener/deadline keep the
+// existing reply pending, including a crash between pickup and confirmation.
 
 // Failure reasons written by the delivery guarantee. Adapter reasons written by
 // the routine dispatcher (http_error, transport_error, ...) remain valid too.
@@ -276,6 +278,17 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 	}
 	if err != nil || acked != nil {
 		return false, err
+	}
+	// Desk answers wait for pickup rather than failing because the agent is
+	// offline. This marker is written only by RecordDeskReply, not by ordinary
+	// sends (whose compat keys are digests). Session-end routing and real adapter
+	// failures keep their existing terminal semantics.
+	if reason == ReasonNoListener || reason == ReasonDeadline {
+		var desk bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_compat_messages c
+ WHERE c.inbox_message_id=$1::uuid AND c.key_digest='desk/'||c.id::text)`, messageID).Scan(&desk); err != nil || desk {
+			return false, err
+		}
 	}
 	var state string
 	var deadline *time.Time

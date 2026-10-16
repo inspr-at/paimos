@@ -108,6 +108,7 @@ type Answer struct {
 	DeliverAfter time.Time `json:"deliver_after"`
 }
 type Pending struct {
+	PickedUpAt        *time.Time `json:"picked_up_at,omitempty"`
 	DoctrineState     string     `json:"doctrine_state,omitempty"`
 	ErrorMessage      string     `json:"error_message,omitempty"`
 	EffectData        EffectData `json:"effect_data,omitempty"`
