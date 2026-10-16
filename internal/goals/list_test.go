@@ -241,6 +241,37 @@ func TestGoalListPageWideProjection(t *testing.T) {
 	if pages != 50 {
 		t.Fatalf("page lost goals: %d", pages)
 	}
+	// A retained serves relation to a deleted reference contributes its project
+	// badge, as on detail, but contributes no key, work leaves or worker ETA.
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'serves')`, f.writer.TenantID, f.workspaceOutcome, f.hiddenTicket); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, f.hiddenTicket)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.reader = f.writer
+	withDeleted := listResult(t, f, m, "?limit=100")
+	found := false
+	for _, g := range withDeleted.Items {
+		if g.ID != f.workspaceGoal {
+			continue
+		}
+		found = true
+		want := detail(t, goalRequest(t.Context(), m, f.reader, "GET", "/api/goals/"+g.ID, "", ""))
+		g.Watermark = want.Watermark
+		a, _ := json.Marshal(g)
+		b, _ := json.Marshal(want)
+		if !reflect.DeepEqual(a, b) {
+			t.Fatalf("deleted-reference list/detail mismatch\n%s\n%s", a, b)
+		}
+	}
+	if !found {
+		t.Fatal("workspace goal with a retained reference disappeared")
+	}
 }
 
 // Risk: independently valid goals exceed the aggregate pair budget, paging

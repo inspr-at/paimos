@@ -34,11 +34,11 @@ func listPageQuery() string {
  ), children AS MATERIALIZED (
  SELECT o.* FROM outcomes o JOIN counts c ON c.id=o.parent_id WHERE c.outcomes<=200
  ), serves AS MATERIALIZED (
- SELECT o.parent_id AS goal,o.id AS outcome,n.id,n.key,n.project_id,k.slug
- FROM children o JOIN node_relations r ON r.source_node_id=o.id AND r.type='serves'
- JOIN nodes n ON n.id=r.target_node_id AND n.deleted_at IS NULL
+ SELECT o.parent_id AS goal,o.id AS outcome,n.id,n.key,n.project_id,k.slug,n.deleted_at IS NOT NULL AS deleted
+ FROM children o CROSS JOIN LATERAL (SELECT target_node_id FROM node_relations WHERE source_node_id=o.id AND type='serves' ORDER BY target_node_id LIMIT 21) r
+ JOIN nodes n ON n.id=r.target_node_id
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- ), work_roots AS MATERIALIZED (SELECT DISTINCT id FROM serves WHERE slug IN ('work','ticket','task','epic')),
+ ), work_roots AS MATERIALIZED (SELECT DISTINCT id FROM serves WHERE NOT deleted AND slug IN ('work','ticket','task','epic')),
  page_scope AS MATERIALIZED (SELECT * FROM aeon_work_scope(ARRAY(SELECT id FROM work_roots))),
  facts(root,id,done,hours,sessions,pr,review,paused,queued,blocked) AS MATERIALIZED (
  WITH scope AS MATERIALIZED (SELECT * FROM page_scope), ` + leafFactsProjectionSQL + `
@@ -113,7 +113,7 @@ func listPageQuery() string {
  UNION ALL SELECT 'child',o.parent_id::text,jsonb_build_object('outcome_node_id',o.id,'key',o.key,'label',o.title,
  'goal_node_id',o.parent_id,'position',o.position::text,'fields',o.fields,
  'ticket_node_ids',ARRAY(SELECT s.id::text FROM serves s WHERE s.outcome=o.id ORDER BY s.id)) FROM children o
- UNION ALL SELECT 'target',s.goal::text,jsonb_build_object('id',s.id,'key',s.key,'project',coalesce(s.project_id::text,''),'work',s.slug IN ('work','ticket','task','epic')) FROM serves s
+ UNION ALL SELECT 'target',s.goal::text,jsonb_build_object('id',s.id,'key',s.key,'project',coalesce(s.project_id::text,''),'work',NOT s.deleted AND s.slug IN ('work','ticket','task','epic'),'deleted',s.deleted) FROM serves s
  UNION ALL SELECT 'fact',f.root::text,to_jsonb(f)-'root' FROM facts f
  UNION ALL SELECT 'root',s.root::text,to_jsonb(count(*)) FROM page_scope s GROUP BY s.root
  UNION ALL SELECT 'eta',e.id::text,jsonb_build_object('live',e.eta_live_at,'ready',e.eta_ready_at,'live_by',e.live_by,'ready_by',e.ready_by) FROM root_eta e
@@ -328,12 +328,15 @@ func (d *listPageData) read(section, id string, raw []byte, w Watermark) error {
 	case "target":
 		var t struct {
 			ID, Key, Project string
-			Work             bool
+			Work, Deleted    bool
 		}
 		if err := json.Unmarshal(raw, &t); err != nil {
 			return err
 		}
-		d.keys[t.ID], d.projects[t.ID], d.work[t.ID] = t.Key, t.Project, t.Work
+		if !t.Deleted {
+			d.keys[t.ID] = t.Key
+		}
+		d.projects[t.ID], d.work[t.ID] = t.Project, t.Work
 	case "fact":
 		var l leafFact
 		if err := json.Unmarshal(raw, &l); err != nil {
