@@ -250,6 +250,9 @@ export type TierSessionDiscovery = readonly HarnessSession[] | { ok: false; sess
 export function tierSessionsFromRefresh(outcome: { ok: boolean }, sessions: readonly HarnessSession[]): TierSessionDiscovery {
   return outcome.ok ? sessions : { ok: false, sessions }
 }
+function unconfirmedDiscovery(value: TierSessionDiscovery): value is { ok: false; sessions?: readonly HarnessSession[] } {
+  return !Array.isArray(value)
+}
 export function nativeTierAdapter(sessions: () => Promise<TierSessionDiscovery>, can: (permission: string, project?: string) => boolean, detail?: (project: string, id: string) => Promise<HarnessSession | undefined>): NonNullable<ProtectedDeskAdapters['tiers']> {
   let records = new Map<string, { session: HarnessSession; tier: SessionTier; request: TierRequest }>()
   return {
@@ -257,11 +260,8 @@ export function nativeTierAdapter(sessions: () => Promise<TierSessionDiscovery>,
       const discovered = await sessions()
       // A plain list is a confirmed discovery. {ok:false} keeps any cached sessions
       // but does not let an empty cache look like a clean capability skip.
-      let known: readonly HarnessSession[]
-      let discoveryFailed = false
-      if (Array.isArray(discovered)) known = discovered
-      else if (discovered && discovered.ok === false) { discoveryFailed = true; known = Array.isArray(discovered.sessions) ? discovered.sessions : [] }
-      else throw new Error('Session discovery did not complete.')
+      const discoveryFailed = unconfirmedDiscovery(discovered)
+      const known = discoveryFailed ? (Array.isArray(discovered.sessions) ? discovered.sessions : []) : discovered
       const available = known.filter(session => session.advertised_capabilities.includes('service_tier_v1'))
       const warnings: string[] = available.length > 30 ? ['Tier history is limited to the first 30 visible sessions; canonical pending requests are read separately.'] : []
       const selected = new Map<string, { project: string; session: HarnessSession | undefined }>(available.slice(0, 30).map(session => [session.id, { project: session.project_id, session }]))
