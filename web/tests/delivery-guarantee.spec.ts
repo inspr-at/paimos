@@ -121,9 +121,14 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(mine).toHaveCount(3)
       await expect(queued).toHaveCount(1)
       await expect(queued).toContainText(messages.at(-1)!.body)
-      await expect(mine.nth(0).locator('.delivery')).toHaveText('Read')
-      await expect(mine.nth(0).locator('.delivery')).toHaveAttribute('data-tip', /^Read by the session · /)
-      await expect(mine.nth(1).locator('.delivery')).toHaveText('Delivered')
+      // AEON-1438: every own post keeps its receipt state; only the latest shows the word.
+      // This latest thread post is the failure, so earlier Read and Delivered stay on the row and Not delivered stays loud.
+      const words = panel.locator('.session-messages .delivery')
+      await expect(mine.nth(0)).toHaveAttribute('data-receipt', 'read')
+      await expect(mine.nth(0).locator('.delivery')).toHaveCount(0)
+      await expect(mine.nth(1)).toHaveAttribute('data-receipt', 'delivered')
+      await expect(mine.nth(1).locator('.delivery')).toHaveCount(0)
+      await expect(words).toHaveCount(0)
       // Main's compact receipt names the terminal state; its explanation and Retry stay explicit.
       await expect(mine.nth(2).locator('.undelivered > span')).toHaveText('Not delivered')
       await expect(mine.nth(2).locator('.undelivered')).toHaveAttribute('data-status', 'not_delivered')
@@ -143,12 +148,17 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(queued).toHaveCount(0)
       await expect(mine).toHaveCount(4)
       await expect(mine.nth(3).locator('.delivery')).toHaveText('Delivered')
+      await expect(mine.nth(3).locator('.delivery')).toHaveAttribute('data-tip', /^Delivered to the session · /)
+      await expect(words).toHaveCount(1)
+      await expect(mine.nth(0).locator('.delivery')).toHaveCount(0)
       const reread = asked.slice(before).flat()
       expect(reread).toContain(last)
       expect(reread).not.toContain(messages[0]!.id) // Read is final.
       statuses[last] = 'read'
       await signal(page, 'inbox.receipt_handed_off')
       await expect(mine.nth(3).locator('.delivery.read')).toHaveText('Read')
+      await expect(mine.nth(3).locator('.delivery.read')).toHaveAttribute('data-tip', /^Read by the session · /)
+      await expect(words).toHaveCount(1)
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true)
     })
   }
