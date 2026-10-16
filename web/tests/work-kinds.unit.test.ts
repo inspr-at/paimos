@@ -194,7 +194,7 @@ function settingsRouter(): Router {
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: vi.fn(async () => {}) }) },
     './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
-    './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/identityScope': {}, './lib/signInReturn': {},
+    './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': {},
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
     './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },
   }).router

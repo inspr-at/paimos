@@ -28,6 +28,7 @@ import ProjectBulkBar from '../components/projects/ProjectBulkBar.vue'
 import ProjectCards from '../components/projects/ProjectCards.vue'
 import ProjectList, { type ProjectSection } from '../components/projects/ProjectList.vue'
 import NewProjectSheet from '../components/projects/NewProjectSheet.vue'
+import { heldDraft, type HeldDraft } from '../lib/importDraft'
 
 // Each sort has its icon; the Display button shows the current one (AEON-174).
 type SortKey = 'activity' | 'name' | 'open' | 'progress' | 'custom'
@@ -48,6 +49,13 @@ const newProjectOpen = ref(false)
 watch([() => scopeOwner(session.identity), () => can('nodes.write')], () => { newProjectOpen.value = false }, { flush: 'sync' })
 const route = useRoute()
 const router = useRouter()
+// AEON-1441: /new-project is the assistant for a conversation handed over from
+// START, over this page. The router already moved its capability out of the
+// address; the sheet reads what this tab holds, once per arrival.
+const fromStart = computed(() => route.path === '/new-project')
+const startDraft = ref<HeldDraft | null>(null), startGeneration = ref(0)
+watch(fromStart, open => { if (open) { startDraft.value = heldDraft(); startGeneration.value++ } }, { immediate: true, flush: 'sync' })
+function closeStart() { if (fromStart.value) void router.replace('/') }
 // The person's view of this page: List or Cards and the list's columns. Their own
 // order of projects (the Custom sort) has a key of its own, so saving one never
 // overwrites the other.
@@ -866,7 +874,8 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
       <p v-if="store.loaded" class="summary">{{ plural(active.length, 'project') }} · {{ plural(openTotal, 'open ticket') }}</p>
       <p v-else class="summary"><span class="skeleton summary-skeleton" /></p>
     </header>
-    <NewProjectSheet v-if="newProjectOpen" @close="newProjectOpen = false" />
+    <NewProjectSheet v-if="newProjectOpen && !fromStart" @close="newProjectOpen = false" />
+    <NewProjectSheet v-if="fromStart" :key="startGeneration" :draft="startDraft" @close="closeStart" />
 
     <div ref="listCard" class="projects-card glass-card">
       <div class="projects-toolbar">
