@@ -76,12 +76,17 @@ type Config struct {
 	DoctrineGateLogin        string
 	DoctrineDCOAcknowledged  bool
 	DeliveryAdmissionEnabled bool
-	ReviewAppID              string
-	ReviewInstallationID     string
-	ReviewAppKeyFile         string
-	ReviewAppTenantID        string
-	ReviewAppRepository      string
-	ReviewWebhookSecret      []byte // Host-owned HMAC key; never logged or tenant-writable.
+	// DeliveryAdmissionQueue starts enqueue, dequeue, quarantine and queue Desk
+	// notices. Status publication does not use it. Off unless the env value is
+	// exactly "true", so a deploy can publish aeon/admission before the App has
+	// pull_requests:write and contents:write.
+	DeliveryAdmissionQueue bool
+	ReviewAppID            string
+	ReviewInstallationID   string
+	ReviewAppKeyFile       string
+	ReviewAppTenantID      string
+	ReviewAppRepository    string
+	ReviewWebhookSecret    []byte // Host-owned HMAC key; never logged or tenant-writable.
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -111,6 +116,7 @@ func FromEnv() (Config, error) {
 		DoctrineGateLogin:        os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
 		DoctrineDCOAcknowledged:  os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
 		DeliveryAdmissionEnabled: os.Getenv("AEON_DELIVERY_ADMISSION_ENABLED") == "true",
+		DeliveryAdmissionQueue:   os.Getenv("AEON_DELIVERY_ADMISSION_QUEUE") == "true",
 		ReviewAppID:              os.Getenv("AEON_REVIEW_APP_ID"),
 		ReviewInstallationID:     os.Getenv("AEON_REVIEW_INSTALLATION_ID"),
 		ReviewAppKeyFile:         os.Getenv("AEON_REVIEW_APP_KEY_FILE"),

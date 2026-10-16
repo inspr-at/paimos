@@ -3,20 +3,39 @@
 # Merge-queue admission publisher
 
 P3 connects the P2 admission evaluator to explicit GitHub queue operations and
-one durable `aeon/admission` publisher. It ships disabled. The host setting
-`AEON_DELIVERY_ADMISSION_ENABLED=true` enables the worker for the repository and
-tenant already bound by `AEON_REVIEW_APP_*`. OPS provisions the App and configures
-its private key path; the code reuses the existing configured-path reader. No
-App provisioning, ruleset cutover, bypass grant or deployment is part of P3.
+one durable `aeon/admission` publisher. It ships disabled. Two host switches
+select what runs. Both default off. Only the exact value `true` enables a
+switch. OPS provisions the App and configures its private key path; the code
+reuses the existing configured-path reader. No App provisioning, ruleset
+cutover, bypass grant or deployment is part of this change.
 
-The App adapter accepts only admission statuses and explicit enqueue/dequeue.
-Enqueue sends `enqueuePullRequest(expectedHeadOid)` with the admitted PR head.
-The adapter requests repository-limited installation tokens, checks the granted
-repository and exact permission set, and revokes tokens after use. Queue calls
-request `pull_requests:write`, `contents:write`, and `metadata:read`; status calls
-request `statuses:read/write` and `metadata:read`. The existing observation
-channel keeps its independent read-only token. No production GitHub writes run
-in tests.
+`AEON_DELIVERY_ADMISSION_ENABLED=true` starts the status publisher and
+reconciler for the repository and tenant already bound by `AEON_REVIEW_APP_*`.
+That lane posts and re-reads only `aeon/admission`. It does not enqueue,
+dequeue, quarantine, or open a queue Desk notice.
+
+`AEON_DELIVERY_ADMISSION_QUEUE=true` also starts the queue lane. Leave it unset
+until the App grant includes the queue write permissions below. With it off the
+queue lane never starts: no installation token asks for `pull_requests:write`
+or `contents:write`, nothing calls enqueue or dequeue, and a required failure
+does not quarantine the head or open a queue Desk notice. A hold during a
+merge-group build is published as `aeon/admission=failure` on that group SHA.
+The harness keeps the enqueue (`expectedHeadOid` = the reviewed head). With the
+switch on, enqueue, dequeue, quarantine and the queue Desk notice behave as P3.
+
+The App adapter accepts only admission statuses and, when the queue switch is
+on, explicit enqueue/dequeue. Enqueue sends `enqueuePullRequest(expectedHeadOid)`
+with the admitted PR head. The adapter requests repository-limited installation
+tokens, checks the granted repository and exact permission set, and revokes
+tokens after use. The existing observation channel keeps its independent
+read-only token. No production GitHub writes run in tests.
+
+App permissions each mode needs:
+
+| Mode | Installation token scopes |
+| --- | --- |
+| Status only (`AEON_DELIVERY_ADMISSION_ENABLED=true`, queue switch off) | Status read or write: `statuses` `read` or `write`, plus `metadata:read`. Merge-group membership cross-check stays a read: `pull_requests:read`, `contents:read`, `metadata:read`. No `pull_requests:write`. No `contents:write`. |
+| Queue lane as well (`AEON_DELIVERY_ADMISSION_QUEUE=true`) | Everything above, plus enqueue and dequeue: `pull_requests:write`, `contents:write`, `metadata:read`. |
 
 A merge-group webhook cross-checks synthetic commit ancestry with the live
 GitHub queue prefix (read again after REST resolution), resolves every preceding
@@ -49,7 +68,7 @@ resumes pending rows. The 30s read is limited to active groups and the current
 heads of open pulls. Merged heads and destroyed groups are retired and keep their
 last confirmed state, so a merge does not paint `aeon/admission=failure` onto main.
 Matching confirmed states avoid another POST,
-preserving GitHub status limits. The queue lane wakes from the dirty trigger.
+preserving GitHub status limits. When the queue switch is on, the queue lane wakes from the dirty trigger.
 A head that stays queued is read at most once a minute, the confirming read is
 skipped when no enqueue or dequeue ran, and one installation token covers every
 read in that pass. Timestamp-only observations and the publisher’s
@@ -81,6 +100,8 @@ infrastructure retry.
 | Unchanged P2 observations seed intent after upgrade; partial queue sightings retain group identity without authorizing it | `TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem` |
 | Unresolved membership fails closed and stays retryable | `TestAdmissionUnknownGroupMembershipFailsClosed` |
 | App pins head/context/repository and rejects wrong grants, changed heads and GraphQL errors | `TestAdmissionAppPinsHeadContextAndRepository` |
+| Queue switch off: harness enqueue, merge group, hold during the build, then merge posts failure on the group SHA and makes no queue call or write scope beyond statuses | `TestAdmissionStatusOnlyPublishesHoldOnGroupWithoutQueue` |
+| Queue switch on selects the P3 queue lane; off selects status only | `TestAdmissionQueueSwitchSelectsLane` |
 
 All publisher interleavings use barriers or cancellation, without sleeps.
 Migration 1359 adds two tenant-isolated tables, nullable retirement and queue

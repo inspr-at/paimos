@@ -179,6 +179,42 @@ func TestStatusAutopilotServerMode(t *testing.T) {
 	}
 }
 
+func TestDeliveryAdmissionQueueDefaultsOff(t *testing.T) {
+	// Risk: a mistyped or empty queue switch starts enqueue and asks for
+	// pull_requests:write before the App grant exists.
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "dev")
+	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
+	t.Setenv("AEON_DELIVERY_ADMISSION_ENABLED", "")
+	t.Setenv("AEON_DELIVERY_ADMISSION_QUEUE", "")
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeliveryAdmissionEnabled || cfg.DeliveryAdmissionQueue {
+		t.Fatal("admission switches must default off")
+	}
+	t.Setenv("AEON_DELIVERY_ADMISSION_ENABLED", "true")
+	for _, raw := range []string{"false", "TRUE", "1", "yes"} {
+		t.Setenv("AEON_DELIVERY_ADMISSION_QUEUE", raw)
+		cfg, err = FromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.DeliveryAdmissionEnabled || cfg.DeliveryAdmissionQueue {
+			t.Fatalf("queue switch %q enabled the lane", raw)
+		}
+	}
+	t.Setenv("AEON_DELIVERY_ADMISSION_QUEUE", "true")
+	cfg, err = FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DeliveryAdmissionEnabled || !cfg.DeliveryAdmissionQueue {
+		t.Fatal("exact true did not enable the queue lane")
+	}
+}
+
 func TestFromEnvOverrides(t *testing.T) {
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")

@@ -5462,6 +5462,8 @@
     ,
     {"kind":"go","package":"internal/config","name":"TestChatEnabledFromEnv","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/config","name":"TestDeliveryAdmissionQueueDefaultsOff","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/config","name":"TestDoctrineBinaryAllowlist","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/config","name":"TestDoctrineGuardKey","tier":"GATED-FULL"}
@@ -5922,9 +5924,13 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueRejectsStaleGreenReadAfterCurrentFactsChange","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueSwitchSelectsLane","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionReconcileLeavesMergedSHAUnchanged","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionRules","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionStatusOnlyPublishesHoldOnGroupWithoutQueue","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionSteadyQueuedEntryBoundsReads","tier":"ESSENTIAL"}
     ,

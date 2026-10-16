@@ -27,6 +27,14 @@ type AdmissionGitHub interface {
 
 func (m *Module) WithAdmission(g AdmissionGitHub) *Module { m.admissionGitHub = g; return m }
 
+// WithAdmissionQueue enables the enqueue/dequeue lane. The zero value leaves
+// that lane stopped: status publication still runs, and nothing requests
+// pull_requests:write or contents:write.
+func (m *Module) WithAdmissionQueue(enabled bool) *Module {
+	m.admissionQueue = enabled
+	return m
+}
+
 type admissionMember struct {
 	PR       int64  `json:"pr"`
 	Head     string `json:"head"`
@@ -220,19 +228,46 @@ func (m *Module) publishAdmission(ctx context.Context, sha string) error {
 	return fmt.Errorf("admission publication remains unconfirmed")
 }
 
+// admissionLane is one pass the admission worker repeats. "status" publishes
+// aeon/admission. "queue" enqueues, dequeues, quarantines and opens Desk notices.
+type admissionLane struct {
+	name string
+	run  func(context.Context) error
+}
+
+// admissionLanes is the worker's pass list. The queue lane is absent unless
+// the host set AEON_DELIVERY_ADMISSION_QUEUE. Status publication does not
+// depend on it.
+func (m *Module) admissionLanes() []admissionLane {
+	if m.admissionGitHub == nil {
+		return nil
+	}
+	status := admissionLane{"status", m.reconcileAdmission}
+	if !m.admissionQueue {
+		return []admissionLane{status}
+	}
+	return []admissionLane{{"queue", m.reconcileAdmissionQueue}, status}
+}
+
 // RunAdmission is opt-in host configuration, independent of P4's ruleset cutover.
 // A new process resumes all pending rows; confirmed rows are also reconciled to
 // repair delayed HTTP outcomes or writes by an obsolete external publisher.
+// With the queue switch off, only the status lane starts.
 func (m *Module) RunAdmission(ctx context.Context) {
-	if m.admissionGitHub == nil {
+	lanes := m.admissionLanes()
+	switch len(lanes) {
+	case 0:
 		return
+	case 1:
+		m.runAdmissionLane(ctx, lanes[0].run)
+	default:
+		// Queue removal is the enforcement lane. A stalled status publisher must
+		// never delay it or spend the time budget needed to confirm a removal.
+		done := make(chan struct{})
+		go func() { defer close(done); m.runAdmissionLane(ctx, lanes[0].run) }()
+		m.runAdmissionLane(ctx, lanes[1].run)
+		<-done
 	}
-	// Queue removal is the enforcement lane. A stalled status publisher must
-	// never delay it or spend the time budget needed to confirm a removal.
-	done := make(chan struct{})
-	go func() { defer close(done); m.runAdmissionLane(ctx, m.reconcileAdmissionQueue) }()
-	m.runAdmissionLane(ctx, m.reconcileAdmission)
-	<-done
 }
 func (m *Module) runAdmissionLane(ctx context.Context, run func(context.Context) error) {
 	tick := time.NewTicker(5 * time.Second)
