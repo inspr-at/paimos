@@ -14244,6 +14244,14 @@
     ,
     {"kind":"browser","file":"tests/ticket-graph-view.spec.ts","name":"status, priority, type and search use the Tickets query","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/ticket-key-nowrap.spec.ts","name":"ticket keys stay on one line in the list and child rows at 1440px in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-key-nowrap.spec.ts","name":"ticket keys stay on one line in the list and child rows at 320px in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-key-nowrap.spec.ts","name":"ticket keys stay on one line in the list and child rows at 360px in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/ticket-key-nowrap.spec.ts","name":"ticket keys stay on one line in the list and child rows at 390px in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/ticket-outcomes.spec.ts","name":"a ticket with no outcomes leaves the section out","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/ticket-outcomes.spec.ts","name":"outcomes stay inside the ticket panel at phone and desk widths","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"GATED-FULL"}

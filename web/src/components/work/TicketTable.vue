@@ -1549,8 +1549,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .table-card.customised.selectable .tickets .ticket-row { grid-template-columns: 44px minmax(0, 1fr); }
   .table-card.customised .ticket-row td { grid-area: auto; min-width: 0; justify-self: stretch; }
   /* Copy remains a complete, separate touch target even while checks take
-     the first column. Long project keys wrap instead of escaping the card. */
-  .key-btn { min-width: 44px; min-height: 44px; height: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+     the first column. The key reads as one piece and never breaks at its
+     hyphen (AEON-1379); its column takes the whole key and the title gives way. */
+  .key-btn { flex: none; min-width: 44px; min-height: 44px; height: auto; max-width: 100%; text-align: left; }
   .table-card.customised.selectable .ticket-row td { grid-column: 2; }
   .table-card.customised.selectable .ticket-row .c-check { grid-column: 1; grid-row: 1 / span 2; }
   .table-card.customised .ticket-row td[data-column-label] {
