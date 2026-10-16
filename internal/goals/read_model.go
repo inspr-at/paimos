@@ -35,7 +35,16 @@ type Waits struct {
 	Count       int      `json:"count"`
 	QuestionIDs []string `json:"question_ids"`
 }
+type HandedOver struct {
+	OutcomeID string `json:"outcome_id"`
+	Label     string `json:"label"`
+	Detail    string `json:"detail"`
+	At        string `json:"at"`
+	By        string `json:"by"`
+}
+
 type GoalProgress struct {
+	OverrideNote            string `json:"override_note,omitempty"`
 	Pct                     int    `json:"pct"`
 	ComputedPct             int    `json:"computed_pct"`
 	Source                  string `json:"source"`
@@ -62,25 +71,26 @@ type OutcomeView struct {
 	HandedOver bool         `json:"handed_over"`
 }
 type GoalView struct {
-	ID        string         `json:"id"`
-	Key       string         `json:"key"`
-	Title     string         `json:"title"`
-	Kind      string         `json:"kind"`
-	ProjectID *string        `json:"project_id"`
-	Workspace bool           `json:"workspace"`
-	Expansion string         `json:"expansion"`
-	Counts    Counts         `json:"counts"`
-	Items     []OutcomeView  `json:"items,omitempty"`
-	Steps     []Step         `json:"steps"`
-	NextStep  *Step          `json:"next_step"`
-	Projects  []ProjectBadge `json:"projects"`
-	Waits     Waits          `json:"waits"`
-	Progress  *GoalProgress  `json:"progress,omitempty"`
-	ETA       *EffectiveETA  `json:"eta,omitempty"`
-	Passed    *bool          `json:"passed,omitempty"`
-	States    *StateCounts   `json:"states,omitempty"`
-	Done      *bool          `json:"done,omitempty"`
-	Stall     *Stall         `json:"stall,omitempty"`
+	ID         string         `json:"id"`
+	Key        string         `json:"key"`
+	Title      string         `json:"title"`
+	Kind       string         `json:"kind"`
+	ProjectID  *string        `json:"project_id"`
+	Workspace  bool           `json:"workspace"`
+	Expansion  string         `json:"expansion"`
+	Counts     Counts         `json:"counts"`
+	Items      []OutcomeView  `json:"items,omitempty"`
+	Steps      []Step         `json:"steps"`
+	NextStep   *Step          `json:"next_step"`
+	Projects   []ProjectBadge `json:"projects"`
+	Waits      Waits          `json:"waits"`
+	Progress   *GoalProgress  `json:"progress,omitempty"`
+	ETA        *EffectiveETA  `json:"eta,omitempty"`
+	Passed     *bool          `json:"passed,omitempty"`
+	States     *StateCounts   `json:"states,omitempty"`
+	Done       *bool          `json:"done,omitempty"`
+	Stall      *Stall         `json:"stall,omitempty"`
+	HandedOver *HandedOver    `json:"handed_over,omitempty"`
 	Watermark
 	created        time.Time
 	movingProjects []string
@@ -275,6 +285,9 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 				leaves = append(leaves, LeafEstimate{l.ID, l.Hours})
 			}
 		}
+		if f.HandedOver {
+			out.HandedOver = &HandedOver{OutcomeID: n.ID, Label: n.Title, Detail: fieldString(n, "handed_over_detail"), At: fieldString(n, "handed_over_at"), By: fieldString(n, "handed_over_by")}
+		}
 		state := DeriveState(f)
 		switch state.State {
 		case Moving:
@@ -305,6 +318,7 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 		progress.Pct = int(pct)
 		progress.Source = "override"
 		progress.OverrideBy = fieldString(out.node, "progress_override_by")
+		progress.OverrideNote = fieldString(out.node, "progress_override_note")
 		progress.OverrideAt = fieldString(out.node, "progress_override_at")
 	}
 	done := len(children) > 0 && states.Done == len(children)

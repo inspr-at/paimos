@@ -190,7 +190,7 @@ func encodeGoalCursor(c goalCursor) string {
 }
 func decodeGoalCursor(raw string) (goalCursor, error) {
 	var c goalCursor
-	if len(raw) > 2048 {
+	if len(raw) > 4096 {
 		return c, invalid("cursor", "too long")
 	}
 	b, err := base64.RawURLEncoding.DecodeString(raw)

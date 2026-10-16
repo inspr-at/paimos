@@ -168,14 +168,7 @@ func createTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, key string, in
 	if err != nil {
 		return out, err
 	}
-	pending := []events.Change{}
-	for _, c := range changes {
-		typ := "kind.created"
-		if c.Before != nil {
-			typ = "kind.updated"
-		}
-		pending = append(pending, events.Change{Type: typ, Before: c.Before, After: c.After})
-	}
+	pending := kindEvents(changes)
 	pending = append(pending, events.Change{NodeID: &n.ID, Type: "goal.created", After: map[string]any{"id": n.ID, "key": n.Key, "title": n.Title}})
 	return finishWrite(ctx, tx, p, key, http.MethodPost, n, hash, pending)
 }
@@ -272,4 +265,16 @@ func addChanges(pending *[]events.Change, before *storedNode, after storedNode) 
 		b = *before
 	}
 	*pending = append(*pending, events.Change{NodeID: &after.ID, Type: "goal.items_changed", Before: b, After: after})
+}
+
+func kindEvents(changes []kindChange) []events.Change {
+	pending := []events.Change{}
+	for _, c := range changes {
+		typ := "kind.created"
+		if c.Before != nil {
+			typ = "kind.updated"
+		}
+		pending = append(pending, events.Change{Type: typ, Before: c.Before, After: c.After})
+	}
+	return pending
 }

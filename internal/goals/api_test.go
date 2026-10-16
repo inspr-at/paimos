@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -275,5 +276,66 @@ func TestGoalProjectWriterUpdatesOnlyVisibleOutcomes(t *testing.T) {
 	var note string
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT fields->>'note' FROM nodes WHERE tenant_id=$1 AND id=$2`, f.writer.TenantID, f.outcome).Scan(&note); err != nil || note != "updated in project" {
 		t.Fatalf("visible write %q %v", note, err)
+	}
+}
+
+// Risk: an existing release cannot receive its first outcome before any goal
+// create has seeded kinds, or a tenant kind edit permanently breaks updates.
+func TestGoalReleaseFirstUpdateRestoresKinds(t *testing.T) {
+	d := dbtest.Open(t)
+	p := tenant.Principal{Kind: tenant.Person}
+	var release string
+	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('release-first-goals','Release goals') RETURNING id::text`).Scan(&p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Builder') RETURNING id::text`, p.TenantID).Scan(&p.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, p.TenantID, p.ID, "admin")
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
+		project := fixtureNode(t, tx, p.TenantID, "project", "PROJ-1", "", nil)
+		release = fixtureNode(t, tx, p.TenantID, "release", "REL-1", project, nil)
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY['work']::text[] WHERE slug='release'`)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &module{d.App, func() time.Time { return apiClock }}
+	readWriteResult(t, goalRequest(t.Context(), m, p, "PATCH", "/api/goals/"+release, "release-first", `{"items":{"upsert":[{"ref":"first","label":"First"}]}}`), 200)
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY['work']::text[] WHERE tenant_id=$1 AND slug='release'`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	readWriteResult(t, goalRequest(t.Context(), m, p, "PATCH", "/api/goals/"+release, "release-repair", `{"items":{"upsert":[{"ref":"first","note":"after kind edit"}]}}`), 200)
+	var kinds int
+	var children []string
+	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM node_kinds WHERE tenant_id=$1 AND slug IN ('goal','outcome')`, p.TenantID).Scan(&kinds); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Admin.QueryRow(t.Context(), `SELECT allowed_child_kinds FROM node_kinds WHERE tenant_id=$1 AND slug='release'`, p.TenantID).Scan(&children); err != nil {
+		t.Fatal(err)
+	}
+	if kinds != 2 || !slices.Contains(children, "work") || !slices.Contains(children, "outcome") {
+		t.Fatalf("lazy release kinds %d %v", kinds, children)
+	}
+}
+
+// Risk: the goal's handover summary leaks a hidden outcome, or a second marker
+// silently replaces the existing handover without an explicit clear.
+func TestGoalHandedOverReadAndConflict(t *testing.T) {
+	f := writerFixture(t)
+	path := "/api/goals/" + f.goal
+	readWriteResult(t, apiRequest(t, f, "PATCH", path, "handover-one", `{"items":{"handed_over":{"ref":"visible","detail":"Plan retained"}}}`), 200)
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	g := detail(t, goalRequest(t.Context(), m, f.reader, "GET", path, "", ""))
+	if g.HandedOver == nil || g.HandedOver.OutcomeID != f.outcome || g.HandedOver.Detail != "Plan retained" || g.HandedOver.By != f.writer.ID {
+		t.Fatalf("handover %+v", g.HandedOver)
+	}
+	readWriteResult(t, apiRequest(t, f, "PATCH", path, "handover-two", `{"items":{"handed_over":{"ref":"keyless"}}}`), 409)
+	readWriteResult(t, apiRequest(t, f, "PATCH", path, "handover-clear", `{"items":{"handed_over":null}}`), 200)
+	readWriteResult(t, apiRequest(t, f, "PATCH", path, "handover-hidden", `{"items":{"handed_over":{"ref":"hidden","detail":"Hidden handover sentinel"}}}`), 200)
+	g = detail(t, goalRequest(t.Context(), m, f.reader, "GET", path, "", ""))
+	if g.HandedOver != nil {
+		t.Fatalf("hidden handover %+v", g.HandedOver)
 	}
 }

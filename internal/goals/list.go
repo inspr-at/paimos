@@ -3,6 +3,8 @@ package goals
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"slices"
 	"sort"
@@ -68,7 +70,8 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, invalid("hide_done", "must be true or false"))
 		return
 	}
-	queryKey := strings.Join([]string{project, group, search, state, q.Get("hide_done"), sortBy, dir}, "\x00")
+	queryDigest := sha256.Sum256([]byte(strings.Join([]string{project, group, search, state, q.Get("hide_done"), sortBy, dir}, "\x00")))
+	queryKey := hex.EncodeToString(queryDigest[:])
 	var cursor *goalCursor
 	if raw := q.Get("cursor"); raw != "" {
 		c, e := decodeGoalCursor(raw)

@@ -74,11 +74,15 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 			return out, fail(409, "if_read_through: goal changed")
 		}
 	}
+	_, kindChanges, err := ensureKinds(ctx, tx, p.TenantID)
+	if err != nil {
+		return out, err
+	}
 	capture, err := CaptureGoalETAs(ctx, tx, ids)
 	if err != nil {
 		return out, err
 	}
-	pending := []events.Change{}
+	pending := kindEvents(kindChanges)
 	before := cloneNode(target)
 	setETA(&target, in.ETA, p, now)
 	setField(target.Fields, "steps", in.Steps)
