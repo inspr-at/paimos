@@ -3,8 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import * as zlib from 'node:zlib';
 import { root, sha256 } from './build-image-inputs.mjs';
 import { secondsBetween } from './release-timing.mjs';
+import { apkVersion, parseRuntimeApkPins } from './runtime-apk-pins.mjs';
 
 export const runtimeRecipe = 'scripts/Dockerfile.runtime';
 
@@ -17,7 +19,7 @@ function jsonFile(path) {
   if (!info.isFile() || info.size > 4 * 1024 * 1024) throw new Error('invalid or oversized OCI JSON');
   return readFileSync(path);
 }
-export function runtimeManifest(directory, platform) {
+function runtimeRecord(directory, platform) {
   if (!/^linux\/(amd64|arm64)$/.test(platform)) throw new Error('invalid OCI platform');
   const matches = [];
   let visited = 0;
@@ -36,7 +38,7 @@ export function runtimeManifest(directory, platform) {
       const configRaw = jsonFile(join(directory, 'blobs/sha256', configID.slice(7)));
       if (`sha256:${sha256(configRaw)}` !== configID || configRaw.length !== value.config.size) throw new Error('OCI config digest or size mismatch');
       const config = JSON.parse(configRaw);
-      if (`${config.os}/${config.architecture}` === platform) matches.push({ digest: id, config_digest: configID });
+      if (`${config.os}/${config.architecture}` === platform) matches.push({ digest: id, config_digest: configID, layers: value.layers });
     } else throw new Error('invalid OCI manifest');
   }
   const index = JSON.parse(jsonFile(join(directory, 'index.json')));
@@ -44,6 +46,10 @@ export function runtimeManifest(directory, platform) {
   for (const entry of index.manifests) visit(entry, 0);
   if (matches.length !== 1) throw new Error('expected exactly one runtime platform manifest');
   return matches[0];
+}
+export function runtimeManifest(directory, platform) {
+  const record = runtimeRecord(directory, platform);
+  return { digest: record.digest, config_digest: record.config_digest };
 }
 // Layer diff IDs hash the uncompressed layers, so they identify the runtime
 // bytes independently of how an exporter compressed or wrapped them.
@@ -57,14 +63,87 @@ export function runtimeClosure(directory, platform) {
 // What this build's runtime consists of: the bytes of the prepared layout and
 // the recipe they came from. Every build prepares its own closure, so these
 // digests are the record of what one release shipped.
+// The marker is its own small layer, written after the package install, so
+// evidence can read the exact APK without unpacking the Chromium layer.
+const CHROMIUM_MARKER = 'etc/aeon-chromium-apk';
+const MAX_MARKER_LAYER = 1024 * 1024;
+
+function layerBytes(directory, descriptor) {
+  if (typeof descriptor?.size !== 'number' || !Number.isInteger(descriptor.size) || descriptor.size < 0) throw new Error('invalid OCI layer');
+  if (descriptor.size > MAX_MARKER_LAYER) return null;
+  const id = digest(descriptor.digest);
+  const path = join(directory, 'blobs/sha256', id.slice(7));
+  const info = lstatSync(path);
+  if (!info.isFile() || info.size !== descriptor.size) throw new Error('OCI layer digest or size mismatch');
+  const raw = readFileSync(path);
+  if (`sha256:${sha256(raw)}` !== id) throw new Error('OCI layer digest or size mismatch');
+  const media = String(descriptor.mediaType || '');
+  if (media.includes('zstd') || (raw.length >= 4 && raw[0] === 0x28 && raw[1] === 0xb5 && raw[2] === 0x2f && raw[3] === 0xfd)) {
+    if (typeof zlib.zstdDecompressSync !== 'function') throw new Error('chromium marker layer is zstd');
+    return zlib.zstdDecompressSync(raw, { maxOutputLength: MAX_MARKER_LAYER });
+  }
+  if (media.includes('gzip') || (raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b)) return zlib.gunzipSync(raw, { maxOutputLength: MAX_MARKER_LAYER });
+  return raw;
+}
+function markerFromTar(bytes) {
+  let offset = 0;
+  let entries = 0;
+  let found = null;
+  while (offset + 512 <= bytes.length) {
+    if (++entries > 10_000) throw new Error('tar exceeds bounds');
+    const header = bytes.subarray(offset, offset + 512);
+    if (header.every(byte => byte === 0)) break;
+    const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
+    const size = parseInt(header.subarray(124, 136).toString('utf8').replace(/\0.*$/s, '').trim(), 8);
+    if (!Number.isInteger(size) || size < 0 || offset + 512 + size > bytes.length) throw new Error('invalid tar entry');
+    const type = header[156];
+    offset += 512;
+    const data = bytes.subarray(offset, offset + size);
+    offset += Math.ceil(size / 512) * 512;
+    const path = name.replace(/^\.?\//, '');
+    // Regular file: ustar type '0' or the legacy NUL typeflag.
+    if ((type === 0 || type === 48) && path === CHROMIUM_MARKER) {
+      if (data.length > 128) throw new Error('chromium marker exceeds bounds');
+      found = data;
+    }
+  }
+  return found;
+}
+function installedChromium(directory, layers, allow) {
+  if (layers.length === 0) return null;
+  if (layers.length > 127) throw new Error('OCI manifest has too many layers');
+  let found = null;
+  for (const layer of layers) {
+    const bytes = layerBytes(directory, layer);
+    if (!bytes) continue;
+    const text = markerFromTar(bytes);
+    if (text == null) continue;
+    const version = text.toString('utf8').replace(/\n$/, '');
+    if (!apkVersion.test(version) || !allow.includes(version)) throw new Error(`installed chromium ${apkVersion.test(version) ? version : 'invalid'} is not on the allow-list`);
+    found = version;
+  }
+  if (!found) throw new Error('runtime closure has no installed chromium record');
+  return found;
+}
 export function runtimeEvidence(directory, platform, cwd = root) {
-  return { platform, ...runtimeClosure(directory, platform), recipe_sha256: sha256(readFileSync(join(cwd, runtimeRecipe))) };
+  const closure = runtimeClosure(directory, platform);
+  const recipe = readFileSync(join(cwd, runtimeRecipe));
+  const evidence = { platform, ...closure, recipe_sha256: sha256(recipe) };
+  const layers = runtimeRecord(directory, platform).layers;
+  // Synthetic layouts have no layer blobs. A real closure must name the APK it installed.
+  if (layers.length === 0) return evidence;
+  const version = installedChromium(directory, layers, parseRuntimeApkPins(recipe.toString('utf8')).chromium);
+  evidence.chromium_apk = version;
+  return evidence;
 }
 export function runtimeSummary(evidence) {
-  return ['', `### Runtime closure (${evidence.platform})`, '',
+  const lines = ['', `### Runtime closure (${evidence.platform})`, '',
     `- runtime manifest: \`${evidence.digest}\``, `- config: \`${evidence.config_digest}\``,
     `- layer diff IDs: ${evidence.diff_ids.map(id => `\`${id}\``).join(', ')}`,
-    `- recipe \`${runtimeRecipe}\` sha256 \`${evidence.recipe_sha256}\``, ''].join('\n');
+    `- recipe \`${runtimeRecipe}\` sha256 \`${evidence.recipe_sha256}\``];
+  if (evidence.chromium_apk) lines.push(`- installed chromium: \`${evidence.chromium_apk}\``);
+  lines.push('');
+  return lines.join('\n');
 }
 // Raw registry manifest bytes, bounded in size and time. Read-only.
 export function inspectRaw(reference, spawn = spawnSync) {
@@ -107,7 +186,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (mode === 'runtime') {
       const result = runtimeEvidence(path, platform);
       // digest binds the later steps; runtime_<arch> is this leg's job output.
-      if (process.env.GITHUB_OUTPUT) writeFileSync(process.env.GITHUB_OUTPUT, `digest=${result.digest}\nruntime_${platform.split('/')[1]}=${result.digest}\n`, { flag: 'a' });
+      if (process.env.GITHUB_OUTPUT) writeFileSync(process.env.GITHUB_OUTPUT, `digest=${result.digest}\nruntime_${platform.split('/')[1]}=${result.digest}\n${result.chromium_apk ? `chromium_apk=${result.chromium_apk}\n` : ''}`, { flag: 'a' });
       if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, runtimeSummary(result), { flag: 'a' });
       console.log(JSON.stringify(result));
     } else if (mode === 'start') writeFileSync(path, new Date().toISOString() + '\n');

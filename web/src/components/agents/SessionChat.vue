@@ -11,7 +11,7 @@ import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
-import SessionRequests from './SessionRequests.vue'
+import ChatReferences from './ChatReferences.vue'
 import SessionQuestion from './SessionQuestion.vue'
 import type { Question } from '../../lib/decisionDeskApi'
 import ChatLiveBlock from './ChatLiveBlock.vue'
@@ -107,8 +107,17 @@ const steerMode = computed(() => offeredSteer(capability.value, steerAdvertised.
 const canSteer = computed(() => working.value && !!steerMode.value)
 const alternative = computed(() => steerMode.value === 'next' ? words.value.next : words.value.now)
 const primaryLabel = computed(() => editing.value ? words.value.save : working.value && capability.value !== 'between' ? words.value.after : words.value.send)
-// Unmanaged sessions take rename/model requests next to the composer (AEON-225).
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
+// The slot left of the primary action (AEON-1438): Send now, its transport note
+// or Stop and send. It is reserved for the whole session and shows only while a
+// turn runs, so a turn starting or ending never moves the composer.
+const choiceOffered = computed(() => !!steerMode.value || steerOffered.value || capability.value === 'abort')
+// Phones show that choice on a second row, once the person types during a turn.
+// It stays until the draft is sent or cleared; the turn alone never toggles it.
+const twoRow = ref(false)
+// "+" on phones inserts a reference at the caret, never an attachment.
+const referenceAnchor = ref<HTMLElement | null>(null)
+const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 // A copy counts toward the pending cap only until the thread has its server id.
 // The id swap can land after the read that already contains it, so both the
@@ -120,6 +129,7 @@ function forgetSettled() {
 }
 watch(() => [...agents.thread(s.value), ...chatMessages.value].map(message => message.id).join(), forgetSettled)
 const draft = ref('')
+watch(draft, value => { if (!value.trim()) twoRow.value = false; else if (working.value && choiceOffered.value) twoRow.value = true })
 const editing = ref<ProjectMessage | null>(null)
 const queueBusy = ref(false)
 // A missing navigator.onLine is not a reported outage. Only an explicit false,
@@ -586,7 +596,8 @@ onMounted(() => {
     // The keyboard or a taller composer shrinks the thread: stay on the latest post.
     resize = new ResizeObserver(() => { if (props.active && entered && stick) keepBottom() })
     resize.observe(scroller.value)
-    const content = scroller.value.querySelector('.session-messages')
+    // The whole column: messages, questions, pending sends and the live turn.
+    const content = scroller.value.querySelector('.thread-col')
     if (content) resize.observe(content)
   }
 })
@@ -659,6 +670,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
   draft.value = ''; replyTo.value = null; editing.value = null; queueBusy.value = false; uncertain.value = new Set(); queuedIds.value = new Set(); sendError.value = ''; localSends.value = []
+  twoRow.value = false; referenceAnchor.value = null
   chatMessages.value = []; leaveChatThread(); chatBaseline = false
   historyLoading.value = false; historyError.value = ''; paging = false
   const projectId = s.value.project_id
@@ -945,6 +957,39 @@ function reply(message: ProjectMessage) {
   replyTo.value = message
   void nextTick(() => textarea.value?.focus())
 }
+// The field grows with its text: one line idle, at most six, then it scrolls.
+function grow() {
+  const field = textarea.value
+  // A hidden tab has no layout to measure; it grows again when shown.
+  if (!field || !field.getClientRects().length) return
+  const style = getComputedStyle(field)
+  const edges = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+  const line = parseFloat(style.lineHeight) || 22
+  const most = line * 6 + edges
+  field.style.height = 'auto'
+  const full = field.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+  field.style.height = `${Math.min(full, most)}px`
+  field.style.overflowY = full > most + 0.5 ? 'auto' : 'hidden'
+}
+watch(draft, () => { void nextTick(grow) })
+watch(() => props.active, active => { if (active) void nextTick(grow) })
+onMounted(() => { grow(); window.addEventListener('resize', grow) })
+onBeforeUnmount(() => window.removeEventListener('resize', grow))
+function closeReferences(restore: boolean) {
+  const anchor = referenceAnchor.value
+  referenceAnchor.value = null
+  if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
+}
+function insertReference(text: string) {
+  const field = textarea.value, value = draft.value
+  const start = field?.selectionStart ?? value.length, end = field?.selectionEnd ?? value.length
+  const before = value.slice(0, start), after = value.slice(end)
+  const lead = before && !/\s$/.test(before) ? ' ' : ''
+  const insert = `${lead}${text} `
+  draft.value = `${before}${insert}${after}`
+  referenceAnchor.value = null
+  void nextTick(() => { field?.focus(); const caret = before.length + insert.length; field?.setSelectionRange(caret, caret) })
+}
 defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, working })
 </script>
 
@@ -956,23 +1001,37 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
         @touchmove.capture.passive="onTouchMove" @touchend.capture.passive="onTouchEnd"
         @touchcancel.capture.passive="onTouchEnd" @pointerdown.capture.passive="onPointerDown"
         @keydown.capture="onScrollKey">
-        <div class="history-head">
-          <button v-if="agents.threadMore[s.id]" type="button" class="earlier" :disabled="historyLoading" @click="earlier">{{ words.older }}</button>
-          <span v-else-if="agents.threadState(s) === 'ready' && threadMessages.length && !bindingReason">{{ words.start }}</span>
-          <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
+        <!-- One reading column (AEON-1438): at most 720 px on desktop. -->
+        <div class="thread-col">
+          <div class="history-head">
+            <button v-if="agents.threadMore[s.id]" type="button" class="earlier" :disabled="historyLoading" @click="earlier">{{ words.older }}</button>
+            <span v-else-if="agents.threadState(s) === 'ready' && threadMessages.length && !bindingReason">{{ words.start }}</span>
+            <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
+          </div>
+          <p v-if="bindingReason && !noPermission" class="binding-error" role="status">{{ words.liveDisconnected }}: {{ bindingReason }}</p>
+          <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
+          <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn && !seenQuestions.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
+          <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now" :questions="questions"
+            :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" @retry="retry" />
+          <div v-if="seenQuestions.length" class="chat-questions">
+            <SessionQuestion v-for="question in seenQuestions" :key="`${identity.identity?.tenant.id}:${me}:${s.id}:${question.id}`" :question="question" :label="view.name" :session-id="s.id" :open="!!questions?.some(item => item.id === question.id)" />
+          </div>
+          <!-- Sends waiting for their turn sit at the thread's end as pending bubbles (AEON-1438), so the growing field never moves them. -->
+          <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
+            <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id" :data-status="message.send_failed ? 'not_delivered' : statuses[message.id]?.status ?? 'sent'">
+              <p class="queue-text">{{ message.body }}</p>
+              <div class="queue-meta">
+                <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="13" />
+                <span class="queue-when">{{ queueWhen(message) }}</span>
+                <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn sm flat" :aria-label="words.retry" :data-tip="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat" :aria-label="words.edit" :data-tip="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat" :aria-label="words.cancel" :data-tip="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>
+              </div>
+            </li>
+          </ul>
+          <ChatLiveBlock v-if="liveTurn && !noPermission" :turn="liveTurn" :name="view.name" :now="now" :can-stop="canStop" />
         </div>
-        <p v-if="bindingReason && !noPermission" class="binding-error" role="status">{{ words.liveDisconnected }}: {{ bindingReason }}</p>
-        <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
-        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn && !seenQuestions.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
-        <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now"
-          :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" :queued-ids="queuedIds" @reply="reply" @retry="retry" />
-        <div v-if="seenQuestions.length" class="chat-questions">
-          <SessionQuestion v-for="question in seenQuestions" :key="`${identity.identity?.tenant.id}:${me}:${s.id}:${question.id}`" :question="question" :label="view.name" :session-id="s.id" :open="!!questions?.some(item => item.id === question.id)" />
-        </div>
-        <ChatLiveBlock v-if="liveTurn && !noPermission" :turn="liveTurn" :name="view.name" :now="now" :can-stop="canStop" />
       </div>
-        <p v-if="editing" class="replying" role="status"><AppIcon name="edit" :size="13" /><span>{{ words.editing }}</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancel" @click="editing = null"><AppIcon name="close" :size="12" /></button></p>
-        <p v-else-if="replyTo" class="replying"><span :title="replyTo.body">{{ words.replying }} “{{ replyTo.body }}”</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancelReply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
       <p v-if="offline" class="offline-banner" role="status"><AppIcon name="refresh" :size="14" />{{ words.offline }}</p>
       <Transition name="jump">
         <button v-if="jump" type="button" class="jump" :class="{ labelled: below > 0 }"
@@ -984,34 +1043,33 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
       </Transition>
     </div>
 
-    <footer v-if="!noPermission" class="composer">
-      <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
-      <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
-        <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id" :data-status="message.send_failed ? 'not_delivered' : statuses[message.id]?.status ?? 'sent'">
-          <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="14" />
-          <div class="queue-copy"><span class="queue-text" tabindex="0" :data-tip="message.body" :title="message.body">{{ message.body }}</span><span class="queue-when" tabindex="0">{{ queueWhen(message) }}</span></div>
-          <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn flat" :aria-label="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
-          <button type="button" class="icon-btn flat" :aria-label="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
-          <button type="button" class="icon-btn flat" :aria-label="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>
-        </li>
-      </ul>
-      <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
-      <form v-else class="compose" @submit.prevent="send()">
-        <p v-if="showHookNotice && !queue.length" class="compose-block hook-notice" role="status">{{ bindingReason ? words.unmanagedBlocked : `${view.name} ${words.unmanagedNote}` }}</p>
-
-        <label class="sr-only" :for="`compose-${s.id}`">{{ words.message }} {{ view.name }}</label>
-        <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" @keydown="composerKeys" @focus="toBottom(true)" />
-        <p v-if="capability === 'abort'" class="gemini-note">{{ words.geminiNote }}</p>
-        <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
-        <div class="compose-row" :class="{ steering: steerOffered }">
-          <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
-          <button v-if="steerMode" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :data-tip="canSteer ? undefined : words.steerIdle" :disabled="!canSteer || !draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
-          <span v-else-if="steerOffered" class="steer-note" role="status">{{ words.chatBetween }}</span>
-          <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
-          <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
-
-        </div>
-      </form>
+    <footer v-if="!noPermission" class="composer" :class="{ two: twoRow }">
+      <div class="composer-col">
+        <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
+        <form v-else class="compose" @submit.prevent="send()">
+          <p v-if="showHookNotice && !queue.length" class="compose-block hook-notice" role="status">{{ bindingReason ? words.unmanagedBlocked : `${view.name} ${words.unmanagedNote}` }}</p>
+          <p v-if="editing" class="replying" role="status"><AppIcon name="edit" :size="13" /><span>{{ words.editing }}</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancel" @click="editing = null"><AppIcon name="close" :size="12" /></button></p>
+          <p v-else-if="replyTo" class="replying"><AppIcon name="reply" :size="13" /><span :title="replyTo.body">{{ words.replying }} “{{ replyTo.body }}”</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancelReply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
+          <p v-if="capability === 'abort'" class="gemini-note">{{ words.geminiNote }}</p>
+          <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
+          <div class="compose-box">
+            <button type="button" class="plus" :aria-label="words.addReference" aria-haspopup="menu" :aria-expanded="!!referenceAnchor" :disabled="!canWrite" @click="referenceAnchor = referenceAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="plus" :size="20" /></button>
+            <label class="sr-only" :for="`compose-${s.id}`">{{ words.message }} {{ view.name }}</label>
+            <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" rows="1" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" aria-keyshortcuts="Enter" @keydown="composerKeys" @focus="toBottom(true)" />
+            <div class="compose-row" :class="{ steering: steerOffered }">
+              <!-- Keycaps for a fine pointer only, shown while the field has focus. -->
+              <span class="compose-hint" aria-hidden="true"><KeyCap k="enter" />{{ primaryLabel }}<template v-if="primaryLabel === words.after && canSteer"><span class="mid">·</span><KeyCap k="mod" /><KeyCap k="enter" />{{ alternative }}</template><template v-else-if="primaryLabel !== words.after"><span class="mid">·</span><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newLine }}</template></span>
+              <span v-if="choiceOffered" class="choice" :class="{ idle: !working }">
+                <button v-if="steerMode" type="button" class="cbtn alt steer-send" :aria-label="alternative" :aria-busy="sending" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="words.nowTip(view.name)" :disabled="!canSteer || !draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="14" />{{ alternative }}</button>
+                <span v-else-if="steerOffered" class="steer-note" role="status">{{ words.chatBetween }}</span>
+                <button v-else type="button" class="cbtn alt stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="14" />{{ words.stopSend }}</button>
+              </span>
+              <button type="submit" class="cbtn primary send" :aria-label="primaryLabel" :aria-busy="sending" :data-tip="primaryLabel === words.after ? words.afterTip : undefined" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="14" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ capability === 'between' ? words.send : words.after }}</span></span></button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <ChatReferences v-if="referenceAnchor" :anchor="referenceAnchor" :project-id="s.project_id" :session-id="s.id" @pick="insertReference" @close="closeReferences" />
     </footer>
   </div>
 </template>
@@ -1023,34 +1081,31 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .empty-state p { font-size: 13.5px; }
 .suggestions { display: grid; justify-items: center; }
 .suggestions button { min-height: 44px; border: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 13px; }
-.chat-queue { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; padding: 0; margin: 0 0 8px; list-style: none; }
-.queue-item { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 2px 3px 2px 10px; border-radius: 12px; background: var(--code-bg); box-shadow: inset 0 0 0 1px var(--line); }
-.queue-item > svg { flex: none; color: var(--ink-3); }
-.queue-item.editing { background: var(--chip-teal-bg); }
-.queue-copy { flex: 1; min-width: 0; }
-.queue-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.queue-when { display: block; height: 2.8em; overflow-y: auto; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.4; color: var(--ink-3); }
+/* Pending own bubbles: a hairline instead of the delivered tint, when and actions under them. */
+.chat-queue { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--thread-gap); margin: var(--thread-gap) 0 0; padding: 0; list-style: none; }
+.queue-item { justify-self: end; display: flex; flex-direction: column; align-items: flex-end; min-width: 0; max-width: min(82%, 640px); }
+.queue-text { margin: 0; padding: 9px 14px; border-radius: 18px; background: transparent; box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--ink); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.queue-item.editing .queue-text { background: var(--chip-teal-bg); }
+.queue-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 2px 4px; min-height: 28px; margin-top: 2px; font-size: 12px; color: var(--ink-3); }
+.queue-meta > svg { flex: none; }
+.queue-when { min-width: 0; margin-right: 2px; overflow-wrap: anywhere; }
+.queue-item[data-status="not_delivered"] .queue-when { color: var(--danger); font-weight: 600; }
+.queue-meta .icon-btn { flex: none; border-radius: 8px; color: var(--ink-3); }
+@media (hover: hover) { .queue-meta .icon-btn:hover:not(:disabled) { color: var(--teal-ink); background: var(--row-hover); } }
+@media (pointer: coarse), (max-width: 720px) { .queue-meta .icon-btn, .replying .icon-btn { width: 44px; height: 44px; } }
 .binding-error { color: var(--ink-2); font-size: 13.5px; overflow-wrap: anywhere; margin: 12px 0; }
-.queue-item .icon-btn { flex: none; width: 44px; height: 44px; }
-.send-label { display: grid; }
-.send-label > span { grid-area: 1 / 1; }
-.label-size { visibility: hidden; }
-.gemini-note { font-size: 12px; color: var(--ink-2); }
-/* Shrinks and wraps inside the action row instead of pushing the actions to a new line. */
-.steer-note { flex: 1 1 0; min-width: 0; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
-.stop-send { color: var(--warn-ink); background: var(--gold-wash); }
-.chat-questions { display: grid; gap: 10px; padding: 12px 0; }
+.gemini-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-2); }
+.chat-questions { display: grid; gap: var(--thread-gap); margin-top: var(--thread-gap); }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }
+/* One reading column. It stays top-anchored, so a short thread never moves when the composer changes height. */
+.thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 14px 24px 8px; scrollbar-gutter: stable both-edges; }
+/* One gap between thread items of every kind: messages, Desk cards, questions, pending sends and the live turn. */
+.thread-col { --thread-gap: 20px; width: 100%; max-width: 720px; min-width: 0; margin: 0 auto; }
 .jump { z-index: 1; position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
 .history-head { position: relative; display: flex; justify-content: center; align-items: center; min-height: 44px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 .earlier { border: 0; background: transparent; color: var(--teal-ink); min-height: 44px; padding: 0 10px; font: inherit; font-weight: 600; }
 .history-error { position: absolute; top: 100%; left: 0; right: 0; z-index: 1; background: var(--surface-raised); color: var(--danger); box-shadow: var(--shadow-pop); padding: 8px; }
-/* Keep the stacked button/keycap tints light enough for 4.5:1 danger text in both themes, including hover (AEON-1062). */
-.chat-stop { min-height: 44px; border-color: var(--danger-line); background: color-mix(in srgb, var(--danger) 4%, transparent); color: var(--danger); box-shadow: none; }
-.chat-stop:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 6%, transparent); box-shadow: none; }
-.chat-stop .keycap { color: inherit; background: color-mix(in srgb, currentColor 4%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 34%, transparent); }
 .jump svg { flex: none; }
 .jump.labelled { padding: 0 12px 0 14px; color: var(--teal-ink); }
 .jump-count { font-size: 12.5px; font-weight: 650; white-space: nowrap; }
@@ -1059,43 +1114,82 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .jump-enter-active, .jump-leave-active { transition: opacity .16s ease, transform .16s ease; }
 .jump-enter-from, .jump-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 @media (prefers-reduced-motion: reduce) { .jump-enter-active, .jump-leave-active { transition: none; } }
-.composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
-.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; container-type: inline-size; }
-.compose textarea { width: 100%; min-width: 0; min-height: 56px; height: 64px; resize: none; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
-.compose-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
-.compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
-/* Narrow panes keep a row for either the steer action or its transport note.
-   Ctrl keycaps can wrap the desktop actions too (AEON-1213); changing the
-   transport must never remove a row and move the field above it. */
-@container (max-width: 640px) {
-  .compose-row.steering .compose-hint { display: none; }
-  .compose-row.steering .compose-hint + * { margin-left: auto; }
-  @media (min-width: 721px) {
-    .compose-row.steering { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-    .compose-row .steer-send, .compose-row .steer-note { grid-column: 1 / -1; }
-    .compose-row .steer-send, .compose-row .send { justify-self: end; }
-    /* Same minimum as the shared .btn.sm; longer copy can grow within its row. */
-    .compose-row .steer-note { display: flex; align-items: center; justify-content: flex-end; min-height: 28px; }
-  }
-}
+
+/* ---------- One calm composer (AEON-1438) ---------- */
+.composer { flex-shrink: 0; padding: 4px 24px 12px; }
+.composer-col { width: 100%; max-width: 720px; margin: 0 auto; }
+.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.compose-box { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; padding: 10px 8px 8px 14px; border-radius: 16px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line-2); }
+.compose-box:focus-within { box-shadow: 0 0 0 1px var(--primary-line), 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent); }
+.compose-box textarea { display: block; width: 100%; min-width: 0; height: 23px; min-height: 23px; margin: 0; padding: 0 6px 0 0; border: 0; outline: 0; border-radius: 0; resize: none; overflow-y: hidden; background: transparent; box-shadow: none; color: var(--ink); font: 14.5px/23px var(--font); }
+.compose-box textarea::placeholder { color: var(--ink-3); }
+.compose-box textarea:disabled { cursor: not-allowed; }
+.plus { display: none; }
+.compose-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; margin-top: 6px; }
+.compose-hint { display: inline-flex; align-items: center; gap: 5px; flex: 1; min-width: 0; overflow: hidden; font-size: 12px; color: var(--ink-3); white-space: nowrap; opacity: 0; }
+.compose-hint .mid { margin: 0 3px; }
+.compose-box:focus-within .compose-hint { opacity: 1; }
+@media (hover: none), (pointer: coarse) { .compose-hint { visibility: hidden; } }
+.choice { display: inline-flex; flex: 0 1 auto; min-width: 0; }
+.choice > .cbtn { flex: none; }
+/* Reserved for the whole session; what it holds shows only while a turn runs. */
+.choice.idle > * { visibility: hidden; }
+.cbtn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: none; height: 32px; padding: 0 14px 0 12px; border: 0; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.cbtn > svg { flex: none; }
+.cbtn.alt { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+@media (hover: hover) { .cbtn.alt:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--primary-line); } }
+.cbtn.primary { background: var(--primary); color: var(--primary-on); box-shadow: 0 6px 14px -10px color-mix(in srgb, var(--primary) 70%, transparent); }
+@media (hover: hover) { .cbtn.primary:hover:not(:disabled) { background: var(--primary-lo); } }
+/* A disabled action reads disabled: no fill, a faint label. */
+.cbtn:disabled { background: var(--chip-bg); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
+.cbtn:focus-visible, .plus:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.stop-send:not(:disabled) { color: var(--warn-ink); background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); }
+/* Shrinks and wraps inside the action row instead of pushing the actions to a new line. */
+.steer-note { display: flex; align-items: center; min-width: 0; min-height: 32px; max-width: 220px; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
+.send-label { display: grid; }
+.send-label > span { grid-area: 1 / 1; }
+.label-size { visibility: hidden; }
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
-.replying { position: absolute; bottom: 12px; left: 14px; right: 14px; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
+.replying { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 6px; padding: 2px 2px 2px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12.5px; color: var(--ink-2); }
+.replying > svg { flex: none; color: var(--ink-3); }
 .replying span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compose > .compose-block { pointer-events: none; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; margin: 0; padding: 8px 12px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
 .send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; background: var(--surface-raised); }
+@media (max-width: 860px) { .thread-scroll, .composer { padding-inline: 16px; } }
+
+/* ---------- Phones: "+" · field · send in one row ---------- */
 @media (max-width: 720px) {
-  .thread-scroll { padding: 14px 16px 16px; }
-  .composer { border-radius: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-raised); }
+  .thread-scroll { padding: 10px 16px 16px; scrollbar-gutter: auto; }
+  .thread-col { --thread-gap: 16px; max-width: none; }
+  .queue-item { max-width: 85%; }
+  .queue-text { font-size: 15px; line-height: 1.45; border-radius: 18px 18px 6px 18px; }
+  .composer { padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }
+  .composer-col { max-width: none; }
+  .replying { margin: -2px 0 6px; padding-left: 14px; font-size: 13px; background: none; }
+  .compose-box { grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "plus field send"; column-gap: 4px; align-items: end; padding: 0; border-radius: 0; background: none; box-shadow: none; }
+  .compose-box:focus-within { box-shadow: none; }
   /* 16px keeps iOS Safari from zooming the page when the field takes focus. */
-  .compose textarea { font-size: 16px; min-height: 48px; resize: none; }
+  .compose-box textarea { grid-area: field; height: 44px; min-height: 44px; padding: 10px 15px; border: 1px solid var(--glass-edge); border-radius: 22px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); font: 16px/22px var(--font); }
+  .compose-box textarea:focus { box-shadow: var(--field-inset), 0 0 0 1px var(--line), 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent); }
+  .plus { display: grid; grid-area: plus; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); }
+  .plus:disabled { opacity: .5; }
+  @media (hover: hover) { .plus:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); } }
+  .compose-row { display: contents; }
   .compose-hint { display: none; }
-  .compose-row .send { margin-left: auto; min-height: 44px; }
-  .compose-row .steer-send, .stop-send { min-height: 44px; }
-  .compose-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
-  .compose-row .send { margin-left: 0; }
-  .compose-row .steer-send, .compose-row .stop-send, .compose-row .steer-note { grid-column: 1 / -1; }
-  /* The note holds the steer action's row, so the field never moves. */
-  .compose-row .steer-note { display: flex; align-items: center; min-height: 44px; }
+  .choice { display: none; }
+  .send { grid-area: send; width: 44px; height: 44px; padding: 0; background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-line) 50%, transparent), 0 6px 14px -8px color-mix(in srgb, var(--primary) 55%, transparent), inset 0 1px 0 var(--glass-edge); }
+  .send > svg { width: 18px; height: 18px; }
+  .send .send-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .send:disabled { background: var(--seg-bg); color: color-mix(in srgb, var(--ink-3) 70%, transparent); box-shadow: none; }
+  /* Typing during a turn: the field takes the first row, the choice the second. */
+  .composer.two .compose-box { grid-template-columns: 44px minmax(0, 1fr) minmax(0, auto) auto; grid-template-areas: "field field field field" "plus . now send"; row-gap: 8px; column-gap: 8px; }
+  .composer.two .choice { display: inline-flex; grid-area: now; align-self: center; }
+  .composer.two .cbtn { height: 44px; padding: 0 16px; font-size: 14.5px; }
+  .composer.two .send { width: auto; }
+  .composer.two .send > svg { width: 15px; height: 15px; }
+  .composer.two .send .send-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+  .composer.two .steer-note { min-height: 44px; }
 }
+@media (max-width: 359px) { .composer.two .compose-box { column-gap: 4px; } .composer.two .cbtn { padding: 0 10px; gap: 5px; font-size: 13.5px; } }
 </style>

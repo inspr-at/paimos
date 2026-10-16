@@ -6,7 +6,7 @@ import { dirname, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { browserIdentity, browserImpact, nightlyBrowserMap, gitTree } from './browser-impact.mjs'
 import { boundedText } from './inputs.mjs'
-import { validImpactPaths, isDocsLike, webGraph, graphIncomplete, reverseDependants, shard, validate, specShardRecordPattern, registryImpact as schemaRegistryImpact } from './core.mjs'
+import { validImpactPaths, isDocsLike, webGraph, graphIncomplete, reverseDependants, shard, validate, specShardRecordPattern, registryImpact as schemaRegistryImpact, fullWebShardCount } from './core.mjs'
 import { tierWeights, loadManifest } from '../../web/scripts/ci-web-shard.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -83,7 +83,7 @@ export function ownershipGraph(checkout, imports, read = file => boundedText(che
 }
 
 export function shadowPlan({ event = 'pull_request', impact, paths, identity = {}, tests = [], graph = {}, browserMap, baseTree,
-  fingerprint, registries = {}, policy, execution = { mode: 'full', layout: 'full', lane: 'full' }, shardCount = 12 }) {
+  fingerprint, registries = {}, policy, execution = { mode: 'full', layout: 'full', lane: 'full' }, shardCount = fullWebShardCount }) {
   const gated = tests.filter(row => row.kind === 'browser' && row.active !== false && row.tier !== 'NIGHTLY')
   let selected = gated, scope = 'gated-full', reasons = [], fallback = []
   const widen = reason => { fallback.push(reason); scope = 'gated-full'; selected = gated }

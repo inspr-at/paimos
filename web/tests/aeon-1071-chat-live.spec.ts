@@ -97,13 +97,15 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     await expect.poll(() => lookups.length).toBe(1)
     expect(lookups[0]).toBe(`/api/chat-sessions/${worker.id}/thread`)
     await expect.poll(() => page.evaluate(() => (window as unknown as { __live?: unknown[] }).__live?.length ?? 0)).toBe(1)
-    // Idle: every send action is already in place, the turn-bound ones disabled.
+    // Idle: every send action already has its place; Send now shows only while
+    // a turn runs, in a slot reserved for it (AEON-1438), so nothing moves.
     await expect(send).toContainText('Send')
-    await expect(steer).toBeDisabled()
+    await expect(steer).toBeHidden()
     await expectInterrupt(page, false)
     await composer.fill('Bitte die vollständige Freigabeprüfung im Bericht berücksichtigen.')
     await composer.blur()
-    const guard = await controlStability(page, { composer, send, steer, stop })
+    const slot = panel.locator('.compose-row .choice')
+    const guard = await controlStability(page, { composer, send, stop, ...(width > 720 ? { slot } : {}) })
 
     await guard.check(async () => {
       await update(page, 1, { sessionUpdate: 'state', state: 'running' })
@@ -138,8 +140,8 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       await expect(panel.locator('.live-turn .fold')).toContainText('Used 1 tool')
       await expect(panel.locator('.live-turn')).not.toContainText('Stopping…')
       await expect(panel.locator('.live-turn')).not.toContainText('You stopped this turn')
-      await expect(send).toContainText('Send')
-      await expect(steer).toBeDisabled()
+      await expect(send).toHaveAccessibleName('Send')
+      await expect(steer).toBeHidden()
     })
     // Once the harness applied it, the block says the person stopped the turn.
     await guard.check(async () => {
@@ -456,10 +458,17 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
   await expect(row).toBeVisible()
   await composer.fill('Ship it after the smoke test.')
   await composer.blur()
-  // Managed delivery steers natively.
+  // Managed delivery steers natively. Its keys show in the focus hint for a
+  // fine pointer on desktop (AEON-1438), never on the buttons or on phones.
   await expect(steer).toContainText('Send now')
-  await expect(steer.locator('.keycap').first()).toHaveText('Ctrl')
   await expect(steer).toBeEnabled()
+  if (width > 720) {
+    await composer.focus()
+    await expect(panel.locator('.compose-hint')).toHaveCSS('opacity', '1')
+    await expect(panel.locator('.compose-hint .keycap').filter({ hasText: 'Ctrl' })).toHaveCount(1)
+    await expect(panel.locator('.compose-hint')).toContainText('After this turn')
+    await composer.blur()
+  } else await expect(panel.locator('.compose-hint')).toBeHidden()
   await expect(note).toHaveCount(0)
   const guard = await controlStability(page, { composer, send, stop })
   await guard.check(async () => {
@@ -486,7 +495,7 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     await expect(note).toHaveText('Chat replies arrive between turns')
   })
   await page.screenshot({ path: testInfo.outputPath(`aeon-1071-chat-reply-${width}.png`) })
-  await guard.check(async () => {
+  const sendReply = async () => {
     // The steer shortcut sends after the turn, to the chat thread.
     await composer.press('Control+Enter')
     await expect.poll(() => outbox.length).toBe(1)
@@ -494,7 +503,10 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     // The reply is done: the next message is managed again and may steer.
     await expect(steer).toContainText('Send now')
     await expect(note).toHaveCount(0)
-  })
+  }
+  // On phones the second row leaves with the sent draft (AEON-1438 design); desktop keeps every control still.
+  if (width > 720) await guard.check(sendReply)
+  else { await sendReply(); await expect(panel.locator('.composer')).not.toHaveClass(/two/) }
   guard.done()
   if (width === 1440) {
     // The divider's minimum details width and wide focus preset must also

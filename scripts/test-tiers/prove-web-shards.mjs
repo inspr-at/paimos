@@ -4,14 +4,14 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectWeb, command, evidence, flattenBrowser, saveJSON, web } from './collect.mjs'
 import { browserList, plan } from './cli.mjs'
-import { key } from './core.mjs'
+import { key, fullWebShardCount } from './core.mjs'
 import { browserBatches } from './web-batches.mjs'
 import { loadManifest, parseShard } from '../../web/scripts/ci-web-shard.mjs'
 
 // Native collection proof for an entire full web layout. No browser cases run:
 // --list resolves every old/new test-list against Playwright registration. CI
 // measurement browserCases separately records the actual execution identities.
-export function proveWebShards({ count = 12, all = false, env = process.env } = {}) {
+export function proveWebShards({ count = fullWebShardCount, all = false, env = process.env } = {}) {
   parseShard(`1/${count}`)
   if (count > 64) throw new Error('Tier layouts support at most 64 shards')
   const start = performance.now(), before = collectWeb({ fresh: true })

@@ -6,7 +6,7 @@ export type IconName =
   | 'repo' | 'circle' | 'signal-off'
   | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top' | 'repeat'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
-  | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
+  | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'reply' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
   | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left' | 'eye' | 'eye-off' | 'monitor' | 'key'
   | 'snowflake' | 'pause' | 'hold' | 'play' | 'winddown' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
@@ -85,6 +85,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'refresh'" d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8M13.4 2.4v3.2h-3.2" />
     <template v-else-if="name === 'sliders'"><path d="M2.4 4.6h6.6M12.6 4.6h1M2.4 11.4h1M7 11.4h6.6" /><circle cx="10.8" cy="4.6" r="1.7" /><circle cx="5.2" cy="11.4" r="1.7" /></template>
     <path v-else-if="name === 'enter'" d="M13 3.4v4.4c0 .9-.7 1.6-1.6 1.6H3.2M6 6.6 3.2 9.4 6 12.2" />
+    <path v-else-if="name === 'reply'" d="M6.4 3.6 2.6 7.4l3.8 3.8M2.6 7.4h6.8a4 4 0 0 1 4 4v1" />
     <template v-else-if="name === 'inbox'"><path d="M2 9.4 4.2 3.6h7.6L14 9.4v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1Z" /><path d="M2 9.4h3.3l1 1.5h3.4l1-1.5H14" /></template>
     <template v-else-if="name === 'park'"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2.6" /><path d="M6.4 11.4V4.8h2.2a1.9 1.9 0 0 1 0 3.8H6.4" /></template>
     <template v-else-if="name === 'req'"><rect x="2.6" y="2.4" width="10.8" height="11.2" rx="2" /><path d="m5.4 8.2 1.8 1.8 3.4-3.6" /></template>

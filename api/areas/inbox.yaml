@@ -46,7 +46,7 @@ paths:
     get:
       operationId: listenInbox
       summary: List or long-poll the caller's durable inbox
-      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again. Returned messages count as delivered to their sender (AEON-280). With session, the pull records that generation as listening (hook for wait_ms=0, long_poll when waiting).
+      description: 'Only the caller''s principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again with the same identities; acknowledgements are idempotent. Decision Desk answers remain pending when no agent is listening and are returned in sent-event order on the next read. Returned messages count as delivered to their sender (AEON-280). With session, the pull records that generation as listening (hook for wait_ms=0, long_poll when waiting).'
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
