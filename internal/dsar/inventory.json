@@ -1930,6 +1930,7 @@
         "confirmed_state": "metadata",
         "uncertain": "metadata",
         "checked_at": "metadata",
+        "retired": "metadata",
         "resolved": "metadata"
       },
       "locator": {
@@ -1950,7 +1951,8 @@
         "policy_removed": "metadata",
         "quarantined": "metadata",
         "enforcement": "metadata",
-        "notice_sent": "metadata"
+        "notice_sent": "metadata",
+        "checked_at": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"

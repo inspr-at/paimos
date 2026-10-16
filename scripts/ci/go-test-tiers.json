@@ -5904,6 +5904,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionGroupsValidatePrecedingEntriesAndInvalidateEveryGroup","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPlainMergeDoesNotReportLostHold","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherRepostsAfterUncertainOutcome","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherResumesUncertainPublicationAfterRestart","tier":"ESSENTIAL"}
@@ -5914,7 +5916,11 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueRejectsStaleGreenReadAfterCurrentFactsChange","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionReconcileLeavesMergedSHAUnchanged","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionRules","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionSteadyQueuedEntryBoundsReads","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionStoreAuthenticatedApprovalsAndInvalidation","tier":"ESSENTIAL"}
     ,

@@ -16,6 +16,7 @@ CREATE TABLE delivery_admission_outbox (
  confirmed_state text NOT NULL DEFAULT '',
  uncertain boolean NOT NULL DEFAULT false,
  checked_at timestamptz,
+ retired boolean,
  PRIMARY KEY(tenant_id,repository,sha,context)
 );
 CREATE TABLE delivery_admission_queue (
@@ -30,6 +31,7 @@ CREATE TABLE delivery_admission_queue (
  quarantined boolean NOT NULL DEFAULT false,
  enforcement text NOT NULL DEFAULT 'pending',
  notice_sent boolean NOT NULL DEFAULT false,
+ checked_at timestamptz,
  PRIMARY KEY(tenant_id,repository,pull_request,head_sha)
 );
 ALTER TABLE delivery_admission_outbox ENABLE ROW LEVEL SECURITY;
@@ -76,7 +78,10 @@ BEGIN
  AND (pr IS NOT NULL OR project IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(o.members) m WHERE m->>'project'=project))
  ORDER BY o.repository,o.sha,o.context FOR UPDATE;
  UPDATE delivery_admission_outbox o SET revision=revision+1,
- invalidated=o.invalidated OR (invalidate AND o.kind='group')
+ invalidated=o.invalidated OR (invalidate AND o.kind='group'),
+ retired=CASE WHEN TG_TABLE_NAME='delivery_items' AND o.kind='head' AND pr IS NOT NULL AND o.sha=fact->'observation'->>'head_sha'
+  THEN COALESCE((fact->'observation'->>'merged')='true', false) OR COALESCE(fact->'observation'->>'open','')<>'true'
+  ELSE o.retired END
  WHERE o.tenant_id=(fact->>'tenant_id')::uuid AND (repo IS NULL OR o.repository=repo)
  AND (pr IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(o.members) m WHERE m->>'pr'=pr))
  AND (pr IS NOT NULL OR project IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(o.members) m WHERE m->>'project'=project));

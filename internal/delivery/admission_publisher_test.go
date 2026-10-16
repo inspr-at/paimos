@@ -28,11 +28,13 @@ type admissionFake struct {
 	post           func(context.Context, string, string) error
 	refuseRemoval  bool
 	mergeOnDequeue bool
+	reads          int
 }
 
 func (g *admissionFake) Status(_ context.Context, sha string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.reads++
 	return g.states[sha], nil
 }
 func (g *admissionFake) PostStatus(ctx context.Context, sha, state string) error {
@@ -654,4 +656,128 @@ func TestAdmissionQueueRejectsStaleGreenReadAfterCurrentFactsChange(t *testing.T
 			}
 		})
 	}
+}
+
+func TestAdmissionPlainMergeDoesNotReportLostHold(t *testing.T) {
+	// Risk: every ordinary merge is reported as a hold that lost the race.
+	f := newAdmissionFixture(t)
+	ctx := t.Context()
+	p := f.gh.pulls[7]
+	entry := admissionQueueEntry{PR: 7, Head: p.Head}
+	if err := f.m.admitQueueEntry(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writer.enqueues) != 1 {
+		t.Fatal("plain merge fixture never entered the queue", f.writer.enqueues)
+	}
+	p.Open, p.Merged, p.Queued = false, true, false
+	f.gh.pulls[7] = p
+	f.webhook(t, "pull_request", "closed", "plain-merge", 204)
+	if err := f.m.admitQueueEntry(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	var snapshot AdmissionSnapshot
+	f.call(t, f.person, "GET", "/api/delivery/"+f.item(t, 7).ID+"/admission", nil, 200, &snapshot)
+	if snapshot.Enforcement != "superseded" || snapshot.Effective {
+		t.Fatalf("plain merge reported a lost hold: %+v", snapshot)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var notices int
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM inbox_compat_messages WHERE is_action_request AND body LIKE 'Admission:%'`).Scan(&notices)
+		if err == nil && (notices != 0 || len(f.writer.enqueues) != 1 || f.writer.dequeues != 0) {
+			t.Fatalf("plain merge mutated the queue or notified Desk: notices=%d enqueues=%v dequeues=%d", notices, f.writer.enqueues, f.writer.dequeues)
+		}
+		return err
+	})
+}
+
+type admissionPullCounter struct {
+	GitHub
+	n int
+}
+
+func (g *admissionPullCounter) Pull(ctx context.Context, n int64) (Pull, error) {
+	g.n++
+	return g.GitHub.Pull(ctx, n)
+}
+
+func TestAdmissionSteadyQueuedEntryBoundsReads(t *testing.T) {
+	// Risk: a PR that stays queued is fully re-read on every 5s pass.
+	f := newAdmissionFixture(t)
+	counter := &admissionPullCounter{GitHub: f.gh}
+	f.m.github = counter
+	ctx := t.Context()
+	pass := func() int {
+		t.Helper()
+		before := counter.n
+		if err := f.m.reconcileAdmissionQueue(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return counter.n - before
+	}
+	if got := pass(); got != 2 {
+		t.Fatalf("enqueue pass reads=%d, want 2", got)
+	}
+	if len(f.writer.enqueues) != 1 {
+		t.Fatal("steady-queue fixture did not enqueue", f.writer.enqueues)
+	}
+	if got := pass(); got != 0 {
+		t.Fatalf("steady queued entry was read again before the backoff: %d", got)
+	}
+	f.at = f.at.Add(admissionQueueSteadyBackoff)
+	if got := pass(); got != 1 {
+		t.Fatalf("due queued entry reads=%d, want 1", got)
+	}
+	if len(f.writer.enqueues) != 1 || f.writer.dequeues != 0 {
+		t.Fatal("steady read mutated the queue", f.writer.enqueues, f.writer.dequeues)
+	}
+}
+
+func TestAdmissionReconcileLeavesMergedSHAUnchanged(t *testing.T) {
+	// Risk: merged heads and destroyed groups are republished as failure forever.
+	f := newAdmissionFixture(t)
+	ctx := t.Context()
+	p := f.gh.pulls[7]
+	p.Queued = true
+	f.gh.pulls[7] = p
+	group := strings.Repeat("c", 40)
+	if err := f.m.publishAdmission(ctx, p.Head); err != nil {
+		t.Fatal(err)
+	}
+	f.webhook(t, "merge_group", "checks_requested", "merged-group", 204)
+	if err := f.m.publishAdmission(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, f, p.Head, "success")
+	requireAdmissionState(t, f, group, "success")
+	posts, reads := len(f.writer.posts), f.writer.reads
+	auditSend(t, f.fixture, "merge_group", "merged-destroy", map[string]any{"action": "destroyed", "merge_group": map[string]string{"head_sha": group, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}, 204)
+	p.Open, p.Merged, p.Queued = false, true, false
+	f.gh.pulls[7] = p
+	f.webhook(t, "pull_request", "closed", "merged-head", 204)
+	f.at = f.at.Add(time.Minute)
+	for range 2 {
+		if err := f.m.reconcileAdmission(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(f.writer.posts) != posts || f.writer.reads != reads {
+		t.Fatalf("merged SHA was republished or re-read: posts %v reads %d→%d", f.writer.posts[posts:], reads, f.writer.reads)
+	}
+	requireAdmissionState(t, f, p.Head, "success")
+	requireAdmissionState(t, f, group, "success")
+	f.tx(t, func(tx pgx.Tx) error {
+		var headRetired, groupRetired bool
+		var headState, groupState string
+		if err := tx.QueryRow(ctx, `SELECT retired IS TRUE, confirmed_state FROM delivery_admission_outbox WHERE sha=$1`, p.Head).Scan(&headRetired, &headState); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT retired IS TRUE, confirmed_state FROM delivery_admission_outbox WHERE sha=$1`, group).Scan(&groupRetired, &groupState); err != nil {
+			return err
+		}
+		if !headRetired || !groupRetired || headState != "success" || groupState != "success" {
+			t.Fatalf("merged outbox not retired in place: head %v %s group %v %s", headRetired, headState, groupRetired, groupState)
+		}
+		return nil
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -48,6 +49,12 @@ func stageAdmissionHeadTx(ctx context.Context, tx pgx.Tx, tid string, o Observat
 		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO delivery_admission_queue(tenant_id,repository,pull_request,head_sha) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, tid, o.Repository, *o.PR, o.Head)
+	if err != nil {
+		return err
+	}
+	// A newer head retires the previous status row. The closed/merged head is
+	// retired by the delivery item trigger, which sees the saved observation.
+	_, err = tx.Exec(ctx, `UPDATE delivery_admission_outbox SET retired=true WHERE tenant_id=$1 AND repository=$2 AND context=$3 AND kind='head' AND sha<>$4 AND retired IS NOT TRUE AND EXISTS(SELECT 1 FROM jsonb_array_elements(members) m WHERE m->>'pr'=$5)`, tid, o.Repository, AdmissionContext, o.Head, fmt.Sprint(*o.PR))
 	return err
 }
 
@@ -56,17 +63,34 @@ type admissionQueueEntry struct {
 	Head string
 }
 
+// Steady queued entries are not a 5s poll. Dirty rows stay pending and are
+// selected on the next pass; an unchanged queued head waits at least a minute.
+const admissionQueueSteadyBackoff = 60 * time.Second
+
 func (m *Module) reconcileAdmissionQueue(ctx context.Context) error {
 	if err := m.seedAdmission(db.AllProjects(ctx, "admission queue seed")); err != nil {
 		return err
 	}
+	run := func(ctx context.Context, pull func(context.Context, int64) (Pull, error)) error {
+		return m.reconcileAdmissionQueueWith(ctx, pull)
+	}
+	if batch, ok := m.github.(interface {
+		WithPulls(context.Context, func(context.Context, func(context.Context, int64) (Pull, error)) error) error
+	}); ok {
+		return batch.WithPulls(ctx, run)
+	}
+	return run(ctx, m.github.Pull)
+}
+
+func (m *Module) reconcileAdmissionQueueWith(ctx context.Context, pull func(context.Context, int64) (Pull, error)) error {
 	cursorPR := int64(0)
 	cursorHead := ""
+	due := m.now().Add(-admissionQueueSteadyBackoff)
 	var failures []error
 	for {
 		entries := []admissionQueueEntry{}
 		err := db.InTenant(db.AllProjects(ctx, "admission queue inventory"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT pull_request,head_sha FROM delivery_admission_queue WHERE repository=$1 AND (enforcement NOT IN ('superseded','removed','merged_before_hold') OR (quarantined AND NOT notice_sent)) AND (pull_request,head_sha)>($2,$3) ORDER BY pull_request,head_sha LIMIT 100`, m.config.Repository, cursorPR, cursorHead)
+			rows, err := tx.Query(ctx, `SELECT pull_request,head_sha FROM delivery_admission_queue WHERE repository=$1 AND (pull_request,head_sha)>($2,$3) AND (enforcement='pending' OR (quarantined AND NOT notice_sent) OR (enforcement='queued' AND (checked_at IS NULL OR checked_at<=$4))) ORDER BY pull_request,head_sha LIMIT 100`, m.config.Repository, cursorPR, cursorHead, due)
 			if err != nil {
 				return err
 			}
@@ -84,7 +108,7 @@ func (m *Module) reconcileAdmissionQueue(ctx context.Context) error {
 			return err
 		}
 		for _, e := range entries {
-			if err = m.admitQueueEntry(ctx, e); err != nil {
+			if err = m.admitQueueEntryWith(ctx, e, pull); err != nil {
 				failures = append(failures, err)
 			}
 		}
@@ -102,6 +126,10 @@ func (m *Module) reconcileAdmissionQueue(ctx context.Context) error {
 // removal remains pending until a fresh GitHub read confirms it. Attempt intent
 // is committed BEFORE the POST, so a crash cannot silently reset the retry cap.
 func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) error {
+	return m.admitQueueEntryWith(ctx, e, m.github.Pull)
+}
+
+func (m *Module) admitQueueEntryWith(ctx context.Context, e admissionQueueEntry, pull func(context.Context, int64) (Pull, error)) error {
 	conn, release, err := db.Acquire(ctx, m.pool)
 	if err != nil {
 		return err
@@ -114,18 +142,20 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 	}
 	defer unlock(conn, key)
 	ctx = db.AllProjects(db.WithConnection(ctx, m.pool, conn), "configured admission queue authority")
-	live, err := m.github.Pull(ctx, e.PR)
+	live, err := pull(ctx, e.PR)
 	if err != nil {
 		return err
 	}
 	// Historical-head rows must never dequeue or enqueue a different live head.
-	if live.Head != e.Head {
+	if live.Head != e.Head || !live.Open || live.Merged {
+		// A merge or close already visible before this pass is not a lost hold.
 		return db.InTenant(ctx, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='superseded' WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head)
+			_, err := tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='superseded',checked_at=$4 WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head, m.now())
 			return err
 		})
 	}
 	action := ""
+	deniedWhileOpen := false
 	err = db.InTenant(ctx, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
 			return err
@@ -134,6 +164,7 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 		if err != nil {
 			return err
 		}
+		deniedWhileOpen = !allowed
 		var attempts, retries int
 		var consumed string
 		var removed, quarantined bool
@@ -156,7 +187,7 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 			return err
 		}
 		if live.Queued {
-			_, err = tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='queued' WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head)
+			_, err = tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='queued',checked_at=$4 WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head, m.now())
 			return err
 		}
 		retry := attempts > 0 && !removed
@@ -177,6 +208,7 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 		return err
 	}
 	var mutationErr error
+	attempted := false
 	if action != "" {
 		err = db.InTenant(ctx, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 			if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
@@ -194,6 +226,7 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 				if !allowed || quarantined {
 					return nil
 				}
+				attempted = true
 				return m.admissionGitHub.Enqueue(ctx, e.PR, e.Head)
 			}
 			// A lifted hold may resume this head in the next pass. Removal of the old
@@ -201,15 +234,20 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 			if !live.Queued {
 				return nil
 			}
+			attempted = true
 			return m.admissionGitHub.Dequeue(ctx, e.PR)
 		})
 		// A merge can win while dequeue is in flight. Even a refused or
 		// uncertain mutation must be followed by a read to report that race.
 		mutationErr = err
 	}
-	confirmed, err := m.github.Pull(ctx, e.PR)
-	if err != nil {
-		return errors.Join(mutationErr, err)
+	confirmed := live
+	if attempted {
+		var confirmErr error
+		confirmed, confirmErr = pull(ctx, e.PR)
+		if confirmErr != nil {
+			return errors.Join(mutationErr, confirmErr)
+		}
 	}
 	result := "pending"
 	err = db.InTenant(ctx, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
@@ -218,16 +256,18 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 		}
 		if confirmed.Head != e.Head {
 			result = "superseded"
-		} else if action == "dequeue" {
-			if confirmed.Merged {
-				result = "merged_before_hold"
-			} else if !confirmed.Queued {
-				result = "removed"
-			}
-		} else if confirmed.Queued {
+		} else if action == "dequeue" && deniedWhileOpen && live.Queued && confirmed.Merged {
+			result = "merged_before_hold"
+		} else if confirmed.Merged || !confirmed.Open {
+			result = "superseded"
+		} else if action == "dequeue" && !confirmed.Queued {
+			result = "removed"
+		} else if action != "dequeue" && confirmed.Queued {
+			// A refused dequeue stays pending and is retried. Only an entry
+			// that was allowed to remain queued is steady state.
 			result = "queued"
 		}
-		_, err := tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement=$4 WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head, result)
+		_, err := tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement=$4,checked_at=$5 WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head, result, m.now())
 		return err
 	})
 	if err != nil {

@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -118,6 +119,23 @@ func TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead(t *testing.T) {
 	}
 	if minted != 1 || revoked != 1 {
 		t.Fatal("read token not revoked")
+	}
+	beforeMint, beforeRevoke := minted, revoked
+	if err = reader.WithPulls(t.Context(), func(ctx context.Context, pull func(context.Context, int64) (Pull, error)) error {
+		first, err := pull(ctx, 7)
+		if err != nil {
+			return err
+		}
+		second, err := pull(ctx, 7)
+		if err != nil || first.Head != second.Head || !second.Queued {
+			t.Fatal("shared token lost the pull", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if minted != beforeMint+1 || revoked != beforeRevoke+1 {
+		t.Fatalf("queue pass used %d tokens; one installation token must cover every read", minted-beforeMint)
 	}
 	pulls, err := reader.Group(t.Context(), group, base, ref)
 	if err != nil || len(pulls) != 1 || len(pulls[0].Checks) != 5 {
