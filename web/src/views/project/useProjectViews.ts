@@ -3,9 +3,11 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { type SavedView } from '../../lib/api'
 import { hideLabel } from '../../lib/hideStates'
-import { PINNED, type ListPrefs } from '../../lib/columns'
+import { PINNED } from '../../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../../lib/savedViews'
-import { usePreference } from '../../lib/preferences'
+import { SAVED_VIEW } from '../../lib/viewSwitch'
+import { savedViewId } from '../../lib/ticketListSwitch'
+import { bareProjectEntry, type ProjectSection } from '../../components/work/projectNavigation'
 import { toast } from '../../lib/toast'
 import { apiParams, filtersFromView, filtersToQuery, hasFilters, sameListState, suggestName, type ListFilters } from '../../lib/ticketList'
 import { scopeOwner } from '../../lib/identityScope'
@@ -18,9 +20,9 @@ import type { useProjectFilters } from './useProjectFilters'
 import type { useProjectColumns } from './useProjectColumns'
 
 export function useProjectViews(state: ProjectState, data: ReturnType<typeof useProjectData>, columns: ReturnType<typeof useProjectColumns>, controls: ReturnType<typeof useProjectFilters>) {
-  const { route, router, session, ticketKey, project, projectId, section, ticketsHeader, sectionPath, filters, activeTicketView, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbarWrap, scrollRoot, collapsed, me } = state
+  const { route, router, session, ticketKey, project, projectId, section, ticketsHeader, sectionPath, filters, activeTicketView, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbarWrap, scrollRoot, collapsed, me, sectionSwitch, ticketSwitch, ticketOpeningQuery } = state
   const { list, outline } = data
-  const { listPref, listPrefs, toolbarColumns } = columns
+  const { listPrefs, toolbarColumns } = columns
   const { chipLabel, update } = controls
   // ---------- Saved views ----------
   const views = computed(() => viewsOf(projectId.value))
@@ -32,7 +34,8 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
   const canSaveView = computed(() => !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && (activeView.value ? viewDirty.value : customised.value))
   // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
   const showViewBar = computed(() => !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
-  const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
+  // The saved view the project opens with: the ticket list switch's default (AEON-1453).
+  const defaultViewId = computed(() => savedViewId(ticketSwitch.defaultId.value))
   function viewQuery(view: SavedView | null): Record<string, string> {
     return view ? filtersToQuery(filtersFromView(view)) : {}
   }
@@ -59,23 +62,28 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
     if (query.cols === undefined && view.columns.length) query.cols = view.columns.join(',')
     if (query.view !== route.query.view || query.cols !== route.query.cols) void router.replace({ path: route.path, query })
   })
-  // The project opens with the person's default view when nothing else was asked for.
-  // The list waits for that answer, so it never shows the plain list first.
+  // The project opens as the person prefers when nothing else was asked for (AEON-1453):
+  // a bare /p/KEY opens the default or last used section, and a plain ticket list the
+  // list switch's default (a mode or a saved view) or the mode used last. A link (a section
+  // address, ?view=, filters, a ticket) wins once and changes neither. The list waits for
+  // that answer, so it never shows the plain list first.
   const entryResolved = ref(false)
   let resolvedFor = ''
   watch(projectId, async id => {
     if (!id || resolvedFor === id) return
     resolvedFor = id
-    const plain = () => section.value === 'tickets' && Object.keys(route.query).every(key => key === 'view') && (route.query.view === undefined || route.query.view === 'list' || route.query.view === 'outline')
-    // Knowledge has no ticket views: its address stays as it is.
-    if (!plain() || ticketKey.value || section.value !== 'tickets') { entryResolved.value = true; void loadViews(id); return }
+    const bare = bareProjectEntry(route)
+    const plain = () => section.value === 'tickets' && Object.keys(route.query).length === 0
+    if (ticketKey.value || (!bare && !plain())) { entryResolved.value = true; void loadViews(id); return }
     entryResolved.value = false
-    const pref = usePreference<ListPrefs>(`list:${id}`)
-    await Promise.race([Promise.all([loadViews(id), pref.ready]), new Promise(resolve => setTimeout(resolve, 1500))])
+    await Promise.race([Promise.all([loadViews(id), sectionSwitch.ready(), ticketSwitch.ready()]), new Promise(resolve => setTimeout(resolve, 1500))])
     if (projectId.value !== id) return
-    const target = pref.value.value?.defaultView
-    const view = target ? viewsOf(id).items.find(item => item.id === target) : null
-    if (view && plain()) await router.replace({ path: route.path, query: viewQuery(view) })
+    const target = sectionSwitch.preferred.value
+    if (bare && plain() && target !== 'tickets') await router.replace({ path: sectionPath(target as ProjectSection) })
+    else if (plain()) {
+      const query = ticketOpeningQuery()
+      if (Object.keys(query).length) await router.replace({ path: route.path, query })
+    }
     entryResolved.value = true
   }, { immediate: true })
 
@@ -135,7 +143,7 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
     if (restore && anchor?.isConnected) anchor.focus()
   }
   function problem(e: unknown) { return e instanceof Error ? e.message : 'Something went wrong' }
-  async function submitSave(value: { name: string; shared: boolean; makeDefault: boolean }) {
+  async function submitSave(value: { name: string; shared: boolean }) {
     const panel = savePanel.value, id = projectId.value, person = me.value?.id, state = { ...savedFilters.value, view: null }
     if (!panel || !id) return
     saveBusy.value = true; saveError.value = ''
@@ -147,7 +155,6 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
       } else {
         const saved = await saveNewView(id, value.name, state, value.shared)
         if (projectId.value !== id || me.value?.id !== person || savePanel.value !== panel) return
-        if (value.makeDefault) listPref.value?.save({ ...(listPrefs.value ?? {}), defaultView: saved.id }, 0)
         if (sameListState(savedFilters.value, state)) update({ view: saved.id, cols: filtersFromView(saved).cols })
         toast(`Saved the view “${saved.name}”${saved.shared ? ', shared with the project' : ''}`)
       }
@@ -177,9 +184,10 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
       toast(`Made “${copy.name}”, your own copy`)
     } catch (e) { toast(`The view was not copied: ${problem(e)}`, { tone: 'error' }) }
   }
+  // Right-click (or the menu) on a saved view: the project opens with it, or stops (AEON-1453).
   function setDefaultView(view: SavedView | null) {
-    listPref.value?.save({ ...(listPrefs.value ?? {}), defaultView: view?.id ?? null }, 0)
-    toast(view ? `${project.value?.title ?? 'The project'} opens with “${view.name}” for you` : `${project.value?.title ?? 'The project'} opens with all tickets again`)
+    ticketSwitch.setDefault(view ? `${SAVED_VIEW}${view.id}` : null)
+    toast(view ? `${project.value?.title ?? 'The project'} opens with “${view.name}” for you` : `${project.value?.title ?? 'The project'} no longer opens with a saved view`)
   }
   async function share(view: SavedView, shared: boolean) {
     const id = projectId.value

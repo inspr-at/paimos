@@ -10,7 +10,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
-import ProjectTabs from '../work/ProjectTabs.vue'
+import ViewSwitch from '../ViewSwitch.vue'
 import ExpertTile from './ExpertTile.vue'
 import FlowView from './FlowView.vue'
 import LevelSwitch from './LevelSwitch.vue'
@@ -19,13 +19,14 @@ import TicketsSection from './TicketsSection.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
-import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, readDeliveryMetrics, readPrefs, shortDate, type DeliveryMetrics, type DeliveryPrefs, type Level, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
+import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, openingPrefs, readDefaults, readDeliveryMetrics, shortDate, type DeliveryDefaults, type DeliveryMetrics, type DeliveryPrefs, type Level, type StoredDeliveryPrefs, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText, fill } from '../../lib/deliveryNumbersText'
 import { FLOW_MODES, type FlowMode } from '../../lib/deliveryFlowModes'
 import { timeLabel } from '../../lib/deliveryFlow'
 import { flowText, put } from '../../lib/deliveryFlowText'
 import { useDeliveryFlow } from '../../lib/useDeliveryFlow'
 import { onPreferenceFailure, preferenceSaves, usePreference } from '../../lib/preferences'
+import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
 import { usePoller } from '../../lib/usePolledData'
 import { vClipTip } from '../../directives/clipTip'
 import { useProfile } from '../../stores/profile'
@@ -48,14 +49,17 @@ const profile = useProfile()
 const lang = computed(() => deliveryLanguage(profile.profile?.locale))
 const text = computed(() => deliveryText(lang.value))
 
-// ---------- Views: ?view=numbers|flow ----------
-const view = computed<'numbers' | 'flow'>(() => route.query.view === 'flow' ? 'flow' : 'numbers')
+// ---------- Views: Numbers | Flow (AEON-1453) ----------
+// The person's default, else the view used last; ?view=flow wins once.
+const viewSwitch = useViewSwitch({ key: viewKey('delivery'), options: ['numbers', 'flow'], fallback: 'numbers', link: () => route.query.view })
+const view = computed<'numbers' | 'flow'>(() => viewSwitch.current.value === 'flow' ? 'flow' : 'numbers')
 const views = computed(() => [
   { id: 'numbers', label: text.value.views.numbers, icon: 'bars' as const },
   { id: 'flow', label: text.value.views.flow, icon: 'flow' as const },
 ])
 function setView(id: string) {
   if (id === view.value) return
+  viewSwitch.choose(id)
   const { view: _view, ...query } = route.query
   void router.replace({ path: route.path, query: id === 'flow' ? { ...query, view: 'flow' } : query, hash: route.hash })
 }
@@ -63,11 +67,18 @@ function setView(id: string) {
 // ---------- The person's level and window ----------
 // Held here once chosen, so a person without a saved preference (or a failed save) still
 // sees their choice; the stored value wins only until they choose.
-const pref = usePreference<Partial<DeliveryPrefs>>(DELIVERY_PREFS_KEY)
+// The person's explicit defaults (right-click › Open here by default) win over the values used last.
+const pref = usePreference<StoredDeliveryPrefs>(DELIVERY_PREFS_KEY)
 const prefsReady = ref(false)
 void pref.ready.then(() => { prefsReady.value = true })
 const chosen = ref<DeliveryPrefs | null>(null)
-const prefs = computed<DeliveryPrefs>(() => chosen.value ?? (prefsReady.value ? readPrefs(pref.value.value) : DEFAULT_PREFS))
+const prefs = computed<DeliveryPrefs>(() => chosen.value ?? (prefsReady.value ? openingPrefs(pref.value.value) : DEFAULT_PREFS))
+const defaults = computed(() => readDefaults(pref.value.value))
+// A save carries the stored defaults along, so choosing a window never clears them.
+function stored(value: DeliveryPrefs): StoredDeliveryPrefs {
+  const kept = pref.value.value?.defaults
+  return kept ? { ...value, defaults: kept } : value
+}
 // The listener fires inside the failed write, before the set records it. The watch only
 // clears the warning, so a retry does not flash the failure that is still in the set.
 const prefFailed = ref(false)
@@ -79,14 +90,21 @@ function choose(next: Partial<DeliveryPrefs>) {
   const value = { ...prefs.value, ...next }
   chosen.value = value
   prefFailed.value = false
-  pref.save(value, 0)
+  pref.save(stored(value), 0)
 }
 function retryPrefs() {
   prefFailed.value = false
-  pref.save(chosen.value ?? prefs.value, 0)
+  pref.save(stored(chosen.value ?? prefs.value), 0)
 }
 const setWindow = (window: WindowDays) => choose({ window })
 const setLevel = (level: Level) => choose({ level })
+// A default is merged into what the server holds; one that could not be read is never overwritten.
+async function setDefault(patch: DeliveryDefaults) {
+  if (!(await pref.ensureLoaded())) return
+  const now = pref.value.value ?? {}
+  prefFailed.value = false
+  pref.save({ ...now, defaults: { ...now.defaults, ...patch } }, 0)
+}
 
 // ---------- Flow: ?mode=live|replay|compare and ?run=, read while Flow is shown ----------
 const flowMode = computed<FlowMode>(() => FLOW_MODES.includes(route.query.mode as FlowMode) ? route.query.mode as FlowMode : 'live')
@@ -258,14 +276,14 @@ watch(state, (next, prev) => {
       <div class="dl-left">
         <div class="dl-titleline">
           <h2 :id="`dl-title-${project.id}`">{{ text.title }}</h2>
-          <ProjectTabs class="dl-views" :items="views" :selected="view" :label="text.viewsLabel" @select="setView" />
+          <ViewSwitch class="dl-views" :options="views" :selected="view" :label="text.viewsLabel" :default-id="viewSwitch.defaultId.value" @select="setView" @set-default="viewSwitch.setDefault" />
         </div>
         <p class="dl-sub">{{ view === 'flow' ? text.flowSub : text.sub }}</p>
       </div>
       <div class="dl-right">
         <div class="dl-ctrls">
-          <WindowSwitch :class="{ 'slot-hidden': view === 'flow' }" :model-value="prefs.window" :label="text.windowLabel" :unit="text.days" @update:model-value="setWindow" />
-          <LevelSwitch :model-value="prefs.level" :label="text.levelLabel" :names="text.level" @update:model-value="setLevel" />
+          <WindowSwitch :class="{ 'slot-hidden': view === 'flow' }" :model-value="prefs.window" :label="text.windowLabel" :unit="text.days" :default-value="defaults.window" @update:model-value="setWindow" @set-default="window => setDefault({ window })" />
+          <LevelSwitch :model-value="prefs.level" :label="text.levelLabel" :names="text.level" :default-value="defaults.level" @update:model-value="setLevel" @set-default="level => setDefault({ level })" />
         </div>
         <span class="dl-updated" data-testid="delivery-updated">{{ updated || ' ' }}</span>
       </div>

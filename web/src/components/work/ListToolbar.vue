@@ -6,7 +6,7 @@ import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
 import type { SortKey } from '../../lib/work'
 import { menuPanelWidth } from '../../lib/menuColumns'
 import AppIcon from '../AppIcon.vue'
-import ProjectTabs from './ProjectTabs.vue'
+import ViewSwitch from '../ViewSwitch.vue'
 import { TICKET_VIEWS, KNOWLEDGE_VIEWS, type TicketView } from './projectNavigation'
 import DateMenu from './DateMenu.vue'
 import DisplayMenu from './DisplayMenu.vue'
@@ -40,6 +40,8 @@ const props = defineProps<{
   stuck: boolean
   view: TicketView | 'knowledge'
   knowledgeView?: 'entries' | 'graph'
+  // The person's default of the shown switch (List, Outline, Graph or Entries, Graph), for its pin (AEON-1453).
+  defaultView?: string | null
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   facetLoading?: boolean
@@ -65,6 +67,7 @@ const emit = defineEmits<{
   needOptions: [dimension: Dimension]
   create: []
   view: [value: string]
+  setDefault: [value: string | null]
   expandAll: []
   collapseAll: []
   expandGroups: []
@@ -245,11 +248,11 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 
 <template>
   <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
-    <ProjectTabs v-if="!attention" class="view-switch"
-      :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
+    <ViewSwitch v-if="!attention" class="view-switch"
+      :options="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
-      :tips="view !== 'knowledge'"
-      :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
+      :tips="view !== 'knowledge'" :default-id="defaultView ?? null"
+      :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" @set-default="value => emit('setDefault', value)" />
     <span v-if="attention" class="count-live">
       <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ `${total} ${attentionWord('suggestions', 'Vorschläge')}` }}</template></span>
     </span>

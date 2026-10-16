@@ -5,7 +5,10 @@ import ts from 'typescript'
 import { afterEach, expect, it, vi } from 'vitest'
 import { computed, effectScope, nextTick, reactive, ref, shallowRef, toRefs, watch, type EffectScope } from 'vue'
 import { filtersFromQuery, filtersToQuery, hasFilters, totalFrom } from '../src/lib/ticketList'
-import { PROJECT_SECTIONS, projectSection, ticketView } from '../src/components/work/projectNavigation'
+import { KNOWLEDGE_VIEWS, PROJECT_SECTIONS, projectSection, ticketView } from '../src/components/work/projectNavigation'
+import { filtersFromView } from '../src/lib/ticketList'
+import { useViewSwitch, viewKey } from '../src/lib/viewSwitch'
+import { savedViewId, useTicketListSwitch } from '../src/lib/ticketListSwitch'
 import { bindProjectRef } from '../src/views/project/context'
 
 // Run the actual owner body with controlled IO, as project-related.unit.test.ts
@@ -46,6 +49,8 @@ function fixture() {
     queueSnapshot: ref(null), queue: { snapshots: {}, errors: {}, load: vi.fn() },
     sectionPath: (section = 'tickets') => `/p/AEON/${section}`, ticketPath: (key: string) => `/p/AEON/${key}`, ticketSectionQuery: () => ({}),
     recovery: ref(null), recovering: ref(false), authorizedProject: ref(undefined),
+    // AEON-1453: the page's view switches; their memory is lib/viewSwitch's, tested on its own.
+    sectionSwitch: { remember: vi.fn() }, ticketSwitch: { remember: vi.fn() }, knowledgeSwitch: { remember: vi.fn() }, ticketOpeningQuery: () => ({}),
   }
   const rows = ref([{ id: 'a', key: 'AEON-1', updated_at: 'v1', state: 'open' }, { id: 'b', key: 'AEON-2', updated_at: 'v1', state: 'open' }, { id: 'c', key: 'AEON-3', updated_at: 'v1', state: 'open' }])
   const data = {
@@ -67,6 +72,7 @@ it('state recovery keeps only the mounted editor copy, never an authorized proje
     usePoller: () => ({}), useDensity: () => ({ density: ref('comfortable'), set: vi.fn() }),
     useProjectHeader: () => ({ headerDensity: ref('compact') }), useDeveloperSettings: () => ({ loading: ref(false), showHeaderGraph: ref(false) }),
     can: () => false, scopeOwner: () => '',
+    useViewSwitch, viewKey, useTicketListSwitch, savedViewId, KNOWLEDGE_VIEWS, viewsOf: () => ({ items: [] }), filtersFromView, filtersToQuery,
   })
   const state = run(() => create())
   state.recovery.value = { projectKey: 'AEON', ticketKey: '', project: { id: 'old-project' }, owner: 'old-owner', person: { id: 'old-person' } }

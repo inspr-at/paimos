@@ -22886,6 +22886,18 @@
     ,
     {"kind":"vitest","file":"tests/version-crossfade.unit.test.ts","name":"touch does not hover; keyboard focus survives pointer exit and leaves on blur; disposal removes listeners","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a hold or Shift+F10 opens the menu; the hold never also switches, movement cancels it, and a mouse never holds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a link wins once: it shows its view without writing, until the person chooses or follows another link","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a memory that could not be read is never overwritten; the next write after a read merges into it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"an explicit default wins over the view used last; stopping it returns to the last used, and the older store never comes back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"each project keeps its own memory under its own key","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"the view used last opens the next visit, kept on the server only","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/webcore-recovery.unit.test.ts","name":"S8-010: human numeric input > normalizes leading zeros and decimal separators without throwing","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/webcore-recovery.unit.test.ts","name":"S9-003: presence recovery > discards a late rejoin after disposal and does not retry it","tier":"NIGHTLY"}

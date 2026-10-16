@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
+import ViewSwitch from '../ViewSwitch.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import NativeEventList from './NativeEventList.vue'
 import { nativeSessionBounds as bounds, type NativeApproval, type NativeStreamEvent } from '../../lib/nativeSessionContract'
@@ -10,6 +11,7 @@ import { bindingKey, expertRequest, liveTerminalLink, type SessionViewProps } fr
 import { endText, eventRows, eventTypes, missingEvents, type EventType } from '../../lib/nativeExpert/rows'
 import { fullName } from '../../lib/modelsSimple'
 import { preferenceOwner, usePreference } from '../../lib/preferences'
+import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
 
 const props = withDefaults(defineProps<SessionViewProps & {
   pane?: 'events' | 'terminal'
@@ -26,15 +28,24 @@ const panelKey = computed(() => `${principalKey.value}/${props.session.owned_ses
 const captureKey = computed(() => JSON.stringify([panelKey.value, bindingKey(props.session.current_binding), props.session.generation,
   props.viewer.canRead, props.viewer.canWatch, props.viewer.canReadStructured, request.value?.view, request.value?.consentId,
 ]))
-const standaloneSegment = ref<'events' | 'terminal'>('events')
-const segment = computed(() => props.standalone ? standaloneSegment.value : props.pane)
 const terminalAtOpen = ref(false), viewerAtOpen = ref(false)
+// The standalone Events / Terminal selector is a ViewSwitch (AEON-1453): the person's own
+// default, else the segment used last; Terminal only where this session opened one.
+const ownPreference = computed(() => props.viewer.kind === 'person' && preferenceOwner.value === `${props.viewer.tenantId}/${props.viewer.principalId}`)
+const segmentSwitch = useViewSwitch({
+  key: () => ownPreference.value && props.standalone ? viewKey('session-expert') : null,
+  options: () => terminalAtOpen.value && props.viewer.kind === 'person' ? ['events', 'terminal'] : ['events'], fallback: 'events',
+})
+const segmentOptions = computed(() => [
+  { id: 'events', label: 'Events', icon: 'list' as const, disabled: !readable.value },
+  { id: 'terminal', label: 'Terminal', icon: 'terminal' as const, disabled: !readable.value },
+])
+const segment = computed<'events' | 'terminal'>(() => props.standalone ? segmentSwitch.current.value === 'terminal' ? 'terminal' : 'events' : props.pane)
 const openedName = ref(''), openedHost = ref('')
 const hidden = ref(false), following = ref(true), hiddenTypes = ref<EventType[]>([]), typeAnchor = ref<HTMLElement | null>(null)
 const phone = ref(window.innerWidth <= 600)
 const resized = () => { phone.value = window.innerWidth <= 600 }
 const preference = usePreference<{ hidden?: string[] }>('agents:expert.types')
-const ownPreference = computed(() => props.viewer.kind === 'person' && preferenceOwner.value === `${props.viewer.tenantId}/${props.viewer.principalId}`)
 watch(() => ownPreference.value ? preference.value.value : null, value => {
   hiddenTypes.value = value?.hidden?.filter((key): key is EventType => eventTypes.some(type => type.key === key)) ?? []
 }, { immediate: true })
@@ -145,7 +156,7 @@ async function earlier() {
 }
 
 watch(panelKey, () => {
-  stop(); standaloneSegment.value = 'events'; following.value = true; typeAnchor.value = null; blocked.value = false
+  stop(); segmentSwitch.chosen.value = null; following.value = true; typeAnchor.value = null; blocked.value = false
   hiddenTypes.value = ownPreference.value ? preference.value.value?.hidden?.filter((key): key is EventType => eventTypes.some(type => type.key === key)) ?? [] : []
   viewerAtOpen.value = !!link.value
   terminalAtOpen.value = props.viewer.kind === 'person' && readable.value &&
@@ -171,10 +182,8 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
 <template>
   <section v-if="segment === 'events' || (terminalAtOpen && viewer.kind === 'person')" class="native-expert" :aria-label="modelName ? `Session ${segment} · ${modelName}` : `Session ${segment}`">
     <div v-if="standalone || segment === 'events'" class="expert-bar" role="toolbar" :aria-label="segment === 'events' ? 'Event tools' : 'Terminal tools'">
-      <div v-if="standalone && terminalAtOpen && viewer.kind === 'person'" class="seg expert-segments" role="radiogroup" aria-label="Session views">
-        <button type="button" role="radio" :disabled="!readable" :aria-checked="segment === 'events'" @click="standaloneSegment = 'events'"><AppIcon name="list" :size="13" />Events</button>
-        <button type="button" role="radio" :disabled="!readable" :aria-checked="segment === 'terminal'" @click="standaloneSegment = 'terminal'"><AppIcon name="terminal" :size="13" />Terminal</button>
-      </div>
+      <ViewSwitch v-if="standalone && terminalAtOpen && viewer.kind === 'person'" class="expert-segments" look="seg" label="Session views" :icon-size="13" :options="segmentOptions" :selected="segment"
+        :menu="ownPreference" :default-id="segmentSwitch.defaultId.value" @select="id => segmentSwitch.choose(id)" @set-default="segmentSwitch.setDefault" />
       <template v-if="segment === 'events'">
         <div class="event-types" role="group" aria-label="Event types">
           <button v-for="type in eventTypes" :key="type.key" class="type-toggle" type="button" :aria-pressed="!hiddenTypes.includes(type.key)" @click="toggleType(type.key)">
@@ -218,7 +227,7 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
 .native-expert { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; container: native-expert / inline-size; background: var(--surface); }
 .expert-bar { display: flex; align-items: center; gap: 10px; flex: none; height: 52px; padding: 8px 12px 8px 14px; border-bottom: 1px solid var(--line); }
 .expert-segments { flex: none; }
-.expert-segments button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.expert-segments :deep(button) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .event-types { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .type-toggle { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 8px 0 6px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--ink-3); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .type-toggle[aria-pressed="true"] { color: var(--ink); }
@@ -255,7 +264,7 @@ defineExpose({ stop, liveTerminalLink: link, modelName })
 }
 @media (pointer: coarse), (max-width: 600px) {
   .expert-bar { height: 56px; }
-  .expert-segments button, .types-button, .follow, .terminal-link { min-height: 44px; }
+  .expert-segments :deep(button), .types-button, .follow, .terminal-link { min-height: 44px; }
   .native-expert { padding-bottom: env(safe-area-inset-bottom); }
 }
 @media (max-width: 600px) {
