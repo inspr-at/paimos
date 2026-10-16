@@ -28,7 +28,7 @@ paths:
       - {$ref: '#/components/parameters/Project'}
     get:
       operationId: listenCompatMessages
-      description: Only the authenticated recipient, optionally selecting its own harness address. Pending accepted R2 messages only; at most ten, ordered by event ID. No target references or secrets. Reading and ACK never close reply obligations.
+      description: 'Only the authenticated recipient, optionally selecting its own harness address. Pending accepted R2 messages only; at most ten, ordered by event ID. Decision Desk replies to this principal are included through any verified caller-owned address; exact session ownership still applies. No target references or secrets. Reading and ACK never close reply obligations.'
       parameters:
         - {name: session, in: query, schema: {type: string, format: uuid}, description: 'Active caller session plus unbound principal broadcasts; absent retains the legacy principal inbox and JSON shape'}
         - {name: to, in: query, schema: {type: string}}

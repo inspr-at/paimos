@@ -55,7 +55,7 @@ func (tr *deliveryWorkTrace) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data 
 	}
 }
 
-func deliveryTracedPool(t *testing.T, pool *pgxpool.Pool, trace *deliveryWorkTrace) *pgxpool.Pool {
+func deliveryTracedPool(t *testing.T, pool *pgxpool.Pool, trace pgx.QueryTracer) *pgxpool.Pool {
 	t.Helper()
 	cfg := pool.Config()
 	cfg.ConnConfig.Tracer = trace

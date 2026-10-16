@@ -179,10 +179,15 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
 			return err
 		}
 		return tx.QueryRow(readCtx, `WITH candidates AS MATERIALIZED (
- SELECT e.id,e.question_id,e.kind,coalesce(e.retry_at,e.deliver_after) AS ordering,greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after)) AS due
+ SELECT e.id,e.question_id,e.kind,coalesce(e.retry_at,e.deliver_after) AS ordering,
+ CASE WHEN e.state='delivered' AND r.state='queued' THEN im.created_at+interval '30 minutes'
+ ELSE greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after)) END AS due
  FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision
  LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
- WHERE e.tenant_id=$1 AND e.kind IN ('inbox','comment','outcome') AND (e.state IN ('pending','failed') OR e.state='delivered' AND r.state='failed' AND r.failure_reason='session_ended')
+ LEFT JOIN inbox_messages im ON im.tenant_id=r.tenant_id AND im.id=r.message_id
+ WHERE e.tenant_id=$1 AND e.kind IN ('inbox','comment','outcome') AND (e.state IN ('pending','failed') OR e.state='delivered' AND (
+   r.state='failed' AND r.failure_reason='session_ended'
+   OR r.state='queued' AND im.fetched_at IS NULL AND im.acked_at IS NULL AND NOT e.effect_data ? 'pickup_stall_alerted_at'))
  AND coalesce(e.effect_data->>'retryable','true')<>'false'
  ) SELECT ARRAY(SELECT id::text FROM candidates WHERE due<=$2
  ORDER BY ordering,question_id,(kind='outcome') DESC,kind,id LIMIT $3),
@@ -265,6 +270,9 @@ func (m *Module) dispatchOne(ctx context.Context, tid, id string) error {
 				return err
 			}
 			if d.kind != "inbox" || !reroute {
+				if d.kind == "inbox" {
+					return m.alertPickupTx(ctx, tx, tid, d, now)
+				}
 				return nil
 			}
 		}

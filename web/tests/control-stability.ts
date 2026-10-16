@@ -21,7 +21,10 @@ export function contentBox(
 
 // Pattern A: measure controls in their scroll container, allowing content below
 // to grow. Pattern B callers can include the frame to also freeze its height.
-export async function controlStability(page: Page, controls: Record<string, Locator>) {
+// `grows` names controls that grow away from the actions by design (AEON-1438:
+// the chat field grows upward with its text): their left, right and bottom
+// edges must stay; their top and height may follow the text.
+export async function controlStability(page: Page, controls: Record<string, Locator>, options: { grows?: string[] } = {}) {
   let interactions = 0
   const measure = async () => {
     const samples: Record<string, { x: number; y: number; width: number; height: number }> = {}
@@ -45,8 +48,16 @@ export async function controlStability(page: Page, controls: Record<string, Loca
     async check(interaction: () => Promise<unknown>) {
       await interaction(); interactions++
       const after = await measure()
-      for (const name of Object.keys(before)) for (const dimension of ['x', 'y', 'width', 'height'] as const) {
-        expect(Math.abs(after[name][dimension] - before[name][dimension]), `${name}.${dimension}`).toBeLessThanOrEqual(.5)
+      for (const name of Object.keys(before)) {
+        if (options.grows?.includes(name)) {
+          expect(Math.abs(after[name].x - before[name].x), `${name}.x`).toBeLessThanOrEqual(.5)
+          expect(Math.abs(after[name].width - before[name].width), `${name}.width`).toBeLessThanOrEqual(.5)
+          expect(Math.abs(after[name].y + after[name].height - before[name].y - before[name].height), `${name}.bottom`).toBeLessThanOrEqual(.5)
+          continue
+        }
+        for (const dimension of ['x', 'y', 'width', 'height'] as const) {
+          expect(Math.abs(after[name][dimension] - before[name][dimension]), `${name}.${dimension}`).toBeLessThanOrEqual(.5)
+        }
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'horizontal overflow').toBeLessThanOrEqual(1)
     },
