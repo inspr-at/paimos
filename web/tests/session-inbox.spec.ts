@@ -28,7 +28,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(row).toBeVisible()
     await expect(page.locator('.sessions .row .no-inbox')).toHaveCount(0)
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    const open = async (id: string) => { await page.goto(`/agents/${id}`); await panel.getByRole('tab', { name: 'Overview' }).click(); await expect(panel.locator('.now-listen')).toBeVisible() }
+    const open = async (id: string) => { await page.goto(`/agents/${id}`); await panel.getByRole('tab', { name: 'Details', exact: true }).click(); await expect(panel.locator('.now-listen')).toBeVisible() }
     await open(oneShot.id)
     const cue = panel.locator('.now-listen .no-inbox')
     await expect(cue).toHaveText('No inbox · this run cannot receive follow-up messages')

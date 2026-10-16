@@ -83,8 +83,9 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(row.locator('.provider-mark')).toHaveAttribute('data-provider', 'unknown')
       await row.locator('.agent-link').click()
       const panel = page.getByRole('complementary', { name: 'Session details' })
-      // AEON-1212 (#592) moved the identity and state into the unified panel's header.
-      await expect(panel.locator('.panel-head .agent-state-label')).toHaveText(STATE_LABEL[state])
+      // AEON-1309: the condensed header carries the state in the named avatar.
+      await expect(panel.locator('.panel-head .live-bot')).toHaveAttribute('aria-label', STATE_LABEL[state])
+      await expect(panel.locator('.panel-head .live-bot')).toHaveAttribute('data-state', state)
       const setup = panel.locator('[aria-labelledby="setup-title"]')
       // AEON-1249 (#594): Details uses the same resolved model name as the row.
       for (const value of ['Integration Model', 'xhigh', 'Test account', '1.2.3']) await expect(setup).toContainText(value)
@@ -329,7 +330,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     missing.heartbeat_at = null
     await page.goto(`/agents/${missing.id}`)
     const evidence = panel.getByRole('region', { name: 'Session state evidence' })
-    await expect(panel.locator('.panel-head .agent-state-label')).toHaveText('No heartbeat')
+    // AEON-1309: the header avatar speaks the state; Details keeps the evidence.
+    await expect(panel.locator('.panel-head .live-bot')).toHaveAttribute('aria-label', 'No heartbeat')
+    await expect(panel.locator('.panel-head .live-bot')).toHaveAttribute('data-state', 'unresponsive')
     await expect(panel.locator('.now-step')).toHaveText('No heartbeat has been received since this session registered.')
     await expect(evidence).toContainText('does not establish that the worker failed')
     await expect(evidence).toContainText('Registered')
