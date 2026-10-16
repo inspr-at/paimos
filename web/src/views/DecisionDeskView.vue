@@ -640,7 +640,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-bar { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
 .dp-bar .view-tabs { grid-area: 1 / 1; }
 .dp-bar .view-tabs button { white-space: nowrap; }
-/* The tabs' type size, so the label fits beside them on a 390 px phone. */
+/* 12.5 px is the tabs' type (a plain .btn is 13 px), so the label fits beside them on a 390 px phone. */
 .one-by-one { grid-area: 1 / -2; justify-self: end; gap: 6px; padding: 0 12px; font-size: 12.5px; }
 @media (pointer: coarse) { .one-by-one { height: 44px; } }
 @media (prefers-reduced-motion: no-preference) { .one-by-one-enter-active, .one-by-one-leave-active { transition: opacity 120ms ease; } }

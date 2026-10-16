@@ -261,3 +261,38 @@ test.describe('touch', () => {
     }
   })
 })
+
+// Shots for the type-size deviation (Tick): the round action is 12.5 px, the tabs' size, rather than a plain 13 px button.
+test.describe('type-size shots', () => {
+  test.use({ locale: 'en-US' })
+  test('AEON-1448: 375 and 390, the round action beside the tabs', async ({ page }) => {
+    test.setTimeout(120_000)
+    const lines = ['| viewport | theme | place | font | gap | padding | row | button | label |', '|---|---|---|---|---|---|---|---|---|']
+    for (const width of [375, 390]) for (const theme of ['light', 'dark'] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await page.setViewportSize({ width, height: 844 })
+      const world = await mockDesk(page, theme)
+      world.arrived = true
+      await page.goto('/decision-desk')
+      await expect(page.getByRole('heading', { level: 1, name: 'Decision Desk' })).toBeVisible()
+      await expect(button(page)).toBeVisible()
+      await expect(button(page)).toHaveCSS('opacity', '1')
+      const read = () => page.evaluate(() => {
+        const action = document.querySelector<HTMLElement>('[data-testid="desk-one-by-one"]')!
+        const label = action.querySelector<HTMLElement>('.label')!
+        const style = getComputedStyle(action)
+        return { font: style.fontSize, gap: style.gap, padding: style.padding, row: action.parentElement!.getBoundingClientRect().width, button: action.getBoundingClientRect().width, label: getComputedStyle(label).display !== 'none' }
+      })
+      for (const place of ['open', 'decided'] as const) {
+        if (place === 'decided') {
+          await page.getByTestId('desk-tab-decided').click()
+          await expect(page.getByRole('radiogroup', { name: 'Stamp' })).toBeVisible()
+        }
+        const box = await read()
+        lines.push(`| ${width} | ${theme} | ${place} | ${box.font} | ${box.gap} | ${box.padding} | ${box.row.toFixed(1)} | ${box.button.toFixed(1)} | ${box.label} |`)
+        await page.screenshot({ path: test.info().outputPath(`type-${width}-${theme}-${place}.png`) })
+      }
+    }
+    await writeFile(test.info().outputPath('type-size.md'), lines.join('\n') + '\n')
+  })
+})
