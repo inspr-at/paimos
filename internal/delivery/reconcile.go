@@ -24,13 +24,32 @@ func unlock(conn *pgxpool.Conn, key string) {
 
 // observationLock serializes network snapshots between webhook/reconciliation
 // replicas. Session locks span reads; no row transaction spans network I/O.
+// Reconciliation may wait. Webhook ingress must not: lock_timeout on this
+// tenant-wide key is what turned the admission publication burst into 502s.
 func (m *Module) observationLock(ctx context.Context) (context.Context, func(), error) {
+	return m.lockObservation(ctx, false)
+}
+
+func (m *Module) tryObservationLock(ctx context.Context) (context.Context, func(), error) {
+	return m.lockObservation(ctx, true)
+}
+
+func (m *Module) lockObservation(ctx context.Context, try bool) (context.Context, func(), error) {
 	conn, release, err := db.Acquire(ctx, m.pool)
 	if err != nil {
 		return ctx, nil, err
 	}
 	key := "aeon-delivery-observation:" + m.config.TenantID
-	if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,0))`, key); err != nil {
+	if try {
+		var locked bool
+		if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,0))`, key).Scan(&locked); err != nil || !locked {
+			release()
+			if err == nil {
+				err = errObservationBusy
+			}
+			return ctx, nil, err
+		}
+	} else if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,0))`, key); err != nil {
 		release()
 		return ctx, nil, err
 	}

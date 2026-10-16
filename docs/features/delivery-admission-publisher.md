@@ -72,7 +72,10 @@ preserving GitHub status limits. When the queue switch is on, the queue lane wak
 A head that stays queued is read at most once a minute, the confirming read is
 skipped when no enqueue or dequeue ran, and one installation token covers every
 read in that pass. Timestamp-only observations and the publisher’s
-own status webhook do not invalidate an acknowledged revision. Unchanged P2
+own status webhook do not invalidate an acknowledged revision. That echo is
+acknowledged before the observation lock and does not read GitHub. Every other
+webhook kind tries the lock and, while reconciliation holds it, remains a
+durable receipt for immediate retry instead of waiting. Unchanged P2
 observations are seeded on startup.
 
 Enqueue intent is committed before its external mutation, so a restart cannot
