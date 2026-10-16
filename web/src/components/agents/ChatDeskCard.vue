@@ -5,6 +5,14 @@ import type { Question } from '../../lib/decisionDeskApi'
 // next card retries. Bounded, so a long history cannot grow it without limit.
 const reads = new Map<string, Promise<Question>>()
 const MAX_READS = 100
+// A long history opens many cards at once: at most four reads run together.
+let active = 0
+const waiting: (() => void)[] = []
+async function limited<T>(task: () => Promise<T>): Promise<T> {
+  if (active >= 4) await new Promise<void>(resolve => waiting.push(resolve))
+  active++
+  try { return await task() } finally { active--; waiting.shift()?.() }
+}
 </script>
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
@@ -44,7 +52,7 @@ watch(() => [viewer.value, props.questionId, props.answer ?? '', !!props.correct
   let read = reads.get(key)
   if (!read) {
     if (reads.size >= MAX_READS) reads.delete(reads.keys().next().value!)
-    read = readQuestion(id)
+    read = limited(() => readQuestion(id))
     reads.set(key, read)
   }
   loading.value = true

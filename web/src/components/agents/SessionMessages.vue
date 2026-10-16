@@ -86,14 +86,21 @@ function closeMenu(restore: boolean) {
   menu.value = null
   if (restore && row?.isConnected && row.tabIndex >= 0) row.focus({ preventScroll: true })
 }
+let firedTimer: ReturnType<typeof setTimeout> | undefined
 function press(event: PointerEvent, message: MessageGroup) {
+  // Every new press starts clean, so a tap on a link is never swallowed.
+  pressFired = false
   if (event.pointerType === 'mouse' || !menuable(message)) return
   if ((event.target as HTMLElement).closest('a, button, summary, .code-fold, input, textarea')) return
   const row = event.currentTarget as HTMLElement
   cancelPress()
-  pressFired = false
   pressOrigin = { x: event.clientX, y: event.clientY }
-  pressTimer = setTimeout(() => { pressTimer = undefined; pressFired = true; openMenu(row, message) }, 450)
+  pressTimer = setTimeout(() => {
+    pressTimer = undefined; pressFired = true; openMenu(row, message)
+    // The click that may follow a long press arrives at once; never hold the flag beyond it.
+    if (firedTimer !== undefined) clearTimeout(firedTimer)
+    firedTimer = setTimeout(() => { firedTimer = undefined; pressFired = false }, 800)
+  }, 450)
 }
 function pressMove(event: PointerEvent) {
   if (pressOrigin && Math.hypot(event.clientX - pressOrigin.x, event.clientY - pressOrigin.y) > 8) cancelPress()
@@ -119,6 +126,7 @@ watch(me, () => { if (menu.value) closeMenu(false) })
 watch(items, list => { if (menu.value && !list.some(item => item.id === menu.value!.id)) closeMenu(false) })
 onBeforeUnmount(() => {
   cancelPress()
+  if (firedTimer !== undefined) clearTimeout(firedTimer)
   coarseQuery?.removeEventListener('change', syncMedia); narrowQuery?.removeEventListener('change', syncMedia)
 })
 </script>
