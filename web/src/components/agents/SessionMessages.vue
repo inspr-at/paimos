@@ -221,8 +221,8 @@ onBeforeUnmount(() => {
 .duplicate { flex: none; font: 500 11.5px var(--mono); color: var(--ink-2); }
 /* Copy and Reply: on hover or focus, centred in the gap under the message. They
    lie over the gap and take no layout space, so the rhythm stays one gap. */
-.message-actions { position: absolute; z-index: 1; top: calc(100% + (var(--thread-gap, 20px) - 28px) / 2); left: -6px; display: flex; gap: 2px; height: 28px; opacity: 0; }
-.message-actions .icon-btn { border-radius: 8px; color: var(--ink-3); }
+.message-actions { --act: 28px; position: absolute; z-index: 1; top: calc(100% + (var(--thread-gap, 20px) - var(--act)) / 2); left: -6px; display: flex; gap: 2px; height: var(--act); opacity: 0; }
+.message-actions .icon-btn { width: var(--act); height: var(--act); border-radius: 8px; color: var(--ink-3); }
 @media (hover: hover) { .message-actions .icon-btn:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .msg:hover .message-actions, .msg:focus-within .message-actions { opacity: 1; }
 /* The gap under a message belongs to its hover, so the pointer reaches the actions. */
@@ -261,6 +261,9 @@ onBeforeUnmount(() => {
   .session-messages.quiet .msg[tabindex]:focus-visible { box-shadow: none; }
 }
 @media (max-width: 720px) {
+  /* Phones keep 44 px targets, also with a mouse; still centred on the gap, still no layout space. */
+  .message-actions { --act: 44px; left: -14px; gap: 0; }
+  .message-actions .icon-btn { border-radius: 10px; }
   .msg-meta { gap: 8px; margin-bottom: 4px; font-size: 12px; line-height: 16px; }
   .msg-author { flex: none; max-width: 60%; font-size: 13px; }
   .msg-meta .sep { display: none; }
