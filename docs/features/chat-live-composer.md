@@ -74,16 +74,50 @@ this turn while the agent works. OpenCode, Gemini and the other harnesses
 keep their existing presentation until their adapters report flags
 (AEON-1073). Unmanaged sessions keep one Send.
 
-The steer action and Stop stay in the composer for the whole session and are
-disabled while nothing runs, so a turn starting or ending never moves a
-control. A narrow composer hides the new-line hint so Stop stays on the action
-row. A live turn counts as working before the session row catches up. Stop and
+The steer action (or Stop and send, or the chat-reply note) has a slot left
+of the primary action for the whole session; it shows only while a turn runs,
+and the primary action keeps the width of its longest label, so a turn
+starting or ending never moves a control (AEON-1438). A live turn counts as
+working before the session row catches up. Stop and
 Esc outside a text field use the existing interrupt control. The live block
 shows "Stopping…" only while an interrupt is on record. "You stopped this
 turn" appears only once the harness applied the interrupt. A refusal, or no
 interrupt within five seconds, withdraws the claim, also when the turn has
 meanwhile ended on its own. The line is live-only; saving the partial reply is
 part of the daemon slices.
+
+## Thread and composer for people (AEON-1438)
+
+The thread reads as a conversation at every width, after the approved phone
+and desktop designs attached to AEON-1438:
+
+- A Decision Desk delivery is one card: "Decision Desk", the question, its
+  state ("Answered: …", or "Waiting for you" for someone who may decide) and
+  Open. The question root and its answer records fold into it; the agent's
+  instruction, the question ID and the CLI words stay in the data.
+- Each message has one quiet meta line (name · time, at most one chip such as
+  "Action request · resolved"); day separators name Today, Yesterday or the
+  date. Only the latest own message shows its receipt; a failed send always
+  shows Not delivered with Retry. Delivery jargon such as "Delivered between
+  steps" is gone; how a session receives messages stays in Details.
+- Copy and Reply sit in a reserved row at the end of an agent message and
+  show on hover or focus. Touch screens have no such row: a long press, Enter
+  on the focused message or the context-menu key opens Reply and Copy, and
+  the pressed message lifts in place. Reply uses its own reply icon.
+- One calm composer: the field grows from one line to six. Desktop shows a
+  labelled Send and, on focus with a fine pointer only, the keys ("Enter
+  Send · Shift Enter New line"; while a turn runs "Enter After this turn" and
+  the steer keys). Phones show "+" · field · a 44 px send button; typing
+  during a turn opens a second row with Send now and After this turn, which
+  leaves on send or clear. "+" inserts a ticket key or a session name, never
+  an attachment.
+- Sends waiting for a turn sit at the end of the thread as pending bubbles
+  with their timing, Retry, Edit and Cancel.
+- Rename and model requests for sessions that run on their own open from the
+  panel's ⋯ menu ("Rename session…", "Change model or effort…"); Details lists
+  them with their outcome.
+- On desktop the thread is a reading column of at most 720 px; your own
+  bubbles end at its right edge.
 
 ## Validation
 
@@ -108,3 +142,11 @@ chat-native final and checks that only a project message reaches the session
 marker, that every visible chat-native post and every post of a collapsed
 group is recorded, and, at 390 and 1440 px, that a chat-native reply target
 removes the steer action without moving the field, Send or Stop.
+`web/tests/chatThread.test.ts` covers Desk-delivery detection and folding,
+the strings that never reach the thread, day labels, the one-chip rule and the
+latest-receipt rule. `web/tests/aeon-1438-chat-thread.spec.ts` checks the
+thread at 1440, 1024, 390 and 320 px in both themes (Desk cards, the strings
+list, receipts, the meta line, the reading column, 4.5:1 contrast and no
+sideways scroll) and holds the composer within 0.5 px on focus, turn start
+and end and send; it also covers hover and focus actions, the touch menu, the
+phone's second row and "+".
