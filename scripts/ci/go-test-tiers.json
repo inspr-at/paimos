@@ -6472,6 +6472,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListPageWideProjection","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListViewFiltersAndOrdering","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalOutcomeReferenceVisibilityIsBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPassedRevalidationIsFixedAndIdempotent","tier":"ESSENTIAL"}

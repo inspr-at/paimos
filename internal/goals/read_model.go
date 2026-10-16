@@ -111,21 +111,23 @@ type leafFact struct {
 // done buckets come from aeon_work_scope; ETA facts use eta.AggregateSQL.
 const leafFactsSQL = `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope($1::uuid[])), ` + leafFactsProjectionSQL
 
-const leafFactsProjectionSQL = `leaves AS MATERIALIZED (SELECT DISTINCT id,fields,bucket,project_id FROM scope WHERE is_leaf AND bucket NOT IN ('archived','cancelled'))
- SELECT s.root::text,l.id::text,l.bucket='done',
- CASE WHEN jsonb_typeof(l.fields->'estimate_hours')='number' THEN CASE WHEN (l.fields->>'estimate_hours')::numeric>0 AND (l.fields->>'estimate_hours')::numeric<=200 THEN (l.fields->>'estimate_hours')::float8 ELSE 0 END ELSE 0 END,
- ARRAY(SELECT h.id::text FROM harness_sessions h WHERE h.ticket_node_id=l.id AND h.project_id=l.project_id AND h.phase='working' AND h.stopped_at IS NULL AND h.archived_at IS NULL AND h.role IN ('worker','coordinator') ORDER BY h.id LIMIT 201),
+const leafFactsProjectionSQL = `leaves AS MATERIALIZED (SELECT DISTINCT id,fields,bucket,project_id FROM scope WHERE is_leaf AND bucket NOT IN ('archived','cancelled')),
+ leaf_facts AS MATERIALIZED (SELECT l.id,l.bucket='done' AS done,
+ CASE WHEN jsonb_typeof(l.fields->'estimate_hours')='number' THEN CASE WHEN (l.fields->>'estimate_hours')::numeric>0 AND (l.fields->>'estimate_hours')::numeric<=200 THEN (l.fields->>'estimate_hours')::float8 ELSE 0 END ELSE 0 END AS hours,
+ ARRAY(SELECT h.id::text FROM harness_sessions h WHERE h.ticket_node_id=l.id AND h.project_id=l.project_id AND h.phase='working' AND h.stopped_at IS NULL AND h.archived_at IS NULL AND h.role IN ('worker','coordinator') ORDER BY h.id LIMIT 201) AS sessions,
  EXISTS(SELECT 1 FROM delivery_items d WHERE d.ticket_node_id=l.id AND d.state<>'merged' AND coalesce(d.observation->>'merged','false')<>'true'
  AND NOT EXISTS(SELECT 1 FROM delivery_metric_pulls p WHERE p.repository=d.repository AND p.pull_request=d.pull_request AND p.merged_at IS NOT NULL)
  AND ((d.pull_request IS NOT NULL AND d.observation->>'open'='true') OR (d.branch LIKE 'work/%' AND substring(lower(d.branch) from '([a-z][a-z0-9_]*-[0-9]+)')=lower(n.key) AND d.head_sha<>'' AND d.head_sha<>coalesce(d.observation->>'base_sha',''))))
- OR EXISTS(SELECT 1 FROM delivery_metric_pulls p JOIN delivery_metric_sources ds ON ds.tenant_id=p.tenant_id AND ds.repository=p.repository AND ds.project_id=l.project_id WHERE p.closed_at IS NULL AND p.merged_at IS NULL AND p.head_branch LIKE 'work/%' AND substring(lower(p.head_branch) from '([a-z][a-z0-9_]*-[0-9]+)')=lower(n.key)),
- EXISTS(SELECT 1 FROM review_runs r WHERE r.ticket_node_id=l.id AND r.submitted_at IS NULL AND r.expires_at>$2) OR EXISTS(SELECT 1 FROM delivery_review_rounds r WHERE r.ticket_node_id=l.id AND r.state IN ('queued','claimed')),
+ OR EXISTS(SELECT 1 FROM delivery_metric_pulls p JOIN delivery_metric_sources ds ON ds.tenant_id=p.tenant_id AND ds.repository=p.repository AND ds.project_id=l.project_id WHERE p.closed_at IS NULL AND p.merged_at IS NULL AND p.head_branch LIKE 'work/%' AND substring(lower(p.head_branch) from '([a-z][a-z0-9_]*-[0-9]+)')=lower(n.key)) AS pr,
+ EXISTS(SELECT 1 FROM review_runs r WHERE r.ticket_node_id=l.id AND r.submitted_at IS NULL AND r.expires_at>$2) OR EXISTS(SELECT 1 FROM delivery_review_rounds r WHERE r.ticket_node_id=l.id AND r.state IN ('queued','claimed')) AS review,
  EXISTS(SELECT 1 FROM harness_sessions h WHERE h.ticket_node_id=l.id AND h.project_id=l.project_id AND h.archived_at IS NULL AND h.stopped_at IS NOT NULL AND h.stop_reason='paused' AND h.pause_record->>'state' IN ('paused','resume_requested') AND NOT EXISTS(SELECT 1 FROM harness_sessions newer WHERE newer.ticket_node_id=h.ticket_node_id AND newer.project_id=h.project_id AND newer.archived_at IS NULL AND newer.stopped_at IS NOT NULL AND (newer.stopped_at,newer.id)>(h.stopped_at,h.id)) AND NOT EXISTS(SELECT 1 FROM harness_sessions live WHERE live.ticket_node_id=l.id AND live.stopped_at IS NULL AND live.archived_at IS NULL))
  OR EXISTS(SELECT 1 FROM delivery_items d WHERE d.ticket_node_id=l.id AND d.state='held')
- OR EXISTS(SELECT 1 FROM desk_askers a JOIN desk_questions q ON q.node_id=a.question_id WHERE q.state='open' AND a.input->>'meanwhile' IN ('parked','paused','stopped') AND a.input->'blocked_node_ids' ? l.id::text),
- EXISTS(SELECT 1 FROM agent_runs a WHERE a.queue_node_id=l.id AND a.status='queued' AND replace(replace(lower(btrim(n.state)),' ','_'),'-','_') IN ('new','open','backlog','blocked')),
- lower(n.state)='blocked'
- FROM scope s JOIN leaves l ON l.id=s.id JOIN nodes n ON n.id=l.id ORDER BY s.root,l.id`
+ OR EXISTS(SELECT 1 FROM desk_askers a JOIN desk_questions q ON q.node_id=a.question_id WHERE q.state='open' AND a.input->>'meanwhile' IN ('parked','paused','stopped') AND a.input->'blocked_node_ids' ? l.id::text) AS paused,
+ EXISTS(SELECT 1 FROM agent_runs a WHERE a.queue_node_id=l.id AND a.status='queued' AND replace(replace(lower(btrim(n.state)),' ','_'),'-','_') IN ('new','open','backlog','blocked')) AS queued,
+ lower(n.state)='blocked' AS blocked
+ FROM leaves l JOIN nodes n ON n.id=l.id)
+ SELECT s.root::text,f.id::text,f.done,f.hours,f.sessions,f.pr,f.review,f.paused,f.queued,f.blocked
+ FROM scope s JOIN leaf_facts f ON f.id=s.id ORDER BY s.root,f.id`
 
 func loadLeafFacts(ctx context.Context, tx pgx.Tx, roots []string, now time.Time) (map[string][]leafFact, error) {
 	out := map[string][]leafFact{}

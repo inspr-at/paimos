@@ -141,6 +141,19 @@ func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 	if before.Stall == nil || before.Stall.Stalled || atBoundary.Stall == nil || !atBoundary.Stall.Stalled || !atBoundary.Stall.Since.Equal(change) {
 		t.Fatalf("stall boundary before=%+v after=%+v", before.Stall, atBoundary.Stall)
 	}
+	list := listResult(t, f, &module{readPool, func() time.Time { return now }}, "?project="+f.project)
+	found := false
+	for _, g := range list.Items {
+		if g.ID == f.secondGoal {
+			found = true
+			if g.Progress == nil || g.Progress.Pct != 50 || !reflect.DeepEqual(g.Stall, atBoundary.Stall) {
+				t.Fatalf("page history differs from detail: %+v", g)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("list omitted the goal with recorded history")
+	}
 	for span, count := range map[string]int{"24h": 24, "7d": 28, "30d": 30} {
 		r := goalRequest(t.Context(), &module{readPool, func() time.Time { return now }}, f.reader, "GET", "/api/goals/"+f.secondGoal+"/series?range="+span, "", "")
 		if r.Code != 200 {

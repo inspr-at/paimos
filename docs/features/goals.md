@@ -9,7 +9,7 @@ data is created. The tenant goal/outcome kinds are restored lazily on an
 authorized create or fresh update, including a release's first outcome.
 
 The contract is authored in `api/areas/goals.yaml` and served with
-`Aeon-Contract: goals/1.3`. It provides:
+`Aeon-Contract: goals/1.4`. It provides:
 
 - `POST /api/goals` for a goal title and optional project UUID.
 - `PATCH /api/goals/{key-or-id}` for ETA, steps, a flagged progress override,
@@ -61,7 +61,10 @@ existing resource permission checks.
 
 Progress series reconstruct outcome membership, recorded node state/estimates,
 parent changes, worker activity and overrides from visible events. They return
-24 hourly, 28 six-hour or 30 daily UTC points, plus bucket delta and changed keys.
+24 hourly, 28 six-hour or 30 daily UTC points. Each bucket carries `t`, `pct`,
+`delta` versus the preceding bucket, and visibility-filtered `changed_keys`.
+State changes remain listed when the percentage stays the same. `keys` is
+retained as a compatibility alias; `keys_truncated` reports the 200-key bound.
 The projection is bounded to 200 points, 4096 roots, 50,000 scope pairs, 20,000
 events, 32 MiB of event snapshots and a work budget. An oversized detail or
 series returns HTTP 200 with `expansion: too_large`, without partial derived
@@ -71,13 +74,17 @@ Moving outcome and an unchanged displayed percentage for at least four hours;
 
 List filters include the goal's home and visible contributing projects/groups.
 Search and state filters do not alter the full-filter totals. Pagination uses a
-filter-bound cursor and stable tie-breaking. The implementation expands at most
-1000 matching goals and requires narrower project/group filters above that
-bound. `totals_partial` identifies oversized goals omitted from state totals.
-This bounded implementation performs per-goal expansion; the concept's single
-page-query optimization is not implemented. Full static and migration
-compatibility remain coordinator/CI release checks when the host protocol
-refuses them.
+filter-bound cursor and stable tie-breaking. Up to 100 goals share one materialized expansion query. The state and shared
+ETA projections reuse one invoker work scope; historical facts supply stall.
+Full-filter totals and computed sorting use the same bounded batches across at
+most 1000 matching goals. Larger sets require narrower project/group filters.
+The aggregate limit is 4096 roots and 50,000 root/node pairs, with separate
+bounded historical discovery. A page that exceeds a combined budget shrinks,
+returns `truncated: true`, and provides `next_cursor` for the first omitted goal.
+A goal that exceeds the budget on its own remains in the result with visible
+counts and `expansion: too_large`; its siblings still expand. `totals_partial`
+identifies oversized goals omitted from state totals. Decoded batch data and
+retained list snapshots each have a 32 MiB bound.
 
 Desk asks accept `goal_id`, and `aeon ask --goal KEY` resolves it. The association
 requires current `nodes.read`, is stored as an `asks_for` relation per ask, and

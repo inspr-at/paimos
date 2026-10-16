@@ -115,6 +115,17 @@ func TestGoalPassedRevalidationIsFixedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &module{f.db.App, func() time.Time { return apiClock }}
+	for _, interval := range []int{1, 240} {
+		if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO eta_settings(tenant_id,interval_minutes) VALUES($1,$2) ON CONFLICT(tenant_id) DO UPDATE SET interval_minutes=excluded.interval_minutes`, f.writer.TenantID, interval); err != nil {
+			t.Fatal(err)
+		}
+		for _, offset := range []time.Duration{0, time.Second} {
+			g := detail(t, goalRequest(t.Context(), &module{f.db.App, func() time.Time { return apiClock.Add(offset) }}, f.reader, "GET", "/api/goals/"+f.goal, "", ""))
+			if g.Passed == nil || *g.Passed != (offset > 0) {
+				t.Fatalf("report interval %d changed the ten-minute threshold at %v: %+v", interval, offset, g.Passed)
+			}
+		}
+	}
 	for _, now := range []time.Time{apiClock, apiClock.Add(time.Second), apiClock.Add(time.Second)} {
 		if _, err := m.RevalidateTenant(t.Context(), f.writer.TenantID, "", now); err != nil {
 			t.Fatal(err)
@@ -126,6 +137,12 @@ func TestGoalPassedRevalidationIsFixedAndIdempotent(t *testing.T) {
 	}
 	if passed != 2 || etaEvents != 0 {
 		t.Fatalf("passed flips %d ETA samples %d", passed, etaEvents)
+	}
+	var goalPing, outcomeFlip bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT
+ EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='goal.passed_changed' AND after ?& ARRAY['goal_id','read_through','generation'] AND NOT after ?| ARRAY['before','after','passed']),
+ EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND node_id=$3 AND type='goal.passed_changed' AND before='false'::jsonb AND after='true'::jsonb)`, f.writer.TenantID, f.goal, f.keylessOutcome).Scan(&goalPing, &outcomeFlip); err != nil || !goalPing || !outcomeFlip {
+		t.Fatalf("passed event shapes ping=%v flip=%v err=%v", goalPing, outcomeFlip, err)
 	}
 }
 
