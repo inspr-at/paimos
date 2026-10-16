@@ -55,6 +55,10 @@ it('the view used last opens the next visit, kept on the server only', async () 
   await next.ready(); await flush()
   expect(next.current.value).toBe('cards')
   expect(next.defaultId.value).toBeNull()
+  // A new default is for the next visit: the view on screen does not change under the person.
+  const set = written(); next.setDefault('goals'); await set
+  expect(next.current.value).toBe('cards')
+  expect(next.preferred.value).toBe('goals')
 })
 
 it('an explicit default wins over the view used last; stopping it returns to the last used, and the older store never comes back', async () => {

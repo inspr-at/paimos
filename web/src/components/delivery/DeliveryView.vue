@@ -100,6 +100,8 @@ const setWindow = (window: WindowDays) => choose({ window })
 const setLevel = (level: Level) => choose({ level })
 // A default is merged into what the server holds; one that could not be read is never overwritten.
 async function setDefault(patch: DeliveryDefaults) {
+  // A new default is for the next visit: the window and level on screen stay as they are.
+  chosen.value ??= prefs.value
   if (!(await pref.ensureLoaded())) return
   const now = pref.value.value ?? {}
   prefFailed.value = false

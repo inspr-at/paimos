@@ -109,6 +109,8 @@ export function useViewSwitch(config: ViewSwitchOptions) {
   }
   function setDefault(id: string | null) {
     if (id !== null && !options.value.includes(id)) return
+    // A new default is for the next visit: the view on screen stays as it is.
+    chosen.value = current.value
     void write(now => now.default === id ? null : { ...now, default: id })
   }
   // The last save of this switch's memory failed (the Settings footer offers Retry).
