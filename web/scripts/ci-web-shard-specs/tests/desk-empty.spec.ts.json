@@ -1,5 +1,9 @@
 {
   "group": "decision-desk",
+  "nightlyTiming": {
+    "seconds": 12.4,
+    "selectedTests": 4
+  },
   "spec": {
     "file": "tests/desk-empty.spec.ts",
     "listedTests": 4,
