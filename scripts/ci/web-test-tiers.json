@@ -1366,8 +1366,6 @@
     ,
     "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 390"
     ,
-    "browser:tests/session-requests.spec.ts:the request form keeps its actions still while the catalog loads"
-    ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
     ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
@@ -13324,7 +13322,7 @@
     ,
     {"kind":"browser","file":"tests/session-requests.spec.ts","name":"light 390: request stays pending until session completion","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-requests.spec.ts","name":"the request form keeps its actions still while the catalog loads","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/session-requests.spec.ts","name":"the request form keeps its actions still while the catalog loads","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 1600 detail closed pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
