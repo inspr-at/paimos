@@ -644,9 +644,12 @@ test('own posts show quiet delivery ticks from the sender status', async ({ page
   await page.goto(`/agents/${worker.id}`)
   const mine = panelOf(page).locator('.msg.mine')
   await expect(mine).toHaveCount(3)
-  await expect(mine.first().locator('.delivery.read')).toHaveAttribute('data-tip', /^Read by the session · /)
-  await expect(mine.first().locator('.delivery.read')).toContainText('Read')
+  // AEON-1438: every own post keeps its receipt state, but only the latest one shows it.
+  await expect(mine.first()).toHaveAttribute('data-receipt', 'read')
+  await expect(mine.first().locator('.delivery')).toHaveCount(0)
+  await expect(panelOf(page).locator('.delivery')).toHaveCount(1)
   await expect(mine.last().locator('.delivery.sent')).toHaveAttribute('data-tip', 'On its way to the agent.')
+  await expect(mine.last().locator('.delivery.sent')).toContainText('Sending')
   // Only the viewer's own posts are asked for, never the agent's.
   const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
   expect(receipts.length).toBeGreaterThan(0)
@@ -665,7 +668,7 @@ test('a managed session keeps its composer and Reply alongside the session contr
 })
 
 test.describe('phone screenshots', () => {
-  // A touch phone: no hover, so Reply stays visible as on an iPhone.
+  // A touch phone: no hover, so Copy and Reply live in the long-press menu (AEON-1438).
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} 390: screenshots of both tabs`, async ({ page }, info) => {
@@ -699,7 +702,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await expect(field).toBeVisible()
     await expect(panel.getByRole('radiogroup', { name: 'Delivery' })).toHaveCount(0)
     await expect(panel.getByRole('radio', { name: 'Steer', exact: true })).toHaveCount(0)
-    const guard = await controlStability(page, { composer: field, send, frame: panel })
+    // AEON-1438: the field grows upward with its text; its bottom edge and the actions stay.
+    const guard = await controlStability(page, { composer: field, send, frame: panel }, { grows: ['composer'] })
     let release: () => void = () => {}
     const gate = new Promise<void>(resolve => { release = resolve })
     await page.route('**/api/projects/*/messages', async route => {
@@ -773,7 +777,10 @@ for (const locale of ['en', 'de'] as const) for (const width of [390, 1024, 1440
     const nowButton = panel.getByRole('button', { name: words.now, exact: true })
     await expect(field).toBeVisible()
     await field.focus()
-    const guard = await controlStability(page, { field, after, now: nowButton, frame: panel })
+    // AEON-1438: phones show Send now on a second row once the person types
+    // during a turn; it leaves on send. Desktop reserves its slot throughout.
+    const phone = width <= 720
+    const guard = await controlStability(page, phone ? { field, after, frame: panel } : { field, after, now: nowButton, frame: panel }, { grows: ['field'] })
     let release!: () => void
     let entered!: () => void
     const started = new Promise<void>(resolve => { entered = resolve })
@@ -794,11 +801,15 @@ for (const locale of ['en', 'de'] as const) for (const width of [390, 1024, 1440
         await expect(panel.locator('.queue-item').last().getByText(words.after, { exact: true })).toBeVisible()
       })
       await field.fill('A newer draft stays here')
-      await guard.check(async () => { release(); await expect(panel.getByRole('button', { name: words.retry, exact: true })).toBeVisible() })
-      await guard.check(async () => { await panel.getByRole('button', { name: words.retry, exact: true }).click(); await expect.poll(() => payloads.length).toBe(2); await expect(field).toHaveValue('A newer draft stays here') })
+      if (phone) await expect(panel.locator('.composer')).toHaveClass(/two/)
+      const typed = phone ? await controlStability(page, { field, after, now: nowButton, frame: panel }, { grows: ['field'] }) : guard
+      await typed.check(async () => { release(); await expect(panel.getByRole('button', { name: words.retry, exact: true })).toBeVisible() })
+      await typed.check(async () => { await panel.getByRole('button', { name: words.retry, exact: true }).click(); await expect.poll(() => payloads.length).toBe(2); await expect(field).toHaveValue('A newer draft stays here') })
       expect(payloads[0].delivery_level).toBe('simple')
       expect(payloads[1].idempotency_key).toBe(payloads[0].idempotency_key)
-      await guard.check(async () => { await field.press('Control+Enter'); await expect.poll(() => payloads.length).toBe(3); await expect(field).toHaveValue('') })
+      const steer = async () => { await field.press('Control+Enter'); await expect.poll(() => payloads.length).toBe(3); await expect(field).toHaveValue('') }
+      if (phone) { typed.done(); await steer(); await expect(panel.locator('.composer')).not.toHaveClass(/two/) }
+      else await guard.check(steer)
       expect(payloads[2].delivery_level).toBe('steer')
       expect(payloads[2].idempotency_key).not.toBe(payloads[0].idempotency_key)
       await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages')).length).toBe(2)
@@ -987,7 +998,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await field.focus()
     await expect(panel.locator('.queue-item')).toHaveCount(1)
     await expect(panel.locator(`.msg[data-id="${original.id}"]`)).toHaveCount(0)
-    const guard = await controlStability(page, { field, primary: panel.locator('.send'), alternative: panel.locator('.steer-send'), stop: panel.getByRole('button', { name: 'More session actions', exact: true }), tab: messagesTab(page), capability: panel.getByRole('group', { name: 'Panel actions' }), frame: panel })
+    // AEON-1438: the field grows upward with the edited text. On phones the
+    // composer's second row follows typing during a turn, so only the panel
+    // controls are held still there; the phone composer has its own spec.
+    const composerControls = width <= 720 ? {} : { field, primary: panel.locator('.send'), alternative: panel.locator('.steer-send') }
+    const guard = await controlStability(page, { ...composerControls, stop: panel.getByRole('button', { name: 'More session actions', exact: true }), tab: messagesTab(page), capability: panel.getByRole('group', { name: 'Panel actions' }), frame: panel }, { grows: ['field'] })
     const queueRow = panel.locator('.queue-item')
     const editGuard = await controlStability(page, { row: queueRow, edit: queueRow.getByRole('button', { name: 'Edit', exact: true }), cancel: queueRow.getByRole('button', { name: 'Cancel', exact: true }) })
     const editedText = 'Die überarbeitete Nachricht bleibt erhalten, wenn der Agent die ursprüngliche Nachricht schon übernommen hat.'

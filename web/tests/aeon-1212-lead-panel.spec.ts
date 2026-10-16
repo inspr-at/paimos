@@ -335,8 +335,8 @@ async function checkHostPill(page: Page, desktopRowHeight: number) {
   console.log(`AEON-1212 Runs on: pill ${layout.pillHeight} px; row ${layout.rowHeight} px = desktop ${desktopRowHeight} px; tap ${layout.tapWidth}×${layout.tapHeight} px`)
 }
 
-// Copy/reply must remain reachable without leaving an empty action row or
-// moving the message, its neighbours, the question, or the pinned composer.
+// Copy/reply must remain reachable without moving the message, its neighbours,
+// the question, or the pinned composer (their row is reserved, AEON-1438).
 async function checkChatSpacing(page: Page, output: string) {
   const thread = panel(page).locator('.thread-scroll')
   const scrollTop = await thread.evaluate(element => element.scrollTop)
@@ -355,14 +355,15 @@ async function checkChatSpacing(page: Page, output: string) {
     const bounds = row.getBoundingClientRect(), previous = rows[index - 1]?.getBoundingClientRect()
     const actions = row.querySelector('.message-actions')?.getBoundingClientRect()
     const body = row.querySelector('.markdown-body, .msg-body')!.getBoundingClientRect()
-    return { gap: previous ? bounds.top - previous.bottom : null, timeGroup: row.classList.contains('time-group'),
+    return { gap: previous ? bounds.top - previous.bottom : null, dayBetween: !!row.previousElementSibling?.matches('.day, .new-divider'),
       actionsInside: !actions || actions.top >= bounds.top && actions.bottom <= bounds.bottom + 0.5,
-      actionsBesideText: !actions || actions.left >= body.right }
+      actionsBelowText: !actions || actions.top >= body.bottom - 0.5 }
   }))
+  // AEON-1438: one 12 px rhythm; Copy and Reply sit in a reserved row at the message's end.
   for (const item of spacing) {
-    if (item.gap !== null) expect(Math.abs(item.gap - (item.timeGroup ? 20 : 12)), 'compact message/time-group spacing').toBeLessThanOrEqual(0.5)
-    expect(item.actionsInside, '44 px message actions stay inside their row').toBe(true)
-    expect(item.actionsBesideText, 'message actions cannot cover the text').toBe(true)
+    if (item.gap !== null && !item.dayBetween) expect(Math.abs(item.gap - 12), 'compact message spacing').toBeLessThanOrEqual(0.5)
+    expect(item.actionsInside, 'message actions stay inside their row').toBe(true)
+    expect(item.actionsBelowText, 'message actions cannot cover the text').toBe(true)
   }
   await writeFile(output, `${JSON.stringify(spacing, null, 2)}\n`)
   console.log(`AEON-1212 chat spacing: ${spacing.slice(1).map(item => item.gap).join(', ')} px; action hover/focus shift ≤ 0.5 px`)

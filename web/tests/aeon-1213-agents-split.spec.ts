@@ -357,7 +357,8 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
       return { gap: frame.bottom - footer.bottom, inset: parseFloat(getComputedStyle(el).borderBottomWidth) + parseFloat(getComputedStyle(el).paddingBottom) }
     })
     expect(Math.abs(geometry.gap - geometry.inset), `${width}: composer pinned to pane bottom`).toBeLessThanOrEqual(.5)
-    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).getByRole('button', { name: 'More session actions', exact: true }) })
+    // AEON-1438: the field grows upward with a long draft; its bottom edge and the actions stay.
+    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).getByRole('button', { name: 'More session actions', exact: true }) }, { grows: ['composer'] })
     for (const draft of ['Die vollständigen Berechtigungseinstellungen für sämtliche angeschlossenen Arbeitsbereiche zuverlässig prüfen.', '']) {
       await guard.check(async () => {
         await composer.fill(draft); await composer.blur()

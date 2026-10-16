@@ -998,7 +998,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
         @touchmove.capture.passive="onTouchMove" @touchend.capture.passive="onTouchEnd"
         @touchcancel.capture.passive="onTouchEnd" @pointerdown.capture.passive="onPointerDown"
         @keydown.capture="onScrollKey">
-        <!-- One reading column (AEON-1438): at most 720 px on desktop, starting at the latest exchange. -->
+        <!-- One reading column (AEON-1438): at most 720 px on desktop. -->
         <div class="thread-col">
           <div class="history-head">
             <button v-if="agents.threadMore[s.id]" type="button" class="earlier" :disabled="historyLoading" @click="earlier">{{ words.older }}</button>
@@ -1087,9 +1087,9 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .chat-questions { display: grid; gap: 10px; padding: 12px 0; }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-/* The reading column starts at the latest exchange and grows upward into the scroll area. */
-.thread-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 14px 24px 8px; scrollbar-gutter: stable both-edges; }
-.thread-col { width: 100%; max-width: 720px; min-width: 0; margin: auto auto 0; }
+/* One reading column. It stays top-anchored, so a short thread never moves when the composer changes height. */
+.thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 14px 24px 8px; scrollbar-gutter: stable both-edges; }
+.thread-col { width: 100%; max-width: 720px; min-width: 0; margin: 0 auto; }
 .jump { z-index: 1; position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
 .history-head { position: relative; display: flex; justify-content: center; align-items: center; min-height: 44px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 .earlier { border: 0; background: transparent; color: var(--teal-ink); min-height: 44px; padding: 0 10px; font: inherit; font-weight: 600; }
@@ -1118,9 +1118,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .compose-hint .mid { margin: 0 3px; }
 .compose-box:focus-within .compose-hint { opacity: 1; }
 @media (hover: none), (pointer: coarse) { .compose-hint { visibility: hidden; } }
-.choice { display: inline-flex; flex: none; min-width: 0; }
-/* Reserved for the whole session; it shows only while a turn runs. */
-.choice.idle { visibility: hidden; }
+.choice { display: inline-flex; flex: 0 1 auto; min-width: 0; }
+.choice > .cbtn { flex: none; }
+/* Reserved for the whole session; what it holds shows only while a turn runs. */
+.choice.idle > * { visibility: hidden; }
 .cbtn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: none; height: 32px; padding: 0 14px 0 12px; border: 0; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; }
 .cbtn > svg { flex: none; }
 .cbtn.alt { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
@@ -1132,7 +1133,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .cbtn:focus-visible, .plus:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .stop-send:not(:disabled) { color: var(--warn-ink); background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); }
 /* Shrinks and wraps inside the action row instead of pushing the actions to a new line. */
-.steer-note { display: flex; align-items: center; min-height: 32px; max-width: 220px; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
+.steer-note { display: flex; align-items: center; min-width: 0; min-height: 32px; max-width: 220px; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
 .send-label { display: grid; }
 .send-label > span { grid-area: 1 / 1; }
 .label-size { visibility: hidden; }
@@ -1168,7 +1169,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
   .send .send-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .send:disabled { background: var(--seg-bg); color: color-mix(in srgb, var(--ink-3) 70%, transparent); box-shadow: none; }
   /* Typing during a turn: the field takes the first row, the choice the second. */
-  .composer.two .compose-box { grid-template-columns: 44px minmax(0, 1fr) auto auto; grid-template-areas: "field field field field" "plus . now send"; row-gap: 8px; column-gap: 8px; }
+  .composer.two .compose-box { grid-template-columns: 44px minmax(0, 1fr) minmax(0, auto) auto; grid-template-areas: "field field field field" "plus . now send"; row-gap: 8px; column-gap: 8px; }
   .composer.two .choice { display: inline-flex; grid-area: now; align-self: center; }
   .composer.two .cbtn { height: 44px; padding: 0 16px; font-size: 14.5px; }
   .composer.two .send { width: auto; }
