@@ -22902,6 +22902,8 @@
     ,
     {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a delayed default never writes one person's choice into the next person's preferences","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a failed remember stays unconfirmed until the same choice is accepted","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a hold or Shift+F10 opens the menu; the hold never also switches, movement cancels it, and a mouse never holds","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a link wins once: it shows its view without writing, until the person chooses or follows another link","tier":"ESSENTIAL"}

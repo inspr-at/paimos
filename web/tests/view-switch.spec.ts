@@ -4,7 +4,7 @@
 // a segment, and a link wins once. A project's ticket list opens on its default (a mode or
 // a saved view, read from the older list:<id>.defaultView until replaced) or the mode used
 // last. The Releases sheet's language moves from this browser to the server once.
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { controlStability } from './control-stability'
 import { fixtures, me, mockView, mockWork, watchErrors, type Fixtures } from './work-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
@@ -17,6 +17,47 @@ const MINE = '11111111-aaaa-4aaa-8aaa-000000000001'
 const menuItem = (page: Page, name: string) => page.getByRole('menuitem', { name, exact: true })
 // A PUT of this preference key landed: the barrier before a reload.
 const saved = (page: Page, key: string) => page.waitForResponse(response => response.request().method() === 'PUT' && decodeURIComponent(new URL(response.url()).pathname) === `/api/preferences/${key}`)
+const preferencePut = (key: string) => (request: { method: () => string; url: () => string }) => request.method() === 'PUT' && decodeURIComponent(new URL(request.url()).pathname) === `/api/preferences/${key}`
+// The pin's box stays inside the segment's pill. Where the label shows, the pin is centred on it.
+async function pinFits(segment: Locator) {
+  const box = await segment.evaluate(button => {
+    const pin = button.querySelector<HTMLElement>('.view-pin')
+    const label = button.querySelector<HTMLElement>('.tab-label')
+    const slot = button.querySelector<HTMLElement>('.pin-slot')
+    if (!pin || !slot || !label) return null
+    const pinBox = pin.getBoundingClientRect(), buttonBox = button.getBoundingClientRect()
+    const shown = getComputedStyle(label).display !== 'none' && label.getClientRects().length > 0
+    const labelBox = shown ? label.getBoundingClientRect() : null
+    return {
+      pin: { x: pinBox.x, y: pinBox.y, right: pinBox.right, bottom: pinBox.bottom },
+      button: { x: buttonBox.x, y: buttonBox.y, right: buttonBox.right, bottom: buttonBox.bottom },
+      label: labelBox ? { y: labelBox.y, right: labelBox.right, bottom: labelBox.bottom } : null,
+      badge: getComputedStyle(slot).position === 'absolute',
+    }
+  })
+  expect(box, 'the pin is in its segment').not.toBeNull()
+  const placed = box!
+  const pad = 0.5
+  expect(placed.pin.x, 'pin left').toBeGreaterThanOrEqual(placed.button.x - pad)
+  expect(placed.pin.y, 'pin top').toBeGreaterThanOrEqual(placed.button.y - pad)
+  expect(placed.pin.right, 'pin right').toBeLessThanOrEqual(placed.button.right + pad)
+  expect(placed.pin.bottom, 'pin bottom').toBeLessThanOrEqual(placed.button.bottom + pad)
+  const width = placed.button.right - placed.button.x, height = placed.button.bottom - placed.button.y, radius = Math.min(width, height) / 2, slack = 0.75
+  for (const [x, y] of [[placed.pin.x, placed.pin.y], [placed.pin.right, placed.pin.y], [placed.pin.x, placed.pin.bottom], [placed.pin.right, placed.pin.bottom]] as const) {
+    const onCap = width >= height
+      ? x < placed.button.x + radius || x > placed.button.right - radius
+      : y < placed.button.y + radius || y > placed.button.bottom - radius
+    if (!onCap) continue
+    const cx = width >= height ? (x < placed.button.x + radius ? placed.button.x + radius : placed.button.right - radius) : placed.button.x + radius
+    const cy = width >= height ? placed.button.y + radius : (y < placed.button.y + radius ? placed.button.y + radius : placed.button.bottom - radius)
+    expect((x - cx) ** 2 + (y - cy) ** 2, 'pin corner stays on the pill').toBeLessThanOrEqual((radius + slack) ** 2)
+  }
+  if (placed.label) {
+    expect(placed.badge, 'a labelled segment keeps the inline slot').toBe(false)
+    expect(Math.abs(placed.pin.x - placed.label.right - 4), 'four pixels after the label').toBeLessThanOrEqual(1)
+    expect(Math.abs((placed.pin.y + placed.pin.bottom) / 2 - (placed.label.y + placed.label.bottom) / 2), 'centred on the label').toBeLessThanOrEqual(1)
+  } else expect(placed.badge, 'an icon-only segment badges the pin inside the pill').toBe(true)
+}
 
 test('AEON-1453 Projects opens on the view used last or the default; the pin never moves a segment, and a link wins once', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -57,6 +98,40 @@ test('AEON-1453 Projects opens on the view used last or the default; the pin nev
   await expect(cards).toHaveAttribute('aria-checked', 'true')
   await expect(cards.locator('.view-pin')).toBeVisible()
   await expect(list.locator('.view-pin')).toHaveCount(0)
+  // Inside the segment at a desktop, a tablet and a phone. The label's centre applies where it shows.
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    if (width === 1440) {
+      await expect(cards.locator('.tab-label')).toBeVisible()
+      await expect(cards).not.toHaveClass(/\bicon-only\b/)
+    } else {
+      await expect(cards.locator('.tab-label')).toBeHidden()
+      await expect(cards).toHaveClass(/\bicon-only\b/)
+    }
+    await pinFits(cards)
+  }
+  // Stopping and restoring the default on a phone leaves both segments where they are.
+  const narrow = await controlStability(page, { list, cards })
+  await narrow.check(async () => {
+    await cards.focus()
+    await page.keyboard.press('Shift+F10')
+    put = saved(page, 'view:projects')
+    await menuItem(page, 'Stop opening here by default').click()
+    await put
+    await expect(cards.locator('.view-pin')).toHaveCount(0)
+  })
+  await narrow.check(async () => {
+    await cards.focus()
+    await page.keyboard.press('Shift+F10')
+    put = saved(page, 'view:projects')
+    await menuItem(page, 'Open here by default').click()
+    await put
+    await expect(cards.locator('.view-pin')).toBeVisible()
+  })
+  narrow.done()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(cards.locator('.tab-label')).toBeVisible()
+  await expect(cards).not.toHaveClass(/\bicon-only\b/)
 
   // A link opens its view once and changes nothing that is remembered.
   await page.goto('/?view=list')
@@ -150,24 +225,33 @@ test('AEON-1453 the ticket list opens on its default (a saved view or a mode) or
 test('AEON-1453 the Releases sheet language leaves this browser for the server once; the view remembers its last choice', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const data: Fixtures = fixtures()
-  await mockWork(page, data)
+  // The answer waits, so a clear that runs before the server accepts it is visible.
+  let releaseLangSave = () => {}
+  const langHeld = new Promise<void>(resolve => { releaseLangSave = () => resolve() })
+  await mockWork(page, data, { hold: ({ path, method }) => path === '/api/preferences/view:releases.lang' && method === 'PUT' ? { until: langHeld } : undefined })
   await mockReleases(page, historicHistory())
   const local = `aeon.release-history.lang.${me.id}`
   await page.addInitScript(key => { if (!sessionStorage.getItem('aeon-1453-seeded')) { localStorage.setItem(key, 'de'); sessionStorage.setItem('aeon-1453-seeded', '1') } }, local)
   const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
   const radio = (name: string) => sheet.getByRole('radio', { name, exact: true })
-  let put = saved(page, 'view:releases.lang')
+  const langPut = saved(page, 'view:releases.lang')
+  const requested = page.waitForRequest(preferencePut('view:releases.lang'))
   await page.goto('/releases')
   await expect(radio('DE')).toHaveAttribute('aria-checked', 'true')
-  await put
+  await requested
+  await page.evaluate(() => new Promise<void>(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve() }; channel.port2.postMessage(undefined) }))
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), local)).toBe('de')
+  releaseLangSave()
+  await langPut
   expect(data.preferences['view:releases.lang']).toEqual({ last: 'de' })
-  // The next visit reads the server and clears what this browser held.
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), local)).toBeNull()
+  // The next visit reads the server and the browser copy stays gone.
   await page.reload()
   await expect(radio('DE')).toHaveAttribute('aria-checked', 'true')
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key), local)).toBeNull()
 
   // Details, chosen once, opens the next visit without it in the address.
-  put = saved(page, 'view:releases')
+  let put = saved(page, 'view:releases')
   await radio('Details').click()
   await put
   await page.goto('/releases')

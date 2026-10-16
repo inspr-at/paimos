@@ -9,7 +9,10 @@ type Owner = { tenant: { id: string }; principal: { id: string } } | null
 interface Preference {
   key: string; owner: string; epoch: number; value: Ref<Json | null>; ready: Promise<void>
   loaded: boolean; reading?: Promise<boolean>
-  timer?: ReturnType<typeof setTimeout>; channel?: MessageChannel; tail?: Promise<void>
+  timer?: ReturnType<typeof setTimeout>; channel?: MessageChannel; tail?: Promise<boolean>
+  // The promise for a delay-0 save that has not reached the network yet, and the
+  // resolvers for a save a newer one replaced or a sign-out cancelled.
+  soon?: Promise<boolean>; settle?: (ok: boolean) => void; delaySettle?: (ok: boolean) => void
 }
 const owner = shallowRef('')
 // Read-only ownership fence for caches that follow the same authentication epoch.
@@ -39,7 +42,10 @@ export function setPreferenceOwner(who: Owner, current = () => true) {
   for (const pref of cache.values()) {
     pref.value.value = null
     if (pref.timer !== undefined) clearTimeout(pref.timer)
-    pref.channel?.port1.close(); pref.channel?.port2.close()
+    pref.timer = undefined
+    pref.delaySettle?.(false); pref.delaySettle = undefined
+    pref.settle?.(false); pref.settle = undefined; pref.soon = undefined
+    pref.channel?.port1.close(); pref.channel?.port2.close(); pref.channel = undefined
   }
   for (const flight of flights) flight.abort()
   flights.clear(); cache.clear(); owner.value = next
@@ -109,26 +115,34 @@ function preference(key: string): Preference | null {
 }
 // A slow move must finish before its Undo is sent. The tail checks ownership
 // when it actually starts, not only when it is enqueued.
-function persist(pref: Preference) {
-  const job = (pref.tail ?? Promise.resolve()).catch(() => undefined).then(async () => {
-    if (!owned(pref)) return
+function persist(pref: Preference): Promise<boolean> {
+  const job = (pref.tail ?? Promise.resolve(false)).catch(() => false).then(async (): Promise<boolean> => {
+    if (!owned(pref)) return false
     const value = pref.value.value
-    if (!value) return
+    if (!value) return false
     const saved = await writePreference(pref.key, value)
     if (owned(pref)) { if (saved) preferenceSaves.failed.delete(`${pref.owner}/${pref.key}`); else preferenceSaves.failed.add(`${pref.owner}/${pref.key}`) }
+    return saved && owned(pref)
   }).finally(() => { if (pref.tail === job) pref.tail = undefined })
   pref.tail = job
+  return job
 }
-function writeSoon(pref: Preference) {
-  if (pref.channel) return
-  const channel = pref.channel = new MessageChannel()
-  channel.port1.onmessage = () => {
-    channel.port1.close(); channel.port2.close(); pref.channel = undefined
-    if (owned(pref) && pref.timer === undefined) persist(pref)
-  }
-  ;(channel.port1 as MessagePort & { unref?: () => void }).unref?.()
-  ;(channel.port2 as MessagePort & { unref?: () => void }).unref?.()
-  channel.port2.postMessage(undefined)
+function writeSoon(pref: Preference): Promise<boolean> {
+  if (pref.soon) return pref.soon
+  pref.soon = new Promise(resolve => {
+    pref.settle = resolve
+    const channel = pref.channel = new MessageChannel()
+    channel.port1.onmessage = () => {
+      channel.port1.close(); channel.port2.close(); pref.channel = undefined
+      pref.soon = undefined; pref.settle = undefined
+      if (owned(pref) && pref.timer === undefined) resolve(persist(pref))
+      else resolve(false)
+    }
+    ;(channel.port1 as MessagePort & { unref?: () => void }).unref?.()
+    ;(channel.port2 as MessagePort & { unref?: () => void }).unref?.()
+    channel.port2.postMessage(undefined)
+  })
+  return pref.soon
 }
 export function usePreference<T extends object>(key: string) {
   // Existing consumers follow the new owner with an empty value and a new read;
@@ -143,16 +157,35 @@ export function usePreference<T extends object>(key: string) {
     if (!owned(pref)) return false
     return pref.loaded || loadPreference(pref)
   }
-  function save(next: T, delay = 400) {
+  function save(next: T, delay = 400): Promise<boolean> {
     const pref = preference(key)
-    if (!pref || !owned(pref)) return
+    if (!pref || !owned(pref)) return Promise.resolve(false)
     pref.value.value = next as Json
     if (pref.timer !== undefined) clearTimeout(pref.timer)
     pref.timer = undefined
-    if (delay <= 0) { writeSoon(pref); return }
-    pref.timer = setTimeout(() => { pref.timer = undefined; if (owned(pref)) persist(pref) }, delay)
+    if (pref.delaySettle) { pref.delaySettle(false); pref.delaySettle = undefined }
+    if (delay <= 0) return writeSoon(pref)
+    return new Promise(resolve => {
+      pref.delaySettle = resolve
+      pref.timer = setTimeout(() => {
+        pref.timer = undefined; pref.delaySettle = undefined
+        if (!owned(pref)) { resolve(false); return }
+        resolve(persist(pref))
+      }, delay)
+    })
   }
-  return { value, get ready() { return preference(key)?.ready ?? Promise.resolve() }, ensureLoaded, save }
+  // True once the value in hand was read from the server or a write of it was accepted.
+  // A write still queued or in flight is awaited; a failed write is false.
+  function done(): Promise<boolean> {
+    const pref = preference(key)
+    if (!pref || !owned(pref)) return Promise.resolve(false)
+    if (pref.soon) return pref.soon
+    if (pref.tail) return pref.tail
+    const id = `${pref.owner}/${pref.key}`
+    if (preferenceSaves.failed.has(id) || preferenceSaves.saving.has(id)) return Promise.resolve(false)
+    return Promise.resolve(pref.loaded)
+  }
+  return { value, get ready() { return preference(key)?.ready ?? Promise.resolve() }, ensureLoaded, save, done }
 }
 // Saves again what a preference holds now, where its last write failed.
 export function retryFailedPreferences() {

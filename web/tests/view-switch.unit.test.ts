@@ -226,3 +226,39 @@ it('signing in again as the same person during a default write keeps the stored 
   await view.ready(); await flush()
   expect(view.current.value).toBe('goals')
 })
+
+it('a failed remember stays unconfirmed until the same choice is accepted', async () => {
+  const releases = sw({ key: viewKey('releases.lang'), options: ['en', 'de'], fallback: 'en' })
+  await releases.ready()
+  let status = 503
+  let begin: () => void = () => {}
+  const started = new Promise<void>(resolve => { begin = () => resolve() })
+  const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+    const key = decodeURIComponent(String(input).split('/api/preferences/')[1] ?? '')
+    if (init?.method === 'PUT') {
+      begin()
+      if (status >= 400) return new Response('{}', { status })
+      const { value } = JSON.parse(String(init.body)) as { value: unknown }
+      store.set(key, value)
+      return new Response('{}')
+    }
+    return new Response(JSON.stringify({ key, value: store.get(key) ?? null }))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const puts = () => fetch.mock.calls.filter(call => (call[1] as RequestInit | undefined)?.method === 'PUT').length
+  const first = releases.remember('de')
+  await started
+  expect(await first).toBe(false)
+  expect(releases.failed.value).toBe(true)
+  expect(releases.lastId.value).toBe('de')
+  expect(store.get('view:releases.lang')).toBeUndefined()
+  expect(puts()).toBe(1)
+  status = 200
+  expect(await releases.remember('de')).toBe(true)
+  expect(releases.failed.value).toBe(false)
+  expect(store.get('view:releases.lang')).toEqual({ last: 'de' })
+  expect(puts()).toBe(2)
+  // Already on the server: confirming it does not write again.
+  expect(await releases.remember('de')).toBe(true)
+  expect(puts()).toBe(2)
+})

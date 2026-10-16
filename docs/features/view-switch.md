@@ -11,7 +11,8 @@ Every place with views opens the way the person left it (AEON-1453). One generic
 - **An explicit default** wins over the view used last. Right-click a segment (desktop),
   hold it (touch), or press Shift+F10 or the context-menu key on a focused segment: a
   small menu offers **Open here by default**, or **Stop opening here by default** when it
-  already is. The default segment carries a small pin in its corner (it never moves a
+  already is. The default segment carries a small pin in a reserved slot beside the label,
+  centred on it, or as a badge inside an icon-only segment (it never moves a
   segment); its tooltip reads "<Label> · default". Setting a default never switches the
   view on screen; it is for the next visit.
 - **A link wins once.** `?view=`, a tab address or `?mode=` opens that view without

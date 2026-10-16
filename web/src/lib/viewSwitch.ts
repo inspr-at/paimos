@@ -92,19 +92,27 @@ export function useViewSwitch(config: ViewSwitchOptions) {
   const current = computed(() => valid(chosen.value, options.value) ?? linked.value ?? preferred.value)
 
   // Writes merge into what the server holds; a value that could not be read is never overwritten.
-  async function write(change: (now: ViewMemory) => ViewMemory | null) {
+  // The promise is true only after the server has accepted the value (or already held it).
+  async function write(change: (now: ViewMemory) => ViewMemory | null): Promise<boolean> {
     const at = key.value, target = pref.value
     const owner = preferenceOwner.value, generation = preferenceGeneration()
     const same = () => key.value === at && preferenceOwner.value === owner && preferenceGeneration() === generation
-    if (!at || !target || !(await target.ensureLoaded()) || !same()) return
+    if (!at || !target || !(await target.ensureLoaded()) || !same()) return false
     const now = readMemory(target.value.value) ?? {}
     const next = change(now)
-    if (!next || !same()) return
-    target.save(next as ViewMemory & object, 0)
+    if (!next || !same()) return target.done()
+    return target.save(next as ViewMemory & object, 0)
   }
-  function remember(id: string) {
-    if (!options.value.includes(id) || config.remembers?.(id) === false) return
-    void write(now => now.last === id ? null : { ...now, last: id })
+  function remember(id: string): Promise<boolean> {
+    if (!options.value.includes(id) || config.remembers?.(id) === false) return Promise.resolve(false)
+    const outstanding = `${preferenceOwner.value}/${key.value}`
+    return write(now => now.last === id && !preferenceSaves.failed.has(outstanding) ? null : { ...now, last: id })
+  }
+  // The memory on the server, including a write this visit that has not answered yet.
+  function confirmed(): Promise<boolean> {
+    const target = pref.value
+    if (!key.value || !target) return Promise.resolve(false)
+    return target.done()
   }
   function choose(id: string) {
     if (!options.value.includes(id)) return
@@ -120,6 +128,6 @@ export function useViewSwitch(config: ViewSwitchOptions) {
   // The last save of this switch's memory failed (the Settings footer offers Retry).
   const failed = computed(() => !!key.value && preferenceSaves.failed.has(`${preferenceOwner.value}/${key.value}`))
 
-  return { key, memory, loaded, ready, defaultId, lastId, preferred, linked, chosen, current, choose, remember, setDefault, failed }
+  return { key, memory, loaded, ready, defaultId, lastId, preferred, linked, chosen, current, choose, remember, confirmed, setDefault, failed }
 }
 export type ViewSwitchState = ReturnType<typeof useViewSwitch>

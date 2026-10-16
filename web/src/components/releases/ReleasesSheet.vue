@@ -61,17 +61,25 @@ type SwitchKey = 'release_lang' | 'release_view'
 const pending = reactive<Partial<Record<SwitchKey, string>>>({})
 watch(() => route.query, query => { for (const key of ['release_lang', 'release_view'] as const) if (query[key] === pending[key]) delete pending[key] })
 const asked = (key: SwitchKey) => { const value = pending[key] ?? route.query[key]; return Array.isArray(value) ? value[0] : value }
-// The language was kept in this browser before: a value still here counts until the server
-// has one, moves there once, and then leaves the browser.
+// The language was kept in this browser before. It counts until the server has one:
+// move it once, and drop the browser copy only after that write is confirmed.
 const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
 const local = ref<string | null>(null)
 watch(langKey, key => { try { local.value = key ? localStorage.getItem(key) : null } catch { local.value = null } }, { immediate: true })
 const langSwitch = useViewSwitch({ key: viewKey('releases.lang'), options: LANGS, fallback: () => releaseLang(null, profile.profile?.locale, local.value), link: () => asked('release_lang') })
 const viewSwitch = useViewSwitch({ key: viewKey('releases'), options: VIEWS, fallback: 'highlights', link: () => asked('release_view') })
+let langTicket = 0
 watch([langKey, langSwitch.loaded, local], ([key, loaded, value]) => {
   if (!key || !loaded || (value !== 'en' && value !== 'de')) return
-  if (!langSwitch.lastId.value) { langSwitch.remember(value); return }
-  try { localStorage.removeItem(key) } catch { /* the server already holds the choice */ }
+  const ticket = ++langTicket
+  const choice = value
+  void (async () => {
+    const migrate = !langSwitch.lastId.value || (langSwitch.lastId.value === choice && langSwitch.failed.value)
+    const ok = migrate ? await langSwitch.remember(choice) : await langSwitch.confirmed()
+    if (ticket !== langTicket || !ok) return
+    try { localStorage.removeItem(key) } catch { /* the server has the choice; a blocked browser keeps its copy */ }
+    if (ticket === langTicket) local.value = null
+  })()
 }, { immediate: true })
 const lang = computed(() => langSwitch.current.value as ReleaseLang)
 const view = computed(() => viewSwitch.current.value as ReleaseView)

@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import { defaultTip } from '../../lib/viewSwitch'
 import { useViewMenuTrigger } from '../../lib/viewMenuTrigger'
@@ -13,6 +13,34 @@ import type { ViewOption } from './projectNavigation'
 const props = withDefaults(defineProps<{ items: readonly ViewOption[]; selected: string; label: string; sections?: boolean; seg?: boolean; tips?: boolean; iconSize?: number; defaultId?: string | null; menu?: boolean }>(), { defaultId: null, iconSize: undefined })
 const emit = defineEmits<{ select: [id: string]; menu: [id: string, anchor: HTMLElement] }>()
 const trigger = useViewMenuTrigger((id, anchor) => emit('menu', id, anchor))
+// Parents hide the label at their own breakpoints (a media query, a container
+// query, an unselected section). The slot follows the label: inline beside it,
+// or a badge inside the pill when the label is gone. The class depends on the
+// label, not on the button's size, so observing the resize cannot loop.
+const root = ref<HTMLElement | null>(null)
+let pins: ResizeObserver | undefined
+function placePins() {
+  const host = root.value
+  if (!host) return
+  for (const button of host.querySelectorAll<HTMLButtonElement>('button[data-view]')) {
+    const label = button.querySelector<HTMLElement>('.tab-label')
+    const hidden = !label || getComputedStyle(label).display === 'none' || label.getClientRects().length === 0
+    button.classList.toggle('icon-only', hidden)
+  }
+}
+function watchPins() {
+  pins?.disconnect()
+  const host = root.value
+  placePins()
+  if (!host || typeof ResizeObserver === 'undefined') { pins = undefined; return }
+  pins = new ResizeObserver(() => placePins())
+  pins.observe(host)
+  for (const button of host.querySelectorAll<HTMLButtonElement>('button[data-view]')) pins.observe(button)
+}
+function onResize() { placePins() }
+onMounted(() => { watchPins(); window.addEventListener('resize', onResize) })
+onBeforeUnmount(() => { pins?.disconnect(); pins = undefined; window.removeEventListener('resize', onResize) })
+watch(() => props.items.map(item => item.id).join('\0'), () => { void nextTick(watchPins) })
 const role = computed(() => props.seg ? 'radio' : 'tab')
 const glyph = computed(() => props.iconSize ?? (props.seg ? 14 : 15))
 const MOVES = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
@@ -43,15 +71,18 @@ function click(event: MouseEvent, id: string) {
 </script>
 
 <template>
-  <div :class="seg ? 'seg' : ['project-tabs', { sections }]" :role="seg ? 'radiogroup' : 'tablist'" :aria-label="label" @keydown="move">
+  <div ref="root" :class="seg ? 'seg' : ['project-tabs', { sections }]" :role="seg ? 'radiogroup' : 'tablist'" :aria-label="label" @keydown="move">
     <button v-for="item in items" :key="item.id" type="button" :role="role" v-bind="item.data"
       :aria-selected="seg ? undefined : selected === item.id" :aria-checked="seg ? selected === item.id : undefined"
       :aria-label="item.ariaLabel ?? item.label" :aria-description="item.id === defaultId ? 'Opens here by default' : undefined" :data-tip="tip(item)" :data-view="item.id"
       :disabled="item.disabled" :tabindex="focusable(item.id) ? 0 : -1" @click="click($event, item.id)"
       @pointerdown="menu && trigger.pointerdown($event, item.id)" @pointermove="trigger.pointermove" @pointerup="trigger.pointerend" @pointercancel="trigger.pointerend"
       @contextmenu="menu && trigger.contextmenu($event, item.id)">
-      <AppIcon v-if="item.icon" :name="item.icon" :size="glyph" /><span class="tab-label">{{ item.label }}</span>
-      <span v-if="item.id === defaultId" class="view-pin" aria-hidden="true"><AppIcon name="pin" :size="10" /></span>
+      <AppIcon v-if="item.icon" :name="item.icon" :size="glyph" />
+      <span class="tab-text">
+        <span class="tab-label">{{ item.label }}</span>
+        <span class="pin-slot" aria-hidden="true"><span v-if="item.id === defaultId" class="view-pin"><AppIcon name="pin" :size="12" /></span></span>
+      </span>
     </button>
     <slot />
   </div>
@@ -64,9 +95,14 @@ function click(event: MouseEvent, id: string) {
 :where(.project-tabs) > button:hover { background: var(--row-hover); color: var(--ink); }
 :where(.project-tabs) > button[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 :where(.project-tabs) > button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-/* The default's pin sits in the corner of its own segment: no segment grows or moves for it. */
+/* The slot is always there, so the pin appearing never moves a segment. Beside a
+   label it is inline; on an icon-only segment it is a badge inside the pill. */
 button { position: relative; -webkit-touch-callout: none; }
-.view-pin { position: absolute; right: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); pointer-events: none; }
+.tab-text { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.pin-slot { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; color: var(--ink-3); line-height: 0; pointer-events: none; }
+.view-pin { display: grid; }
+button.icon-only .tab-text { position: absolute; inset: 0; pointer-events: none; }
+button.icon-only .pin-slot { position: absolute; top: 18%; right: 18%; }
 .sections { margin-top: 18px; gap: 4px; padding: 0; background: transparent; }
 .sections button { min-height: 36px; padding: 0 14px; font-size: 13.5px; }
 .sections button[aria-selected="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--line); }
