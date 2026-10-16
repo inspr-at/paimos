@@ -429,10 +429,13 @@ async function undoLesson(item: DeskItem): Promise<DeskItem> {
     return { ...current, decided: false, optionId: undefined, answer: undefined, reason: undefined, delivery: undefined, undoEvent: undefined }
   } finally { undoingLessons.delete(eventId) }
 }
-let pendingLessonToast: DeskItem | undefined
-function showLessonToast(item: DeskItem) {
+// A lesson has no server delivery. Its Undo keeps the ten-second grace of an answer, counted from the
+// decision, so a round that ends on a lesson ends like every other kind (AEON-1385).
+const LESSON_GRACE_MS = 10_000
+let pendingLessonToast: { item: DeskItem; at: number } | undefined
+function showLessonToast(item: DeskItem, timeout = 8000) {
   const current = captureToastOwner()
-  toast(item.delivery ?? 'Lesson decision recorded.', { timeout: 8000, action: { label: 'Undo', run: () => {
+  toast(item.delivery ?? 'Lesson decision recorded.', { timeout, action: { label: 'Undo', run: () => {
     if (!current()) return
     void undoLesson(item).then(restored => { if (current()) recorded(restored) })
       .catch(cause => { if (current()) toast(cause instanceof Error ? cause.message : 'Undo did not work.', { tone: 'error' }) })
@@ -441,7 +444,7 @@ function showLessonToast(item: DeskItem) {
 // The memo already offers Undo in its pinned native action slot. Its toast
 // appears on closing, where it cannot cover the phone's decision controls.
 watch(opened, open => {
-  if (!open && pendingLessonToast) { const item = pendingLessonToast; pendingLessonToast = undefined; showLessonToast(item) }
+  if (!open && pendingLessonToast) { const { item } = pendingLessonToast; pendingLessonToast = undefined; showLessonToast(item) }
 })
 function stepBusy(id: string, value: boolean) {
   const next = new Set(pendingSteps.value); if (value) next.add(id); else next.delete(id); pendingSteps.value = next
@@ -453,9 +456,9 @@ function stepSettled(item: DeskItem) {
 }
 function recorded(item: DeskItem) {
   if (item.kind === 'lesson') {
-    if (!item.decided && pendingLessonToast?.id === item.id) pendingLessonToast = undefined
+    if (!item.decided && pendingLessonToast?.item.id === item.id) pendingLessonToast = undefined
     if (item.decided && item.undoEvent && item.undoEvent !== items.value.find(row => row.id === item.id)?.undoEvent) {
-      if (opened.value) pendingLessonToast = item
+      if (opened.value) pendingLessonToast = { item, at: Date.now() }
       else showLessonToast(item)
     }
   }
@@ -505,10 +508,16 @@ function closed(result?: DeskClose) {
   opened.value = false; ruleEdit.value = undefined; changeId.value = ''
   if (result?.skipped) toast('Skipped. It stays on the desk.')
   if (!result?.afterLast) return
-  const last = result.last, left = last ? graceLeft(last) : 0
-  if (last && left > 1) {
+  // The toast keeps Undo for the rest of the grace, read on a fresh clock for every kind.
+  const last = result.last; now.value = Date.now()
+  if (last?.kind === 'lesson') {
+    const pending = pendingLessonToast?.item.id === last.id ? pendingLessonToast : undefined
+    pendingLessonToast = undefined
+    const left = pending ? Math.min(10, Math.max(0, Math.round((pending.at + LESSON_GRACE_MS - now.value) / 1000))) : 0
+    if (pending && left > 1) showLessonToast(pending.item, (left - 1) * 1000)
+  } else if (last && graceLeft(last) > 1) {
     const name = who(last)?.name ?? 'the agent', id = last.id
-    toast(`Decided. It goes to ${name} in a few seconds.`, { timeout: (left - 1) * 1000, action: { label: 'Undo', run: () => undoAfterClose(id) } })
+    toast(`Decided. It goes to ${name} in a few seconds.`, { timeout: (graceLeft(last) - 1) * 1000, action: { label: 'Undo', run: () => undoAfterClose(id) } })
   }
   const from = route.query.from
   if ((from === 'preview' || from === 'agents') && typeof window.history.state?.back === 'string') {
