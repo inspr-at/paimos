@@ -5,6 +5,7 @@
 // other rule runs, so no return path, redirect or report can copy it, and the
 // assistant sends it only in a header.
 import { api, APIError, type WorkNode } from './api.ts'
+import { displayLanguage } from './displayLanguage.ts'
 
 export type DraftLanguage = 'en' | 'de'
 export interface HeldDraft { draft: string; lang: DraftLanguage | null }
@@ -63,8 +64,8 @@ export const createFromDraft = (held: HeldDraft, body: DraftCreate) =>
   api('/import/project-draft/create', { method: 'POST', headers: { [HEADER]: held.draft, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 30_000).then(answer<DraftCreated>)
 
 /** The page's language before the draft is read: the handoff's, else the browser's. */
-export function draftLanguage(held: HeldDraft | null): DraftLanguage {
-  return held?.lang ?? (typeof navigator !== 'undefined' && /^de\b/i.test(navigator.language) ? 'de' : 'en')
+export function draftLanguage(held: HeldDraft | null, browserLanguage: string | null = typeof navigator === 'undefined' ? null : navigator.language): DraftLanguage {
+  return held?.lang ?? displayLanguage(browserLanguage, 'start')
 }
 
 // The assistant's words follow the conversation's language; its content stays as sent.

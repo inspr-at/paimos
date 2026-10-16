@@ -17770,6 +17770,8 @@
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"follows the START handoff language, else the browser, through the shared helper","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps the incomplete app in English and preserves the independent release-note choice","tier":"ESSENTIAL"}

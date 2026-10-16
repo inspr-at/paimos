@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter, type Router, type RouteRecordRaw } from 'vue-router'
 import { defineComponent } from 'vue'
 import { sourceModule } from './record-source'
+import { displayLanguage } from '../src/lib/displayLanguage'
 
 const empty = defineComponent({ render: () => null })
 const CAPABILITY = 'Q2FwYWJpbGl0eS1mb3ItQUVPTi0xNDQxLXRlc3RzXzA'
@@ -30,7 +31,7 @@ beforeEach(() => {
   storage = new Map()
   vi.stubGlobal('sessionStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v) }, removeItem: (k: string) => { storage.delete(k) } })
   session = { identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }, requiresSignIn: false, error: '', refresh: async () => {} }
-  draft = sourceModule<Draft>('lib/importDraft.ts', { './api.ts': {} })
+  draft = sourceModule<Draft>('lib/importDraft.ts', { './api.ts': {}, './displayLanguage.ts': { displayLanguage } })
   signInReturn = sourceModule<Return>('lib/signInReturn.ts', { './attachLink.ts': { stripAttachCode: (path: string) => path } })
 })
 afterEach(() => { vi.unstubAllGlobals() })
