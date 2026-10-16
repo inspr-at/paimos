@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"runtime"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -325,7 +325,7 @@ func (m *backendMemoryTrace) explain(t testing.TB, ctx context.Context, conn *pg
 // retain its label and never present it as Linux anonymous memory.
 func backendProcessMemory(t testing.TB, ctx context.Context, pid uint32) map[string]uint64 {
 	t.Helper()
-	if runtime.GOOS != "darwin" {
+	if goruntime.GOOS != "darwin" {
 		return nil
 	}
 	probe, cancel := context.WithTimeout(ctx, 3*time.Second)
