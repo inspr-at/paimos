@@ -4,6 +4,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseRuntimeApkPins } from './runtime-apk-pins.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = path => readFileSync(join(root, path), 'utf8')
@@ -42,16 +43,28 @@ export function checkQuoteEvidence() {
   if (readdirSync(join(root, 'web/tests/quotes')).some(name => name.endsWith('.md'))) fail('quote evidence must not add Markdown files')
 
   const docker = read('Dockerfile'), notice = read('NOTICE'), gomod = read('go.mod')
+  const runtime = read('scripts/Dockerfile.runtime')
+  const pins = parseRuntimeApkPins(runtime)
   const lock = JSON.parse(read('web/package-lock.json'))
   const qr = lock.packages?.['node_modules/qrcode-generator']
   if (qr?.version !== '1.5.2' || qr.license !== 'MIT') fail('qrcode-generator pin/license changed')
-  if (!/chromium=152\.0\.7977\.82-r0/.test(docker) || !/tini=0\.19\.0-r3/.test(docker)) fail('runtime APK pins changed')
+  if (!runtime.includes('no allow-listed chromium version is in the Alpine index')) fail('runtime chromium install does not fail closed')
+  if (pins.chromium.length > 1 && !/\|\| apk add --no-cache ca-certificates "chromium=/.test(runtime)) fail('runtime chromium allow-list is not tried in order')
+  if (/apk add[^\n]*\bchromium(?!=)/.test(runtime)) fail('runtime chromium install is not pinned to the allow-list')
+  if (/^ARG /m.test(runtime)) fail('runtime APK pins must not be a build arg')
+  if (/chromium=[0-9]/.test(docker)) fail('assembly Dockerfile hardcodes a chromium APK')
+  if (!docker.includes('chromium allow-list') || !docker.includes('scripts/Dockerfile.runtime')) fail('assembly Dockerfile lost the runtime allow-list comment')
   if (!/golang\.org\/x\/image v0\.45\.0/.test(gomod)) fail('x/image pin changed')
   if (!docker.includes('COPY NOTICE /usr/share/doc/aeon/NOTICE')) fail('runtime image omits NOTICE')
+  if (!notice.includes('chromium allow-list in scripts/Dockerfile.runtime')) fail('NOTICE missing chromium allow-list')
+  for (const match of notice.matchAll(/\b(\d+\.\d+\.\d+(?:\.\d+)?-r\d+)\b/g)) {
+    const version = match[1]
+    if (version !== pins.tini && !pins.chromium.includes(version)) fail(`NOTICE names ${version} outside the runtime APK allow-list`)
+  }
   for (const entry of [
-    'Chromium 152.0.7977.82-r0', 'License: BSD-3-Clause', 'Copyright 2015 The Chromium Authors',
+    'License: BSD-3-Clause', 'Copyright 2015 The Chromium Authors',
     'qrcode-generator 1.5.2', 'License: MIT', 'Copyright (c) 2009 Kazuhiko Arase',
-    'tini 0.19.0-r3', 'Copyright (c) 2015 Thomas Orozco',
+    `tini ${pins.tini}`, 'Copyright (c) 2015 Thomas Orozco',
     'golang.org/x/image v0.45.0', 'Copyright 2009 The Go Authors.',
     'Permission is hereby granted', 'Redistribution and use in source and binary forms',
   ]) if (!notice.includes(entry)) fail(`NOTICE missing ${entry}`)

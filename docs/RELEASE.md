@@ -954,7 +954,7 @@ The server image pipeline starts independently of the macOS jobs (AEON-407, AEON
 
 1. Each `image-platform` matrix job checks out all tags, validates the calendar coordinate and presentation bundle, and requires an annotated tag matching `version.json`. It refuses an existing GitHub release (including drafts) or GHCR release tag; lookup errors fail closed.
 2. Generate the release-history manifest once. Freeze the source commit timestamp as `SOURCE_DATE_EPOCH`; compile web and Go on the native host. The npm cache is restored (every tarball is checked against the lockfile); **no Go cache is restored**, and Go compiles cold from modules verified against `go.sum` (see [Cold Go compilation](#cold-go-compilation-for-shipped-binaries)). `scripts/build-image-inputs.mjs` runs the production prebuild checks, uses `-trimpath -buildvcs=false -tags webembed`, disables CGO, and injects the exact reserved version. The input manifest records the tree, toolchain versions, generated-history hash, web hashes and binary hash; the final executable has mode 755 and a fixed mtime.
-3. Prepare the runtime closure cold: build `scripts/Dockerfile.runtime` (the digest-pinned Alpine base plus the pinned `chromium` and `tini`) with `no-cache` and without any registry cache, in every tag build and every rehearsal (see [Runtime closure](#runtime-closure-prepared-cold-on-every-build)). Bind the exported OCI runtime manifest digest as the `aeon-runtime` named context and print it per architecture. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and single-platform arguments, with `rewrite-timestamp=true` and OCI media types.
+3. Prepare the runtime closure cold: build `scripts/Dockerfile.runtime` (the digest-pinned Alpine base plus the chromium allow-list and exact `tini`) with `no-cache` and without any registry cache, in every tag build and every rehearsal (see [Runtime closure](#runtime-closure-prepared-cold-on-every-build)). Bind the exported OCI runtime manifest digest as the `aeon-runtime` named context and print it per architecture. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and single-platform arguments, with `rewrite-timestamp=true` and OCI media types.
 4. Record assembly plus smoke timing and require two clean same-input rebuilds (below). After these gates pass, export the same image inputs with BuildKit `provenance: mode=max` and push **by digest only**. Update that architecture's assembly cache in `mode=max`. Platform jobs never assign the release tag. Before anything is attested, `scripts/verify-pushed-image.mjs` reads the pushed digest back, walks to its `linux/<arch>` manifest and requires the image config digest of the smoked build; a mismatch fails the job and prints both digests. Each job then creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, and uploads its digest artifact. That handoff is the job's last step.
 5. The `image` job waits for both platform jobs to succeed, rechecks release/tag immutability, and combines their immutable references using `docker buildx imagetools create`. Before publishing and after reading back, require exactly linux/amd64 and linux/arm64 runtime manifests with separate bound BuildKit provenance descriptors. Publish one multi-arch OCI index at `ghcr.io/inspr-at/aeon:<version>`, without a `latest` alias.
 6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. The notes keep exactly one `Digest:` line (the index, which `scripts/verify-live.mjs` requires) and add one `Runtime closure linux/<arch>:` line per architecture. Production **prod-1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
@@ -1060,9 +1060,14 @@ the evidence. Fixture timings are not live acceptance evidence.
 The tag and rehearsal workflows pin Buildx `v0.37.1` and the docker-container builder to `moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`. All three setups disable the shared Buildx binary cache. Their identical guards resolve Docker CLI plugin precedence, reject missing, symlinked or shadowed plugins, and verify the downloaded binary against the pinned per-architecture SHA256 before invoking Buildx to assert its version and the bootstrapped BuildKit version. Both platform jobs have a 45-minute budget. To bump the pins, update both workflows and the releaseworkflow expectations with the Buildx version, both Linux amd64/arm64 checksums from the official versioned `https://github.com/docker/buildx/releases/download/<version>/checksums.txt`, and the BuildKit version and multi-architecture image digest; regenerate the changed rehearsal coverage fingerprints with `go run scripts/rehearsal-step.go inventory`, preserving the reviewed counterparts. Rehearse on both native architectures, then tag only after a green PR rehearsal and a green exact-SHA main rehearsal of the merged commit. Release 124 requires both new green rehearsals; the earlier receipt (run 37427550810) no longer covers the changed release workflow.
 
 `scripts/Dockerfile.runtime` pins the official Alpine 3.24 multi-platform index
-by digest (3.24.2 when observed on 2026-10-05), while preserving Chromium
-152.0.7977.82-r0 and tini 0.19.0-r3. The index keeps both native architectures;
-the smoke gate still checks their installed pins, licenses, NOTICE, UID/GID,
+by digest (3.24.2 when observed on 2026-10-05). Chromium is an exact-version
+allow-list, newest first (AEON-1450: `155.0.8059.39-r0`, then
+`152.0.7977.82-r0`). Preparation installs the first version the index can
+satisfy and fails when none match. tini stays exactly `0.19.0-r3`. A bump
+edits those exact `chromium=` arguments. Image evidence records the installed
+chromium APK. The
+index keeps both native architectures; the smoke gate still checks the
+installed pin against the allow-list, plus licenses, NOTICE, UID/GID,
 mounted files, embedded web, authenticated APIs and Chromium PDF rendering.
 The runtime closure uses epoch 0, so neither the source commit's timestamp nor
 the build time enters it. Every tag build and every rehearsal prepares it cold;
@@ -1095,7 +1100,9 @@ changes the input: equality across independently regenerated cold closures is
 not claimed. Retain the complete runtime OCI layout when replaying old
 evidence; the input/base hashes in JSON identify it but cannot recover its
 bytes. Pin/package changes require the existing render-parity and NOTICE
-review; unavailable pinned APKs fail preparation rather than being upgraded.
+review. An allow-listed chromium version that is absent from the index is
+skipped. Preparation fails when none of the allow-list can be selected.
+It never installs a floating chromium.
 
 `scripts/reproduce-image.mjs RUNTIME_LAYOUT EVIDENCE.json` requires a clean
 tracked checkout. It archives the exact commit into two distinct fresh source
@@ -1206,7 +1213,7 @@ release latency.
 There is no runtime closure cache. Every tag build, and every rehearsal,
 prepares the closure cold: `scripts/Dockerfile.runtime` is built with
 `no-cache: true` and without a registry cache, from the digest-pinned Alpine
-3.24 index and the pinned `chromium` and `tini` packages. Nothing is restored
+3.24 index, the chromium allow-list and the exact `tini` pin. Nothing is restored
 from an earlier build and nothing is saved for a later one. Workflow tests
 reject a cache for it, a second source, a second preparation, and any step
 after the platform job's digest handoff.
@@ -1225,7 +1232,7 @@ describe the closure that this build prepared and shipped, never a shared or
 reused one:
 
 - each platform job's summary: runtime manifest digest, config digest, layer
-  diff IDs and the recipe hash;
+  diff IDs, the recipe hash and the installed chromium APK;
 - `runtime_base` in `image-reproducibility.json`: the same values;
 - the draft release notes: one `Runtime closure linux/<arch>:` line per
   architecture with the runtime manifest digest.
