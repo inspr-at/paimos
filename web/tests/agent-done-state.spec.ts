@@ -52,7 +52,8 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goto('/agents/5e000000-0000-4000-8000-000000000008')
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-step')).toHaveText('Reviewing the diff before stopping')
-    await expect(panel.locator('.agent-state-label').first()).toContainText('Ended')
+    // AEON-1309: the condensed header speaks the state through its avatar.
+    await expect(panel.locator('.panel-head .live-bot')).toHaveAttribute('aria-label', 'Ended')
     await page.goto('/agents/5e000000-0000-4000-8000-000000000007')
     await expect(panel.locator('.now-meta').first()).toContainText('Done')
     await shot(page, `panel-done-${theme}`)

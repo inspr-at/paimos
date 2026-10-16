@@ -23,7 +23,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await page.goto(`/agents/${session.id}`)
     await theme(page, look)
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    await panel.getByRole('tab', { name: 'Overview' }).click()
+    await panel.getByRole('tab', { name: 'Details', exact: true }).click()
     const requests = panel.getByRole('region', { name: 'Session state evidence' }).getByRole('link', { name: 'Permission requests' })
     await expect(requests).toHaveAttribute('href', '/decision-desk')
     await expectStableControls({ controls: { requests }, scrollAreas: { body: panel.locator('#session-panel-overview') }, interactions: [

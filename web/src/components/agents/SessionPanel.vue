@@ -313,7 +313,13 @@ const setupLine = computed(() => {
 const recentRunModel = (item: typeof recentRuns.value[number]) => panelModelLine({ harness: s.value?.harness ?? 'codex', model: runModel(item), reasoning_effort: '' }, agents.models)
 const modelLine = computed(() => s.value ? panelModelLine(reported.value || s.value, agents.models, props.view?.model) : '')
 
-const identityTitle = computed(() => [props.view?.ticket?.title ?? (isLead.value ? props.view?.projectTitle : ''), props.view?.status.label, native.value?.controller ? native.value.controller.actor_id === viewer.value.principalId ? 'You have control in a terminal' : 'Another person has control' : '', modelLine.value, s.value?.host].filter(Boolean).join(' · '))
+const identityTitle = computed(() => [
+  props.view?.ticket?.title || props.view?.name,
+  !props.view?.ticket?.title && isLead.value ? props.view?.projectTitle : '',
+  props.view?.status.label,
+  native.value?.controller ? native.value.controller.actor_id === viewer.value.principalId ? 'You have control in a terminal' : 'Another person has control' : '',
+  modelLine.value, s.value?.host,
+].filter(Boolean).join(' · '))
 const fullScreenTip = computed(() => panelLayout.value === 'full' ? 'Exit full screen · Esc' : ['Full screen', shortcutHint('agents.panel.fullscreen')].filter(Boolean).join(' · '))
 const shortcutScope = { enabled: () => !!s.value && !props.loading && menuReady.value, when: (event: KeyboardEvent) => !isHolderTerminalTarget(event.target) && !isHolderTerminalTarget(document.activeElement) }
 const stopPanelShortcuts = registerPanelShortcuts({ ...shortcutScope,
