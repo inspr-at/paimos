@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -66,10 +65,13 @@ func (e *publicError) HTTPStatus() int { return e.status }
 func invalid(message string) error { return &publicError{http.StatusUnprocessableEntity, message} }
 
 func parseCreate(r *http.Request, w http.ResponseWriter) (CreateInput, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxCreateBody)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
+	body, err := httpapi.ReadRequestBody(w, r, maxCreateBody, readDeadline)
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
 		return CreateInput{}, &publicError{http.StatusRequestEntityTooLarge, "The request is too large."}
+	}
+	if err != nil {
+		return CreateInput{}, &publicError{http.StatusBadRequest, "The request could not be read."}
 	}
 	var in CreateInput
 	dec := json.NewDecoder(bytes.NewReader(body))
@@ -178,7 +180,11 @@ func (m *Module) createTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, di
 		if err != nil {
 			return Created{}, err
 		}
-		return Created{Project: view.Project, Tickets: *view.Tickets, Replayed: true}, nil
+		tickets := 0
+		if view.Tickets != nil {
+			tickets = *view.Tickets
+		}
+		return Created{Project: view.Project, Tickets: tickets, Replayed: true}, nil
 	}
 	var payload Payload
 	if err := json.Unmarshal(d.Payload, &payload); err != nil {

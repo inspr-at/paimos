@@ -23,7 +23,7 @@ const draft = (language: 'de' | 'en') => ({
 type Gate = { open: () => void; until: Promise<void> }
 const gate = (): Gate => { let open!: () => void; const until = new Promise<void>(resolve => { open = resolve }); return { open, until } }
 
-async function setup(page: Page, options: { language?: 'de' | 'en'; gone?: boolean; holdRead?: Gate; holdCreate?: Gate; theme: 'light' | 'dark' }) {
+async function setup(page: Page, options: { language?: 'de' | 'en'; gone?: boolean; denied?: boolean; holdRead?: Gate; holdCreate?: Gate; theme: 'light' | 'dark' }) {
   const data = fixtures(), errors = watchErrors(page)
   // Workspace admins and built-in members read members; the mock grants it to admin.
   await mockWork(page, data, { admin: true })
@@ -37,6 +37,7 @@ async function setup(page: Page, options: { language?: 'de' | 'en'; gone?: boole
     seen.reads.push({ header: route.request().headers()['aeon-import-draft'] ?? null, url: route.request().url() })
     if (options.holdRead) await options.holdRead.until
     if (options.gone) return route.fulfill({ status: 404, json: { error: 'This handoff has expired.', code: 'draft_gone' } })
+    if (options.denied) return route.fulfill({ status: 403, json: { error: 'permission denied' } })
     return route.fulfill({ json: draft(options.language ?? 'en') })
   })
   await page.route('**/api/import/project-draft/create', async route => {
@@ -138,6 +139,12 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await stable.check(() => page.locator('#np-owner').click())
       await expect(sheet(page).getByRole('menuitemradio')).toHaveCount(2)
       await shoot(page, testInfo, 'owner', width, theme)
+      // Escape closes the list first and keeps the sheet; the list opens again.
+      await page.keyboard.press('Escape')
+      await expect(sheet(page).getByRole('menuitemradio')).toHaveCount(0)
+      await expect(sheet(page)).toBeVisible()
+      await expect(page.locator('#np-owner')).toBeFocused()
+      await page.locator('#np-owner').click()
       await stable.check(async () => { await sheet(page).getByRole('menuitemradio', { name: /Lena Huber/ }).click(); await expect(page.locator('#np-owner')).toContainText('Lena Huber') })
       await stable.check(async () => {
         await sheet(page).locator('input[type="date"]').evaluate(input => { (input as HTMLInputElement).value = '2026-11-30'; input.dispatchEvent(new Event('change', { bubbles: true })) })
@@ -186,6 +193,13 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await expect(page).toHaveURL(/\/$/)
       await expect(sheet(page)).toHaveCount(0)
 
+      // A person who may not create projects is told so, not shown a draft.
+      const denied = await ctx.newPage()
+      const refused = await setup(denied, { denied: true, theme })
+      await denied.goto(`/new-project#draft=${CAPABILITY}&lang=en`)
+      await expect(sheet(denied).getByRole('heading', { name: 'You may not create projects here.' })).toBeVisible()
+      await expect(sheet(denied).locator('form')).toHaveCount(0)
+
       const de = await ctx.newPage()
       const german = await setup(de, { language: 'de', theme })
       await de.goto(`/new-project#draft=${CAPABILITY}&lang=de`)
@@ -196,7 +210,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await expect(de.locator('#np-go')).toContainText('Projekt anlegen')
       await craft(de, width < 600)
       await shoot(de, testInfo, 'de', width, theme)
-      expect([...world.errors, ...german.errors]).toEqual([])
+      expect([...world.errors, ...german.errors, ...refused.errors.filter(error => !/403/.test(error))]).toEqual([])
     } finally { await ctx.close() }
   })
 }
