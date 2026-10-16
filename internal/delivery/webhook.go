@@ -354,6 +354,51 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 	return webhookRecorded, nil
 }
 
+// Receipt mutations wait out a transient tenant-fence timeout. Projection keeps
+// the session lock_timeout and its own three-attempt budget, so a held fence
+// can still end that attempt as 502. A brief 55P03 while saving or scheduling
+// a receipt must not. The wait is capped by the request deadline.
+func (m *Module) ingressTx(ctx context.Context, reason string, fn func(pgx.Tx) error) error {
+	for attempt := 0; ; attempt++ {
+		err := db.InTenant(db.AllProjects(ctx, reason), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+			if err := widenReceiptLockWait(ctx, tx); err != nil {
+				return err
+			}
+			return fn(tx)
+		})
+		if !postgresLockTimeout(err) {
+			return err
+		}
+		delay := time.Duration(20+rand.Int64N(30)) * time.Millisecond * time.Duration(1<<min(attempt, 5))
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
+	}
+}
+
+func widenReceiptLockWait(ctx context.Context, tx pgx.Tx) error {
+	wait := webhookReceiptLockWait
+	if deadline, ok := ctx.Deadline(); ok {
+		if remain := time.Until(deadline); remain < wait {
+			wait = remain
+		}
+	}
+	if wait < time.Millisecond {
+		wait = time.Millisecond
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('lock_timeout',$1,true)`, fmt.Sprintf("%dms", wait.Milliseconds()))
+	return err
+}
+
+func postgresLockTimeout(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "55P03"
+}
+
 // Retry only a definite lock-timeout rollback, never an ambiguous commit or a
 // GitHub read. Each attempt re-enters RLS and takes the tenant fence before
 // reading current platform/admission facts. The observation session stays held
