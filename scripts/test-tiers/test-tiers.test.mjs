@@ -583,12 +583,11 @@ test('affected kill switch off matches the frozen selector for all 80 real PR li
 })
 
 test('merge groups always use the exact full gate with either switch state, including every real diff',()=>{
-  const expected=fullGateTests(replayRows)
   for(const affectedLane of [undefined,'off','on'])for(const paths of [[],['README.md'],['internal/auth/key.go'],...replay.prs.map(pr=>pr.paths)]) {
     const selected=select(replayRows,{event:'merge_group',paths,affectedLane,webImports:replayGraph,tree:repoTree,promotions:noPromotions,readFile:readRepo})
     assert.equal(selected.full,true)
     assert.equal(selected.scope,'gated-full')
-    assert.deepEqual(selected.tests,expected)
+    assert.deepEqual(selected.tests,fullGateTests(replayRows,paths))
     const decision=schedulingDecision('merge_group',paths,()=>true,{affectedLane,graph:replayGraph,tree:repoTree,promotions:noPromotions})
     assert.equal(decision.mode,'full')
     assert.equal(decision.layout,'full')
@@ -638,10 +637,14 @@ test('R1 semantically unchanged registries take the static layout; promotions mu
   const manifests=realPaths.filter(path=>affectedRisk(path).rule==='R1')
   for(const path of ['scripts/ci/go-test-tiers.json','scripts/ci/web-test-tiers.json','web/ci-web-shards.json','web/scripts/ci-web-shard.test.mjs'])
     assert.ok(manifests.includes(path),`${path} must appear in the real PR lists`)
+  const planningRegression=replayRows.find(row=>row.kind==='node'&&row.file==='tests/test-tier-failures.test.ts'&&row.name==='native planning regression reuses one collected snapshot for unchanged-tree CLI checks')
+  assert.equal(planningRegression?.tier,'NIGHTLY')
   for(const path of [...manifests,'web/scripts/aeon-681-ci.test.mjs']) {
     const selected=on([path])
     assert.equal(selected.full,false,path)
-    assert.ok(essentialOnly(selected),`${path}: registration-only manifest diffs run essentials only`)
+    const nightly=selected.tests.filter(row=>row.tier!=='ESSENTIAL')
+    if(path==='web/scripts/aeon-681-ci.test.mjs') assert.deepEqual(nightly.map(key),[key(planningRegression)])
+    else assert.deepEqual(nightly,[],`${path}: registration-only manifest diffs run essentials only`)
     assert.match(selected.reason,/R1: (?:manifest\/static|semantic registry) checks: /)
     const decision=decide([path])
     assert.deepEqual([decision.mode,decision.layout],['essential','static'],path)
@@ -1245,6 +1248,29 @@ test('AEON-1334 a recorded drift title resolves across describe prefixes and a r
   const renamed=row(`${names[0]} (renamed)`)
   assert.deepEqual(fullGateTests([renamed,sibling,...rest]).map(key).sort(),[renamed,sibling,...rest].map(key).sort(),'an unresolved recorded title runs its whole file')
   assert.deepEqual(fullGateTests([{...sibling,file:'tests/elsewhere.spec.ts'}]),[],'a nightly case outside the drift files stays deferred')
+})
+
+test('AEON-1431 a planner diff runs the nightly planning regression and a workflow diff still defers cases outside the drift files',()=>{
+  const name='native planning regression reuses one collected snapshot for unchanged-tree CLI checks'
+  const row=replayRows.find(item=>item.kind==='node'&&item.file==='tests/test-tier-failures.test.ts'&&item.name===name)
+  assert.equal(row?.tier,'NIGHTLY')
+  const siblings=replayRows.filter(item=>item.file===row.file&&key(item)!==key(row))
+  assert.ok(siblings.length>0)
+  for(const path of ['scripts/test-tiers/core.mjs','scripts/test-tiers/drift-obligations.json','web/tests/test-tier-failures.test.ts','web/scripts/aeon-681-ci.test.mjs']) {
+    const selected=on([path])
+    assert.ok(selected.tests.some(item=>key(item)===key(row)),path)
+    if(path.startsWith('scripts/test-tiers/')) assert.ok(siblings.every(item=>!selected.tests.some(picked=>key(picked)===key(item))),path)
+  }
+  const workflow=on(['.github/workflows/ci.yml'])
+  assert.equal(workflow.full,true)
+  assert.equal(workflow.scope,'gated-full')
+  assert.ok(!workflow.tests.some(item=>key(item)===key(row)))
+  const drift=new Set(JSON.parse(readFileSync(new URL('./drift-obligations.json',import.meta.url),'utf8')).browserFiles)
+  const deferred=replayRows.filter(item=>item.kind==='browser'&&item.tier==='NIGHTLY'&&!drift.has(item.file))
+  assert.ok(deferred.length>0)
+  const gated=new Set(workflow.tests.map(key))
+  assert.ok(deferred.every(item=>!gated.has(key(item))))
+  assert.ok(workflow.tests.some(item=>item.kind==='browser'&&item.tier==='NIGHTLY'&&drift.has(item.file)))
 })
 
 test('layout is static only when every path is docs, manifest, audit or always-on test material',()=>{
