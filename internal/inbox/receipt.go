@@ -8,11 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Receipt is the sender's proof of receiver confirmation. State moves
@@ -109,10 +108,6 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 		return nil
 	})
 	return out, err
-}
-
-func recordAcceptanceReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string) error {
-	return recordAcceptanceReceiptWith(ctx, tx, p, messageID, func(c events.Change) error { _, err := events.Append(ctx, tx, p, c); return err })
 }
 
 func recordAcceptanceReceiptWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string, appendEvent func(events.Change) error) error {

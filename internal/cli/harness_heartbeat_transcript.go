@@ -337,10 +337,6 @@ func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack u
 	advanceUsageCursor(session, pending)
 }
 
-func codexSessionLabel(path, sessionID string) (string, bool) {
-	return readCodexSessionLabel(context.Background(), path, sessionID)
-}
-
 func readCodexSessionLabel(ctx context.Context, path, sessionID string) (string, bool) {
 	if ctx.Err() != nil || path == "" || !validUUID(sessionID) {
 		return "", false
@@ -379,10 +375,6 @@ func readCodexSessionLabel(ctx context.Context, path, sessionID string) (string,
 		return "", false
 	}
 	return found, true
-}
-
-func claudeSessionLabel(o heartbeatOptions, sessionID string) (string, bool) {
-	return readClaudeSessionLabel(context.Background(), o, sessionID)
 }
 
 func readClaudeSessionLabel(ctx context.Context, o heartbeatOptions, sessionID string) (string, bool) {
@@ -531,18 +523,6 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n += int64(n)
 	return n, err
-}
-
-func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool) (map[string]usageSum, int64, []string, bool, error) {
-	return scanUsageWindowSource(ctx, path, fallback, offset, maxBytes, recent, discarding, "claude")
-}
-
-// scanUsageWindowSource scans one window with a fresh Codex cursor. It is the
-// single-window form; the heartbeat uses scanUsageWindowState so the Codex
-// model and baseline carry over between beats.
-func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string) (map[string]usageSum, int64, []string, bool, error) {
-	sums, next, ring, disc, _, err := scanUsageWindowState(ctx, path, fallback, offset, maxBytes, recent, discarding, source, nil)
-	return sums, next, ring, disc, err
 }
 
 // scanUsageWindowState scans one window and returns the Codex cursor that

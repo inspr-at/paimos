@@ -4,9 +4,9 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { APIError, RequestFailure, StaleRequestError } from '../src/lib/api.ts'
 import {
-  accountUseCommand, accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor, sameAccountCopy,
-  nightLabel, pickWindows, plainText, poolSentence, presetWeek, rateAt, sameShape, scheduleProblem, setGlobalMode, sourceLine, todayCell,
-  estimateLabel, consumptionLine, usingNow, toggleAccountMode, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
+  accountUseCommand, accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge,
+  nightLabel, pickWindows, plainText, poolSentence, presetWeek, rateAt, sameShape, scheduleProblem, sourceLine,
+  estimateLabel, consumptionLine, usingNow, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type CapacityWindow,
 } from '../src/lib/capacity.ts'
 
@@ -122,11 +122,11 @@ test('two Codex accounts: soonest reset first, one plan sentence, gauges from se
   const spare = codex.rows[0]
   const plan = accountPlan(spare, now)!
   assert.deepEqual(gauge(spare, plan), { yours: 0, later: 5, today: 4, spent: 2, tick: 5, frozen: false })
-  assert.deepEqual(todayCell(spare, plan), { kind: 'share', value: '~6%', tip: 'Plan for today ~6%: 2% used, 4% to go' })
+
   assert.equal(sourceLine(spare, now), 'Codex reported · 9 min ago')
   const studio = codex.rows[2]
   assert.equal(sourceLine(studio, now), 'Read on studio · 3 h ago · offline')
-  assert.deepEqual(todayCell(studio, accountPlan(studio, now)), { kind: 'quiet', text: 'waits for studio' })
+
   assert.equal(gauge(studio, accountPlan(studio, now)).tick, null)
 })
 
@@ -151,8 +151,7 @@ test('one quota is one gauge, and a group is its own pool', () => {
   assert.equal(built[0].rows.length, 1)
   assert.deepEqual(built[0].rows[0].hosts, ['build-7', 'studio'])
   assert.equal(built[0].parallelRuns, 1)
-  assert.equal(sameAccountCopy(built[0].rows[0].hosts), 'Same account on build-7 and studio')
-  assert.equal(sameAccountCopy(['build-7', 'studio', 'desk']), 'Same account on build-7, studio and desk')
+
   assert.equal(built[1].id, `group:${group}`)
   assert.equal(built[1].name, 'Client · Codex')
   assert.equal(built[1].mark, 'codex')
@@ -172,7 +171,6 @@ test('ahead of pace is gold, not red, and says what happens next', () => {
   const s = poolSentence(cursor, now, TZ)
   assert.equal(s.ahead, true)
   assert.equal(plainText(s), 'Ahead of pace: 7% used today, the plan was ~6%. Agents ease off Cursor until tomorrow.')
-  assert.deepEqual(todayCell(cursor.rows[0], accountPlan(cursor.rows[0], now)), { kind: 'ahead', used: '7%', plan: '~6%' })
 })
 
 test('Sprint and Hold come from the pool schedule; an expired Sprint is the plan again', () => {
@@ -183,7 +181,7 @@ test('Sprint and Hold come from the pool schedule; an expired Sprint is the plan
   )
   assert.equal(codex.override, 'sprint')
   assert.equal(plainText(poolSentence(codex, now, TZ)), 'Sprint: agents may use everything left on Spare (9%) and Main (42%) until tomorrow 18:02.')
-  assert.deepEqual(todayCell(codex.rows[0], accountPlan(codex.rows[0], now)), { kind: 'sprint', text: 'all 9%' })
+
   const [held] = pools([acct('g', 'markus', 'grok')], [cap('g', [win({ used: 10, budget: 0, reset: '2026-10-06T11:10:00Z' })], schedule({ override: 'hold' }))])
   assert.equal(plainText(poolSentence(held, now, TZ)), "On hold. Agents leave Grok alone until you resume; today's share moves to the coming days.")
   assert.equal(gauge(held.rows[0], accountPlan(held.rows[0], now)).tick, null)
@@ -195,7 +193,7 @@ test('days off: rest, would expire, and unused capacity', () => {
   const sunday = presetWeek(5).map((d, i) => ({ ...d, on: i !== 1 })) // Tuesday off
   const [rest] = pools([acct('g', 'markus', 'grok')], [cap('g', [win({ used: 30, budget: 0, reset: '2026-10-06T11:10:00Z' })], schedule({ week: sunday, off_days: 'rest' }))])
   assert.equal(plainText(poolSentence(rest, now, TZ)), 'Day off: agents rest. Grok continues tomorrow.')
-  assert.deepEqual(todayCell(rest.rows[0], accountPlan(rest.rows[0], now)), { kind: 'quiet', text: 'day off' })
+
   const [expire] = pools([acct('g', 'markus', 'grok')], [cap('g', [win({ used: 30, budget: 70, reset: '2026-09-29T20:00:00Z', allowOff: true })], schedule({ week: sunday }))])
   assert.equal(plainText(poolSentence(expire, now, TZ)), 'Day off, but ~70% of Grok would expire before your next work day, so agents use it today.')
   const [lost] = pools([acct('g', 'markus', 'grok')], [cap('g', [win({ used: 30, budget: 0, reset: '2026-09-29T20:00:00Z', unused: true })], schedule({ week: sunday, off_days: 'rest' }))])
@@ -207,11 +205,11 @@ test('days off: rest, would expire, and unused capacity', () => {
 test('sign-in and offline pools pause with the one fixing step', () => {
   const [cursor] = pools([acct('u', 'markus', 'cursor', { last_probe_ok: false })], [{ ...cap('u', [win({ kind: 'monthly', used: 43, budget: 6, reset: '2026-10-14T07:00:00Z', readMin: 2 * 24 * 60 })]), probe_failure: 'auth_failed' }])
   assert.equal(plainText(poolSentence(cursor, now, TZ)), 'Paused until you sign in again on build-7. 57% left, resets Wed 14 Oct.')
-  assert.deepEqual(todayCell(cursor.rows[0], null), { kind: 'signin', command: 'cursor-agent login' })
+
   assert.equal(sourceLine(cursor.rows[0], now), 'Sign-in expired · last read 2 d ago')
   const [quiet] = pools([acct('g', 'markus', 'grok', { last_probe_ok: false })], [{ ...cap('g', [win({ used: 10, budget: 12, reset: '2026-10-06T11:10:00Z' })]), probe_failure: 'unavailable' }])
   assert.equal(plainText(poolSentence(quiet, now, TZ)), 'Reading unavailable on build-7. Agents skip it until the next check succeeds.')
-  assert.deepEqual(todayCell(quiet.rows[0], accountPlan(quiet.rows[0], now)), { kind: 'quiet', text: 'reading unavailable' })
+
   assert.equal(sourceLine(quiet.rows[0], now), 'Codex reported · 2 min ago'.replace('Codex', 'Grok'))
   const [none] = pools([acct('p', 'Pi on worker-1', 'pi')], [])
   assert.equal(plainText(poolSentence(none, now, TZ)), 'Usage unknown · reserve not enforceable')
@@ -219,18 +217,6 @@ test('sign-in and offline pools pause with the one fixing step', () => {
   const [next] = pools([acct('p', 'Pi on worker-1', 'pi')], [{ ...cap('p', []), awaiting_reading: true }])
   assert.equal(plainText(poolSentence(next, now, TZ)), 'Usage unknown · reserve not enforceable')
   assert.equal(sourceLine(next.rows[0], now), '')
-})
-
-test('gauges show % left or % used, globally and per account', () => {
-  assert.equal(gaugeModeFor(null, 'a'), 'left')
-  const used = toggleAccountMode(null, 'a')
-  assert.deepEqual(used, { mode: 'left', accounts: { a: 'used' } })
-  assert.equal(gaugeModeFor(used, 'a'), 'used')
-  assert.equal(gaugeModeFor(used, 'b'), 'left')
-  assert.deepEqual(toggleAccountMode(used, 'a'), { mode: 'left', accounts: {} })
-  const global = setGlobalMode(used, 'used')
-  assert.deepEqual(global, { mode: 'used', accounts: {} })
-  assert.deepEqual(toggleAccountMode(global, 'b'), { mode: 'used', accounts: { b: 'left' } })
 })
 
 test('a Sprint ends at the pool\'s earliest limiting reset, 5-hour windows included', () => {
@@ -291,7 +277,7 @@ test('Keep for you: an account at your reserve leaves today\'s plan and reads ke
   const plan = accountPlan(spare, now)!
   assert.equal(plan.atReserve, true)
   assert.equal(plan.reserve, 9, 'what is kept is never more than what is left')
-  assert.equal(todayCell(spare, plan).kind, 'reserve')
+
   assert.deepEqual(gauge(spare, plan), { yours: 9, later: 0, today: 0, spent: 2, tick: 5, frozen: false })
   assert.equal(plainText(poolSentence(codex, now, TZ)), 'Today: ~15% of Main, keeping ~30% for you. Spare is kept for you until tomorrow 18:02.')
   // Every account at the reserve: agents wait.
@@ -312,7 +298,7 @@ test("Keep for you: the 5-hour window's clause, Away and a dated Hold", () => {
   const [gone] = pools([acct('c', 'markus', 'claude')], [cap('c', [win({ used: 63, usedToday: 4, budget: 37, reset: '2026-10-04T09:00:00Z', kept: 0 })], away)])
   assert.equal(gone.override, 'away')
   assert.equal(plainText(poolSentence(gone, now, TZ)), "Away: agents may use all 37% of Claude until you're back.")
-  assert.deepEqual(todayCell(gone.rows[0], accountPlan(gone.rows[0], now)), { kind: 'sprint', text: 'all 37%' })
+
   assert.equal(activeOverride(schedule({ override: 'away', override_until: '2026-09-29T10:00:00Z' }), now), '', 'Away ends at its date')
   const held = schedule({ override: 'hold', override_until: '2026-09-29T14:02:00Z' })
   const [h] = pools([acct('g', 'markus', 'grok')], [cap('g', [win({ used: 10, budget: 0, reset: '2026-10-06T11:10:00Z' })], held)])
@@ -337,7 +323,6 @@ test('Keep for you: wall times in the schedule zone, and saves confirm reserve a
   assert.equal(confirmsSave([{ scope: 'user', schedule: sent }], away), false)
   assert.equal(sameShape(sent, s), true, 'Keep for you is not the shape')
 })
-
 
 test('the server rank wins over displayed reset times and names', () => {
  const accounts = [acct('a', 'Soon', 'codex'), acct('b', 'Later', 'codex')]
@@ -365,7 +350,6 @@ test('server-ineligible accounts stay out of the actionable plan', () => {
   assert.match(sentence, /Main: Waiting for the vendor/)
 })
 
-
 test('learned capacity stays honest about uncertainty and blind consumption', () => {
   const reading = win({ used: 50, budget: 12, reset: '2026-10-04T09:00:00Z', source: 'estimate' }).reading
   assert.equal(estimateLabel({ ...reading, plus_minus: 20, evidence: { kind: 'limit_hits', samples: 2 } }), 'Estimated · ±20% · 2 limit hits')
@@ -375,12 +359,11 @@ test('learned capacity stays honest about uncertainty and blind consumption', ()
   const [row] = buildRows([acct('a', 'Blind', 'grok')], [c])
   assert.equal(row.primary, null)
   assert.equal(sourceLine(row, now), 'No limit seen yet')
-  assert.deepEqual(todayCell(row, null), { kind: 'quiet', text: '3 runs · 24k tokens' })
+
   assert.equal(consumptionLine({ ...learning, cost_micros: 1500000 }), '3 runs · $1.50')
   assert.equal(usingNow(row, now), true)
   assert.equal(usingNow(row, now + 60000), false)
 })
-
 
 test('shared quota preserves grouped and ungrouped doors in either input order', () => {
   const fp = 'ef'.repeat(32)
@@ -416,7 +399,6 @@ test('displayed account command round trips in fish, zsh and bash with arbitrary
   assert.equal(accountUseCommand({ id: '$(false)', harness: 'claude' }), '')
   assert.equal(accountUseCommand({ id, harness: 'claude;false' }), '')
 })
-
 
 test('AEON-623: unsupported quota readers say so before learning or first work', () => {
   for (const harness of ['cursor', 'grok', 'pi']) {

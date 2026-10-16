@@ -26,8 +26,6 @@ import { rowStore } from './rowStore.ts'
 import type { ExecutionPrincipal, HistoryFilter, Recurrence, RecurrenceHistoryEntry, RecurrenceInput, RecurrencePreview, RecurrenceRelease, RecurrenceResult, RoutineExecutionSettings, RoutineGuardPolicy, RoutineScopeKind } from './recurrences'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
-
-export const listRecurrences = (projectId: string, after?: string, signal?: AbortSignal) => json<Page<Recurrence>>(`/recurrences${query({ project_id: projectId, after })}`, 'GET', undefined, {}, signal)
 export const getRecurrence = (id: string, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}`, 'GET', undefined, {}, signal)
 export const createRecurrence = (input: RecurrenceInput, signal?: AbortSignal) => json<Recurrence>('/recurrences', 'POST', input, {}, signal)
 export const updateRecurrence = (id: string, input: RecurrenceInput, revision: number, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}`, 'PUT', { ...input, expected_revision: revision }, {}, signal)

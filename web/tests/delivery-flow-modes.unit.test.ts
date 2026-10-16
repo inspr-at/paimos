@@ -9,20 +9,21 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as Vue from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const http = vi.hoisted(() => ({ handle: async (_path: string, _init?: RequestInit): Promise<Response> => new Response('{"error":"unused"}', { status: 500, headers: { 'content-type': 'application/json' } }) }))
-vi.mock('../src/lib/api.ts', () => ({
-  api: (path: string, init?: RequestInit) => http.handle(path, init),
-  APIError: class APIError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; this.name = 'APIError' } },
-}))
 import * as flow from '../src/lib/deliveryFlow'
 import { createTimeline, criticalPath, fitAll, laneModel, minutesText, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
-import { arionTarget, ARION_LATER_MINUTES, ARION_MINUTES, ARION_PATH, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
+import { arionTarget, ARION_MINUTES, ARION_PATH, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
 import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from './delivery-flow-example-fixtures'
 import * as modes from '../src/lib/deliveryFlowModes'
 import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, recordOf, wentOf, type FlowMode, type Frames } from '../src/lib/deliveryFlowModes'
 import { useDeliveryFlow } from '../src/lib/useDeliveryFlow'
 import * as words from '../src/lib/deliveryFlowText'
 import { flowText } from '../src/lib/deliveryFlowText'
+
+const http = vi.hoisted(() => ({ handle: async (_path: string, _init?: RequestInit): Promise<Response> => new Response('{"error":"unused"}', { status: 500, headers: { 'content-type': 'application/json' } }) }))
+vi.mock('../src/lib/api.ts', () => ({
+  api: (path: string, init?: RequestInit) => http.handle(path, init),
+  APIError: class APIError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; this.name = 'APIError' } },
+}))
 
 const en = flowText('en')
 const T0 = Date.parse('2026-10-08T18:00:00Z')
@@ -94,7 +95,7 @@ it('Compare races a release from its step a against the Arion target on one rela
   // Project Arion v5 § 4b, "v5 now": 15.4 + 0.5 + 12.2 + 0.5 + 10 + 1.5 + 0.5 + (4.9 + 1.1 = the 6 of h–i) + 3 + 6 + 5.
   expect(ARION_PATH.map(([key, minutes]) => `${key} ${minutes}`).join(', ')).toBe('a 15.4, b 0.5, c 12.2, d 0.5, e 10, f 1.5, g 0.5, h 4.9, i 1.1, j 3, k 6, l 5')
   expect(ARION_MINUTES).toBeCloseTo(60.6)
-  expect(ARION_LATER_MINUTES).toBeCloseTo(53.9)
+
   const scaled = arionTarget('de', 12)
   expect(runEnd(scaled)).toBeCloseTo(12)
   expect(criticalPath(scaled).at(-1)!.end).toBeCloseTo(12)

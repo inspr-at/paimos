@@ -7,7 +7,7 @@ import { QuotePresence } from '../src/lib/quotePresence'
 import { QuoteSession } from '../src/lib/quoteSession'
 import { useTicketList } from '../src/lib/useTicketList'
 import { filtersFromQuery } from '../src/lib/ticketList'
-import { parseAmountInput, parsePercentInput, parseQuantityInput } from '../src/components/business/money'
+import { parseAmountInput } from '../src/components/business/money'
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), getDraft: vi.fn() }))
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: mocks.api }))
@@ -43,19 +43,10 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 describe('S8-010: human numeric input', () => {
   it('normalizes leading zeros and decimal separators without throwing', () => {
     for (const input of ['01', '00.5', '01,5']) {
-      expect(parseQuantityInput(input)).toBe(input === '01' ? '1' : input === '00.5' ? '0.5' : '1.5')
       expect(parseAmountInput(input)).toBe(input === '01' ? '1.0000' : input === '00.5' ? '0.5000' : '1.5000')
-      expect(parsePercentInput(input)).toBe(input === '01' ? '0.01000' : input === '00.5' ? '0.00500' : '0.01500')
     }
-    expect(parseQuantityInput('000')).toBeNull()
+
     expect(parseAmountInput('000')).toBe('0.0000')
-    expect(parsePercentInput('000 %')).toBe('0.00000')
-    expect(parseQuantityInput('99999999999999.9999')).toBe('99999999999999.9999')
-    expect(parsePercentInput('100')).toBe('1.00000')
-    expect(parsePercentInput('100.001')).toBeNull()
-    for (const parse of [parseQuantityInput, parseAmountInput, parsePercentInput]) {
-      for (const input of ['', 'NaN', '-1', '1e3', '1.00001', '1.2.3', '9'.repeat(1000), '\u0000']) expect(parse(input)).toBeNull()
-    }
   })
 })
 

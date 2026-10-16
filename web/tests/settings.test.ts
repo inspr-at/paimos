@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SETTINGS_SECTIONS, adminOnly, keyState, sectionGranted, sectionOf, senderLine, settingsLink, visibleSections, type AgentKey } from '../src/lib/settings.ts'
+import { SETTINGS_SECTIONS, adminOnly, keyState, sectionGranted, sectionOf, settingsLink, visibleSections, type AgentKey } from '../src/lib/settings.ts'
 
 test('Personal, Developer and Policies are for everyone; workspace sections follow their grants', () => {
   assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer', 'vocabulary', 'policies', 'routines'])
@@ -58,12 +58,6 @@ test('agent keys read as active, expired or revoked', () => {
   assert.equal(keyState(key({ expires_at: '2026-09-20T00:00:00Z' }), now), 'expired')
   assert.equal(keyState(key({ expires_at: '2026-10-20T00:00:00Z' }), now), 'active')
   assert.equal(keyState(key({ revoked_at: '2026-09-02T00:00:00Z', expires_at: '2026-09-20T00:00:00Z' }), now), 'revoked')
-})
-
-test('the quote sender reads as one line of what is set', () => {
-  assert.equal(senderLine({ company: 'INSPR Studio', city: 'Graz', country: 'AT', iban: 'x' }), 'INSPR Studio · Graz · AT')
-  assert.equal(senderLine({ company: ' ', city: 'Graz' }), 'Graz')
-  assert.equal(senderLine(null), '')
 })
 
 test('the sender saves what is filled in and keeps the logo it does not edit', async () => {

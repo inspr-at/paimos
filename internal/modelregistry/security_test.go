@@ -464,7 +464,7 @@ func TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline(t *testing.T) {
 		body := fmt.Sprintf(`{"data":[{"id":"claude-%d"}],"has_more":true,"last_id":"claude-%d"}`, calls, calls)
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
-	if _, err := listVendorModels(t.Context(), client, "anthropic", "fixture-key"); err == nil || calls != maxDiscoveryPages {
+	if _, err := fetchProviderCatalog(t.Context(), client, "anthropic", "fixture-key", time.Now()); err == nil || calls != maxDiscoveryPages {
 		t.Fatalf("pagination bound: %d calls, %v", calls, err)
 	}
 	rows := []map[string]string{}
@@ -475,7 +475,7 @@ func TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline(t *testing.T) {
 	client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
 	})
-	if _, err := listVendorModels(t.Context(), client, "openai", "fixture-key"); err == nil {
+	if _, err := fetchProviderCatalog(t.Context(), client, "openai", "fixture-key", time.Now()); err == nil {
 		t.Fatal("unbounded model identifiers")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -484,7 +484,7 @@ func TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline(t *testing.T) {
 		t.Fatal("cancelled discovery made an outbound call")
 		return nil, io.EOF
 	})
-	if _, err := listVendorModels(ctx, client, "openai", "fixture-key"); !errors.Is(err, context.Canceled) {
+	if _, err := fetchProviderCatalog(ctx, client, "openai", "fixture-key", time.Now()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled discovery returned %v, want context.Canceled", err)
 	}
 }

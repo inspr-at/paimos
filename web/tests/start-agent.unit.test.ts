@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { dispatchHint, launchState, staleGrantRejection, startAgent, type WorkOrder } from '../src/lib/startAgent'
+import { launchState, staleGrantRejection, startAgent, type WorkOrder } from '../src/lib/startAgent'
 import { APIError } from '../src/lib/api'
-import type { AgentAccount, AgentRun, ModelProfile } from '../src/lib/agents'
+import type { AgentRun } from '../src/lib/agents'
 import type { AgentRunRow } from '../src/lib/agentRows'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAgents } from '../src/stores/agents'
@@ -13,7 +13,6 @@ import * as Cascade from '../src/lib/accountCascade'
 import { flush, setupSource } from './record-source'
 
 const ticket = { id: 'ticket', key: 'AEON-181', title: 'Start agent', is_leaf: true, body: 'Build the launch flow.', fields: { acceptance_criteria: 'Queue, then show a managed session.' } } as unknown as WorkNode
-const profile = { id: 'model', harness: 'codex', enabled: true } as ModelProfile
 const order = { node_id: 'order', status: 'draft', revision: 3, assignee_principal_id: 'agent', criteria: [] } as WorkOrder
 const queued = { id: 'run', work_order_id: 'order', agent_principal_id: 'agent', model_profile_id: 'model', status: 'queued' } as AgentRun
 const selection = { ticket, agentId: 'agent', profileId: 'model' }
@@ -23,10 +22,6 @@ beforeEach(() => { setActivePinia(createPinia()); resetPositions() })
 function admission() {
   const agents = useAgents()
   return { run: agents.admitRun, runs: agents.admitRuns }
-}
-const now = Date.parse('2026-09-26T14:00:00Z')
-function account(overrides: Partial<AgentAccount> = {}): AgentAccount {
-  return { id: 'account', account_key: 'local', harness: 'codex', daemon_id: 'mac', label: 'Work account', registered_by_principal_id: 'agent', state: 'available', last_probe_at: new Date(now - 30_000).toISOString(), last_probe_ok: true, created_at: '', windows: [{ id: 'window', account_id: 'account', starts_at: new Date(now - 60_000).toISOString(), ends_at: new Date(now + 60_000).toISOString(), unit: 'requests', allowance: 10, used: 0, reserved: 0, pace_model: 'unrestricted', burst_ratio: 0 }], ...overrides }
 }
 function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch?: boolean; lostRunResponse?: boolean; whileLaunching?: () => void; whileReadingRuns?: () => void } = {}) {
   const orders = [...(options.existing ?? [])], runs = [...(options.runs ?? [])]
@@ -206,23 +201,6 @@ describe('Start Agent leaf selection', () => {
 })
 
 describe('honest launch state', () => {
-  it('distinguishes missing daemon evidence from unavailable account capacity', () => {
-    expect(dispatchHint([], 'agent', profile, now).label).toBe('No daemon online')
-    expect(dispatchHint([account({ registered_by_principal_id: 'other' })], 'agent', profile, now).label).toBe('No daemon online')
-    expect(dispatchHint([account({ last_probe_at: new Date(now - 120_001).toISOString() })], 'agent', profile, now).label).toBe('No daemon online')
-    expect(dispatchHint([account({ state: 'draining' })], 'agent', profile, now).label).toBe('No eligible account')
-    expect(dispatchHint([account({ harness: 'claude' })], 'agent', profile, now).label).toBe('No eligible account')
-    expect(dispatchHint([account({ windows: [] })], 'agent', profile, now).label).toBe('No eligible account')
-    expect(dispatchHint([account()], 'agent', profile, now).label).toBe('Account available')
-    expect(dispatchHint([account()], 'agent', profile, now, 'missing').label).toBe('No eligible account')
-  })
-  it('does not round monetary headroom into eligibility', () => {
-    const a = account()
-    Object.assign(a.windows![0], { unit: 'cost_micros', allowance: Number.MAX_SAFE_INTEGER, used: Number.MAX_SAFE_INTEGER - 1, reserved: 1 })
-    expect(dispatchHint([a], 'agent', profile, now).label).toBe('No eligible account')
-    a.windows![0].reserved = 0
-    expect(dispatchHint([a], 'agent', profile, now).label).toBe('Account available')
-  })
   it('never presents queued or claimed as a registered managed session', () => {
     expect(launchState(queued).label).toBe('Queued')
     expect(launchState({ ...queued, status: 'starting' }).label).toBe('Claimed')
@@ -236,7 +214,6 @@ describe('honest launch state', () => {
     expect(staleGrantRejection(new Error('allow the model profile'))).toBe(false)
   })
 })
-
 
 describe('run now once', () => {
   it('only sends the override when the person chooses it', async () => {

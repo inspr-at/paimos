@@ -156,7 +156,7 @@ func (m *Module) quarantineEvent(ctx context.Context, name, id string, raw []byt
 				if c.ID <= 0 || len(c.Name) == 0 || len(c.Name) > 200 || c.Head != suite.Head || c.Completed == nil || c.Completed.IsZero() {
 					return errRead
 				}
-				tag, err := tx.Exec(ctx, `INSERT INTO delivery_queue_failures(tenant_id,repository,pull_request,head_sha,check_name,workflow,conclusion,kind,check_run_id,at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tenant_id,check_run_id) DO NOTHING`, m.config.TenantID, queued.Repository, n, queued.Head, c.Name, workflow, c.Conclusion, kind, c.ID, c.Completed)
+				tag, err := tx.Exec(ctx, `INSERT INTO delivery_queue_failures(tenant_id,repository,pull_request,head_sha,check_name,workflow,conclusion,kind,check_run_id,at,group_sha) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(tenant_id,check_run_id) DO NOTHING`, m.config.TenantID, queued.Repository, n, queued.Head, c.Name, workflow, c.Conclusion, kind, c.ID, c.Completed, suite.Head)
 				if err != nil {
 					return err
 				}

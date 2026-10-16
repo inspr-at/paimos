@@ -6,7 +6,6 @@ import { brand } from './brand.ts'
 import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agents.ts'
 import type { HarnessSessionRow } from './agentRows.ts'
 import type { DeepReadonly } from './ledger.ts'
-
 import { DEFAULT_AGENT_STATE, STATE_LABEL, assessAgentState, stopReasonLabel, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
 export const HEARTBEAT_STALE_MS = 3 * 60_000
@@ -24,9 +23,6 @@ export const GROUPS: { id: SessionGroup; label: string }[] = [
 ]
 const STATE_GROUP: Record<AgentState, SessionGroup> = { pausing: 'pausing', paused: 'paused', working: 'working', awaiting: 'awaiting', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', done: 'stopped', stopped: 'stopped' }
 const STATE_TONE: Record<AgentState, LiveTone> = { pausing: 'busy', paused: 'stopped', working: 'busy', awaiting: 'attention', unresponsive: 'attention', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', done: 'done', stopped: 'stopped' }
-export function heartbeatStale(session: HarnessSession, now: number, preferences = DEFAULT_AGENT_STATE) {
-  return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) >= preferences.yellowMinutes * 60_000
-}
 export function sessionStatus(session: HarnessSession, now: number, needsYou = false, preferences: AgentStatePreference = DEFAULT_AGENT_STATE, run?: AgentRun): SessionStatus {
   // The session projection is fresh and authoritative, including explicit false
   // and null. Optional run/approval reads can finish later or retain old data.
@@ -72,7 +68,7 @@ export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> |
 }
 
 // How a session ended, in words (AEON-1285): never the reported code itself.
-export { stopReasonLabel, stopReasonSentence } from './agentSignals.ts'
+export { stopReasonLabel,stopReasonSentence } from './agentSignals.ts'
 
 // ---------- Retried attempts (AEON-1285) ----------
 // A run family: one ticket, one owner, one role and one label but for its trailing round
@@ -192,17 +188,6 @@ export function needsYou(session: HarnessSession, pending: Approval[], _held: (P
   return pending.some(a => a.agent_principal_id === session.agent_principal_id && approvalRun(a) === session.run_id)
 }
 
-export function groupSessions(sessions: HarnessSession[], now: number, needs: (session: HarnessSession) => boolean) {
-  const buckets: Record<SessionGroup, { session: HarnessSession; status: SessionStatus }[]> = { pausing: [], paused: [], problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
-  for (const session of sessions) {
-    const status = sessionStatus(session, now, needs(session))
-    buckets[status.group].push({ session, status })
-  }
-  for (const group of ['problem', 'unresponsive', 'needs', 'awaiting', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => byStart(a.session, b.session))
-  buckets.stopped.sort((a, b) => byStopped(a.session, b.session))
-  return buckets
-}
-
 export function duration(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000))
   if (s < 60) return `${s}s`
@@ -292,7 +277,6 @@ export function expiresIn(approval: Approval, now: number) {
   const left = Date.parse(approval.expires_at) - now
   return left <= 0 ? 'Expired' : `Expires in ${duration(left)}`
 }
-export const expiresSoon = (approval: Approval, now: number) => Date.parse(approval.expires_at) - now < 10 * 60_000
 
 // ---------- Held action requests ----------
 export const heldRequests = (messages: ProjectMessage[]) => messages.filter(m => m.is_action_request && !m.human_resolution_outcome)

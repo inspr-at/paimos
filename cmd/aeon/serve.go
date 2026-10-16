@@ -400,6 +400,10 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	startWorker(func() { reviewMod.RunStatusReporter(workerCtx) })
 	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange).WithRoutineReviews(reviewMod)
+	if cfg.DeliveryAdmissionEnabled && reviewApp.Configured(cfg.ReviewAppTenantID, cfg.ReviewAppRepository) {
+		deliveryMod.WithAdmission(delivery.AppAdmission{App: reviewApp})
+		startWorker(func() { deliveryMod.RunAdmission(workerCtx) })
+	}
 	routineActions := routineactions.New(pool, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
 		return recurringWork.AuthorizeActionTx(ctx, tx, p, recurrences.ActionBinding(b), c)
 	}).WithPullRequests(crossreview.AppRoutinePullRequests{App: reviewApp}).WithPipeline(deliveryMod).WithObservation(func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding) (tenant.Principal, error) {

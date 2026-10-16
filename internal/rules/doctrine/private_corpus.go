@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"slices"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -176,19 +175,6 @@ func (c *guardCorpus) addYAML(text string) {
 		}
 	}
 	walk(&node)
-}
-
-func corpusFrom(key []byte, docs map[string]string) *guardCorpus {
-	c := newGuardCorpus(key)
-	paths := make([]string, 0, len(docs))
-	for path := range docs {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		c.add(path, docs[path])
-	}
-	return c
 }
 
 // publicAllow is the indexed public text. A private span that already occurs

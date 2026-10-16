@@ -4,8 +4,7 @@
 // TG0 already mounts the API through nodes.New; no new module/manifest is needed.
 import type { GraphData, GraphLink } from './graphRenderer.ts'
 import type { TicketGraph, TicketGraphLinkKind, TicketStatusCategory } from './ticketGraph.ts'
-import { excluded, included, levelOf, type Dimension, type ListFilters } from './ticketList.ts'
-import { normaliseState } from './work.ts'
+import { type Dimension } from './ticketList.ts'
 
 // The graph API has no assignee, labels or date-range projection. Visible
 // membership comes from the shared server-filtered context in headerGlimpse.ts.
@@ -20,23 +19,6 @@ export const ticketLinkStyles = {
 } as const satisfies Record<TicketGraphLinkKind, Pick<GraphLink, 'color' | 'width' | 'directed' | 'curvature'>>
 
 export interface TicketGraphState { data: TicketGraph; visible: TicketGraph; loading: boolean }
-
-function matches(values: string[], value: string, normalise = (v: string) => v.toLowerCase()): boolean {
-  const actual = normalise(value), yes = included(values), no = excluded(values)
-  return (!yes.length || yes.some(v => normalise(v) === actual)) && !no.some(v => normalise(v) === actual)
-}
-export function filterTicketGraph(data: TicketGraph, filters: ListFilters): TicketGraph {
-  const words = filters.q.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const nodes = data.nodes.filter(node => (filters.showClosed || node.status_category !== 'done')
-    && matches(filters.status, node.status, normaliseState)
-    && matches(filters.priority, node.priority ?? 'none')
-    && matches(filters.type, levelOf({ is_leaf: node.is_leaf, depth: node.depth, kind_slug: node.type }))
-    && matches(filters.shape, node.is_leaf === false || (node.is_leaf === undefined && node.type === 'epic') ? 'parent' : 'leaf')
-    && matches(filters.depth, String(node.depth ?? 1))
-    && words.every(word => `${node.key} ${node.title}`.toLowerCase().includes(word)))
-  const ids = new Set(nodes.map(node => node.id))
-  return { nodes, links: data.links.filter(link => ids.has(link.source) && ids.has(link.target)), truncated: data.truncated }
-}
 
 export function ticketGraphData(data: TicketGraph, projectKey: string): GraphData {
   const byId = new Map(data.nodes.map(node => [node.id, node]))

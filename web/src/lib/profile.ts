@@ -50,8 +50,6 @@ const FIELD_WORDS: Record<string, (message: string) => string> = {
   daily_points_per_day: () => 'Use a whole number from 1 to 50.',
 }
 export const fieldMessage = (field: string, message: string) => FIELD_WORDS[field]?.(message) ?? message
-
-export const SHORT_NAME = /^[a-z0-9._-]{2,24}$/
 export function shortNameProblem(value: string) {
   if (value === '') return ''
   if (/[A-Z]/.test(value)) return 'Use lowercase letters.'

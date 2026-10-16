@@ -21,6 +21,7 @@ type Module struct {
 	config               crossreview.AppConfig
 	secret               []byte
 	github               GitHub
+	admissionGitHub      AdmissionGitHub
 	fanout               func(context.Context, []byte) error
 	now                  func() time.Time
 	queueAdmission       QueueAdmission

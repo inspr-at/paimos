@@ -63,8 +63,6 @@ export interface PlanningRow { kind_slug: string; fields: Record<string, unknown
 
 export type PlanningColumn = 'model' | 'tokens' | 'list_cost' | 'paid'
 export const PLANNING_COLUMNS: PlanningColumn[] = ['model', 'tokens', 'list_cost']
-// Cost columns show only to people who may see usage (harness.read).
-export const COST_COLUMNS: PlanningColumn[] = ['list_cost', 'paid']
 
 const DEFAULT_RATE = 5_000_000
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 3 })

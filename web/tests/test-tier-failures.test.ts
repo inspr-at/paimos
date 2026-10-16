@@ -241,23 +241,25 @@ test('native planning regression reuses one collected snapshot for unchanged-tre
   const directory=mkdtempSync(resolve(tmpdir(),'aeon-planning-snapshot-'))
   const hook=resolve(directory,'fixture.mjs'),calls=resolve(directory,'collections.txt')
   const collector=new URL('../../scripts/test-tiers/collect.mjs',import.meta.url).href
-  const manifest=JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url),'utf8'))
-  // A partial drift file makes its recorded titles look unresolved, and the
-  // widen rule then pulls every supplied sibling into the gate. Keep one
-  // recorded drift case and one nightly case from outside the drift files.
+  const manifest=fileURLToPath(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url))
+  const tests=JSON.parse(readFileSync(manifest,'utf8')).tests
   const obligations=JSON.parse(readFileSync(new URL('../../scripts/test-tiers/drift-obligations.json',import.meta.url),'utf8'))
   const driftFiles=new Set(obligations.browserFiles)
   const recorded=new Set(obligations.cases.filter(row=>row.kind==='browser').map(row=>`${row.file}\0${row.name}`))
-  const essential=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
-  const driftNightly=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&recorded.has(`${row.file}\0${row.name}`))
-  const deferred=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&!driftFiles.has(row.file))
+  const essential=tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
+  const driftNightly=tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&recorded.has(`${row.file}\0${row.name}`))
+  const deferred=tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&!driftFiles.has(row.file))
   assert.ok(essential);assert.ok(driftNightly);assert.ok(deferred)
   assert.notEqual(deferred.file,driftNightly.file)
-  const wrapper=`export * from ${JSON.stringify(`${collector}?collection-count-fixture`)};
-import {appendFileSync} from 'node:fs';
+  // The declared catalogue keeps the recorded drift files and a deferred nightly.
+  // A partial stand-in makes the full gate report every other row as stale.
+  // Reading Playwright's list here exceeds this regression's hang guard.
+  const real=`${collector}?collection-count-fixture`
+  const wrapper=`export * from ${JSON.stringify(real)};
+import {appendFileSync,readFileSync} from 'node:fs';
 export const collectWeb = () => {
   appendFileSync(${JSON.stringify(calls)},'collection\\n');
-  return ${JSON.stringify({tests:[essential,driftNightly,deferred]})};
+  return {tests:JSON.parse(readFileSync(${JSON.stringify(manifest)},'utf8')).tests};
 };`
   writeFileSync(hook,`import {registerHooks} from 'node:module';
 registerHooks({load(url,context,next) {

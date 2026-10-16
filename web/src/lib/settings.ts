@@ -135,8 +135,3 @@ export function senderWrite(before: Record<string, string>, form: Record<string,
   for (const field of SENDER_FIELDS) { const value = (form[field.key] ?? '').trim(); if (value) out[field.key] = field.key === 'iban' ? value.toUpperCase() : value }
   return out
 }
-// The sender as one line: company, city and country, the parts that are set.
-export function senderLine(sender: Record<string, unknown> | null | undefined) {
-  if (!sender) return ''
-  return ['company', 'city', 'country'].map(key => sender[key]).filter((v): v is string => typeof v === 'string' && v.trim() !== '').join(' · ')
-}

@@ -1,25 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimates, hostTick, normalizeScope, prediction, predictWindDown, selectedAgent, toggleScope, windDownResult } from '../src/lib/agentPause.ts'
+import { estimates, normalizeScope, prediction, predictWindDown, selectedAgent, windDownResult } from '../src/lib/agentPause.ts'
 import { assessAgentState } from '../src/lib/agentSignals.ts'
 import type { HarnessSessionRow } from '../src/lib/agentRows.ts'
+
 const now = Date.parse('2026-10-02T09:30:00Z'), minute = 60_000
 const row = (fields: Partial<HarnessSessionRow> = {}) => ({ id: 'a', host: 'studio', phase: 'working', stopped_at: null, management_mode: 'unmanaged', advertised_capabilities: ['pause'], finished: false, activity: 'busy', heartbeat_at: new Date(now).toISOString(), ...fields }) as HarnessSessionRow
 const progress = (fields = {}) => ({ reported_at: new Date(now).toISOString(), ...fields })
-test('selection separates host admission intent from individual agents and normalizes tri-state', () => {
+test('normalizes all selected hosts and agents to the complete scope', () => {
   const sessions = [row(), row({ id: 'b' }), row({ id: 'c', host: 'build' }), row({ id: 'paused', host: 'idle', phase: 'stopped' })], hosts = ['studio', 'build', 'idle', 'offline']
-  let scope = toggleScope({ hosts: [], agents: [] }, 'agent', 'a', sessions, hosts)
-  assert.equal(hostTick('studio', scope, sessions), 'mixed'); assert.deepEqual(scope.hosts, [])
-  scope = toggleScope(scope, 'host', 'studio', sessions, hosts)
-  assert.equal(hostTick('studio', scope, sessions), 'true'); assert.deepEqual(scope.agents, ['a', 'b']); assert.deepEqual(scope.hosts, ['studio'])
-  scope = toggleScope(scope, 'agent', 'a', sessions, hosts)
-  assert.equal(hostTick('studio', scope, sessions), 'mixed'); assert.deepEqual(scope.hosts, [])
-  scope = toggleScope(scope, 'host', 'idle', sessions, hosts)
-  assert.equal(hostTick('idle', scope, sessions), 'true'); assert.ok(!scope.agents?.includes('paused'))
+
   assert.deepEqual(normalizeScope({ hosts, agents: ['a', 'b', 'c'] }, sessions, hosts), { hosts: 'all' })
-  const partial = toggleScope({ hosts: 'all' }, 'agent', 'b', sessions, hosts)
-  assert.deepEqual(partial.hosts, ['build', 'idle', 'offline']); assert.deepEqual(partial.agents, ['a', 'c'])
 })
 test('wind-down chooses fitting wrap-up before quick pause and respects margins and uninterruptible commands', () => {
   assert.deepEqual(predictWindDown(row({ pause_progress: progress({ finish_in_min: 1, next_point_in_min: 5 }) }), now, now + 2 * minute, 10), { level: 'wrap_up', starts: now })
@@ -34,12 +26,10 @@ test('effective agent lists override all hosts, including an explicit empty list
   assert.equal(selectedAgent(sessions[0]!, scope), true)
   assert.equal(selectedAgent(sessions[1]!, scope), false)
   assert.equal(selectedAgent(sessions[2]!, scope), false)
-  assert.equal(hostTick('studio', scope, sessions), 'mixed')
-  assert.equal(hostTick('build', scope, sessions), 'false')
-  assert.equal(hostTick('idle', scope, sessions), 'true')
+
   assert.deepEqual(normalizeScope(scope, sessions, ['studio', 'build']), scope)
   assert.equal(selectedAgent(row(), { hosts: 'all', agents: [] }), false)
-  assert.equal(hostTick('studio', { hosts: 'all', agents: [] }, sessions), 'false')
+
   assert.equal(selectedAgent(row(), { hosts: 'all' }), true)
 })
 test('planning counts down from its report and stale or cleared snapshots never revive legacy ETA', () => {

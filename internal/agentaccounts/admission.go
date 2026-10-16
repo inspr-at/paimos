@@ -310,7 +310,6 @@ func containsRecovery(windows []Window) bool {
 	return false
 }
 
-func timePtr(t time.Time) *time.Time { return &t }
 func provisionalWindow(id string, now time.Time, kind string) Window {
 	return Window{AccountID: id, StartsAt: now, EndsAt: now.Add(5 * time.Minute), Unit: "percent", Allowance: 1, PaceModel: "unrestricted", capacityReadAt: &now, capacityAllowed: true, capacityKind: kind, Provisional: true}
 }

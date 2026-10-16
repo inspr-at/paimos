@@ -2,7 +2,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { benefitDraft, benefitIssues, completedTicketState, firstBenefitGap, firstPillGap, pillIssues } from '../src/lib/ticketBenefits.ts'
-import { displayHeadline, emptyNotesLine, hasUsableNotes, historicalTagFallback, localizedNote, noteLocale, ticketsOf, matches, writtenAfterRelease, WRITTEN_AFTER_LABEL, type Release } from '../src/lib/releases.ts'
+import { displayHeadline, emptyNotesLine, hasUsableNotes, localizedNote, noteLocale, ticketsOf, matches, writtenAfterRelease, WRITTEN_AFTER_LABEL, type Release } from '../src/lib/releases.ts'
+
 const fields = { pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.' }
 test('benefit completion covers product completion states without guessing custom or cancelled states', () => {
   for (const state of ['done', 'accepted', 'delivered']) assert.equal(completedTicketState(state), true, state)
@@ -45,7 +46,7 @@ test('snapshot notes displace Git headlines and ticket guesses while archives st
   assert.equal(german.benefit, fields.benefit_en)
   assert.equal(german.pillLang, 'en')
   assert.equal(localizedNote(fields, 'de-CH').benefitLang, 'de')
-  assert.equal(historicalTagFallback(r), false)
+
   assert.deepEqual(ticketsOf(r), ['TEST-7'])
   assert.equal(matches(r, { q: 'erklären', features: false, fixes: false, tickets: false }, 'de'), true)
   assert.equal(matches(r, { q: 'erklären', features: false, fixes: false, tickets: false }, 'en'), false)
@@ -57,14 +58,14 @@ test('snapshot notes displace Git headlines and ticket guesses while archives st
   assert.equal(displayHeadline(r), 'Invented headline')
   assert.equal(emptyNotesLine(), 'Internal changes only.')
   assert.equal(emptyNotesLine('de-AT'), 'Nur interne Änderungen.')
-  assert.equal(historicalTagFallback(r), false) // A known internal release does not claim its snapshot is missing.
+   // A known internal release does not claim its snapshot is missing.
   assert.deepEqual(ticketsOf(r), []) // Hidden-only/empty membership stays authoritative.
   r.notes = { source: 'unavailable', fallback: 'historical-tag-headline', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: ['missing'] }
-  assert.equal(historicalTagFallback(r), true)
+
   assert.equal(displayHeadline(r), 'Invented headline')
   delete r.notes
   assert.equal(hasUsableNotes(r), false)
-  assert.equal(historicalTagFallback(r), true)
+
   assert.equal(displayHeadline(r), 'Invented headline')
   assert.deepEqual(ticketsOf(r), ['TEST-999'])
 })
@@ -75,8 +76,7 @@ test('a backfilled snapshot says the notes were written after the release, and a
   assert.equal(writtenAfterRelease(r), false)
   notes.written_after_release = true
   assert.equal(writtenAfterRelease(r), true)
-  assert.equal(historicalTagFallback(r), false)
+
   const historical = { headline: 'Git headline', notes: { source: 'unavailable', fallback: 'historical-tag-headline', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: ['missing'], written_after_release: true } } as unknown as Release
   assert.equal(writtenAfterRelease(historical), false)
-  assert.equal(historicalTagFallback(historical), true)
 })

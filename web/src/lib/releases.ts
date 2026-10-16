@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { displayLanguage } from './displayLanguage.ts'
+import { api } from './api.ts'
+
 // The release history (schema inspr.release-history.v1, served by GET /api/releases)
 // and what the release sheet derives from it: days, change groups, stats, compare
 // ranges and search. Free of Vue for unit tests.
-import { api } from './api.ts'
 
 export type ChangeGroup = 'features' | 'fixes' | 'other'
 // group: the ticket's own features or fixes; older servers omit it.
@@ -277,20 +278,6 @@ export function releaseView(value: unknown): ReleaseView {
 }
 // Where a person's language choice is kept on this device.
 export const releaseLangKey = (principalId: string) => `aeon.release-history.lang.${principalId}`
-// Details: a short technical line for a list row, the first few commit subjects.
-export function technicalLine(r: Pick<Release, 'changes'>, limit = 3): string {
-  const seen = new Set<string>()
-  const parts: string[] = []
-  for (const c of r.changes) {
-    if (!changeGroup(c)) continue
-    const text = plainSubject(c.subject, c.tickets)
-    if (!text || seen.has(text)) continue
-    seen.add(text)
-    parts.push(text)
-    if (parts.length === limit) break
-  }
-  return parts.join(' · ')
-}
 export interface LocalizedNote { pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de' }
 // One text in the chosen language; a missing one falls back to the other
 // language, never to an empty string while either has words. The lang tells
@@ -363,7 +350,6 @@ export function markParts(text: string, query?: string | null): { text: string; 
   if (at < text.length) out.push({ text: text.slice(at), hit: false })
   return out
 }
-export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
 export const WRITTEN_AFTER_LABEL = 'Notes written after release'
 export function writtenAfterLine(locale?: string | null) {
   return noteLocale(locale) === 'de' ? 'Notizen nach dem Release geschrieben' : WRITTEN_AFTER_LABEL
@@ -372,13 +358,6 @@ export function writtenAfterLine(locale?: string | null) {
 // when the notes are only the historical headline.
 export function writtenAfterRelease(r: Pick<Release, 'notes'>): boolean {
   return hasUsableNotes(r) && r.notes.written_after_release === true
-}
-// Tag headlines are only the fallback when member benefits were never captured.
-export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): boolean {
-  if (!r.headline.trim()) return false
-  if (hasUsableNotes(r)) return false
-  if (!r.notes) return true
-  return r.notes.fallback === HISTORICAL_TAG_FALLBACK || r.notes.source === 'unavailable'
 }
 // The sheet's empty and compare lines in the chosen language (AEON-323).
 export function releaseCopy(locale?: string | null) {

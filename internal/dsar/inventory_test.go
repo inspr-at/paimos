@@ -72,6 +72,7 @@ func TestQuarantineInventoryParsesWithWorkflowColumn(t *testing.T) {
 		"head_sha":     "metadata",
 		"check_name":   "metadata",
 		"workflow":     "metadata",
+		"group_sha":    "metadata",
 		"conclusion":   "metadata",
 		"kind":         "metadata",
 		"check_run_id": "metadata",

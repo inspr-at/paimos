@@ -2,6 +2,7 @@
 // Public pause contract and pure planning; estimates are predictions, never exit evidence.
 import type { HarnessSessionRow } from './agentRows.ts'
 import type { DeepReadonly } from './ledger.ts'
+
 export type PauseLevel = 'stop_now' | 'pause_quickly' | 'pause' | 'wrap_up'
 export interface PauseProgress {
   reported_at: string; step?: string | null; next_point?: string | null; next_point_in_min?: number | null
@@ -74,22 +75,9 @@ export function prediction(s: DeepReadonly<HarnessSessionRow>, level: PauseLevel
 export function selectedAgent(s: DeepReadonly<HarnessSessionRow>, scope: WindDownScope) {
   return scope.agents ? scope.agents.includes(s.id) : scope.hosts === 'all' || scope.hosts.includes(s.host)
 }
-export function hostTick(host: string, scope: WindDownScope, sessions: readonly DeepReadonly<HarnessSessionRow>[]): 'true' | 'mixed' | 'false' {
-  const running = sessions.filter(s => s.host === host && liveSession(s)), count = running.filter(s => selectedAgent(s, scope)).length
-  return running.length ? count === running.length ? 'true' : count ? 'mixed' : 'false' : scope.hosts === 'all' || scope.hosts.includes(host) ? 'true' : 'false'
-}
 export function normalizeScope(scope: WindDownScope, sessions: readonly DeepReadonly<HarnessSessionRow>[], hosts: readonly string[]): WindDownScope {
   if (scope.hosts === 'all') return { hosts: 'all', ...(scope.agents ? { agents: [...scope.agents] } : {}) }
   const running = sessions.filter(liveSession), agents = running.filter(s => selectedAgent(s, scope)).map(s => s.id)
   const chosen = hosts.filter(host => { const rows = running.filter(s => s.host === host); return rows.length ? rows.every(s => agents.includes(s.id)) : scope.hosts.includes(host) })
   return chosen.length === hosts.length && agents.length === running.length && hosts.length > 0 ? { hosts: 'all' } : { hosts: chosen, agents }
-}
-export function toggleScope(scope: WindDownScope, kind: 'host' | 'agent', id: string, sessions: readonly DeepReadonly<HarnessSessionRow>[], hosts: readonly string[]): WindDownScope {
-  const expanded = { hosts: scope.hosts === 'all' ? [...hosts] : [...scope.hosts], agents: sessions.filter(s => liveSession(s) && selectedAgent(s, scope)).map(s => s.id) }
-  if (kind === 'host') {
-    const checked = hostTick(id, scope, sessions) === 'true', ids = sessions.filter(s => s.host === id && liveSession(s)).map(s => s.id)
-    expanded.hosts = checked ? expanded.hosts.filter(h => h !== id) : [...new Set([...expanded.hosts, id])]
-    expanded.agents = checked ? expanded.agents.filter(a => !ids.includes(a)) : [...new Set([...expanded.agents, ...ids])]
-  } else expanded.agents = expanded.agents.includes(id) ? expanded.agents.filter(a => a !== id) : [...expanded.agents, id]
-  return normalizeScope(expanded, sessions, hosts)
 }

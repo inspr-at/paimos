@@ -42,7 +42,7 @@ func TestHeartbeatAppServerModelRequiresThreadBinding(t *testing.T) {
 	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if model, effort := readHeartbeatModelFile(context.Background(), path, "codex", harnessCodexStream, "own"); model != "own-model" || effort != "low" {
+	if model, effort := readHeartbeatModelFileSince(context.Background(), path, "codex", harnessCodexStream, "own", 0); model != "own-model" || effort != "low" {
 		t.Fatalf("interleaved capture: %q %q", model, effort)
 	}
 }
@@ -387,7 +387,7 @@ func TestHeartbeatCodexRerouteDoesNotPersistAcrossTurns(t *testing.T) {
 		if err := os.WriteFile(path, []byte(records), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if model, effort := readHeartbeatModelFile(context.Background(), path, "codex", harnessCodexStream, "own"); model != "session-model" || effort != "high" {
+		if model, effort := readHeartbeatModelFileSince(context.Background(), path, "codex", harnessCodexStream, "own", 0); model != "session-model" || effort != "high" {
 			t.Fatalf("reroute became session identity: %q %q", model, effort)
 		}
 	}

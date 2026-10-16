@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"time"
 )
 
@@ -125,32 +124,4 @@ func fetchProviderCatalog(ctx context.Context, client *http.Client, source, key 
 		after = c.Next
 	}
 	return out, errors.New("model list pagination limit")
-}
-
-// Compatibility adapter for callers that need IDs only, with the same bounds.
-func listVendorModels(ctx context.Context, client *http.Client, vendor, key string) ([]string, error) {
-	c, err := fetchProviderCatalog(ctx, client, vendor, key, time.Now().UTC())
-	if err != nil {
-		return nil, err
-	}
-	seen := map[string]bool{}
-	for _, f := range c.Facts {
-		if f.Fact == "model_id" {
-			id := rawString(f.Value)
-			if id != "" {
-				seen[id] = true
-			}
-		}
-	}
-	ids := make([]string, 0, len(seen))
-	for id := range seen {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids, nil
-}
-
-// ID-only listings cannot assert any effort, including a synthetic default.
-func discoveryObservations(vendor, evidence string, models []string) []Observation {
-	return []Observation{}
 }

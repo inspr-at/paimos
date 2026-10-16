@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -109,46 +110,132 @@ func checks(get func(string, any) error, head string) ([]Check, error) {
 	}
 	return out, nil
 }
-func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
-	var out Pull
+func readOnePull(get func(string, any) error, queue func(int64, string) (bool, string, error), repo string, n int64) (Pull, bool, error) {
 	if n <= 0 {
-		return out, errRead
+		return Pull{}, false, errRead
 	}
-	missing := false
-	err := g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
-		var p crossreview.GitHubPull
-		if err := get("/pulls/"+strconv.FormatInt(n, 10), &p); err != nil {
-			// Only the pull document's 404 is absence. A 404 on checks is a partial read.
-			if errors.Is(err, crossreview.ErrNotFound) {
-				missing = true
-			}
-			return err
+	var p crossreview.GitHubPull
+	if err := get("/pulls/"+strconv.FormatInt(n, 10), &p); err != nil {
+		// Only the pull document's 404 is absence. A 404 on checks is a partial read.
+		if errors.Is(err, crossreview.ErrNotFound) {
+			return Pull{}, true, err
 		}
-		var err error
-		out, err = readPull(p, g.App.Config.Repository)
+		return Pull{}, false, err
+	}
+	out, err := readPull(p, repo)
+	if err != nil {
+		return Pull{}, false, err
+	}
+	if out.Number != n {
+		return Pull{}, false, errRead
+	}
+	if out.Open {
+		if err = readAdmissionDiff(get, &out); err != nil {
+			return Pull{}, false, err
+		}
+		out.Checks, err = checks(get, out.Head)
 		if err != nil {
-			return err
+			return Pull{}, false, err
 		}
-		if out.Number != n {
-			return errRead
+		out.Queued, out.QueueHead, err = queue(out.Number, out.Head)
+		if err != nil {
+			return Pull{}, false, err
 		}
-		if out.Open {
-			if err = readAdmissionDiff(get, &out); err != nil {
-				return err
-			}
-			out.Checks, err = checks(get, out.Head)
-			if err == nil {
-				out.Queued, out.QueueHead, err = queue(out.Number, out.Head)
-			}
-		}
-		return err
-	})
+	}
+	return out, false, nil
+}
+
+func finishPull(out Pull, missing bool, err error) (Pull, error) {
 	if missing {
 		// Reconciliation still recognizes confirmed absence while receipts keep
 		// the content-free HTTP class of the failed pull read.
 		return Pull{}, errors.Join(errMissing, err)
 	}
 	return out, err
+}
+
+func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
+	var out Pull
+	missing := false
+	err := g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
+		var err error
+		out, missing, err = readOnePull(get, queue, g.App.Config.Repository, n)
+		return err
+	})
+	return finishPull(out, missing, err)
+}
+
+// WithPulls shares one read-only installation token across the pulls a queue
+// pass actually performs, and revokes it when the pass returns. The token is
+// minted on the first pull, so a pass with nothing to read mints nothing.
+// It does not authorize enqueue or status writes.
+func (g AppReader) WithPulls(ctx context.Context, fn func(context.Context, func(context.Context, int64) (Pull, error)) error) (err error) {
+	if fn == nil || g.App == nil {
+		return errRead
+	}
+	type installed struct {
+		get   func(string, any) error
+		queue func(int64, string) (bool, string, error)
+	}
+	var mu sync.Mutex
+	var once sync.Once
+	var session installed
+	var openErr error
+	started := false
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan error, 1)
+	defer func() {
+		close(release)
+		if !started {
+			return
+		}
+		if waitErr := <-finished; err == nil {
+			err = waitErr
+		}
+	}()
+	pull := func(_ context.Context, n int64) (Pull, error) {
+		once.Do(func() {
+			started = true
+			go func() {
+				entered := false
+				callErr := g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
+					entered = true
+					mu.Lock()
+					session = installed{get, queue}
+					mu.Unlock()
+					close(ready)
+					<-release
+					return nil
+				})
+				if !entered {
+					mu.Lock()
+					openErr = callErr
+					if openErr == nil {
+						openErr = errRead
+					}
+					mu.Unlock()
+					close(ready)
+				}
+				finished <- callErr
+			}()
+		})
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return Pull{}, ctx.Err()
+		}
+		mu.Lock()
+		get, queue, failure := session.get, session.queue, openErr
+		mu.Unlock()
+		if failure != nil {
+			return Pull{}, failure
+		}
+		out, missing, readErr := readOnePull(get, queue, g.App.Config.Repository, n)
+		return finishPull(out, missing, readErr)
+	}
+	err = fn(ctx, pull)
+	return err
 }
 func openPulls(get func(string, any) error, repo string) ([]Pull, error) {
 	out := []Pull{}
@@ -255,7 +342,7 @@ func (g AppReader) Group(ctx context.Context, head, base, ref string) ([]Pull, e
 		// this observation, so an empty slice would project the open head as pushed.
 		matched := []Pull{}
 		for _, p := range ps {
-			if p.Base != base || !shas[p.Head] {
+			if !shas[p.Head] {
 				continue
 			}
 			if err = readAdmissionDiff(get, &p); err != nil {

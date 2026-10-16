@@ -5506,6 +5506,8 @@
     ,
     {"kind":"go","package":"internal/credentialguard","name":"TestSensitiveProviderForms","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestAdmissionAppPinsHeadContextAndRepository","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestAuthenticatedBaseChangeBypassesDirtyReporter","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestBindingRefreshRunsWhileDirtyPublicationIsBlocked","tier":"GATED-FULL"}
@@ -5894,13 +5896,41 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableQuestionDoesNotStarveAuthorizedQuestion","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionBackfillRetainsPartialQueueGroupsWithoutAuthorizingThem","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionCIExcludesOwnContext","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionClosedBeforeDestroyDoesNotPostOnGroupSHA","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionDiffReadsMergeBaseAndRenameSides","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionGroupsValidatePrecedingEntriesAndInvalidateEveryGroup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionHistoricalHeadsOneReadAfterCheck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionIdlePassMintsNoToken","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPlainMergeDoesNotReportLostHold","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherRepostsAfterUncertainOutcome","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherResumesUncertainPublicationAfterRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherSerializesStalledSuccessAndCurrentFailure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueBoundsInfrastructureRetryAndReportsMergedBeforeHold","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueRejectsStaleGreenReadAfterCurrentFactsChange","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionReconcileLeavesMergedSHAUnchanged","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionRules","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionSteadyQueuedEntryBoundsReads","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionStoreAuthenticatedApprovalsAndInvalidation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionUnknownGroupMembershipFailsClosed","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAppReaderMergeGroupKeepsRequiredChecks","tier":"ESSENTIAL"}
     ,
@@ -7709,8 +7739,6 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorConditionalWriteWaitsForAdditivePreparation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorExactRowAndBodyBounds","tier":"GATED-FULL"}
-    ,
-    {"kind":"go","package":"internal/modelregistry","name":"TestEditorExpiryBoundaryNewAndRetainedHolds","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorExpiryTokensAndCompensation","tier":"GATED-FULL"}
     ,

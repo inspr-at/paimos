@@ -189,6 +189,11 @@ func saveProjectionTx(ctx context.Context, tx pgx.Tx, tid string, o Observation,
 			return Item{}, nil, err
 		}
 	}
+	if observe {
+		if err := stageAdmissionHeadTx(ctx, tx, tid, o); err != nil {
+			return Item{}, nil, err
+		}
+	}
 	after := project(o, before)
 	raw, err := json.Marshal(o)
 	if err != nil {
@@ -230,6 +235,7 @@ type record struct {
 	At                                        time.Time
 	Observations                              []Observation
 	Fanout                                    bool
+	AdmissionGroupResolved                    bool
 }
 
 // recordTx requires the tenant fence, and writes the ledger before the event counter.
@@ -289,6 +295,17 @@ func recordTx(ctx context.Context, tx pgx.Tx, tid string, r record) (bool, error
 		}
 		if change != nil {
 			changes = append(changes, *change)
+		}
+	}
+	if r.Event == "merge_group" {
+		pulls := []Pull{}
+		for _, o := range r.Observations {
+			if o.PR != nil {
+				pulls = append(pulls, Pull{Number: *o.PR, Head: o.Head})
+			}
+		}
+		if err := stageAdmissionGroupTx(ctx, tx, tid, r.Repository, r.Head, pulls, r.Action == "checks_requested", r.AdmissionGroupResolved); err != nil {
+			return false, err
 		}
 	}
 	return true, appendChanges(ctx, tx, tid, changes)
