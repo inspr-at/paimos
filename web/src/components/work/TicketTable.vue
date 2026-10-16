@@ -1550,8 +1550,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .table-card.customised .ticket-row td { grid-area: auto; min-width: 0; justify-self: stretch; }
   /* Copy remains a complete, separate touch target even while checks take
      the first column. The key reads as one piece and never breaks at its
-     hyphen (AEON-1379); its column takes the whole key and the title gives way. */
-  .key-btn { flex: none; min-width: 44px; min-height: 44px; height: auto; max-width: 100%; text-align: left; }
+     hyphen (AEON-1379); its column takes the whole key and the title gives way.
+     The column is as wide as the text, so the cap adds back the two -5px side
+     margins; a plain 100% cut the padded key 10px short and wrapped it. */
+  .key-btn { flex: none; min-width: 44px; min-height: 44px; height: auto; max-width: calc(100% + 10px); text-align: left; }
   .table-card.customised.selectable .ticket-row td { grid-column: 2; }
   .table-card.customised.selectable .ticket-row .c-check { grid-column: 1; grid-row: 1 / span 2; }
   .table-card.customised .ticket-row td[data-column-label] {
