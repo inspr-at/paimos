@@ -1467,6 +1467,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
+  /* The whole key keeps its column (AEON-1379); on the narrowest phones the
+     status label gives way instead (its icon stays, the menu names it). */
+  .c-status { min-width: 0; }
   /* An hour estimate sits at the end of the title line. An empty cell stays off the card. */
   .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
   .c-estimate .cell { height: auto; }

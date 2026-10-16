@@ -40,8 +40,19 @@ for (const width of [320, 360, 390, 1440]) {
       for (const row of await rows(page).all()) {
         const keyFit = await wholeKey(row.locator('.c-key .key'), 'tr')
         expect(keyFit, `${colorScheme} ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
-        const title = (await row.locator('.title-link').boundingBox())!, card = (await row.boundingBox())!
-        expect(title.x + title.width, 'the title gives way inside the card').toBeLessThanOrEqual(card.x + card.width + .5)
+        const fit = await row.evaluate(tr => {
+          const right = (selector: string) => tr.querySelector(selector)?.getBoundingClientRect().right ?? 0
+          const label = tr.querySelector<HTMLElement>('.status-btn > span')!
+          return {
+            title: right('.title-link'), status: right('.status-btn'), card: tr.getBoundingClientRect().right - parseFloat(getComputedStyle(tr).paddingRight),
+            labelWhole: label.scrollWidth <= label.clientWidth + 1,
+            why: `${tr.querySelector('.c-key .key')!.textContent}: ${[...tr.children].map(td => `${td.className.split(' ')[0]} ${Math.round(td.getBoundingClientRect().width)}`).join(', ')}; columns ${getComputedStyle(tr).gridTemplateColumns}`,
+          }
+        })
+        expect(fit.title, `the title gives way inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
+        expect(fit.status, `the status stays inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
+        // Only the narrowest phones shorten the status label; from 360px it reads whole.
+        if (width >= 360) expect(fit.labelWhole, `the status label reads whole; ${fit.why}`).toBe(true)
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
       await page.screenshot({ path: testInfo.outputPath(`keys-list-${width}-${colorScheme}.png`) })
