@@ -177,8 +177,10 @@ function overflow(el: HTMLElement) {
 // start, so the page you are on goes last; with nothing whole left, the trail
 // steps aside. A project's name ends in an ellipsis first, and steps aside
 // rather than show a sliver. What steps aside leaves sight and the tab order, but
-// screen readers keep the whole trail. Each fit starts from the whole trail, so
-// one width always gives one trail.
+// screen readers keep the whole trail. Each resize starts from the whole trail,
+// so one width gives one trail. A name already judged a sliver during that
+// follow-up stays dropped: restoring it to remeasure still sees the 1px
+// stand-in, and the row then settles on the sliver (AEON-1439, 38px at 887).
 // The room is the header inside its padding, then every box up from the chip that
 // hides its overflow. A chip can sit inside the trail and still cross that padding
 // (AEON-1439: PHAROS at 1412px, the trail only `/ PHAROS`). The same rules as the
@@ -249,20 +251,33 @@ function nameSliver(name: HTMLElement | null): name is HTMLElement {
   const font = parseFloat(style.fontSize) || 13.5
   return name.scrollWidth > name.clientWidth && name.clientWidth < 3 * font
 }
+// Set for the follow-up that just judged the name a sliver. The next refit
+// clears it, so a wider window measures the name again.
+let nameHeld = false
+function keepSliver(name: HTMLElement | null) {
+  if (!nameSliver(name)) return
+  drop(name)
+  nameHeld = true
+}
+function restorePart(part: HTMLElement) {
+  if (part.dataset.dropped === 'tab') part.removeAttribute('tabindex')
+  delete part.dataset.dropped
+}
 function fitTrail(trail: HTMLElement | null, wide: boolean) {
   if (!trail) return
   delete trail.dataset.empty
+  // Phones show the short crumb, not this name. A desktop follow-up keeps a
+  // sliver name out: restoring it in the same turn still measures the 1px box.
+  if (!wide) nameHeld = false
   for (const part of trail.querySelectorAll<HTMLElement>('[data-dropped]')) {
-    if (part.dataset.dropped === 'tab') part.removeAttribute('tabindex')
-    delete part.dataset.dropped
+    if (nameHeld && part.classList.contains('crumb-name')) continue
+    restorePart(part)
   }
   if (!wide) return
-  // Restoring a dropped name puts it back in the row only after layout. Measuring
-  // in the same turn still sees the 1px box (scrollWidth === clientWidth), so the
-  // sliver check keeps a name that then shrinks under three em.
   void trail.offsetWidth
   const name = trail.querySelector<HTMLElement>('.crumb-name')
-  if (nameSliver(name)) drop(name)
+  void name?.offsetWidth
+  keepSliver(name)
   const parts = [...trail.children] as HTMLElement[]
   const crumbs = parts.filter(part => part.classList.contains('crumb') && getComputedStyle(part).display !== 'none')
   // A trail that continues from a place keeps the separator before its first crumb.
@@ -275,7 +290,8 @@ function fitTrail(trail: HTMLElement | null, wide: boolean) {
   }
   // The segment pass lays the row out for real. A name that still comes back under
   // three em was missed by the check above, which can run before that shrink.
-  if (nameSliver(name)) drop(name)
+  void name?.offsetWidth
+  keepSliver(name)
 }
 // Phones (AEON-1240): a key, the project's chip or a ticket's, shows whole or not at all. It is never clipped by its
 // slot, never half under Search and never ends in an ellipsis; a name may end in one but keeps three characters' room.
@@ -352,21 +368,28 @@ function trailSignature() {
 function refit() {
   cancelAnimationFrame(fitFrame)
   const generation = ++fitGeneration
+  nameHeld = false
   // Fit before paint, and once more on the next frame: a newly rendered ticket
   // key may only reach its width then. Keep going while the row that arrives is
-  // not the row just fitted, or a project name is still a sliver. A confirming
-  // frame that already matches does not fit again — restoring a dropped name to
-  // remeasure it is what left the sliver on screen. A handful of frames is the cap.
+  // not the row just fitted, or a project name is still a sliver. Drop that
+  // sliver before the fit, so the fit cannot put it back, and before the frame
+  // cap, so the cap cannot leave it on screen. A confirming frame that already
+  // matches does not fit again. A handful of frames is the cap.
   let frames = 0
   let left = ''
   const tick = () => {
     if (generation !== fitGeneration) return
     const name = header.value?.querySelector<HTMLElement>('.crumbs .crumb-name') ?? null
     const trail = header.value?.querySelector<HTMLElement>('.crumbs') ?? null
+    keepSliver(name)
     // A stable row can still be a cut chip: the width did not change, the letters did
     // (AEON-1439). Keep fitting until the trail probe would agree.
     if (frames >= 2 && trailSignature() === left && !nameSliver(name) && !cutTrail(trail)) { fitFrame = 0; return }
-    if (frames >= 6) { fitFrame = 0; return }
+    if (frames >= 6) {
+      if (cutTrail(trail)) fitHeader()
+      fitFrame = 0
+      return
+    }
     fitHeader()
     // A resize during the fit starts a new follow-up. This one must not replace it.
     if (generation !== fitGeneration) return
