@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -928,5 +929,250 @@ func TestAdmissionClosedBeforeDestroyDoesNotPostOnGroupSHA(t *testing.T) {
 			t.Fatalf("merged group stayed active: retired=%v state=%s", retired, state)
 		}
 		return err
+	})
+}
+
+func TestAdmissionQueueSwitchSelectsLane(t *testing.T) {
+	// Risk: the default starts enqueue, or enabling the switch drops the P3 queue lane.
+	m := &Module{admissionGitHub: AppAdmission{}}
+	if lanes := m.admissionLanes(); len(lanes) != 1 || lanes[0].name != "status" {
+		t.Fatalf("default lanes: %+v", lanes)
+	}
+	if m.WithAdmissionQueue(true) != m {
+		t.Fatal("queue switch did not return the module")
+	}
+	if lanes := m.admissionLanes(); len(lanes) != 2 || lanes[0].name != "queue" || lanes[1].name != "status" {
+		t.Fatalf("enabled lanes: %+v", lanes)
+	}
+	m.WithAdmissionQueue(false)
+	if lanes := m.admissionLanes(); len(lanes) != 1 || lanes[0].name != "status" {
+		t.Fatalf("cleared switch still starts the queue lane: %+v", lanes)
+	}
+	m.admissionGitHub = nil
+	m.WithAdmissionQueue(true)
+	if len(m.admissionLanes()) != 0 {
+		t.Fatal("queue switch started a lane without an admission publisher")
+	}
+}
+
+type admissionScopeRecord struct {
+	mu     sync.Mutex
+	perms  []map[string]string
+	calls  []string
+	states map[string]string
+	posts  []string
+}
+
+func (r *admissionScopeRecord) snapshot() (posts, calls []string, perms []map[string]string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	posts = append([]string(nil), r.posts...)
+	calls = append([]string(nil), r.calls...)
+	for _, perm := range r.perms {
+		clone := map[string]string{}
+		for k, v := range perm {
+			clone[k] = v
+		}
+		perms = append(perms, clone)
+	}
+	return posts, calls, perms
+}
+
+func assertStatusOnlyGitHub(t *testing.T, posts, calls []string, perms []map[string]string, group string) {
+	t.Helper()
+	if len(calls) != 0 {
+		t.Fatalf("queue API calls: %v", calls)
+	}
+	wrote := false
+	for _, perm := range perms {
+		for name, level := range perm {
+			if level == "write" && name != "statuses" {
+				t.Fatalf("write scope beyond statuses: %v", perm)
+			}
+			if name != "statuses" && name != "metadata" {
+				t.Fatalf("token scope beyond statuses/metadata: %s=%s in %v", name, level, perm)
+			}
+			if name == "statuses" && level == "write" {
+				wrote = true
+			}
+		}
+	}
+	if !wrote {
+		t.Fatal("status publisher requested no statuses:write token")
+	}
+	successBeforeFailure := false
+	failed := false
+	for _, post := range posts {
+		sha, state, ok := strings.Cut(post, ":")
+		if !ok || sha != group {
+			continue
+		}
+		if state == "success" && !failed {
+			successBeforeFailure = true
+		}
+		if state == "failure" && successBeforeFailure {
+			failed = true
+		}
+		if state == "success" && failed {
+			t.Fatalf("success posted on the group SHA after the hold: %v", posts)
+		}
+	}
+	if !failed {
+		t.Fatalf("hold did not publish failure on the group SHA: %v", posts)
+	}
+}
+
+func runStatusOnlyLane(t *testing.T, m *Module) {
+	t.Helper()
+	lanes := m.admissionLanes()
+	if len(lanes) != 1 || lanes[0].name != "status" {
+		t.Fatalf("status-only worker lanes: %+v", lanes)
+	}
+	if err := lanes[0].run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdmissionStatusOnlyPublishesHoldOnGroupWithoutQueue(t *testing.T) {
+	// Risk: with the queue switch off, a hold during a harness-enqueued merge
+	// group either calls enqueue/dequeue or never posts failure on the group SHA.
+	f := newAdmissionFixture(t)
+	if lanes := f.m.admissionLanes(); len(lanes) != 1 || lanes[0].name != "status" {
+		t.Fatal("fixture started the queue lane")
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(dir, "fixture.pem")
+	if err = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rec := &admissionScopeRecord{states: map[string]string{}}
+	cfg := f.m.config
+	cfg.KeyFile = keyFile
+	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		var body any
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/456/access_tokens":
+			var in struct {
+				Permissions map[string]string `json:"permissions"`
+			}
+			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil {
+				t.Fatal(err)
+			}
+			clone := map[string]string{}
+			for name, level := range in.Permissions {
+				clone[name] = level
+			}
+			rec.mu.Lock()
+			rec.perms = append(rec.perms, clone)
+			rec.mu.Unlock()
+			body = map[string]any{"token": "fixture-only-token", "permissions": in.Permissions, "repositories": []any{map[string]string{"full_name": cfg.Repository}}}
+		case r.Method == http.MethodDelete && r.URL.Path == "/installation/token":
+			body = map[string]any{}
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/repos/"+cfg.Repository+"/statuses/"):
+			sha := strings.TrimPrefix(r.URL.Path, "/repos/"+cfg.Repository+"/statuses/")
+			var in map[string]string
+			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil {
+				t.Fatal(err)
+			}
+			if in["context"] != AdmissionContext || (in["state"] != "success" && in["state"] != "failure") {
+				t.Fatalf("unexpected status body: %v", in)
+			}
+			rec.mu.Lock()
+			rec.states[sha] = in["state"]
+			rec.posts = append(rec.posts, sha+":"+in["state"])
+			rec.mu.Unlock()
+			body = map[string]any{}
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/"+cfg.Repository+"/commits/") && strings.HasSuffix(r.URL.Path, "/statuses"):
+			sha := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/repos/"+cfg.Repository+"/commits/"), "/statuses")
+			rec.mu.Lock()
+			state := rec.states[sha]
+			rec.mu.Unlock()
+			body = []any{}
+			if state != "" {
+				body = []any{map[string]string{"context": AdmissionContext, "state": state}}
+			}
+		default:
+			rec.mu.Lock()
+			rec.calls = append(rec.calls, r.Method+" "+r.URL.RequestURI())
+			rec.mu.Unlock()
+			body = map[string]any{}
+			raw, _ := json.Marshal(body)
+			return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+		}
+		raw, _ := json.Marshal(body)
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	})}
+	f.m.WithAdmission(AppAdmission{App: &crossreview.GitHubApp{Config: cfg, Client: client}})
+	head := f.gh.pulls[7].Head
+	group := strings.Repeat("c", 40)
+	runStatusOnlyLane(t, f.m)
+	posts, calls, _ := rec.snapshot()
+	if len(calls) != 0 || !slices.Contains(posts, head+":success") {
+		t.Fatalf("approved head: posts %v calls %v", posts, calls)
+	}
+	// The harness enqueues. This worker must only observe that fact.
+	p := f.gh.pulls[7]
+	p.Queued = true
+	f.gh.pulls[7] = p
+	f.webhook(t, "pull_request", "enqueued", "status-only-harness-enqueue", 204)
+	if !f.item(t, 7).Observation.Queued {
+		t.Fatal("harness enqueue was not stored")
+	}
+	runStatusOnlyLane(t, f.m)
+	f.webhook(t, "merge_group", "checks_requested", "status-only-group", 204)
+	runStatusOnlyLane(t, f.m)
+	posts, calls, _ = rec.snapshot()
+	if len(calls) != 0 || !slices.Contains(posts, group+":success") {
+		t.Fatalf("group before hold: posts %v calls %v", posts, calls)
+	}
+	f.hold(t, true)
+	runStatusOnlyLane(t, f.m)
+	posts, calls, perms := rec.snapshot()
+	assertStatusOnlyGitHub(t, posts, calls, perms, group)
+	before := len(posts)
+	p = f.gh.pulls[7]
+	p.Open, p.Merged, p.Queued = false, true, false
+	f.gh.pulls[7] = p
+	f.webhook(t, "pull_request", "closed", "status-only-merged", 204)
+	auditSend(t, f.fixture, "merge_group", "status-only-destroyed", map[string]any{"action": "destroyed", "merge_group": map[string]string{"head_sha": group, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}, 204)
+	f.at = f.at.Add(time.Minute)
+	runStatusOnlyLane(t, f.m)
+	runStatusOnlyLane(t, f.m)
+	posts, calls, perms = rec.snapshot()
+	if len(posts) != before {
+		t.Fatalf("merge republished admission: %v", posts[before:])
+	}
+	assertStatusOnlyGitHub(t, posts, calls, perms, group)
+	f.tx(t, func(tx pgx.Tx) error {
+		var rows, attempts, quarantined, noticesSent, acted int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*), coalesce(sum(attempts),0)::int, count(*) FILTER (WHERE quarantined), count(*) FILTER (WHERE notice_sent), count(*) FILTER (WHERE enforcement<>'pending') FROM delivery_admission_queue WHERE pull_request=7`).Scan(&rows, &attempts, &quarantined, &noticesSent, &acted); err != nil {
+			return err
+		}
+		if rows < 1 || attempts != 0 || quarantined != 0 || noticesSent != 0 || acted != 0 {
+			t.Fatalf("queue lane wrote rows=%d attempts=%d quarantined=%d notices=%d acted=%d", rows, attempts, quarantined, noticesSent, acted)
+		}
+		var desk int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM inbox_compat_messages WHERE is_action_request AND body LIKE 'Admission:%'`).Scan(&desk); err != nil {
+			return err
+		}
+		if desk != 0 {
+			t.Fatalf("queue Desk notices: %d", desk)
+		}
+		var retired bool
+		var state string
+		if err := tx.QueryRow(t.Context(), `SELECT retired IS TRUE, confirmed_state FROM delivery_admission_outbox WHERE sha=$1`, group).Scan(&retired, &state); err != nil {
+			return err
+		}
+		if !retired || state != "failure" {
+			t.Fatalf("group SHA after merge: retired=%v state=%s", retired, state)
+		}
+		return nil
 	})
 }

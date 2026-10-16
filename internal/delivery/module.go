@@ -22,6 +22,7 @@ type Module struct {
 	secret               []byte
 	github               GitHub
 	admissionGitHub      AdmissionGitHub
+	admissionQueue       bool
 	fanout               func(context.Context, []byte) error
 	now                  func() time.Time
 	queueAdmission       QueueAdmission
