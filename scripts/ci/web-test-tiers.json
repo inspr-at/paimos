@@ -11632,6 +11632,10 @@
     ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"? opens the shortcut sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-list.spec.ts","name":"AEON-1415: inactive section tabs hide their labels at 1024 px and stay 44 px wide at 360 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-list.spec.ts","name":"AEON-1415: section owners mount the project page without a fatal setup error","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"a rejected status change rolls back and explains why","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"a status changed elsewhere is not overwritten","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18951,6 +18955,32 @@
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"gate and merged totals cover every generation and survive trimming the retained history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"questions bind to the lead’s exact session, also after it stopped; another generation’s stay on the Desk","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"assignee opening rejects people loaded for an older project generation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"columns in a saved view change its URL while plain-list columns save the person preference","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"data reports a failed queue read instead of displaying an unfiltered success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"filters keep a separate query for each section and preserve routed ticket identity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"keyboard keeps browser shortcuts native and submits selection through its owner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"knowledge queues filter writes against the latest landed query","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"live application preserves an open row and advances the cursor before removing it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"panel resolution discards an in-flight response after the owner changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"render sections attach and clear the same page-owned ref","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"saved views reject a save response after the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"selection retains ranges and drops rows that have left the loaded list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"state recovery keeps only the mounted editor copy, never an authorized project id","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"the page discard guard stays bound to the editors that opened its confirmation","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later close action","tier":"GATED-FULL"}
     ,

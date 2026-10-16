@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from 'node:fs'
-import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
 
 // Execute the view's actual navigation handlers with controlled network and
 // history dependencies, without maintaining a duplicate implementation.
-const { descriptor } = parse(readFileSync(new URL('../src/views/ProjectView.vue', import.meta.url), 'utf8'))
-const source = ts.createSourceFile('ProjectView.ts', descriptor.scriptSetup!.content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+function ownerSource(name: string) {
+  const source = ts.createSourceFile(`${name}.ts`, readFileSync(new URL(`../src/views/project/${name}.ts`, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const owner = source.statements.find(ts.isFunctionDeclaration)!
+  return { source, statements: owner.body!.statements }
+}
+const { source, statements } = ownerSource('useProjectPanel')
 const names = ['openRelated', 'follow', 'trailBack']
-const functions = source.statements.filter(statement => ts.isFunctionDeclaration(statement) && names.includes(statement.name?.text ?? ''))
+const functions = statements.filter(statement => ts.isFunctionDeclaration(statement) && names.includes(statement.name?.text ?? ''))
 expect(functions).toHaveLength(names.length)
 const printer = ts.createPrinter()
 const { outputText } = ts.transpileModule(functions.map(fn => printer.printNode(ts.EmitHint.Unspecified, fn, source)).join('\n'), {
@@ -67,12 +70,13 @@ it.each(['route', 'person'])('a pending related lookup cannot navigate after the
 // Keep the real menu handlers and their generation state together so deferred
 // responses exercise the view's cancellation, rather than a copy of it.
 const bulkFunctions = ['openBulk', 'closeBulk', 'openRelease']
-const bulkStatements = source.statements.filter(statement =>
+const { source: bulkSource, statements: selectionStatements } = ownerSource('useProjectSelection')
+const bulkStatements = selectionStatements.filter(statement =>
   (ts.isFunctionDeclaration(statement) && bulkFunctions.includes(statement.name?.text ?? '')) ||
   (ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration =>
     ts.isIdentifier(declaration.name) && declaration.name.text === 'bulkMenuGeneration')),
 )
-const bulkCode = ts.transpileModule(bulkStatements.map(statement => printer.printNode(ts.EmitHint.Unspecified, statement, source)).join('\n'), {
+const bulkCode = ts.transpileModule(bulkStatements.map(statement => printer.printNode(ts.EmitHint.Unspecified, statement, bulkSource)).join('\n'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022 },
 }).outputText
 
@@ -83,7 +87,7 @@ it.each(['status', 'priority', 'labels', 'move', 'release', 'direct release', 'c
     const anchor = { isConnected: true, focus: vi.fn() }
     const context = {
       bulkMenu: { value: null as { kind: string; anchor: typeof anchor } | null },
-      peopleGeneration: 0, selectedRows: { value: [{ id: 'ticket-1', updated_at: 'revision-1' }] },
+      getPeopleGeneration: () => 0, selectedRows: { value: [{ id: 'ticket-1', updated_at: 'revision-1' }] },
       loadProjectPeople: vi.fn(() => pendingPeople),
       list: { requestFacet: vi.fn(), loadEpics: vi.fn() },
       project: { value: { id: 'project-1' } }, releaseIds: { value: [] as string[] },
