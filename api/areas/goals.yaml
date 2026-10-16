@@ -5,7 +5,7 @@ paths:
     get:
       operationId: listGoals
       summary: List visible goals with current rollup
-      description: "Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. At most 1000 matching goals are expanded per request; larger candidate sets require narrower project/group filters rather than partial totals."
+      description: "Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. Up to 100 goals share one materialized expansion query; state and ETA reuse the same invoker work scope. Aggregate root/pair/history budgets shrink the returned page with truncated true and a continuation cursor; a singleton that exceeds its budget is counts-only with expansion too_large. Full-filter totals and computed sorts use bounded batches across at most 1000 matching goals; larger sets require narrower project/group filters."
       security: *auth
       parameters:
         - {name: project, in: query, schema: {type: string, maxLength: 64}}
@@ -122,7 +122,7 @@ paths:
     get:
       operationId: goalProgressSeries
       summary: Read bounded event-backed progress over time
-      description: "24h uses 24 hourly UTC buckets, 7d uses 28 six-hour buckets, and 30d uses 30 daily buckets. Each value is as of the bucket end or now. Immutable outcome events preserve membership across moves. Current visibility filters every point. Work-scope, event-count, byte and projection bounds return expansion too_large with no points."
+      description: "24h uses 24 hourly UTC buckets, 7d uses 28 six-hour buckets, and 30d uses 30 daily buckets. Each value is as of the bucket end or now. Immutable outcome events preserve membership across moves. Each bucket includes delta versus the preceding bucket and changed_keys for visible outcome/ticket state transitions, including transitions with unchanged progress. Current visibility filters every point. Work-scope, event-count, byte and projection bounds return expansion too_large with no points."
       security: *auth
       parameters:
         - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}}
@@ -149,7 +149,7 @@ components:
   headers:
     GoalsContract:
       description: "Goals API contract"
-      schema: {type: string, enum: [goals/1.3]}
+      schema: {type: string, enum: [goals/1.4]}
   schemas:
     GoalCreate:
       type: object
@@ -243,6 +243,6 @@ components:
     GoalList: {"type":"object","required":["items","totals","totals_partial","quiet_projects","truncated","read_through","generation"],"properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/GoalDetail"}},"totals":{"$ref":"#/components/schemas/GoalStateCounts"},"totals_partial":{"type":"boolean"},"quiet_projects":{"type":"object","required":["count","keys"],"properties":{"count":{"type":"integer","minimum":0},"keys":{"type":"array","maxItems":2000,"items":{"type":"string"}}}},"next_cursor":{"type":"string"},"truncated":{"type":"boolean"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
     GoalHistory: {"type":"object","required":["items","read_through","generation"],"properties":{"items":{"type":"array","maxItems":50,"items":{"$ref":"#/components/schemas/Event"}},"next_cursor":{"type":"string"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
     GoalStall: {"type":"object","required":["stalled","since"],"properties":{"stalled":{"type":"boolean"},"since":{"type":"string","format":"date-time","description":"Last visibility-filtered displayed percentage change, or goal creation; moving outcomes and age at least four hours make stalled true"}}}
-    GoalSeriesPoint: {"type":"object","required":["t","pct","basis","delta","keys","keys_truncated"],"properties":{"t":{"type":"string","format":"date-time"},"pct":{"type":"integer","minimum":0,"maximum":100},"basis":{"type":"string","enum":["count","mixed","estimate"]},"delta":{"type":"integer","minimum":-100,"maximum":100},"keys":{"type":"array","maxItems":200,"items":{"type":"string"}},"keys_truncated":{"type":"boolean"}}}
+    GoalSeriesPoint: {"type":"object","required":["t","pct","basis","delta","keys","keys_truncated"],"properties":{"t":{"type":"string","format":"date-time"},"pct":{"type":"integer","minimum":0,"maximum":100},"basis":{"type":"string","enum":["count","mixed","estimate"]},"delta":{"type":"integer","minimum":-100,"maximum":100},"keys":{"type":"array","maxItems":200,"items":{"type":"string"}},"changed_keys":{"type":"array","maxItems":200,"items":{"type":"string"},"description":"Visible outcome and ticket keys whose state changed during the bucket; keys is a compatibility alias"},"keys_truncated":{"type":"boolean"}}}
     GoalSeries: {"type":"object","required":["range","expansion","read_through","generation"],"properties":{"range":{"type":"string","enum":["24h","7d","30d"]},"expansion":{"type":"string","enum":["full","too_large"]},"read_through":{"type":"integer","format":"int64","minimum":0},"generation":{"type":"integer","format":"int64","minimum":1},"points":{"type":"array","maxItems":200,"items":{"$ref":"#/components/schemas/GoalSeriesPoint"}}}}
     GoalHandedOver: {"type":"object","required":["outcome_id","label","detail","at","by"],"properties":{"outcome_id":{"type":"string","format":"uuid"},"label":{"type":"string","maxLength":300},"detail":{"type":"string","maxLength":2000},"at":{"type":"string","format":"date-time"},"by":{"type":"string","format":"uuid"}}}

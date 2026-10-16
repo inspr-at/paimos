@@ -6466,7 +6466,11 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalLazyKindSeeding","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListAggregateBudgetPaginatesWithoutLoss","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListFiltersTotalsAndMoveHistory","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListPageWideProjection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalOutcomeReferenceVisibilityIsBounded","tier":"ESSENTIAL"}
     ,
@@ -6483,6 +6487,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalReleaseFirstUpdateRestoresKinds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalRollupPartialAndSharedEstimates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesChangedKeysWithoutPercentageChange","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesPlannerAndMoveTimeline","tier":"ESSENTIAL"}
     ,

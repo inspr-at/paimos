@@ -699,8 +699,8 @@
     }
   },
   "goals": {
-    "version": "goals/1.3",
-    "sha256": "b79dc53e3d86885e06516bd6c4555d772fab1722afbc452bae1c80c3c0e9dc95",
+    "version": "goals/1.4",
+    "sha256": "9c8a44fa2951311e01d2d19821f4c6fc4834d69977de89783b583d813a6b5441",
     "shape": {
       "GET /goals 200": {
         "properties": {
@@ -1969,6 +1969,13 @@
                     "estimate"
                   ],
                   "type": "string"
+                },
+                "changed_keys": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 200,
+                  "type": "array"
                 },
                 "delta": {
                   "maximum": 100,

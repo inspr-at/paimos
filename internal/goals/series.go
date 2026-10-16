@@ -21,6 +21,7 @@ type SeriesPoint struct {
 	Basis         string    `json:"basis"`
 	Delta         int       `json:"delta"`
 	Keys          []string  `json:"keys"`
+	ChangedKeys   []string  `json:"changed_keys"`
 	KeysTruncated bool      `json:"keys_truncated"`
 }
 type SeriesResult struct {
@@ -457,12 +458,19 @@ func (p *historicalProjection) apply(e sourceEvent, metadata map[string]historic
 	return nil
 }
 func (p *historicalProjection) progress(ctx context.Context) (int, string, error) {
+	pct, basis, _, err := p.values(ctx)
+	return pct, basis, err
+}
+
+type historicalState struct{ Key, State string }
+
+func (p *historicalProjection) values(ctx context.Context) (int, string, map[string]historicalState, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, "", err
+		return 0, "", nil, err
 	}
 	p.work += len(p.nodes) + len(p.sessions) + len(p.outcomes)
 	if p.work > maxSeriesWork {
-		return 0, "", fail(413, "series projection budget exceeded")
+		return 0, "", nil, fail(413, "series projection budget exceeded")
 	}
 
 	children := map[string][]string{}
@@ -483,6 +491,7 @@ func (p *historicalProjection) progress(ctx context.Context) (int, string, error
 		}
 	}
 	inputs := []ProgressOutcome{}
+	states := map[string]historicalState{}
 	outcomeIDs := []string{}
 	for id := range p.outcomes {
 		outcomeIDs = append(outcomeIDs, id)
@@ -503,7 +512,7 @@ func (p *historicalProjection) progress(ctx context.Context) (int, string, error
 			queue := []string{root}
 			for len(queue) > 0 {
 				if err := ctx.Err(); err != nil {
-					return 0, "", err
+					return 0, "", nil, err
 				}
 				id := queue[len(queue)-1]
 				queue = queue[:len(queue)-1]
@@ -513,7 +522,7 @@ func (p *historicalProjection) progress(ctx context.Context) (int, string, error
 				seen[id] = true
 				p.work++
 				if p.work > maxSeriesWork {
-					return 0, "", fail(413, "series projection budget exceeded")
+					return 0, "", nil, fail(413, "series projection budget exceeded")
 				}
 				n := p.nodes[id]
 				if !n.Present {
@@ -522,6 +531,10 @@ func (p *historicalProjection) progress(ctx context.Context) (int, string, error
 				queue = append(queue, children[id]...)
 				if !n.Work || workParents[id] || n.Bucket == "archived" || n.Bucket == "cancelled" {
 					continue
+				}
+				states[id] = historicalState{Key: n.Key, State: n.Bucket}
+				if working[id] {
+					states[id] = historicalState{Key: n.Key, State: string(Moving)}
 				}
 				facts.TotalLeaves++
 				if n.Bucket == "done" || n.Bucket == "delivered" || n.Bucket == "accepted" {
@@ -534,13 +547,15 @@ func (p *historicalProjection) progress(ctx context.Context) (int, string, error
 			}
 		}
 		sort.Slice(leaves, func(i, j int) bool { return leaves[i].ID < leaves[j].ID })
-		inputs = append(inputs, ProgressOutcome{State: DeriveState(facts).State, Leaves: leaves})
+		state := DeriveState(facts).State
+		states[outcomeID] = historicalState{Key: outcome.Key, State: string(state)}
+		inputs = append(inputs, ProgressOutcome{State: state, Leaves: leaves})
 	}
 	rollup := ComputeRollup(inputs)
 	if p.override != nil {
-		return *p.override, rollup.Basis, nil
+		return *p.override, rollup.Basis, states, nil
 	}
-	return rollup.Pct, rollup.Basis, nil
+	return rollup.Pct, rollup.Basis, states, nil
 }
 func (h reconstruction) project(ctx context.Context, now time.Time, span string) ([]SeriesPoint, time.Time, error) {
 	starts, grain, err := planSeries(now, span)
@@ -551,36 +566,52 @@ func (h reconstruction) project(ctx context.Context, now time.Time, span string)
 	index := 0
 	since := h.created
 	previous := 0
+	previousStates := map[string]historicalState{}
+	// Replay the prefix to establish the preceding bucket's value. It also
+	// preserves the true stall time when the last change predates this range.
+	advance := func(event sourceEvent, keys map[string]bool) error {
+		if err := p.apply(event, h.metadata); err != nil {
+			return err
+		}
+		pct, _, states, err := p.values(ctx)
+		if err != nil {
+			return err
+		}
+		if pct != previous {
+			since = event.At
+		}
+		if keys != nil {
+			for id, state := range states {
+				if old, ok := previousStates[id]; !ok || old.State != state.State {
+					keys[state.Key] = true
+				}
+			}
+			for id, state := range previousStates {
+				if _, ok := states[id]; !ok {
+					keys[state.Key] = true
+				}
+			}
+		}
+		previous, previousStates = pct, states
+		return nil
+	}
+	for index < len(h.events) && h.events[index].At.Before(starts[0]) {
+		if err := advance(h.events[index], nil); err != nil {
+			return nil, since, err
+		}
+		index++
+	}
 	points := []SeriesPoint{}
 	for _, start := range starts {
 		end := start.Add(grain)
 		if end.After(now) {
 			end = now
 		}
+		baseline := previous
 		keys := map[string]bool{}
 		for index < len(h.events) && !h.events[index].At.After(end) {
-			event := h.events[index]
-			if err := p.apply(event, h.metadata); err != nil {
+			if err := advance(h.events[index], keys); err != nil {
 				return nil, since, err
-			}
-			pct, _, err := p.progress(ctx)
-			if err != nil {
-				return nil, since, err
-			}
-			if pct != previous {
-				since = event.At
-				if !event.At.Before(start) {
-					if n, ok := h.metadata[event.Node]; ok {
-						keys[n.Key] = true
-					} else if event.Family == "outcome" {
-						for _, root := range p.outcomes[event.Node].Targets {
-							if n, ok := h.metadata[root]; ok {
-								keys[n.Key] = true
-							}
-						}
-					}
-				}
-				previous = pct
 			}
 			index++
 		}
@@ -599,11 +630,7 @@ func (h reconstruction) project(ctx context.Context, now time.Time, span string)
 		if truncated {
 			keyList = keyList[:200]
 		}
-		delta := 0
-		if len(points) > 0 {
-			delta = pct - points[len(points)-1].Pct
-		}
-		points = append(points, SeriesPoint{T: start, Pct: pct, Basis: basis, Delta: delta, Keys: keyList, KeysTruncated: truncated})
+		points = append(points, SeriesPoint{T: start, Pct: pct, Basis: basis, Delta: pct - baseline, Keys: keyList, ChangedKeys: keyList, KeysTruncated: truncated})
 	}
 	return points, since, nil
 }

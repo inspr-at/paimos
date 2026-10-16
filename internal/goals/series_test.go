@@ -4,6 +4,8 @@ package goals
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -151,6 +153,19 @@ func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 		if len(s.Points) != count || s.Points[len(s.Points)-1].Pct != 50 {
 			t.Fatalf("filtered series %s %+v", span, s)
 		}
+		changed := false
+		for i, point := range s.Points {
+			if i > 0 && point.Delta != point.Pct-s.Points[i-1].Pct {
+				t.Fatalf("incorrect bucket delta %+v", point)
+			}
+			if !reflect.DeepEqual(point.Keys, point.ChangedKeys) || slices.Contains(point.ChangedKeys, "SOUT-3") || slices.Contains(point.ChangedKeys, "TKT-2") {
+				t.Fatalf("hidden keys or mismatched compatibility alias %+v", point)
+			}
+			changed = changed || slices.Contains(point.ChangedKeys, "TKT-1") && slices.Contains(point.ChangedKeys, "SOUT-1")
+		}
+		if !changed {
+			t.Fatalf("missing visible ticket and outcome transitions: %+v", s.Points)
+		}
 	}
 	// Mutate the live row without an event: historical reconstruction must
 	// retain the recorded completion, proving it is not a live-row sample.
@@ -166,6 +181,28 @@ func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 		if rec := apiRequest(t, f, "GET", "/api/goals/"+f.secondGoal+"/series"+query, "", ""); rec.Code != 400 {
 			t.Fatalf("unbounded range %s %d", query, rec.Code)
 		}
+	}
+}
+
+// Risk: a queued-to-moving change disappears because progress remains zero,
+// or the first bucket's delta loses the preceding bucket's value.
+func TestGoalSeriesChangedKeysWithoutPercentageChange(t *testing.T) {
+	now := apiClock.Add(30 * time.Minute)
+	starts, _, _ := planSeries(now, "24h")
+	outcome := storedNode{ID: "outcome", Key: "OUT-1", Parent: "goal", Fields: map[string]any{"state_set": "done"}}
+	h := reconstruction{goal: "goal", created: starts[0].Add(-time.Hour), metadata: map[string]historicalNode{}, events: []sourceEvent{
+		{ID: 1, At: starts[0].Add(-time.Minute), Node: outcome.ID, Family: "outcome", After: sourceJSON(t, outcome)},
+	}}
+	outcome.Fields["state_set"] = "queued"
+	h.events = append(h.events, sourceEvent{ID: 2, At: starts[0].Add(time.Minute), Node: outcome.ID, Family: "outcome", After: sourceJSON(t, outcome)})
+	outcome.Fields["state_set"] = "moving"
+	h.events = append(h.events, sourceEvent{ID: 3, At: starts[1].Add(time.Minute), Node: outcome.ID, Family: "outcome", After: sourceJSON(t, outcome)})
+	points, since, err := h.project(t.Context(), now, "24h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if points[0].Delta != -100 || points[1].Delta != 0 || !reflect.DeepEqual(points[1].ChangedKeys, []string{"OUT-1"}) || !since.Equal(h.events[1].At) {
+		t.Fatalf("state-only transition or prefix delta lost: points=%+v since=%v", points[:2], since)
 	}
 }
 

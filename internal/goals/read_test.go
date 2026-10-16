@@ -231,7 +231,7 @@ func TestGoalPauseUsesLatestStoppedSession(t *testing.T) {
 			if reason == "paused" {
 				pause = `{"state":"paused"}`
 			}
-			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,stopped_at,stop_reason,pause_record) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$6,$7,$8,$9::jsonb) RETURNING id::text`, f.writer.TenantID, f.project, agent, f.ticket, []byte(fmt.Sprintf("pause-ref-%d", i)), []byte(fmt.Sprintf("pause-lease-%d", i)), apiClock.Add(time.Duration(i-2)*time.Hour), reason, pause).Scan(&id); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,stopped_at,stop_reason,pause_record) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$6,'stopped',$7,$8,$9::jsonb) RETURNING id::text`, f.writer.TenantID, f.project, agent, f.ticket, []byte(fmt.Sprintf("pause-ref-%d", i)), []byte(fmt.Sprintf("pause-lease-%d", i)), apiClock.Add(time.Duration(i-2)*time.Hour), reason, pause).Scan(&id); err != nil {
 				return err
 			}
 			if i == 1 {

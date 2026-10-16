@@ -116,13 +116,22 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		if len(nodes) > 1000 {
 			return fail(413, "goals: narrow project/group filters to at most 1000 goals")
 		}
+		check, err := authz.ProjectsTx(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		for _, n := range nodes {
+			if !check("nodes.read", n.Project) {
+				return authz.ErrForbidden
+			}
+		}
+		goals, err := readGoalList(ctx, tx, p, nodes, now, w)
+		if err != nil {
+			return err
+		}
 		candidates := []GoalView{}
 		movingProjects := map[string]bool{}
-		for _, n := range nodes {
-			g, err := readGoal(ctx, tx, p, n, now, w)
-			if err != nil {
-				return err
-			}
+		for _, g := range goals {
 			if g.States == nil {
 				out.TotalsPartial = true
 			} else {
@@ -196,19 +205,24 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 			bk, bn := keyForGoal(candidates[j], sortBy)
 			return compare(ak, an, candidates[i].ID, bk, bn, candidates[j].ID) < 0
 		})
+		budget := newListBudget()
 		for _, g := range candidates {
 			key, null := keyForGoal(g, sortBy)
 			if cursor != nil && compare(key, null, g.ID, cursor.Key, cursor.Null, cursor.ID) <= 0 {
 				continue
 			}
-			out.Items = append(out.Items, g)
-			if len(out.Items) > limit {
-				out.Items = out.Items[:limit]
-				last := out.Items[limit-1]
+			nextBudget := newListBudget()
+			nextBudget.add(budget)
+			nextBudget.add(g.budget)
+			if len(out.Items) == limit || len(out.Items) > 0 && !nextBudget.fits() {
+				out.Truncated = len(out.Items) < limit
+				last := out.Items[len(out.Items)-1]
 				k, n := keyForGoal(last, sortBy)
 				out.NextCursor = encodeGoalCursor(goalCursor{Key: k, Null: n, ID: last.ID, Query: queryKey})
 				break
 			}
+			budget = nextBudget
+			out.Items = append(out.Items, g)
 		}
 		projects, err := tx.Query(ctx, `SELECT n.id::text,coalesce(nullif(n.fields->>'project_key',''),n.key) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='project' AND n.deleted_at IS NULL AND ($1='' OR n.id::text=$1 OR n.key=$1 OR n.fields->>'project_key'=$1) AND ($2='' OR EXISTS(SELECT 1 FROM project_group_members gm WHERE gm.project_id=n.id AND gm.group_id::text=$2) OR $2='none' AND NOT EXISTS(SELECT 1 FROM project_group_members gm WHERE gm.project_id=n.id)) ORDER BY n.id LIMIT 2001`, project, group)
 		if err != nil {

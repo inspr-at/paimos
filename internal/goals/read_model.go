@@ -96,6 +96,7 @@ type GoalView struct {
 	movingProjects []string
 	targets        []string
 	node           storedNode
+	budget         listBudget
 }
 
 type leafFact struct {
@@ -108,8 +109,9 @@ type leafFact struct {
 
 // These predicates are shared by detail/list/revalidation. Work membership and
 // done buckets come from aeon_work_scope; ETA facts use eta.AggregateSQL.
-const leafFactsSQL = `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope($1::uuid[])),
- leaves AS MATERIALIZED (SELECT DISTINCT id,fields,bucket,project_id FROM scope WHERE is_leaf AND bucket NOT IN ('archived','cancelled'))
+const leafFactsSQL = `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope($1::uuid[])), ` + leafFactsProjectionSQL
+
+const leafFactsProjectionSQL = `leaves AS MATERIALIZED (SELECT DISTINCT id,fields,bucket,project_id FROM scope WHERE is_leaf AND bucket NOT IN ('archived','cancelled'))
  SELECT s.root::text,l.id::text,l.bucket='done',
  CASE WHEN jsonb_typeof(l.fields->'estimate_hours')='number' THEN CASE WHEN (l.fields->>'estimate_hours')::numeric>0 AND (l.fields->>'estimate_hours')::numeric<=200 THEN (l.fields->>'estimate_hours')::float8 ELSE 0 END ELSE 0 END,
  ARRAY(SELECT h.id::text FROM harness_sessions h WHERE h.ticket_node_id=l.id AND h.project_id=l.project_id AND h.phase='working' AND h.stopped_at IS NULL AND h.archived_at IS NULL AND h.role IN ('worker','coordinator') ORDER BY h.id LIMIT 201),
@@ -155,10 +157,25 @@ func tooLarge(err error) bool {
 	return errors.As(err, &pg) && pg.Code == "54000" || errors.As(err, &bounded) && bounded.status == 413 || errors.As(err, &validation) && validation.Path == "items"
 }
 
-func readGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, n storedNode, now time.Time, w Watermark) (GoalView, error) {
+func baseGoal(n storedNode, w Watermark) (GoalView, error) {
 	out := GoalView{ID: n.ID, Key: n.Key, Title: n.Title, Kind: n.Slug, Workspace: n.Project == "", Expansion: "full", Steps: []Step{}, Projects: []ProjectBadge{}, Waits: Waits{QuestionIDs: []string{}}, Watermark: w, node: n}
 	if n.Project != "" {
 		out.ProjectID = &n.Project
+	}
+	if steps, ok := n.Fields["steps"]; ok {
+		raw, _ := json.Marshal(steps)
+		if err := decodeStrict(raw, &out.Steps); err != nil {
+			return out, err
+		}
+	}
+	out.NextStep = NextStep(out.Steps)
+	return out, nil
+}
+
+func readGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, n storedNode, now time.Time, w Watermark) (GoalView, error) {
+	out, err := baseGoal(n, w)
+	if err != nil {
+		return out, err
 	}
 	if !IsGoalKind(n.Slug) {
 		return out, pgx.ErrNoRows
@@ -169,16 +186,9 @@ func readGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, n storedNode, 
 	if err := tx.QueryRow(ctx, `SELECT created_at FROM nodes WHERE id=$1`, n.ID).Scan(&out.created); err != nil {
 		return out, err
 	}
-	if steps, ok := n.Fields["steps"]; ok {
-		raw, _ := json.Marshal(steps)
-		if err := decodeStrict(raw, &out.Steps); err != nil {
-			return out, err
-		}
-	}
-	out.NextStep = NextStep(out.Steps)
 	// Count visible rows before expansion. No hidden-outcome denominator or
 	// fallback survives the savepoint when work traversal exceeds its budget.
-	err := tx.QueryRow(ctx, `SELECT count(*)::int FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.parent_id=$1 AND k.slug='outcome' AND n.deleted_at IS NULL`, n.ID).Scan(&out.Counts.Outcomes)
+	err = tx.QueryRow(ctx, `SELECT count(*)::int FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.parent_id=$1 AND k.slug='outcome' AND n.deleted_at IS NULL`, n.ID).Scan(&out.Counts.Outcomes)
 	if err != nil {
 		return out, err
 	}
@@ -233,14 +243,6 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 	if err != nil {
 		return out, err
 	}
-	sort.Slice(children, func(i, j int) bool {
-		a, _ := Position(children[i].Position).decimal()
-		b, _ := Position(children[j].Position).decimal()
-		if a.Cmp(b) == 0 {
-			return children[i].ID < children[j].ID
-		}
-		return a.Cmp(b) < 0
-	})
 	roots := []string{}
 	for _, n := range children {
 		roots = append(roots, n.Targets...)
@@ -257,6 +259,43 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 	etas, err := effectiveETAs(ctx, tx, children)
 	if err != nil {
 		return out, err
+	}
+	keys, err := targetIdentities(ctx, tx, roots)
+	if err != nil {
+		return out, err
+	}
+	out, movingTargets := deriveGoal(out, children, facts, etas, keys, now)
+	out.Projects, err = projectBadges(ctx, tx, out.node.Project, out.targets)
+	if err != nil {
+		return out, err
+	}
+	if out.States.Moving > 0 {
+		badges, e := projectBadges(ctx, tx, out.node.Project, movingTargets)
+		if e != nil {
+			return out, e
+		}
+		for _, b := range badges {
+			out.movingProjects = append(out.movingProjects, b.ID)
+		}
+	}
+	out.Waits, err = goalWaits(ctx, tx, p, out.ID, out.targets)
+	return out, err
+}
+
+// deriveGoal is shared by detail, revalidation and the page-wide projection.
+// Database reads and visibility checks are completed before deriving values.
+func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact, etas map[string]EffectiveETA, targetKeys map[string]string, now time.Time) (GoalView, []string) {
+	sort.Slice(children, func(i, j int) bool {
+		a, _ := Position(children[i].Position).decimal()
+		b, _ := Position(children[j].Position).decimal()
+		if a.Cmp(b) == 0 {
+			return children[i].ID < children[j].ID
+		}
+		return a.Cmp(b) < 0
+	})
+	roots := []string{}
+	for _, n := range children {
+		roots = append(roots, n.Targets...)
 	}
 	movingTargets := []string{}
 	inputs := []ProgressOutcome{}
@@ -300,10 +339,13 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 		case Done:
 			states.Done++
 		}
-		keys, err := targetKeys(ctx, tx, n.Targets)
-		if err != nil {
-			return out, err
+		keys := []string{}
+		for _, id := range n.Targets {
+			if key, ok := targetKeys[id]; ok {
+				keys = append(keys, key)
+			}
 		}
+		sort.Strings(keys)
 		value := etas[n.ID]
 		out.Items = append(out.Items, OutcomeView{ID: n.ID, Ref: fieldString(n, "outcome_ref"), Label: n.Title, Note: fieldString(n, "note"), Position: Position(n.Position), Keys: keys, EffectiveState: state, ETA: value, Passed: Passed(value.At, state.State, now), HandedOver: f.HandedOver})
 		inputs = append(inputs, ProgressOutcome{State: state.State, Leaves: leaves})
@@ -351,22 +393,9 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 	out.States = &states
 	out.Done = &done
 	out.targets = slices.Compact(slices.Sorted(slices.Values(roots)))
-	out.Projects, err = projectBadges(ctx, tx, out.node.Project, out.targets)
-	if err != nil {
-		return out, err
-	}
-	if states.Moving > 0 {
-		badges, e := projectBadges(ctx, tx, out.node.Project, movingTargets)
-		if e != nil {
-			return out, e
-		}
-		for _, b := range badges {
-			out.movingProjects = append(out.movingProjects, b.ID)
-		}
-	}
-	out.Waits, err = goalWaits(ctx, tx, p, out.ID, out.targets)
-	return out, err
+	return out, movingTargets
 }
+
 func filterWorkRoots(ctx context.Context, tx pgx.Tx, ids []string) ([]string, error) {
 	out := []string{}
 	rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=ANY($1::uuid[]) AND k.slug IN ('work','epic','ticket','task') AND n.deleted_at IS NULL ORDER BY n.id`, ids)
@@ -383,19 +412,19 @@ func filterWorkRoots(ctx context.Context, tx pgx.Tx, ids []string) ([]string, er
 	}
 	return out, rows.Err()
 }
-func targetKeys(ctx context.Context, tx pgx.Tx, ids []string) ([]string, error) {
-	out := []string{}
-	rows, err := tx.Query(ctx, `SELECT key FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY key`, ids)
+func targetIdentities(ctx context.Context, tx pgx.Tx, ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	rows, err := tx.Query(ctx, `SELECT id::text,key FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY key`, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
+		var id, key string
+		if err := rows.Scan(&id, &key); err != nil {
 			return nil, err
 		}
-		out = append(out, key)
+		out[id] = key
 	}
 	return out, rows.Err()
 }
