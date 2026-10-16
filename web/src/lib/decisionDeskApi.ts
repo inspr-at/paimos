@@ -295,7 +295,9 @@ export function nativeTierAdapter(sessions: () => Promise<readonly HarnessSessio
       records = next
       const failed = reads.some(read => read.status === 'rejected')
       if (failed) warnings.push('Some tier requests could not be read. Open Agents to inspect their source.')
-      return { items, warnings, failed }
+      // A clean read, including a capability skip with no requests, omits failed.
+      // The exact { items, warnings } shape is pinned, and loadDesk treats only true as unanswered.
+      return failed ? { items, warnings, failed } : { items, warnings }
     },
     allowed: item => can('harness.control', item.projectId),
     async decide(item, draft, requestId) {
