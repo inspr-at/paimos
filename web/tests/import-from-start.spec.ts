@@ -25,7 +25,8 @@ const gate = (): Gate => { let open!: () => void; const until = new Promise<void
 
 async function setup(page: Page, options: { language?: 'de' | 'en'; gone?: boolean; holdRead?: Gate; holdCreate?: Gate; theme: 'light' | 'dark' }) {
   const data = fixtures(), errors = watchErrors(page)
-  await mockWork(page, data, {})
+  // Workspace admins and built-in members read members; the mock grants it to admin.
+  await mockWork(page, data, { admin: true })
   const seen = { reads: [] as { header: string | null; url: string }[], creates: [] as Record<string, unknown>[] }
   await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: options.theme } }))
   await page.route('**/api/members', route => route.fulfill({ json: { people: [

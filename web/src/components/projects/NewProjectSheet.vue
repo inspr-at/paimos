@@ -88,11 +88,14 @@ function loadDraft() {
     phase.value = cause instanceof APIError && cause.status === 404 ? 'gone' : cause instanceof APIError && cause.status === 403 ? 'denied' : 'unreadable'
   } })
 }
+// Permissions can settle after the sheet opens; the owner list follows them.
+watch(() => fromStart && can('members.read'), allowed => { if (allowed && scope.owner.value) loadPeople() })
 watch(() => scope.owner.value, (current, previous) => {
   // Another person or workspace: nothing of this draft stays on screen or in the tab.
   if (previous && current !== previous) { if (fromStart) dropDraft(); emit('close'); return }
   if (!current) return
   if (!fromStart) { load(); return }
+  owner.value = me.value
   loadPeople(); loadDraft()
 }, { immediate: true, flush: 'sync' })
 
@@ -166,7 +169,7 @@ const closeInner = () => ownerPicker.value?.close() ?? false
     <template #actions><button type="button" class="btn" @click="emit('close')">Cancel <KeyCap k="Esc" /></button><button id="np-go" type="submit" form="np-form" class="btn primary" :disabled="!valid" :aria-busy="busy">Create project <KeyCap k="mod" /><KeyCap k="enter" /></button></template>
   </ProjectSettingsSheet>
 
-  <ProjectSettingsSheet v-else :title="title" :close-label="t.close" :lang="lang" :escape="closeInner" @close="close" @submit="submit">
+  <ProjectSettingsSheet v-else :title="title" :close-label="t.close" :lang="lang" :escape="closeInner" focus-sheet @close="close" @submit="submit">
     <template #description>
       <p v-if="phase === 'loading' || phase === 'ready'" class="np-from" data-m="from"><template v-if="loading"><span class="sk-row"><span class="skeleton" style="width: 44%" /></span><span class="sk-row"><span class="skeleton" style="width: 64%" /></span></template><template v-else-if="draft">{{ t.from(draft.source?.host ?? 'START', handedOverAt(lang, draft.handed_over_at)) }}</template></p>
     </template>

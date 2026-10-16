@@ -7,7 +7,8 @@ import { PROJECT_SETTINGS_OVERLAY } from '../../lib/projectSettings'
 import AppIcon from '../AppIcon.vue'
 
 // escape: an open layer inside the sheet (a list) closes first and returns true.
-const props = defineProps<{ title: string; description?: string; closeLabel?: string; lang?: string; escape?: () => boolean }>()
+// focusSheet: the sheet itself takes focus (no field to type into first, and no ring on Close).
+const props = defineProps<{ title: string; description?: string; closeLabel?: string; lang?: string; escape?: () => boolean; focusSheet?: boolean }>()
 const emit = defineEmits<{ close: []; submit: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const registerOverlay = inject(PROJECT_SETTINGS_OVERLAY, null)
@@ -29,7 +30,7 @@ function backdrop(event: MouseEvent) {
 }
 onMounted(() => {
   unregister = registerOverlay?.({ element: () => dialog.value, close: () => emit('close'), submit: () => emit('submit') })
-  dialog.value?.showModal(); dialog.value?.querySelector<HTMLElement>('[autofocus]')?.focus({ preventScroll: true })
+  dialog.value?.showModal(); (props.focusSheet ? dialog.value : dialog.value?.querySelector<HTMLElement>('[autofocus]'))?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => { unregister?.(); keys.forEach(dispose => dispose()); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
 </script>
