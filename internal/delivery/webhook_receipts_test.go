@@ -28,7 +28,227 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type projectionLockTraceKey struct{}
+
+type projectionLockFailure struct {
+	sql    string
+	resume chan struct{}
+}
+
+// Pause the first projection after it claims the observation session. Let the
+// other deliveries save their receipts before a competing writer takes the
+// tenant fence. TraceQueryEnd observes an actual PostgreSQL lock timeout.
+type projectionLockBarrier struct {
+	once        sync.Once
+	reading     chan struct{}
+	resumeRead  chan struct{}
+	lockFailure chan projectionLockFailure
+}
+
+func (b *projectionLockBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.HasPrefix(data.SQL, "SELECT pull_request FROM delivery_items WHERE repository=") {
+		b.once.Do(func() {
+			close(b.reading)
+			select {
+			case <-b.resumeRead:
+			case <-ctx.Done():
+			}
+		})
+	}
+	return context.WithValue(ctx, projectionLockTraceKey{}, data.SQL)
+}
+
+func (b *projectionLockBarrier) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	var failure *pgconn.PgError
+	if !errors.As(data.Err, &failure) || failure.Code != "55P03" {
+		return
+	}
+	sql, _ := ctx.Value(projectionLockTraceKey{}).(string)
+	failed := projectionLockFailure{sql: sql, resume: make(chan struct{})}
+	select {
+	case b.lockFailure <- failed:
+	case <-ctx.Done():
+		return
+	}
+	select {
+	case <-failed.resume:
+	case <-ctx.Done():
+	}
+}
+
+func TestDeliveryWebhookProjectionLockBurst(t *testing.T) {
+	// Risk: concurrent CI completions lose projection progress to a transient
+	// tenant-fence timeout, or retries hide a persistent write failure as success.
+	for _, tc := range []struct {
+		name       string
+		timeouts   int
+		wantStatus int
+	}{
+		{"transient contention", 1, http.StatusNoContent},
+		{"persistent contention", 3, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			p := f.pull()
+			f.gh.pulls[p.Number] = p
+			f.webhook(t, "pull_request", "opened", "projection-seed", http.StatusNoContent)
+			p.Checks = []Check{{Name: "go-test", Status: "completed", Conclusion: "failure"}}
+			f.gh.pulls[p.Number] = p
+
+			barrier := &projectionLockBarrier{reading: make(chan struct{}), resumeRead: make(chan struct{}), lockFailure: make(chan projectionLockFailure)}
+			cfg := f.d.App.Config()
+			cfg.MaxConns = 30
+			cfg.ConnConfig.RuntimeParams["lock_timeout"] = "100ms"
+			cfg.ConnConfig.Tracer = barrier
+			pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(pool.Close)
+			f.m.pool = pool
+			var logs bytes.Buffer
+			f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			t.Cleanup(cancel)
+			var resumeOnce sync.Once
+			resume := func() { resumeOnce.Do(func() { close(barrier.resumeRead) }) }
+			t.Cleanup(resume)
+
+			run := receiptBody(t, f, map[string]any{"action": "completed", "check_run": map[string]any{"head_sha": p.Head, "name": "go-test", "status": "completed", "conclusion": "failure", "pull_requests": []any{map[string]any{"number": p.Number}}}})
+			suite := receiptBody(t, f, map[string]any{"action": "completed", "check_suite": map[string]any{"head_sha": p.Head, "pull_requests": []any{map[string]any{"number": p.Number}}}})
+			send := func(event, id string, raw []byte) int {
+				r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/github/webhook", bytes.NewReader(raw))
+				r.Header.Set("X-GitHub-Event", event)
+				r.Header.Set("X-GitHub-Delivery", id)
+				r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				return w.Code
+			}
+			leader := make(chan int, 1)
+			go func() { leader <- send("check_run", "projection-burst-0", run) }()
+			select {
+			case <-barrier.reading:
+			case <-ctx.Done():
+				t.Fatal("first projection did not reach its snapshot barrier")
+			}
+
+			// Twenty check_run completions (including the paused first one) and
+			// one check_suite overlap on the same PR/head, with unique deliveries.
+			start := make(chan struct{})
+			codes := make(chan int, 20)
+			for i := 1; i <= 20; i++ {
+				go func() {
+					<-start
+					event, raw := "check_run", run
+					if i == 20 {
+						event, raw = "check_suite", suite
+					}
+					codes <- send(event, fmt.Sprintf("projection-burst-%d", i), raw)
+				}()
+			}
+			close(start)
+			for range 20 {
+				select {
+				case code := <-codes:
+					if code != http.StatusNoContent {
+						t.Fatalf("overlapping delivery returned HTTP %d", code)
+					}
+				case <-ctx.Done():
+					t.Fatal("overlapping deliveries did not acknowledge their receipts")
+				}
+			}
+
+			holder, err := f.d.Admin.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = holder.Rollback(context.Background()) }()
+			if err := db.LockTenant(ctx, holder, f.person.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			resume()
+			for i := 1; i <= tc.timeouts; i++ {
+				select {
+				case failed := <-barrier.lockFailure:
+					if failed.sql != db.TenantFenceSQL {
+						close(failed.resume)
+						t.Fatalf("55P03 came from the wrong operation: %s", failed.sql)
+					}
+					if i == tc.timeouts {
+						if err := holder.Commit(ctx); err != nil {
+							close(failed.resume)
+							t.Fatal(err)
+						}
+					}
+					close(failed.resume)
+				case code := <-leader:
+					t.Fatalf("projection returned HTTP %d after %d lock timeouts; wanted %d", code, i-1, tc.timeouts)
+				case <-ctx.Done():
+					t.Fatal("projection did not encounter the competing tenant fence")
+				}
+			}
+			select {
+			case code := <-leader:
+				if code != tc.wantStatus {
+					t.Fatalf("projection returned HTTP %d after %d real 55P03 errors; want %d", code, tc.timeouts, tc.wantStatus)
+				}
+			case <-ctx.Done():
+				t.Fatal("projection did not finish after the tenant fence was released")
+			}
+			attempts, _, finished, points, step, class := receiptState(t, f, "projection-burst-0")
+			if tc.wantStatus == http.StatusNoContent {
+				if attempts != 1 || finished == nil || len(points) != len(webhookSteps) || step != nil || class != nil || logs.Len() != 0 {
+					t.Fatalf("recovered projection: attempts %d finished %v points %v step %v class %v logs %s", attempts, finished != nil, points, step, class, logs.String())
+				}
+			} else {
+				if attempts != 1 || finished != nil || len(points) != 0 || step == nil || *step != "projection" || class == nil || *class != "database" {
+					t.Fatalf("failed projection lost its retry: attempts %d finished %v points %v step %v class %v", attempts, finished != nil, points, step, class)
+				}
+				assertWebhookFailureLine(t, &logs, "check_run", "completed", "projection", "database", http.StatusBadGateway, map[string]any{"delivery_id": "projection-burst-0", "sqlstate": "55P03"})
+				if err := f.m.processWebhook(ctx, "projection-burst-0", true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The due page is bounded at 20; all twenty deferred siblings fit in
+			// one pass. Repeated HTTP deliveries must leave one ledger row each.
+			if err := f.m.retryWebhooks(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i <= 20; i++ {
+				id := fmt.Sprintf("projection-burst-%d", i)
+				_, _, finished, points, step, class := receiptState(t, f, id)
+				if finished == nil || len(points) != len(webhookSteps) || points["projection"] != webhookRecorded || step != nil || class != nil {
+					t.Fatalf("%s did not finish consistently: finished %v points %v step %v class %v", id, finished != nil, points, step, class)
+				}
+				event, raw := "check_run", run
+				if i == 20 {
+					event, raw = "check_suite", suite
+				}
+				if code := send(event, id, raw); code != http.StatusNoContent {
+					t.Fatalf("%s redelivery: HTTP %d", id, code)
+				}
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				var events, receipts int
+				if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM delivery_github_events WHERE delivery_id LIKE 'projection-burst-%'),(SELECT count(*) FROM delivery_webhook_receipts WHERE delivery_id LIKE 'projection-burst-%' AND finished_at IS NOT NULL)`).Scan(&events, &receipts); err != nil {
+					return err
+				}
+				if events != 21 || receipts != 21 {
+					t.Fatalf("burst effects: %d ledger rows, %d completed receipts", events, receipts)
+				}
+				return nil
+			})
+			if item := f.item(t, p.Number); item.Head != p.Head || !reflect.DeepEqual(item.Observation.Checks, p.Checks) {
+				t.Fatalf("burst corrupted current CI projection: %+v", item)
+			}
+		})
+	}
+}
 
 type receiptGitHub struct {
 	*metricsFake

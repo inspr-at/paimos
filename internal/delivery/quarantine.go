@@ -125,7 +125,7 @@ func (m *Module) quarantineEvent(ctx context.Context, name, id string, raw []byt
 	}
 	at := m.now()
 	service := db.AllProjects(ctx, "authenticated delivery queue checks")
-	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	err = m.webhookProjectionTx(service, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}

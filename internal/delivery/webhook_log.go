@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,6 +128,12 @@ func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, s
 		var github *crossreview.GitHubHTTPError
 		if errors.As(err, &github) {
 			attrs = append(attrs, "github_status", github.StatusCode)
+		}
+		var postgres *pgconn.PgError
+		if errors.As(err, &postgres) && len(postgres.Code) == 5 && strings.IndexFunc(postgres.Code, func(r rune) bool {
+			return r < '0' || r > '9' && r < 'A' || r > 'Z'
+		}) == -1 {
+			attrs = append(attrs, "sqlstate", postgres.Code)
 		}
 		logger := m.webhookFailures.logger
 		if logger == nil {

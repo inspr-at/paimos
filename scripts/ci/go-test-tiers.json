@@ -6170,6 +6170,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookPermissionNoticeAtomicity","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookProjectionLockBurst","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookRateHintBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookReceiptIntegrityAndClaims","tier":"ESSENTIAL"}
