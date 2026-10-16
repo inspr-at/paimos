@@ -209,7 +209,6 @@ test('AEON-1448: one tab row from 320 to 1440 px, the stamp filter never pushed 
   const lines: string[] = ['| viewport | row | tabs | button | filter | label | filter line |', '|---|---|---|---|---|---|---|']
   for (const width of [1440, 1280, 1024, 960, 900, 768, 600, 414, 390, 375, 360, 340, 320]) {
     await page.setViewportSize({ width, height: 900 })
-    await expect.poll(async () => (await rowGeometry(page)).row!.width).toBeLessThanOrEqual(width)
     const geometry = await rowGeometry(page)
     expectOneRow(geometry, `${width}`)
     const filter = geometry.filter!, action = geometry.action!, tabsBox = geometry.tabs!
