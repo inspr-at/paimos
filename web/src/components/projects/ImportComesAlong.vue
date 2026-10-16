@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import type { ImportCopy, ImportDraft } from '../../lib/importDraft'
 import AppIcon from '../AppIcon.vue'
 
@@ -38,7 +39,7 @@ watch(() => [props.draft?.summary, props.loading], () => { summaryOpen.value = f
         <div class="pv-lab"><b>{{ t.facts }}</b><button v-if="loading || extra" type="button" class="link-btn" :class="{ wait: loading }" :aria-expanded="factsOpen" :tabindex="loading ? -1 : undefined" @click="factsOpen = !factsOpen"><span class="btn-label"><span :aria-hidden="factsOpen || undefined">{{ t.more(extra) }}</span><span :aria-hidden="!factsOpen || undefined">{{ t.fewer }}</span></span></button></div>
         <ul class="pv-facts" :class="{ all: factsOpen }">
           <template v-if="loading"><li v-for="width in ['88%', '80%', '72%']" :key="width" class="sk-li"><span class="sk-row"><span class="skeleton" :style="{ width }" /></span></li></template>
-          <template v-else><li v-for="(fact, index) in facts" :key="index" :class="{ more: index >= FACTS }">{{ fact }}</li></template>
+          <template v-else><li v-for="(fact, index) in facts" :key="index" v-clip-tip :class="{ more: index >= FACTS }">{{ fact }}</li></template>
         </ul>
       </div>
       <p v-if="loading || draft?.messages" class="pv-att"><AppIcon name="paperclip" :size="14" /><span v-if="loading"><span class="sk-row"><span class="skeleton" style="width: 210px; max-width: 100%" /></span></span><span v-else>{{ t.transcript(draft?.messages ?? 0) }}</span></p>

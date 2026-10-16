@@ -33,7 +33,7 @@ const scope = useIdentityScope(fromStart ? () => true : () => can('nodes.write')
 const name = ref(''), key = ref(''), touched = ref(false), group = ref('')
 const kind = ref(''), groups = ref<SharedProjectGroup[]>([]), groupError = ref(''), loadError = ref('')
 const busy = ref(false), conflict = ref(''), error = ref('')
-const problem = computed(() => conflict.value || (name.value.trim() ? projectKeyProblem(key.value) : ''))
+const problem = computed(() => conflict.value || (name.value.trim() && projectKeyProblem(key.value) ? (fromStart ? (key.value ? t.value.keyShape : t.value.keyEmpty) : projectKeyProblem(key.value)) : ''))
 const valid = computed(() => !!scope.owner.value && !!kind.value && !!name.value.trim() && !projectKeyProblem(key.value) && !conflict.value && !busy.value)
 const groupAllowed = computed(() => can('project_groups.read') && can('project_groups.write'))
 
@@ -141,9 +141,10 @@ function submitStart() {
     finishStart(result.project, result.tickets)
   }), {
     failed: cause => {
+      // The sheet speaks the conversation's language, so server wording stays out of it.
       if (cause instanceof APIError && cause.status === 404) { phase.value = 'gone'; return }
-      if (cause instanceof APIError && cause.status === 409) { conflict.value = cause.message; return }
-      error.value = cause instanceof APIError && cause.status < 500 ? cause.message : t.value.failed
+      if (cause instanceof APIError && cause.status === 409) { conflict.value = t.value.keyTaken; return }
+      error.value = cause instanceof APIError && cause.status === 403 ? t.value.denied : t.value.failed
       void nextTick(() => document.getElementById('np-error')?.scrollIntoView({ block: 'nearest' }))
     }, settled: () => { busy.value = false },
   })
