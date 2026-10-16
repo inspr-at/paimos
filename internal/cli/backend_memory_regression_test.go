@@ -4,7 +4,9 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -227,10 +229,10 @@ func runBackendMemoryWorkload(t testing.TB, diagnostics bool) {
 				t.Fatalf("backend %d endpoint %d: allocated context bytes=%d, budget=48 MiB", slot, endpoint, m.TotalBytes)
 			}
 			slices.Sort(values)
-			out := map[string]any{"migration": migration, "postgres": version, "policies": policies, "backend": slot, "endpoint": endpoint, "cold": cold, "idle": warm, "p50_ms": values[7], "p95_ms": values[15]}
+			out := map[string]any{"migration": migration, "postgres": version, "policies": policies, "backend": slot, "endpoint": endpoint, "cold": backendMemorySummary(t, cold), "idle": backendMemorySummary(t, warm), "p50_ms": values[7], "p95_ms": values[15]}
 			if diagnostics {
 				out["process"] = backendProcessMemory(t, ctx, pid)
-				out["plans"] = trace.explain(t, ctx, held[slot].Conn())
+				out["plans"] = trace.explain(t, ctx, held[2].Conn())
 			}
 			raw, err := json.Marshal(out)
 			if err != nil {
@@ -302,7 +304,7 @@ func (m *backendMemoryTrace) explain(t testing.TB, ctx context.Context, conn *pg
 			t.Fatal(err)
 		}
 		var raw json.RawMessage
-		err = tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, MEMORY, FORMAT JSON, TIMING OFF) "+q.sql, append([]any{pgx.QueryExecModeExec}, q.args...)...).Scan(&raw)
+		err = tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, MEMORY, FORMAT JSON, TIMING OFF) "+q.sql, append([]any{pgx.QueryExecModeDescribeExec}, q.args...)...).Scan(&raw)
 		_ = tx.Rollback(ctx)
 		if err != nil {
 			t.Fatalf("request plan diagnostics: %v", err)
@@ -311,7 +313,7 @@ func (m *backendMemoryTrace) explain(t testing.TB, ctx context.Context, conn *pg
 		if err := json.Unmarshal(raw, &plan); err != nil {
 			t.Fatal(err)
 		}
-		clean, err := json.Marshal(backendNumericPlan(plan))
+		clean, err := json.Marshal(backendPlanSummary(q.sql, plan))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -345,32 +347,45 @@ print(json.dumps({'darwin_resident_bytes':buf[8],'darwin_phys_footprint_bytes':b
 	return result
 }
 
-// Exclude SQL predicates, query text, row contents and auth arguments. Keep
-// numeric EXPLAIN evidence and node/relation names from this synthetic DB.
-func backendNumericPlan(value any) any {
-	switch v := value.(type) {
-	case []any:
-		out := make([]any, len(v))
-		for i, x := range v {
-			out[i] = backendNumericPlan(x)
-		}
-		return out
-	case map[string]any:
-		out := map[string]any{}
-		for k, x := range v {
-			switch x.(type) {
-			case map[string]any, []any:
-				out[k] = backendNumericPlan(x)
-			case float64, bool:
-				out[k] = x
-			case string:
-				if k == "Node Type" || k == "Relation Name" || k == "Sort Method" || k == "Sort Space Type" || k == "Join Type" {
-					out[k] = x
+func backendMemorySummary(t testing.TB, raw json.RawMessage) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m, "contexts")
+	return m
+}
+
+func backendPlanSummary(sql string, value any) map[string]any {
+	hash := sha256.Sum256([]byte(sql))
+	result := map[string]any{"query_sha256": fmt.Sprintf("%x", hash)}
+	relations := map[string]float64{}
+	var walk func(any)
+	walk = func(value any) {
+		switch v := value.(type) {
+		case []any:
+			for _, x := range v {
+				walk(x)
+			}
+		case map[string]any:
+			for _, key := range []string{"Memory Used", "Memory Allocated", "Sort Space Used", "Peak Memory Usage", "Temp Read Blocks", "Temp Written Blocks", "Execution Time", "Planning Time"} {
+				if x, ok := v[key].(float64); ok {
+					if prior, _ := result[key].(float64); x > prior {
+						result[key] = x
+					}
 				}
 			}
+			if relation, ok := v["Relation Name"].(string); ok {
+				loops, _ := v["Actual Loops"].(float64)
+				relations[relation] += loops
+			}
+			for _, x := range v {
+				walk(x)
+			}
 		}
-		return out
-	default:
-		return value
 	}
+	walk(value)
+	result["relation_scan_loops"] = relations
+	return result
 }
