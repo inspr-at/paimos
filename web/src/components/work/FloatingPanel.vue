@@ -17,12 +17,15 @@ const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
 const y = ref(-9999)
+// A phone sheet is decided before the first paint, so it never changes form, width or edge while it opens.
+const bottomSheet = () => props.phoneSheet && innerWidth <= 720 && innerHeight > 480
+const bottom = ref(bottomSheet())
+const sheetMax = () => Math.max(160, innerHeight - 48)
 // Until placed (off-screen), the content may take its full height so place() measures it.
-const maxHeight = ref(props.tallest)
+const maxHeight = ref(bottom.value ? sheetMax() : props.tallest)
 const placedHeight = ref<number>()
 const compactWidth = ref(props.width)
 const above = ref(false)
-const bottom = ref(false)
 const scrim = ref<HTMLElement>()
 let placedAnchor: DOMRect | null = null
 
@@ -32,14 +35,12 @@ function place(keepSide = false) {
   if (!props.anchor || !panel.value) return
   const rect = props.anchor.getBoundingClientRect()
   placedAnchor = rect
-  bottom.value = props.phoneSheet && innerWidth <= 720 && innerHeight > 480
+  bottom.value = bottomSheet()
   if (bottom.value) {
-    // Anchored to the bottom edge: a taller menu grows upward and scrolls below 48 px of the screen's top.
-    maxHeight.value = Math.max(160, innerHeight - 48)
+    // The bottom edge holds it (CSS): a taller menu grows upward and scrolls below 48 px of the screen's top.
+    maxHeight.value = sheetMax()
     placedHeight.value = undefined
     above.value = false
-    x.value = 0
-    y.value = Math.round(innerHeight - Math.min(panel.value.scrollHeight, maxHeight.value))
     return
   }
   // A long picker uses a top-anchored frame with its own scrolling body and
@@ -182,7 +183,7 @@ defineExpose({ place })
 <template>
   <Teleport :to="layer">
     <div v-if="bottom" ref="scrim" class="floating-scrim" aria-hidden="true" @click="emit('close', false)" />
-    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom }" role="dialog" :aria-label="label" :style="{ transform: bottom ? 'none' : `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>
@@ -193,12 +194,14 @@ defineExpose({ place })
 .floating:focus { outline: none; }
 .floating.sheet { width: min(960px, max(480px, 64vw)); max-width: calc(100vw - 32px); overflow: hidden; }
 @media (max-width: 600px) { .floating.sheet { width: 100%; max-width: none; border-radius: 0; } }
-.floating.bottom { max-width: none; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
+.floating.bottom { top: auto; bottom: 0; left: 0; max-width: none; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
 .floating-scrim { position: fixed; inset: 0; z-index: 69; background: var(--scrim); }
 @media (prefers-reduced-motion: no-preference) {
   .floating { animation: pop-in .14s cubic-bezier(.2, .7, .2, 1); }
   @keyframes pop-in { from { opacity: 0; margin-top: -4px; } to { opacity: 1; margin-top: 0; } }
   .floating.above { animation-name: pop-in-above; }
+  .floating.bottom { animation-name: sheet-up; }
+  @keyframes sheet-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
   @keyframes pop-in-above { from { opacity: 0; margin-top: 4px; } to { opacity: 1; margin-top: 0; } }
 }
 </style>

@@ -399,7 +399,10 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
         await stable.more.click()
         for (const name of [/^Interrupt/, /^Pause…/, /^Stop…/]) await expect(sessionMenu(page).getByRole('menuitem', { name })).toBeVisible()
         await expect(panel(page).locator('.pane-bar').getByRole('button', { name: /^(Interrupt|Pause|Stop)/ })).toHaveCount(0)
-        await stable.more.click()
+        // AEON-1286: on a phone ⋯ opens a sheet over a scrim; Escape (or the scrim) closes it.
+        if (width <= 720) await page.keyboard.press('Escape')
+        else await stable.more.click()
+        await expect(sessionMenu(page)).toHaveCount(0)
       } },
       { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-sheet-${width}-${look}.png`) }) } },
       { name: 'Details', run: async () => {
