@@ -43,10 +43,11 @@ type projectionLockFailure struct {
 // other deliveries save their receipts before a competing writer takes the
 // tenant fence. TraceQueryEnd observes an actual PostgreSQL lock timeout.
 type projectionLockBarrier struct {
-	once        sync.Once
-	reading     chan struct{}
-	resumeRead  chan struct{}
-	lockFailure chan projectionLockFailure
+	once          sync.Once
+	reading       chan struct{}
+	resumeRead    chan struct{}
+	lockFailure   chan projectionLockFailure
+	countTimeouts atomic.Bool
 }
 
 func (b *projectionLockBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
@@ -63,6 +64,11 @@ func (b *projectionLockBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn
 }
 
 func (b *projectionLockBarrier) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	// Receipt saves retry their own fence timeouts. Parking those here deadlocks
+	// the overlap phase, because this test is not reading lockFailure yet.
+	if !b.countTimeouts.Load() {
+		return
+	}
 	var failure *pgconn.PgError
 	if !errors.As(data.Err, &failure) || failure.Code != "55P03" {
 		return
@@ -102,6 +108,8 @@ func TestDeliveryWebhookProjectionLockBurst(t *testing.T) {
 			barrier := &projectionLockBarrier{reading: make(chan struct{}), resumeRead: make(chan struct{}), lockFailure: make(chan projectionLockFailure)}
 			cfg := f.d.App.Config()
 			cfg.MaxConns = 30
+			// Projection attempts keep this short budget so a real 55P03 is observable.
+			// Receipt ingress widens its own wait and must not fail it.
 			cfg.ConnConfig.RuntimeParams["lock_timeout"] = "100ms"
 			cfg.ConnConfig.Tracer = barrier
 			pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
@@ -156,13 +164,14 @@ func TestDeliveryWebhookProjectionLockBurst(t *testing.T) {
 				select {
 				case code := <-codes:
 					if code != http.StatusNoContent {
-						t.Fatalf("overlapping delivery returned HTTP %d", code)
+						t.Fatalf("overlapping delivery returned HTTP %d; log %s", code, logs.String())
 					}
 				case <-ctx.Done():
 					t.Fatal("overlapping deliveries did not acknowledge their receipts")
 				}
 			}
 
+			barrier.countTimeouts.Store(true)
 			holder, err := f.d.Admin.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)

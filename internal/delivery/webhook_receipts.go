@@ -24,9 +24,10 @@ import (
 )
 
 const (
-	webhookAttemptTimeout = 4 * time.Minute
-	webhookMaxAttempts    = 12
-	webhookProbeTimeout   = 30 * time.Second
+	webhookAttemptTimeout  = 4 * time.Minute
+	webhookMaxAttempts     = 12
+	webhookProbeTimeout    = 30 * time.Second
+	webhookReceiptLockWait = 8 * time.Second
 )
 
 // installationProber is optional. Readers without it keep the per-receipt
@@ -181,8 +182,7 @@ func webhookSubject(name string, e envelope) error {
 }
 
 func (m *Module) saveWebhook(ctx context.Context, name, id string, raw []byte, e envelope) error {
-	service := db.AllProjects(ctx, "verified delivery receipt")
-	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	return m.ingressTx(ctx, "verified delivery receipt", func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
@@ -276,7 +276,7 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 		}
 	} else {
 		receipt.attempts++
-		err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		err = m.ingressTx(ctx, "delivery receipt attempt", func(tx pgx.Tx) error {
 			if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 				return err
 			}
@@ -317,7 +317,7 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 			return m.deferWebhook(ctx, &receipt, step, step, nil)
 		}
 	}
-	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	return m.ingressTx(ctx, "delivery receipt attempt", func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
@@ -365,7 +365,7 @@ func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step
 			return err
 		}
 	}
-	err := db.InTenant(db.AllProjects(ctx, "delivery receipt retry schedule"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	err := m.ingressTx(ctx, "delivery receipt retry schedule", func(tx pgx.Tx) error {
 		// Notice routing rechecks the current linked project and lead under the
 		// same tenant/tree access fence as the final receipt mutation.
 		if permission {
@@ -466,7 +466,7 @@ func (m *Module) checkpointWebhook(ctx context.Context, step string, outcome web
 			return errRead
 		}
 	}
-	return db.InTenant(db.AllProjects(ctx, "delivery receipt checkpoint"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	return m.ingressTx(ctx, "delivery receipt checkpoint", func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
