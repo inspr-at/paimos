@@ -232,10 +232,12 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 	if len(roots) > 4096 {
 		return out, fail(413, "series root bound exceeded")
 	}
-	// A union of recorded parent edges and current identity edges discovers the
-	// bounded candidate graph. Current state, estimates and outcome membership
-	// are never sampled. Event snapshots choose the actual tree at each instant.
-	rows, err = tx.Query(ctx, `WITH RECURSIVE edges(id,parent_id) AS MATERIALIZED (
+	nodeIDs := []string{}
+	if len(roots) > 0 {
+		// A union of recorded parent edges and current identity edges discovers the
+		// bounded candidate graph. Current state, estimates and outcome membership
+		// are never sampled. Event snapshots choose the actual tree at each instant.
+		rows, err = tx.Query(ctx, `WITH RECURSIVE edges(id,parent_id) AS MATERIALIZED (
  SELECT id,parent_id FROM nodes
  UNION SELECT e.node_id,p.id::uuid FROM events e CROSS JOIN LATERAL (VALUES(e.before->>'parent_id'),(e.after->>'parent_id')) p(id)
  WHERE e.node_id IS NOT NULL AND p.id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
@@ -243,77 +245,78 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
  walk(root,id) AS (SELECT n.id,n.id FROM nodes n WHERE n.id=ANY($1::uuid[]) UNION SELECT w.root,e.id FROM walk w JOIN edges e ON e.parent_id=w.id),
  bounded AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001)
  SELECT b.root::text,n.id::text,n.key,n.kind_id::text,k.slug FROM bounded b JOIN nodes n ON n.id=b.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`, roots)
-	if err != nil {
-		return out, err
-	}
-	pairs := 0
-	for rows.Next() {
-		pairs++
-		var root, id, key, kind, slug string
-		if err := rows.Scan(&root, &id, &key, &kind, &slug); err != nil {
-			rows.Close()
+		if err != nil {
 			return out, err
 		}
-		out.metadata[id] = historicalNode{ID: id, Key: key, Kind: kind, Work: isWorkKind(slug)}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return out, err
-	}
-	if pairs > 50000 {
-		return out, fail(413, "series work scope budget exceeded")
-	}
-	nodeIDs := []string{}
-	for id := range out.metadata {
-		nodeIDs = append(nodeIDs, id)
-	}
-	sort.Strings(nodeIDs)
-	rows, err = tx.Query(ctx, `SELECT id::text,slug FROM node_kinds ORDER BY id LIMIT 1001`)
-	if err != nil {
-		return out, err
-	}
-	kindCount := 0
-	for rows.Next() {
-		var id, slug string
-		if err := rows.Scan(&id, &slug); err != nil {
-			rows.Close()
+		pairs := 0
+		for rows.Next() {
+			pairs++
+			var root, id, key, kind, slug string
+			if err := rows.Scan(&root, &id, &key, &kind, &slug); err != nil {
+				rows.Close()
+				return out, err
+			}
+			out.metadata[id] = historicalNode{ID: id, Key: key, Kind: kind, Work: isWorkKind(slug)}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
 			return out, err
 		}
-		out.kinds[id] = isWorkKind(slug)
-		kindCount++
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return out, err
-	}
-	if kindCount > 1000 {
-		return out, fail(413, "series kind bound exceeded")
-	}
-	rows, err = tx.Query(ctx, `SELECT e.id,e.at,e.node_id::text,e.after,
+		if pairs > 50000 {
+			return out, fail(413, "series work scope budget exceeded")
+		}
+		for id := range out.metadata {
+			nodeIDs = append(nodeIDs, id)
+		}
+		sort.Strings(nodeIDs)
+		rows, err = tx.Query(ctx, `SELECT id::text,slug FROM node_kinds ORDER BY id LIMIT 1001`)
+		if err != nil {
+			return out, err
+		}
+		kindCount := 0
+		for rows.Next() {
+			var id, slug string
+			if err := rows.Scan(&id, &slug); err != nil {
+				rows.Close()
+				return out, err
+			}
+			out.kinds[id] = isWorkKind(slug)
+			kindCount++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return out, err
+		}
+		if kindCount > 1000 {
+			return out, fail(413, "series kind bound exceeded")
+		}
+		rows, err = tx.Query(ctx, `SELECT e.id,e.at,e.node_id::text,e.after,
  CASE WHEN e.after ? 'state' THEN aeon_work_status_category(e.after->>'state',k.field_schema) END
  FROM events e JOIN nodes n ON n.id=e.node_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  WHERE e.node_id=ANY($1::uuid[]) AND e.at<=$2 AND (e.type LIKE 'node.%' OR e.type LIKE 'import.%' OR e.type LIKE 'status_autopilot.%')
  AND (e.after ? 'state' OR e.after ? 'fields' OR e.after ? 'parent_id' OR e.after ? 'deleted_at') ORDER BY e.at,e.id LIMIT 20001`, nodeIDs, now)
-	if err != nil {
-		return out, err
-	}
-	for rows.Next() {
-		e := sourceEvent{Family: "node"}
-		if err := rows.Scan(&e.ID, &e.At, &e.Node, &e.After, &e.Bucket); err != nil {
-			rows.Close()
+		if err != nil {
 			return out, err
 		}
-		if err := out.add(e); err != nil {
-			rows.Close()
+		for rows.Next() {
+			e := sourceEvent{Family: "node"}
+			if err := rows.Scan(&e.ID, &e.At, &e.Node, &e.After, &e.Bucket); err != nil {
+				rows.Close()
+				return out, err
+			}
+			if err := out.add(e); err != nil {
+				rows.Close()
+				return out, err
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
 			return out, err
 		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return out, err
+
 	}
 	rows, err = tx.Query(ctx, `SELECT id,at,node_id::text,after FROM events WHERE at<=$2 AND ((node_id=$1 AND type='goal.updated') OR (type LIKE 'harness.%' AND after ? 'id' AND after ? 'phase' AND (after->>'ticket_node_id'=ANY($3::text[]) OR before->>'ticket_node_id'=ANY($3::text[])))) ORDER BY at,id LIMIT 20001`, goal, now, nodeIDs)
 	if err != nil {
