@@ -89,6 +89,9 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
         ...(params.get('order') === 'desc' && has_more && last ? { next_cursor: Buffer.from(JSON.stringify(key(last))).toString('base64url') } : {}) } })
     }
     if (options.tier && path === '/api/harness-sessions') return route.fulfill({ json: { items: [{ id: 'tier-session', project_id: 'p-aeon', agent_principal_id: 'agent-1', ticket_node_id: 'n-a1', harness: 'codex', host: 'test', phase: 'working', activity: 'busy', heartbeat_at: new Date().toISOString(), created_at: '2026-10-02T08:00:00Z', management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'service_tier_v1'], process_ownership: ownership, revision: 1, row_version: 1, project: { id: 'p-aeon', key: 'AEON', title: 'Paimos Aeon' } }], next_cursor: null } })
+    // A workspace without sessions answers an empty list. Unmocked, discovery fails and the desk
+    // rightly reports tier requests as unanswered (AEON-1406), which these desks do not claim.
+    if (path === '/api/harness-sessions' && method === 'GET') return route.fulfill({ json: { items: [], next_cursor: null } })
     if (options.tier && path.endsWith('/tier')) return route.fulfill({ json: tier })
     if (options.tier && path.endsWith('/tier/requests/tier-request-1/decision')) {
       const body = request.postDataJSON(); calls.push({ path, body })
