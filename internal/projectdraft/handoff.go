@@ -67,9 +67,15 @@ func (m *Module) handoff(w http.ResponseWriter, r *http.Request) {
 		writePage(w, http.StatusTooManyRequests, lang, pageBusy)
 		return
 	}
-	// The server has no body read timeout; this request gets its own.
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(readDeadline))
-	r.Body = http.MaxBytesReader(w, r.Body, maxWire)
+	// Size and time bound the whole body before it is parsed.
+	if err := httpapi.BufferRequestBodyTimeout(w, r, maxWire, readDeadline); err != nil {
+		if errors.Is(bodyError(err), errTooLarge) {
+			writePage(w, http.StatusRequestEntityTooLarge, lang, pageTooLarge)
+		} else {
+			writePage(w, http.StatusBadRequest, lang, pageUnreadable)
+		}
+		return
+	}
 	raw, err := formPayload(r, contentType)
 	if errors.Is(err, errTooLarge) {
 		writePage(w, http.StatusRequestEntityTooLarge, lang, pageTooLarge)
@@ -108,7 +114,9 @@ func (m *Module) handoff(w http.ResponseWriter, r *http.Request) {
 		writePage(w, http.StatusServiceUnavailable, lang, pageUnavailable)
 		return
 	}
-	w.Header().Set("Location", "/new-project#draft="+capability)
+	// The language lets the assistant speak the conversation's language
+	// from its first frame; it is no secret and travels with the capability.
+	w.Header().Set("Location", "/new-project#draft="+capability+"&lang="+payload.Language)
 	w.WriteHeader(http.StatusSeeOther)
 }
 

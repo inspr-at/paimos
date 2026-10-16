@@ -88,8 +88,10 @@ func (f fixture) handoff(t *testing.T, doc map[string]any) string {
 		t.Fatalf("handoff status %d: %s", w.Code, w.Body.String())
 	}
 	location := w.Header().Get("Location")
-	capability, ok := strings.CutPrefix(location, "/new-project#draft=")
-	if !ok || !capabilityPattern.MatchString(capability) {
+	fragment, ok := strings.CutPrefix(location, "/new-project#")
+	values, err := url.ParseQuery(fragment)
+	capability := values.Get("draft")
+	if !ok || err != nil || !capabilityPattern.MatchString(capability) || values.Get("lang") != "de" || len(values) != 2 {
 		t.Fatalf("Location %q is not the assistant with a fragment capability", location)
 	}
 	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Referrer-Policy") != "no-referrer" {

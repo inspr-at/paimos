@@ -7,7 +7,7 @@ paths:
       summary: 'Hand a START conversation to Paimos as a project draft (AEON-1441)'
       servers: [{url: /}]
       security: []
-      description: 'A top-level browser form POST from START (navigation, never fetch; no CORS). One field, payload, holds the strict v1 JSON document of at most 512 KiB. The draft lands in the one import tenant the instance configures (AEON_IMPORT_TENANT_SLUG); the payload, a session cookie or the caller can never choose a tenant, project or destination. Cookies are not read. Attempts are rate-limited per client address (the transport peer, or X-Forwarded-For behind AEON_TRUSTED_PROXIES), and live drafts are capped in count and bytes. Success is 303 to /new-project#draft=<capability>: 256 random bits in the fragment, so no server or proxy log records them; only their SHA-256 is stored. Drafts expire after 30 minutes and are deleted by a scheduled sweep. Refusals are small HTML pages in the conversation or browser language with Cache-Control no-store and Referrer-Policy no-referrer.'
+      description: 'A top-level browser form POST from START (navigation, never fetch; no CORS). One field, payload, holds the strict v1 JSON document of at most 512 KiB. The draft lands in the one import tenant the instance configures (AEON_IMPORT_TENANT_SLUG); the payload, a session cookie or the caller can never choose a tenant, project or destination. Cookies are not read. Attempts are rate-limited per client address (the transport peer, or X-Forwarded-For behind AEON_TRUSTED_PROXIES), and live drafts are capped in count and bytes. Success is 303 to /new-project#draft=<capability>&lang=<de|en>: 256 random bits in the fragment, so no server or proxy log records them; only their SHA-256 is stored. Drafts expire after 30 minutes and are deleted by a scheduled sweep. Refusals are small HTML pages in the conversation or browser language with Cache-Control no-store and Referrer-Policy no-referrer.'
       requestBody:
         required: true
         content:
@@ -24,7 +24,7 @@ paths:
               properties:
                 payload: {type: string, maxLength: 524288, description: 'JSON text of ProjectDraftPayloadV1.'}
       responses:
-        '303': {description: 'Draft stored; Location is /new-project#draft=<capability>.', headers: {Location: {schema: {type: string}}}}
+        '303': {description: 'Draft stored; Location is /new-project#draft=<capability>&lang=<de|en>.', headers: {Location: {schema: {type: string}}}}
         '400': {description: 'The payload field is missing or does not match payload v1 (HTML page).'}
         '413': {description: 'The payload is larger than 512 KiB (HTML page).'}
         '415': {description: 'Not a form submission (HTML page).'}
