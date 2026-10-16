@@ -603,6 +603,9 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 				return errForbidden
 			}
 		}
+		// Desk replies address the asking principal, not one harness alias.
+		// The alias above must still resolve to this caller; the query below
+		// retains both recipient and exact-session ownership checks.
 		rows, err := tx.Query(r.Context(), `WITH RECURSIVE ancestors AS (
  SELECT id,reply_to_id FROM inbox_compat_messages WHERE project_id=$1::uuid AND id=$7::uuid
  UNION SELECT c.id,c.reply_to_id FROM inbox_compat_messages c JOIN ancestors a ON c.id=a.reply_to_id WHERE c.project_id=$1::uuid
@@ -621,7 +624,7 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
  AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp())))
  AND (($3 AND ($9::uuid IS NULL OR c.id IN (SELECT id FROM session_thread)))
       OR (NOT $3 AND (c.recipient_session_id IS NULL OR c.recipient_session_id=$9::uuid)))
- AND ($5='' OR c.recipient_address=$5)
+ AND ($5='' OR c.recipient_address=$5 OR (NOT $3 AND c.key_digest='desk/'||c.id::text))
  AND ($7::uuid IS NULL OR c.id IN (SELECT id FROM thread))
  AND (NOT $8 OR (c.is_action_request AND NOT EXISTS(SELECT 1 FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text)))
  ORDER BY c.sent_event_id `+order+` LIMIT $6`, project, after, inspect, p.ID, to, limit, thread, pending, sessionID, admin)

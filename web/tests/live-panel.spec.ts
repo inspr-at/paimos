@@ -187,13 +187,18 @@ test('a move answer that lands after a newer move elsewhere leaves the newer epi
   let release!: () => void
   const answer = new Promise<void>(resolve => { release = resolve })
   let moved = false
-  const { page, data, errors, close } = await openOne(browser, '/p/PHAROS/PHAROS-14', {
+  const { page, data, live, errors, close } = await openOne(browser, '/p/PHAROS/PHAROS-14', {
     hold: ({ path, method }) => method === 'POST' && path === '/api/nodes/n-4/move' ? { until: answer, computed: () => { moved = true } } : undefined,
   })
   try {
     const ws = panel(page)
     const noEpic = ws.getByRole('button', { name: 'No parent. Choose a parent' })
     await expect(noEpic).toBeVisible()
+    // A stream opened after the move starts at "latest" and misses it.
+    // Wait for the node subscriber, rather than an earlier agent subscriber.
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as { fixtureStreamCompletions: { nodes: boolean }[] }).fixtureStreamCompletions.some(item => item.nodes),
+    )).toBe(true)
     await ws.getByRole('button', { name: 'More actions' }).click()
     await page.getByRole('menuitem', { name: 'Move to another parent…' }).click()
     await page.getByLabel('Find a parent').fill('guarded')
@@ -202,16 +207,25 @@ test('a move answer that lands after a newer move elsewhere leaves the newer epi
     await expect.poll(() => moved).toBe(true)
     const node = data.nodes.find(n => n.id === 'n-4')!
     expect(node.parent_id).toBe('n-epic')
-    const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/nodes/n-4' && response.request().method() === 'GET')
+    // Record both server moves even if the client only reads the second one.
+    live.eventFor(node.id)
     Object.assign(node, { parent_id: 'p-pharos', updated_at: new Date(Date.parse(node.updated_at) + 60_000).toISOString() })
-    await read
-    await page.waitForTimeout(300)
+    const newer = { parent_id: node.parent_id, revision: node.updated_at }
+    const shown = () => page.evaluate(async id => {
+      const { rowStore } = await import('/src/lib/rowStore.ts' /* @vite-ignore */)
+      const row = rowStore.shown(id)
+      return { parent_id: row?.parent_id, revision: row?.updated_at }
+    }, node.id)
+    await live.delivered(page, live.eventFor(node.id))
+    // A shared cached row can satisfy an event without another GET, and
+    // "No parent" was already visible initially. Bind to the displayed copy.
+    await expect.poll(shown).toEqual(newer)
     await expect(noEpic).toBeVisible()
     release()
     await expect(page.getByText('PHAROS-14 moved to PHAROS-10 Guarded multi-cloud provisioning')).toBeVisible()
-    await page.waitForTimeout(300)
+    expect(await shown()).toEqual(newer)
     await expect(noEpic).toBeVisible()
     await expect(ws.locator('.epic-chip')).toHaveCount(0)
     expect(errors).toEqual([])
-  } finally { await close() }
+  } finally { release(); await close() }
 })

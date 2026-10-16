@@ -9,7 +9,7 @@ set -euo pipefail
 # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
 pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a}"
 
-for tool in docker curl python3 openssl; do
+for tool in docker curl python3 openssl node; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 
@@ -80,10 +80,34 @@ else
   echo 'Building release image for smoke gate'
   node scripts/assemble-image.mjs "$image"
 fi
-docker run --rm --entrypoint /bin/sh "$image" -c '
-  test -s /usr/share/doc/aeon/NOTICE &&
-  apk list --installed chromium | grep -Eq "^chromium-152[.]0[.]7977[.]82-r0 .*[(]BSD-3-Clause[)] \\[installed\\]$" &&
-  apk list --installed tini | grep -Eq "^tini-0[.]19[.]0-r3 .*[(]MIT[)] \\[installed\\]$"
+apk_pins="$(node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { parseRuntimeApkPins } from "./scripts/runtime-apk-pins.mjs";
+const pins = parseRuntimeApkPins(readFileSync("scripts/Dockerfile.runtime", "utf8"));
+process.stdout.write(pins.chromium.join(" ") + "\n" + pins.tini + "\n");
+')"
+chromium_allow="${apk_pins%%$'\n'*}"
+tini_pin="${apk_pins#*$'\n'}"
+tini_pin="${tini_pin%%$'\n'*}"
+case "$chromium_allow" in ''|*[!0-9.r\ -]*) echo 'refusing unsafe runtime APK allow-list' >&2; exit 1 ;; esac
+case "$tini_pin" in ''|*[!0-9.r-]*) echo 'refusing unsafe runtime APK allow-list' >&2; exit 1 ;; esac
+docker run --rm \
+  -e "AEON_CHROMIUM_ALLOW=$chromium_allow" \
+  -e "AEON_TINI_PIN=$tini_pin" \
+  --entrypoint /bin/sh \
+  "$image" -c '
+  set -eu
+  test -s /usr/share/doc/aeon/NOTICE
+  ver=$(tr -d "\n" < /etc/aeon-chromium-apk)
+  ok=0
+  for candidate in $AEON_CHROMIUM_ALLOW; do
+    if [ "$ver" = "$candidate" ]; then ok=1; fi
+  done
+  test "$ok" = 1
+  esc=$(printf "%s" "$ver" | sed "s/[.]/[.]/g")
+  apk list --installed chromium | grep -Eq "^chromium-${esc} .*[(]BSD-3-Clause[)] \\[installed\\]$"
+  tini_esc=$(printf "%s" "$AEON_TINI_PIN" | sed "s/[.]/[.]/g")
+  apk list --installed tini | grep -Eq "^tini-${tini_esc} .*[(]MIT[)] \\[installed\\]$"
 ' || { echo 'runtime quote dependency notice or license check failed' >&2; exit 1; }
 echo 'runtime: quote dependency pins, licenses and NOTICE OK'
 docker network create "$network" >/dev/null

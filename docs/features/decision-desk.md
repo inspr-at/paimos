@@ -89,6 +89,24 @@ in the log; the new typed correction names its `replaces` answer ID. The inbox
 outbox state `delivered` means dispatched, while `receipt_state` reports `queued`,
 `handed_off`, or `failed`. CLI status distinguishes dispatch from receiver proof.
 
+Desk answers stay pending while the asking agent is offline (AEON-1432).
+Neither `no_listener` nor an elapsed inbox deadline discards a Desk answer.
+The next principal inbox read, exact-session listen, project inbox read or SSE
+subscription returns the pending replies in sent-event order. Address-filtered
+project listeners include these principal-addressed answers after verifying the
+alias belongs to the caller, while retaining exact-session ownership. Unacknowledged
+replies can replay after a crash with the same message and answer IDs; pickup
+events and receipt confirmation are idempotent. Acknowledged answers leave the
+pending inbox. Ended generations still use only the verified successor path.
+`aeon ask status ID` reports `answered · delivered` after first pickup, or
+`answered · not yet picked up (since TIME)` while waiting. The additive
+`picked_up_at` field records first pickup; `receipt_state` separately records
+receiver confirmation. An answer still unpicked thirty minutes after inbox
+acceptance emits one durable `delivery.stall_alerted` event for the coordinator,
+without sending a notification to the person. Dispatcher restarts and replicas
+retain that one-time alert marker on the existing pending effect. The default
+versus PPM account-key mismatch involves separate principals and is unchanged.
+
 The question dispatcher (AEON-1111) wakes on committed answer, reused-answer and
 session-ended receipt notifications. Reused answers create immediately due inbox
 and comment effects, without another grace window. A single tenant-scoped read

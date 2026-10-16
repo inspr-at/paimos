@@ -69,7 +69,8 @@ test('German profile: session tabs, composer and code controls use the app langu
   await expect(panel.getByRole('tab', { name: /Chat|Messages/ })).toBeVisible()
   await expect(panel.locator('.code-copy')).toHaveText('Copy')
   await capture(page, info, 'session-chat', async () => {
-    await expectStableControls({ controls: { composer, send: panel.getByRole('button', { name: 'Send', exact: true }) }, interactions: [{ name: 'write German message', run: async () => { await composer.fill(longGerman); await composer.blur() } }, { name: 'clear draft', run: async () => { await composer.fill(''); await composer.blur() } }], scrollAreas: { panel } })
+    // AEON-1438: the field grows upward with a long draft; the send action and the tabs stay.
+    await expectStableControls({ controls: { send: panel.getByRole('button', { name: 'Send', exact: true }), chat: panel.getByRole('tab', { name: /Chat|Messages/ }) }, interactions: [{ name: 'write German message', run: async () => { await composer.fill(longGerman); await composer.blur() } }, { name: 'clear draft', run: async () => { await composer.fill(''); await composer.blur() } }], scrollAreas: { panel } })
   })
 })
 

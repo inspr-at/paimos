@@ -656,12 +656,30 @@ export function tierWeights(manifest, rows) {
   })))
 }
 
+// Sixteen is the smallest full-gate bin count whose measured tierTiming pack
+// stays inside the 15-minute budget (25% of the 20-minute hang guard, including
+// setup). Essential PR matrices grow from four up to this cap. Full mode and
+// non-PR events stay fixed here so the merge-queue literal matches the plan.
+export const fullWebShardCount = 16
+export const fullWebShards = Array.from({ length: fullWebShardCount }, (_, index) => index + 1)
+
+// Fail when any projected shard crosses the budget. The plan itself still
+// returns fitsBudget false for an indivisible file, so callers can fail wide.
+export function assertWebShardBudget(plan) {
+  const over = plan?.projections?.filter(bin => !(bin.seconds <= plan.budgetSeconds)) ?? []
+  if (!plan?.fitsBudget || over.length) {
+    const worst = over.reduce((best, bin) => bin.seconds > (best?.seconds ?? -Infinity) ? bin : best, over[0])
+    throw new Error(`Web shard ${worst?.shard ?? '?'} predicts ${Number(worst?.seconds).toFixed(1)}s, over the ${plan?.budgetSeconds}s budget`)
+  }
+  return plan
+}
+
 // Size the same whole-file LPT packing used by the runner. Reserve 25% of
 // the 20-minute job cap, including two minutes for setup and collection.
 // An indivisible heavy file cannot be fixed by adding bins: fail wide to the
 // established full gate and expose its projection rather than dropping cases.
 export function webShardPlan(rows, policy, { mode = 'essential', timeoutSeconds = 1200,
-  headroom = 0.25, overheadSeconds = 120, minimum = 4, maximum = 12 } = {}) {
+  headroom = 0.25, overheadSeconds = 120, minimum = 4, maximum = fullWebShardCount } = {}) {
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || !Number.isFinite(headroom) || headroom < 0 || headroom >= 1 ||
       !Number.isFinite(overheadSeconds) || overheadSeconds < 0 || !Number.isInteger(minimum) || minimum < 1 ||
       !Number.isInteger(maximum) || maximum < minimum || maximum > 64) throw new Error('Invalid web shard budget')

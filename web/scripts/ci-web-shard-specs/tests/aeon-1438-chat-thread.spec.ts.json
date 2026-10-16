@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 12.5,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/aeon-1438-chat-thread.spec.ts",
+    "listedTests": 17,
+    "weightSeconds": 37.731708,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

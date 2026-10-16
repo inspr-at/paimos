@@ -1809,6 +1809,7 @@ components:
         effect_data: {$ref: '#/components/schemas/QuestionEffectData'}
         receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
         receipt_failure: {type: string}
+        picked_up_at: {type: string, format: date-time, description: 'First inbox pickup of this answer. Receipt confirmation remains separate; retries retain the same message and answer identities.'}
         delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
         doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
     QuestionReuse:
