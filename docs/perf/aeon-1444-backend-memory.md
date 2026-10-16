@@ -128,3 +128,7 @@ and failed for the intended reason: 42,655 KiB planner memory exceeds the
 same remote run. Only the added memory-budget test row is changed in the
 shared tier manifest; the new test file is covered by the existing CLI audit
 slice. No model review, push to origin or deployment was performed.
+
+The final merge-main static run on `5167bf00a` exited 0: all 42 checks passed,
+with no optional skips, in 159.46 seconds. The first run found an operator host
+name in this document; that name was removed before the successful rerun.
