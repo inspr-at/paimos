@@ -109,8 +109,8 @@ function finishStart(node: WorkNode, tickets: number, announce = true) {
   dropDraft()
   projects.addCreatedProject(node)
   if (announce) toast(t.value.created(tickets))
-  void router.push(`/p/${encodeURIComponent(projectRouteKey(node.key, node.fields))}/tickets`)
-  emit('close')
+  // Leaving /new-project closes the sheet; closing first would race it back to Projects.
+  void router.push(`/p/${encodeURIComponent(projectRouteKey(node.key, node.fields))}/tickets`).finally(() => emit('close'))
 }
 function submit() {
   if (fromStart) { submitStart(); return }
