@@ -385,6 +385,7 @@ func TestRequestBodyDeadlineResponsesAndStreaming(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var admitted atomic.Bool
+			staged := make(chan struct{})
 			server := httptest.NewServer(RequestBodyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				finish, err := BeginRequestBodyStream(w, r, 8, UploadBodyReadTimeout)
 				if err != nil {
@@ -399,6 +400,7 @@ func TestRequestBodyDeadlineResponsesAndStreaming(t *testing.T) {
 					WriteError(w, 400, "upload failed")
 					return
 				}
+				close(staged)
 				if err := finish(true); err != nil {
 					WriteError(w, 400, "upload failed")
 					return
@@ -407,7 +409,35 @@ func TestRequestBodyDeadlineResponsesAndStreaming(t *testing.T) {
 				w.WriteHeader(204)
 			})))
 			defer server.Close()
-			response, err := server.Client().Post(server.URL, "application/octet-stream", strings.NewReader(tc.body))
+			reader, writer := io.Pipe()
+			defer writer.Close()
+			defer reader.Close()
+			type result struct {
+				response *http.Response
+				err      error
+			}
+			done := make(chan result, 1)
+			client := server.Client()
+			client.Timeout = 5 * time.Second // Hang guard, not timing evidence.
+			go func() {
+				response, err := client.Post(server.URL, "application/octet-stream", reader)
+				done <- result{response, err}
+			}()
+			if _, err := io.WriteString(writer, tc.body[:2]); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-staged:
+				// The server consumed a prefix before the client sent the rest.
+			case <-time.After(5 * time.Second):
+				t.Fatal("stream was buffered before staging; hang guard")
+			}
+			if _, err := io.WriteString(writer, tc.body[2:]); err != nil {
+				t.Fatal(err)
+			}
+			_ = writer.Close()
+			got := <-done
+			response, err := got.response, got.err
 			if err != nil {
 				t.Fatal(err)
 			}
