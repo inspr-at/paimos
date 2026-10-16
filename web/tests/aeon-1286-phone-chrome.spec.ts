@@ -11,7 +11,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
-import { mockLeadFlow, LEAD_SESSION } from './lead-flow-fixtures'
+import { mockLeadFlow, LEAD_AGENT, LEAD_SESSION, NOW } from './lead-flow-fixtures'
 import { controlStability } from './control-stability'
 
 type Size = { width: number; height: number }
@@ -94,6 +94,31 @@ async function openLeadChat(page: Page, size: Size, look: 'light' | 'dark') {
     if (['/api/models', '/api/approvals', '/api/agent-accounts', '/api/agent-accounts/capacity', '/api/agent-accounts/capacity/schedule'].includes(path)) return route.fulfill({ json: [] })
     return route.fallback()
   })
+  // The lead's thread, so Chat shows its composer (the lead fixture serves no messages).
+  const at = (minutes: number) => new Date(Date.parse(NOW) - minutes * 60_000).toISOString()
+  const post = (n: number, body: string, mine: boolean, minutes: number) => ({
+    id: `3e000000-0000-4000-8000-${String(n).padStart(12, '0')}`, project: 'p-pharos', body, reply_to: null, sent_event_id: 100 + n, created_at: at(minutes),
+    is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', human_resolution_outcome: null,
+    ...(mine ? { sender_principal_id: me.id, recipient_principal_id: LEAD_AGENT, to: 'claude:lead', recipient_session_id: LEAD_SESSION, sender_label: me.name }
+      : { sender_principal_id: LEAD_AGENT, recipient_principal_id: me.id, to: 'paimos:markus', sender_session_id: LEAD_SESSION, sender_label: 'Claude lead' }),
+  })
+  const thread = [
+    post(1, 'Morning. The nightly is green; PHAROS-11 waits for its review.', false, 50),
+    post(2, 'Take the review findings first, then the release check.', true, 44),
+    post(3, 'On it. Three findings, all small; a Codex worker has them.', false, 40),
+    post(4, 'Merged PHAROS-11. Shall I start the release check now?', false, 12),
+  ]
+  await page.route(/\/api\/projects\/[^/]+\/(messages|message-targets)(\?|$)/, route => {
+    const url = new URL(route.request().url())
+    if (route.request().method() !== 'GET') return route.fallback()
+    if (url.pathname.endsWith('/message-targets')) return route.fulfill({ json: [] })
+    const after = Number(url.searchParams.get('after') ?? 0)
+    const items = url.searchParams.get('newest_first') === 'true' ? [...thread].reverse().filter(m => !after || m.sent_event_id < after) : thread.filter(m => m.sent_event_id > after)
+    return route.fulfill({ json: { items, next_after: items.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
+  })
+  await page.route('**/api/inbox/message-status?*', route => route.fulfill({ json: { items: [] } }))
+  await page.route(/\/api\/chat-threads\/[^/]+\/messages(\?|$)/, route => route.fulfill({ json: { contract: 'chat-v1', items: [], has_more_before: false, has_more_after: false, before_cursor: null, after_cursor: null, snapshot_cursor: 'c', migration_epoch: '0' } }))
+  await page.route('**/api/chat-sessions/*/thread', route => route.fulfill({ json: { contract: 'chat-v1', conversation_id: '7c000000-0000-4000-8000-000000001286', role: { contract: 'chat-v1' }, revision: '2', binding_epoch: '1', readiness: { state: 'offline', capabilities: [], reason: 'session_offline' } } }))
   await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
   await expect(tabOf(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
   await expect(panelOf(page).getByRole('textbox', { name: /^Message to / })).toBeVisible()
