@@ -4,7 +4,6 @@ package goals
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
