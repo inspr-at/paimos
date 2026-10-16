@@ -41,7 +41,11 @@ import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionRequests from './SessionRequests.vue'
 import SessionTabs from './SessionTabs.vue'
-import { createPanelOpening, leadTab, openingTab, panelModelLine, panelQueryTab, PANEL_TAB_LABEL, panelTabs, type PanelLayout, type PanelTab } from '../../lib/leadPanel'
+import { createPanelOpening, leadTab, openingTab, panelModelLine, panelQueryTab, PANEL_TAB_LABEL, panelTabs, type LeadTab, type PanelLayout, type PanelTab } from '../../lib/leadPanel'
+import AgentStateLabel from './AgentStateLabel.vue'
+import HarnessMark from './HarnessMark.vue'
+import { modelProvider } from './sessionRow'
+import { TIER_NAME } from '../../lib/serviceTier'
 import { leadActionAvailable, leadActionReason } from '../../lib/lead'
 import { openLeadPause } from '../../lib/leadOverlay'
 import { usePreference } from '../../lib/preferences'
@@ -233,7 +237,16 @@ function selectTab(next: PanelTab) {
   else workerPreference.save({ last: next }, 0)
   if (route.query.tab !== undefined || route.hash === '#next-up') { const query = { ...route.query }; delete query.tab; void router.replace({ query, hash: '' }) }
 }
-function pinTab() { if (isLead.value) leadPreference.save({ ...leadPreference.value.value, pinned: pinned.value === 'lead' ? null : 'lead' }, 0) }
+// AEON-1286: the default tab is a menu choice for the tab on screen ("Open on Chat by default"),
+// never a pin beside the tabs. Events and Terminal cannot be a default; there the item names the
+// current default, so it can still be cleared. Questions and problems still open where they need you.
+const pinChoice = computed<LeadTab | null>(() => isLead.value ? leadTab(tab.value) ?? pinned.value : null)
+const pinNote = computed(() => !pinChoice.value ? '' : pinned.value === pinChoice.value ? 'Unless something needs you'
+  : pinned.value ? `Now ${PANEL_TAB_LABEL[pinned.value]} is your default` : 'Now it opens on the last tab used')
+function pinTab() {
+  const choice = pinChoice.value
+  if (isLead.value && choice) leadPreference.save({ ...leadPreference.value.value, pinned: pinned.value === choice ? null : choice }, 0)
+}
 function closeActions(restore: boolean) {
   const anchor = actionsAnchor.value
   actionsAnchor.value = null
@@ -329,6 +342,17 @@ const setupLine = computed(() => {
 })
 const recentRunModel = (item: typeof recentRuns.value[number]) => panelModelLine({ harness: s.value?.harness ?? 'codex', model: runModel(item), reasoning_effort: '' }, agents.models)
 const modelLine = computed(() => s.value ? panelModelLine(reported.value || s.value, agents.models, props.view?.model) : '')
+// AEON-1286 phone head: ← · avatar · name over "state · model" · ⋯. The state is said once:
+// line 2 shows it; the avatar is artwork there, and screen readers hear it in the heading.
+// The composer is the panel's foot only while Chat shows it.
+const chatting = computed(() => tab.value === 'chat' && !!props.view && !props.loading && !reported.value?.watch && !nativeKnown.value)
+const phoneMedia = window.matchMedia('(max-width: 720px)')
+const phoneHead = ref(phoneMedia.matches)
+const syncPhoneHead = () => { phoneHead.value = phoneMedia.matches }
+phoneMedia.addEventListener('change', syncPhoneHead)
+onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhoneHead))
+const modelMarkProvider = computed(() => modelProvider(reported.value?.model?.trim() || props.view?.model?.trim() || ''))
+const tierNote = computed(() => nativeKnown.value ? nativeBrowserReason : tierState.value?.active_tier ? `Now ${TIER_NAME[tierState.value.active_tier]}` : '')
 
 const identityTitle = computed(() => [
   props.view?.ticket?.title || props.view?.name,
@@ -596,23 +620,46 @@ function panelKey(event: KeyboardEvent) {
   const edge = event.shiftKey ? controls[0] : controls.at(-1)
   if (event.target === edge || !controls.includes(document.activeElement as HTMLElement)) { event.preventDefault(); (event.shiftKey ? controls.at(-1) : controls[0])?.focus({ preventScroll: true }) }
 }
+// The ⋯ menu in groups (AEON-1286 design): control · the session's process · how it opens ·
+// what it is asked to change · the panel's layout. A hairline separates the groups present.
+const menuGroups = computed(() => {
+  const view = props.view, watched = !!reported.value?.watch
+  if (!view) return []
+  return [
+    !watched,
+    terminalAtOpen.value || (viewerAtOpen.value && viewer.value.kind === 'person') || showRecover.value || showRemove.value || (!watched && !nativeKnown.value && !!agentRecovery.action(view.session)),
+    !!pinChoice.value || (!watched && !serviceTiers.unavailable(view.session)),
+    requestsOffered.value || managedControls.value,
+    true,
+  ]
+})
+const menuSeparator = (group: number) => menuGroups.value[group] && menuGroups.value.slice(0, group).some(Boolean)
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
 <template>
-  <aside ref="root" class="session-panel" :class="{ composing, docked, sheet, full: panelLayout === 'full', wide: panelLayout === 'wide' }" :data-layout="panelLayout" aria-label="Session details" tabindex="-1" @keydown="panelKey" @focusin="chatFocus" @focusout="chatBlur">
+  <aside ref="root" class="session-panel" :class="{ composing, docked, sheet, full: panelLayout === 'full', wide: panelLayout === 'wide', chatting }" :data-layout="panelLayout" aria-label="Session details" tabindex="-1" @keydown="panelKey" @focusin="chatFocus" @focusout="chatBlur">
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
       <div class="pane-bar">
+        <!-- Phones: ← before the avatar closes the panel (A4); wider screens keep ✕ at the end. -->
+        <button type="button" class="pane-icon pane-back" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="arrow-left" :size="20" /></button>
         <div v-if="view && !loading" class="pane-identity">
-          <AgentGlyph :view="view" :size="28" />
-          <h2 class="pane-title" tabindex="0" :title="identityTitle" :data-tip="identityTitle">
-            <span class="name">{{ view.ticket?.key || view.name }}</span><template v-if="view.ticket?.title || isLead"><span class="title-separator"> · </span><span class="title-detail">{{ view.ticket?.title || view.projectTitle }}</span></template>
-            <span class="sr-only"> · {{ view.status.label }} · {{ modelLine }}</span>
-          </h2>
+          <AgentGlyph :view="view" :size="phoneHead ? 40 : 28" aria-hidden="true" />
+          <div class="pane-heading">
+            <h2 class="pane-title" tabindex="0" :title="identityTitle" :data-tip="identityTitle">
+              <span class="name">{{ view.ticket?.key || view.name }}</span><template v-if="view.ticket?.title || isLead"><span class="title-separator"> · </span><span class="title-detail">{{ view.ticket?.title || view.projectTitle }}</span></template>
+              <span class="sr-only"> · {{ view.status.label }}<template v-if="modelLine"> · {{ modelLine }}</template></span>
+            </h2>
+            <!-- The heading already says this to screen readers; on phones it is the one visible state. -->
+            <p class="pane-state" aria-hidden="true">
+              <AgentStateLabel :state="view.status.state" :label="view.status.label" />
+              <span v-if="modelLine" class="pane-model"><span class="state-separator"> · </span><span class="model-mark"><HarnessMark :harness="view.session.harness" :provider="modelMarkProvider" :size="10" /></span>{{ modelLine }}</span>
+            </p>
+          </div>
         </div>
         <div v-else class="pane-identity" role="status">{{ loading ? 'Reading session…' : 'Session unavailable' }}</div>
-        <SessionTabs v-if="view && !loading && menuReady" :selected="tab" :lead="leadAtOpen" :terminal="terminalAtOpen" :watch="!!reported?.watch" :pinned="pinned" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)" @select="selectTab" />
+        <SessionTabs v-if="view && !loading && menuReady" :selected="tab" :lead="leadAtOpen" :terminal="terminalAtOpen" :watch="!!reported?.watch" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)" @select="selectTab" />
         <div class="pane-buttons" role="group" aria-label="Panel actions">
           <button v-if="sidebarAvailable" type="button" class="pane-icon pane-layout" aria-label="Sessions list" :aria-pressed="panelLayout === 'side'" :data-tip="panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list'" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side')"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="18" /></button>
           <button type="button" class="pane-icon pane-layout" aria-label="Full screen" :aria-pressed="panelLayout === 'full'" :data-tip="fullScreenTip" :aria-keyshortcuts="shortcutKeys('agents.panel.fullscreen').join(' ') || undefined" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full')"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="18" /></button>
@@ -624,25 +671,25 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <p v-if="leadAtOpen && why" class="sr-only">Opened on {{ PANEL_TAB_LABEL[openedTab] }}: {{ why.replace('Session is', 'Details is') }}</p>
       <ManagedSessionControls v-if="view && !loading && !reported?.watch && !nativeKnown" ref="managed" overflow :session="reported || view.session" :now="now" :run-status="view.run?.status" />
       <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
-      <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" :width="nativeKnown ? 440 : 360" @close="closeActions">
+      <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" :width="nativeKnown ? 440 : 360" phone-sheet @close="closeActions">
         <div class="panel-menu" :class="{ 'phone-full': panelLayout === 'full', 'native-menu': nativeKnown }" role="menu" aria-label="More session actions">
-          <button type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full'); closeActions(true)"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="16" /><span>{{ panelLayout === 'full' ? 'Exit full screen' : 'Full screen' }}</span><KeyCap k="shift" /><KeyCap k="E" /></button>
-          <button v-if="sidebarAvailable" type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side'); closeActions(true)"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="16" /><span>{{ panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list' }}</span></button>
-          <div class="phone-panel-choices" role="group" aria-label="Session views">
-            <button v-for="choice in availableTabs" :key="choice" type="button" role="menuitemradio" :aria-checked="choice === tab" class="panel-menu-item" @click="selectTab(choice); closeActions(true)"><span>{{ PANEL_TAB_LABEL[choice] }}</span><AppIcon v-if="choice === tab" name="check" :size="14" /></button>
-          </div>
           <template v-if="!reported?.watch">
             <button type="button" role="menuitem" class="panel-menu-item" :disabled="!!interruptReason" @click="interrupt(); closeActions(true)"><AppIcon name="interrupt" :size="16" /><span>Interrupt<small>{{ interruptReason || 'Ends its current step' }}</small></span></button>
             <button type="button" role="menuitem" class="panel-menu-item" :disabled="!!pauseReason || !!(s && leads.busy[s.project_id])" @click="pauseOrResume(actionsAnchor!); closeActions(false)"><AppIcon :name="resumeOffered ? 'play' : 'pause'" :size="16" /><span>{{ resumeOffered ? 'Resume' : isLead ? 'Pause…' : 'Pause' }}<small>{{ pauseReason || (resumeOffered ? 'Through the current start checks' : 'Workers finish their step') }}</small></span></button>
             <button type="button" role="menuitem" class="panel-menu-item danger-ghost" :disabled="!!stopReason" @click="stopSession(actionsAnchor!); closeActions(false)"><AppIcon name="stop" :size="16" /><span>Stop…<small>{{ stopReason || 'Opens the confirmation' }}</small></span></button>
             <button v-if="managedControls" type="button" role="menuitem" class="panel-menu-item" :disabled="!!settingReason('steer')" @click="steer"><AppIcon name="send" :size="16" /><span>Steer…<small>{{ settingReason('steer') || 'Change the next step' }}</small></span></button>
           </template>
+          <div v-if="menuSeparator(1)" class="panel-menu-separator" role="separator" />
           <button v-if="terminalAtOpen" type="button" role="menuitem" class="panel-menu-item" disabled><AppIcon name="terminal" :size="16" /><span>{{ nativeAction?.label || 'Control unavailable' }}<small>{{ nativeAction?.reason || nativeReason }}</small></span></button>
-          <a v-if="viewerAtOpen && viewer.kind === 'person'" role="menuitem" class="panel-menu-item" :href="terminalLink?.href" :aria-disabled="!terminalLink" :tabindex="terminalLink ? 0 : -1" target="_blank" rel="noopener noreferrer" @click="terminalLink ? closeActions(false) : $event.preventDefault()"><AppIcon name="terminal" :size="16" /><span>Open live terminal</span><AppIcon name="external" :size="14" /></a>
+          <a v-if="viewerAtOpen && viewer.kind === 'person'" role="menuitem" class="panel-menu-item" :href="terminalLink?.href" :aria-disabled="!terminalLink" :tabindex="terminalLink ? 0 : -1" target="_blank" rel="noopener noreferrer" @click="terminalLink ? closeActions(false) : $event.preventDefault()"><AppIcon name="terminal" :size="16" /><span>Open live terminal<small>{{ view.session.host ? `${view.session.host} · opens a new tab` : 'Opens a new tab' }}</small></span><AppIcon name="external" :size="14" /></a>
           <button v-if="showRecover" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :title="nativeKnown ? nativeBrowserReason : undefined" @click="recovery?.open(actionsAnchor ?? undefined); closeActions(false)"><AppIcon name="wrench" :size="16" /><span>Recover<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :aria-label="`Remove ${view.name}`" @click="removal?.remove(); closeActions(false)"><AppIcon name="trash" :size="16" /><span>{{ quick ? 'Remove' : 'Remove…' }}<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
-          <button v-if="isLead" type="button" role="menuitemcheckbox" :aria-checked="pinned === 'lead'" class="panel-menu-item" @click="pinTab(); closeActions(true)"><AppIcon name="pin" :size="16" /><span>Open on Lead by default</span><AppIcon v-if="pinned === 'lead'" name="check" :size="14" /></button>
-          <button v-if="!reported?.watch && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" @click="pickTier(actionsAnchor); closeActions(false)"><AppIcon name="gauge" :size="16" /><span>Change tier…<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
+          <button v-if="!reported?.watch && !nativeKnown && agentRecovery.action(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); closeActions(false)"><AppIcon name="refresh" :size="16" /><span>{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
+          <div v-if="menuSeparator(2)" class="panel-menu-separator" role="separator" />
+          <!-- A checkbox stays open: its tick and its line change in place, nothing below moves. -->
+          <button v-if="pinChoice" type="button" role="menuitemcheckbox" :aria-checked="pinned === pinChoice" class="panel-menu-item" @click="pinTab"><AppIcon name="pin" :size="16" /><span>Open on {{ PANEL_TAB_LABEL[pinChoice] }} by default<small>{{ pinNote }}</small></span><AppIcon name="check" :size="14" class="menu-tick" :class="{ on: pinned === pinChoice }" /></button>
+          <button v-if="!reported?.watch && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" @click="pickTier(actionsAnchor); closeActions(false)"><AppIcon name="gauge" :size="16" /><span>Change tier…<small v-if="tierNote">{{ tierNote }}</small></span></button>
+          <div v-if="menuSeparator(3)" class="panel-menu-separator" role="separator" />
           <template v-if="requestsOffered">
             <button type="button" role="menuitem" class="panel-menu-item" @click="openRequest('rename_request')"><AppIcon name="edit" :size="16" /><span>Rename session…<small>{{ view.name }} applies it at its next step</small></span></button>
             <button type="button" role="menuitem" class="panel-menu-item" @click="openRequest('model_request')"><AppIcon name="sliders" :size="16" /><span>Change model or effort…<small>Now {{ modelLine || 'unknown' }}</small></span></button>
@@ -650,7 +697,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-if="managedControls">
             <button v-for="setting in (['rename', 'model', 'effort'] as const)" :key="setting" type="button" role="menuitem" class="panel-menu-item" :disabled="!!settingReason(setting)" @click="editSetting(setting)"><AppIcon name="edit" :size="16" /><span>{{ setting === 'rename' ? 'Name…' : setting === 'model' ? 'Model…' : 'Effort…' }}<small>{{ settingReason(setting) || (setting === 'rename' ? view.name : setting === 'model' ? modelLine : view.session.reasoning_effort) }}</small></span></button>
           </template>
-          <button v-if="!reported?.watch && !nativeKnown && agentRecovery.action(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); closeActions(false)"><AppIcon name="refresh" :size="16" /><span>{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
+          <div v-if="menuSeparator(4)" class="panel-menu-separator" role="separator" />
+          <button type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full'); closeActions(true)"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="16" /><span>{{ panelLayout === 'full' ? 'Exit full screen' : 'Full screen' }}</span><KeyCap k="shift" /><KeyCap k="E" /></button>
+          <button v-if="sidebarAvailable" type="button" role="menuitem" class="panel-menu-item" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side'); closeActions(true)"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="16" /><span>{{ panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list' }}</span></button>
+          <div class="phone-panel-choices" role="group" aria-label="Session views">
+            <button v-for="choice in availableTabs" :key="choice" type="button" role="menuitemradio" :aria-checked="choice === tab" class="panel-menu-item" @click="selectTab(choice); closeActions(true)"><span>{{ PANEL_TAB_LABEL[choice] }}</span><AppIcon v-if="choice === tab" name="check" :size="14" /></button>
+          </div>
         </div>
       </FloatingPanel>
       <FloatingPanel v-if="requestAnchor && view && !loading" :anchor="requestAnchor" align="end" :width="344" :label="requestKind === 'rename_request' ? 'Rename session' : 'Change model or effort'" cycle field-escape @close="closeRequest">
@@ -955,22 +1007,39 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .panel-menu-item:disabled { opacity: .6; cursor: not-allowed; }
 .panel-menu-item:hover:not(:disabled) { background: var(--row-hover); }
 .panel-menu-item:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.panel-menu-separator { height: 1px; margin: 4px 10px; background: var(--line); }
+.panel-menu-item.danger-ghost:not(:disabled), .panel-menu-item.danger-ghost:not(:disabled) > svg { color: var(--danger); }
+/* The tick keeps its slot, so checking it moves nothing. */
+.panel-menu-item > .menu-tick { color: var(--teal-ink); visibility: hidden; }
+.panel-menu-item > .menu-tick.on { visibility: visible; }
 .phone-panel-choices { display: none; }
+.pane-back, .pane-state { display: none; }
+.pane-heading { display: grid; min-width: 0; }
 .live-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .live-unavailable { padding: 24px; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .live-pane :deep(.replay-controls:has(.btn-label > span:first-child[aria-hidden="false"]) .replay-history > button), .live-pane :deep(.replay-controls:has(.btn-label > span:first-child[aria-hidden="false"]) .replay-history > span[aria-hidden="true"]) { display: none; }
 .live-pane :deep(.expert-bar) { height: 44px; padding-block: 4px; border-bottom: 0; }
 @container pane (max-width: 450px) { .pane-layout { display: none; } .pane-bar { gap: 16px; } }
+/* AEON-1286 phone head (A4): ← · avatar · name over "state · model" · ⋯, then the flat
+   menu on its own row. Everything else lives in ⋯, which opens as a sheet from the bottom. */
 @media (max-width: 720px) {
-  .pane-bar { height: 92px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 48px 44px; gap: 0 8px; padding: env(safe-area-inset-top) 12px 0; box-sizing: content-box; }
-  .pane-identity { min-width: 0; }
-  .pane-title { font-size: 13px; }
-  .pane-bar > :deep(.session-tabs) { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
-  .pane-buttons { grid-column: 2; grid-row: 1; }
-  .pane-layout { display: none; }
+  .panel-head { padding-top: env(safe-area-inset-top); }
+  .pane-bar { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; grid-template-rows: 56px auto; gap: 0 8px; height: auto; padding: 0 4px 0 0; }
+  .pane-back { display: inline-grid; grid-column: 1; grid-row: 1; color: var(--ink); }
+  .pane-identity { grid-column: 2; grid-row: 1; gap: 10px; min-width: 0; }
+  .pane-title { font-size: 15px; line-height: 20px; }
+  .pane-state { display: flex; align-items: center; min-width: 0; margin: 1px 0 0; overflow: hidden; white-space: nowrap; font-size: 12.5px; line-height: 18px; color: var(--ink-2); }
+  .pane-state :deep(.agent-state-label) { flex: none; font-size: inherit; line-height: inherit; }
+  .pane-model { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+  .model-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 4px 0 2px; vertical-align: -4px; border-radius: 5px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
+  .pane-buttons { grid-column: 3; grid-row: 1; }
+  .pane-layout, .pane-close { display: none; }
   .pane-icon { width: 44px; height: 44px; }
-  .full .pane-bar { height: 48px; grid-template-rows: 48px; }
+  .pane-bar > :deep(.session-tabs) { grid-column: 1 / -1; grid-row: 2; justify-self: start; margin: 6px 8px; }
+  .full .pane-bar { grid-template-rows: 56px; }
   .full .pane-bar > :deep(.session-tabs) { display: none; }
+  .panel-menu-item { gap: 12px; min-height: 56px; font-size: 15px; }
+  .panel-menu-item small { font-size: 12px; }
   .panel-menu.phone-full .phone-panel-choices { display: grid; }
   .live-pane :deep(.retained-size) { display: none; }
   .live-pane :deep(.retained-value) { white-space: nowrap; }
@@ -981,4 +1050,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .scroll :deep(.btn), .project-link { min-width: 44px; min-height: 44px; }
 }
 @media (pointer: coarse) { .pane-icon { width: 44px; height: 44px; } .pane-bar { min-height: 48px; } }
+/* Chat runs to the screen's foot: the composer pads the home indicator itself, so the
+   panel adds no band of its own under it (AEON-1286). */
+.session-panel.chatting.sheet, .session-panel.chatting.full { padding-bottom: 0; }
+/* Short landscape phones: the sheet takes the whole screen inside the side safe areas; head
+   and menu share one line, so the thread keeps most of the height (AEON-1286). */
+@media (max-height: 480px) and (min-width: 721px) {
+  .session-panel.sheet { z-index: 40; inset: 0; width: auto; border: 0; border-radius: 0; box-shadow: none; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .session-panel.sheet.chatting { padding-bottom: 0; }
+  .session-panel.sheet .pane-layout { display: none; }
+}
 </style>

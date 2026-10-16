@@ -7,7 +7,9 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false })
+// `phoneSheet`: on a portrait phone the menu opens as a sheet from the bottom edge, over a scrim,
+// its items in thumb reach (AEON-1286); elsewhere it stays anchored to its trigger.
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, phoneSheet: false })
 defineOptions({ inheritAttrs: false })
 const floatingID = `floating-${getCurrentInstance()!.uid}`
 const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
@@ -20,6 +22,8 @@ const maxHeight = ref(props.tallest)
 const placedHeight = ref<number>()
 const compactWidth = ref(props.width)
 const above = ref(false)
+const bottom = ref(false)
+const scrim = ref<HTMLElement>()
 let placedAnchor: DOMRect | null = null
 
 // Below the trigger, content grows downward. Above it, reserve the opening
@@ -28,6 +32,16 @@ function place(keepSide = false) {
   if (!props.anchor || !panel.value) return
   const rect = props.anchor.getBoundingClientRect()
   placedAnchor = rect
+  bottom.value = props.phoneSheet && innerWidth <= 720 && innerHeight > 480
+  if (bottom.value) {
+    // Anchored to the bottom edge: a taller menu grows upward and scrolls below 48 px of the screen's top.
+    maxHeight.value = Math.max(160, innerHeight - 48)
+    placedHeight.value = undefined
+    above.value = false
+    x.value = 0
+    y.value = Math.round(innerHeight - Math.min(panel.value.scrollHeight, maxHeight.value))
+    return
+  }
   // A long picker uses a top-anchored frame with its own scrolling body and
   // pinned actions. Its location never depends on the selected role's preview.
   if (props.sheet) {
@@ -69,7 +83,8 @@ function childOverlay(target: Node | null) {
 }
 function outside(event: PointerEvent) {
   const target = event.target as Node
-  if (panel.value?.contains(target) || props.anchor?.contains(target) || childOverlay(target)) return
+  // The scrim closes on its click, which it also consumes, so the tap never reaches the page below.
+  if (panel.value?.contains(target) || props.anchor?.contains(target) || childOverlay(target) || target === scrim.value) return
   emit('close', false)
 }
 // A full-page capture scrolls the page away and back inside one turn. Closing
@@ -166,7 +181,8 @@ defineExpose({ place })
 
 <template>
   <Teleport :to="layer">
-    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div v-if="bottom" ref="scrim" class="floating-scrim" aria-hidden="true" @click="emit('close', false)" />
+    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>
@@ -177,6 +193,8 @@ defineExpose({ place })
 .floating:focus { outline: none; }
 .floating.sheet { width: min(960px, max(480px, 64vw)); max-width: calc(100vw - 32px); overflow: hidden; }
 @media (max-width: 600px) { .floating.sheet { width: 100%; max-width: none; border-radius: 0; } }
+.floating.bottom { max-width: none; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
+.floating-scrim { position: fixed; inset: 0; z-index: 69; background: var(--scrim); }
 @media (prefers-reduced-motion: no-preference) {
   .floating { animation: pop-in .14s cubic-bezier(.2, .7, .2, 1); }
   @keyframes pop-in { from { opacity: 0; margin-top: -4px; } to { opacity: 1; margin-top: 0; } }
