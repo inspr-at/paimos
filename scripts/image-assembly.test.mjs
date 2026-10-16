@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -204,6 +205,78 @@ test('runtime evidence names the prepared bytes and their recipe, and nothing el
     `- runtime manifest: \`${closure.digest}\``, `- config: \`${closure.config_digest}\``,
     `- layer diff IDs: \`sha256:${sha256('evidence')}\``,
     `- recipe \`scripts/Dockerfile.runtime\` sha256 \`${evidence.recipe_sha256}\``, ''].join('\n'));
+  assert.equal(runtimeSummary({ ...evidence, chromium_apk: '155.0.8059.39-r0' }).includes('- installed chromium: `155.0.8059.39-r0`'), true);
+});
+
+function tarRegular(name, content) {
+  const data = Buffer.from(content);
+  const header = Buffer.alloc(512);
+  header.write(name);
+  header.write('0000644\0', 100);
+  header.write('0000000\0', 108);
+  header.write('0000000\0', 116);
+  header.write(data.length.toString(8).padStart(11, '0') + '\0', 124);
+  header.write('00000000000\0', 136);
+  header.write('        ', 148);
+  header[156] = 48;
+  header.write('ustar\0', 257);
+  header.write('00', 263);
+  let sum = 0;
+  for (const byte of header) sum += byte;
+  header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+  const padded = (512 - (data.length % 512)) % 512;
+  return Buffer.concat([header, data, Buffer.alloc(padded), Buffer.alloc(1024)]);
+}
+function ociWithLayers(path, layers) {
+  mkdirSync(join(path, 'blobs/sha256'), { recursive: true });
+  const blob = (bytes, extra = {}) => {
+    const id = `sha256:${sha256(bytes)}`;
+    writeFileSync(join(path, 'blobs/sha256', id.slice(7)), bytes);
+    return { digest: id, size: bytes.length, ...extra };
+  };
+  const stored = layers.map(layer => blob(layer.bytes, { mediaType: layer.mediaType }));
+  const config = blob(Buffer.from(JSON.stringify({ architecture: 'arm64', os: 'linux', rootfs: { type: 'layers', diff_ids: [`sha256:${sha256('marked')}`] } })));
+  const manifest = blob(Buffer.from(JSON.stringify({
+    config: { digest: config.digest, size: config.size },
+    layers: stored.map(({ digest: id, size, mediaType }) => ({ digest: id, size, mediaType })),
+  })));
+  writeFileSync(join(path, 'index.json'), JSON.stringify({ manifests: [{ digest: manifest.digest, size: manifest.size }] }));
+  return { digest: manifest.digest, config_digest: config.digest };
+}
+
+test('AEON-1450 runtime evidence records the installed chromium APK and rejects anything off the allow-list', () => {
+  const version = '155.0.8059.39-r0';
+  const pins = `FROM alpine:3.24@sha256:${'a'.repeat(64)}\n"chromium=${version}" "tini=0.19.0-r3"\n"chromium=152.0.7977.82-r0" "tini=0.19.0-r3"\n`;
+  const marked = (content, { empty = false, huge = false } = {}) => {
+    const path = fixture();
+    writeFileSync(join(path, runtimeRecipe), pins);
+    const layout = join(path, 'runtime');
+    if (huge) {
+      ociWithLayers(layout, [{ bytes: gzipSync(tarRegular('etc/other', 'x')), mediaType: 'application/vnd.oci.image.layer.v1.tar+gzip' }]);
+      const index = JSON.parse(readFileSync(join(layout, 'index.json'), 'utf8'));
+      const manifestPath = join(layout, 'blobs/sha256', index.manifests[0].digest.slice(7));
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      manifest.layers[0].size = 2 * 1024 * 1024;
+      const bytes = Buffer.from(JSON.stringify(manifest));
+      const id = `sha256:${sha256(bytes)}`;
+      writeFileSync(join(layout, 'blobs/sha256', id.slice(7)), bytes);
+      writeFileSync(join(layout, 'index.json'), JSON.stringify({ manifests: [{ digest: id, size: bytes.length }] }));
+    } else {
+      const payload = empty ? tarRegular('etc/other', 'x') : tarRegular('etc/aeon-chromium-apk', content);
+      ociWithLayers(layout, [{ bytes: gzipSync(payload), mediaType: 'application/vnd.oci.image.layer.v1.tar+gzip' }]);
+    }
+    return { path, layout };
+  };
+  const good = marked(`${version}\n`);
+  const evidence = runtimeEvidence(good.layout, 'linux/arm64', good.path);
+  assert.equal(evidence.chromium_apk, version);
+  assert.equal(runtimeSummary(evidence).includes(`- installed chromium: \`${version}\``), true);
+  const off = marked('151.0.0.0-r0\n');
+  assert.throws(() => runtimeEvidence(off.layout, 'linux/arm64', off.path), /not on the allow-list/);
+  const missing = marked('', { empty: true });
+  assert.throws(() => runtimeEvidence(missing.layout, 'linux/arm64', missing.path), /no installed chromium record/);
+  const skipped = marked('', { huge: true });
+  assert.throws(() => runtimeEvidence(skipped.layout, 'linux/arm64', skipped.path), /no installed chromium record/);
 });
 
 test('runtime CLI hands the digest to later steps and the job output, and prints the closure', () => {
