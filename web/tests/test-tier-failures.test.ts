@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { loadManifest as loadWebPolicy } from '../scripts/ci-web-shard.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -242,17 +241,16 @@ test('native planning regression reuses one collected snapshot for unchanged-tre
   const directory=mkdtempSync(resolve(tmpdir(),'aeon-planning-snapshot-'))
   const hook=resolve(directory,'fixture.mjs'),calls=resolve(directory,'collections.txt')
   const collector=new URL('../../scripts/test-tiers/collect.mjs',import.meta.url).href
-  const manifest=JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url),'utf8'))
-  const policy=loadWebPolicy()
-  const optional=new Set(policy.groups.filter(group=>group.gate===false).flatMap(group=>group.specs.map(spec=>spec.file)))
-  const essential=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
-  const nightly=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&optional.has(row.file))
-  assert.ok(essential);assert.ok(nightly)
-  const wrapper=`export * from ${JSON.stringify(`${collector}?collection-count-fixture`)};
-import {appendFileSync} from 'node:fs';
+  const manifest=fileURLToPath(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url))
+  // The declared catalogue keeps the recorded drift files and a deferred nightly.
+  // A two-row stand-in makes the full gate report every other row as stale.
+  // Reading Playwright's list here exceeds this regression's hang guard.
+  const real=`${collector}?collection-count-fixture`
+  const wrapper=`export * from ${JSON.stringify(real)};
+import {appendFileSync,readFileSync} from 'node:fs';
 export const collectWeb = () => {
   appendFileSync(${JSON.stringify(calls)},'collection\\n');
-  return ${JSON.stringify({tests:[essential,nightly]})};
+  return {tests:JSON.parse(readFileSync(${JSON.stringify(manifest)},'utf8')).tests};
 };`
   writeFileSync(hook,`import {registerHooks} from 'node:module';
 registerHooks({load(url,context,next) {
