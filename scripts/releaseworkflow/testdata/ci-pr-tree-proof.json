@@ -27,7 +27,7 @@
     "path": ".github/workflows/ci.yml"
   },
   "jobs": {
-    "total_count": 40,
+    "total_count": 44,
     "jobs": [
       {
         "name": "tier-plan",
@@ -586,6 +586,78 @@
       },
       {
         "name": "web-shard (12)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (13)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (14)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (15)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (16)",
         "run_attempt": 1,
         "status": "completed",
         "conclusion": "success",
