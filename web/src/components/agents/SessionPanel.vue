@@ -40,7 +40,7 @@ import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionTabs from './SessionTabs.vue'
-import { leadTab, openingTab, panelModelLine, panelQueryTab, PANEL_TAB_LABEL, panelTabs, type PanelLayout, type PanelTab } from '../../lib/leadPanel'
+import { createPanelOpening, leadTab, openingTab, panelModelLine, panelQueryTab, PANEL_TAB_LABEL, panelTabs, type PanelLayout, type PanelTab } from '../../lib/leadPanel'
 import { leadActionAvailable, leadActionReason } from '../../lib/lead'
 import { openLeadPause } from '../../lib/leadOverlay'
 import { usePreference } from '../../lib/preferences'
@@ -194,10 +194,13 @@ const nativeAction = computed<TerminalActionView | null>(() => {
 let nativeRead = 0, nativePanel = ''
 let nativeReady: Promise<void> = Promise.resolve()
 watch([() => s.value?.project_id, () => s.value?.id, owner, () => s.value?.heartbeat_at], (_keys, _old, cleanup) => {
-  const read = ++nativeRead, selected = s.value, panel = `${owner.value}/${selected?.project_id}/${selected?.id}`
+  const read = ++nativeRead, selected = s.value
+  // AEON-1439: the menu is fixed once per opening. A refresh that briefly drops
+  // the session or the identity keeps it; the same pair back reads again.
+  if (!selected || !owner.value) { if (!nativePanel) menuReady.value = true; return }
+  const panel = `${owner.value}/${selected.project_id}/${selected.id}`
   const fresh = panel !== nativePanel; nativePanel = panel
   if (fresh) { native.value = null; nativeKnown.value = false; terminalAtOpen.value = false; menuReady.value = false; leadAtOpen.value = false; viewerAtOpen.value = false; nativeReason.value = 'Reading the session’s live capabilities…' }
-  if (!selected || !owner.value) { menuReady.value = true; return }
   const abort = new AbortController(); cleanup(() => abort.abort())
   const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(3000)])
   nativeReady = (async () => {
@@ -236,16 +239,25 @@ function closeActions(restore: boolean) {
   if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
 }
 function showQuestion(id: string) { selectTab('chat'); questionFocus.value = ''; void nextTick(() => { questionFocus.value = id }) }
+// AEON-1439: one opening per panel open (another person or another session).
+// Refreshes, polls and identity re-reads never choose again, never blank `why`
+// and never move the tab a person picked.
+const openings = createPanelOpening()
+// The menu's latest read: a heartbeat or a brief drop can replace the read an opening started with.
+async function menuSettled() { let ready: Promise<void>; do { ready = nativeReady; await ready } while (ready !== nativeReady) }
 watch([() => s.value?.id, owner], async () => {
-  const mine = ++opening, selected = s.value, who = owner.value
-  if (!selected || !who) return
+  const selected = s.value, who = owner.value, key = openings.begin(who, selected?.id)
+  if (!key || !selected) return
+  const mine = ++opening
   questionFocus.value = ''; why.value = ''
   const scope = projection.watchProjects({ project: selected.project_id })
   try {
     // nativeReady owns the opening lead read too. A second loadLead here can
     // discard that read before the fixed opening menu captures its Lead item.
-    await Promise.all([leadPreference.ready, workerPreference.ready, nativeReady, ensurePermissions(selected.project_id), projection.refresh()])
-    if (mine !== opening || selected.id !== s.value?.id || who !== owner.value) return
+    await Promise.all([leadPreference.ready, workerPreference.ready, menuSettled(), ensurePermissions(selected.project_id), projection.refresh()])
+    if (mine !== opening) return
+    // Missing while the reads returned (another person or session would have begun its own opening): open on the next sight.
+    if (selected.id !== s.value?.id || who !== owner.value) { openings.abandon(key); return }
     const ids = projection.workersOf(selected.project_id, selected.id)
     const workers = agents.views.filter(v => ids?.has(v.session.id))
     const choice = openingTab({ lead: isLead.value, forced: panelQueryTab(route.query.tab, isLead.value), asksYou: hasQuestion.value,
@@ -256,12 +268,16 @@ watch([() => s.value?.id, owner], async () => {
     if ((route.hash === '#next-up' || props.section === 'next-up') && isLead.value) tab.value = openedTab.value = 'lead'
   } finally { scope() }
 }, { immediate: true })
-watch(() => [route.query.tab, route.hash, props.section], () => {
-  if (props.section === 'next-up' && isLead.value) { tab.value = openedTab.value = 'lead'; why.value = 'Next up, from the queue count' }
-  const forced = panelQueryTab(route.query.tab, isLead.value)
+// Only a link or a Next up request that changed chooses again; any other route
+// change leaves the person's tab alone (AEON-1439).
+watch([() => String(route.query.tab ?? ''), () => route.hash, () => props.section], ([query, hash, section], [lastQuery, lastHash, lastSection]) => {
+  if (section === 'next-up' && lastSection !== 'next-up' && isLead.value) { tab.value = openedTab.value = 'lead'; why.value = 'Next up, from the queue count' }
+  const forced = query !== lastQuery || hash !== lastHash ? panelQueryTab(route.query.tab, isLead.value) : null
   if (forced && availableTabs.value.includes(forced)) { tab.value = forced; openedTab.value = forced; why.value = route.hash === '#next-up' ? 'Next up, from the queue count' : 'from this link' }
 })
-watch(isLead, value => { if (!value && ['lead', 'session'].includes(tab.value)) tab.value = 'overview' })
+// A session still shown whose lead record names another session stopped being
+// the lead; a refresh that briefly drops either keeps the tab (AEON-1439).
+watch(isLead, value => { if (!value && s.value && lead.value && ['lead', 'session'].includes(tab.value)) tab.value = 'overview' })
 onBeforeUnmount(() => { opening++ })
 useVisualViewport(root)
 watch([owner, () => s.value?.id], async () => {
@@ -474,9 +490,14 @@ watch(() => s.value?.id, async id => {
   thread.value?.scrollTo({ top: 0 })
   await agents.refreshAgentRuns(s.value.agent_principal_id)
 }, { immediate: true })
-watch([() => s.value?.id, () => auth.identity?.tenant.id, () => auth.identity?.principal.id, () => props.sheet], async (_next, previous) => {
+// Per-person state resets for another person only; an identity re-read that
+// briefly has no identity keeps the same person's tab (AEON-1439).
+let shownTo = ''
+watch([() => s.value?.id, () => auth.identity?.tenant.id, () => auth.identity?.principal.id, () => props.sheet], async () => {
   actionsAnchor.value = null; composing.value = false
-  if (previous?.length && (_next[1] !== previous[1] || _next[2] !== previous[2])) { tab.value = 'overview'; unread.value = 0 }
+  const person = auth.identity ? `${auth.identity.tenant.id}/${auth.identity.principal.id}` : ''
+  if (person && shownTo && person !== shownTo) { tab.value = 'overview'; unread.value = 0 }
+  if (person) shownTo = person
   const id = s.value?.id, owner = `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`
   await nextTick()
   if (id !== s.value?.id || owner !== `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`) return
@@ -574,7 +595,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <button type="button" class="pane-icon pane-close" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="18" /></button>
         </div>
       </div>
-      <p v-if="isLead && why" class="sr-only">Opened on {{ PANEL_TAB_LABEL[openedTab] }}: {{ why.replace('Session is', 'Details is') }}</p>
+      <!-- The menu's lead state at opening, so a refresh that briefly drops the session never rewrites the line (AEON-1439). -->
+      <p v-if="leadAtOpen && why" class="sr-only">Opened on {{ PANEL_TAB_LABEL[openedTab] }}: {{ why.replace('Session is', 'Details is') }}</p>
       <ManagedSessionControls v-if="view && !loading && !reported?.watch && !nativeKnown" ref="managed" overflow :session="reported || view.session" :now="now" :run-status="view.run?.status" />
       <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
       <FloatingPanel v-if="actionsAnchor && view && !loading" :anchor="actionsAnchor" align="end" label="More session actions" :width="nativeKnown ? 440 : 360" @close="closeActions">

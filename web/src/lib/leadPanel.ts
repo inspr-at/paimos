@@ -45,6 +45,24 @@ export function openingTab(input: { forced?: PanelTab | null; lead: boolean; ask
   const last = leadTab(input.last)
   return { tab: last ?? 'lead', why: last ? 'last used · no default set' : 'Lead first' }
 }
+// AEON-1439: the opening choice runs once per panel open, for another person or
+// another session. A read that briefly drops the session or the identity and
+// brings back the same pair is a refresh, never an opening. An opening that could
+// not finish (its session was missing when its reads returned) is abandoned, so
+// the next sight of that pair opens it.
+export function createPanelOpening() {
+  let opened = ''
+  return {
+    /** The key of a real opening, or '' for a refresh or a missing pair. */
+    begin(owner: string, session: string | null | undefined): string {
+      const key = owner && session ? `${owner}/${session}` : ''
+      if (!key || key === opened) return ''
+      opened = key
+      return key
+    },
+    abandon(key: string) { if (key && key === opened) opened = '' },
+  }
+}
 
 const LABEL: Record<GateKind, string> = { dial: 'Dial', harness: 'Harness limits', account_room: 'Account room', host_load: 'Host load' }
 export interface AdmissionRow { kind: GateKind; label: string; state: 'passed' | 'held' | 'unreadable' | 'unknown'; detail: string; reason?: string }
