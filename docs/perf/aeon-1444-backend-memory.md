@@ -40,9 +40,9 @@ MiB means 1,048,576 bytes. These are per-process measurements after Desk reads:
 
 | Measurement | 134 backend 0 | 134 backend 1 | 135 original backend 0 | Fixed backend 0 | Fixed backend 1 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Darwin physical footprint, MiB | 126.98 | 134.17 | 167.69 | 129.94 | 126.70 |
-| Allocated live contexts, MiB | 25.06 | 24.25 | 27.83 | 30.19 | 29.62 |
-| Used live contexts, MiB | 16.64 | 16.04 | 19.57 | 19.66 | 18.98 |
+| Darwin physical footprint, MiB | 121.52 | 120.59 | 167.69 | 129.08 | 127.89 |
+| Allocated live contexts, MiB | 25.06 | 24.25 | 27.83 | 30.18 | 29.62 |
+| Used live contexts, MiB | 16.77 | 16.02 | 19.57 | 19.59 | 18.99 |
 | Cached plan subtrees, MiB | 16.93 | 16.59 | 19.52 | 21.88 | 21.53 |
 | Catalog subtrees excluding plans, MiB | 5.72 | 5.56 | 5.88 | 5.88 | 5.72 |
 | CacheMemoryContext itself, MiB | 4.12 | 4.06 | 4.12 | 4.12 | 4.06 |
@@ -50,11 +50,11 @@ MiB means 1,048,576 bytes. These are per-process measurements after Desk reads:
 | Largest Desk planner memory, KiB | 28,551 | 28,494 | 42,591 | 28,958 | 28,931 |
 
 Fixed physical footprint is within 10% of 134 on both sampled backends; backend
-0 is 2.3% above its 134 measurement and 22.5% below original 135. The new candidate
+0 is 6.2% above its 134 measurement and 23.0% below original 135. The new candidate
 query separately uses 13,212 KiB of planner memory. The extra bounded cached plan
 increases live context allocation while reducing process footprint: allocated
 context totals alone would miss this regression. After the additional admission
-read, fixed footprints are 130.98 and 127.80 MiB; that path adds under 1.1 MiB.
+read, fixed footprints are 130.14 and 129.06 MiB; that path adds under 1.2 MiB.
 The six new RLS policies change the policy count from 485 to 491, without the
 large catalog growth that would explain the process delta.
 
@@ -71,8 +71,9 @@ prepare instrumentation statements. EXPLAIN (ANALYZE, BUFFERS, MEMORY) runs on a
 separate diagnostic connection so diagnostics cannot grow the measured backend.
 Instrumented execution snapshots wrap the actual list/Desk result and retain
 its row while sampling contexts; the wrapper and helper add their own overhead.
-For example the fixed diagnostic connection records 14.88–16.97 MiB during the
-scoped list, 28.09 MiB during Desk, and a 32 KiB relcache map. The recorded plan
+For example the release 134 diagnostic connection records 11.65–13.90 MiB
+during the scoped list and 26.13 MiB during Desk; the fixed connection records
+12.29–14.41 MiB and 28.08 MiB respectively. Both record a 32 KiB relcache map. The recorded plan
 summaries retain numbers, relation names and SQL fingerprints; they omit SQL
 predicates, arguments, credentials and response contents.
 
@@ -117,6 +118,13 @@ numeric execution/plan diagnostics.
 /Users/markus/.aeon/lead/aeon/remote-test.sh <worktree> ./internal/cli -run '^$' -bench '^BenchmarkBackendMemoryRelease$' -benchtime=1x -count=1 -v
 ```
 
-The fixed benchmark passed on `cfc35e17c6` in 17.861 seconds. The release 134
-benchmark passed on the disposable diagnostic branch `7a24a4ba0d`. Final behavior,
-negative-control and static-check results are recorded below when available.
+The final fixed benchmark passed on `937d0868be` in 18.027 seconds. The release 134
+benchmark with execution snapshots passed on disposable diagnostic branch
+`c58cf190ab` in 17.087 seconds. The final populated-fixture behavior test passed
+in 18.526 seconds; the full Decision Desk package passed in 32.482 seconds.
+The negative control restored the original 135 projection on a scratch branch
+and failed for the intended reason: 42,655 KiB planner memory exceeds the
+32 MiB budget. The existing recycling defaults/override test passed in that
+same remote run. Only the added memory-budget test row is changed in the
+shared tier manifest; the new test file is covered by the existing CLI audit
+slice. No model review, push to origin or deployment was performed.
