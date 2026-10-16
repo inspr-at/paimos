@@ -17758,6 +17758,8 @@
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > chooses reading, all clear, a silent source or the scope line, and nothing while rows are listed","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > keeps the empty desk incomplete when session discovery fails, until a successful retry","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > names the source that did not answer, so an empty read is never all clear","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}

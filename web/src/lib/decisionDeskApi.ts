@@ -244,11 +244,25 @@ async function tierBody(response: Response): Promise<SessionTier> {
   if (!response.ok) throw new APIError(response.status, body.error || 'Tier requests are unavailable.', body)
   return body
 }
-export function nativeTierAdapter(sessions: () => Promise<readonly HarnessSession[]>, can: (permission: string, project?: string) => boolean, detail?: (project: string, id: string) => Promise<HarnessSession | undefined>): NonNullable<ProtectedDeskAdapters['tiers']> {
+/** A confirmed session list, or a refresh that did not confirm one. An `{ok:false}`
+ * result is not an empty list: tier coverage stays unanswered until discovery succeeds. */
+export type TierSessionDiscovery = readonly HarnessSession[] | { ok: false; sessions?: readonly HarnessSession[] }
+export function tierSessionsFromRefresh(outcome: { ok: boolean }, sessions: readonly HarnessSession[]): TierSessionDiscovery {
+  return outcome.ok ? sessions : { ok: false, sessions }
+}
+export function nativeTierAdapter(sessions: () => Promise<TierSessionDiscovery>, can: (permission: string, project?: string) => boolean, detail?: (project: string, id: string) => Promise<HarnessSession | undefined>): NonNullable<ProtectedDeskAdapters['tiers']> {
   let records = new Map<string, { session: HarnessSession; tier: SessionTier; request: TierRequest }>()
   return {
     async read(pending = []) {
-      const available = (await sessions()).filter(session => session.advertised_capabilities.includes('service_tier_v1'))
+      const discovered = await sessions()
+      // A plain list is a confirmed discovery. {ok:false} keeps any cached sessions
+      // but does not let an empty cache look like a clean capability skip.
+      let known: readonly HarnessSession[]
+      let discoveryFailed = false
+      if (Array.isArray(discovered)) known = discovered
+      else if (discovered && discovered.ok === false) { discoveryFailed = true; known = Array.isArray(discovered.sessions) ? discovered.sessions : [] }
+      else throw new Error('Session discovery did not complete.')
+      const available = known.filter(session => session.advertised_capabilities.includes('service_tier_v1'))
       const warnings: string[] = available.length > 30 ? ['Tier history is limited to the first 30 visible sessions; canonical pending requests are read separately.'] : []
       const selected = new Map<string, { project: string; session: HarnessSession | undefined }>(available.slice(0, 30).map(session => [session.id, { project: session.project_id, session }]))
       const targets = new Map<string, string>()
@@ -293,9 +307,9 @@ export function nativeTierAdapter(sessions: () => Promise<readonly HarnessSessio
         }
       }
       records = next
-      const failed = reads.some(read => read.status === 'rejected')
+      const failed = discoveryFailed || reads.some(read => read.status === 'rejected')
       if (failed) warnings.push('Some tier requests could not be read. Open Agents to inspect their source.')
-      // A clean read, including a capability skip with no requests, omits failed.
+      // A confirmed discovery, including a capability skip with no requests, omits failed.
       // The exact { items, warnings } shape is pinned, and loadDesk treats only true as unanswered.
       return failed ? { items, warnings, failed } : { items, warnings }
     },

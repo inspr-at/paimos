@@ -2,8 +2,10 @@
 // AEON-1406 risk: an empty Open tab says "Nothing waits for you" while a source
 // did not answer, so a person stops looking while something is waiting.
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { deskEmptyState, deskUnansweredLine, type DeskProjection } from '../src/lib/decisionDesk'
-import { loadDesk } from '../src/lib/decisionDeskApi'
+import { loadDesk, nativeTierAdapter, tierSessionsFromRefresh } from '../src/lib/decisionDeskApi'
+import type { HarnessSession } from '../src/lib/agents'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -67,5 +69,38 @@ describe('Decision Desk empty state', () => {
     const missing = await loadDesk(undefined, {}, {}, null)
     expect(missing.unanswered).toEqual(['desk'])
     expect(choose(missing)).toBe('incomplete')
+  })
+
+  // Risk: refreshSessions answers {ok:false} and the desk still returns the empty
+  // cache, so no tier read runs and the Open tab says all clear while discovery failed.
+  it('keeps the empty desk incomplete when session discovery fails, until a successful retry', async () => {
+    const cache: HarnessSession[] = []
+    let outcome: { ok: true } | { ok: false; error: string } | { ok: false; dropped: true } = { ok: false, error: 'Session list unavailable' }
+    expect(tierSessionsFromRefresh(outcome, cache)).toEqual({ ok: false, sessions: cache })
+    expect(tierSessionsFromRefresh({ ok: false, dropped: true }, cache)).toEqual({ ok: false, sessions: cache })
+    expect(tierSessionsFromRefresh({ ok: true }, cache)).toBe(cache)
+    const adapter = nativeTierAdapter(async () => tierSessionsFromRefresh(outcome, cache), () => true)
+    const view = readFileSync(new URL('../src/views/DecisionDeskView.vue', import.meta.url), 'utf8')
+    expect(view).toContain('tierSessionsFromRefresh(await agents.refreshSessions(), agents.sessions)')
+
+    sources()
+    const missedRead = await adapter.read([])
+    expect(missedRead.failed).toBe(true)
+    expect(missedRead.items).toEqual([])
+    expect(missedRead.warnings).toContain('Some tier requests could not be read. Open Agents to inspect their source.')
+    const missed = await loadDesk(undefined, { tiers: adapter }, {}, empty)
+    expect(missed.items.filter(item => !item.decided)).toEqual([])
+    expect(missed.unanswered).toEqual(['tiers'])
+    expect(choose(missed)).toBe('incomplete')
+    expect(deskUnansweredLine(missed.unanswered!)).toBe('Tier requests didn’t answer, so this may be incomplete')
+
+    outcome = { ok: true }
+    sources()
+    const settledRead = await adapter.read([])
+    expect(settledRead).toEqual({ items: [], warnings: [] })
+    expect(settledRead.failed).toBeUndefined()
+    const settled = await loadDesk(undefined, { tiers: adapter }, {}, empty)
+    expect(settled.unanswered).toEqual([])
+    expect(choose(settled)).toBe('clear')
   })
 })

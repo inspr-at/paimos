@@ -12,7 +12,7 @@ import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import { agentName, harnessLabel, RISK_LABEL, riskFor } from '../lib/agentState'
 import { captureToastOwner, toast } from '../lib/toast'
-import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readDeskTickets, readQuestion, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
+import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readDeskTickets, readQuestion, tierSessionsFromRefresh, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
 import { phoneCapability } from '../lib/deskPhoneApproval'
 import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessRevalidate } from '../lib/authz'
@@ -35,7 +35,7 @@ const makeAdapters = () => ({ approvalRun: async (id: string) => {
   const run = await getRun(id)
   if (session.identity !== identity || !session.authenticationCurrent()) throw new Error('The person changed while reading approval ownership.')
   return agents.admitRun(run)
-}, tiers: nativeTierAdapter(async () => { await agents.refreshSessions(); return agents.sessions }, can, async (project, id) => {
+}, tiers: nativeTierAdapter(async () => tierSessionsFromRefresh(await agents.refreshSessions(), agents.sessions), can, async (project, id) => {
   await agents.loadSessionDetail(project, id)
   return agents.sessionById(id)
 }) })
