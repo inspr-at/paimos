@@ -235,16 +235,16 @@ func BenchmarkBackendMemory(b *testing.B) {
 	}
 }
 
-func backendMemoryServer(b *testing.B, pool *pgxpool.Pool) *httptest.Server {
+func backendMemoryServer(b testing.TB, pool *pgxpool.Pool, extra ...httpapi.Module) *httptest.Server {
 	b.Helper()
 	am, err := auth.New(auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{9}, 32), PublicURL: "http://127.0.0.1", BootstrapTenantSlug: "aeon", BootstrapAdminEmail: "admin@example.com"}, pool)
 	if err != nil {
 		b.Fatal(err)
 	}
-	return httptest.NewServer((&httpapi.Server{Pool: pool, Modules: []httpapi.Module{am, nodes.New(pool, nodes.SQLWriter{}), activity.New(pool), search.New(pool, nil), modelregistry.New(pool), inbox.New(pool), harness.New(pool)}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}).Handler())
+	return httptest.NewServer((&httpapi.Server{Pool: pool, Modules: append([]httpapi.Module{am, nodes.New(pool, nodes.SQLWriter{}), activity.New(pool), search.New(pool, nil), modelregistry.New(pool), inbox.New(pool), harness.New(pool)}, extra...), Middleware: []func(http.Handler) http.Handler{am.Middleware}}).Handler())
 }
 
-func backendMemoryRequest(b *testing.B, ctx context.Context, hc *http.Client, base, token, method, path, body string, status int) []byte {
+func backendMemoryRequest(b testing.TB, ctx context.Context, hc *http.Client, base, token, method, path, body string, status int) []byte {
 	b.Helper()
 	req, err := http.NewRequestWithContext(ctx, method, base+path, strings.NewReader(body))
 	if err != nil {
@@ -269,7 +269,7 @@ func backendMemoryRequest(b *testing.B, ctx context.Context, hc *http.Client, ba
 	return raw
 }
 
-func backendMemorySnapshot(b *testing.B, ctx context.Context, conn *pgx.Conn) json.RawMessage {
+func backendMemorySnapshot(b testing.TB, ctx context.Context, conn *pgx.Conn) json.RawMessage {
 	b.Helper()
 	var raw json.RawMessage
 	// Never prepare the instrumentation queries: they must not pollute the

@@ -4562,6 +4562,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginStdin","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestBackendMemoryBudget","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestBaselineReportBuiltCLI","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestBoundedInputReads","tier":"GATED-FULL"}
