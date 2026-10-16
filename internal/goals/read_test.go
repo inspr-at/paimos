@@ -215,3 +215,52 @@ func TestGoalListFiltersTotalsAndMoveHistory(t *testing.T) {
 		t.Fatalf("move history %d %s", r.Code, r.Body)
 	}
 }
+
+// Risk: an old paused session leaves an outcome Paused after a newer failed
+// worker has stopped. The latest stop, not any historical pause, decides it.
+func TestGoalPauseUsesLatestStoppedSession(t *testing.T) {
+	f := writerFixture(t)
+	var agent, latest string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Pause worker') RETURNING id::text`, f.writer.TenantID).Scan(&agent); err != nil {
+			return err
+		}
+		for i, reason := range []string{"paused", "process_failed"} {
+			var id string
+			var pause any
+			if reason == "paused" {
+				pause = `{"state":"paused"}`
+			}
+			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,stopped_at,stop_reason,pause_record) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$6,$7,$8,$9::jsonb) RETURNING id::text`, f.writer.TenantID, f.project, agent, f.ticket, []byte(fmt.Sprintf("pause-ref-%d", i)), []byte(fmt.Sprintf("pause-lease-%d", i)), apiClock.Add(time.Duration(i-2)*time.Hour), reason, pause).Scan(&id); err != nil {
+				return err
+			}
+			if i == 1 {
+				latest = id
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	readState := func() State {
+		g := detail(t, goalRequest(t.Context(), m, f.reader, "GET", "/api/goals/"+f.goal, "", ""))
+		for _, item := range g.Items {
+			if item.ID == f.outcome {
+				return item.State
+			}
+		}
+		t.Fatal("missing visible outcome")
+		return ""
+	}
+	if state := readState(); state != Queued {
+		t.Fatalf("old pause won: %s", state)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=$2 WHERE id=$1`, latest, apiClock.Add(-3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if state := readState(); state != Paused {
+		t.Fatalf("latest pause lost: %s", state)
+	}
+}
