@@ -85,7 +85,12 @@ function rowGeometry(page: Page) {
     const label = action?.querySelector('.label')
     const stamps = document.querySelector('[role="radiogroup"][aria-label="Stamp"]'), desk = group.closest('main')!
     const note = [...document.querySelectorAll('p')].find(p => p.textContent === 'Agents keep working unless something is held up.')!
+    // The shell's content box: inside its scrollbar gutter and any stand-in inset.
+    const shell = document.getElementById('main')!, shellBox = shell.getBoundingClientRect(), shellStyle = getComputedStyle(shell)
+    const shellLeft = shellBox.left + shell.clientLeft
     return {
+      shell: { left: shellLeft + parseFloat(shellStyle.paddingLeft), right: shellLeft + shell.clientWidth - parseFloat(shellStyle.paddingRight) },
+      gutter: shellBox.width - shell.clientWidth, deskGutter: desk.offsetWidth - desk.clientWidth,
       row: rect(group.parentElement), tabs: rect(group), tabTops: [...group.querySelectorAll('button')].map(tab => Math.round(tab.getBoundingClientRect().top)),
       tabsOverflow: group.scrollWidth - group.clientWidth, action: rect(action), labelShown: !!label && getComputedStyle(label).display !== 'none',
       tip: action?.getAttribute('data-tip') ?? null, note: rect(note), section: parseFloat(getComputedStyle(note.closest('header')!).marginBottom),
@@ -94,15 +99,20 @@ function rowGeometry(page: Page) {
   })
 }
 
-// CI's Linux Chromium keeps a classic scrollbar gutter (~15 px) and a wider sans (DejaVu Sans Bold, about
-// 15 % wider than macOS). Verdana Bold is as wide (AEON-1339). Where the overlay gutter is 0, 15 px of
-// inset stands in for it, so these assertions meet the same row the gate measured.
+// CI's Linux Chromium draws classic scrollbars and a wider sans (DejaVu Sans Bold, about 15 % wider than
+// macOS). Verdana Bold is as wide (AEON-1339). Every host gets the same 15 px classic scrollbars on the
+// shell and on the Desk's own <main>, so these assertions meet the row a Linux or Windows desktop draws.
+// Only where a host still overlays them (mobile emulation) does a 15 px inset stand in, measured once the
+// shell exists: a read before it mounts saw no gutter and stacked the inset on CI's real one.
 async function useLinuxDeskMetrics(page: Page) {
-  await page.addStyleTag({ content: '.dp-tabrow, .dp-tabrow .seg button, .dp-tabrow .one-by-one { font-family: Verdana, "DejaVu Sans", sans-serif !important; }' })
-  const gutter = await page.evaluate(() => {
-    const main = document.getElementById('main')
-    return main ? main.getBoundingClientRect().width - main.clientWidth : 0
-  })
+  await page.addStyleTag({ content: [
+    '.dp-tabrow, .dp-tabrow .seg button, .dp-tabrow .one-by-one { font-family: Verdana, "DejaVu Sans", sans-serif !important; }',
+    '#main, #main main { scrollbar-width: auto !important; scrollbar-color: auto !important; }',
+    '#main::-webkit-scrollbar, #main main::-webkit-scrollbar { width: 15px; height: 15px; }',
+  ].join('\n') })
+  const shell = page.locator('#main')
+  await shell.waitFor({ state: 'attached' })
+  const gutter = await shell.evaluate(main => main.getBoundingClientRect().width - main.clientWidth)
   if (gutter < 8) await page.addStyleTag({ content: '#main { padding-right: 15px; }' })
 }
 
@@ -113,6 +123,9 @@ function expectOneRow(geometry: Awaited<ReturnType<typeof rowGeometry>>, step: s
   // The Desk page itself; the stability guards below also hold the whole document to no sideways scroll.
   expect(geometry.sideways, `${step}: the Desk page does not scroll sideways`).toBeLessThanOrEqual(0)
   expect(Math.abs(geometry.tabs!.left - geometry.row!.left), `${step}: the tabs start the row`).toBeLessThanOrEqual(0.5)
+  // The Desk reserves no scrollbar strip of its own beside the shell's, so the row sits centred in the shell.
+  const insets = { left: geometry.row!.left - geometry.shell.left, right: geometry.shell.right - geometry.row!.right }
+  expect(Math.abs(insets.left - insets.right), `${step}: the row is centred, no second gutter (${insets.left} | ${insets.right})`).toBeLessThanOrEqual(0.5)
   const action = geometry.action
   if (!action) return
   expect(Math.abs(action.right - geometry.row!.right), `${step}: the button ends the row`).toBeLessThanOrEqual(0.5)
@@ -223,13 +236,13 @@ test('AEON-1448: one tab row from 320 to 1440 px, the stamp filter never pushed 
   await expect(button(page)).toBeVisible()
   await page.getByTestId('desk-tab-decided').click()
   // The document column is information only: right after a live resize the app header may still be re-fitting.
-  const lines: string[] = ['| viewport | row | tabs | button | filter | label | filter line | document sideways |', '|---|---|---|---|---|---|---|---|']
+  const lines: string[] = ['| viewport | gutter | desk gutter | row | tabs | button | filter | label | filter line | document sideways |', '|---|---|---|---|---|---|---|---|---|---|']
   const samples: [number, Awaited<ReturnType<typeof rowGeometry>>][] = []
   for (const width of [1440, 1280, 1024, 960, 900, 768, 600, 414, 390, 384, 383, 375, 360, 340, 320]) {
     await page.setViewportSize({ width, height: 900 })
     const geometry = await rowGeometry(page)
     samples.push([width, geometry])
-    lines.push(`| ${width} | ${geometry.row!.width.toFixed(1)} | ${geometry.tabs!.width.toFixed(1)} | ${geometry.action!.width.toFixed(1)} | ${geometry.filter!.width.toFixed(1)} | ${geometry.labelShown} | ${Math.abs(geometry.filter!.top - geometry.tabs!.top) < geometry.tabs!.height ? 'first' : 'own'} | ${geometry.documentSideways} |`)
+    lines.push(`| ${width} | ${geometry.gutter} | ${geometry.deskGutter} | ${geometry.row!.width.toFixed(1)} | ${geometry.tabs!.width.toFixed(1)} | ${geometry.action!.width.toFixed(1)} | ${geometry.filter!.width.toFixed(1)} | ${geometry.labelShown} | ${Math.abs(geometry.filter!.top - geometry.tabs!.top) < geometry.tabs!.height ? 'first' : 'own'} | ${geometry.documentSideways} |`)
   }
   // The measurements first, so a failure still leaves the numbers behind.
   await writeFile(test.info().outputPath('row-widths.md'), lines.join('\n') + '\n')

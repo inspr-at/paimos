@@ -631,6 +631,9 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 /* AEON-1339: the Desk page as the approved rev 11 artifact draws it. */
 .scope-line { display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; min-height: 44px; margin: 0; font-size: 12px; color: var(--ink-3); }.scope-line a { color: var(--teal-ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }.scope-line a:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .desk-page { width: 100%; max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }
+/* This root <main> also takes App's scoped `main` rule. Its stable gutter would reserve a second, empty scrollbar
+   strip inside #main's own on classic-scrollbar desktops. That narrows the tab row and moves the page off centre. */
+.desk-page { scrollbar-gutter: auto; }
 /* At the label's edge a classic scrollbar gutter would eat the 16 px inset. 8 px keeps the row wide enough. */
 @media (max-width: 399.98px) { .desk-page { padding-left: 8px; padding-right: 8px; } }
 .dp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 18px; }
