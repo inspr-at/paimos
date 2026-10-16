@@ -1230,7 +1230,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .more-btn:hover { background: var(--row-hover); }
 .more-btn:focus-visible { box-shadow: var(--focus-ring); }
 
-.key-btn { display: inline-flex; align-items: center; height: 22px; margin: 0 -5px; padding: 0 5px; border: 0; border-radius: 6px; background: transparent; cursor: copy; }
+.key-btn { display: inline-flex; align-items: center; height: 22px; margin: 0 -5px; padding: 0 5px; border: 0; border-radius: 6px; background: transparent; cursor: copy; white-space: nowrap; }
 .key-btn:hover { color: var(--teal-ink); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
 .assignee-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; }
 .assignee-btn:hover:not(:disabled) { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
@@ -1436,7 +1436,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .tickets thead { display: none; }
   .ticket-row { -webkit-touch-callout: none; }
   .ticket-row {
-    display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "key status prio updated" "title title title title";
+    /* Key and date stay whole. Status may shrink. The flexible space stays in
+       the priority column, so its icon keeps a slot beside the status (AEON-1379). */
+    display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(max-content, 1fr) max-content; grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
   /* The compact status visual is 2px shorter; leave its 44px reach inside the card. */
@@ -1444,7 +1446,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
   .table-card.selectable .ticket-row {
-    grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
+    grid-template-columns: 44px max-content minmax(0, max-content) minmax(max-content, 1fr) max-content;
     grid-template-areas: "check key status prio updated" "check title title title title";
     padding-left: 2px; column-gap: 6px;
   }
@@ -1467,9 +1469,15 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
-  /* The whole key keeps its column (AEON-1379); on the narrowest phones the
-     status label gives way instead (its icon stays, the menu names it). */
+  /* The whole key keeps its column (AEON-1379). Spare room stays in the
+     priority column, so the icon keeps its slot beside the status. When the
+     card runs out of room the status label gives way first (its icon stays,
+     the menu names it). The date stays content-sized, so it does not yield
+     before that label. The priority mark never shrinks below the icon and
+     carries no negative margin. */
   .c-status { min-width: 0; }
+  .table-card:not(.customised) .c-prio,
+  .table-card:not(.customised) .c-prio .cell { min-width: max-content; margin: 0; }
   /* An hour estimate sits at the end of the title line. An empty cell stays off the card. */
   .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
   .c-estimate .cell { height: auto; }
@@ -1480,7 +1488,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
   .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
   .table-card.selectable:not(.customised) .ticket-row:has(.progress-read) {
-    grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
+    grid-template-columns: 44px max-content minmax(0, max-content) minmax(max-content, 1fr) max-content;
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
@@ -1529,7 +1537,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.top td { border-top: 0; }
   .more-row { display: block; padding: 6px 14px; }
   .more-row td { display: block; height: auto; border: 0; padding: 0; }
-  .status-btn { height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+  .status-btn { min-width: 0; height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+  .status-btn > span:not(.status-icon) { min-width: 0; }
   .prio-label { display: none; }
   /* A phone card shows priority only when there is one. */
   .c-prio .empty { display: none; }

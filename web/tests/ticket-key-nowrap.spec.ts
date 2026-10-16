@@ -37,15 +37,30 @@ for (const width of [320, 360, 390, 1440]) {
     for (const colorScheme of SCHEMES) {
       await page.emulateMedia({ colorScheme })
       await page.evaluate(() => document.fonts.ready)
+      let priorityRows = 0
       for (const row of await rows(page).all()) {
         const keyFit = await wholeKey(row.locator('.c-key .key'), 'tr')
         expect(keyFit, `${colorScheme} ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
         const fit = await row.evaluate(tr => {
           const right = (selector: string) => tr.querySelector(selector)?.getBoundingClientRect().right ?? 0
-          const label = tr.querySelector<HTMLElement>('.status-btn > span')!
+          const label = tr.querySelector<HTMLElement>('.status-btn > span:not(.status-icon)')!
+          const icon = tr.querySelector<SVGElement>('.c-prio svg.prio')
+          const date = tr.querySelector<HTMLElement>('.c-updated time, .c-eta time, .c-eta .when')
+          let priority: { gap: number; intersect: boolean } | null = null
+          if (icon && date) {
+            const a = icon.getBoundingClientRect(), b = date.getBoundingClientRect()
+            if (a.width >= 1 && b.width >= 1) {
+              priority = {
+                gap: b.left - a.right,
+                intersect: a.right > b.left + .5 && a.left < b.right - .5 && a.bottom > b.top + .5 && a.top < b.bottom - .5,
+              }
+            }
+          }
           return {
             title: right('.title-link'), status: right('.status-btn'), card: tr.getBoundingClientRect().right - parseFloat(getComputedStyle(tr).paddingRight),
+            label: label.textContent?.trim() ?? '',
             labelWhole: label.scrollWidth <= label.clientWidth + 1,
+            priority,
             why: `${tr.querySelector('.c-key .key')!.textContent}: ${[...tr.children].map(td => `${td.className.split(' ')[0]} ${Math.round(td.getBoundingClientRect().width)}`).join(', ')}; columns ${getComputedStyle(tr).gridTemplateColumns}`,
           }
         })
@@ -53,7 +68,15 @@ for (const width of [320, 360, 390, 1440]) {
         expect(fit.status, `the status stays inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
         // Only the narrowest phones shorten the status label; from 360px it reads whole.
         if (width >= 360) expect(fit.labelWhole, `the status label reads whole; ${fit.why}`).toBe(true)
+        // "In progress" still fits at 320; a shorter label is what gives way first.
+        if (width === 320 && fit.label === 'In progress') expect(fit.labelWhole, `In progress still reads whole at 320; ${fit.why}`).toBe(true)
+        if ((width === 320 || width === 360) && fit.priority) {
+          priorityRows++
+          expect(fit.priority.intersect, `${colorScheme} the priority icon stays clear of the date; ${fit.why}`).toBe(false)
+          expect(fit.priority.gap, `${colorScheme} the priority icon keeps at least 6px from the date; ${fit.why}`).toBeGreaterThanOrEqual(6)
+        }
       }
+      if (width === 320 || width === 360) expect(priorityRows, `${colorScheme}: both priority rows keep a slot beside the date`).toBeGreaterThanOrEqual(2)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
       await page.screenshot({ path: testInfo.outputPath(`keys-list-${width}-${colorScheme}.png`) })
     }

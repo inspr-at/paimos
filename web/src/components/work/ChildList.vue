@@ -81,7 +81,7 @@ defineExpose({ startAdd })
 .child-row:focus-visible { box-shadow: var(--focus-ring); }
 .child-row.closed .child-title { color: var(--ink-2); }
 /* Keys line up as a column; a longer key widens its slot and the title gives way (AEON-1379). */
-.key { flex: none; min-width: 88px; font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+.key { flex: none; min-width: 88px; font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; white-space: nowrap; }
 .child-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .none { font-size: 13px; color: var(--ink-3); }
 .child-skeleton { display: grid; gap: 10px; padding: 12px; }
