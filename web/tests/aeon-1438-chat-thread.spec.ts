@@ -9,6 +9,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 const now = Date.parse('2026-10-16T06:04:00Z') // 08:04 in Vienna
@@ -69,6 +70,12 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: 
   ]
   data.messages.splice(0, data.messages.length, ...messages)
   const calls = await mockAgents(page, data)
+  // A person who may decide Desk questions: an open one waits for them.
+  await page.route('**/api/me/permissions*', route => {
+    const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    answer.workspace.permissions.push('questions.read', 'questions.decide')
+    return route.fulfill({ json: answer })
+  })
   const ownIds = messages.filter(m => m.sender_principal_id === me.id).map(m => m.id)
   const latest = ownIds.at(-1)!
   await page.route('**/api/inbox/message-status?*', route => {

@@ -119,6 +119,7 @@ const desk = computed(() => ({ path: '/decision-desk', query: { item: `q:${props
   .desk-delivery { --meta-h: 0px; max-width: none; padding: 10px 12px 0; }
   .desk-delivery::before { border-radius: 14px; box-shadow: inset 0 0 0 1px var(--paper-edge), 0 1px 3px color-mix(in srgb, var(--shadow-color) 7%, transparent); }
   .desk-meta { gap: 8px; margin-bottom: 4px; font-size: 12px; }
+  .desk-meta .sep { display: none; }
   .desk-who { font-size: 13px; }
   .desk-q { margin-top: 2px; padding: 0; font-size: 15px; }
   .desk-foot { min-height: 44px; margin-top: 0; padding: 0; font-size: 13.5px; }

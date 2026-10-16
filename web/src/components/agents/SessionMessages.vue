@@ -29,9 +29,10 @@ const words = computed(() => chatWords[language.value])
 const label = (status: MessageStatus) => ({ sent: words.value.sending, delivered: words.value.delivered, read: words.value.read, not_delivered: words.value.failed })[status.status]
 const me = computed(() => identity.identity?.principal.id ?? '')
 const items = computed(() => collapseMessages(props.messages))
-// Day boundaries follow the clock tick, so "Today" turns into "Yesterday" overnight.
-const today = computed(() => new Date(props.now).toDateString())
-const rows = computed(() => { void today.value; return threadRows(items.value, props.now, language.value) })
+// Day labels follow the clock, so "Today" turns into "Yesterday" overnight. The
+// rows depend on the day only, not on every tick of the clock.
+const day = computed(() => { const at = new Date(props.now); at.setHours(12, 0, 0, 0); return at.getTime() })
+const rows = computed(() => threadRows(items.value, day.value, language.value))
 const receiptId = computed(() => receiptTarget(rows.value, me.value))
 const chip = (message: MessageGroup) => messageChip(message, words.value)
 const mine = (message: MessageGroup) => message.sender_principal_id === me.value
@@ -245,6 +246,8 @@ onBeforeUnmount(() => {
   .msg.mine { max-width: 85%; }
   .mine .msg-body { border-radius: 18px 18px 6px 18px; background: var(--chip-teal-bg); font-size: 15px; line-height: 1.45; }
   .mine .msg-meta { gap: 6px; }
+  .day { display: flex; align-items: center; gap: 12px; justify-self: stretch; padding: 0; }
+  .day::before, .day::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 }
 /* The smallest phones: a tighter meta line, so name and chip still fit on one line. */
 @media (max-width: 359px) {
