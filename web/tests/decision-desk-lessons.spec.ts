@@ -292,9 +292,11 @@ async function roundEnd(page: Page, toastText: string | RegExp) {
   await expect(toast).toBeVisible(); await expect(toast.getByRole('button', { name: 'Undo', exact: true })).toBeVisible()
   return toast
 }
+// Closed at 1.2 s, a ten-second grace leaves the toast 8 s (whole seconds, one kept in hand). The toast
+// leaves on the next animation frames, which the paused page clock only runs inside runFor.
 async function graceEnds(page: Page, toast: Locator) {
   await page.clock.runFor(7999); await expect(toast).toBeVisible()
-  await page.clock.runFor(1); await expect(toast).toHaveCount(0)
+  await page.clock.runFor(1 + 48); await expect(toast).toHaveCount(0)
 }
 for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1385 a round that ends on a lesson closes like one that ends on an answer at ${width} ${theme}`, async ({ page }, testInfo) => {

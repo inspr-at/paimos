@@ -34,7 +34,8 @@ After the last open decision the sheet reads "All decided" for 1.2 seconds, then
 closes back to where the round was opened (`from=preview|agents` returns there).
 Skipped items are taken up again before that. Undo, inside the ten-second grace and
 in the toast after closing, acts as Change: it reopens the recorded answer so a new
-decision replaces it before it goes out. The legend under the sheet never wraps; when
+decision replaces it before it goes out. A round that ends on a lesson closes the same
+way, and its Undo restores the lesson (see Lessons on the Decision Desk). The legend under the sheet never wraps; when
 it does not fit it folds into a Keys button. The Desk list shows rev 11 rows with
 inline Approve, Deny, Resolve and Dismiss, which commit through the memo's path, and
 one calm line per source that could not be read, with Try again.
