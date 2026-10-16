@@ -19,7 +19,7 @@ permission or API change is required.
 
 ## Reproduction and measurements
 
-All workloads ran through LEAD's `remote-test.sh` on mbp2606, Darwin arm64,
+All workloads ran through LEAD's `remote-test.sh` on the approved Darwin arm64 runner,
 PostgreSQL 18.6. The restricted app role owns the schema with FORCE RLS and
 NOSUPERUSER/NOBYPASSRLS. Fixtures contain a project with 1,500 generated work
 leaves, 1 KiB bodies and three active person checks. Each of two pinned app
