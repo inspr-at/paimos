@@ -584,17 +584,17 @@ test('AEON-1286 inline code keeps the line box at 390 light', async ({ page }) =
       const tops = [...new Set(samples.map(value => Math.round(value * 2) / 2))].sort((a, b) => a - b)
       const lines: number[] = []
       for (const top of tops) if (!lines.length || top - lines[lines.length - 1]! > 3) lines.push(top)
-      const lineHeights = lines.slice(1).map((top, index) => top - lines[index]!)
-      if (lines.length) lineHeights.push(box.bottom - lines[lines.length - 1]!)
-      return lineHeights
+      // The step from one line's top to the next is that line's box. The paragraph's
+      // border edge is not the last line's box, so it is not a height.
+      return lines.slice(1).map((top, index) => top - lines[index]!)
     }
     const paragraph = (text: string) => [...document.querySelectorAll('.chat-markdown p')].find(item => item.textContent?.includes(text))
     const plainP = paragraph('Without a chip, the nightly gate')
     const chipP = paragraph('With a chip,')
     return { plain: plainP ? heights(plainP) : [], chip: chipP ? heights(chipP) : [] }
   })
-  expect(measured.plain.length, 'the plain paragraph wraps').toBeGreaterThan(1)
-  expect(measured.chip.length, 'the chip paragraph wraps').toBeGreaterThan(1)
+  expect(measured.plain.length, 'the plain paragraph wraps').toBeGreaterThan(0)
+  expect(measured.chip.length, 'the chip paragraph wraps').toBeGreaterThan(0)
   const basis = measured.plain[0]!
-  for (const height of [...measured.plain, ...measured.chip]) expect(Math.abs(height - basis), `line box ${height} px`).toBeLessThanOrEqual(1)
+  for (const height of [...measured.plain, ...measured.chip]) expect(Math.abs(height - basis), `plain [${measured.plain.join(', ')}] chip [${measured.chip.join(', ')}]`).toBeLessThanOrEqual(1)
 })
