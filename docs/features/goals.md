@@ -23,7 +23,8 @@ The contract is authored in `api/areas/goals.yaml` and served with
 Writes require `nodes.write` in each affected goal's current scope. A required
 `Idempotency-Key` binds the tenant, actor, method, immutable target and canonical
 body. Replays recheck current authority and retain their original response,
-`read_through`, `generation` and `changed`. Another target or body conflicts.
+`read_through`, `generation` and `changed`. Another target or body conflicts. Relative ETA clock bounds apply to fresh
+receipts; aging past that bound does not invalidate a previously committed replay.
 New keys for unchanged data produce no domain event. Request bodies are bounded
 to 256 KiB and a read deadline; validation and mutations are atomic.
 
@@ -86,4 +87,5 @@ goal's visibility and key ceiling.
 The CLI exposes `goal create|update|list|get|history|series`. Create and update
 require an explicit stable `--idempotency-key`. Update accepts bounded JSON via
 `--file PATH|-`, or `--eta`, `--eta-at` and `--progress N|clear`; `--dry-run`
-validates and prints the request. The UI belongs to AEON-1457.
+validates structural bounds and prints the request. The server checks relative
+ETA clock bounds for a fresh receipt. The UI belongs to AEON-1457.

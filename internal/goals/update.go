@@ -167,6 +167,15 @@ func CleanIdempotencyKey(value string) (string, error) {
 // DecodeUpdate bounds bytes before JSON allocation or digest work. Handlers
 // must also use MaxBytesReader/body deadlines at the HTTP boundary.
 func DecodeUpdate(reader io.Reader, now time.Time) (Update, error) {
+	return decodeUpdate(reader, now, true)
+}
+
+// DecodeRequest validates bounded patch structure before receipt lookup. The
+// final transaction checks relative ETA clock bounds only for a fresh receipt;
+// an old, valid receipt remains replayable after its ETA ages out.
+func DecodeRequest(reader io.Reader) (Update, error) { return decodeUpdate(reader, time.Time{}, false) }
+
+func decodeUpdate(reader io.Reader, now time.Time, checkETAClock bool) (Update, error) {
 	var update Update
 	raw, err := io.ReadAll(io.LimitReader(reader, MaxBodyBytes+1))
 	if err != nil {
@@ -188,7 +197,7 @@ func DecodeUpdate(reader io.Reader, now time.Time) (Update, error) {
 	if err := decodeStrict(raw, &update); err != nil {
 		return update, invalid("body", err.Error())
 	}
-	return update, update.Validate(now)
+	return update, update.validate(now, checkETAClock)
 }
 
 func decodeStrict(raw []byte, target any) error {
@@ -269,11 +278,16 @@ func (u Update) Digest() ([32]byte, error) {
 	return sha256.Sum256(raw), nil
 }
 
-func (u Update) Validate(now time.Time) error {
+func (u Update) Validate(now time.Time) error { return u.validate(now, true) }
+
+// ValidateStructure leaves receipt-dependent time validity to the server.
+func (u Update) ValidateStructure() error { return u.validate(time.Time{}, false) }
+
+func (u Update) validate(now time.Time, checkETAClock bool) error {
 	if u.IfReadThrough.Set && (u.IfReadThrough.Value == nil || *u.IfReadThrough.Value < 0) {
 		return invalid("if_read_through", "must be a non-negative event id")
 	}
-	if err := validateETA(u.ETA.Value, "eta", now); err != nil {
+	if err := validateETA(u.ETA.Value, "eta", now, checkETAClock); err != nil {
 		return err
 	}
 	if u.Steps.Value != nil {
@@ -312,7 +326,7 @@ func (u Update) Validate(now time.Time) error {
 			return invalid(path+".ref", "a unique client ref is required")
 		}
 		refs[outcome.Ref] = true
-		if err := outcome.validate(path, now); err != nil {
+		if err := outcome.validate(path, now, checkETAClock); err != nil {
 			return err
 		}
 	}
@@ -348,7 +362,7 @@ func (u Update) Validate(now time.Time) error {
 	return nil
 }
 
-func (o OutcomeUpsert) validate(path string, now time.Time) error {
+func (o OutcomeUpsert) validate(path string, now time.Time, checkETAClock bool) error {
 	if o.Label.Set && (o.Label.Value == nil || strings.TrimSpace(*o.Label.Value) == "" || utf8.RuneCountInString(*o.Label.Value) > 300) {
 		return invalid(path+".label", "must contain 1–300 characters")
 	}
@@ -376,17 +390,17 @@ func (o OutcomeUpsert) validate(path string, now time.Time) error {
 			seen[strings.ToLower(key)] = true
 		}
 	}
-	return validateETA(o.ETA.Value, path+".eta", now)
+	return validateETA(o.ETA.Value, path+".eta", now, checkETAClock)
 }
 
-func validateETA(value *ETAInput, path string, now time.Time) error {
+func validateETA(value *ETAInput, path string, now time.Time, checkETAClock bool) error {
 	if value == nil {
 		return nil
 	}
 	if utf8.RuneCountInString(value.Text) > 40 || strings.TrimSpace(value.Text) == "" && value.At == nil {
 		return invalid(path+".text", "use text of at most 40 characters or a clock time")
 	}
-	if value.At != nil && !eta.Allowed(*value.At, now) {
+	if checkETAClock && value.At != nil && !eta.Allowed(*value.At, now) {
 		return invalid(path+".at", "outside the allowed ETA range")
 	}
 	return nil

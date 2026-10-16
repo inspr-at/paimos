@@ -99,7 +99,7 @@ func (m *module) patch(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	now := m.now()
-	in, err := DecodeUpdate(http.MaxBytesReader(w, r.Body, MaxBodyBytes), now)
+	in, err := DecodeRequest(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
 	if err != nil {
 		respond(w, nil, err)
 		return

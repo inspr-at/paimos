@@ -95,7 +95,7 @@ func (rt *runtime) cmdGoalUpdate() *Command {
 				if err != nil {
 					return err
 				}
-				in, err = goals.DecodeUpdate(bytes.NewReader(raw), time.Now())
+				in, err = goals.DecodeRequest(bytes.NewReader(raw))
 				if err != nil {
 					return usagef("%s", err)
 				}
@@ -129,7 +129,7 @@ func (rt *runtime) cmdGoalUpdate() *Command {
 				}
 				in.IfReadThrough = goals.Field[int64]{Set: true, Value: &value}
 			}
-			if err := in.Validate(time.Now()); err != nil {
+			if err := in.ValidateStructure(); err != nil {
 				return usagef("%s", err)
 			}
 			return rt.goalWrite(http.MethodPatch, "/api/goals/"+url.PathEscape(args[0]), key, in, dry)

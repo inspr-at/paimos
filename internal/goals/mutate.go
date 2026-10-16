@@ -65,6 +65,9 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 	if r != nil {
 		return replay(r, http.MethodPatch, target.ID, hash)
 	}
+	if err := in.Validate(now); err != nil {
+		return out, err
+	}
 	if in.Items.Value != nil && in.Items.Value.Mode == "replace" {
 		var latest int64
 		if err := tx.QueryRow(ctx, `SELECT coalesce(max(id),0) FROM events WHERE node_id=$1 AND type LIKE 'goal.%'`, target.ID).Scan(&latest); err != nil {

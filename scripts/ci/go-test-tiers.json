@@ -6478,6 +6478,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalReadGenerationOrdersReversedCompletion","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalReceiptReplaySurvivesETAClockWindow","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalReleaseFirstUpdateRestoresKinds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalRollupPartialAndSharedEstimates","tier":"ESSENTIAL"}

@@ -339,3 +339,22 @@ func TestGoalHandedOverReadAndConflict(t *testing.T) {
 		t.Fatalf("hidden handover %+v", g.HandedOver)
 	}
 }
+
+// Risk: the relative ETA window turns a valid durable receipt into a rejected
+// request after time passes, even though the same committed body is replayed.
+func TestGoalReceiptReplaySurvivesETAClockWindow(t *testing.T) {
+	f := writerFixture(t)
+	body := `{"eta":{"at":"` + apiClock.Add(time.Hour).Format(time.RFC3339) + `"}}`
+	path := "/api/goals/" + f.goal
+	first := readWriteResult(t, apiRequest(t, f, "PATCH", path, "eta-durable-key", body), 200)
+	count := eventCount(t, f)
+	later := &module{f.db.App, func() time.Time { return apiClock.Add(32 * 24 * time.Hour) }}
+	replayed := readWriteResult(t, goalRequest(t.Context(), later, f.writer, "PATCH", path, "eta-durable-key", body), 200)
+	if !reflect.DeepEqual(first, replayed) || eventCount(t, f) != count {
+		t.Fatal("aging ETA changed receipt replay")
+	}
+	rejected := goalRequest(t.Context(), later, f.writer, "PATCH", path, "eta-fresh-old", body)
+	if rejected.Code != 400 || !strings.Contains(rejected.Body.String(), "eta.at") {
+		t.Fatalf("fresh expired ETA %d %s", rejected.Code, rejected.Body)
+	}
+}
