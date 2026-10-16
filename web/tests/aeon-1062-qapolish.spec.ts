@@ -2,8 +2,10 @@
 // AEON-1062: polish from INSPR QA of release 128. Risks: the chat header squeezes "Stop now…" to an icon's
 // width so its label runs over its neighbours; the dark chat Stop renders light with an unreadable Esc keycap;
 // the account drawer says "1 computers"; a Models row whose profile left the registry shows a raw id.
-// AEON-1212 / #592 moved chat controls into Session actions; retain the Stop
-// contrast contract there and measure Esc on the Close action that now owns it.
+// AEON-1212 / #592 moved chat controls into Session actions. AEON-1309 / #678
+// condensed the head to tabs and icon actions and moved Interrupt, Pause and Stop
+// into More session actions; Close names Esc in its tip and shortcut. Retain the
+// Stop contrast contract in that menu, measured with the keycaps shown beside it.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -52,8 +54,8 @@ const luminance = (value: number[]) => {
 }
 const contrast = (a: number[], b: number[]) => { const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m); return (x! + .05) / (y! + .05) }
 
-async function stopContrast(stop: Locator) {
-  return stop.evaluate(button => {
+async function inkContrast(control: Locator) {
+  return control.evaluate(button => {
     // Chromium may serialize color-mix as color(srgb ... / alpha), rather than rgba.
     const context = document.createElement('canvas').getContext('2d')!
     const rgba = (value: string) => {
@@ -91,14 +93,10 @@ async function stopContrast(stop: Locator) {
       if (!element.parentElement) throw new Error('No opaque background behind Stop')
       return backgrounds(element.parentElement).flatMap(back => layers.map(front => over(front, back)))
     }
-    // The Esc keycap moved to Close session details in #592.
-    const keycap = button.closest('.pane-bar')!.querySelector('.pane-close .keycap')!
     return {
       hovered: button.matches(':hover'),
       ink: rgba(getComputedStyle(button).color).slice(0, 3),
-      keycapInk: rgba(getComputedStyle(keycap).color).slice(0, 3),
       backgrounds: backgrounds(button).map(color => color.slice(0, 3)),
-      keycapBackgrounds: backgrounds(keycap).map(color => color.slice(0, 3)),
     }
   })
 }
@@ -122,27 +120,44 @@ for (const { width, panel } of cases) for (const theme of themes) {
       expect(bounds.width).toBeGreaterThanOrEqual(380)
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
     }
-    const actions = frame.getByRole('group', { name: 'Session actions' })
-    const pause = actions.getByRole('button', { name: 'Pause', exact: true }), stop = actions.getByRole('button', { name: 'Stop…', exact: true })
-    const interrupt = actions.getByRole('button', { name: 'Interrupt', exact: true })
+    const head = frame.locator('.pane-bar')
+    const more = frame.getByRole('button', { name: 'More session actions', exact: true }), close = frame.getByRole('button', { name: 'Close session details' })
+    await expect(more).toBeEnabled()
+    await expectNoOverlap(head)
+    await expect(close).toHaveAttribute('aria-keyshortcuts', 'Escape')
+    await expect(close).toHaveAttribute('data-tip', 'Close · Esc')
+    // Pointing at the head actions and opening the menu never moves them or the composer's controls.
+    const guard = await controlStability(page, { tabs: frame.getByRole('tablist'), more, close, send: frame.locator('.send') })
+    await guard.check(() => close.hover())
+    await guard.check(() => more.hover())
+    const menu = page.getByRole('menu', { name: 'More session actions' })
+    await guard.check(async () => { await more.click(); await expect(menu).toBeVisible() })
+    const pause = menu.getByRole('menuitem', { name: /^Pause/ }), stop = menu.getByRole('menuitem', { name: /^Stop…/ })
+    const interrupt = menu.getByRole('menuitem', { name: /^Interrupt/ })
     await expect(stop).toBeEnabled()
-    await expectNoOverlap(frame.locator('.pane-bar'))
-    // Pointing at and focusing the header actions never moves them or the composer's controls.
-    const guard = await controlStability(page, { pause, interrupt, stop, more: frame.getByRole('button', { name: 'More session actions', exact: true }), close: frame.getByRole('button', { name: 'Close session details' }), send: frame.locator('.send') })
-    await guard.check(() => pause.hover())
-    await guard.check(() => interrupt.hover())
+    await expectNoOverlap(menu)
+    const keycaps = menu.locator('.keycap')
+    await expect(keycaps.first()).toBeVisible()
+    // Pointing at the menu's actions never moves them either.
+    const items = await controlStability(page, { pause, interrupt, stop })
+    await items.check(() => pause.hover())
+    await items.check(() => interrupt.hover())
     for (const state of ['normal', 'hovered'] as const) {
-      await guard.check(() => state === 'normal' ? pause.hover() : stop.hover())
-      const look = await stopContrast(stop)
+      await items.check(() => state === 'normal' ? pause.hover() : stop.hover())
+      const look = await inkContrast(stop)
       expect(look.hovered).toBe(state === 'hovered')
       const stopRatio = Math.min(...look.backgrounds.map(background => contrast(look.ink, background)))
-      const escRatio = Math.min(...look.keycapBackgrounds.map(background => contrast(look.keycapInk, background)))
-      await testInfo.attach(`contrast-${state}`, { body: JSON.stringify({ theme, width, state, stopRatio, escRatio }), contentType: 'application/json' })
+      let keycapRatio = Infinity
+      for (const keycap of await keycaps.all()) {
+        const cap = await inkContrast(keycap)
+        keycapRatio = Math.min(keycapRatio, ...cap.backgrounds.map(background => contrast(cap.ink, background)))
+      }
+      await testInfo.attach(`contrast-${state}`, { body: JSON.stringify({ theme, width, state, stopRatio, keycapRatio }), contentType: 'application/json' })
       expect.soft(stopRatio, `${theme} ${state} Stop on its composited button background`).toBeGreaterThanOrEqual(4.5)
-      expect.soft(escRatio, `${theme} ${state} Esc on its composited keycap background`).toBeGreaterThanOrEqual(4.5)
+      expect.soft(keycapRatio, `${theme} ${state} menu keycaps on their composited background`).toBeGreaterThanOrEqual(4.5)
       if (theme === 'dark') expect(Math.max(...look.backgrounds.map(luminance)), 'dark Stop is not a light slab').toBeLessThan(.2)
     }
-    guard.done()
+    guard.done(); items.done()
     await page.screenshot({ path: testInfo.outputPath(`chat-header-${theme}-${label.replaceAll(' ', '-')}.png`) })
   })
 }

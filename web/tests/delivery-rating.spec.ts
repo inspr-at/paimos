@@ -188,7 +188,8 @@ test('the session overview shows the same rework mark', async ({ browser }, test
         const stoppedId = '5e000000-0000-4000-8000-000000000007'
         await page.goto(`/agents/${sessionId}`)
         const details = page.getByRole('complementary', { name: 'Session details' })
-        await expect(details.getByRole('heading', { name: 'Details' })).toBeVisible()
+        // AEON-1309 / #678 named the tab Details and its facts section Facts.
+        await expect(details.getByRole('heading', { name: 'Facts' })).toBeVisible()
         await expect(details.locator('[data-delivery-rating]')).toHaveCount(0)
         await page.goto(`/agents/${stoppedId}`)
         const box = details.locator('[data-delivery-rating]')
@@ -197,7 +198,7 @@ test('the session overview shows the same rework mark', async ({ browser }, test
         await expect(box.getByRole('button', { name: 'Undo' })).toBeVisible()
         await expect(box.getByRole('radio')).toHaveCount(0)
         await expect(box).toContainText('1 review round · 2 reverts')
-        await expect(details.getByRole('heading', { name: 'Details' })).toBeVisible()
+        await expect(details.getByRole('heading', { name: 'Facts' })).toBeVisible()
         await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
         await box.screenshot({ path: testInfo.outputPath(`session-${theme}-${width}.png`) })
       })

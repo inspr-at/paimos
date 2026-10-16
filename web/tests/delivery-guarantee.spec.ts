@@ -97,12 +97,12 @@ for (const theme of ['light', 'dark'] as const) {
       await shot(page, `list-${width}-${theme}`)
       for (const [session, words, tip] of [[worker, 'Listening', /^Pulled its inbox/], [never, 'Not listening · never pulled', /Has not pulled its inbox yet/]] as const) {
         await page.goto(`/agents/${session.id}?tab=messages`)
-        await panelOf(page).getByRole('tab', { name: 'Overview' }).click()
+        await panelOf(page).getByRole('tab', { name: 'Details' }).click()
         await expect(panelOf(page).locator('.now-listen')).toContainText(words)
         await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', tip)
       }
       await page.goto(`/agents/${quiet.id}?tab=messages`)
-      await panelOf(page).getByRole('tab', { name: 'Overview' }).click()
+      await panelOf(page).getByRole('tab', { name: 'Details' }).click()
       await expect(panelOf(page).locator('.now-listen')).toContainText('Not listening · last pulled 12m ago')
       await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', /^Last pulled its inbox 12m ago through a turn hook\./)
       // No coloured edge accent marks the state (AGENTS.md rule 11).

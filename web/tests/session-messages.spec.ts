@@ -279,7 +279,8 @@ for (const count of [100, 101, 200]) {
       await panel.getByRole('button', { name: 'Earlier messages', exact: true }).click()
       await expect(panel.locator('.msg[data-id], .queue-item[data-id]')).toHaveCount(Math.min(loaded + 50, count))
     }
-    await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
+    // AEON-1309 / #678 named the Overview tab Details.
+    await panel.getByRole('tab', { name: 'Details', exact: true }).click()
     await panel.getByRole('tab', { name: /Chat/ }).click()
     await expect(panel.locator('.msg[data-id]')).toHaveCount(count)
     await expect(panel.locator('.delivery.delivered')).toHaveCount(count)
@@ -314,7 +315,7 @@ test('a delivered send on screen is asked again and can become read', async ({ p
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
   promote = true
-  await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
+  await panel.getByRole('tab', { name: 'Details', exact: true }).click()
   await panel.getByRole('tab', { name: /Chat/ }).click()
   await expect(panel.locator('.delivery.read')).toHaveCount(1)
   expect(asked.flat()).toContain(id)
