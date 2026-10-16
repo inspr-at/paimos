@@ -55,7 +55,9 @@ the app header searches everything), Filter (by state, the same filter as the
 head counts) and Display (the sort and Default order), then Clear stale and
 History. Applied filters show as pills under the head. The head, the pills and
 the column heads stick inside the card under the app header; sticking adds a
-hairline shadow only, so no box changes. `?q=` carries the search.
+hairline shadow only, so no box changes. `?q=` carries the search. On short
+landscape screens the tools stay on the title's line as icons and the column
+heads are left out, as on phones, so the rows get the height (AEON-1286).
 
 **Keys.** F or / focuses the search, Shift F opens the filter, Esc clears the
 search and then leaves the field. Plain keys never fire inside a text field.
@@ -248,8 +250,9 @@ Only a mouse or a pen points: on a touch screen the changes wait while a
 finger is down and its scroll still runs, momentum included, and apply 1.5 s
 after the scroll settles, without Show now. Whenever changes apply, the first
 rows on screen keep their place, on phones too (Safari does not keep them in
-place by itself). On phones the footer folds away over the page while reading
-down; the page itself never changes size while it scrolls.
+place by itself). On phones and short landscape screens the footer folds away
+over the page while reading down; the page itself never changes size while it
+scrolls.
 A done or ended session keeps its place among its siblings and its end state
 for 10 minutes, then moves to Ended at the next allowed moment. Line 2 says how
 and when it ended and when it moves: "Finished 11:57 · moves to Ended at 12:07"
