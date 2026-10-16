@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -273,13 +272,4 @@ func addChanges(pending *[]events.Change, before *storedNode, after storedNode) 
 		b = *before
 	}
 	*pending = append(*pending, events.Change{NodeID: &after.ID, Type: "goal.items_changed", Before: b, After: after})
-	if before == nil || !reflect.DeepEqual(etaSnapshot(*before), etaSnapshot(after)) {
-		var prior any
-		if before != nil {
-			prior = etaSnapshot(*before)
-		}
-		if prior != nil || len(etaSnapshot(after)) > 1 {
-			*pending = append(*pending, events.Change{NodeID: &after.ID, Type: "goal.eta_changed", Before: prior, After: etaSnapshot(after)})
-		}
-	}
 }

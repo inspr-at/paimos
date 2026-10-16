@@ -376,12 +376,54 @@ func (m *module) subscriptionRead(ctx context.Context, p tenant.Principal, after
 			candidates = candidates[:subscriptionBatch]
 			through = candidates[len(candidates)-1].hint.ID
 		}
+		// Goal hints also require the ordinary event RLS, including a visible
+		// outcome and all serves ends. The widened service read above cannot
+		// substitute for that predicate, even though hints carry no values.
+		goalVisible := map[int64]bool{}
+		goalEventIDs := []int64{}
+		for _, c := range candidates {
+			if subscriptionTypes[c.hint.Type].topic == "goals" {
+				goalEventIDs = append(goalEventIDs, c.hint.ID)
+			}
+		}
+		if len(goalEventIDs) > 0 {
+			var creator any
+			if p.KeyCreatorID != "" {
+				creator = p.KeyCreatorID
+			}
+			if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+				return err
+			}
+			visible, err := tx.Query(ctx, `SELECT id FROM events WHERE id=ANY($1::bigint[])`, goalEventIDs)
+			if err != nil {
+				return err
+			}
+			for visible.Next() {
+				var id int64
+				if err := visible.Scan(&id); err != nil {
+					visible.Close()
+					return err
+				}
+				goalVisible[id] = true
+			}
+			err = visible.Err()
+			visible.Close()
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+				return err
+			}
+		}
 		cache := map[string]bool{}
 		for _, c := range candidates {
 			if c.oversized {
 				return errors.New("subscription event references exceed bound")
 			}
 			policy := subscriptionTypes[c.hint.Type]
+			if policy.topic == "goals" && !goalVisible[c.hint.ID] {
+				continue
+			}
 			project := ""
 			if c.project != nil {
 				project = *c.project

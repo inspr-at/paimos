@@ -161,6 +161,15 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if in.GoalID != "" {
+			var visible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('goal','release'))`, in.GoalID).Scan(&visible); err != nil {
+				return err
+			}
+			if !visible {
+				return missing()
+			}
+		}
 		if in.SourceHandoverID != "" {
 			return fail(422, "source_unavailable", "handover questions require the verified handover adapter")
 		}

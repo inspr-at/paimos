@@ -6450,6 +6450,14 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestGoalUpdateCommandPreservesPatchAndReceipt","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalAPIWriteTimeETAsAndHiddenPings","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestGoalETAHeartbeatAndDirectWriteTransitions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestGoalsSubscriptionUsesOutcomeVisibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/questions","name":"TestGoalLinksSurviveQuestionMerge","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalClockBoundariesAndWatermarks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalIdempotencyKeyGrammar","tier":"ESSENTIAL"}

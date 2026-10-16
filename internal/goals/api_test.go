@@ -177,3 +177,73 @@ func TestGoalAPIMoveReplaceAndRetiredRefs(t *testing.T) {
 	readWriteResult(t, apiRequest(t, f, "PATCH", dest, "replace-good", string(raw)), 200)
 	readWriteResult(t, apiRequest(t, f, "PATCH", dest, "retired-key2", `{"items":{"upsert":[{"ref":"visible","label":"Cannot reuse"}]}}`), 409)
 }
+
+// Risk: a sampling job loses A→B→A, while a goal-level derived ETA can expose
+// another project's value. Real write transactions must preserve both edges.
+func TestGoalAPIWriteTimeETAsAndHiddenPings(t *testing.T) {
+	f := writerFixture(t)
+	path := "/api/goals/" + f.goal
+	for i, text := range []string{"A", "B", "A"} {
+		body := `{"items":{"upsert":[{"ref":"visible","eta":{"text":"` + text + `"}}]}}`
+		key := []string{"eta-write-A1", "eta-write-B1", "eta-write-A2"}[i]
+		readWriteResult(t, apiRequest(t, f, "PATCH", path, key, body), 200)
+	}
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.writer), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT after->>'text' FROM events WHERE node_id=$1 AND type='goal.eta_changed' ORDER BY id`, f.outcome)
+		if err != nil {
+			return err
+		}
+		texts := []string{}
+		for rows.Next() {
+			var text string
+			if err := rows.Scan(&text); err != nil {
+				return err
+			}
+			texts = append(texts, text)
+		}
+		err = rows.Err()
+		rows.Close()
+		if !reflect.DeepEqual(texts, []string{"A", "B", "A"}) {
+			t.Fatalf("write-time ETA edges %v", texts)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readWriteResult(t, apiRequest(t, f, "PATCH", path, "hidden-eta-01", `{"items":{"upsert":[{"ref":"hidden","eta":{"text":"new-private-sentinel"}}]}}`), 200)
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.reader), f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT node_id::text,after FROM events WHERE type='goal.eta_changed' ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		pings := 0
+		for rows.Next() {
+			var id string
+			var raw []byte
+			if err := rows.Scan(&id, &raw); err != nil {
+				return err
+			}
+			if strings.Contains(string(raw), "private") {
+				t.Fatal("hidden ETA leaked")
+			}
+			if id == f.goal {
+				var payload map[string]any
+				json.Unmarshal(raw, &payload)
+				if len(payload) != 3 || payload["goal_id"] != f.goal || payload["generation"] == nil || payload["read_through"] == nil {
+					t.Fatalf("derived payload %s", raw)
+				}
+				pings++
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if pings != 4 {
+			t.Fatalf("visible pings %d", pings)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

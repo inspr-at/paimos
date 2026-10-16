@@ -74,6 +74,10 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 			return out, fail(409, "if_read_through: goal changed")
 		}
 	}
+	capture, err := CaptureGoalETAs(ctx, tx, ids)
+	if err != nil {
+		return out, err
+	}
 	pending := []events.Change{}
 	before := cloneNode(target)
 	setETA(&target, in.ETA, p, now)
@@ -122,6 +126,11 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 	if !reflect.DeepEqual(etaSnapshot(before), etaSnapshot(target)) {
 		pending = append(pending, events.Change{NodeID: &target.ID, Type: "goal.eta_changed", Before: etaSnapshot(before), After: etaSnapshot(target)})
 	}
+	etaChanges, err := capture.Changes(ctx, tx)
+	if err != nil {
+		return out, err
+	}
+	pending = append(pending, etaChanges...)
 	return finishWrite(ctx, tx, p, key, http.MethodPatch, target, hash, pending)
 }
 func ownGoalFields(n storedNode) map[string]any {

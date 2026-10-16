@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -331,11 +332,22 @@ func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if err := proof(s, r, p); err != nil {
 		return nil, err
 	}
+	goalETAs, err := goals.CaptureTicketETAs(ctx, tx, []string{nodeID})
+	if err != nil {
+		return nil, err
+	}
 	if err := writeTicketLive(ctx, tx, p, nodeID, s.ProjectID, at); err != nil {
 		return nil, err
 	}
 	if err := syncBoundLive(ctx, tx, s.ID, nodeID, at); err != nil {
 		return nil, err
 	}
-	return eta.One(ctx, tx, nodeID)
+	view, err := eta.One(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	if err := goalETAs.Append(ctx, tx, p); err != nil {
+		return nil, err
+	}
+	return view, nil
 }

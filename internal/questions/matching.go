@@ -136,6 +136,9 @@ func addAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id st
 	var askerID string
 	err := tx.QueryRow(ctx, `INSERT INTO desk_askers(tenant_id,project_id,question_id,principal_id,request_id,request_digest,session_id,source_request_id,ticket_id,comment_node_id,input,reused_decision_id,reused_revision)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id::text`, p.TenantID, project, id, p.ID, in.RequestID, hash, nullable(in.SessionID), nullable(in.SourceRequestID), nullable(in.TicketID), dest, body, nullable(match.decisionID), revision).Scan(&askerID)
+	if err == nil && in.GoalID != "" {
+		_, err = tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'asks_for') ON CONFLICT DO NOTHING`, p.TenantID, dest, in.GoalID)
+	}
 	return askerID, err
 }
 
