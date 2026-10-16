@@ -34,7 +34,7 @@ func TestGoalUpdateCommandPreservesPatchAndReceipt(t *testing.T) {
 	t.Setenv("AEON_API_KEY", testKey)
 	args := []string{"aeon", "goal", "update", "GOAL-3", "--file", "-", "--idempotency-key", "cli-goal-key"}
 	code, out, stderr := runCLI(args, `{"progress_override":null}`)
-	if code != 0 || stderr != "" || !strings.Contains(out, `"changed": true`) {
+	if code != 0 || stderr != "" || !strings.Contains(out, `"changed":true`) {
 		t.Fatalf("CLI %d %s %s", code, out, stderr)
 	}
 	code, _, stderr = runCLI(args, `{"items":{"upsert":[{"label":"missing ref"}]}}`)

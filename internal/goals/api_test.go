@@ -24,7 +24,7 @@ func writerFixture(t *testing.T) storageFixture {
 	t.Helper()
 	f := newStorageFixture(t)
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='owner'`, f.writer.TenantID, f.writer.ID)
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='admin'`, f.writer.TenantID, f.writer.ID)
 		return err
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestGoalAPIReplayReauthorizesUnderFence(t *testing.T) {
 		if err := db.LockTenant(ctx, tx, f.writer.TenantID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.writer.TenantID, f.writer.ID)
+		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='viewer') WHERE tenant_id=$1 AND principal_id=$2`, f.writer.TenantID, f.writer.ID)
 		return err
 	})
 	if err != nil {
