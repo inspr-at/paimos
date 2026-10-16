@@ -5922,6 +5922,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherSerializesStalledSuccessAndCurrentFailure","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionPublisherWebhooksAckWhilePublicationHolds","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueBoundsInfrastructureRetryAndReportsMergedBeforeHold","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionQueueRejectsStaleGreenReadAfterCurrentFactsChange","tier":"ESSENTIAL"}
