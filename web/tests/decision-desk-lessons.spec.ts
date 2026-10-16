@@ -241,10 +241,11 @@ test('AEON-1331 lesson scope names its filter and Show all restores other waitin
   await expect(page.getByTestId('desk-row-a:approval-1')).toHaveCount(0)
   await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*0$/)
   await page.screenshot({ path: testInfo.outputPath('scope-empty-390.png') })
+  // AEON-1448: an empty scope renders no round action; it arrives at the tab row's end without moving the tabs.
+  await expect(page.getByTestId('desk-one-by-one')).toHaveCount(0)
   const phone = await controlStability(page, {
     open: page.getByTestId('desk-tab-open'),
     decided: page.getByTestId('desk-tab-decided'),
-    review: page.getByTestId('desk-one-by-one'),
     heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }),
   })
   await phone.check(async () => {
@@ -253,6 +254,7 @@ test('AEON-1331 lesson scope names its filter and Show all restores other waitin
     await expect(page.getByTestId('desk-row-a:approval-1')).toBeVisible()
     await expect(page.getByText('No lessons wait in Paimos Aeon.')).toHaveCount(0)
     await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*1$/)
+    await expect(page.getByTestId('desk-one-by-one')).toBeVisible()
   })
   phone.done()
 })
