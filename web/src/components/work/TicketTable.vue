@@ -1431,9 +1431,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .c-check { display: none; }
 .phone-check { display: none; }
 @media (max-width: 720px) {
-  /* The page keeps its 12px inset. The card uses that inset so a whole status
-     label and a 14px priority slot fit at 320px (AEON-1379). */
-  .table-card { margin-inline: -12px; border-radius: 14px; overflow: visible; }
+  .table-card { border-radius: 14px; overflow: visible; }
   .tickets, .tickets tbody { display: block; }
   .tickets thead { display: none; }
   .ticket-row { -webkit-touch-callout: none; }
@@ -1442,8 +1440,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
        priority column. Its minimum is the 14px icon, not max-content and not 0:
        the title spans this column, and a max-content minimum would adopt the
        title's full line (AEON-1379). A 0 minimum lets the status track take the
-       icon's slot, so the mark overflows into the date. */
-    display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(14px, 1fr) max-content; grid-template-areas: "key status prio updated" "title title title title";
+       icon's slot, so the mark overflows into the date. The narrowest cards
+       swap the status and date tracks' minima (below). */
+    --card-status: minmax(0, max-content); --card-date: max-content;
+    display: grid; grid-template-columns: max-content var(--card-status) minmax(14px, 1fr) var(--card-date); grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
   /* The compact status visual is 2px shorter; leave its 44px reach inside the card. */
@@ -1451,9 +1451,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
   .table-card.selectable .ticket-row {
-    grid-template-columns: 44px max-content minmax(0, max-content) minmax(14px, 1fr) max-content;
+    grid-template-columns: 44px max-content var(--card-status) minmax(14px, 1fr) var(--card-date);
     grid-template-areas: "check key status prio updated" "check title title title title";
-    padding-left: 0; padding-right: 0; column-gap: 4px;
+    padding-left: 0; column-gap: 4px;
   }
   .c-check { display: flex; grid-area: check; align-self: center; justify-content: center; }
   .phone-check {
@@ -1502,7 +1502,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
   .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
   .table-card.selectable:not(.customised) .ticket-row:has(.progress-read) {
-    grid-template-columns: 44px max-content minmax(0, max-content) minmax(14px, 1fr) max-content;
+    grid-template-columns: 44px max-content var(--card-status) minmax(14px, 1fr) var(--card-date);
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
@@ -1555,6 +1555,16 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .status-btn { min-width: 0; height: 24px; margin-left: 0; gap: 4px; padding: 0 4px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
   .status-btn .status-icon { flex: none; }
   .status-btn > span:not(.status-icon) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* The narrowest cards drop the status label whole instead of growing the
+     row: the chip keeps its icon and the button's label names the status.
+     The icon-only chip keeps its width; the date is next to give way, and the
+     key never does. The card keeps the page inset and its border (AEON-1379). */
+  @container tickets (max-width: 314px) {
+    .table-card:not(.customised) .ticket-row { --card-status: max-content; --card-date: minmax(0, max-content); }
+    .table-card:not(.customised) .status-btn > span:not(.status-icon) { display: none; }
+    .table-card:not(.customised) .c-updated time { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .table-card:not(.customised) .c-eta { justify-self: stretch; }
+  }
   .prio-label { display: none; }
   /* A phone card shows priority only when there is one. */
   .c-prio .empty { display: none; }
