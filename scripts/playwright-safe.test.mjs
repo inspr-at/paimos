@@ -285,6 +285,42 @@ export default class {
   assert.equal(existsSync(lockPath), false)
 })
 
+// Risk: a shared --last-failed-file lets the last chunk replace the whole
+// group's retry state. The shard preflight then skips a group whose final
+// chunk passed. This run fails in the first chunk and passes in the last.
+test('a failing earlier chunk survives a passing final chunk in the shared last-run file and --last-failed retries only that failure', { timeout: 90000 }, async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'aeon-pw-last-run-'))), lockPath = join(directory, 'suite.lock')
+  const lastRun = join(directory, '.last-run.json'), seen = join(directory, 'seen.txt')
+  const config = join(directory, 'playwright.config.mjs')
+  writeFileSync(config, `export default ${JSON.stringify({ testDir: directory, testMatch: '*.spec.mjs', outputDir: join(directory, 'results'), workers: 1, reporter: 'line' })}`)
+  const playwright = new URL('../web/node_modules/@playwright/test/index.mjs', import.meta.url).href
+  const spec = (title, pass) => `import { test, expect } from ${JSON.stringify(playwright)};
+    import { appendFileSync } from 'node:fs';
+    test(${JSON.stringify(title)}, async () => {
+      appendFileSync(${JSON.stringify(seen)}, ${JSON.stringify(title + '\n')});
+      expect(${pass}).toBe(true);
+    });\n`
+  writeFileSync(join(directory, 'a-fail.spec.mjs'), spec('fails first', false))
+  writeFileSync(join(directory, 'b-pass.spec.mjs'), spec('passes last', true))
+  const args = ['-c', config, '--last-failed-file', lastRun]
+  const options = { cwd: directory, lockPath, capture: true, graceMs: 50 }
+  const first = await runPlaywright(args, options)
+  assert.equal(first.code, 1, `${first.stderr}\n${first.stdout}`)
+  assert.equal(readFileSync(seen, 'utf8'), 'fails first\npasses last\n', 'the passing chunk must run after the failure so it can overwrite shared retry state')
+  const state = JSON.parse(readFileSync(lastRun, 'utf8'))
+  assert.equal(state.status, 'failed')
+  assert.deepEqual(state.failedTests.map(id => typeof id), ['string'])
+  assert.equal(state.failedTests.length, 1)
+  writeFileSync(seen, '')
+  const retry = await runPlaywright([...args, '--last-failed'], options)
+  assert.equal(retry.code, 1, `${retry.stderr}\n${retry.stdout}`)
+  assert.equal(readFileSync(seen, 'utf8'), 'fails first\n', 'failure-only retry must not run the chunk that already passed')
+  const retried = JSON.parse(readFileSync(lastRun, 'utf8'))
+  assert.equal(retried.status, 'failed')
+  assert.deepEqual(retried.failedTests, state.failedTests)
+  assert.equal(existsSync(lockPath), false)
+})
+
 test('a synchronous progress burst records every heartbeat without overflowing the reporter queue', { timeout: 30000 }, async t => {
   const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-burst-')), 'suite.lock'), records = []
   const rename = fs.renameSync

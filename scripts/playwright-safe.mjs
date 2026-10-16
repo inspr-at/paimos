@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
-import { basename, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { suiteLockPath } from './playwright-global-setup.mjs'
 import { acquireLock, holdLimitMs } from './playwright-lock.mjs'
@@ -347,6 +347,65 @@ function withProgressReporter(args, reporter) {
   }
   return [...withoutOptions(args, ['--add-reporter']), `--add-reporter=${additional ? additional + ',' : ''}${reporter}`]
 }
+const lastRunStatuses = ['passed', 'failed', 'timedout', 'interrupted']
+const lastRunRank = Object.fromEntries(lastRunStatuses.map((status, index) => [status, index]))
+// The CLI override wins over PLAYWRIGHT_LAST_RUN_OUTPUT_FILE, matching
+// Playwright. The last occurrence wins when the flag is repeated.
+function lastRunOverride(args, env) {
+  let seen = false, value
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === '--last-failed-file') { seen = true; value = args[++index] }
+    else if (arg.startsWith('--last-failed-file=')) { seen = true; value = arg.slice('--last-failed-file='.length) }
+  }
+  if (seen) {
+    if (!value || value.startsWith('--')) throw new Error('--last-failed-file requires a path')
+    return value
+  }
+  if (typeof env.PLAYWRIGHT_LAST_RUN_OUTPUT_FILE === 'string' && env.PLAYWRIGHT_LAST_RUN_OUTPUT_FILE) return env.PLAYWRIGHT_LAST_RUN_OUTPUT_FILE
+}
+function parseLastRun(text) {
+  let info
+  try { info = JSON.parse(text) }
+  catch { throw new Error('Invalid chunk last-run state; refusing partial retry state') }
+  if (!info || !lastRunStatuses.includes(info.status) || !Array.isArray(info.failedTests) || info.failedTests.some(id => typeof id !== 'string')) {
+    throw new Error('Invalid chunk last-run state; refusing partial retry state')
+  }
+  return { status: info.status, failedTests: info.failedTests }
+}
+function readChunkLastRun(path) {
+  if (!existsSync(path)) return undefined
+  return parseLastRun(readFileSync(path, 'utf8'))
+}
+function aggregateLastRuns(states, floor = 'passed') {
+  const failedTests = [], seen = new Set()
+  let status = floor
+  for (const state of states) {
+    if (lastRunRank[state.status] > lastRunRank[status]) status = state.status
+    for (const id of state.failedTests) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      failedTests.push(id)
+    }
+  }
+  if (failedTests.length && status === 'passed') status = 'failed'
+  return { status, failedTests }
+}
+function publishLastRun(destination, info) {
+  mkdirSync(dirname(destination), { recursive: true })
+  const temporary = join(dirname(destination), `.${basename(destination)}.${process.pid}.${Date.now()}.tmp`)
+  writeFileSync(temporary, JSON.stringify(info, null, 2))
+  try { renameSync(temporary, destination) }
+  catch (error) {
+    try { unlinkSync(temporary) } catch { /* the failed rename must not leave the temporary as the published file */ }
+    throw error
+  }
+}
+function stoppedLastRunFloor(code) {
+  if (code === 124) return 'timedout'
+  if ([129, 130, 143].includes(code)) return 'interrupted'
+  return 'failed'
+}
 
 // Long batches use the native list to freeze the original selection, then run
 // one spec/repetition per acquisition. Native repeat sharding preserves
@@ -380,37 +439,59 @@ export async function runPlaywright(args, options = {}) {
     const plan = JSON.parse(readFileSync(planFile, 'utf8'))
     // Empty selections still use native handling (including --pass-with-no-tests).
     if (!plan.chunks.length) return run(['test', ...withProgressReporter(args, reporter)])
+    if (!plan.outputDir) throw new Error('Playwright chunk retry state has no output directory; refusing partial success')
     mkdirSync(plan.outputDir, { recursive: true })
     const artifacts = mkdtempSync(join(plan.outputDir, 'aeon-chunks-')), blobs = join(artifacts, 'reports')
     mkdirSync(blobs)
+    const lastRunDir = join(artifacts, 'last-run')
+    mkdirSync(lastRunDir)
+    // Chunks must not share the caller's last-run file. A passing final chunk
+    // would replace earlier failures with status passed and no ids, and the
+    // shard --last-failed preflight would skip the group. Publish one aggregate
+    // to the original destination only after the chunk states are collected.
+    const override = lastRunOverride(args, env)
+    const destination = override ? resolve(options.cwd ?? web, override) : join(plan.outputDir, '.last-run.json')
+    const publish = (states, floor) => { if (states.length) publishLastRun(destination, aggregateLastRuns(states, floor)) }
     writeFileSync(mergeConfig, `export default ${JSON.stringify({ testDir: plan.rootDir, reporter: plan.reporters })}\n`)
-    const base = withoutOptions(args, ['--reporter', '--add-reporter', '--shard', '--test-list', '--output', '--last-failed'])
-    let code = 0, last, metrics = []
+    const base = withoutOptions(args, ['--reporter', '--add-reporter', '--shard', '--test-list', '--output', '--last-failed', '--last-failed-file'])
+    let code = 0, last, metrics = [], states = []
     for (const [index, chunk] of plan.chunks.entries()) {
       const list = join(scratch, 'chunk.txt'), expected = join(scratch, 'expected.json'), blob = join(artifacts, `blob-${index}`, 'report.zip')
+      const statePath = join(lastRunDir, `${String(index).padStart(6, '0')}.json`)
       const file = relative(plan.rootDir, chunk.file).split('\\').join('/')
       writeFileSync(list, chunk.titles.map(titles => `[${chunk.project}] › ${file} › ${titles.join(' › ')}`).join('\n') + '\n')
       writeFileSync(expected, JSON.stringify(chunk.titles.map(titles => JSON.stringify([chunk.project, chunk.file, chunk.repeat, titles]))))
       console.error(`AEON_PW_CHUNK ${index + 1}/${plan.chunks.length} spec=${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}`)
-      last = await run(['test', ...chunkSelector(base, chunk, file, list), `--shard=${chunk.repeat + 1}/${chunk.repeats}`, '--reporter=blob', `--add-reporter=${reporter}`, '--output', join(artifacts, `chunk-${index}`)], {
-        capture: true, env: { ...env, AEON_PW_CHUNK_EXPECTED: expected, PLAYWRIGHT_BLOB_OUTPUT_FILE: blob },
+      const chunkEnv = { ...env, AEON_PW_CHUNK_EXPECTED: expected, PLAYWRIGHT_BLOB_OUTPUT_FILE: blob }
+      delete chunkEnv.PLAYWRIGHT_LAST_RUN_OUTPUT_FILE
+      last = await run(['test', ...chunkSelector(base, chunk, file, list), `--shard=${chunk.repeat + 1}/${chunk.repeats}`, '--reporter=blob', `--add-reporter=${reporter}`, '--output', join(artifacts, `chunk-${index}`), `--last-failed-file=${statePath}`], {
+        capture: true, env: chunkEnv,
         lockOptions: { wait: true, ...options.lockOptions, command: `node Playwright test ${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}` },
       })
       metrics.push(last.metrics)
+      const state = readChunkLastRun(statePath)
+      if (state) states.push(state)
       if (existsSync(blob)) { renameSync(blob, join(blobs, `${String(index).padStart(6, '0')}.zip`)); rmdirSync(join(blob, '..')) }
       if (last.code !== 0) code ||= last.code
       // Interruptions, timeouts and missing reports are partial results. Stop
       // rather than quietly executing the remainder or masking the failure.
-      if ([124, 129, 130, 143].includes(last.code) || !existsSync(join(blobs, `${String(index).padStart(6, '0')}.zip`))) {
+      // Publish the states already collected so a previous passed file cannot
+      // hide this run's failures.
+      if ([124, 129, 130, 143].includes(last.code) || !existsSync(join(blobs, `${String(index).padStart(6, '0')}.zip`)) || !state) {
+        publish(states, stoppedLastRunFloor(last.code))
         if (!options.capture) { process.stdout.write(last.stdout); process.stderr.write(last.stderr) }
         return { ...last, code: last.code || 1 }
       }
     }
+    const info = aggregateLastRuns(states)
+    if (code !== 0 && info.status === 'passed') info.status = 'failed'
+    publishLastRun(destination, info)
     const mergedEnv = { ...env }
     delete mergedEnv.PW_TEST_REPORTER
     delete mergedEnv.AEON_PW_PROGRESS_SOCKET
     delete mergedEnv.AEON_PW_CHUNK_EXPECTED
     delete mergedEnv.AEON_PW_CHUNK_PLAN
+    delete mergedEnv.PLAYWRIGHT_LAST_RUN_OUTPUT_FILE
     const merged = await run(['merge-reports', blobs, '--config', mergeConfig], { capture: options.capture, env: mergedEnv, heartbeat: false })
     return { ...merged, code: code || merged.code, chunks: metrics, metrics: { ...merged.metrics,
       peak: Math.max(...metrics.map(row => row.peak)), wall_ms: Date.now() - began,
