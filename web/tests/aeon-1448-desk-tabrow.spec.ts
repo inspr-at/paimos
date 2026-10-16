@@ -2,7 +2,8 @@
 // AEON-1448 (Tick's design decision): "Answer one by one" lives at the end of the Open/Decided tab row.
 // Risks: an empty band above the tabs while nothing is open (the old reserved slot, ~80 px on a phone);
 // a question arriving or leaving moves the tabs, the stamp filter or the list card; the button wraps the
-// row or crowds the tabs on a narrow phone; its icon-only form loses its name or its 44 px touch target.
+// row or crowds the tabs on a narrow phone; its icon-only form loses its name or its 44 px touch target;
+// the label follows the viewport instead of the row (a classic scrollbar), or a phone loses its 16 px inset.
 import { expect, test, type Page } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import type { Question } from '../src/lib/decisionDeskApi'
@@ -89,7 +90,7 @@ function rowGeometry(page: Page) {
     const shell = document.getElementById('main')!, shellBox = shell.getBoundingClientRect(), shellStyle = getComputedStyle(shell)
     const shellLeft = shellBox.left + shell.clientLeft
     return {
-      shell: { left: shellLeft + parseFloat(shellStyle.paddingLeft), right: shellLeft + shell.clientWidth - parseFloat(shellStyle.paddingRight) },
+      viewport: innerWidth, shell: { left: shellLeft + parseFloat(shellStyle.paddingLeft), right: shellLeft + shell.clientWidth - parseFloat(shellStyle.paddingRight) },
       gutter: shellBox.width - shell.clientWidth, deskGutter: desk.offsetWidth - desk.clientWidth,
       row: rect(group.parentElement), tabs: rect(group), tabTops: [...group.querySelectorAll('button')].map(tab => Math.round(tab.getBoundingClientRect().top)),
       tabsOverflow: group.scrollWidth - group.clientWidth, action: rect(action), labelShown: !!label && getComputedStyle(label).display !== 'none',
@@ -100,13 +101,17 @@ function rowGeometry(page: Page) {
 }
 
 // CI's Linux Chromium draws classic scrollbars and a wider sans (DejaVu Sans Bold, about 15 % wider than
-// macOS). Verdana Bold is as wide (AEON-1339). Every host gets the same 15 px classic scrollbars on the
-// shell and on the Desk's own <main>, so these assertions meet the row a Linux or Windows desktop draws.
+// macOS). Verdana Bold is as wide (AEON-1339). 'classic' gives every host the same 15 px classic scrollbars
+// on the shell and on the Desk's own <main>, so these assertions meet the row a Linux or Windows desktop draws.
 // Only where a host still overlays them (mobile emulation) does a 15 px inset stand in, measured once the
 // shell exists: a read before it mounts saw no gutter and stacked the inset on CI's real one.
-async function useLinuxDeskMetrics(page: Page) {
+// 'overlay' is a phone's or a default macOS window's: the scrollbar takes no width, on every host.
+type Scrollbars = 'classic' | 'overlay'
+async function useLinuxDeskMetrics(page: Page, scrollbars: Scrollbars = 'classic') {
+  const font = '.dp-tabrow, .dp-tabrow .seg button, .dp-tabrow .one-by-one { font-family: Verdana, "DejaVu Sans", sans-serif !important; }'
+  if (scrollbars === 'overlay') { await page.addStyleTag({ content: [font, '#main, #main main { scrollbar-width: none !important; }'].join('\n') }); return }
   await page.addStyleTag({ content: [
-    '.dp-tabrow, .dp-tabrow .seg button, .dp-tabrow .one-by-one { font-family: Verdana, "DejaVu Sans", sans-serif !important; }',
+    font,
     '#main, #main main { scrollbar-width: auto !important; scrollbar-color: auto !important; }',
     '#main::-webkit-scrollbar, #main main::-webkit-scrollbar { width: 15px; height: 15px; }',
   ].join('\n') })
@@ -114,6 +119,19 @@ async function useLinuxDeskMetrics(page: Page) {
   await shell.waitFor({ state: 'attached' })
   const gutter = await shell.evaluate(main => main.getBoundingClientRect().width - main.clientWidth)
   if (gutter < 8) await page.addStyleTag({ content: '#main { padding-right: 15px; }' })
+}
+
+// The narrowest row that shows the label: a 384 px phone's with overlay scrollbars. The row decides, not the viewport.
+const labelRow = 352
+// A phone's page inset, the same as the Projects title's (AEON-1448, Tick).
+const phoneInset = 16
+
+// The page title's left edge inside the shell's content box (its gutter and any stand-in inset excluded).
+function titleInset(page: Page, name: string) {
+  return page.getByRole('heading', { level: 1, name }).evaluate(title => {
+    const shell = document.getElementById('main')!
+    return title.getBoundingClientRect().left - (shell.getBoundingClientRect().left + shell.clientLeft + parseFloat(getComputedStyle(shell).paddingLeft))
+  })
 }
 
 // One row at every width: tabs at its start on one line, the button at its end, never taller, never overlapping.
@@ -126,6 +144,7 @@ function expectOneRow(geometry: Awaited<ReturnType<typeof rowGeometry>>, step: s
   // The Desk reserves no scrollbar strip of its own beside the shell's, so the row sits centred in the shell.
   const insets = { left: geometry.row!.left - geometry.shell.left, right: geometry.shell.right - geometry.row!.right }
   expect(Math.abs(insets.left - insets.right), `${step}: the row is centred, no second gutter (${insets.left} | ${insets.right})`).toBeLessThanOrEqual(0.5)
+  if (geometry.viewport < 400) expect(Math.abs(insets.left - phoneInset), `${step}: the phone keeps its ${phoneInset} px inset (${insets.left})`).toBeLessThanOrEqual(0.5)
   const action = geometry.action
   if (!action) return
   expect(Math.abs(action.right - geometry.row!.right), `${step}: the button ends the row`).toBeLessThanOrEqual(0.5)
@@ -141,7 +160,8 @@ async function deskRow(page: Page, locale: string, widths: number[]) {
     await page.setViewportSize({ width, height: width < 400 ? 844 : 1000 })
     const world = await mockDesk(page, theme)
     await page.goto('/decision-desk')
-    await useLinuxDeskMetrics(page)
+    // Phones overlay their scrollbars; desktops here draw classic ones. The sweep below meets both at 390.
+    await useLinuxDeskMetrics(page, width < 400 ? 'overlay' : 'classic')
     await expect(page.getByRole('heading', { level: 1, name: 'Decision Desk' })).toBeVisible()
     await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*0$/)
     await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
@@ -175,9 +195,10 @@ async function deskRow(page: Page, locale: string, widths: number[]) {
     const arrived = await rowGeometry(page)
     expectOneRow(arrived, `${step} decided with a question`)
     await expect(button(page)).toHaveAccessibleName('Answer one by one')
-    // On phones below about 384 px the arrow alone, named by its label and, on fine pointers, a tip.
-    if (width < 384) { expect(arrived.labelShown, `${step}: icon only`).toBe(false); expect(arrived.tip).toBe('Answer one by one') }
+    // Below a 352 px row the arrow alone, named by its label and, on this fine pointer, a tip.
+    if (arrived.row!.width < labelRow) { expect(arrived.labelShown, `${step}: icon only`).toBe(false); expect(arrived.tip).toBe('Answer one by one') }
     else { expect(arrived.labelShown, `${step}: the label shows`).toBe(true); expect(arrived.tip).toBeNull() }
+    if (width === 390) expect(arrived.labelShown, `${step}: a 390 px phone shows the label`).toBe(true)
     await page.screenshot({ path: test.info().outputPath(`decided-${width}-${theme}-${locale}.png`) })
     await decided.check(async () => {
       world.arrived = false
@@ -225,41 +246,60 @@ for (const [locale, widths] of [['en-US', [1440, 1024, 390, 320]], ['de-DE', [14
 })
 
 // The row across widths, with the stamp filter (the widest case): one line of tabs, the button at the end,
-// the label down to a 384 px phone, the filter on the first line only when it fits beside the button.
+// the filter on the first line only when it fits beside the button. Classic and overlay scrollbars: the label
+// shows from a 352 px row either way, so at 390 the overlay window keeps it and the classic one gets the arrow.
+// Phones keep the 16 px inset of the Projects title.
 test('AEON-1448: one tab row from 320 to 1440 px, the stamp filter never pushed by the button', async ({ page }) => {
-  test.setTimeout(120_000)
+  test.setTimeout(150_000)
   const world = await mockDesk(page, 'light')
   world.arrived = true
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/decision-desk')
-  await useLinuxDeskMetrics(page)
-  await expect(button(page)).toBeVisible()
-  await page.getByTestId('desk-tab-decided').click()
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible()
+  const projectsInset = await titleInset(page, 'Projects')
   // The document column is information only: right after a live resize the app header may still be re-fitting.
-  const lines: string[] = ['| viewport | gutter | desk gutter | row | tabs | button | filter | label | filter line | document sideways |', '|---|---|---|---|---|---|---|---|---|---|']
-  const samples: [number, Awaited<ReturnType<typeof rowGeometry>>][] = []
-  for (const width of [1440, 1280, 1024, 960, 900, 768, 600, 414, 390, 384, 383, 375, 360, 340, 320]) {
-    await page.setViewportSize({ width, height: 900 })
-    const geometry = await rowGeometry(page)
-    samples.push([width, geometry])
-    lines.push(`| ${width} | ${geometry.gutter} | ${geometry.deskGutter} | ${geometry.row!.width.toFixed(1)} | ${geometry.tabs!.width.toFixed(1)} | ${geometry.action!.width.toFixed(1)} | ${geometry.filter!.width.toFixed(1)} | ${geometry.labelShown} | ${Math.abs(geometry.filter!.top - geometry.tabs!.top) < geometry.tabs!.height ? 'first' : 'own'} | ${geometry.documentSideways} |`)
+  const lines: string[] = ['| scrollbars | viewport | gutter | desk gutter | inset | row | tabs | button | filter | label | filter line | document sideways |', '|---|---|---|---|---|---|---|---|---|---|---|---|']
+  const samples: [Scrollbars, number, Awaited<ReturnType<typeof rowGeometry>>][] = [], deskTitle: Partial<Record<Scrollbars, number>> = {}
+  for (const scrollbars of ['classic', 'overlay'] as const) {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.goto('/decision-desk')
+    await useLinuxDeskMetrics(page, scrollbars)
+    await expect(button(page)).toBeVisible()
+    await page.getByTestId('desk-tab-decided').click()
+    await expect(page.getByRole('radiogroup', { name: 'Stamp' })).toBeVisible()
+    for (const width of [1440, 1280, 1024, 960, 900, 768, 600, 414, 399, 398, 390, 384, 383, 375, 360, 340, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      const geometry = await rowGeometry(page)
+      if (width === 390) deskTitle[scrollbars] = await titleInset(page, 'Decision Desk')
+      samples.push([scrollbars, width, geometry])
+      lines.push(`| ${scrollbars} | ${width} | ${geometry.gutter} | ${geometry.deskGutter} | ${(geometry.row!.left - geometry.shell.left).toFixed(1)} | ${geometry.row!.width.toFixed(1)} | ${geometry.tabs!.width.toFixed(1)} | ${geometry.action!.width.toFixed(1)} | ${geometry.filter!.width.toFixed(1)} | ${geometry.labelShown} | ${Math.abs(geometry.filter!.top - geometry.tabs!.top) < geometry.tabs!.height ? 'first' : 'own'} | ${geometry.documentSideways} |`)
+    }
   }
   // The measurements first, so a failure still leaves the numbers behind.
-  await writeFile(test.info().outputPath('row-widths.md'), lines.join('\n') + '\n')
-  for (const [width, geometry] of samples) {
-    expectOneRow(geometry, `${width}`)
+  await writeFile(test.info().outputPath('row-widths.md'), [...lines, '', `Projects title inset at 390: ${projectsInset}; Desk: ${JSON.stringify(deskTitle)}`].join('\n') + '\n')
+  expect(Math.abs(projectsInset - phoneInset), `390: the Projects title's inset (${projectsInset})`).toBeLessThanOrEqual(0.5)
+  for (const [scrollbars, width, geometry] of samples) {
+    const step = `${scrollbars} ${width}`
+    expectOneRow(geometry, step)
     const filter = geometry.filter!, action = geometry.action!, tabsBox = geometry.tabs!
     const sameLine = Math.abs(filter.top - tabsBox.top) < tabsBox.height
     if (sameLine) {
-      expect(filter.left - tabsBox.right, `${width}: the filter follows the tabs`).toBeGreaterThanOrEqual(10)
-      expect(action.left - filter.right, `${width}: the button keeps clear of the filter`).toBeGreaterThanOrEqual(10)
-      expect(geometry.filterOverflow, `${width}: the filter is not squeezed`).toBeLessThanOrEqual(0)
-    } else expect(filter.top, `${width}: the filter takes its own line below`).toBeGreaterThanOrEqual(tabsBox.bottom)
-    expect(geometry.labelShown, `${width}: the label down to 384 px`).toBe(width >= 384)
+      expect(filter.left - tabsBox.right, `${step}: the filter follows the tabs`).toBeGreaterThanOrEqual(10)
+      expect(action.left - filter.right, `${step}: the button keeps clear of the filter`).toBeGreaterThanOrEqual(10)
+      expect(geometry.filterOverflow, `${step}: the filter is not squeezed`).toBeLessThanOrEqual(0)
+    } else expect(filter.top, `${step}: the filter takes its own line below`).toBeGreaterThanOrEqual(tabsBox.bottom)
+    // A phone's row is the window less both 16 px insets and, with classic scrollbars, the 15 px gutter.
+    if (width < 400) expect(Math.abs(geometry.row!.width - (width - 2 * phoneInset - (scrollbars === 'classic' ? 15 : 0))), `${step}: the row width (${geometry.row!.width})`).toBeLessThanOrEqual(0.5)
+    expect(geometry.labelShown, `${step}: the label from a ${labelRow} px row (${geometry.row!.width})`).toBe(geometry.row!.width >= labelRow)
   }
+  for (const scrollbars of ['classic', 'overlay'] as const) expect(Math.abs(deskTitle[scrollbars]! - projectsInset), `${scrollbars} 390: the Desk title sits where the Projects title does (${deskTitle[scrollbars]})`).toBeLessThanOrEqual(0.5)
+  const at390 = (scrollbars: Scrollbars) => samples.find(([mode, width]) => mode === scrollbars && width === 390)![2]
+  expect(at390('overlay').labelShown, '390 with an overlay scrollbar: the label').toBe(true)
+  expect(at390('classic').labelShown, '390 with a classic 15 px scrollbar: the arrow').toBe(false)
 })
 
 // Coarse pointers: a 44 px tall button (44 × 44 when icon-only) that still fits inside the tab row's height.
+// A phone overlays its scrollbars, so 390 keeps the label; the arrow alone at 320 gets no tip (a fine-pointer aid).
 test.describe('touch', () => {
   test.use({ hasTouch: true, isMobile: true })
   test('AEON-1448: the round action keeps a 44 px target and adds no height to the row', async ({ page }) => {
@@ -269,7 +309,7 @@ test.describe('touch', () => {
       await page.setViewportSize({ width, height: 844 })
       const world = await mockDesk(page, 'light')
       await page.goto('/decision-desk')
-      await useLinuxDeskMetrics(page)
+      await useLinuxDeskMetrics(page, 'overlay')
       await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*0$/)
       await expect(button(page)).toHaveCount(0)
       const empty = await rowGeometry(page)
@@ -284,7 +324,9 @@ test.describe('touch', () => {
       const geometry = await rowGeometry(page)
       expectOneRow(geometry, `touch ${width}`)
       expect(geometry.action!.height, `${width}: 44 px tall`).toBeGreaterThanOrEqual(44)
-      if (width < 360) expect(geometry.action!.width, `${width}: 44 px wide when icon-only`).toBeGreaterThanOrEqual(44)
+      expect(geometry.labelShown, `${width}: the label on a 390 px phone, the arrow at 320`).toBe(width === 390)
+      if (!geometry.labelShown) expect(geometry.action!.width, `${width}: 44 px wide when icon-only`).toBeGreaterThanOrEqual(44)
+      expect(geometry.tip, `${width}: no tip on a coarse pointer`).toBeNull()
       await page.screenshot({ path: test.info().outputPath(`touch-${width}.png`) })
     }
   })

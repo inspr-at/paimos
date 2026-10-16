@@ -489,13 +489,17 @@ watch(owner, () => {
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
 const stopAccess = onAccessRevalidate({ reset: resetDesk })
-// Below a 384 px viewport the arrow shows alone (AEON-1448); its name then also comes as a tip.
-const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), iconOnly = ref(false)
-function readIconOnly() { const label = oneByOne.value?.querySelector('.label'); iconOnly.value = !!label && getComputedStyle(label).display === 'none' }
-watch(oneByOne, readIconOnly, { flush: 'post' })
+// On a row too narrow for its label the arrow shows alone (AEON-1448); on a fine pointer its name then also comes as a tip.
+const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), arrowTip = ref(false)
+let finePointer: MediaQueryList | undefined
+function readArrowTip() { const label = oneByOne.value?.querySelector('.label'); arrowTip.value = !!label && getComputedStyle(label).display === 'none' && !!finePointer?.matches }
+watch(oneByOne, readArrowTip, { flush: 'post' })
 let rowSize: ResizeObserver | undefined
-onMounted(() => { rowSize = new ResizeObserver(readIconOnly); if (tabRow.value) rowSize.observe(tabRow.value) })
-onBeforeUnmount(() => rowSize?.disconnect())
+onMounted(() => {
+  finePointer = matchMedia('(pointer: fine)'); finePointer.addEventListener('change', readArrowTip)
+  rowSize = new ResizeObserver(readArrowTip); if (tabRow.value) rowSize.observe(tabRow.value)
+})
+onBeforeUnmount(() => { rowSize?.disconnect(); finePointer?.removeEventListener('change', readArrowTip) })
 // How the round ended: after the last decision the desk returns to where it was opened (AEON-1339).
 function closed(result?: DeskClose) {
   opened.value = false; ruleEdit.value = undefined; changeId.value = ''
@@ -550,7 +554,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
           <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
         </div>
         <Transition name="one-by-one">
-          <button v-if="openRound.length" ref="oneByOne" type="button" class="btn one-by-one" aria-label="Answer one by one" :data-tip="iconOnly ? 'Answer one by one' : undefined" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" /><span class="label">Answer one by one</span></button>
+          <button v-if="openRound.length" ref="oneByOne" type="button" class="btn one-by-one" aria-label="Answer one by one" :data-tip="arrowTip ? 'Answer one by one' : undefined" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" /><span class="label">Answer one by one</span></button>
         </Transition>
       </div>
     </div>
@@ -634,8 +638,6 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 /* This root <main> also takes App's scoped `main` rule. Its stable gutter would reserve a second, empty scrollbar
    strip inside #main's own on classic-scrollbar desktops. That narrows the tab row and moves the page off centre. */
 .desk-page { scrollbar-gutter: auto; }
-/* At the label's edge a classic scrollbar gutter would eat the 16 px inset. 8 px keeps the row wide enough. */
-@media (max-width: 399.98px) { .desk-page { padding-left: 8px; padding-right: 8px; } }
 .dp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 18px; }
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }
 .dp-head .head-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
@@ -647,7 +649,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-bar .view-tabs button { white-space: nowrap; }
 /* 12.5 px is the tabs' type (a plain .btn is 13 px), so the label fits beside them on a 390 px phone. */
 .one-by-one { grid-area: 1 / -2; justify-self: end; gap: 6px; padding: 0 12px; font-size: 12.5px; }
-@media (pointer: coarse) { .one-by-one { height: 44px; } }
+/* Coarse pointers: 44 px tall, and 44 × 44 as the arrow alone. */
+@media (pointer: coarse) { .one-by-one { height: 44px; min-width: 44px; } }
 @media (prefers-reduced-motion: no-preference) { .one-by-one-enter-active, .one-by-one-leave-active { transition: opacity 120ms ease; } }
 .one-by-one-enter-from, .one-by-one-leave-to { opacity: 0; }
 .dp-bar .seg button .n { font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
@@ -667,13 +670,13 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
   .dp-bar .view-tabs button { padding: 0 6px; gap: 4px; }
   .one-by-one { padding: 0 6px; gap: 4px; }
 }
-/* The label shows from a 384 px viewport. A container query cannot: the same viewport is a narrower row once a
-   classic scrollbar gutter is reserved. Below that, the arrow alone (44 px on a coarse pointer); the name stays. */
-@media (max-width: 383.98px) {
+/* The row decides, not the viewport. Beside the tabs the label needs about 340 px of row with the widest sans the
+   spec meets (CI's DejaVu Sans Bold); below a 352 px row the arrow shows alone and keeps its name. A 390 px phone
+   (358 px row) shows the label; the same window with a classic 15 px scrollbar (343 px row) gets the arrow. */
+@container desk-tabs (max-width: 351.98px) {
   .one-by-one { width: 32px; padding: 0; }
   .one-by-one .label { display: none; }
 }
-@media (pointer: coarse) and (max-width: 383.98px) { .one-by-one { width: 44px; } }
 .trim-pages { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 /* The list card: a warm full tint and a soft gold ring while something waits, never an edge bar. */
 .queue { --agent-state-color: var(--agent-waiting); overflow: clip; container: queue / inline-size; }
