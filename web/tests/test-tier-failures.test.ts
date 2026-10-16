@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { loadManifest as loadWebPolicy } from '../scripts/ci-web-shard.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -243,16 +242,22 @@ test('native planning regression reuses one collected snapshot for unchanged-tre
   const hook=resolve(directory,'fixture.mjs'),calls=resolve(directory,'collections.txt')
   const collector=new URL('../../scripts/test-tiers/collect.mjs',import.meta.url).href
   const manifest=JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url),'utf8'))
-  const policy=loadWebPolicy()
-  const optional=new Set(policy.groups.filter(group=>group.gate===false).flatMap(group=>group.specs.map(spec=>spec.file)))
+  // A partial drift file makes its recorded titles look unresolved, and the
+  // widen rule then pulls every supplied sibling into the gate. Keep one
+  // recorded drift case and one nightly case from outside the drift files.
+  const obligations=JSON.parse(readFileSync(new URL('../../scripts/test-tiers/drift-obligations.json',import.meta.url),'utf8'))
+  const driftFiles=new Set(obligations.browserFiles)
+  const recorded=new Set(obligations.cases.filter(row=>row.kind==='browser').map(row=>`${row.file}\0${row.name}`))
   const essential=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
-  const nightly=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&optional.has(row.file))
-  assert.ok(essential);assert.ok(nightly)
+  const driftNightly=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&recorded.has(`${row.file}\0${row.name}`))
+  const deferred=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&!driftFiles.has(row.file))
+  assert.ok(essential);assert.ok(driftNightly);assert.ok(deferred)
+  assert.notEqual(deferred.file,driftNightly.file)
   const wrapper=`export * from ${JSON.stringify(`${collector}?collection-count-fixture`)};
 import {appendFileSync} from 'node:fs';
 export const collectWeb = () => {
   appendFileSync(${JSON.stringify(calls)},'collection\\n');
-  return ${JSON.stringify({tests:[essential,nightly]})};
+  return ${JSON.stringify({tests:[essential,driftNightly,deferred]})};
 };`
   writeFileSync(hook,`import {registerHooks} from 'node:module';
 registerHooks({load(url,context,next) {
