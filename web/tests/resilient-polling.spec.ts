@@ -14,7 +14,32 @@ async function agents(page: Page) {
 const sessions = '**/api/harness-sessions?*'
 const sessionRows = (page: Page) => page.locator('.sessions [data-row^="s:"]')
 
+// The page counts every session-list read whose request has settled. Seeing a
+// refresh's third attempt on the network is not enough: the next 'online'
+// restarts polling and drops a read whose failure has not landed yet, so that
+// failure would never count towards the three.
+async function countSettledReads(page: Page) {
+  await page.addInitScript(() => {
+    const list = /\/api\/harness-sessions\?[^/]*$/
+    const counter = window as unknown as { settledSessionReads: number }
+    counter.settledSessionReads = 0
+    const original = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const answer = original(input, init)
+      return list.test(url) ? answer.finally(() => { counter.settledSessionReads++ }) : answer
+    }
+  })
+}
+// Every read the route has seen so far has settled in the page. The app handles
+// a settled read in microtasks; a later task runs only after they are done.
+async function settledReads(page: Page, count: number) {
+  await page.waitForFunction(n => (window as unknown as { settledSessionReads: number }).settledSessionReads >= n, count)
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve)))
+}
+
 test('Agents retries a stalled session read and keeps the loaded table through three failed refreshes', async ({ page }) => {
+  await countSettledReads(page)
   await agents(page)
   let attempts = 0
   let fail = false
@@ -32,6 +57,7 @@ test('Agents retries a stalled session read and keeps the loaded table through t
     const before = attempts
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
     await expect.poll(() => attempts).toBeGreaterThanOrEqual(before + 3)
+    await settledReads(page, attempts)
     await expect(page.getByRole('region', { name: 'Agents', exact: true }).getByRole('status').filter({ hasText: 'Update delayed' })).toBeVisible()
     await expect(sessionRows(page).first()).toBeVisible()
     if (n < 3) await expect(page.getByText('Sessions could not be refreshed:')).toHaveCount(0)
