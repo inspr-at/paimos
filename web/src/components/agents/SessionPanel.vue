@@ -29,7 +29,7 @@ import { readSessionNativeContext } from '../../lib/agentRows'
 import { parseJson } from '../../lib/json'
 import { can, ensurePermissions } from '../../lib/authz'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Approval, SessionControl } from '../../lib/agents'
+import type { Approval, SessionChangeRequest, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
@@ -39,6 +39,7 @@ import KeyCap from '../KeyCap.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
+import SessionRequests from './SessionRequests.vue'
 import SessionTabs from './SessionTabs.vue'
 import { createPanelOpening, leadTab, openingTab, panelModelLine, panelQueryTab, PANEL_TAB_LABEL, panelTabs, type PanelLayout, type PanelTab } from '../../lib/leadPanel'
 import { leadActionAvailable, leadActionReason } from '../../lib/lead'
@@ -355,6 +356,30 @@ function editSetting(kind: 'rename' | 'model' | 'effort') {
 }
 function steer() { const anchor = actionsAnchor.value; closeActions(false); if (anchor && !nativeKnown.value) managed.value?.openSteer(anchor) }
 function settingReason(kind: 'rename' | 'model' | 'effort' | 'steer') { return nativeKnown.value ? nativeBrowserReason : managed.value?.settingReason(kind) ?? 'This setting is not available for this session.' }
+// A session that runs on its own takes rename and model requests (AEON-225). They
+// open from ⋯ as a small form; Details lists them with their outcome (AEON-1438).
+const requestAnchor = ref<HTMLElement | null>(null)
+const requestKind = ref<'rename_request' | 'model_request'>('rename_request')
+const requestList = ref<InstanceType<typeof SessionRequests>>()
+const unmanagedRequests = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && !s.value.watch && !nativeKnown.value && auth.identity?.principal.kind === 'person')
+const requestsOffered = computed(() => unmanagedRequests.value && !!s.value && !s.value.stopped_at && !s.value.archived_at && s.value.phase !== 'stopped' && can('harness.control', s.value.project_id))
+function openRequest(kind: 'rename_request' | 'model_request') {
+  const anchor = actionsAnchor.value
+  closeActions(false)
+  requestKind.value = kind
+  requestAnchor.value = anchor
+}
+function closeRequest(restore: boolean) {
+  const anchor = requestAnchor.value
+  requestAnchor.value = null
+  if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
+}
+function requestSent(control: SessionChangeRequest) {
+  requestList.value?.add(control)
+  toast(control.kind === 'rename_request' ? 'Rename requested' : 'Model change requested')
+  closeRequest(true)
+}
+watch(() => s.value?.id, () => { requestAnchor.value = null })
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0
 const nonnegativeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
@@ -618,11 +643,18 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <button v-if="showRemove" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" :aria-label="`Remove ${view.name}`" @click="removal?.remove(); closeActions(false)"><AppIcon name="trash" :size="16" /><span>{{ quick ? 'Remove' : 'Remove…' }}<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
           <button v-if="isLead" type="button" role="menuitemcheckbox" :aria-checked="pinned === 'lead'" class="panel-menu-item" @click="pinTab(); closeActions(true)"><AppIcon name="pin" :size="16" /><span>Open on Lead by default</span><AppIcon v-if="pinned === 'lead'" name="check" :size="14" /></button>
           <button v-if="!reported?.watch && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="nativeKnown" @click="pickTier(actionsAnchor); closeActions(false)"><AppIcon name="gauge" :size="16" /><span>Change tier…<small v-if="nativeKnown">{{ nativeBrowserReason }}</small></span></button>
+          <template v-if="requestsOffered">
+            <button type="button" role="menuitem" class="panel-menu-item" @click="openRequest('rename_request')"><AppIcon name="edit" :size="16" /><span>Rename session…<small>{{ view.name }} applies it at its next step</small></span></button>
+            <button type="button" role="menuitem" class="panel-menu-item" @click="openRequest('model_request')"><AppIcon name="sliders" :size="16" /><span>Change model or effort…<small>Now {{ modelLine || 'unknown' }}</small></span></button>
+          </template>
           <template v-if="managedControls">
             <button v-for="setting in (['rename', 'model', 'effort'] as const)" :key="setting" type="button" role="menuitem" class="panel-menu-item" :disabled="!!settingReason(setting)" @click="editSetting(setting)"><AppIcon name="edit" :size="16" /><span>{{ setting === 'rename' ? 'Name…' : setting === 'model' ? 'Model…' : 'Effort…' }}<small>{{ settingReason(setting) || (setting === 'rename' ? view.name : setting === 'model' ? modelLine : view.session.reasoning_effort) }}</small></span></button>
           </template>
           <button v-if="!reported?.watch && !nativeKnown && agentRecovery.action(view.session)" type="button" role="menuitem" class="panel-menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); closeActions(false)"><AppIcon name="refresh" :size="16" /><span>{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
         </div>
+      </FloatingPanel>
+      <FloatingPanel v-if="requestAnchor && view && !loading" :anchor="requestAnchor" align="end" :width="344" :label="requestKind === 'rename_request' ? 'Rename session' : 'Change model or effort'" cycle field-escape @close="closeRequest">
+        <SessionRequests :key="`${view.session.id}:${requestKind}`" mode="form" :kind="requestKind" :session="view.session" :name="view.name" :now="now" @sent="requestSent" @cancel="closeRequest(true)" />
       </FloatingPanel>
     </header>
     <template v-if="view && !loading">
@@ -689,6 +721,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <p class="now-meta" :title="capText[1]">{{ capText[0] }}</p>
         <p v-if="view.session.agent_recovery" class="outside-note">{{ view.session.agent_recovery.detail }}</p>
       </section>
+      <SessionRequests v-if="unmanagedRequests" ref="requestList" :key="view.session.id" mode="list" :session="view.session" :now="now" />
 
       <section class="block first" aria-labelledby="setup-title">
         <h3 id="setup-title" class="eyebrow">Facts</h3>
