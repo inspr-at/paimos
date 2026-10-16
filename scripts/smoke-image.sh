@@ -91,9 +91,10 @@ tini_pin="${apk_pins#*$'\n'}"
 tini_pin="${tini_pin%%$'\n'*}"
 case "$chromium_allow" in ''|*[!0-9.r\ -]*) echo 'refusing unsafe runtime APK allow-list' >&2; exit 1 ;; esac
 case "$tini_pin" in ''|*[!0-9.r-]*) echo 'refusing unsafe runtime APK allow-list' >&2; exit 1 ;; esac
-docker run --rm --entrypoint /bin/sh \
+docker run --rm \
   -e "AEON_CHROMIUM_ALLOW=$chromium_allow" \
   -e "AEON_TINI_PIN=$tini_pin" \
+  --entrypoint /bin/sh \
   "$image" -c '
   set -eu
   test -s /usr/share/doc/aeon/NOTICE

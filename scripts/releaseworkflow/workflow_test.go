@@ -518,7 +518,10 @@ case "$*" in
 esac`,
 				"openssl": "echo fixture",
 				"trash":   "exit 0",
-				"node":    `printf '%s\n' "$*" >> "$DOCKER_LOG"`,
+				"node": `printf '%s\n' "$*" >> "$DOCKER_LOG"
+case "$*" in
+  *parseRuntimeApkPins*) printf '%s\n' '1.2.3-r0' '0.19.0-r3' ;;
+esac`,
 			}
 			for name, script := range stubs {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/bash\n"+script+"\n"), 0700); err != nil {
