@@ -6074,6 +6074,28 @@
     ,
     {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024 sanity: the docked head and its anchored menu are unchanged in form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 320x568: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 390x664: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 320 dark: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 320 light: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 390 dark: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 390 light: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow bar and the Decided filter","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
