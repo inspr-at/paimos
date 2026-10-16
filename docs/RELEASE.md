@@ -329,14 +329,14 @@ delay browser fan-out. Unit shard 1 also runs shard-policy regressions and
 browser-runner safety once. Spec-only PRs retain one unit job with the existing
 unit command; docs-only PRs skip all three web job families. Dependency and Chromium
 caches are keyed by the lockfile hash and resolved Playwright version; each of
-12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
+16 hosted `web-shard` jobs restores that runtime and installs only Chromium's
 system libraries. The shard command is `npm --prefix web run ci:web:shard --
 i/12` for exact-spec inspection; full-lane execution uses
-`scripts/test-tiers/cli.mjs run web --shard i/12` with zero retries. Traces and
+`scripts/test-tiers/cli.mjs run web --shard i/16` with zero retries. Traces and
 screenshots are retained in `web-shard-i-evidence` for seven days. The required
 check remains exactly `web`: its unconditional aggregate rejects failed,
 cancelled or skipped setup, unit shards or browser shards in the full lane.
-All four unit measurements and twelve browser measurements feed the tier report;
+All four unit measurements and sixteen browser measurements feed the tier report;
 nightly retains its existing once-only `web-unit` evidence. Skipped Actions jobs
 with zero timestamps report absent duration; executed jobs with invalid timestamps
 still fail accounting. Spec-only reports explicitly use `untiered` coverage and
@@ -351,8 +351,9 @@ step cap (AEON-1351: shard 23 passed every case and still hit the old
 job is still caught; dependency installation keeps its own 13-minute step cap.
 The `nightly-web` aggregate requires setup and the entire shard matrix;
 tier accounting consumes all 24 shard measurements and rejects missing or
-interrupted evidence. PR and merge-group layouts retain their
-existing shard counts and `tierTiming` weights.
+interrupted evidence. PR and merge-group layouts use sixteen shards packed
+from `tierTiming` weights, inside the fifteen-minute planner budget. The
+twenty-minute job cap stays the hang guard.
 
 **Affected PR planning (OPS-257 / AEON-743):** `CI_AFFECTED_LANE` is a repository
 variable, default off. Only its exact value `on` enables new rules; unset, `off`

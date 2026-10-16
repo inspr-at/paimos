@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { classifyPaths, classifyPR, requireResults, validatePath } from './ci-pr-plan.mjs';
 import { effectiveLane } from './test-tiers/diff.mjs';
+import { fullWebShardCount, fullWebShards } from './test-tiers/core.mjs';
 
 function repository() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'aeon-pr-plan-')));
@@ -403,7 +404,7 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         'needs.ci-plan.outputs.lane': raw, 'needs.ci-plan.result': 'success',
         'needs.tier-plan.outputs.lane': lane, 'needs.tier-plan.outputs.mode': mode,
         'needs.tier-plan.outputs.layout': layout, 'needs.tier-plan.result': 'success',
-        'needs.tier-plan.outputs.web_shards': JSON.stringify(Array.from({length:event==='pull_request'&&lane==='spec-only'?1:mode==='essential'?6:12},(_,i)=>i+1)),
+        'needs.tier-plan.outputs.web_shards': JSON.stringify(Array.from({length:event==='pull_request'&&lane==='spec-only'?1:mode==='essential'?6:fullWebShardCount},(_,i)=>i+1)),
         'needs.tree-reuse.outputs.reuse': 'none', 'needs.tree-reuse.result': 'skipped', 'needs.tree-reuse.outputs.run': '',
         'steps.pr-confirm.outputs.reuse': 'none', 'steps.pr-confirm.outputs.run': '',
         'needs.cache-prime.result': 'skipped', 'needs.runner-route.result': 'success',
@@ -420,7 +421,7 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         if (flag === 'on' && mode === 'full') assert.equal(enabled, true, `${label}/${id}: full planner must execute heavy checks`);
         context[`needs.${id}.result`] = enabled ? 'success' : 'skipped';
       }
-      for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', 12]]) {
+      for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', fullWebShardCount]]) {
         const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)?.[1];
         assert.ok(expression, id);
         const rows = evaluate(expression, context);
@@ -469,14 +470,14 @@ test('merge-group workflow retains full matrices, job gates and execution proofs
         'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': 'inspr-at/paimos',
         'needs.ci-plan.result': 'success', 'needs.tier-plan.result': 'success',
         'needs.tier-plan.outputs.lane': 'full', 'needs.tier-plan.outputs.mode': mode,
-        'needs.tier-plan.outputs.layout': layout, 'needs.tier-plan.outputs.web_shards': mode==='essential'?'[1,2,3,4,5,6]':'[1,2,3,4,5,6,7,8,9,10,11,12]', 'needs.tree-reuse.outputs.reuse': 'none',
+        'needs.tier-plan.outputs.layout': layout, 'needs.tier-plan.outputs.web_shards': mode==='essential'?'[1,2,3,4,5,6]':`[${fullWebShards.join(',')}]`, 'needs.tree-reuse.outputs.reuse': 'none',
         'needs.runner-route.result': 'success', 'needs.runner-route.outputs.run_attempt': '1',
         'needs.runner-route.outputs.runner_class': 'hosted', 'needs.web-setup.result': 'success'};
       for (const id of ['go-test', 'go-timing', 'web-shard', 'e2e-run']) {
         const condition = /^    if: (.+)$/m.exec(requiredJob(id))[1];
         assert.equal(Boolean(evaluate(condition, context)), event !== 'pull_request' || layout !== 'static', `${label}/${id}`);
       }
-      for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', 12]]) {
+      for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', fullWebShardCount]]) {
         const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)[1];
         const wanted = event === 'pull_request' && mode === 'essential' && id === 'web-shard' ? 6
           : event === 'pull_request' && mode === 'essential' && id !== 'web-unit' ? 2 : fullRows;
@@ -525,11 +526,11 @@ test('every CI lane and tier runner consumer uses the single effective publisher
 
 test('AEON-1389 web matrix consumes planner shard list and fails wide on absent output',()=>{
   const expression=/^        shard: (.+)$/m.exec(requiredJob('web-shard'))[1];
-  for(const count of [4,6,12]) for(const event of ['pull_request','merge_group','push','workflow_dispatch']) {
+  for(const count of [4,6,fullWebShardCount]) for(const event of ['pull_request','merge_group','push','workflow_dispatch']) {
     const shards=Array.from({length:count},(_,i)=>i+1);
     const context={'github.event_name':event,'needs.tier-plan.outputs.web_shards':JSON.stringify(shards)};
-    assert.deepEqual(evaluate(expression,context),event==='pull_request'?shards:Array.from({length:12},(_,i)=>i+1));
+    assert.deepEqual(evaluate(expression,context),event==='pull_request'?shards:fullWebShards);
   }
-  assert.equal(evaluate(expression,{'github.event_name':'pull_request','needs.tier-plan.outputs.web_shards':''}).length,12);
+  assert.equal(evaluate(expression,{'github.event_name':'pull_request','needs.tier-plan.outputs.web_shards':''}).length,fullWebShardCount);
   assert.match(requiredJob('tier-plan'),/web_shards: \$\{\{ steps\.tiers\.outputs\.web_shards \}\}/);
 });

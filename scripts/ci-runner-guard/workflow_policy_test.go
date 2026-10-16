@@ -669,9 +669,9 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	expression := mapping(mapping(shard["strategy"])["matrix"])["shard"].(string)
 	expression = strings.TrimPrefix(expression, "${{ fromJSON(")
 	expression = strings.TrimSuffix(expression, ") }}")
-	// AEON-1389: the planner owns PR sizing. Other events retain all twelve
+	// AEON-1389: the planner owns PR sizing. Other events retain all sixteen
 	// shards even if a candidate publishes an empty, one-row or essential list.
-	full := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
+	full := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]"
 	for _, planned := range []string{"", "[1]", "[1,2,3,4]", "[1,2,3,4,5,6]", full} {
 		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
 			got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{
