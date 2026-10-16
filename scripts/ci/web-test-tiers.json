@@ -6078,9 +6078,15 @@
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1024: hover and focus reveal them in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1024: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1440: hover and focus reveal them in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1440: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 390: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 the thread starts with its day separator, 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 the thread starts with its day separator, 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1024 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

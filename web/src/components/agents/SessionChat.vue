@@ -1082,7 +1082,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .suggestions { display: grid; justify-items: center; }
 .suggestions button { min-height: 44px; border: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 13px; }
 /* Pending own bubbles: a hairline instead of the delivered tint, when and actions under them. */
-.chat-queue { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 12px 0 0; padding: 0; list-style: none; }
+.chat-queue { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--thread-gap); margin: var(--thread-gap) 0 0; padding: 0; list-style: none; }
 .queue-item { justify-self: end; display: flex; flex-direction: column; align-items: flex-end; min-width: 0; max-width: min(82%, 640px); }
 .queue-text { margin: 0; padding: 9px 14px; border-radius: 18px; background: transparent; box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--ink); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .queue-item.editing .queue-text { background: var(--chip-teal-bg); }
@@ -1095,12 +1095,13 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 @media (pointer: coarse), (max-width: 720px) { .queue-meta .icon-btn, .replying .icon-btn { width: 44px; height: 44px; } }
 .binding-error { color: var(--ink-2); font-size: 13.5px; overflow-wrap: anywhere; margin: 12px 0; }
 .gemini-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-2); }
-.chat-questions { display: grid; gap: 10px; padding: 12px 0; }
+.chat-questions { display: grid; gap: var(--thread-gap); margin-top: var(--thread-gap); }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* One reading column. It stays top-anchored, so a short thread never moves when the composer changes height. */
 .thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 14px 24px 8px; scrollbar-gutter: stable both-edges; }
-.thread-col { width: 100%; max-width: 720px; min-width: 0; margin: 0 auto; }
+/* One gap between thread items of every kind: messages, Desk cards, questions, pending sends and the live turn. */
+.thread-col { --thread-gap: 20px; width: 100%; max-width: 720px; min-width: 0; margin: 0 auto; }
 .jump { z-index: 1; position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
 .history-head { position: relative; display: flex; justify-content: center; align-items: center; min-height: 44px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 .earlier { border: 0; background: transparent; color: var(--teal-ink); min-height: 44px; padding: 0 10px; font: inherit; font-weight: 600; }
@@ -1160,7 +1161,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 /* ---------- Phones: "+" · field · send in one row ---------- */
 @media (max-width: 720px) {
   .thread-scroll { padding: 10px 16px 16px; scrollbar-gutter: auto; }
-  .thread-col { max-width: none; }
+  .thread-col { --thread-gap: 16px; max-width: none; }
   .queue-item { max-width: 85%; }
   .queue-text { font-size: 15px; line-height: 1.45; border-radius: 18px 18px 6px 18px; }
   .composer { padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }

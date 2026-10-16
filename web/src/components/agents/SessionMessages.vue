@@ -69,6 +69,13 @@ onMounted(() => {
 const avatarSize = computed(() => narrow.value ? 18 : 20)
 const menuable = (m: MessageGroup) => fromAgent(m) || mine(m)
 const menu = ref<{ id: string; anchor: HTMLElement; row: HTMLElement; message: MessageGroup } | null>(null)
+// A press opens the menu and later returns focus without the ring; a key
+// brings the ring back (the JoeDesk P4 rule). The last input decides.
+const quiet = ref(false)
+let keyed = false
+const onKey = (event: KeyboardEvent) => { if (!['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) { keyed = true; quiet.value = false } }
+const onPointer = () => { keyed = false }
+onMounted(() => { addEventListener('keydown', onKey, true); addEventListener('pointerdown', onPointer, true) })
 let pressTimer: ReturnType<typeof setTimeout> | undefined
 let pressOrigin: { x: number; y: number } | null = null
 let pressFired = false
@@ -79,6 +86,7 @@ function openMenu(row: HTMLElement, message: MessageGroup) {
   const scroller = row.closest<HTMLElement>('.thread-scroll')
   const bottom = scroller ? scroller.getBoundingClientRect().bottom : innerHeight
   const anchor = row.getBoundingClientRect().bottom > bottom ? (row.firstElementChild as HTMLElement | null) ?? row : row
+  quiet.value = !keyed
   menu.value = { id: message.id, anchor, row, message }
 }
 function closeMenu(restore: boolean) {
@@ -128,11 +136,12 @@ onBeforeUnmount(() => {
   cancelPress()
   if (firedTimer !== undefined) clearTimeout(firedTimer)
   coarseQuery?.removeEventListener('change', syncMedia); narrowQuery?.removeEventListener('change', syncMedia)
+  removeEventListener('keydown', onKey, true); removeEventListener('pointerdown', onPointer, true)
 })
 </script>
 
 <template>
-  <section class="session-messages" aria-label="Conversation">
+  <section class="session-messages" :class="{ quiet }" aria-label="Conversation">
     <ol v-if="rows.length" class="thread" aria-label="Messages">
       <template v-for="row in rows" :key="row.key">
         <li v-if="row.type === 'day'" class="day" role="separator" :aria-label="row.label"><span aria-hidden="true">{{ row.label }}</span></li>
@@ -188,7 +197,7 @@ onBeforeUnmount(() => {
     </ol>
     <div v-if="menu" class="msg-scrim" aria-hidden="true" />
     <FloatingPanel v-if="menu" :anchor="menu.anchor" :align="mine(menu.message) ? 'end' : 'start'" :width="216" :label="words.actions" @close="closeMenu">
-      <div class="msg-menu" role="menu" :aria-label="words.actions">
+      <div class="msg-menu" :class="{ quiet }" role="menu" :aria-label="words.actions">
         <button v-if="fromAgent(menu.message) && canReply" type="button" role="menuitem" class="msg-menu-item" @click="menuReply"><AppIcon name="reply" :size="18" /><span>{{ words.reply }}</span></button>
         <button type="button" role="menuitem" class="msg-menu-item" @click="menuCopy"><AppIcon name="copy" :size="18" /><span>{{ words.copy }}</span></button>
       </div>
@@ -198,8 +207,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .session-messages { min-width: 0; }
-.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.day { justify-self: center; padding: 4px 0 2px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+/* One gap between every two items, whatever their kind (20 px, 16 px on phones). */
+.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--thread-gap, 20px); margin: 0; padding: 0; list-style: none; }
+.day { justify-self: center; font-size: 12px; font-weight: 600; color: var(--ink-3); }
 .msg { position: relative; min-width: 0; width: 100%; padding: 0; }
 .msg :deep(.chat-markdown > :last-child) { margin-bottom: 0; }
 /* One quiet meta line: name · time, then at most one chip. */
@@ -208,11 +218,14 @@ onBeforeUnmount(() => {
 .msg-time { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
 .msg-chip { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; height: 20px; margin-left: 4px; padding: 0 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; font-weight: 500; line-height: 20px; }
 .duplicate { flex: none; font: 500 11.5px var(--mono); color: var(--ink-2); }
-/* Copy and Reply: a reserved row at the message's end, shown on hover or focus. */
-.message-actions { display: flex; gap: 2px; height: 28px; margin: 4px 0 0 -6px; opacity: 0; }
+/* Copy and Reply: on hover or focus, centred in the gap under the message. They
+   lie over the gap and take no layout space, so the rhythm stays one gap. */
+.message-actions { position: absolute; top: calc(100% + (var(--thread-gap, 20px) - 28px) / 2); left: -6px; display: flex; gap: 2px; height: 28px; opacity: 0; }
 .message-actions .icon-btn { border-radius: 8px; color: var(--ink-3); }
 @media (hover: hover) { .message-actions .icon-btn:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .msg:hover .message-actions, .msg:focus-within .message-actions { opacity: 1; }
+/* The gap under a message belongs to its hover, so the pointer reaches the actions. */
+@media (hover: hover) and (pointer: fine) { .msg.agent::after { content: ''; position: absolute; inset: 100% 0 auto; height: var(--thread-gap, 20px); } }
 @media (prefers-reduced-motion: no-preference) { .message-actions { transition: opacity .15s ease; } }
 /* Your own messages: the bubble on the column's right edge, the time under it. */
 .msg.mine { justify-self: end; width: auto; max-width: min(82%, 640px); display: flex; flex-direction: column; align-items: flex-end; }
@@ -226,9 +239,9 @@ onBeforeUnmount(() => {
 .undelivered svg { flex: none; }
 .retry { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 650; text-decoration: underline; min-height: 44px; }
 /* A hairline with a quiet label; no coloured edge (AGENTS.md rule 11). */
-.new-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0; color: var(--teal-ink); font-size: 11px; font-weight: 650; letter-spacing: .04em; }
+.new-divider { display: flex; align-items: center; gap: 10px; color: var(--teal-ink); font-size: 11px; font-weight: 650; letter-spacing: .04em; }
 .new-divider::before, .new-divider::after { content: ''; flex: 1; height: 1px; background: var(--chip-teal-line); }
-/* Touch: no reserved action row; a long press lifts the message in place under a scrim. */
+/* Touch: no action row at all; a long press lifts the message in place under a scrim. */
 .msg-scrim { position: fixed; inset: 0; z-index: 30; background: var(--scrim); }
 .msg.pressed { z-index: 31; }
 .msg.pressed::before { content: ''; position: absolute; inset: -8px -10px; z-index: -1; border-radius: 14px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
@@ -239,16 +252,14 @@ onBeforeUnmount(() => {
 .msg-menu-item + .msg-menu-item { box-shadow: 0 -1px 0 var(--line); }
 @media (hover: hover) { .msg-menu-item:hover { background: var(--row-hover); } }
 .msg-menu-item:focus-visible { outline: 2px solid var(--primary-line); outline-offset: -2px; }
+.msg-menu.quiet .msg-menu-item:focus-visible { outline: none; }
 @media (hover: none), (pointer: coarse) {
-  .thread { gap: 20px; }
   .message-actions { display: none; }
   .msg.agent, .msg.mine { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .msg[tabindex]:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 10px; }
+  .session-messages.quiet .msg[tabindex]:focus-visible { box-shadow: none; }
 }
 @media (max-width: 720px) {
-  /* Phones keep 44 px targets, also with a mouse. */
-  .message-actions { height: 44px; margin: 0 0 0 -14px; }
-  .message-actions .icon-btn { width: 44px; height: 44px; border-radius: 10px; }
   .msg-meta { gap: 8px; margin-bottom: 4px; font-size: 12px; line-height: 16px; }
   .msg-author { flex: none; max-width: 60%; font-size: 13px; }
   .msg-meta .sep { display: none; }

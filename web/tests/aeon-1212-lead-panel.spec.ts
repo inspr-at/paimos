@@ -335,8 +335,8 @@ async function checkHostPill(page: Page, desktopRowHeight: number) {
   console.log(`AEON-1212 Runs on: pill ${layout.pillHeight} px; row ${layout.rowHeight} px = desktop ${desktopRowHeight} px; tap ${layout.tapWidth}×${layout.tapHeight} px`)
 }
 
-// Copy/reply must remain reachable without moving the message, its neighbours,
-// the question, or the pinned composer (their row is reserved, AEON-1438).
+// Copy/reply must remain reachable without leaving an empty action row or
+// moving the message, its neighbours, the question, or the pinned composer.
 async function checkChatSpacing(page: Page, output: string) {
   const thread = panel(page).locator('.thread-scroll')
   const scrollTop = await thread.evaluate(element => element.scrollTop)
@@ -353,17 +353,18 @@ async function checkChatSpacing(page: Page, output: string) {
   ] })
   const spacing = await messages.evaluateAll(rows => rows.map((row, index) => {
     const bounds = row.getBoundingClientRect(), previous = rows[index - 1]?.getBoundingClientRect()
-    const actions = row.querySelector('.message-actions')?.getBoundingClientRect()
+    const next = row.nextElementSibling?.getBoundingClientRect()
+    const icons = [...row.querySelectorAll('.message-actions svg')].map(icon => icon.getBoundingClientRect())
     const body = row.querySelector('.markdown-body, .msg-body')!.getBoundingClientRect()
     return { gap: previous ? bounds.top - previous.bottom : null, dayBetween: !!row.previousElementSibling?.matches('.day, .new-divider'),
-      actionsInside: !actions || actions.top >= bounds.top && actions.bottom <= bounds.bottom + 0.5,
-      actionsBelowText: !actions || actions.top >= body.bottom - 0.5 }
+      noActionRow: !icons.length || Math.abs(bounds.bottom - body.bottom) <= 0.5,
+      iconsInGap: icons.every(icon => icon.top >= body.bottom - 0.5 && (!next || icon.bottom <= next.top + 0.5)) }
   }))
-  // AEON-1438: one 12 px rhythm; Copy and Reply sit in a reserved row at the message's end.
+  // AEON-1438: one 20 px gap; Copy and Reply lie in it under the message and reserve no row.
   for (const item of spacing) {
-    if (item.gap !== null && !item.dayBetween) expect(Math.abs(item.gap - 12), 'compact message spacing').toBeLessThanOrEqual(0.5)
-    expect(item.actionsInside, 'message actions stay inside their row').toBe(true)
-    expect(item.actionsBelowText, 'message actions cannot cover the text').toBe(true)
+    if (item.gap !== null && !item.dayBetween) expect(Math.abs(item.gap - 20), 'one message gap').toBeLessThanOrEqual(0.5)
+    expect(item.noActionRow, 'message actions reserve no row').toBe(true)
+    expect(item.iconsInGap, 'message actions sit in the gap and cover no text').toBe(true)
   }
   await writeFile(output, `${JSON.stringify(spacing, null, 2)}\n`)
   console.log(`AEON-1212 chat spacing: ${spacing.slice(1).map(item => item.gap).join(', ')} px; action hover/focus shift ≤ 0.5 px`)

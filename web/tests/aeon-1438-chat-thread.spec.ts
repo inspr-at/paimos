@@ -4,7 +4,9 @@
 // history; delivery jargon reaches the thread; Copy/Reply clutter every message
 // or move it on hover; the composer moves when a turn starts or ends, on focus
 // or on send; a long word scrolls the page sideways; the desktop thread spreads
-// past a reading column; quiet text drops below 4.5:1 in either theme.
+// past a reading column; quiet text drops below 4.5:1 in either theme; the
+// rhythm between items depends on their kind (Copy/Reply reserving a row);
+// a touch-opened menu shows the keyboard focus ring.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -22,7 +24,7 @@ const JARGON = [/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
 const REPLY_PATH = 'M6.4 3.6 2.6 7.4l3.8 3.8M2.6 7.4h6.8a4 4 0 0 1 4 4v1'
 const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown> } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; today?: boolean } = {}) {
   // A scripted EventSource: the agents feed opens quietly; the chat-live stream takes frames from the test.
   await page.addInitScript(() => {
     class Stream extends EventTarget {
@@ -53,7 +55,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: 
   const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString()
   const agentPost = (body: string, minutesAgo: number, fields: Record<string, unknown> = {}) => ({ ...template, id: `3e000000-0000-4000-8000-${String(++event).padStart(12, '0')}`, sent_event_id: event, body, created_at: at(minutesAgo), sender_principal_id: worker.agent_principal_id, recipient_principal_id: me.id, to: 'paimos:markus', sender_session_id: worker.id, sender_label: 'AEON-LEAD', ...fields }) as typeof template
   const myPost = (body: string, minutesAgo: number, fields: Record<string, unknown> = {}) => ({ ...template, id: `3e000000-0000-4000-8000-${String(++event).padStart(12, '0')}`, sent_event_id: event, body, created_at: at(minutesAgo), sender_principal_id: me.id, recipient_principal_id: worker.agent_principal_id, to: 'claude:camy', recipient_session_id: worker.id, sender_session_id: undefined, sender_label: 'Markus', ...fields }) as typeof template
-  const yesterday = Array.from({ length: 12 }, (_, i) => i % 3 === 2
+  const yesterday = options.today ? [] : Array.from({ length: 12 }, (_, i) => i % 3 === 2
     ? myPost(`Yesterday's note ${i + 1}: keep the release gate as it is.`, 60 * 20 - i * 6)
     : agentPost(`Yesterday's report ${i + 1}: the nightly run is green and the queue is empty.`, 60 * 20 - i * 6))
   const deskRoot = (question: string, minutesAgo: number) => agentPost(`Decision Desk question ${question}; read through ask status`, minutesAgo, { is_action_request: true, expects_reply: true, human_resolution_outcome: 'resolved' })
@@ -110,6 +112,19 @@ const noHorizontalScroll = (page: Page) => page.evaluate(() => {
   const inner = [...document.querySelectorAll<HTMLElement>('.session-panel .thread-scroll, .session-panel .composer')]
   return { doc: doc.scrollWidth <= doc.clientWidth, panel: panel.scrollWidth <= panel.clientWidth, inner: inner.every(el => el.scrollWidth <= el.clientWidth + 1) }
 })
+// The visible gap between consecutive thread items. A message counts from its
+// first to its last visible part; the Copy/Reply row is not part of it, so a
+// reserved row shows up as a wider gap under that message.
+const rhythm = (thread: Locator) => thread.evaluate(list => {
+  const kind = (item: Element) => item.matches('.day, .new-divider') ? 'separator' : item.matches('.desk') ? 'card' : 'text'
+  const bounds = (item: Element) => {
+    if (!item.matches('.msg')) return item.getBoundingClientRect()
+    const parts = [...item.children].filter(child => !child.matches('.message-actions')).map(child => child.getBoundingClientRect())
+    return { top: Math.min(...parts.map(part => part.top)), bottom: Math.max(...parts.map(part => part.bottom)) }
+  }
+  const items = [...list.children]
+  return items.slice(1).map((item, index) => ({ pair: `${kind(items[index]!)}→${kind(item)}`, gap: Math.round((bounds(item).top - bounds(items[index]!).bottom) * 10) / 10 }))
+})
 // WCAG contrast of an element's text over the layers actually behind it,
 // including a ::before paper (the Desk card) and translucent tints.
 async function contrast(locator: Locator) {
@@ -158,6 +173,9 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
     expect(text).not.toContain('Delivered between steps')
     await expect(thread.getByRole('separator', { name: 'Yesterday', exact: true })).toHaveCount(1)
     await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toHaveCount(1)
+    // Each day opens with its separator: the thread's first item, and right above today's first post.
+    await expect(thread.locator(':scope > li').first()).toHaveAttribute('aria-label', 'Yesterday')
+    await expect(thread.locator(':scope > li.day + li.msg').last()).toContainText('Morning, Markus.')
 
     // Receipts only on the latest own message.
     const own = thread.locator('.msg.mine')
@@ -241,20 +259,46 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
   })
 }
 
-for (const width of [1440, 1024]) test(`AEON-1438 Copy and Reply on demand ${width}: hover and focus reveal them in place`, async ({ page }) => {
+for (const width of [1440, 1024, 390]) test(`AEON-1438 Copy and Reply on demand ${width}: hover and focus reveal them in the gap, nothing moves`, async ({ page }, testInfo) => {
   const { worker } = await setup(page)
-  await page.setViewportSize({ width, height: 900 })
+  await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 })
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = panelOf(page)
+  const thread = panel.getByRole('list', { name: 'Messages', exact: true })
   const message = panel.locator('.msg.agent', { hasText: 'Shall I start the release check' })
   const next = panel.locator('.msg.desk').last()
   const copy = message.getByRole('button', { name: 'Copy', exact: true }), reply = message.getByRole('button', { name: 'Reply', exact: true })
   await expect(message).toBeVisible()
-  // Never permanently visible: the reserved row is transparent until hover or focus.
+  await expect(panel.getByRole('article', { name: /^Decision Desk: Ship the 135 notes/ })).toContainText('Waiting for you')
+  await expect(panel.getByRole('article', { name: /^Decision Desk: Merge AEON-1182 now/ })).toContainText('Answered: Yes, merge now')
+
+  // One gap between every two items, whatever their kind: 20 px, 16 px on phones.
+  const expected = width <= 720 ? 16 : 20
+  const gaps = await rhythm(thread)
+  for (const pair of ['text→text', 'text→card', 'card→text']) expect(gaps.some(item => item.pair === pair), `${pair} is in the fixture`).toBe(true)
+  for (const item of gaps) expect(Math.abs(item.gap - expected), `${item.pair} gap ${item.gap} px`).toBeLessThanOrEqual(1)
+
+  // Never permanently visible: the row is transparent until hover or focus, and it takes no space.
   await expect(message.locator('.message-actions')).toHaveCSS('opacity', '0')
   await panel.locator('.pane-bar').hover()
-  const guard = await controlStability(page, { message, next, copy, reply, composer: panel.locator('.compose-row') })
+  const guard = await controlStability(page, { message, next, copy, reply, composer: panel.locator('.compose-box') })
   await guard.check(async () => { await message.hover(); await expect(message.locator('.message-actions')).toHaveCSS('opacity', '1') })
+  // The icons sit in the gap under the message: below its text, above the next item.
+  const place = await message.evaluate(row => {
+    const text = row.querySelector('.chat-markdown, .markdown-body')!.getBoundingClientRect(), after = row.nextElementSibling!.getBoundingClientRect()
+    const icons = [...row.querySelectorAll('.message-actions svg')].map(icon => icon.getBoundingClientRect())
+    return { rowEnd: row.getBoundingClientRect().bottom - text.bottom, icons: icons.map(icon => ({ top: icon.top - text.bottom, bottom: after.top - icon.bottom })) }
+  })
+  expect(Math.abs(place.rowEnd), 'the message ends with its text').toBeLessThanOrEqual(.5)
+  expect(place.icons).toHaveLength(2)
+  for (const icon of place.icons) { expect(icon.top, 'icon below the text').toBeGreaterThanOrEqual(-.5); expect(icon.bottom, 'icon above the next item').toBeGreaterThanOrEqual(-.5) }
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1438/hover-${width}-light.png`) })
+  // The pointer travels through the gap to the actions without losing them.
+  const box = (await copy.boundingBox())!, text = (await message.locator('.chat-markdown, .markdown-body').first().boundingBox())!
+  await page.mouse.move(text.x + text.width / 2, text.y + text.height + expected / 2)
+  await expect(message.locator('.message-actions')).toHaveCSS('opacity', '1')
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await expect(message.locator('.message-actions')).toHaveCSS('opacity', '1')
   await guard.check(async () => { await panel.locator('.pane-bar').hover(); await copy.focus(); await expect(message.locator('.message-actions')).toHaveCSS('opacity', '1') })
   // Reply uses the reply glyph, never an arrow that reads as Back.
   expect(await reply.locator('path').getAttribute('d')).toBe(REPLY_PATH)
@@ -264,6 +308,27 @@ for (const width of [1440, 1024]) test(`AEON-1438 Copy and Reply on demand ${wid
     await expect(panel.getByRole('textbox', { name: 'Message to AEON-LEAD' })).toBeFocused()
   })
   guard.done()
+  expect(await rhythm(thread), 'hover and Reply leave the rhythm alone').toEqual(gaps)
+})
+
+// The thread opens with its day: a thread that starts today shows "Today" first, at scrollTop 0.
+for (const width of [1440, 390]) test(`AEON-1438 the thread starts with its day separator, ${width}`, async ({ page }, testInfo) => {
+  const { worker } = await setup(page, { today: true })
+  await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  const thread = panel.getByRole('list', { name: 'Messages', exact: true })
+  const scroller = panel.locator('.thread-scroll')
+  await expect(panel.getByRole('article', { name: /^Decision Desk: Ship the 135 notes/ })).toContainText('Waiting for you')
+  await scroller.hover()
+  await page.mouse.wheel(0, -20000)
+  await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(0)
+  const first = thread.locator(':scope > li').first()
+  await expect(first).toHaveAttribute('role', 'separator')
+  await expect(first).toHaveAttribute('aria-label', 'Today')
+  await expect(first).toBeInViewport()
+  await expect(thread.locator('.day')).toHaveCount(1)
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1438/thread-start-${width}-light.png`) })
 })
 
 test.describe('touch', () => {
@@ -283,6 +348,8 @@ test.describe('touch', () => {
     await expect(message).toBeVisible()
     // Touch has no hover: no action row at all, so nothing is permanently visible.
     await expect(message.locator('.message-actions')).toBeHidden()
+    await expect(panel.getByRole('article', { name: /^Decision Desk: Ship the 135 notes/ })).toContainText('Waiting for you')
+    for (const item of await rhythm(panel.getByRole('list', { name: 'Messages', exact: true }))) expect(Math.abs(item.gap - 16), `${item.pair} gap ${item.gap} px`).toBeLessThanOrEqual(1)
     const menu = page.getByRole('menu', { name: 'Message actions' })
     const guard = await controlStability(page, { message, next: panel.locator('.msg.desk').last(), send: panel.locator('.compose .send'), plus: panel.getByRole('button', { name: 'Add a ticket or session' }) })
     await guard.check(async () => {
@@ -293,21 +360,31 @@ test.describe('touch', () => {
     })
     for (const item of await menu.getByRole('menuitem').all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     await expect(menu.getByRole('menuitem')).toHaveText(['Reply', 'Copy'])
+    // A press moves focus into the menu without the keyboard ring (the JoeDesk P4 rule).
+    const first = menu.getByRole('menuitem', { name: 'Reply' })
+    await expect(first).toBeFocused()
+    await expect(first).toHaveCSS('outline-style', 'none')
     await page.screenshot({ path: testInfo.outputPath(`AEON-1438/long-press-390-${theme}.png`) })
     await guard.check(async () => {
       await page.keyboard.press('Escape')
       await expect(menu).toHaveCount(0)
       await expect(message).not.toHaveClass(/pressed/)
     })
-    // Your own message offers Copy only.
+    // Your own message offers Copy only; a tap on Copy hands focus back to the message, still without a ring.
     const mine = panel.locator('.msg.mine').last()
     await longPress(page, mine)
     await expect(menu.getByRole('menuitem')).toHaveText(['Copy'])
-    await page.keyboard.press('Escape')
-    // The keyboard reaches the same menu: Enter on the focused message.
+    await menu.getByRole('menuitem', { name: 'Copy' }).click()
+    await expect(menu).toHaveCount(0)
+    await expect(mine).toBeFocused()
+    await expect(mine).toHaveCSS('box-shadow', 'none')
+    // The keyboard reaches the same menu: Enter on the focused message, and there the ring shows.
     await message.focus()
     await page.keyboard.press('Enter')
     await expect(menu).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: 'Reply' })).toBeFocused()
+    await expect(menu.getByRole('menuitem', { name: 'Reply' })).toHaveCSS('outline-style', 'solid')
+    if (theme === 'light') await page.screenshot({ path: testInfo.outputPath('AEON-1438/menu-keyboard-390-light.png') })
     await menu.getByRole('menuitem', { name: 'Reply' }).click()
     await expect(panel.locator('.replying')).toContainText('Merged AEON-1182.')
     guard.done()

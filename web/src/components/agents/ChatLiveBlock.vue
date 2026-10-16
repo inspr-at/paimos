@@ -56,7 +56,7 @@ const foldLabel = computed(() => `${words.value.tools(props.turn.tools.length)} 
 </template>
 
 <style scoped>
-.live-turn { min-width: 0; padding: 6px 0; margin-top: 10px; }
+.live-turn { min-width: 0; padding: 6px 0; margin-top: calc(var(--thread-gap, 20px) - 6px); }
 /* The same quiet meta line as a message (AEON-1438): name, then "Live" in plain type. */
 .live-meta { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 20px; margin-bottom: 5px; font-size: 12.5px; color: var(--ink-3); }
 .live-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; color: var(--ink); }

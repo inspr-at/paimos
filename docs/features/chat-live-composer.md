@@ -104,10 +104,13 @@ and desktop designs attached to AEON-1438:
   date. Only the latest own message shows its receipt; a failed send always
   shows Not delivered with Retry. Delivery jargon such as "Delivered between
   steps" is gone; how a session receives messages stays in Details.
-- Copy and Reply sit in a reserved row at the end of an agent message and
-  show on hover or focus. Touch screens have no such row: a long press, Enter
-  on the focused message or the context-menu key opens Reply and Copy, and
-  the pressed message lifts in place. Reply uses its own reply icon.
+- One gap separates every two items in the thread, whatever their kind
+  (20 px, 16 px on phones). Copy and Reply show on hover or focus inside the
+  gap under an agent message and take no space of their own. Touch screens
+  have no such row: a long press, Enter on the focused message or the
+  context-menu key opens Reply and Copy, and the pressed message lifts in
+  place. A menu opened by a press takes focus without the keyboard ring; a
+  key brings the ring back. Reply uses its own reply icon.
 - One calm composer: the field grows from one line to six. Desktop shows a
   labelled Send and, on focus with a fine pointer only, the keys ("Enter
   Send · Shift Enter New line"; while a turn runs "Enter After this turn" and
