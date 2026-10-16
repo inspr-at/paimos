@@ -167,7 +167,14 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 	}
 	// Discovery uses immutable outcome subjects, including visible moved-away
 	// outcomes. Values still come only from their RLS-filtered event snapshots.
-	rows, err := tx.Query(ctx, `SELECT DISTINCT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='outcome' WHERE EXISTS(SELECT 1 FROM events e WHERE e.node_id=n.id AND e.type='goal.items_changed' AND (e.before->>'goal_node_id'=$1 OR e.after->>'goal_node_id'=$1)) ORDER BY n.id::text LIMIT 4097`, goal)
+	rows, err := tx.Query(ctx, `WITH subjects AS MATERIALIZED (
+ SELECT DISTINCT e.node_id FROM events e WHERE e.type='goal.items_changed'
+ AND e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
+ AND (e.before->>'goal_node_id'=$1 OR e.after->>'goal_node_id'=$1)
+ ORDER BY e.node_id LIMIT 4097)
+ SELECT n.id::text FROM subjects s JOIN nodes n ON n.id=s.node_id
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='outcome'
+ ORDER BY n.id`, goal)
 	if err != nil {
 		return out, err
 	}
