@@ -15,7 +15,9 @@ async function wholeKey(key: Locator, frame: string) {
     range.selectNodeContents(el)
     const lines = new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => Math.round(rect.top))).size
     const box = el.getBoundingClientRect(), outer = el.closest(selector)!.getBoundingClientRect()
-    return { text: el.textContent, lines, clipped: el.scrollWidth > el.clientWidth + 1, inside: box.left >= outer.left - .5 && box.right <= outer.right + .5 }
+    const frameStyle = getComputedStyle(el.closest(selector)!)
+    const why = `${el.textContent}: ${el.scrollWidth}/${el.clientWidth}px in ${Math.round(el.parentElement!.getBoundingClientRect().width)}px; columns ${frameStyle.gridTemplateColumns || frameStyle.display}`
+    return { why, lines, clipped: el.scrollWidth > el.clientWidth + 1, inside: box.left >= outer.left - .5 && box.right <= outer.right + .5 }
   }, frame)
 }
 
@@ -36,7 +38,8 @@ for (const width of [320, 360, 390, 1440]) {
       await page.emulateMedia({ colorScheme })
       await page.evaluate(() => document.fonts.ready)
       for (const row of await rows(page).all()) {
-        expect(await wholeKey(row.locator('.c-key .key'), 'tr'), colorScheme).toMatchObject({ lines: 1, clipped: false, inside: true })
+        const keyFit = await wholeKey(row.locator('.c-key .key'), 'tr')
+        expect(keyFit, `${colorScheme} ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
         const title = (await row.locator('.title-link').boundingBox())!, card = (await row.boundingBox())!
         expect(title.x + title.width, 'the title gives way inside the card').toBeLessThanOrEqual(card.x + card.width + .5)
       }
@@ -51,7 +54,8 @@ for (const width of [320, 360, 390, 1440]) {
     for (const colorScheme of SCHEMES) {
       await page.emulateMedia({ colorScheme })
       for (const child of await children.all()) {
-        expect(await wholeKey(child.locator('.key'), '.child-row'), colorScheme).toMatchObject({ lines: 1, clipped: false, inside: true })
+        const keyFit = await wholeKey(child.locator('.key'), '.child-row')
+        expect(keyFit, `${colorScheme} ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
         const key = (await child.locator('.key').boundingBox())!, title = (await child.locator('.child-title').boundingBox())!
         expect(key.x + key.width, 'the key never runs under the title').toBeLessThanOrEqual(title.x + .5)
       }

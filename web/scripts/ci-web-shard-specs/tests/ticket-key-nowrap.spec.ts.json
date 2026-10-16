@@ -1,5 +1,9 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 16,
+    "selectedTests": 4
+  },
   "spec": {
     "file": "tests/ticket-key-nowrap.spec.ts",
     "listedTests": 4,
