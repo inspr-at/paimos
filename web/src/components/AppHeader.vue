@@ -181,15 +181,24 @@ function overflow(el: HTMLElement) {
 // one width always gives one trail.
 function cutTrail(trail: HTMLElement) {
   const frame = trail.getBoundingClientRect(), range = document.createRange()
+  // The same room the trail probe uses. The trail's own edge is not enough: its
+  // box can cross the header padding while a ticket key still sits inside the
+  // trail, and the probe then reports the key's text as cut (the 1230 px sweep).
+  const header = trail.closest('.app-header')
+  const headerBox = header instanceof HTMLElement ? header.getBoundingClientRect() : null
+  const headerPad = header instanceof HTMLElement ? getComputedStyle(header) : null
+  const limitLeft = headerBox && headerPad ? headerBox.left + (parseFloat(headerPad.paddingLeft) || 0) : -Infinity
+  const limitRight = headerBox && headerPad ? headerBox.right - (parseFloat(headerPad.paddingRight) || 0) : Infinity
   for (const part of trail.children) {
     if (!(part instanceof HTMLElement)) continue
     const box = part.getBoundingClientRect(), style = getComputedStyle(part)
     if (box.width <= 1 || style.display === 'none') continue
     const inset = (side: 'Left' | 'Right') => parseFloat(style[`padding${side}`]) || 0
-    // A crumb clips to its own box, the trail to its. What must show whole: the
-    // crumb's keys, icons and names, or its text; an ellipsis by design, its box.
-    const left = Math.max(frame.left, style.overflowX === 'hidden' ? box.left : -Infinity)
-    const right = Math.min(frame.right, style.overflowX === 'hidden' ? box.right : Infinity)
+    // A crumb clips to its own box, the trail to its, and both to the header's
+    // content box. What must show whole: the crumb's keys, icons and names, or
+    // its text; an ellipsis by design, its box.
+    const left = Math.max(frame.left, limitLeft, style.overflowX === 'hidden' ? box.left : -Infinity)
+    const right = Math.min(frame.right, limitRight, style.overflowX === 'hidden' ? box.right : Infinity)
     let atoms: { left: number; right: number }[]
     if (style.textOverflow === 'ellipsis') atoms = [{ left: box.left + inset('Left'), right: box.right - inset('Right') }]
     else if (part.children.length) atoms = [...part.children].map(child => child.getBoundingClientRect()).filter(rect => rect.width > 1 && rect.height > 1)
@@ -337,7 +346,10 @@ function refit() {
   const tick = () => {
     if (generation !== fitGeneration) return
     const name = header.value?.querySelector<HTMLElement>('.crumbs .crumb-name') ?? null
-    if (frames >= 2 && trailSignature() === left && !nameSliver(name)) { fitFrame = 0; return }
+    const trailNow = header.value?.querySelector<HTMLElement>('.crumbs') ?? null
+    // A matching row can still be cut: the chip widths did not move, but the key
+    // crosses the header padding. Fit again instead of confirming that frame.
+    if (frames >= 2 && trailSignature() === left && !nameSliver(name) && !(trailNow && cutTrail(trailNow))) { fitFrame = 0; return }
     if (frames >= 6) { fitFrame = 0; return }
     fitHeader()
     // A resize during the fit starts a new follow-up. This one must not replace it.
