@@ -890,6 +890,8 @@
     ,
     "AEON-1425: project-name-wrap was not in hosted nightly run 38732586462. The mbp2606 one-worker run of all eight cases passed in 24.9 seconds including startup; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight. The historical twelve-shard prior gate stays at 299.838842s by charging this file outside that budget."
     ,
+    "AEON-1406: desk-empty was not in hosted nightly run 38732586462. The mbp2606 one-worker run of all four cases passed in 12.4 seconds including startup; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight. The historical twelve-shard prior gate stays at 299.838842s by charging this file outside that budget."
+    ,
     "AEON-1448: aeon-1448-desk-tabrow was not in hosted nightly run 38732586462. An mbp2606 one-worker run of its four cases took 20.1 seconds including startup; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight. The historical twelve-shard prior gate stays at 299.838842s by charging this file outside that budget."
   ]
   ,
