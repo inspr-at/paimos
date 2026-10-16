@@ -69,22 +69,32 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
   // that answer, so it never shows the plain list first.
   const entryResolved = ref(false)
   let resolvedFor = ''
+  // Counted when the address changes, so a result that resumes after the preference
+  // read cannot replace a ticket or a section opened meanwhile (AEON-1453).
+  let navigation = 0
+  watch(() => [ticketKey.value, section.value, route.path, JSON.stringify(route.query ?? {})], () => { navigation++ })
   watch(projectId, async id => {
     if (!id || resolvedFor === id) return
     resolvedFor = id
+    const generation = navigation
+    const openedTicket = ticketKey.value
     const bare = bareProjectEntry(route)
-    const plain = () => section.value === 'tickets' && Object.keys(route.query).length === 0
+    const plain = () => section.value === 'tickets' && !ticketKey.value && Object.keys(route.query).length === 0
     if (ticketKey.value || (!bare && !plain())) { entryResolved.value = true; void loadViews(id); return }
     entryResolved.value = false
     await Promise.race([Promise.all([loadViews(id), sectionSwitch.ready(), ticketSwitch.ready()]), new Promise(resolve => setTimeout(resolve, 1500))])
-    if (projectId.value !== id) return
-    const target = sectionSwitch.preferred.value
-    if (bare && plain() && target !== 'tickets') await router.replace({ path: sectionPath(target as ProjectSection) })
-    else if (plain()) {
-      const query = ticketOpeningQuery()
-      if (Object.keys(query).length) await router.replace({ path: route.path, query })
+    const stillHere = () => projectId.value === id && navigation === generation && ticketKey.value === openedTicket
+    if (!stillHere()) {
+      if (projectId.value === id) { entryResolved.value = true; void loadViews(id) }
+      return
     }
-    entryResolved.value = true
+    const target = sectionSwitch.preferred.value
+    if (bare && plain() && stillHere() && target !== 'tickets') await router.replace({ path: sectionPath(target as ProjectSection) })
+    else if (plain() && stillHere()) {
+      const query = ticketOpeningQuery()
+      if (Object.keys(query).length && stillHere()) await router.replace({ path: route.path, query })
+    }
+    if (projectId.value === id) entryResolved.value = true
   }, { immediate: true })
 
   const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')

@@ -5,7 +5,7 @@
 // last; a link (?view=, ?tab=, ?mode=) wins once and changes neither. One key per
 // switch, per project where the switch belongs to a project. Never browser storage.
 import { computed, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import { preferenceOwner, preferenceSaves, usePreference } from './preferences'
+import { preferenceGeneration, preferenceOwner, preferenceSaves, usePreference } from './preferences'
 
 export interface ViewMemory { last?: string; default?: string | null }
 // What an older store held before the switch had its own key: read, never written.
@@ -84,19 +84,23 @@ export function useViewSwitch(config: ViewSwitchOptions) {
   const lastId = computed(() => memoryLast(memory.value, options.value, legacy.value))
   const preferred = computed(() => openingView(memory.value, options.value, fallback.value, legacy.value))
   const linked = computed(() => valid(config.link === undefined ? null : toValue(config.link), options.value))
-  // The person's choice on this visit. A new link or another key starts from the link or the memory again.
+  // The person's choice on this visit. A new link, another key, or another person starts from the link or the memory again.
   const chosen = ref<string | null>(null)
-  watch(key, () => { chosen.value = null })
+  // Sync: the choice drops with the preference cache, before a write queued on the old epoch resumes.
+  watch([key, preferenceOwner], () => { chosen.value = null }, { flush: 'sync' })
   watch(linked, value => { if (value) chosen.value = null })
   const current = computed(() => valid(chosen.value, options.value) ?? linked.value ?? preferred.value)
 
   // Writes merge into what the server holds; a value that could not be read is never overwritten.
   async function write(change: (now: ViewMemory) => ViewMemory | null) {
     const at = key.value, target = pref.value
-    if (!at || !target || !(await target.ensureLoaded())) return
+    const owner = preferenceOwner.value, generation = preferenceGeneration()
+    const same = () => key.value === at && preferenceOwner.value === owner && preferenceGeneration() === generation
+    if (!at || !target || !(await target.ensureLoaded()) || !same()) return
     const now = readMemory(target.value.value) ?? {}
     const next = change(now)
-    if (next) target.save(next as ViewMemory & object, 0)
+    if (!next || !same()) return
+    target.save(next as ViewMemory & object, 0)
   }
   function remember(id: string) {
     if (!options.value.includes(id) || config.remembers?.(id) === false) return

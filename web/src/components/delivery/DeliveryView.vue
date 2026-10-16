@@ -25,7 +25,7 @@ import { FLOW_MODES, type FlowMode } from '../../lib/deliveryFlowModes'
 import { timeLabel } from '../../lib/deliveryFlow'
 import { flowText, put } from '../../lib/deliveryFlowText'
 import { useDeliveryFlow } from '../../lib/useDeliveryFlow'
-import { onPreferenceFailure, preferenceSaves, usePreference } from '../../lib/preferences'
+import { onPreferenceFailure, preferenceGeneration, preferenceOwner, preferenceSaves, usePreference } from '../../lib/preferences'
 import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
 import { usePoller } from '../../lib/usePolledData'
 import { vClipTip } from '../../directives/clipTip'
@@ -72,6 +72,8 @@ const pref = usePreference<StoredDeliveryPrefs>(DELIVERY_PREFS_KEY)
 const prefsReady = ref(false)
 void pref.ready.then(() => { prefsReady.value = true })
 const chosen = ref<DeliveryPrefs | null>(null)
+// Sync: the window and level on screen drop with the preference cache, before a write queued on the old epoch resumes.
+watch(preferenceOwner, () => { chosen.value = null }, { flush: 'sync' })
 const prefs = computed<DeliveryPrefs>(() => chosen.value ?? (prefsReady.value ? openingPrefs(pref.value.value) : DEFAULT_PREFS))
 const defaults = computed(() => readDefaults(pref.value.value))
 // A save carries the stored defaults along, so choosing a window never clears them.
@@ -102,8 +104,11 @@ const setLevel = (level: Level) => choose({ level })
 async function setDefault(patch: DeliveryDefaults) {
   // A new default is for the next visit: the window and level on screen stay as they are.
   chosen.value ??= prefs.value
-  if (!(await pref.ensureLoaded())) return
+  const owner = preferenceOwner.value, generation = preferenceGeneration()
+  const same = () => preferenceOwner.value === owner && preferenceGeneration() === generation
+  if (!(await pref.ensureLoaded()) || !same()) return
   const now = pref.value.value ?? {}
+  if (!same()) return
   prefFailed.value = false
   pref.save({ ...now, defaults: { ...now.defaults, ...patch } }, 0)
 }

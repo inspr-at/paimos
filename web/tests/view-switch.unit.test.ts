@@ -6,7 +6,7 @@
 // hold also switching. Writes are awaited through a barrier on the PUT, never a sleep.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
-import { setPreferenceOwner } from '../src/lib/preferences'
+import { preferenceOwner, setPreferenceOwner } from '../src/lib/preferences'
 import { useViewSwitch, viewKey, type ViewSwitchOptions } from '../src/lib/viewSwitch'
 import { useViewMenuTrigger } from '../src/lib/viewMenuTrigger'
 import { flush } from './record-source'
@@ -164,4 +164,65 @@ it('a hold or Shift+F10 opens the menu; the hold never also switches, movement c
   expect(trigger.keydown(key({ key: 'F10', shiftKey: true }), 'list')).toBe(true)
   expect(trigger.keydown(key({ key: 'ContextMenu' }), 'goals')).toBe(true)
   expect(opened).toEqual(['cards', 'list', 'goals'])
+})
+
+// The preference is already loaded, so ensureLoaded's continuation is queued before this
+// microtask. The write that follows must not land on whoever owns the switch by then.
+function personStore() {
+  const saved = new Map<string, unknown>([
+    ['t/A/view:projects', { last: 'cards', default: 'goals' }],
+    ['t/B/view:projects', { last: 'list', default: 'outline' }],
+  ])
+  const writes: { owner: string; key: string; value: unknown }[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+    const key = decodeURIComponent(String(input).split('/api/preferences/')[1] ?? '')
+    const id = `${preferenceOwner.value}/${key}`
+    if ((init?.method ?? 'GET').toUpperCase() === 'PUT') {
+      const { value } = JSON.parse(String(init?.body)) as { value: unknown }
+      saved.set(id, value); writes.push({ owner: preferenceOwner.value, key, value })
+      return new Response('{}')
+    }
+    return new Response(JSON.stringify({ key, value: saved.get(id) ?? null }))
+  }))
+  return { saved, writes }
+}
+async function drain() {
+  await flush()
+  await new Promise<void>(resolve => {
+    const channel = new MessageChannel()
+    channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve() }
+    channel.port2.postMessage(undefined)
+  })
+  await flush()
+}
+
+it('a delayed default never writes one person\'s choice into the next person\'s preferences', async () => {
+  const { saved, writes } = personStore()
+  const view = sw({ ...projects, options: ['list', 'cards', 'goals', 'outline'] })
+  await view.ready(); await flush()
+  expect(view.current.value).toBe('goals')
+  view.setDefault(null)
+  queueMicrotask(() => setPreferenceOwner(who('B')))
+  await drain()
+  expect(saved.get('t/A/view:projects')).toEqual({ last: 'cards', default: 'goals' })
+  expect(saved.get('t/B/view:projects')).toEqual({ last: 'list', default: 'outline' })
+  expect(writes.filter(write => write.owner === 't/B')).toEqual([])
+  expect(view.chosen.value).toBeNull()
+  await view.ready(); await flush()
+  expect(view.current.value).toBe('outline')
+})
+
+it('signing in again as the same person during a default write keeps the stored default', async () => {
+  const { saved, writes } = personStore()
+  const view = sw(projects)
+  await view.ready(); await flush()
+  expect(view.current.value).toBe('goals')
+  view.setDefault(null)
+  queueMicrotask(() => { setPreferenceOwner(null); setPreferenceOwner(who('A')) })
+  await drain()
+  expect(saved.get('t/A/view:projects')).toEqual({ last: 'cards', default: 'goals' })
+  expect(writes).toEqual([])
+  expect(view.chosen.value).toBeNull()
+  await view.ready(); await flush()
+  expect(view.current.value).toBe('goals')
 })

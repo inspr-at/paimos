@@ -238,7 +238,7 @@ for (const lang of ['en', 'de'] as const) {
       '../../lib/authz': { can: () => true }, '../../lib/projectSettings': projectSettings, '../../lib/projectDeliverySettings': projectDeliverySettings,
       '../../lib/deliveryFlow': flowLib, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowTextLib, '../../lib/useDeliveryFlow': useFlow,
       '../../lib/deliveryNumbers': { ...numbers, readDeliveryMetrics: () => read() },
-      '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, usePreference: () => pref },
+      '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, preferenceOwner: Vue.ref('me'), preferenceGeneration: () => 0, usePreference: () => pref },
       '../../lib/usePolledData': { usePoller: (load: () => Promise<void>) => { reload = load; return { start: () => { void load() }, stop() {}, restart() {} } } },
       '../../directives/clipTip': { vClipTip: {} },
       // AEON-1453: Numbers | Flow remembers itself; this case stays on Numbers.

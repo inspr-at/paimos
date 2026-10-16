@@ -15,6 +15,9 @@ const owner = shallowRef('')
 // Read-only ownership fence for caches that follow the same authentication epoch.
 export const preferenceOwner = computed(() => owner.value)
 let epoch = 0
+// Advanced whenever the owner changes, including a sign-out and back in as the same person.
+// A write captures it and drops the result when a later resume belongs to another epoch.
+export function preferenceGeneration(): number { return epoch }
 let authenticationCurrent = () => true
 const cache = new Map<string, Preference>()
 const flights = new Set<AbortController>()

@@ -5,11 +5,12 @@ import ts from 'typescript'
 import { afterEach, expect, it, vi } from 'vitest'
 import { computed, effectScope, nextTick, reactive, ref, shallowRef, toRefs, watch, type EffectScope } from 'vue'
 import { filtersFromQuery, filtersToQuery, hasFilters, totalFrom } from '../src/lib/ticketList'
-import { KNOWLEDGE_VIEWS, PROJECT_SECTIONS, projectSection, ticketView } from '../src/components/work/projectNavigation'
+import { KNOWLEDGE_VIEWS, PROJECT_SECTIONS, bareProjectEntry, projectSection, ticketView } from '../src/components/work/projectNavigation'
 import { filtersFromView } from '../src/lib/ticketList'
 import { useViewSwitch, viewKey } from '../src/lib/viewSwitch'
 import { savedViewId, useTicketListSwitch } from '../src/lib/ticketListSwitch'
 import { bindProjectRef } from '../src/views/project/context'
+import { flush } from './record-source'
 
 // Run the actual owner body with controlled IO, as project-related.unit.test.ts
 // does for navigation handlers. Real Vue refs/watchers prove cross-owner changes.
@@ -264,4 +265,66 @@ it('the page discard guard stays bound to the editors that opened its confirmati
   expect(outgoing.discard).toHaveBeenCalledExactlyOnceWith()
   expect(outgoingKnowledge.discard).toHaveBeenCalledExactlyOnceWith()
   expect(incoming.discard).not.toHaveBeenCalled()
+})
+
+// The opening preference is held behind a gate. Releasing it is the test's step, never a timer.
+function opening() {
+  const gate = Promise.withResolvers<void>()
+  const loadViews = vi.fn(() => gate.promise)
+  const { state, data } = fixture()
+  Object.assign(state.route, { redirectedFrom: { params: { projectKey: 'AEON' }, query: {}, meta: {} } })
+  state.sectionSwitch = { remember: vi.fn(), ready: () => gate.promise, preferred: ref('delivery') }
+  state.ticketSwitch = { remember: vi.fn(), ready: () => gate.promise }
+  state.router.replace = vi.fn(async (location: { path?: string; query?: Record<string, string> }) => {
+    if (location.path) state.route.path = location.path
+    if (location.query) state.route.query = location.query
+  })
+  const create = owner('useProjectViews', {
+    viewsOf: () => ({ items: [], loaded: true }), PINNED: [], bareProjectEntry, loadViews, apiParams: () => ({}),
+    useViewFigures: () => ({ figures: ref(null), whole: ref(null), busy: ref(false), failed: ref(false), narrowed: ref(false), retry: vi.fn() }),
+    hasFilters, scopeOwner: () => '', toast: vi.fn(),
+  })
+  const columns = { listPrefs: ref({}), listPref: ref(null), toolbarColumns: ref({ order: [], visible: [] }) }
+  run(() => create(state, data, columns, { chipLabel: vi.fn(), update: vi.fn() }))
+  return { state, gate, loadViews }
+}
+
+it('a bare project still opens the remembered section when nothing else is asked', async () => {
+  const { state, gate, loadViews } = opening()
+  state.projectId.value = 'project'
+  await nextTick()
+  expect(loadViews).toHaveBeenCalledTimes(1)
+  gate.resolve()
+  await flush()
+  expect(state.router.replace).toHaveBeenCalledExactlyOnceWith({ path: '/p/AEON/delivery' })
+  expect(loadViews).toHaveBeenCalledTimes(1)
+})
+
+it('a ticket opened while preferences load stays on that ticket', async () => {
+  const { state, gate, loadViews } = opening()
+  state.projectId.value = 'project'
+  await nextTick()
+  state.ticketKey.value = 'AEON-9'
+  state.route.path = '/p/AEON/AEON-9'
+  await nextTick()
+  gate.resolve()
+  await flush()
+  expect(state.router.replace).not.toHaveBeenCalled()
+  expect(loadViews).toHaveBeenCalledTimes(2)
+})
+
+it('leaving the plain list and returning while preferences load does not open the remembered section', async () => {
+  const { state, gate, loadViews } = opening()
+  state.projectId.value = 'project'
+  await nextTick()
+  state.section.value = 'knowledge'
+  state.route.path = '/p/AEON/knowledge'
+  await nextTick()
+  state.section.value = 'tickets'
+  state.route.path = '/p/AEON/tickets'
+  await nextTick()
+  gate.resolve()
+  await flush()
+  expect(state.router.replace).not.toHaveBeenCalled()
+  expect(loadViews).toHaveBeenCalledTimes(2)
 })
