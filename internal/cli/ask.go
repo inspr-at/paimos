@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -210,6 +211,18 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 	}
 	if q.Answer != nil {
 		fmt.Fprintln(rt.stdout, "answer:", q.Answer.Answer)
+		pickedUp, inboxEffects := true, 0
+		for _, p := range q.Pending {
+			if p.Kind == "inbox" {
+				inboxEffects++
+				pickedUp = pickedUp && p.ReceiptState != "failed" && (p.PickedUpAt != nil || p.ReceiptState == "handed_off")
+			}
+		}
+		if inboxEffects > 0 && pickedUp {
+			fmt.Fprintln(rt.stdout, "answered · delivered")
+		} else {
+			fmt.Fprintf(rt.stdout, "answered · not yet picked up (since %s)\n", q.Answer.CreatedAt.UTC().Format(time.RFC3339))
+		}
 	}
 	for _, p := range q.Pending {
 		state := p.State

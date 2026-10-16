@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
 import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
-import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, semanticRegistryPattern, registryImpact, select, webShardPlan } from './core.mjs'
+import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, semanticRegistryPattern, registryImpact, select, webShardPlan, fullWebShards } from './core.mjs'
 import { browserImpact, nightlyBrowserMap } from './browser-impact.mjs'
 import { loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
 
@@ -260,7 +260,7 @@ export function main(env=process.env) {
   const layout=mode==='full'?'full':decision.layout??'full'
   if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
   const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE,impact:env.CI_IMPACT})
-  const webShards=lane==='spec-only'&&env.GITHUB_EVENT_NAME==='pull_request'?[1]:decision.webShards??Array.from({length:12},(_,i)=>i+1)
+  const webShards=lane==='spec-only'&&env.GITHUB_EVENT_NAME==='pull_request'?[1]:decision.webShards??fullWebShards
   writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\nweb_shards=${JSON.stringify(webShards)}\n`,{flag:'a'})
   const sizing=decision.webShardSizing
   const note=`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}; web shards ${webShards.length}${sizing?`; projected max ${sizing.projectedMaxSeconds.toFixed(1)}s / ${sizing.budgetSeconds}s budget (25% timeout headroom, setup included)`:''}`

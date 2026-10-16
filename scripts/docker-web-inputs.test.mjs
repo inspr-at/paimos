@@ -6,6 +6,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { checkWebReproducibility } from './check-web-reproducibility.mjs';
+import { parseRuntimeApkPins } from './runtime-apk-pins.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const web = join(root, 'web');
@@ -133,17 +134,45 @@ test('assembly Dockerfile only copies prebuilt production artifacts into the fro
   assert.match(dockerfile, /^COPY NOTICE \/usr\/share\/doc\/aeon\/NOTICE$/m);
   assert.match(dockerfile, /^USER 65532:65532$/m);
   const runtime = readFileSync(join(root, 'scripts/Dockerfile.runtime'), 'utf8');
+  const smoke = readFileSync(join(root, 'scripts/smoke-image.sh'), 'utf8');
   assert.match(runtime, /^FROM alpine:3\.24@sha256:[a-f0-9]{64}$/m);
-  for (const pin of ['chromium=152.0.7977.82-r0', 'tini=0.19.0-r3']) {
-    assert.ok(runtime.includes(pin));
-    assert.ok(dockerfile.includes(pin), 'quote evidence pin annotation drifted');
-  }
-  // Every build prepares the closure from these two instructions alone: no
-  // build argument or variable may make its bytes depend on anything else.
+  assert.match(dockerfile, /chromium allow-list/);
+  assert.match(dockerfile, /scripts\/Dockerfile\.runtime/);
+  assert.doesNotMatch(dockerfile, /chromium=[0-9]/);
+  assert.doesNotMatch(smoke, /152\.0\.7977\.82|155\.0\.8059\.39/);
+  assert.match(smoke, /parseRuntimeApkPins/);
+  assert.match(smoke, /\/etc\/aeon-chromium-apk/);
+  // Versions come only from the pins= literal. A build arg must not be able
+  // to change the closure, and chromium is never installed without a version.
   const instructions = runtime.replaceAll('\\\n', ' ').split('\n').filter(line => line && !line.startsWith('#'));
-  assert.equal(instructions.length, 2);
+  assert.equal(instructions.length, 3);
   assert.match(instructions[0], /^FROM alpine:3\.24@sha256:[a-f0-9]{64}$/);
-  assert.match(instructions[1], /^RUN apk add --no-cache [^$]+$/);
+  assert.match(instructions[1], /^RUN apk add --no-cache ca-certificates "chromium=/);
+  assert.match(instructions[2], /^RUN set -o pipefail; apk list --installed chromium /);
+  assert.equal(runtime.includes('$'), false, 'a shell variable would let a build arg change the closure');
+  assert.doesNotMatch(runtime, /^ARG /m);
+  assert.match(runtime, /\|\| apk add --no-cache ca-certificates "chromium=/);
+  assert.match(runtime, /no allow-listed chromium version is in the Alpine index/);
+  assert.match(runtime, /\/etc\/aeon-chromium-apk/);
+  assert.doesNotMatch(runtime, /apk add[^\n]*\bchromium(?!=)/);
+  const pins = parseRuntimeApkPins(runtime);
+  assert.deepEqual(pins, { chromium: ['155.0.8059.39-r0', '152.0.7977.82-r0'], tini: '0.19.0-r3' });
+});
+
+test('AEON-1450 runtime APK allow-list rejects empty, floating, duplicate and oldest-first pins', () => {
+  const valid = '"chromium=155.0.8059.39-r0" "tini=0.19.0-r3"';
+  assert.deepEqual(parseRuntimeApkPins(valid), { chromium: ['155.0.8059.39-r0'], tini: '0.19.0-r3' });
+  for (const [text, reason] of [
+    ['', /runtime APK pins block missing/],
+    ['"tini=0.19.0-r3"', /allow-list is empty/],
+    ['"chromium=152.0.7977.82-r0" "tini=0.19.0-r3" "chromium=155.0.8059.39-r0" "tini=0.19.0-r3"', /newest first/],
+    ['"chromium=155.0.8059.39-r0" "tini=0.19.0-r3" "chromium=155.0.8059.39-r0" "tini=0.19.0-r3"', /duplicate/],
+    ['"chromium=155.0.8059.39" "tini=0.19.0-r3"', /not an exact version/],
+    ['"chromium=latest" "tini=0.19.0-r3"', /not an exact version/],
+    ['"chromium=155.0.8059.39-r0" "tini=0.19.0-r4"', /tini pin changed/],
+    ['"chromium=155.0.8059.39-r0"', /tini pin changed/],
+    ['"vim=9.0.0-r0" "tini=0.19.0-r3"', /unknown package/],
+  ]) assert.throws(() => parseRuntimeApkPins(text), reason, text);
 });
 
 // The release keeps the restored npm cache only because npm ci verifies every

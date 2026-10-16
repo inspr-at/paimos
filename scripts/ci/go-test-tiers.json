@@ -4544,6 +4544,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAskStatusDistinguishesQueuedFailedAndReceived","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAskStatusReportsAnswerPickup","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceAndHookOutputBoundaries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"}
@@ -9065,6 +9067,8 @@
     {"kind":"go","package":"internal/questions","name":"TestDeliveryFanoutFailureAndReceiptVisibility","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestDeliveryGraceEditRestartAndCorrections","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/questions","name":"TestDeliveryOfflinePickupAndStall","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestDeliveryPausedSuccessorAndCorrection","tier":"NIGHTLY"}
     ,

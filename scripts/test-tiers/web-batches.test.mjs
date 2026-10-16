@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { collectBrowserNow, flattenBrowser } from './collect.mjs'
 import { browserBatches, browserCaseSeconds } from './web-batches.mjs'
 import { plan, run } from './cli.mjs'
-import { key, fullGateTests } from './core.mjs'
+import { key, fullGateTests, fullWebShardCount } from './core.mjs'
 
 const row = (file, id) => ({ kind: 'browser', file: `tests/${file}.spec.ts`, name: id, id, line: 10,
   config: 'playwright.ui.config.ts', project: '', tier: 'GATED-FULL', active: true })
@@ -109,11 +109,11 @@ test('AEON-1023 browser-only discovery preserves full/catalogue/changed-area dec
     assert.deepEqual(after.tests.map(key), before.tests.map(key))
     return { before, after }
   }
-  // A full twelve-shard execution through the real runner with native-result
+  // A full-layout execution through the real runner with native-result
   // fixtures proves batching never drops, duplicates, or changes case identity.
   const beforeKeys = [], executed = []
-  for (let index = 1; index <= 12; index++) {
-    const { before, after } = compare({ full: true, event: 'merge_group', count: 12, index })
+  for (let index = 1; index <= fullWebShardCount; index++) {
+    const { before, after } = compare({ full: true, event: 'merge_group', count: fullWebShardCount, index })
     beforeKeys.push(...before.tests.map(key))
     const batches = browserBatches(after.tests, policies)
     const chosen = args => {

@@ -315,9 +315,11 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details.locator('.msg')).toHaveCount(4)
   await expect(details.locator('.msg.mine')).toHaveCount(2)
   await expect(details.locator('.msg').last()).toContainText('Awaiting reply')
-  // Messages show when they were sent: relative, with the exact time on hover.
-  await expect(details.locator('.msg .msg-time')).toHaveText(['52m ago', '47m ago', '31m ago', '6m ago'])
-  await expect(details.locator('.msg .msg-time').first()).toHaveAttribute('data-tip', /\d{2}:\d{2}/)
+  // Messages show when they were sent: the clock time on the meta line, the full time on hover (AEON-1438).
+  const times = details.locator('.msg .msg-time')
+  await expect(times).toHaveCount(4)
+  expect(await times.evaluateAll(els => els.map(el => el.textContent === new Date(el.getAttribute('datetime')!).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })))).toEqual([true, true, true, true])
+  await expect(times.first()).toHaveAttribute('data-tip', /\d{2}:\d{2}/)
   await details.getByRole('button', { name: 'Reply' }).last().click()
   await expect(details.locator('.replying')).toContainText('Counts are in')
   const field = details.getByRole('textbox', { name: 'Message to camy' })

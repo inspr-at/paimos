@@ -667,6 +667,11 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const deskEmpty = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/desk-empty.spec.ts')
   assert.ok(deskEmpty && deskEmpty.listedTests === 4, 'Empty Desk regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === deskEmpty.file), 'Empty Desk regressions must remain gated')
+  // AEON-1448 adds four Desk tab-row cases after the historical budget.
+  // Keep the old budget and charge only this file's scheduling weight, as for project name wrap.
+  const deskTabRow = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/aeon-1448-desk-tabrow.spec.ts')
+  assert.ok(deskTabRow && deskTabRow.listedTests === 4, 'Desk tab-row regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === deskTabRow.file), 'Desk tab-row regressions must remain gated')
   // AEON-1453 adds three ViewSwitch cases (Projects, the ticket list default, the Releases sheet)
   // after the historical budget, charged like the empty Desk: only this file's scheduling weight.
   const viewSwitch = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/view-switch.spec.ts')
@@ -676,16 +681,16 @@ test('ungated groups stay declared and checked but only run with --all', () => {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== nameWrap && spec !== personSteps && spec !== deskEmpty && spec !== viewSwitch).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== nameWrap && spec !== personSteps && spec !== deskEmpty && spec !== deskTabRow && spec !== viewSwitch).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + viewSwitch.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions, project name wrap, person-step ownership, empty Desk and ViewSwitch specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions, project name wrap, person-step ownership, empty Desk, Desk tab-row and ViewSwitch specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

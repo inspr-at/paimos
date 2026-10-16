@@ -337,7 +337,7 @@ async function checkHostPill(page: Page, desktopRowHeight: number) {
 
 // Copy/reply must remain reachable without leaving an empty action row or
 // moving the message, its neighbours, the question, or the pinned composer.
-async function checkChatSpacing(page: Page, output: string) {
+async function checkChatSpacing(page: Page, output: string, phone: boolean) {
   const thread = panel(page).locator('.thread-scroll')
   const scrollTop = await thread.evaluate(element => element.scrollTop)
   const messages = panel(page).locator('.thread > .msg')
@@ -353,16 +353,18 @@ async function checkChatSpacing(page: Page, output: string) {
   ] })
   const spacing = await messages.evaluateAll(rows => rows.map((row, index) => {
     const bounds = row.getBoundingClientRect(), previous = rows[index - 1]?.getBoundingClientRect()
-    const actions = row.querySelector('.message-actions')?.getBoundingClientRect()
+    const next = row.nextElementSibling?.getBoundingClientRect()
+    const icons = [...row.querySelectorAll('.message-actions svg')].map(icon => icon.getBoundingClientRect())
     const body = row.querySelector('.markdown-body, .msg-body')!.getBoundingClientRect()
-    return { gap: previous ? bounds.top - previous.bottom : null, timeGroup: row.classList.contains('time-group'),
-      actionsInside: !actions || actions.top >= bounds.top && actions.bottom <= bounds.bottom + 0.5,
-      actionsBesideText: !actions || actions.left >= body.right }
+    return { gap: previous ? bounds.top - previous.bottom : null, dayBetween: !!row.previousElementSibling?.matches('.day, .new-divider'),
+      noActionRow: !icons.length || Math.abs(bounds.bottom - body.bottom) <= 0.5,
+      iconsInGap: icons.every(icon => icon.top >= body.bottom - 0.5 && (!next || icon.bottom <= next.top + 0.5)) }
   }))
+  // AEON-1438: one gap (20 px, 16 px on phones); Copy and Reply lie in it under the message and reserve no row.
   for (const item of spacing) {
-    if (item.gap !== null) expect(Math.abs(item.gap - (item.timeGroup ? 20 : 12)), 'compact message/time-group spacing').toBeLessThanOrEqual(0.5)
-    expect(item.actionsInside, '44 px message actions stay inside their row').toBe(true)
-    expect(item.actionsBesideText, 'message actions cannot cover the text').toBe(true)
+    if (item.gap !== null && !item.dayBetween) expect(Math.abs(item.gap - (phone ? 16 : 20)), 'one message gap').toBeLessThanOrEqual(0.5)
+    expect(item.noActionRow, 'message actions reserve no row').toBe(true)
+    expect(item.iconsInGap, 'message actions sit in the gap and cover no text').toBe(true)
   }
   await writeFile(output, `${JSON.stringify(spacing, null, 2)}\n`)
   console.log(`AEON-1212 chat spacing: ${spacing.slice(1).map(item => item.gap).join(', ')} px; action hover/focus shift ≤ 0.5 px`)
@@ -411,7 +413,7 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
           await page.screenshot({ path: info.outputPath(`AEON-1212/details-400-${look}.png`) })
         }
       } },
-      { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await checkChatSpacing(page, info.outputPath(`AEON-1212/chat-spacing-${width}-${look}.md`)); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
+      { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await checkChatSpacing(page, info.outputPath(`AEON-1212/chat-spacing-${width}-${look}.md`), width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
     ] })
     world.hold()
     await expectStableControls({ controls: { ...stable, card: question(page), answerArea: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { thread: panel(page).locator('.thread-scroll') }, interactions: [

@@ -1,0 +1,13 @@
+{
+  "group": "decision-desk",
+  "nightlyTiming": {
+    "seconds": 20.1,
+    "selectedTests": 4
+  },
+  "spec": {
+    "file": "tests/aeon-1448-desk-tabrow.spec.ts",
+    "listedTests": 4,
+    "weightSeconds": 8.878049,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

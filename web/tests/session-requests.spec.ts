@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, sessionListReads } from './agents-fixtures'
+import { controlStability } from './control-stability'
 import type { SessionChangeRequest } from '../src/lib/agents'
 
 const now = Date.parse('2026-09-29T06:00:00Z')
@@ -42,28 +43,53 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', admin = true
   return { worker, controls, submissions, calls }
 }
 
+// AEON-1438: requests open from the panel's ⋯ menu as a small form; Details
+// lists them with their outcome. The chat composer carries no second composer.
+const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
+async function openRequest(page: Page, item: 'Rename session…' | 'Change model or effort…') {
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: new RegExp(`^${item}`) }).click()
+  return page.getByRole('dialog', { name: item.replace('…', '') })
+}
+
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`${theme} ${width}: request stays pending until session completion`, async ({ page }) => {
+  test(`${theme} ${width}: request stays pending until session completion`, async ({ page }, testInfo) => {
     const { worker, controls, submissions } = await setup(page, theme)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-    await page.goto(`/agents/${worker.id}?tab=messages`) // Requests sit next to the composer in Messages (AEON-273)
-    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page)
+    await expect(panel.getByRole('textbox', { name: 'Message to Release checks' })).toBeVisible()
+    await expect(panel.getByText('Ask this session to…')).toHaveCount(0)
+    await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+    await expect(page.getByRole('menuitem', { name: /^Rename session…/ })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1438/requests-menu-${width}-${theme}.png`) })
+    await page.keyboard.press('Escape')
+    const rename = await openRequest(page, 'Rename session…')
+    const name = rename.getByRole('textbox', { name: 'New session name' })
+    await expect(name).toHaveValue('Release checks')
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1438/rename-${width}-${theme}.png`) })
+    await expect(rename.getByRole('button', { name: 'Send request' })).toBeDisabled()
+    await name.fill('Ready for release')
+    await rename.getByRole('button', { name: 'Send request' }).click()
+    await expect(rename).toHaveCount(0)
+    await expect(panel.getByRole('button', { name: 'More session actions', exact: true })).toBeFocused()
+    await panel.getByRole('tab', { name: 'Details', exact: true }).click()
     const requests = panel.getByRole('region', { name: 'Session requests' })
-    await requests.getByText('Ask this session to…').click()
-    await requests.getByRole('textbox', { name: 'Requested session name' }).fill('Ready for release')
-    await requests.getByRole('button', { name: 'Send request' }).click()
+    await expect(requests).toContainText('Rename to Ready for release')
     await expect(requests).toContainText('Requested · waiting for the session')
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1438/requests-details-${width}-${theme}.png`) })
     // The pending rename must not replace the current name. AEON-1212 keeps that
     // name in the identity span; the heading's accessible name also includes status.
     await expect(panel.locator('h2.pane-title .name')).toHaveText('Release checks')
     await expect(panel.locator('h2.pane-title')).not.toContainText('Ready for release')
     expect(submissions[0]?.expected_generation).toBe(worker.id)
     expect(submissions[0]?.kind).toBe('rename_request')
-    await requests.getByText('Ask this session to…').click()
-    await requests.getByRole('combobox', { name: 'Change to request' }).selectOption('model_request')
-    await requests.getByRole('combobox', { name: 'Model', exact: true }).selectOption('Catalog model')
-    await requests.getByRole('combobox', { name: 'Effort', exact: true }).selectOption(profileID)
-    await requests.getByRole('button', { name: 'Send request' }).click()
+    const model = await openRequest(page, 'Change model or effort…')
+    await expect(model.getByRole('combobox', { name: 'Account catalog' })).toHaveValue(accountID)
+    await model.getByRole('combobox', { name: 'Model', exact: true }).selectOption('Catalog model')
+    await model.getByRole('combobox', { name: 'Effort', exact: true }).selectOption(profileID)
+    await model.getByRole('button', { name: 'Send request' }).click()
+    await expect(model).toHaveCount(0)
     await expect(requests.getByText('Requested · waiting for the session', { exact: true })).toHaveCount(2)
     expect(submissions[1]?.account_id).toBe(accountID)
     expect(submissions[1]?.model_profile_id).toBe(profileID)
@@ -86,15 +112,31 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
   })
 }
 
+test('the request form keeps its actions still while the catalog loads', async ({ page }) => {
+  const { worker } = await setup(page)
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/agent-accounts/catalog?*', async route => { await held; await route.fallback() })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const model = await openRequest(page, 'Change model or effort…')
+  await expect(model.getByText('Loading models…')).toBeVisible()
+  const guard = await controlStability(page, { cancel: model.getByRole('button', { name: 'Cancel' }), send: model.getByRole('button', { name: 'Send request' }), account: model.getByRole('combobox', { name: 'Account catalog' }) })
+  await guard.check(async () => { release(); await expect(model.getByText('Loading models…')).toHaveCount(0) })
+  guard.done()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await expect(model).toHaveCount(0)
+})
+
 test('an accepted request reads the lists again', async ({ page }) => {
   const { worker, calls } = await setup(page)
   await page.goto(`/agents/${worker.id}?tab=messages`)
-  const requests = page.getByRole('complementary', { name: 'Session details' }).getByRole('region', { name: 'Session requests' })
-  await requests.getByText('Ask this session to…').click()
-  await requests.getByRole('textbox', { name: 'Requested session name' }).fill('Ready for release')
+  const rename = await openRequest(page, 'Rename session…')
+  await rename.getByRole('textbox', { name: 'New session name' }).fill('Ready for release')
   const before = sessionListReads(calls)
-  await requests.getByRole('button', { name: 'Send request' }).click()
-  await expect(requests).toContainText('Requested · waiting for the session')
+  await rename.getByRole('button', { name: 'Send request' }).click()
+  await expect(page.getByText('Rename requested')).toBeVisible()
   await page.clock.runFor(100)
   await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
@@ -102,18 +144,26 @@ test('an accepted request reads the lists again', async ({ page }) => {
 test('a managed or stopped session has no request composer', async ({ page }) => {
   const { worker } = await setup(page)
   worker.management_mode = 'managed'
-  await page.goto(`/agents/${worker.id}?tab=messages`) // Requests sit next to the composer in Messages (AEON-273)
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
-  await expect(page.getByText('Ask this session to…')).toHaveCount(0)
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  await expect(panelOf(page)).toBeVisible()
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: /^Rename session…/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   worker.management_mode = 'unmanaged'; worker.phase = 'stopped'; worker.stopped_at = new Date(now).toISOString()
   await page.reload()
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
+  await expect(panelOf(page)).toBeVisible()
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: /^Rename session…/ })).toHaveCount(0)
   await expect(page.getByText('Ask this session to…')).toHaveCount(0)
 })
 
 test('a reader cannot send session requests', async ({ page }) => {
   const { worker } = await setup(page, 'light', false)
-  await page.goto(`/agents/${worker.id}?tab=messages`) // Requests sit next to the composer in Messages (AEON-273)
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  await expect(panelOf(page)).toBeVisible()
   await expect(page.getByText('Ask this session to…')).toHaveCount(0)
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await expect(page.getByRole('menu', { name: 'More session actions' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: /^Rename session…/ })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: /^Change model or effort…/ })).toHaveCount(0)
 })
