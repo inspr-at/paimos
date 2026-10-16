@@ -252,6 +252,63 @@ test('Playwright batches release between native spec/repetition chunks and merge
   assert.equal(existsSync(lockPath), false)
 })
 
+test('a title containing › is selected exactly and the merged report stays green', { timeout: 30000 }, async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'aeon-pw-delimiter-'))), lockPath = join(directory, 'suite.lock')
+  const marker = join(directory, 'merge-progress')
+  const probe = join(directory, 'merge-probe.mjs')
+  const config = join(directory, 'playwright.config.mjs')
+  const titled = 'Policies links to Settings › Models and never calls the ladder endpoints'
+  writeFileSync(probe, `import { writeFileSync } from 'node:fs'
+export default class {
+  onBegin() {
+    if (!process.argv.includes('merge-reports')) return
+    const live = process.env.AEON_PW_PROGRESS_SOCKET || process.env.PW_TEST_REPORTER || process.env.AEON_PW_CHUNK_EXPECTED || process.env.AEON_PW_CHUNK_PLAN
+    writeFileSync(${JSON.stringify(marker)}, live ? 'live' : 'quiet')
+  }
+  printsToStdio() { return false }
+}
+`)
+  writeFileSync(config, `export default ${JSON.stringify({ testDir: directory, testMatch: '*.spec.mjs', outputDir: join(directory, 'results'), workers: 1, reporter: [[probe], ['json']] })}`)
+  const playwright = new URL('../web/node_modules/@playwright/test/index.mjs', import.meta.url).href
+  writeFileSync(join(directory, 'delimiter.spec.mjs'), `import { test, expect } from ${JSON.stringify(playwright)};
+    test(${JSON.stringify(titled)}, async () => { expect(1).toBe(1) });
+    test('sibling keeps its own title', async () => { expect(1).toBe(1) });`)
+  const result = await runPlaywright(['-c', config], { cwd: directory, lockPath, capture: true, graceMs: 50 })
+  assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`)
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /chunk selection differs|queue overflow/)
+  const report = JSON.parse(result.stdout)
+  const titles = report.suites.flatMap(function walk(suite) { return [...(suite.specs ?? []).map(spec => spec.title), ...(suite.suites ?? []).flatMap(walk)] })
+  assert.deepEqual(titles.sort(), [titled, 'sibling keeps its own title'].sort())
+  assert.equal(report.stats.expected, 2)
+  assert.equal(report.stats.unexpected, 0)
+  assert.equal(readFileSync(marker, 'utf8'), 'quiet', 'merge replays events and must not keep the live progress reporter')
+  assert.equal(existsSync(lockPath), false)
+})
+
+test('a synchronous progress burst records every heartbeat without overflowing the reporter queue', { timeout: 30000 }, async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-burst-')), 'suite.lock'), records = []
+  const rename = fs.renameSync
+  const injected = t.mock.method(fs, 'renameSync', (from, to) => {
+    rename(from, to)
+    if (to === path) records.push(1)
+  })
+  syncBuiltinESMExports()
+  const script = `import Reporter from ${JSON.stringify(new URL('./playwright-safe.mjs', import.meta.url).href)};
+    const reporter = new Reporter();
+    for (let i = 0; i < 8000; i++) reporter.event();
+    const ended = await reporter.onEnd();
+    if (ended?.status === 'failed') process.exit(2);
+    console.log('burst-recorded');`
+  try {
+    const result = await runOwnedCommand(process.execPath, ['--input-type=module', '-e', script], { lockPath: path, capture: true, graceMs: 50 })
+    assert.equal(result.code, 0, result.stderr)
+    assert.match(result.stdout, /burst-recorded/)
+    assert.doesNotMatch(`${result.stderr}\n${result.stdout}`, /queue overflow/)
+    assert.equal(records.length, 8001, 'the burst plus the closing heartbeat each stamp the lock once')
+    assert.equal(existsSync(path), false)
+  } finally { injected.mock.restore(); syncBuiltinESMExports() }
+})
+
 test('excessive captured chunk output fails explicitly and releases only after owned cleanup', async () => {
   const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-output-limit-')), 'suite.lock')
   await assert.rejects(runOwnedCommand(process.execPath, ['-e', 'process.stdout.write("x".repeat(8192))'], {

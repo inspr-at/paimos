@@ -29,10 +29,12 @@ async function progressServer(lock, onError) {
     socket.on('close', () => sockets.delete(socket))
     socket.on('data', data => {
       buffer += data.toString()
-      if (buffer.length > 65536) { socket.destroy(new Error('Oversized browser progress message')); return }
       let end
       while ((end = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, end); buffer = buffer.slice(end + 1)
+        // The cap bounds one message. A coalesced burst of short lines is
+        // still one heartbeat each and must not be rejected as one message.
+        if (line.length > 65536) { socket.destroy(new Error('Oversized browser progress message')); return }
         if (!authenticated) {
           if (line !== lock.token) { socket.destroy(); return }
           authenticated = true
@@ -41,6 +43,7 @@ async function progressServer(lock, onError) {
           flush()
         }
       }
+      if (buffer.length > 65536) socket.destroy(new Error('Oversized browser progress message'))
     })
   })
   try {
@@ -67,16 +70,32 @@ async function progressServer(lock, onError) {
 
 export default class ProgressReporter {
   constructor() {
+    this.unsent = 0
     if (!process.env.AEON_PW_PROGRESS_SOCKET) return
     this.socket = createConnection(process.env.AEON_PW_PROGRESS_SOCKET)
     this.socket.on('error', error => { this.error = error })
     this.socket.write(`${process.env.AEON_PW_RUN}\n`)
   }
   printsToStdio() { return false }
+  // A reporter can emit a whole run before the socket is read. Keep every
+  // heartbeat and yield while the buffer is above the cap; destroying the
+  // socket would fail a run whose tests had already passed.
   event() {
-    if (this.socket && !this.socket.destroyed) {
-      if (this.socket.writableLength > 65536) { this.socket.destroy(new Error('Browser progress reporter queue overflow')); return }
-      this.socket.write('progress\n')
+    if (!this.socket || this.socket.destroyed || this.error) return
+    this.unsent++
+    this.drainProgress()
+  }
+  drainProgress() {
+    if (this.draining || !this.socket || this.socket.destroyed) return
+    while (this.unsent > 0) {
+      if (this.socket.writableLength > 32768) {
+        this.draining = true
+        setImmediate(() => { this.draining = false; if (!this.error) this.drainProgress() })
+        return
+      }
+      try { this.socket.write('progress\n') }
+      catch (error) { this.error = error; return }
+      this.unsent--
     }
   }
   onBegin(config, suite) {
@@ -94,8 +113,10 @@ export default class ProgressReporter {
     for (const test of suite.allTests()) {
       const project = test.parent.project(), file = test.location.file
       const key = JSON.stringify([project.name, file, test.repeatEachIndex])
-      if (!chunks.has(key)) chunks.set(key, { project: project.name, file, repeat: test.repeatEachIndex, repeats: project.repeatEach, titles: [] })
-      chunks.get(key).titles.push(test.titlePath().slice(3))
+      const chunk = chunks.get(key) ?? { project: project.name, file, repeat: test.repeatEachIndex, repeats: project.repeatEach, titles: [], greps: [] }
+      if (!chunks.has(key)) chunks.set(key, chunk)
+      chunk.titles.push(test.titlePath().slice(3))
+      if (typeof test._grepTitleWithTags === 'function') chunk.greps.push(grepIdentity(test._grepTitleWithTags()))
     }
     writeFileSync(process.env.AEON_PW_CHUNK_PLAN, JSON.stringify({ rootDir: config.rootDir, outputDir: config.projects[0]?.outputDir, reporters: config.reporter.filter(([name]) => name !== fileURLToPath(import.meta.url)), chunks: [...chunks.values()] }))
   }
@@ -109,6 +130,11 @@ export default class ProgressReporter {
   async onEnd() {
     this.event()
     if (!this.socket) return
+    const deadline = Date.now() + 20000
+    while (this.unsent > 0 && !this.socket.destroyed && !this.error && Date.now() < deadline) {
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    if (this.unsent > 0) this.error ??= new Error('Browser reporter progress could not be recorded; host lock retained')
     await new Promise(done => { if (this.socket.destroyed) done(); else { this.socket.once('close', done); this.socket.end() } })
     // Playwright catches reporter exceptions. Explicitly override status so
     // selection drift or a lost progress socket cannot become a green run.
@@ -116,7 +142,7 @@ export default class ProgressReporter {
   }
 }
 
-export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000, capture = false, captureLimitBytes = 64 * 1024 * 1024, rootIdentityWait, lockOptions = {}, maxHoldMs = holdLimitMs, clock = { now: Date.now, setTimeout, clearTimeout } } = {}) {
+export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000, capture = false, captureLimitBytes = 64 * 1024 * 1024, rootIdentityWait, lockOptions = {}, maxHoldMs = holdLimitMs, clock = { now: Date.now, setTimeout, clearTimeout }, heartbeat = true } = {}) {
   if (process.platform === 'win32') throw new Error('Browser supervision requires POSIX process groups; use Linux CI on Windows')
   const start = Date.now()
   let lock, groupLog, snapshot, child, interrupt, peak = 0, timer, monitoringError, journalCreated = false, stdout = '', stderr = '', capturedBytes = 0, progress, leaseTimer, timedOut = false
@@ -156,11 +182,25 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
     if (interrupt) throw Object.assign(new Error(`Browser startup interrupted by ${interrupt}`), { signal: interrupt })
     writeFileSync(groupLog, '', { flag: 'wx', mode: 0o600 })
     journalCreated = true
-    progress = await progressServer(lock, error => { monitoringError ??= error; if (child?.pid) signalOwned('SIGTERM') })
+    if (heartbeat) progress = await progressServer(lock, error => { monitoringError ??= error; if (child?.pid) signalOwned('SIGTERM') })
     const preload = new URL('./playwright-owned-groups.mjs', import.meta.url).href
     const hasReporter = args.some(arg => arg.startsWith('--add-reporter=') && arg.slice('--add-reporter='.length).split(',').includes(fileURLToPath(import.meta.url)))
-    const reporterHook = hasReporter ? env.PW_TEST_REPORTER : env.PW_TEST_REPORTER ?? fileURLToPath(import.meta.url)
-    child = spawn(command, args, { cwd, env: { ...env, ...(reporterHook ? { PW_TEST_REPORTER: reporterHook } : {}), AEON_PW_RUN: lock.token, AEON_PW_PROGRESS_SOCKET: progress.path, AEON_PW_GROUP_LOG: groupLog, AEON_PW_OWNER: String(process.pid), AEON_PW_OWNER_STARTED: lock.started, NODE_OPTIONS: `${env.NODE_OPTIONS ?? ''} --import=${preload}` }, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', detached: true })
+    const reporterHook = heartbeat ? (hasReporter ? env.PW_TEST_REPORTER : env.PW_TEST_REPORTER ?? fileURLToPath(import.meta.url)) : undefined
+    const childEnv = { ...env, AEON_PW_GROUP_LOG: groupLog, AEON_PW_OWNER: String(process.pid), AEON_PW_OWNER_STARTED: lock.started, NODE_OPTIONS: `${env.NODE_OPTIONS ?? ''} --import=${preload}` }
+    if (heartbeat) {
+      if (reporterHook) childEnv.PW_TEST_REPORTER = reporterHook
+      childEnv.AEON_PW_RUN = lock.token
+      childEnv.AEON_PW_PROGRESS_SOCKET = progress.path
+    } else {
+      // Merge replays every recorded event in one turn. That replay is not a
+      // live browser hold, so it must not attach the progress reporter.
+      delete childEnv.PW_TEST_REPORTER
+      delete childEnv.AEON_PW_PROGRESS_SOCKET
+      delete childEnv.AEON_PW_CHUNK_EXPECTED
+      delete childEnv.AEON_PW_CHUNK_PLAN
+      delete childEnv.AEON_PW_RUN
+    }
+    child = spawn(command, args, { cwd, env: childEnv, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', detached: true })
     // Reserve both TERM grace and bounded KILL cleanup inside the 15-minute
     // acquisition. An oversized indivisible chunk fails; it is never replayed
     // or reported as successful after partial work.
@@ -272,6 +312,33 @@ function withoutOptions(args, names) {
   }
   return result
 }
+const selectionLimit = 100_000
+// Playwright applies --grep before the project suite is attached to the root.
+// The reporter's title therefore has one extra leading space from the root's
+// empty title. The filter never sees that space.
+function grepIdentity(rooted) {
+  return rooted.startsWith(' ') ? rooted.slice(1) : rooted
+}
+function escapeRegExp(value) {
+  return value.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&').replaceAll('\n', '\\n').replaceAll('\r', '\\r')
+}
+function chunkCannotUseTestList(chunk, file) {
+  return [chunk.project, file, ...chunk.titles.flat()].some(part => /[\u203A\n\r]/.test(String(part)))
+}
+function exactGrep(greps) {
+  const pattern = `/^(?:${greps.map(escapeRegExp).join('|')})$/`
+  if (pattern.length > selectionLimit) throw new Error('Playwright chunk selection is too large to match exactly; refusing partial success')
+  return pattern
+}
+// Playwright's test list splits every › and cannot round-trip a title that
+// contains one. Those chunks use the exact grep identity captured at list
+// time. The in-process expected set still rejects any drift.
+function chunkSelector(base, chunk, file, list) {
+  if (!chunkCannotUseTestList(chunk, file)) return [...base, '--test-list', list]
+  const identifiable = Array.isArray(chunk.greps) && chunk.greps.length === chunk.titles.length && chunk.greps.every(grep => typeof grep === 'string' && grep.includes(file))
+  if (!identifiable) throw new Error('Playwright chunk selection cannot be verified; refusing partial success')
+  return [...withoutOptions(base, ['--grep', '-g']), '--grep', exactGrep(chunk.greps)]
+}
 function withProgressReporter(args, reporter) {
   let additional = ''
   for (let index = 0; index < args.length; index++) {
@@ -325,7 +392,7 @@ export async function runPlaywright(args, options = {}) {
       writeFileSync(list, chunk.titles.map(titles => `[${chunk.project}] › ${file} › ${titles.join(' › ')}`).join('\n') + '\n')
       writeFileSync(expected, JSON.stringify(chunk.titles.map(titles => JSON.stringify([chunk.project, chunk.file, chunk.repeat, titles]))))
       console.error(`AEON_PW_CHUNK ${index + 1}/${plan.chunks.length} spec=${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}`)
-      last = await run(['test', ...base, '--test-list', list, `--shard=${chunk.repeat + 1}/${chunk.repeats}`, '--reporter=blob', `--add-reporter=${reporter}`, '--output', join(artifacts, `chunk-${index}`)], {
+      last = await run(['test', ...chunkSelector(base, chunk, file, list), `--shard=${chunk.repeat + 1}/${chunk.repeats}`, '--reporter=blob', `--add-reporter=${reporter}`, '--output', join(artifacts, `chunk-${index}`)], {
         capture: true, env: { ...env, AEON_PW_CHUNK_EXPECTED: expected, PLAYWRIGHT_BLOB_OUTPUT_FILE: blob },
         lockOptions: { wait: true, ...options.lockOptions, command: `node Playwright test ${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}` },
       })
@@ -339,7 +406,12 @@ export async function runPlaywright(args, options = {}) {
         return { ...last, code: last.code || 1 }
       }
     }
-    const merged = await run(['merge-reports', blobs, '--config', mergeConfig], { capture: options.capture, env })
+    const mergedEnv = { ...env }
+    delete mergedEnv.PW_TEST_REPORTER
+    delete mergedEnv.AEON_PW_PROGRESS_SOCKET
+    delete mergedEnv.AEON_PW_CHUNK_EXPECTED
+    delete mergedEnv.AEON_PW_CHUNK_PLAN
+    const merged = await run(['merge-reports', blobs, '--config', mergeConfig], { capture: options.capture, env: mergedEnv, heartbeat: false })
     return { ...merged, code: code || merged.code, chunks: metrics, metrics: { ...merged.metrics,
       peak: Math.max(...metrics.map(row => row.peak)), wall_ms: Date.now() - began,
     } }
