@@ -564,7 +564,7 @@ test('an explanation is one short English line, German optional', async () => {
 })
 
 test('the projected file counts each layer and finds the file furthest over a limit', async () => {
-  const { projectedUsage, budgetExcess, largestProjected, budgetParts, budgetLine, overBudget, MERGE_HEADING_BYTES, DEFAULT_BUDGET } = await import('../src/lib/rules.ts')
+  const { projectedUsage, budgetExcess, largestProjected, budgetParts, budgetLine, MERGE_HEADING_BYTES, DEFAULT_BUDGET } = await import('../src/lib/rules.ts')
   const company = { id: 'a', scope: { layer: 'company' as const }, rules: [rule({ identity: 'floor', text: 'Keep the floor.', strength: 'locked', roles: [], harnesses: [] })] }
   const project = { id: 'b', scope: { layer: 'project' as const, project_id: PROJECT }, rules: [rule({ identity: 'style', text: 'Use style.', roles: [], harnesses: [] }), rule({ identity: 'codex', text: 'Codex only rule.', roles: [], harnesses: ['codex'] })] }
   const ctx = { projectId: PROJECT, personId: ME, role: 'builder' as const, harness: 'claude-code' as const }
@@ -577,8 +577,9 @@ test('the projected file counts each layer and finds the file furthest over a li
   const worst = largestProjected([company, project], PROJECT, ME, new Date(), tight)
   assert.equal(worst.harness, 'codex')
   assert.ok(budgetExcess(worst.bytes, worst.usage, tight) > 0)
-  assert.ok(overBudget(worst.usage, worst.bytes, tight))
-  assert.equal(overBudget(usage, bytes, DEFAULT_BUDGET), false)
+  assert.equal(budgetParts(worst.usage, worst.bytes, tight).some(part => part.over), true)
+  assert.equal(budgetExcess(bytes, usage, DEFAULT_BUDGET), 0)
+  assert.equal(budgetParts(usage, bytes, DEFAULT_BUDGET).some(part => part.over), false)
   const parts = budgetParts({ company: 7100, project: 2300 }, 9422, { max_bytes: 12000, layer_max_bytes: { company: 8000 } })
   assert.deepEqual(parts.map(part => part.label), ['Company 7.1 of 8 kB', 'Project 2.3 kB', 'total 9.4 of 12 kB'])
   assert.equal(budgetLine({ company: 8100 }, 8200, { max_bytes: 12000, layer_max_bytes: { company: 8000 } }), 'Company 8.1 of 8 kB · total 8.2 of 12 kB')
