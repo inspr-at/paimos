@@ -19,40 +19,44 @@ async function wholeKey(key: Locator, frame: string) {
   }, frame)
 }
 
+const SCHEMES = ['light', 'dark'] as const
+
 for (const width of [320, 360, 390, 1440]) {
-  for (const colorScheme of ['light', 'dark'] as const) {
-    test(`ticket keys stay on one line in the list and child rows at ${width}px ${colorScheme}`, async ({ page }, testInfo) => {
-      const errors = watchErrors(page)
-      await page.setViewportSize({ width, height: 900 })
+  test(`ticket keys stay on one line in the list and child rows at ${width}px in light and dark`, async ({ page }, testInfo) => {
+    const errors = watchErrors(page)
+    await page.setViewportSize({ width, height: 900 })
+    const data = fixtures()
+    // A five-digit number on a six-letter project, with a title long enough to give way.
+    Object.assign(data.nodes.find(node => node.id === 'n-2')!, { key: 'PHAROS-14530', title: 'Add an Oracle Cloud connector that provisions guarded tenancies across every configured region' })
+    await mockWork(page, data)
+    await page.goto('/p/PHAROS')
+    await expect(rows(page)).toHaveCount(5)
+    await expect(grid(page).locator('.c-key .key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
+    for (const colorScheme of SCHEMES) {
       await page.emulateMedia({ colorScheme })
-      const data = fixtures()
-      // A five-digit number on a six-letter project, with a title long enough to give way.
-      Object.assign(data.nodes.find(node => node.id === 'n-2')!, { key: 'PHAROS-14530', title: 'Add an Oracle Cloud connector that provisions guarded tenancies across every configured region' })
-      await mockWork(page, data)
-      await page.goto('/p/PHAROS')
-      await expect(rows(page)).toHaveCount(5)
       await page.evaluate(() => document.fonts.ready)
-      await expect(grid(page).locator('.c-key .key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
       for (const row of await rows(page).all()) {
-        expect(await wholeKey(row.locator('.c-key .key'), 'tr')).toMatchObject({ lines: 1, clipped: false, inside: true })
+        expect(await wholeKey(row.locator('.c-key .key'), 'tr'), colorScheme).toMatchObject({ lines: 1, clipped: false, inside: true })
         const title = (await row.locator('.title-link').boundingBox())!, card = (await row.boundingBox())!
         expect(title.x + title.width, 'the title gives way inside the card').toBeLessThanOrEqual(card.x + card.width + .5)
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
       await page.screenshot({ path: testInfo.outputPath(`keys-list-${width}-${colorScheme}.png`) })
+    }
 
-      await rows(page).filter({ hasText: 'PHAROS-10' }).locator('.title-link').click()
-      const panel = page.getByRole('complementary', { name: 'Ticket details' })
-      const children = panel.locator('.child-row')
-      await expect(children).toHaveCount(2)
-      await expect(children.locator('.key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
+    await rows(page).filter({ hasText: 'PHAROS-10' }).locator('.title-link').click()
+    const children = page.getByRole('complementary', { name: 'Ticket details' }).locator('.child-row')
+    await expect(children).toHaveCount(2)
+    await expect(children.locator('.key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
+    for (const colorScheme of SCHEMES) {
+      await page.emulateMedia({ colorScheme })
       for (const child of await children.all()) {
-        expect(await wholeKey(child.locator('.key'), '.child-row')).toMatchObject({ lines: 1, clipped: false, inside: true })
+        expect(await wholeKey(child.locator('.key'), '.child-row'), colorScheme).toMatchObject({ lines: 1, clipped: false, inside: true })
         const key = (await child.locator('.key').boundingBox())!, title = (await child.locator('.child-title').boundingBox())!
         expect(key.x + key.width, 'the key never runs under the title').toBeLessThanOrEqual(title.x + .5)
       }
       await page.screenshot({ path: testInfo.outputPath(`keys-children-${width}-${colorScheme}.png`) })
-      expect(errors).toEqual([])
-    })
-  }
+    }
+    expect(errors).toEqual([])
+  })
 }
