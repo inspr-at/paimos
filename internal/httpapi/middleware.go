@@ -51,7 +51,8 @@ type handlerBudget struct {
 func requestBudgetMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		duration := ordinaryRequestBudget
-		if r.Pattern == "POST /api/nodes/{nodeId}/attachments" || r.Pattern == "POST /api/me/avatar" {
+		switch r.Pattern {
+		case "POST /api/nodes/{nodeId}/attachments", "POST /api/me/avatar", "POST /api/quote-profiles/assets":
 			duration = UploadBodyReadTimeout
 		}
 		separate := separateHandlerBudget(r.Pattern)

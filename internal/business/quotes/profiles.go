@@ -614,7 +614,7 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, denied())
 		return
 	}
-	raw, e := httpapi.ReadRequestBody(w, r, 10<<20, httpapi.DefaultBodyReadTimeout)
+	raw, e := httpapi.ReadRequestBody(w, r, 10<<20, httpapi.UploadBodyReadTimeout)
 	if e != nil {
 		respond(w, 0, nil, bad("asset exceeds 10 MiB"))
 		return
