@@ -235,7 +235,26 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 			return webhookFailed, webhookClass("invalid_group")
 		}
 		if e.Action == "checks_requested" {
-			pulls, err = m.github.Group(ctx, head, e.Group.Base, e.Group.Ref)
+			// Persist a fail-closed publication even when membership resolution
+			// fails. Receipt retries can fill the immutable member snapshot.
+			err = db.InTenant(db.AllProjects(ctx, "admission unknown group"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+					return err
+				}
+				return stageAdmissionGroupTx(ctx, tx, m.config.TenantID, m.config.Repository, head, nil, true, false)
+			})
+			if err != nil {
+				return webhookFailed, err
+			}
+			resolver := m.github.Group
+			if m.admissionGitHub != nil {
+				if g, ok := m.github.(interface {
+					AdmissionGroup(context.Context, string, string, string) ([]Pull, error)
+				}); ok {
+					resolver = g.AdmissionGroup
+				}
+			}
+			pulls, err = resolver(ctx, head, e.Group.Base, e.Group.Ref)
 		} else {
 			err = db.InTenant(db.AllProjects(ctx, "delivery queue destroy subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 				rows, err := tx.Query(ctx, `SELECT observation FROM delivery_items WHERE observation->>'queue_head'=$1 ORDER BY id LIMIT 101`, head)
@@ -312,7 +331,7 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 			}
 			os = append(os, o)
 		}
-		rec := record{ID: id, Event: name, Action: e.Action, Repository: m.config.Repository, Head: head, Hash: digest(raw), At: at, Observations: os, Fanout: name == "pull_request"}
+		rec := record{ID: id, Event: name, Action: e.Action, Repository: m.config.Repository, Head: head, Hash: digest(raw), At: at, Observations: os, Fanout: name == "pull_request", AdmissionGroupResolved: m.admissionGitHub != nil}
 		if len(pulls) == 1 {
 			n := pulls[0].Number
 			rec.PR = &n
