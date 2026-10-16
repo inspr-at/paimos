@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func sourceJSON(t *testing.T, value any) json.RawMessage {
@@ -75,10 +76,17 @@ func TestGoalSeriesPlannerAndMoveTimeline(t *testing.T) {
 // row is used instead of recorded facts; the four-hour comparison is exclusive.
 func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 	f := writerFixture(t)
+	config := f.db.App.Config()
+	config.ConnConfig.Tracer = goalQueryDiagnostics{t}
+	readPool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(readPool.Close)
 	now := apiClock
 	start := now.Add(-12 * time.Hour)
 	change := now.Add(-4 * time.Hour)
-	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET created_at=$2 WHERE id=$1`, f.secondGoal, now.Add(-24*time.Hour)); err != nil {
 			return err
 		}
@@ -124,7 +132,7 @@ func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 		t.Fatal(err)
 	}
 	get := func(at time.Time) GoalView {
-		return detail(t, goalRequest(t.Context(), &module{f.db.App, func() time.Time { return at }}, f.reader, "GET", "/api/goals/"+f.secondGoal, "", ""))
+		return detail(t, goalRequest(t.Context(), &module{readPool, func() time.Time { return at }}, f.reader, "GET", "/api/goals/"+f.secondGoal, "", ""))
 	}
 	before := get(now.Add(-time.Second))
 	atBoundary := get(now)
@@ -132,7 +140,7 @@ func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 		t.Fatalf("stall boundary before=%+v after=%+v", before.Stall, atBoundary.Stall)
 	}
 	for span, count := range map[string]int{"24h": 24, "7d": 28, "30d": 30} {
-		r := goalRequest(t.Context(), &module{f.db.App, func() time.Time { return now }}, f.reader, "GET", "/api/goals/"+f.secondGoal+"/series?range="+span, "", "")
+		r := goalRequest(t.Context(), &module{readPool, func() time.Time { return now }}, f.reader, "GET", "/api/goals/"+f.secondGoal+"/series?range="+span, "", "")
 		if r.Code != 200 {
 			t.Fatalf("series %d %s", r.Code, r.Body)
 		}
@@ -149,7 +157,7 @@ func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET state='open' WHERE tenant_id=$1 AND id=$2`, f.writer.TenantID, f.ticket); err != nil {
 		t.Fatal(err)
 	}
-	r := goalRequest(t.Context(), &module{f.db.App, func() time.Time { return now }}, f.reader, "GET", "/api/goals/"+f.secondGoal+"/series?range=24h", "", "")
+	r := goalRequest(t.Context(), &module{readPool, func() time.Time { return now }}, f.reader, "GET", "/api/goals/"+f.secondGoal+"/series?range=24h", "", "")
 	var s SeriesResult
 	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &s) != nil || len(s.Points) != 24 || s.Points[23].Pct != 50 {
 		t.Fatalf("sampled live state %d %s", r.Code, r.Body)
@@ -158,5 +166,32 @@ func TestGoalSeriesVisibilityAndFourHourStall(t *testing.T) {
 		if rec := apiRequest(t, f, "GET", "/api/goals/"+f.secondGoal+"/series"+query, "", ""); rec.Code != 400 {
 			t.Fatalf("unbounded range %s %d", query, rec.Code)
 		}
+	}
+}
+
+// Keep SQL text (never arguments/credentials) on a failed regression so a
+// bounded request failure identifies the expensive visibility projection.
+type goalQueryDiagnostics struct{ t *testing.T }
+type goalQueryDiagnosticKey struct{}
+type goalQueryDiagnosticStart struct {
+	at  time.Time
+	sql string
+}
+
+func (q goalQueryDiagnostics) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	return context.WithValue(ctx, goalQueryDiagnosticKey{}, goalQueryDiagnosticStart{time.Now(), data.SQL})
+}
+func (q goalQueryDiagnostics) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	start, ok := ctx.Value(goalQueryDiagnosticKey{}).(goalQueryDiagnosticStart)
+	if !ok {
+		return
+	}
+	elapsed := time.Since(start.at)
+	if elapsed > 200*time.Millisecond || data.Err != nil {
+		sql := start.sql
+		if len(sql) > 1800 {
+			sql = sql[:1800]
+		}
+		q.t.Logf("goal query %s err=%v SQL=%s", elapsed, data.Err, sql)
 	}
 }
