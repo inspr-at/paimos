@@ -129,11 +129,8 @@ func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, s
 		if errors.As(err, &github) {
 			attrs = append(attrs, "github_status", github.StatusCode)
 		}
-		var postgres *pgconn.PgError
-		if errors.As(err, &postgres) && len(postgres.Code) == 5 && strings.IndexFunc(postgres.Code, func(r rune) bool {
-			return r < '0' || r > '9' && r < 'A' || r > 'Z'
-		}) == -1 {
-			attrs = append(attrs, "sqlstate", postgres.Code)
+		if sqlstate, ok := strings.CutPrefix(httpapi.ErrorClass(err), "postgres_"); ok && sqlstate != "unknown" {
+			attrs = append(attrs, "sqlstate", sqlstate)
 		}
 		logger := m.webhookFailures.logger
 		if logger == nil {
