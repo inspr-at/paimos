@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 32,
+    "selectedTests": 4
+  },
+  "spec": {
+    "file": "tests/aeon-1439-panel-opening.spec.ts",
+    "listedTests": 4,
+    "weightSeconds": 32,
+    "weightSource": "AEON-1439: unmeasured estimate, 4 cases of about 8 s each on mbp2606 with one worker"
+  }
+}
