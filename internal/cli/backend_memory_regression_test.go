@@ -134,7 +134,7 @@ func runBackendMemoryWorkload(t testing.TB, diagnostics bool) {
 				return err
 			}
 			if err := tx.QueryRow(ctx, `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,head_sha,state,state_since,owner,observation,updated_at)
- VALUES($1,gen_random_uuid(),$2,$3,'fixture/memory',1,repeat('b',40),'pushed',now(),'fixture',jsonb_build_object('target','main','base',repeat('a',40),'head',repeat('b',40),'open',true),now()) RETURNING id::text`, worker.TenantID, project.ID, ticket).Scan(&item); err != nil {
+ VALUES($1,gen_random_uuid(),$2,$3,'fixture/memory',1,repeat('b',40),'pushed',now(),'fixture',jsonb_build_object('target_branch','main','base_sha',repeat('a',40),'head_sha',repeat('b',40),'open',true),now()) RETURNING id::text`, worker.TenantID, project.ID, ticket).Scan(&item); err != nil {
 				return err
 			}
 			_, err := tx.Exec(ctx, `INSERT INTO delivery_admission_bindings(tenant_id,repository,pull_request,project_id,ticket_node_id,target_branch,base_sha,head_sha,scope)
