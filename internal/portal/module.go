@@ -163,7 +163,7 @@ func decodeJSON(r *http.Request, dest any) error {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return errors.New("JSON required")
 	}
-	buf, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+	buf, err := httpapi.ReadRequestBody(nil, r, 1025, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) > 1024 {
 		return errors.New("invalid JSON")
 	}

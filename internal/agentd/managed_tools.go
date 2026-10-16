@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -80,10 +81,10 @@ func startManagedTools(credential string, b toolBinding) (*managedToolServer, er
 			http.Error(w, "run capability unavailable", http.StatusForbidden)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		r.Body = httpapi.RequestBodyReader(w, r, 64<<10)
 		mcpHandler.ServeHTTP(w, r)
 	})
-	httpServer := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	httpServer := &http.Server{Handler: httpapi.RequestBodyMiddleware(h), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, IdleTimeout: time.Minute}
 	out := &managedToolServer{listener: listener, server: httpServer,
 		tools: RunTools{URL: "http://" + listener.Addr().String(), Token: credential, Routine: b.routine != nil,
 			BrowserCaptureOnly: b.routine != nil && b.routine.RuntimeCapability == agentsetup.RoutineBrowserCapability}}

@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -218,7 +219,7 @@ func (m *module) addMembership(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in membershipInput
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	d := httpapi.NewRequestDecoder(w, r, 1<<20)
 	d.DisallowUnknownFields()
 	if d.Decode(&in) != nil || d.Decode(new(any)) != io.EOF || in.Revision < 1 || len(in.IDs) < 1 || len(in.IDs) > 100 {
 		respond(w, nil, fail(400, "expected_revision and 1..100 ticket_node_ids required"))

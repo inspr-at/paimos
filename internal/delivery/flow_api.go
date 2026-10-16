@@ -473,8 +473,7 @@ func (m *Module) reportRollout(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, flowRolloutBytes)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, flowRolloutBytes)
 	var in rolloutInput
 	if err := dec.Decode(&in); err != nil {
 		respondError(w, fail(400, "invalid rollout JSON"))

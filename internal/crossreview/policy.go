@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -72,7 +73,7 @@ func (m *Module) writePolicy(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	var in reviewgate.FamilyPolicy
 	if r.Method != http.MethodDelete {
-		raw, err := io.ReadAll(io.LimitReader(r.Body, 4097))
+		raw, err := httpapi.ReadRequestBody(nil, r, 4097, httpapi.DefaultBodyReadTimeout)
 		if err != nil || len(raw) > 4096 {
 			return nil, workorders.Fail(400, "review policy exceeds its bound")
 		}

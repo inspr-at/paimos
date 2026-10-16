@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -41,7 +41,7 @@ func (m *Module) pullChanged(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
+	raw, err := httpapi.ReadRequestBody(w, r, (2<<20)+1, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(raw) > 2<<20 {
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		return

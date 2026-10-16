@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"github.com/inspr-at/paimos/internal/authz"
 	"io"
@@ -157,8 +156,7 @@ func mapWrite(err error) error {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, limit int64, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, limit)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		writeError(w, 400, "invalid_request", "invalid JSON body")

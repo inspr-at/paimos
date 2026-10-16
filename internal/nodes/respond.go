@@ -114,8 +114,7 @@ func requirePrincipal(w http.ResponseWriter, r *http.Request) (tenant.Principal,
 }
 
 func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	b, err := io.ReadAll(r.Body)
+	b, err := httpapi.ReadRequestBody(w, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(b) == 0 {
 		writeError(w, http.StatusBadRequest, "bad request")
 		return nil, false

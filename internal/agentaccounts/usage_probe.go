@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 	"net/http"
 )
@@ -17,7 +18,7 @@ func (m *Module) usageProbe(w http.ResponseWriter, r *http.Request) {
 		Revision *int64 `json:"binding_revision"`
 		Enabled  *bool  `json:"enabled"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = httpapi.RequestBodyReader(w, r, 4096)
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return

@@ -184,14 +184,14 @@ func (b *Broker) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Body == nil {
 		r.Body = http.NoBody
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+	r.Body = httpapi.RequestBodyReader(w, r, MaxBodyBytes)
 	if err := workorders.BufferEndpointBody(w, r); err != nil {
 		workorders.WriteError(w, err)
 		return
 	}
 	// The existing body guard completed and bounded every transport read before
 	// entering the mutation transaction. This reads only its buffered memory.
-	raw, err := io.ReadAll(r.Body)
+	raw, err := httpapi.ReadRequestBody(w, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {

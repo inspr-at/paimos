@@ -4,7 +4,6 @@ package authz
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -100,7 +99,7 @@ func internalFail(w http.ResponseWriter, err error) {
 	}
 }
 func decode(r *http.Request, v any) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	d := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		return err

@@ -350,7 +350,7 @@ func WriteError(w http.ResponseWriter, err error) {
 
 // Decode accepts one bounded JSON object with no unknown fields.
 func Decode(r *http.Request, dst any) error {
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return Fail(400, "invalid JSON")

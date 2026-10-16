@@ -3,7 +3,6 @@ package accountuse
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -88,7 +87,7 @@ func (m *Module) handler(fn endpoint, write bool) http.HandlerFunc {
 	}
 }
 func decode(r *http.Request, dst any) error {
-	decoder := json.NewDecoder(r.Body)
+	decoder := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		return fail(400, "invalid account-use body")

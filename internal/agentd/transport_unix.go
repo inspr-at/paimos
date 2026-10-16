@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/hooknote"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 // LocalServer exposes fenced local control through an owner-only Unix socket.
@@ -122,8 +123,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 64<<10)
 		d.DisallowUnknownFields()
 		var req agentsetup.SetupRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
@@ -157,8 +157,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 4096)
 		d.DisallowUnknownFields()
 		var req AccountLinkRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
@@ -181,8 +180,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 8192)
 		d.DisallowUnknownFields()
 		var req StatuslineRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
@@ -214,8 +212,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 				http.Error(w, "kernel peer required", 403)
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, 4096)
-			d := json.NewDecoder(r.Body)
+			d := httpapi.NewRequestDecoder(w, r, 4096)
 			d.DisallowUnknownFields()
 			var in AttachedHookRequest
 			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
@@ -308,8 +305,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 4096)
 		d.DisallowUnknownFields()
 		var req DrainRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
@@ -331,8 +327,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 8192)
 		d.DisallowUnknownFields()
 		var config LedgerConfig
 		if d.Decode(&config) != nil || d.Decode(&struct{}{}) != io.EOF {
@@ -351,8 +346,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 2)
-		raw, err := io.ReadAll(r.Body)
+		raw, err := httpapi.ReadRequestBody(w, r, 2, httpapi.DefaultBodyReadTimeout)
 		if err != nil || len(raw) != 0 {
 			http.Error(w, "invalid ledger leave", 400)
 			return
@@ -377,8 +371,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 70<<10)
-		decoder := json.NewDecoder(r.Body)
+		decoder := httpapi.NewRequestDecoder(w, r, 70<<10)
 		decoder.DisallowUnknownFields()
 		var req ControlRequest
 		if decoder.Decode(&req) != nil || decoder.Decode(&struct{}{}) != io.EOF || req.RunID != r.PathValue("runID") {
@@ -393,7 +386,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, ConnContext: localConnContext}
+	server := &http.Server{Handler: httpapi.RequestBodyMiddleware(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, ConnContext: localConnContext}
 	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup, hooks: hooks}
 	local.release = func() {
 		_ = lock.Close()

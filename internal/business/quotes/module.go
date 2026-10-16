@@ -154,7 +154,7 @@ func pathVersion(r *http.Request) (int, error) {
 	return n, nil
 }
 func decode(r *http.Request, v any) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, 1<<20+1))
+	d := httpapi.NewRequestDecoder(nil, r, 1<<20+1)
 	d.DisallowUnknownFields()
 	d.UseNumber()
 	if err := d.Decode(v); err != nil {

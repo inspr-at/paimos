@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/servicetier"
@@ -98,7 +99,7 @@ func (m *Module) queueManagedControl(r *http.Request, tx pgx.Tx, p tenant.Princi
 		Text      string                `json:"text"`
 		Ownership ownedprocess.Identity `json:"expected_ownership"`
 	}
-	r.Body = http.MaxBytesReader(nil, r.Body, 16384)
+	r.Body = httpapi.RequestBodyReader(nil, r, 16384)
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}

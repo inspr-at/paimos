@@ -164,8 +164,7 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 		Generation string    `json:"expected_generation"`
 		Revision   time.Time `json:"expected_revision"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 4096)
 	dec.DisallowUnknownFields()
 	if dec.Decode(&in) != nil || !validUUID(in.Generation) || in.Revision.IsZero() {
 		fail(w, fault{400, "expected generation and revision required"})
