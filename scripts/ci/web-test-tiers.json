@@ -290,6 +290,12 @@
     ,
     "browser:tests/aeon-1285-agent-rows.spec.ts:light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
     ,
+    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once"
+    ,
+    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once"
+    ,
+    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 light refreshes keep the chosen tab and write the opening line once"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -6077,6 +6083,14 @@
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 1440 light refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 390 light refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15923,6 +15937,8 @@
     {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1212: an explicit link wins; a real ask, held start and worker problem win over the pinned default; otherwise default then last used","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1249: panel model names and effort match the session row for registered and unlisted models","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1439: only another person or another session opens the panel again; refreshes never do and an abandoned opening opens on the next sight","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"AEON-1038: unclaimed starts and launch-off policy never invent admission failures","tier":"GATED-FULL"}
     ,
