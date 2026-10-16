@@ -144,6 +144,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto('/agents')
     const card = dial(page), codex = card.locator('[data-key="codex"]'), fold = card.locator('.fs-tog')
     const more = totalMore(page), fewer = totalFewer(page)
+    // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded.
+    if (width <= 720) { await expect(fold).toHaveAttribute('aria-expanded', 'false'); await fold.click() }
     await expect(codex).toBeVisible()
     await expect(card.locator('.f-num')).toHaveText(String(states[state].total))
     await expect(card.locator('.f-bot')).toHaveClass(/busy/)
@@ -207,7 +209,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       ],
     })
     if (width >= 900) expect((await inc.boundingBox())!.width).toBe(20)
-    await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ dial: false })
+    // A phone's fold lasts for the visit; the saved choice, shared across devices, stays as it was (AEON-1286).
+    if (width <= 720) expect(work.preferences['ui.agents.sections']).toMatchObject({ dial: true })
+    else await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ dial: false })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
     expect(errors).toEqual([])
