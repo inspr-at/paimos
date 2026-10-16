@@ -6090,6 +6090,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 390: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 a link on the last line stays a link under Copy and Reply, 390 fine pointer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 the thread starts with its day separator, 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 the thread starts with its day separator, 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

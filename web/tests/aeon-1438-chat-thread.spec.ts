@@ -6,7 +6,8 @@
 // or on send; a long word scrolls the page sideways; the desktop thread spreads
 // past a reading column; quiet text drops below 4.5:1 in either theme; the
 // rhythm between items depends on their kind (Copy/Reply reserving a row);
-// a touch-opened menu shows the keyboard focus ring.
+// Copy/Reply take a click meant for a link on the message's last line; a
+// touch-opened menu shows the keyboard focus ring.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -133,6 +134,20 @@ const itemBoxes = (thread: Locator) => thread.evaluate(list => {
   return [...list.children].map(item => { const box = item.getBoundingClientRect(); return [box.left - origin.left, box.top - origin.top, box.width, box.height] })
 })
 const largestShift = (before: number[][], after: number[][]) => Math.max(...before.flatMap((box, index) => box.map((value, side) => Math.abs(after[index]![side]! - value))))
+// Where each Copy/Reply button really takes the pointer: hit-test down through
+// its box (three columns, every 0.5 px) and keep the points where the button,
+// not the text under it, gets the click. Relative to the message's text end and
+// the next item's top, so a positive top/bottom means clear of both.
+const actionReach = (message: Locator) => message.evaluate(row => {
+  const text = row.querySelector('.chat-markdown')!.getBoundingClientRect(), after = row.nextElementSibling!.getBoundingClientRect()
+  return [...row.querySelectorAll<HTMLElement>('.message-actions button')].map(button => {
+    const box = button.getBoundingClientRect(), hits: number[] = []
+    for (const x of [box.left + 2, box.left + box.width / 2, box.right - 2]) {
+      for (let y = Math.floor(box.top) - 2; y <= Math.ceil(box.bottom) + 2; y += .5) if (document.elementFromPoint(x, y)?.closest('button') === button) hits.push(y)
+    }
+    return { name: button.getAttribute('aria-label'), height: box.height, hits: hits.length, top: Math.min(...hits) - text.bottom, bottom: after.top - Math.max(...hits), span: Math.max(...hits) - Math.min(...hits) }
+  })
+})
 // The measured gaps as evidence beside the shots.
 async function writeRhythm(path: string, title: string, columns: Record<string, { pair: string; gap: number }[]>, notes: string[]) {
   const names = Object.keys(columns), rows = Object.values(columns)[0]!
@@ -312,6 +327,17 @@ for (const width of [1440, 1024, 390]) test(`AEON-1438 Copy and Reply on demand 
   expect(Math.abs(place.rowEnd), 'the message ends with its text').toBeLessThanOrEqual(.5)
   expect(place.icons).toHaveLength(2)
   for (const icon of place.icons) { expect(icon.top, 'icon below the text').toBeGreaterThanOrEqual(-.5); expect(icon.bottom, 'icon above the next item').toBeGreaterThanOrEqual(-.5) }
+  // The buttons are taller than the gap, but only the gap takes the pointer: the
+  // overhang leaves clicks to the message's last line and to the next item.
+  const reach = await actionReach(message)
+  expect(reach.map(action => action.name)).toEqual(['Copy', 'Reply'])
+  for (const action of reach) {
+    expect(action.height, `${action.name} box is taller than the gap`).toBeGreaterThan(expected)
+    expect(action.hits, `${action.name} takes the pointer`).toBeGreaterThan(0)
+    expect(action.top, `${action.name} takes no click on the message text`).toBeGreaterThanOrEqual(-.5)
+    expect(action.bottom, `${action.name} takes no click on the next item`).toBeGreaterThanOrEqual(-.5)
+    expect(action.span, `${action.name} answers across the whole gap`).toBeGreaterThanOrEqual(expected - 2)
+  }
   await page.screenshot({ path: testInfo.outputPath(`AEON-1438/hover-${width}-light.png`) })
   // The pointer travels through the gap to the actions without losing them.
   const box = (await copy.boundingBox())!, text = (await message.locator('.chat-markdown, .markdown-body').first().boundingBox())!
@@ -334,6 +360,47 @@ for (const width of [1440, 1024, 390]) test(`AEON-1438 Copy and Reply on demand 
     `Hover over the message: the largest change of any thread item's box (x, y, width, height; ${resting.length} items) is ${Math.round(hoverShift * 100) / 100} px (limit 0.5 px).`,
     'Message, next card, Copy, Reply and composer stay within 0.5 px through hover, the pointer travelling the gap, focus on Copy and Reply.',
   ])
+})
+
+// With a mouse at phone width the 44 px Copy and Reply overhang the message's
+// last line; a link there must still take the click, and the gap still copies.
+test('AEON-1438 a link on the last line stays a link under Copy and Reply, 390 fine pointer', async ({ page }) => {
+  const { worker, messages } = await setup(page)
+  const post = messages.find(m => m.body.startsWith('Merged AEON-1182. Shall I start'))!
+  post.body += '\n\n[Release check log](https://ci.example.test/runs/1438) has the details.'
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches), 'a fine pointer').toBe(true)
+  const panel = panelOf(page)
+  const message = panel.locator('.msg.agent', { hasText: 'Shall I start the release check' })
+  const link = message.getByRole('link', { name: 'Release check log' }), copy = message.getByRole('button', { name: 'Copy', exact: true })
+  await link.scrollIntoViewIfNeeded()
+  // Record which control each click reaches (a link click stays on the page) and every copy.
+  await page.evaluate(() => {
+    const w = window as unknown as { __clicks: string[]; __copies: string[] }
+    w.__clicks = []; w.__copies = []
+    addEventListener('click', event => {
+      const hit = (event.target as Element).closest('a, button')
+      w.__clicks.push(hit ? `${hit.tagName.toLowerCase()}:${hit.getAttribute('aria-label') ?? hit.textContent?.trim()}` : 'none')
+      if (hit?.matches('a')) event.preventDefault()
+    }, true)
+    Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async (text: string) => { w.__copies.push(text) } })
+  })
+  const record = () => page.evaluate(() => { const w = window as unknown as { __clicks: string[]; __copies: string[] }; return { clicks: [...w.__clicks], copies: [...w.__copies] } })
+  await message.hover()
+  await expect(message.locator('.message-actions')).toHaveCSS('opacity', '1')
+  const linkBox = (await link.boundingBox())!, copyBox = (await copy.boundingBox())!, text = (await message.locator('.chat-markdown').boundingBox())!
+  // A point on the link that also lies inside Copy's 44 px box.
+  const point = { x: linkBox.x + 6, y: linkBox.y + linkBox.height - 4 }
+  expect(copyBox.height, 'Copy keeps its 44 px box').toBeGreaterThanOrEqual(44)
+  expect(text.y + text.height - (linkBox.y + linkBox.height), 'the link sits on the last line').toBeLessThan(8)
+  expect(point.x > copyBox.x && point.x < copyBox.x + copyBox.width && point.y > copyBox.y && point.y < copyBox.y + copyBox.height, 'the point lies inside the Copy box').toBe(true)
+  await page.mouse.click(point.x, point.y)
+  await expect.poll(record).toEqual({ clicks: ['a:Release check log'], copies: [] })
+  // The gap under the text still copies, seen by the same instruments.
+  await page.mouse.click(copyBox.x + copyBox.width / 2, copyBox.y + copyBox.height / 2)
+  await expect.poll(record).toEqual({ clicks: ['a:Release check log', 'button:Copy'], copies: [post.body] })
+  await expect(page.locator('.toast-host')).toContainText('Copied')
 })
 
 // The thread opens with its day: a thread that starts today shows "Today" first, at scrollTop 0.

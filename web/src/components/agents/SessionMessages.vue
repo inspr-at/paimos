@@ -220,9 +220,13 @@ onBeforeUnmount(() => {
 .msg-chip { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; height: 20px; margin-left: 4px; padding: 0 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; font-weight: 500; line-height: 20px; }
 .duplicate { flex: none; font: 500 11.5px var(--mono); color: var(--ink-2); }
 /* Copy and Reply: on hover or focus, centred in the gap under the message. They
-   lie over the gap and take no layout space, so the rhythm stays one gap. */
-.message-actions { --act: 28px; position: absolute; z-index: 1; top: calc(100% + (var(--thread-gap, 20px) - var(--act)) / 2); left: -6px; display: flex; gap: 2px; height: var(--act); opacity: 0; }
-.message-actions .icon-btn { width: var(--act); height: var(--act); border-radius: 8px; color: var(--ink-3); }
+   lie over the gap and take no layout space, so the rhythm stays one gap. A
+   button is taller than the gap (--over on each side), so only its gap part
+   takes the pointer: a click on the message's last line or on the next item
+   passes through, and a link there stays a link. */
+.message-actions { --act: 28px; --over: max(0px, (var(--act) - var(--thread-gap, 20px)) / 2); position: absolute; z-index: 1; top: calc(100% + (var(--thread-gap, 20px) - var(--act)) / 2); left: -6px; display: flex; gap: 2px; height: var(--act); opacity: 0; pointer-events: none; }
+.message-actions .icon-btn { position: relative; width: var(--act); height: var(--act); border-radius: 8px; color: var(--ink-3); pointer-events: none; }
+.message-actions .icon-btn::before { content: ''; position: absolute; inset: var(--over) 0; width: auto; height: auto; transform: none; pointer-events: auto; }
 @media (hover: hover) { .message-actions .icon-btn:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .msg:hover .message-actions, .msg:focus-within .message-actions { opacity: 1; }
 /* The gap under a message belongs to its hover, so the pointer reaches the actions. */
@@ -261,7 +265,8 @@ onBeforeUnmount(() => {
   .session-messages.quiet .msg[tabindex]:focus-visible { box-shadow: none; }
 }
 @media (max-width: 720px) {
-  /* Phones keep 44 px targets, also with a mouse; still centred on the gap, still no layout space. */
+  /* Phones keep 44 px buttons, also with a mouse; still centred on the gap, still no layout space,
+     and still only the gap takes the pointer (touch uses the long-press menu instead). */
   .message-actions { --act: 44px; left: -14px; gap: 0; }
   .message-actions .icon-btn { border-radius: 10px; }
   .msg-meta { gap: 8px; margin-bottom: 4px; font-size: 12px; line-height: 16px; }
