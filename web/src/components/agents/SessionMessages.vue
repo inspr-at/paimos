@@ -32,7 +32,7 @@ const items = computed(() => collapseMessages(props.messages))
 // Day labels follow the clock, so "Today" turns into "Yesterday" overnight. The
 // rows depend on the day only, not on every tick of the clock.
 const day = computed(() => { const at = new Date(props.now); at.setHours(12, 0, 0, 0); return at.getTime() })
-const rows = computed(() => threadRows(items.value, day.value, language.value))
+const rows = computed(() => threadRows(items.value, day.value, language.value, props.principalId))
 const receiptId = computed(() => receiptTarget(rows.value, me.value))
 const chip = (message: MessageGroup) => messageChip(message, words.value)
 const mine = (message: MessageGroup) => message.sender_principal_id === me.value

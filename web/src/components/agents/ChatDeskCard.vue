@@ -22,11 +22,12 @@ import { readQuestion } from '../../lib/decisionDeskApi'
 import { absoluteTime } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
-import { clockTime } from './chatThread'
+import { clockTime, deskCardState } from './chatThread'
 import { chatWords } from './sessionChat'
 
 // A Decision Desk delivery in the thread (AEON-1438): the question, its state and
-// Open. The delivery's own text is the agent's instruction and stays in the data.
+// Open. The state comes from the Desk record when that record can be read.
+// The delivery's own text is the agent's instruction and stays in the data.
 const props = defineProps<{ questionId: string; answer?: string; corrected?: boolean; at?: string; questions?: Question[]; sessionId?: string }>()
 const identity = useSession()
 const words = computed(() => chatWords[displayLanguage()])
@@ -72,16 +73,7 @@ const text = computed(() => {
   return q.askers.find(asker => asker.session_id && asker.session_id === props.sessionId)?.input.question || q.input.question
 })
 const title = computed(() => text.value || (loading.value ? '' : words.value.deskFallback))
-const state = computed<{ kind: 'answered' | 'waiting' | 'unknown'; label?: string }>(() => {
-  const q = question.value
-  if (q?.state === 'answered' && q.answer) {
-    const option = q.answer.option_id ? q.input.options.find(item => item.id === q.answer!.option_id) : undefined
-    return { kind: 'answered', label: option?.title || q.answer.answer || props.answer }
-  }
-  if (props.answer) return { kind: 'answered', label: props.answer }
-  if (q?.state === 'open') return { kind: 'waiting' }
-  return { kind: 'unknown' }
-})
+const state = computed(() => deskCardState(question.value, props.answer))
 const decides = computed(() => identity.identity?.principal.kind === 'person' && !!question.value && can('questions.decide', question.value.project_id))
 const desk = computed(() => ({ path: '/decision-desk', query: { item: `q:${props.questionId}` } }))
 </script>

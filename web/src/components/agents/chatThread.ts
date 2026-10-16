@@ -17,12 +17,18 @@ const ANSWER_LIMIT = 64 * 1024
 
 export interface DeskDelivery { kind: 'question' | 'answer'; questionId: string; answer?: string; correction?: boolean }
 
-// A Desk delivery is either the question root or the recorded answer (or its
-// correction). Everything else is an ordinary message.
-export function deskDelivery(message: Pick<ProjectMessage, 'body'>): DeskDelivery | null {
+// A Desk card is the session agent's question root, or an answer or correction
+// from someone else. The agent's own copy of an answer record, and anyone
+// else's copy of the root sentence, stay ordinary messages. Without a known
+// session agent there is no card: a body alone cannot decide.
+export function deskDelivery(message: Pick<ProjectMessage, 'body' | 'sender_principal_id'>, sessionAgent: string): DeskDelivery | null {
   const body = (message.body ?? '').trim()
+  const sender = message.sender_principal_id ?? ''
   const root = DESK_QUESTION.exec(body)
-  if (root) return { kind: 'question', questionId: root[1]!.toLowerCase() }
+  if (root) {
+    if (!sessionAgent || sender !== sessionAgent) return null
+    return { kind: 'question', questionId: root[1]!.toLowerCase() }
+  }
   if (!body.startsWith('{') || body.length > ANSWER_LIMIT) return null
   let value: unknown
   try { value = parseJson(body) } catch { return null }
@@ -30,8 +36,31 @@ export function deskDelivery(message: Pick<ProjectMessage, 'body'>): DeskDeliver
   const record = value as Record<string, unknown>
   if (record.type !== 'question.answer' && record.type !== 'question.correction') return null
   if (typeof record.question_id !== 'string' || !QUESTION_ID.test(record.question_id)) return null
+  if (!sessionAgent || sender === sessionAgent) return null
   const answer = typeof record.answer === 'string' ? record.answer.trim() : ''
   return { kind: 'answer', questionId: record.question_id.toLowerCase(), correction: record.type === 'question.correction', ...(answer ? { answer } : {}) }
+}
+
+// The Desk record decides whenever it can be read. Answered shows that
+// record's option or answer text. Open stays Waiting, even when a message
+// body already carries an answer. The body is used only when no record is readable.
+export interface DeskRecord {
+  state: 'open' | 'answered'
+  answer?: { option_id?: string; answer?: string }
+  input: { options: readonly { id: string; title: string }[] }
+}
+export function deskCardState(question: DeskRecord | null | undefined, bodyAnswer?: string): { kind: 'answered' | 'waiting' | 'unknown'; label?: string } {
+  if (question) {
+    if (question.state === 'answered') {
+      const recorded = question.answer
+      const option = recorded?.option_id ? question.input.options.find(item => item.id === recorded.option_id) : undefined
+      return { kind: 'answered', label: option?.title || recorded?.answer || '' }
+    }
+    if (question.state === 'open') return { kind: 'waiting' }
+    return { kind: 'unknown' }
+  }
+  const body = bodyAnswer?.trim()
+  return body ? { kind: 'answered', label: body } : { kind: 'unknown' }
 }
 
 export interface DayRow { type: 'day'; key: string; label: string }
@@ -62,12 +91,12 @@ export function clockTime(iso: string | undefined): string {
   return Number.isFinite(at) ? new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : ''
 }
 
-export function threadRows(items: readonly MessageGroup[], now: number, language: ThreadLanguage): ThreadRow[] {
+export function threadRows(items: readonly MessageGroup[], now: number, language: ThreadLanguage, sessionAgent: string): ThreadRow[] {
   const rows: ThreadRow[] = []
   const desks = new Map<string, DeskRow>()
   let day = ''
   for (const message of items) {
-    const desk = deskDelivery(message)
+    const desk = deskDelivery(message, sessionAgent)
     const known = desk ? desks.get(desk.questionId) : undefined
     if (desk && known) {
       known.members.push(...message.members)

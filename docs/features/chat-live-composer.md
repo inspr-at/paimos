@@ -93,8 +93,12 @@ and desktop designs attached to AEON-1438:
 
 - A Decision Desk delivery is one card: "Decision Desk", the question, its
   state ("Answered: …", or "Waiting for you" for someone who may decide) and
-  Open. The question root and its answer records fold into it; the agent's
-  instruction, the question ID and the CLI words stay in the data.
+  Open. The card is the session agent's question root, or an answer or
+  correction from someone else. When the Desk record can be read, the state
+  comes from that record: an answer shows its option or answer text, and an
+  open question stays Waiting. The message body supplies an answer only when
+  no record can be read. The agent's instruction, the question ID and the CLI
+  words stay in the data.
 - Each message has one quiet meta line (name · time, at most one chip such as
   "Action request · resolved"); day separators name Today, Yesterday or the
   date. Only the latest own message shows its receipt; a failed send always
