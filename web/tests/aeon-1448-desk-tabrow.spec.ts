@@ -83,12 +83,13 @@ function rowGeometry(page: Page) {
     const group = document.querySelector('[role="radiogroup"][aria-label="Show"]')!
     const action = document.querySelector<HTMLElement>('[data-testid="desk-one-by-one"]')
     const label = action?.querySelector('.label')
+    const stamps = document.querySelector('[role="radiogroup"][aria-label="Stamp"]')
     const note = [...document.querySelectorAll('p')].find(p => p.textContent === 'Agents keep working unless something is held up.')!
     return {
       row: rect(group.parentElement), tabs: rect(group), tabTops: [...group.querySelectorAll('button')].map(tab => Math.round(tab.getBoundingClientRect().top)),
       tabsOverflow: group.scrollWidth - group.clientWidth, action: rect(action), labelShown: !!label && getComputedStyle(label).display !== 'none',
       tip: action?.getAttribute('data-tip') ?? null, note: rect(note), section: parseFloat(getComputedStyle(note.closest('header')!).marginBottom),
-      filter: rect(document.querySelector('[role="radiogroup"][aria-label="Stamp"]')), sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      filter: rect(stamps), filterOverflow: stamps ? stamps.scrollWidth - stamps.clientWidth : 0, sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     }
   })
 }
@@ -147,8 +148,8 @@ async function deskRow(page: Page, locale: string, widths: number[]) {
     const arrived = await rowGeometry(page)
     expectOneRow(arrived, `${step} decided with a question`)
     await expect(button(page)).toHaveAccessibleName('Answer one by one')
-    // Below about 360 px the arrow alone, named by its label and, on fine pointers, a tip.
-    if (width < 360) { expect(arrived.labelShown, `${step}: icon only`).toBe(false); expect(arrived.tip).toBe('Answer one by one') }
+    // On phones below about 384 px the arrow alone, named by its label and, on fine pointers, a tip.
+    if (width < 384) { expect(arrived.labelShown, `${step}: icon only`).toBe(false); expect(arrived.tip).toBe('Answer one by one') }
     else { expect(arrived.labelShown, `${step}: the label shows`).toBe(true); expect(arrived.tip).toBeNull() }
     await page.screenshot({ path: test.info().outputPath(`decided-${width}-${theme}-${locale}.png`) })
     await decided.check(async () => {
@@ -197,7 +198,7 @@ for (const [locale, widths] of [['en-US', [1440, 1024, 390, 320]], ['de-DE', [14
 })
 
 // The row across widths, with the stamp filter (the widest case): one line of tabs, the button at the end,
-// the label down to ~360 px, the filter on the first line only when it fits beside the button.
+// the label down to a 384 px phone, the filter on the first line only when it fits beside the button.
 test('AEON-1448: one tab row from 320 to 1440 px, the stamp filter never pushed by the button', async ({ page }) => {
   test.setTimeout(120_000)
   const world = await mockDesk(page, 'light')
@@ -207,21 +208,26 @@ test('AEON-1448: one tab row from 320 to 1440 px, the stamp filter never pushed 
   await expect(button(page)).toBeVisible()
   await page.getByTestId('desk-tab-decided').click()
   const lines: string[] = ['| viewport | row | tabs | button | filter | label | filter line |', '|---|---|---|---|---|---|---|']
-  for (const width of [1440, 1280, 1024, 960, 900, 768, 600, 414, 390, 375, 360, 340, 320]) {
+  const samples: [number, Awaited<ReturnType<typeof rowGeometry>>][] = []
+  for (const width of [1440, 1280, 1024, 960, 900, 768, 600, 414, 390, 384, 383, 375, 360, 340, 320]) {
     await page.setViewportSize({ width, height: 900 })
     const geometry = await rowGeometry(page)
+    samples.push([width, geometry])
+    lines.push(`| ${width} | ${geometry.row!.width.toFixed(1)} | ${geometry.tabs!.width.toFixed(1)} | ${geometry.action!.width.toFixed(1)} | ${geometry.filter!.width.toFixed(1)} | ${geometry.labelShown} | ${Math.abs(geometry.filter!.top - geometry.tabs!.top) < geometry.tabs!.height ? 'first' : 'own'} |`)
+  }
+  // The measurements first, so a failure still leaves the numbers behind.
+  await writeFile(test.info().outputPath('row-widths.md'), lines.join('\n') + '\n')
+  for (const [width, geometry] of samples) {
     expectOneRow(geometry, `${width}`)
     const filter = geometry.filter!, action = geometry.action!, tabsBox = geometry.tabs!
     const sameLine = Math.abs(filter.top - tabsBox.top) < tabsBox.height
     if (sameLine) {
       expect(filter.left - tabsBox.right, `${width}: the filter follows the tabs`).toBeGreaterThanOrEqual(10)
       expect(action.left - filter.right, `${width}: the button keeps clear of the filter`).toBeGreaterThanOrEqual(10)
-      expect(await page.getByRole('radiogroup', { name: 'Stamp' }).evaluate(element => element.scrollWidth - element.clientWidth), `${width}: the filter is not squeezed`).toBeLessThanOrEqual(0)
+      expect(geometry.filterOverflow, `${width}: the filter is not squeezed`).toBeLessThanOrEqual(0)
     } else expect(filter.top, `${width}: the filter takes its own line below`).toBeGreaterThanOrEqual(tabsBox.bottom)
-    expect(geometry.labelShown, `${width}: label down to ~360 px`).toBe(width >= 372)
-    lines.push(`| ${width} | ${geometry.row!.width.toFixed(1)} | ${tabsBox.width.toFixed(1)} | ${action.width.toFixed(1)} | ${filter.width.toFixed(1)} | ${geometry.labelShown} | ${sameLine ? 'first' : 'own'} |`)
+    expect(geometry.labelShown, `${width}: the label down to 384 px`).toBe(width >= 384)
   }
-  await writeFile(test.info().outputPath('row-widths.md'), lines.join('\n') + '\n')
 })
 
 // Coarse pointers: a 44 px tall button (44 × 44 when icon-only) that still fits inside the tab row's height.

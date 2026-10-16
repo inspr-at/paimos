@@ -474,7 +474,7 @@ watch(owner, () => {
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
 const stopAccess = onAccessRevalidate({ reset: resetDesk })
-// Below about 360 px the tab row's container query shows the arrow alone (AEON-1448); its name then also comes as a tip.
+// On a narrow phone the tab row's container query shows the arrow alone (AEON-1448); its name then also comes as a tip.
 const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), iconOnly = ref(false)
 function readIconOnly() { const label = oneByOne.value?.querySelector('.label'); iconOnly.value = !!label && getComputedStyle(label).display === 'none' }
 watch(oneByOne, readIconOnly, { flush: 'post' })
@@ -617,7 +617,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-bar { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
 .dp-bar .view-tabs { grid-area: 1 / 1; }
 .dp-bar .view-tabs button { white-space: nowrap; }
-.one-by-one { grid-area: 1 / -2; justify-self: end; }
+/* The tabs' type size, so the label fits beside them on a 390 px phone. */
+.one-by-one { grid-area: 1 / -2; justify-self: end; gap: 6px; padding: 0 12px; font-size: 12.5px; }
 @media (pointer: coarse) { .one-by-one { height: 44px; } }
 @media (prefers-reduced-motion: no-preference) { .one-by-one-enter-active, .one-by-one-leave-active { transition: opacity 120ms ease; } }
 .one-by-one-enter-from, .one-by-one-leave-to { opacity: 0; }
@@ -631,12 +632,13 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
   .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
   .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
 }
-/* Below about 360 px the arrow alone, a 44 px target; the accessible name stays. */
-@container desk-tabs (max-width: 339.98px) {
+/* The label needs about 345 px beside the tabs. On a narrower row (phones below about 384 px, such as 360 and 375)
+   the arrow alone, a 44 px target; the accessible name stays. */
+@container desk-tabs (max-width: 351.98px) {
   .one-by-one { width: 32px; padding: 0; }
   .one-by-one .label { display: none; }
 }
-@media (pointer: coarse) { @container desk-tabs (max-width: 339.98px) { .one-by-one { width: 44px; } } }
+@media (pointer: coarse) { @container desk-tabs (max-width: 351.98px) { .one-by-one { width: 44px; } } }
 .trim-pages { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 /* The list card: a warm full tint and a soft gold ring while something waits, never an edge bar. */
 .queue { --agent-state-color: var(--agent-waiting); overflow: clip; container: queue / inline-size; }
