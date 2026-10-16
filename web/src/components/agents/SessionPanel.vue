@@ -1014,7 +1014,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .panel-menu-item > .menu-tick.on { visibility: visible; }
 .phone-panel-choices { display: none; }
 .pane-back, .pane-state { display: none; }
-.pane-heading { display: grid; min-width: 0; }
+.pane-heading { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .live-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .live-unavailable { padding: 24px; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .live-pane :deep(.replay-controls:has(.btn-label > span:first-child[aria-hidden="false"]) .replay-history > button), .live-pane :deep(.replay-controls:has(.btn-label > span:first-child[aria-hidden="false"]) .replay-history > span[aria-hidden="true"]) { display: none; }

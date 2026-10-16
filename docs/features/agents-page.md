@@ -24,7 +24,10 @@ or a More item for it.
   harnesses, a tablet), the units wrap onto further lines inside the control
   instead of being cut off. Over pace and today's limit show as a flag after
   the number. The unfolded dial opens as a card under the row (see
-  [agents-daily-plan.md](agents-daily-plan.md)).
+  [agents-daily-plan.md](agents-daily-plan.md)). A page opened on a phone or a
+  short landscape screen starts with the dial folded, so the sessions come
+  first; its toggle unfolds it for the visit, and the saved fold, shared across
+  devices, belongs to wider screens (AEON-1286).
 - On touch, −, the number and + are three separate 44 px targets that never
   overlap: − and + are 44 px wide, and the number's target takes in its mark.
   In a tight row a closed unit is one target, and a tap opens its plate.
@@ -119,8 +122,9 @@ worker problem opens the relevant tab, ahead of the person's pinned default
 and last-used tab. The opening reason stays visible. Workers have Overview
 and Chat. Defaults and last-used tabs are person preferences.
 
-Interrupt, Pause (Resume when paused) and Stop remain in the panel head on
-every tab. Lead start, resume and cooperative handover use the caller-specific
+Interrupt, Pause (Resume when paused) and Stop live in the panel's ⋯ menu with
+their labels and reasons (AEON-1286). The default tab is a ⋯ choice for the tab
+on screen, such as "Open on Chat by default"; no pin sits beside the tabs. Lead start, resume and cooperative handover use the caller-specific
 lead action projection, including its blocked reason; a missing projection
 leaves those actions unavailable. Session controls retain their own ownership
 and permission checks. A stopped lead's Start a lead is in Right now.
@@ -166,7 +170,12 @@ Escape and the close button return directly to List only.
 
 A split fits at 1056 px of work area (560 + 16 + 480). Below that threshold,
 details open over the list as a sheet and the preset button hides. Phones have a
-full-height sheet with a 44 px Back control and safe-area padding. In a split,
+full-height sheet: Back, the avatar, the name over its state and model, and ⋯,
+then the menu row (AEON-1286). The state is said once, on that line. ⋯ opens as a
+sheet from the bottom edge in groups: control, the session's process, how the
+panel opens, requested changes, layout. Short landscape screens get the whole
+screen too, with head and menu on one line. In Chat the composer pads the home
+indicator itself, so no band is left under it. In a split,
 the work area comes directly under the app header; the list and details have
 viewport-high panes with separate scrolling. A new selection resets the details
 to their top while the picked row stays in view. Opening a sheet, including when
