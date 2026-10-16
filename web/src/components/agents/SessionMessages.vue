@@ -210,7 +210,8 @@ onBeforeUnmount(() => {
 /* One gap between every two items, whatever their kind (20 px, 16 px on phones). */
 .thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--thread-gap, 20px); margin: 0; padding: 0; list-style: none; }
 .day { justify-self: center; font-size: 12px; font-weight: 600; color: var(--ink-3); }
-.msg { position: relative; min-width: 0; width: 100%; padding: 0; }
+/* Each message paints on its own: its actions sit above its hover strip, and the next item stays on top of both. */
+.msg { position: relative; isolation: isolate; min-width: 0; width: 100%; padding: 0; }
 .msg :deep(.chat-markdown > :last-child) { margin-bottom: 0; }
 /* One quiet meta line: name · time, then at most one chip. */
 .msg-meta { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 20px; margin: 0 0 5px; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
@@ -220,7 +221,7 @@ onBeforeUnmount(() => {
 .duplicate { flex: none; font: 500 11.5px var(--mono); color: var(--ink-2); }
 /* Copy and Reply: on hover or focus, centred in the gap under the message. They
    lie over the gap and take no layout space, so the rhythm stays one gap. */
-.message-actions { position: absolute; top: calc(100% + (var(--thread-gap, 20px) - 28px) / 2); left: -6px; display: flex; gap: 2px; height: 28px; opacity: 0; }
+.message-actions { position: absolute; z-index: 1; top: calc(100% + (var(--thread-gap, 20px) - 28px) / 2); left: -6px; display: flex; gap: 2px; height: 28px; opacity: 0; }
 .message-actions .icon-btn { border-radius: 8px; color: var(--ink-3); }
 @media (hover: hover) { .message-actions .icon-btn:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .msg:hover .message-actions, .msg:focus-within .message-actions { opacity: 1; }
