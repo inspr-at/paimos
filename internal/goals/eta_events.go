@@ -3,7 +3,6 @@ package goals
 
 import (
 	"context"
-	"reflect"
 	"sort"
 	"time"
 
@@ -77,7 +76,8 @@ func effectiveETAs(ctx context.Context, tx pgx.Tx, nodes []storedNode) (map[stri
 					at, by = a.ReadyAt, a.ReadyBy
 				}
 				if at != nil && (value.At == nil || at.After(*value.At)) {
-					value = EffectiveETA{Source: "worker", At: at, By: by}
+					utc := at.UTC()
+					value = EffectiveETA{Source: "worker", At: &utc, By: by}
 				}
 			}
 		}
@@ -195,10 +195,9 @@ func CaptureTicketETAs(ctx context.Context, tx pgx.Tx, ticketIDs []string) (*ETA
 	return CaptureGoalETAs(ctx, tx, goals)
 }
 func sameETA(a, b EffectiveETA) bool {
-	a.By, b.By = "", ""
-	a.Partial, b.Partial = false, false
-	return reflect.DeepEqual(a, b)
+	return a.Source == b.Source && a.Text == b.Text && (a.At == nil && b.At == nil || a.At != nil && b.At != nil && a.At.Equal(*b.At))
 }
+
 func (c *ETACapture) Changes(ctx context.Context, tx pgx.Tx) ([]events.Change, error) {
 	changes := []events.Change{}
 	if len(c.goals) == 0 {
