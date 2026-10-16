@@ -93,7 +93,10 @@ test('assignee, priority, labels and parent change in one request each; stale ti
   await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('Markus Barta')
   await bulkBar(page).getByRole('button', { name: 'Priority' }).click()
   await page.getByRole('menu', { name: 'Priority of 2 tickets' }).getByRole('menuitemradio', { name: 'No priority' }).click()
-  expect(bulkCalls(calls).at(-1)!.body).toMatchObject({ priority: null })
+  // The mock records a request before it answers, so the answer's message proves this change has been sent.
+  await expect(page.getByText('Cleared the priority of 2 tickets')).toBeVisible()
+  expect(bulkCalls(calls)).toHaveLength(2)
+  expect(bulkCalls(calls).at(-1)!.body).toEqual({ ids: ['n-2', 'n-4'], priority: null, if_unmodified_since: revisions('n-2', 'n-4') })
   // Labels: one carries BUG, so it shows as mixed; Apply sends adds and removes together.
   await bulkBar(page).getByRole('button', { name: 'Labels' }).click()
   const labels = page.getByRole('dialog', { name: 'Labels of 2 tickets' })
