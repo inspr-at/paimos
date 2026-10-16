@@ -48,7 +48,8 @@ async function retry() {
   try {
     const next = await retryConfirmation(quoteId, version, uncertain)
     if (!still(current, quoteId, version)) return
-    job.value = next; toast('The receipt is being made again.'); void load()
+    // load() takes the next generation, so this finally can no longer clear busy.
+    job.value = next; toast('The receipt is being made again.'); busy.value = false; void load()
   } catch (e) { if (still(current, quoteId, version)) error.value = lifecycleError(e, 'The receipt could not be retried.') }
   finally { if (still(current, quoteId, version)) busy.value = false }
 }

@@ -19192,6 +19192,8 @@
     ,
     {"kind":"vitest","file":"tests/quote-profile-normalize.unit.test.ts","name":"normalizeProfile > survives a snapshot without a definition","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/quote-switch-race.unit.test.ts","name":"AEON-1421: a receipt retry stays usable when the refresh shows generation failed again","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/quote-switch-race.unit.test.ts","name":"AEON-1421: switching quotes drops the other quote’s link read and refuses its revoke","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred discarded recovery decision even after the old 400ms window","tier":"GATED-FULL"}

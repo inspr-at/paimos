@@ -19,6 +19,7 @@ const linkReads: { id: string; version: number; gate: Gate<PublicLink | null> }[
 const versionReads: { id: string; gate: Gate<QuoteVersion[]> }[] = []
 const noticeReads: Gate<AcceptanceNotice[]>[] = []
 const confirmationReads: { id: string; version: number; gate: Gate<ConfirmationJob | null> }[] = []
+const retries: { id: string; version: number; uncertain: boolean; gate: Gate<ConfirmationJob> }[] = []
 const revokes: { id: string; version: number; gate: Gate<PublicLink> }[] = []
 const creates: { id: string; version: number; gate: Gate<PublicLink> }[] = []
 
@@ -30,6 +31,9 @@ function versionRow(id: string, mark: string): QuoteVersion {
 }
 function receiptJob(id: string, mark: string): ConfirmationJob {
   return { quote_node_id: id, version: 1, state: 'ready', attempts: 1, next_attempt_at: '2030-01-01T00:00:00Z', receipt_sha256: mark.repeat(64), updated_at: '2026-01-02T00:00:00Z' }
+}
+function receiptState(id: string, state: ConfirmationJob['state'], attempts: number): ConfirmationJob {
+  return { quote_node_id: id, version: 1, state, attempts, next_attempt_at: '2030-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' }
 }
 function projection(id: string, version: number) {
   return { quote_node_id: id, project_node_id: 'p', customer_org_node_id: 'c', current_version: version, state: 'issued' as const, revision: version, archived: false, project_ref: '', classic_status: 'sent' as const }
@@ -44,6 +48,11 @@ const createLink = vi.fn((id: string, version: number) => {
   creates.push({ id, version, gate })
   return gate.promise
 })
+const retryConfirmation = vi.fn((id: string, version: number, uncertain: boolean) => {
+  const gate = deferred<ConfirmationJob>()
+  retries.push({ id, version, uncertain, gate })
+  return gate.promise
+})
 const lifecycle = {
   lifecycleError, shortDigest, receiptBusy, receiptUrl, RECEIPT_PILL,
   linkUrl: (link: { path?: string }) => link.path ? `https://quotes.test${link.path}` : '',
@@ -53,7 +62,7 @@ const lifecycle = {
   listVersions: (id: string) => { const gate = deferred<QuoteVersion[]>(); versionReads.push({ id, gate }); return gate.promise },
   acceptanceNotices: () => { const gate = deferred<AcceptanceNotice[]>(); noticeReads.push(gate); return gate.promise },
   getConfirmation: (id: string, version: number) => { const gate = deferred<ConfirmationJob | null>(); confirmationReads.push({ id, version, gate }); return gate.promise },
-  retryConfirmation: vi.fn(),
+  retryConfirmation,
   readiness: async () => ({ renderer_available: true, smtp_enabled: true, smtp_configured: true, email_delivery: 'off' }),
 }
 const toast = (message: string) => { messages.push(message); return messages.length }
@@ -76,8 +85,8 @@ function quoteRouter(): Router {
 afterEach(() => {
   settleConfirm(false)
   stopped.splice(0).forEach(stop => stop())
-  linkReads.length = 0; versionReads.length = 0; noticeReads.length = 0; confirmationReads.length = 0; revokes.length = 0; creates.length = 0; messages.length = 0
-  revokeLink.mockClear(); createLink.mockClear()
+  linkReads.length = 0; versionReads.length = 0; noticeReads.length = 0; confirmationReads.length = 0; retries.length = 0; revokes.length = 0; creates.length = 0; messages.length = 0
+  revokeLink.mockClear(); createLink.mockClear(); retryConfirmation.mockClear()
   vi.unstubAllGlobals()
 })
 
@@ -231,4 +240,52 @@ it('AEON-1421: switching quotes drops the other quote’s link read and refuses 
   expect(confirmState.resolve).toBeNull()
   settleConfirm(true)
   expect(revokeLink).toHaveBeenCalledExactlyOnceWith(A, 1)
+})
+
+it('AEON-1421: a receipt retry stays usable when the refresh shows generation failed again', async () => {
+  const receiptProps = reactive({ quoteId: A, version: 1, admin: true })
+  const receipt = setupSource('components/quotes/details/QuoteReceiptCard.vue', receiptProps, {
+    '../../../lib/quotes/lifecycle': lifecycle,
+    '../../../lib/toast': { toast },
+    '../../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
+  })
+  stopped.push(receipt.stop)
+  confirmationReads[0]!.gate.resolve(receiptState(A, 'failed', 1))
+  await flush()
+  expect(receipt.state.loaded.value).toBe(true)
+  expect(receipt.state.job.value).toMatchObject({ quote_node_id: A, state: 'failed', attempts: 1 })
+  expect(receipt.state.busy.value).toBe(false)
+
+  const first = receipt.state.retry()
+  expect(receipt.state.busy.value).toBe(true)
+  expect(retries).toEqual([expect.objectContaining({ id: A, version: 1, uncertain: false })])
+  retries[0]!.gate.resolve(receiptState(A, 'pending', 0))
+  await first
+  await flush()
+  // The mutation has finished and the refresh is still in flight. Make it again
+  // must already be free: the refresh takes the next generation.
+  expect(messages).toEqual(['The receipt is being made again.'])
+  expect(confirmationReads.map(read => [read.id, read.version])).toEqual([[A, 1], [A, 1]])
+  expect(receipt.state.busy.value).toBe(false)
+
+  confirmationReads[1]!.gate.resolve(receiptState(A, 'failed', 2))
+  await flush()
+  expect(receipt.state.job.value).toMatchObject({ quote_node_id: A, state: 'failed', attempts: 2 })
+  expect(receipt.state.error.value).toBe('')
+  expect(receipt.state.busy.value).toBe(false)
+
+  const second = receipt.state.retry()
+  expect(retries).toHaveLength(2)
+  expect(retries[1]).toMatchObject({ id: A, version: 1, uncertain: false })
+  expect(receipt.state.busy.value).toBe(true)
+  retries[1]!.gate.resolve(receiptState(A, 'pending', 0))
+  await second
+  await flush()
+  expect(confirmationReads).toHaveLength(3)
+  expect(receipt.state.busy.value).toBe(false)
+  confirmationReads[2]!.gate.resolve(receiptState(A, 'failed', 3))
+  await flush()
+  expect(receipt.state.job.value).toMatchObject({ quote_node_id: A, state: 'failed', attempts: 3 })
+  expect(receipt.state.busy.value).toBe(false)
+  expect(retryConfirmation).toHaveBeenCalledTimes(2)
 })
