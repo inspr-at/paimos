@@ -22708,6 +22708,8 @@
     ,
     {"kind":"vitest","file":"tests/ticket-links.unit.test.ts","name":"250 mounted links resolve once in bounded batches and stay stable, including missing keys","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/ticket-links.unit.test.ts","name":"a modified click on a release key opens one ticket tab and not the peek","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/ticket-links.unit.test.ts","name":"access refresh keeps links until the whole replacement arrives, then removes lost access","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ticket-links.unit.test.ts","name":"duplicate normalized keys stay pinned until the last link leaves, including prop changes","tier":"GATED-FULL"}

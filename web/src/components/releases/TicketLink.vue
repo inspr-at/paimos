@@ -1,20 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, inject, watch, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, watch, watchEffect } from 'vue'
 import { brand } from '../../lib/brand'
-import { TICKET_PEEK } from '../../lib/ticketPeek'
 import { normalKey, showingTicketKeys, ticketRef, wantTicketKey } from '../../lib/ticketLinks'
 import { useProjects } from '../../stores/projects'
 import { ticketPath } from '../../lib/work'
+import TicketPeekLink from '../TicketPeekLink.vue'
 
 // One ticket key in release notes: a link to the ticket when this workspace has
 // it, plain text otherwise (earlier trackers, other products), never a dead link.
+// The link is TicketPeekLink: a plain click opens the peek, ctrl/cmd opens one
+// tab from the press (AEON-1327), other modifiers keep the browser's meaning.
 const props = withDefaults(defineProps<{ ticketKey: string; variant?: 'chip' | 'inline' }>(), { variant: 'chip' })
 const projects = useProjects()
 void projects.load()
-const router = useRouter()
-const peek = inject(TICKET_PEEK, null)
 
 // Asks for its key, and again after an access change dropped the answer.
 watch(() => normalKey(props.ticketKey), (key, _old, onCleanup) => {
@@ -26,23 +25,14 @@ const href = computed(() => {
   const project = ticket.value ? projects.byId(ticket.value.projectId) : undefined
   return ticket.value && project ? ticketPath(project.routeKey, ticket.value.key) : ''
 })
-const open = computed(() => !!peek && peek.openKey.value === normalKey(props.ticketKey))
 const missing = computed(() => ticket.value === null ? `${props.ticketKey} is not a ticket in this ${brand.value.short_name} workspace` : undefined)
-
-// Modified and middle clicks keep the browser's own meaning (new tab, window).
-function click(event: MouseEvent) {
-  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-  event.preventDefault()
-  if (peek) peek.open(props.ticketKey, event.currentTarget as HTMLElement)
-  else void router.push(href.value)
-}
 </script>
 
 <template>
-  <a
-    v-if="href" class="ticket-link" :class="[variant, { 'key-badge': variant === 'chip' }]" :href="href" :aria-current="open ? 'true' : undefined"
-    :aria-label="`${ticketKey}: ${ticket!.title}`" :data-tip="ticket!.title" @click="click"
-  >{{ ticketKey }}</a>
+  <TicketPeekLink
+    v-if="href" class="ticket-link" :class="[variant, { 'key-badge': variant === 'chip' }]" :ticket-key="ticketKey" :href="href"
+    :aria-label="`${ticketKey}: ${ticket!.title}`" :tip="ticket!.title"
+  >{{ ticketKey }}</TicketPeekLink>
   <span v-else class="ticket-plain" :class="[variant, { 'key-badge': variant === 'chip' }]" :data-tip="missing">{{ ticketKey }}</span>
 </template>
 

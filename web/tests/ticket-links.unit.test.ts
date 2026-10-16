@@ -28,22 +28,31 @@ const renderer = Vue.createRenderer<Node, Node>({
     if (at < 0) parent.children.push(child); else parent.children.splice(at, 0, child)
   },
 })
-// Compile the actual client component: Node-mode Vite otherwise emits SSR.
-const { descriptor } = parse(readFileSync(new URL('../src/components/releases/TicketLink.vue', import.meta.url), 'utf8'))
-const { content } = compileScript(descriptor, { id: 'ticket-link-test', inlineTemplate: true })
-const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
-const modules: Record<string, unknown> = {
+// Compile the actual client components: Node-mode Vite otherwise emits SSR.
+function compile(file: string, id: string, modules: Record<string, unknown>) {
+  const { descriptor } = parse(readFileSync(new URL(file, import.meta.url), 'utf8'))
+  const { content } = compileScript(descriptor, { id, inlineTemplate: true })
+  const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
+  const compiled: { default?: Vue.Component } = {}
+  new Function('require', 'exports', outputText)((dependency: string) => {
+    if (!(dependency in modules)) throw new Error(`Unexpected dependency ${dependency}`)
+    return modules[dependency]
+  }, compiled)
+  return compiled
+}
+const peekKey = Symbol('peek')
+const peekLink = compile('../src/components/TicketPeekLink.vue', 'ticket-peek-link-test', {
   vue: Vue, 'vue-router': { useRouter: () => ({ push: vi.fn() }) },
+  '../lib/ticketPeek': { TICKET_PEEK: peekKey }, '../lib/ticketLinks': links,
+})
+const compiled = compile('../src/components/releases/TicketLink.vue', 'ticket-link-test', {
+  vue: Vue,
   '../../lib/brand': { brand: Vue.ref({ short_name: 'AEON' }) },
-  '../../lib/ticketPeek': { TICKET_PEEK: Symbol('peek') }, '../../lib/ticketLinks': links,
+  '../../lib/ticketLinks': links,
   '../../lib/work': { ticketPath },
   '../../stores/projects': { useProjects: () => ({ load: async () => {}, byId: () => ({ routeKey: 'AEON' }) }) },
-}
-const compiled: { default?: Vue.Component } = {}
-new Function('require', 'exports', outputText)((id: string) => {
-  if (!(id in modules)) throw new Error(`Unexpected dependency ${id}`)
-  return modules[id]
-}, compiled)
+  '../TicketPeekLink.vue': peekLink,
+})
 
 type Answer = { items: { requested_key: string; key: string; id: string; title: string; state: string; project_id: string }[] }
 const answer = (keys: string[]): Answer => ({ items: keys.map(key => ({ requested_key: key, key, id: key, title: key, state: 'open', project_id: 'project' })) })
@@ -52,12 +61,14 @@ const apps: Vue.App[] = []
 const keys = Array.from({ length: 250 }, (_, i) => `AEON-${i + 1}`)
 // Drain the finite promise/Vue queue, with network replies held independently.
 const flush = async () => { for (let i = 0; i < 12; i++) { await Promise.resolve(); await Vue.nextTick() } }
+// A link's slot renders its key as child text nodes.
+const textOf = (el: Node): string => el.text + el.children.map(textOf).join('')
 function mount(initial: string[]) {
   const shown = Vue.ref(initial)
   const root = node('root')
   const app = renderer.createApp({ render: () => Vue.h('div', shown.value.map((key, i) => Vue.h(compiled.default!, { key: i, ticketKey: key }))) })
   apps.push(app); app.mount(root)
-  const pills = () => root.children[0]!.children.filter(el => el.tag === 'a' || el.tag === 'span').map(el => ({ key: el.text, tag: el.tag, class: el.props.class }))
+  const pills = () => root.children[0]!.children.filter(el => el.tag === 'a' || el.tag === 'span').map(el => ({ key: textOf(el), tag: el.tag, class: el.props.class }))
   return { shown, pills, app }
 }
 beforeEach(() => {
@@ -159,4 +170,51 @@ it('duplicate normalized keys stay pinned until the last link leaves, including 
   expect(duplicates.pills()[0]).toMatchObject({ key: 'AEON-2', tag: 'a' })
   await links.resolveTicketKeys(['AEON-2000'])
   expect(links.ticketRef('AEON-2')?.key).toBe('AEON-2')
+})
+
+// A release key is the app's ticket link (AEON-1413): ctrl/cmd opens one tab
+// from the press, never the peek, and the browser's own tab is not opened too.
+it('a modified click on a release key opens one ticket tab and not the peek', async () => {
+  const opened: string[] = []
+  const original = globalThis.window
+  globalThis.window = { open: (url: string) => { opened.push(String(url)); return null } } as unknown as Window & typeof globalThis
+  try {
+    const peek = { open: vi.fn(), openKey: Vue.ref<string | null>(null) }
+    const root = node('root')
+    const app = renderer.createApp({ render: () => Vue.h(compiled.default!, { ticketKey: 'AEON-7' }) })
+    app.provide(peekKey, peek)
+    apps.push(app); app.mount(root)
+    await flush()
+    requests[0]!.release(answer(['AEON-7']))
+    await flush()
+    const link = root.children[0]!
+    expect(link).toMatchObject({ tag: 'a', props: { href: '/p/AEON/AEON-7', class: 'ticket-link chip key-badge', 'aria-label': 'AEON-7: AEON-7' } })
+    expect(textOf(link)).toBe('AEON-7')
+    const event = (partial: Record<string, unknown> = {}) => {
+      const e: Record<string, unknown> = {
+        button: 0, metaKey: false, ctrlKey: true, shiftKey: false, altKey: false, defaultPrevented: false,
+        clientX: 10, clientY: 20, pointerId: 1, detail: 1, currentTarget: link,
+        preventDefault() { e.defaultPrevented = true }, ...partial,
+      }
+      return e
+    }
+    const on = (name: string) => {
+      const fn = link.props[name]
+      if (typeof fn !== 'function') throw new Error(`missing ${name}; props: ${Object.keys(link.props).join(',')}`)
+      return fn as (e: Record<string, unknown>) => void
+    }
+    on('onPointerdown')(event())
+    on('onPointerup')(event())
+    const click = event()
+    on('onClick')(click)
+    await flush()
+    expect(click.defaultPrevented).toBe(true)
+    expect(opened).toEqual(['/p/AEON/AEON-7'])
+    expect(peek.open).not.toHaveBeenCalled()
+    // A plain click still opens the peek beside the history.
+    on('onClick')(event({ ctrlKey: false }))
+    expect(peek.open).toHaveBeenCalledTimes(1)
+    expect(peek.open.mock.calls[0]![0]).toBe('AEON-7')
+    expect(opened).toEqual(['/p/AEON/AEON-7'])
+  } finally { globalThis.window = original }
 })
