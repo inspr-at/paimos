@@ -311,29 +311,38 @@ const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => 
 // The trail element itself, whatever it shows; the probe judges only what is in sight.
 const trailOf = (page: Page) => page.locator('.app-header .crumbs')
 // The header fits in the resize callback and once more on the next frame: dropping
-// a segment changes the row, and a key can be clipped for that one frame. Two
-// animation frames can land between those passes (nightly: 'chip PHAROS' at a
-// single width). Wait until the chips agree across two frames, after fonts.
-const settle = (page: Page) => page.evaluate(async () => {
-  await document.fonts.ready
-  const signature = () => {
-    const trail = document.querySelector<HTMLElement>('.app-header .crumbs')
-    if (!trail) return 'none'
-    const chips = [...trail.querySelectorAll<HTMLElement>('.sep, .key-badge, .crumb-name, .mono-crumb')].map(el => {
-      const box = el.getBoundingClientRect()
-      return `${el.className}:${el.dataset.dropped ?? ''}:${Math.round(box.width * 2)}:${el.scrollWidth}:${el.clientWidth}`
-    }).join('|')
-    return `${trail.scrollWidth}:${trail.clientWidth}:${chips}`
-  }
-  let previous = ''
-  for (let frame = 0; frame < 40; frame++) {
-    await new Promise<void>(done => requestAnimationFrame(() => done()))
-    const next = signature()
-    if (frame > 0 && next === previous) return
-    previous = next
-  }
-  throw new Error('header trail did not settle')
-})
+// a segment changes the row, and a key can be clipped for that one frame.
+// Animation-frame callbacks run before resize observers, and their promise
+// continuations can run before the header's own frame callback. Sample in a task
+// after rendering, including positions and the surrounding slots: equal chip
+// widths alone do not mean that a resize or a newly loaded place has settled.
+const settle = async (page: Page) => {
+  await page.waitForFunction(({ width, height }) => innerWidth === width && innerHeight === height, page.viewportSize()!)
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    const signature = () => {
+      const trail = document.querySelector<HTMLElement>('.app-header .crumbs')
+      if (!trail) return 'none'
+      const chips = [...document.querySelectorAll<HTMLElement>('.app-header, .app-header > *, .crumbs *')].map(el => {
+        const box = el.getBoundingClientRect()
+        return `${el.className}:${el.dataset.dropped ?? ''}:${el.dataset.empty ?? ''}:${box.x}:${box.y}:${box.width}:${box.height}:${el.scrollWidth}:${el.clientWidth}`
+      }).join('|')
+      return `${trail.scrollWidth}:${trail.clientWidth}:${chips}`
+    }
+    let previous = ''
+    for (let frame = 0; frame < 40; frame++) {
+      await new Promise<void>(done => requestAnimationFrame(() => {
+        const channel = new MessageChannel()
+        channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); done() }
+        channel.port2.postMessage(null)
+      }))
+      const next = signature()
+      if (frame > 0 && next === previous) return
+      previous = next
+    }
+    throw new Error('header trail did not settle')
+  })
+}
 const TRAILS = [
   { slug: 'tickets', path: '/p/PHAROS/tickets', ready: (page: Page) => expect(page.locator('.app-header .app-density')).toBeVisible() },
   { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full', ready: (page: Page) => expect(trailOf(page).locator('.crumb.current')).toHaveText('PHAROS-11') },

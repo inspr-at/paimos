@@ -10782,6 +10782,18 @@
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business shows only while one of its parts is open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tab labels fit and controls stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tab labels fit and controls stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tab labels fit and controls stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tab labels fit and controls stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tab labels fit and controls stay still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tab labels fit and controls stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tabs: a closed Customers or Quotes says how to open it; earlier links lead there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"at 390 the ticket fits: previous and next fold into More, chips and screens wrap","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11185,6 +11197,16 @@
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"failed retry stays actionable and flag-off hides generation controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves done as open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
