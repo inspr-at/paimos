@@ -6440,6 +6440,28 @@
     ,
     {"kind":"go","package":"internal/fromclassic","name":"TestResolveImportedLinksWithProjectVisibility","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalClockBoundariesAndWatermarks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalIdempotencyKeyGrammar","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalKindSchemasAndNextStep","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalLazyKindSeeding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalOutcomeReferenceVisibilityIsBounded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalRollupPartialAndSharedEstimates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalStateWorkerWins","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalStorageIdentityAndReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalStorageVisibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestUpdateDigestRetainsPatchIntent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestUpdateValidationBounds","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/greetings","name":"TestCorpusLint","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/greetings","name":"TestGreetingRotationPreferencesAndTenantIsolation","tier":"GATED-FULL"}

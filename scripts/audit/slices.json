@@ -312,7 +312,8 @@
         "internal/nodes/project_lookup_test.go",
         "internal/nodes/person_steps.go",
         "internal/nodes/person_steps_test.go",
-        "internal/workorders/person_steps.go"
+        "internal/workorders/person_steps.go",
+        "internal/goals/**"
       ]
     },
     {

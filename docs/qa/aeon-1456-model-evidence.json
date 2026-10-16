@@ -1,0 +1,75 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "ticket": "AEON-1456",
+  "brief": "aeon-1456-goals-api",
+  "round": 1,
+  "status": "partial-foundation-only",
+  "base_commit": "3c983e722",
+  "concept": "Goals model r3, including D1-D12 and E1-E6",
+  "attribution": {
+    "tracker": "PPM",
+    "instance": "ppm",
+    "session": "aeon-1456-goals-api",
+    "session_id": "4e212928-6bca-4ac9-8357-73c5174307c2",
+    "marker": "Coordinator marker and selected account verified before repository writes"
+  },
+  "implemented": [
+    "Migration 1361: tenant-scoped forced-RLS goal_update_receipts; method and immutable target binding columns; response generation sequence; deleted-ref and live-handover unique indexes; additive serves/asks_for CHECK widen",
+    "Outcome visibility collects all serves targets under temporary project widening, restores the caller visibility, and checks every target under RLS; nested outcome references terminate closed on cycles/depth/target bounds",
+    "Goal event RLS extends existing families and named events, retaining actor and node_refs checks; project readers need a visible goal and outcome",
+    "Lazy goal/outcome kind helper preserves tenant presentation and custom properties, restores outcome children, extends restricted releases without removing existing children, and returns snapshots for a future caller to append events",
+    "Bounded strict update decoder, required client refs, omission/null distinction, canonical request digest, exact decimal positions, key grammar and field-path bounds",
+    "Shared worker-first state, estimate coverage/shared-leaf weights, fixed Passed predicate, inclusive stall predicate, watermark ordering and value-free derived ping type"
+  ],
+  "checks": [
+    {
+      "command": "GOMAXPROCS=2 GOTOOLCHAIN=local go test -p 2 ./internal/goals -run '^(TestUpdate|TestGoalIdempotency|TestGoalState|TestGoalRollup|TestGoalClock|TestGoalKindSchemas)' -count=1",
+      "result": "passed",
+      "scope": "7 model test groups; compiles all 4 DB test groups without executing them"
+    },
+    {
+      "command": "node scripts/check-migrations.mjs --base-ref v261016060843.0.0",
+      "result": "passed",
+      "scope": "362 migrations; exact-byte exception; published tag verified with gh release view"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/audit",
+      "result": "passed",
+      "scope": "33 tests"
+    },
+    {
+      "command": "Scoped canonical test-tier CLI classify with the single-package AST collector",
+      "result": "passed",
+      "scope": "11 new Goals tests classified ESSENTIAL; no whole-repo compilation"
+    },
+    {
+      "command": "Ownership, DSAR and tier row checks",
+      "result": "passed",
+      "scope": "9 added source/policy files assigned; 9 receipt columns classified; tenant/person locator present"
+    },
+    {
+      "command": "node --test --test-concurrency=2 scripts/check-migrations.test.mjs scripts/test-tiers/manifests.test.mjs scripts/test-tiers/test-tiers.test.mjs",
+      "result": "passed",
+      "scope": "410 tests; 0 failures, skips or cancellations; browser/Go runner failure cases are injected fixtures, not browser or remote executions"
+    }
+  ],
+  "unproven": [
+    "The 4 DB test groups are compiled, not executed. The remote-test runner pushes a temporary Git ref, so it was not invoked under the explicit no-push instruction. No heavy local database suite substituted.",
+    "Full ci-static --merge-main, previous-binary migration compatibility and remote affected suites remain unverified; the remote/static wrappers also push temporary refs and full local ci-static is prohibited by worker host policy."
+  ],
+  "remaining": [
+    "OpenAPI goals source, generated contract and goals/1.0 surface; authz routes and module wiring",
+    "Create/update/stored-get/history API and CLI, with final-transaction RequireTx under tenant/tree/goal fences, current-target authorization before receipt replay, method/target/body conflict handling, ref retirement, moves and event-counter-last ordering",
+    "Write-time outcome ETA transitions in agent updates and worker heartbeat transactions; goal-level value-free pings; outcome-scoped moves; event subscribe allowlist/filtering and per-ask asks_for integration",
+    "Filtered detail/list rollup and effective ETA, project badges/search/sorts/filters/totals/quiet projects/waits, too-large handling, read watermark/generation allocation, Passed revalidation and effective ETA history",
+    "Event-backed bounded 24h/7d/30d progress reconstruction, move-time membership and visibility-filtered last-progress-change stall computation",
+    "All API/replay/auth revocation/ETA transition/move/history/subscribe/series acceptance tests; docs/features/goals.md and final affected validation"
+  ],
+  "registry_changes": [
+    "internal/dsar/inventory.json: goal_update_receipts only",
+    "scripts/audit/slices.json: internal/goals/** assigned to S5/domain-a only",
+    "scripts/ci/go-test-tiers.json: 11 own ESSENTIAL rows only",
+    "scripts/migration-policy-exceptions/1361_goals.json: exact migration digest and coordinator release-gate requirements"
+  ],
+  "safety": "No push, deployment, browser, model CLI or review gate. No new permission scopes, release-version change, release acceptance or ticket-status change. No sample data. This foundation is not a completed or releasable Goals feature."
+}

@@ -758,6 +758,25 @@
       "table": "engine_admission_settings"
     },
     {
+      "classification": "review",
+      "columns": {
+        "actor_principal_id": "personal",
+        "created_at": "metadata",
+        "event_id": "metadata",
+        "idempotency_key": "metadata",
+        "method": "metadata",
+        "request_sha256": "metadata",
+        "response": "review",
+        "target_node_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "actor_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "goal_update_receipts"
+    },
+    {
       "classification": "personal",
       "columns": {
         "agent_principal_id": "personal",
