@@ -248,3 +248,32 @@ func TestGoalAPIWriteTimeETAsAndHiddenPings(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Risk: one hidden sibling prevents a legitimate project writer updating a
+// visible outcome, or a replace silently destroys siblings the writer cannot see.
+func TestGoalProjectWriterUpdatesOnlyVisibleOutcomes(t *testing.T) {
+	f := writerFixture(t)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='member') WHERE tenant_id=$1 AND principal_id=$2`, f.reader.TenantID, f.reader.ID); err != nil {
+		t.Fatal(err)
+	}
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	path := "/api/goals/" + f.goal
+	response := goalRequest(t.Context(), m, f.reader, "PATCH", path, "project-visible", `{"items":{"upsert":[{"ref":"visible","note":"updated in project"}]}}`)
+	readWriteResult(t, response, 200)
+	var latest int64
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.reader), f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT max(id) FROM events WHERE node_id=$1 AND type LIKE 'goal.%'`, f.goal).Scan(&latest)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"if_read_through": latest, "items": map[string]any{"mode": "replace"}})
+	rejected := goalRequest(t.Context(), m, f.reader, "PATCH", path, "project-replace", string(raw))
+	if rejected.Code != 403 {
+		t.Fatalf("partial replace %d %s", rejected.Code, rejected.Body)
+	}
+	var note string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT fields->>'note' FROM nodes WHERE tenant_id=$1 AND id=$2`, f.writer.TenantID, f.outcome).Scan(&note); err != nil || note != "updated in project" {
+		t.Fatalf("visible write %q %v", note, err)
+	}
+}

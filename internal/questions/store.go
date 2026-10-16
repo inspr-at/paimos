@@ -162,12 +162,12 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 			return err
 		}
 		if in.GoalID != "" {
-			var visible bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('goal','release'))`, in.GoalID).Scan(&visible); err != nil {
+			var scope string
+			if err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id::text,'') FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('goal','release')`, in.GoalID).Scan(&scope); err != nil {
 				return err
 			}
-			if !visible {
-				return missing()
+			if err := permit(ctx, tx, p, scope, "nodes.read"); err != nil {
+				return err
 			}
 		}
 		if in.SourceHandoverID != "" {
@@ -297,6 +297,9 @@ func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	}
 	if len(q.Askers) == 0 {
 		return q, missing()
+	}
+	if err := filterGoalInputs(ctx, tx, &q, check); err != nil {
+		return q, err
 	}
 	if p.Kind == tenant.Agent {
 		q.Input = q.Askers[0].Input
@@ -657,4 +660,46 @@ func retireDecisions(ctx context.Context, tx pgx.Tx, p tenant.Principal, project
 		return nil, err
 	}
 	return []events.Change{{NodeID: &id, Type: "knowledge.updated", Before: before, After: after, Metadata: json.RawMessage(`{"reason":"Decision Desk supersession"}`)}}, nil
+}
+
+// Goal associations are per ask, but question read authority alone does not
+// grant nodes.read on an associated goal. Filter again on every replay/read.
+func filterGoalInputs(ctx context.Context, tx pgx.Tx, q *Question, check authz.ProjectCheck) error {
+	ids := []string{}
+	if q.Input.GoalID != "" {
+		ids = append(ids, q.Input.GoalID)
+	}
+	for _, a := range q.Askers {
+		if a.Input.GoalID != "" {
+			ids = append(ids, a.Input.GoalID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text,coalesce(project_id::text,'') FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	allowed := map[string]bool{}
+	for rows.Next() {
+		var id, project string
+		if err := rows.Scan(&id, &project); err != nil {
+			return err
+		}
+		allowed[id] = check("nodes.read", project)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !allowed[q.Input.GoalID] {
+		q.Input.GoalID = ""
+	}
+	for i := range q.Askers {
+		if !allowed[q.Askers[i].Input.GoalID] {
+			q.Askers[i].Input.GoalID = ""
+		}
+	}
+	return nil
 }

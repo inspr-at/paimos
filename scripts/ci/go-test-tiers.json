@@ -6472,6 +6472,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesVisibilityAndFourHourStall","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalProjectWriterUpdatesOnlyVisibleOutcomes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalClockBoundariesAndWatermarks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalIdempotencyKeyGrammar","tier":"ESSENTIAL"}

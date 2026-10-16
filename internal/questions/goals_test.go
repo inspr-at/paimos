@@ -67,4 +67,17 @@ func TestGoalLinksSurviveQuestionMerge(t *testing.T) {
 		t.Fatal("question replay exposed a goal that became hidden")
 	}
 
+	restricted := f.otherAgent
+	restricted.Scopes = []string{"questions.ask", "questions.read"}
+	projection := question(t, request(t.Context(), f.mux, restricted, "GET", "/api/questions/"+q.ID, nil), 200)
+	if projection.Input.GoalID != "" || projection.Askers[0].Input.GoalID != "" {
+		t.Fatal("question read bypassed goal nodes.read key ceiling")
+	}
+	denied := second
+	denied.RequestID = uid()
+	response := request(t.Context(), f.mux, restricted, "POST", "/api/projects/"+f.project+"/questions", denied)
+	if response.Code != 404 {
+		t.Fatalf("goal association bypassed nodes.read: %d %s", response.Code, response.Body)
+	}
+
 }

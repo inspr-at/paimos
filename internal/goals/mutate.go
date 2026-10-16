@@ -175,30 +175,17 @@ func childNodes(ctx context.Context, tx pgx.Tx, goal string) ([]storedNode, erro
 	return children, nil
 }
 
-// A replace, move or handed-over write must not silently operate on only the
-// subset of children that relation visibility exposed. Probe counts only, then
-// restore visibility before reading data. No hidden counts leave this function.
-func requireAllChildren(ctx context.Context, tx pgx.Tx, goal string, visible int) error {
-	var previous string
-	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),'')`).Scan(&previous); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
-		return err
-	}
+// Global live-count bounds include hidden siblings. Implicit whole-list edits
+// require complete visibility; explicit edits still target visible outcomes.
+// No hidden counts or values leave the mutation.
+func allChildCount(ctx context.Context, tx pgx.Tx, goal string) (int, error) {
 	var count int
-	err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.parent_id=$1 AND k.slug='outcome' AND n.deleted_at IS NULL LIMIT 201) s`, goal).Scan(&count)
-	if _, e := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true)`, previous); e != nil {
-		return e
-	}
-	if err != nil {
-		return err
-	}
-	if count != visible {
-		return authz.ErrForbidden
-	}
-	return nil
+	err := withAllGoalProjects(ctx, tx, func() error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.parent_id=$1 AND k.slug='outcome' AND n.deleted_at IS NULL LIMIT 201) s`, goal).Scan(&count)
+	})
+	return count, err
 }
+
 func retired(n storedNode) []string {
 	raw, _ := json.Marshal(n.Fields["retired_refs"])
 	var refs []string
@@ -220,6 +207,7 @@ func retire(goals map[string]storedNode, goal, ref string) error {
 }
 func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target string, goals map[string]storedNode, in ItemsUpdate, now time.Time, pending *[]events.Change) error {
 	children := map[string]map[string]storedNode{}
+	counts := map[string]int{}
 	ids := []string{}
 	for id := range goals {
 		ids = append(ids, id)
@@ -230,8 +218,13 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 		if err != nil {
 			return err
 		}
-		if err = requireAllChildren(ctx, tx, id, len(rows)); err != nil {
+		count, err := allChildCount(ctx, tx, id)
+		if err != nil {
 			return err
+		}
+		counts[id] = count
+		if id == target && (in.Mode == "replace" || in.HandedOver.Set && in.HandedOver.Value == nil) && count != len(rows) {
+			return authz.ErrForbidden
 		}
 		children[id] = map[string]storedNode{}
 		for _, n := range rows {
@@ -293,6 +286,7 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 		addChanges(pending, &old, n)
 		membership(pending, target, &old, n)
 		delete(source, ref)
+		counts[target]--
 	}
 	kind, err := readKind(ctx, tx, p.TenantID, OutcomeKind)
 	if err != nil {
@@ -357,7 +351,7 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 			continue
 		}
 		if !exists {
-			if len(source) >= MaxOutcomes {
+			if counts[target] >= MaxOutcomes {
 				return invalid("items", "at most 200 live outcomes")
 			}
 			created, e := insertNode(ctx, tx, p, kind, n.Title, target, n.Fields, n.Position)
@@ -366,6 +360,7 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 			}
 			created.Targets = n.Targets
 			n = created
+			counts[target]++
 		} else if err := saveNode(ctx, tx, n); err != nil {
 			return err
 		}
@@ -411,7 +406,7 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 		if slices.Contains(retired(goals[dest.ID]), newRef) {
 			return fail(409, "items.move.to_ref: retired ref")
 		}
-		if len(children[dest.ID]) >= MaxOutcomes {
+		if counts[dest.ID] >= MaxOutcomes {
 			return invalid("items.move.to_goal", "at most 200 live outcomes")
 		}
 		old := cloneNode(n)
@@ -428,6 +423,8 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 		membership(pending, target, &old, n)
 		membership(pending, dest.ID, &old, n)
 		delete(source, ref)
+		counts[target]--
+		counts[dest.ID]++
 		children[dest.ID][newRef] = n
 	}
 	if in.HandedOver.Set {
