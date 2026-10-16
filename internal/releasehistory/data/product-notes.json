@@ -6885,6 +6885,71 @@
           "group": "features"
         }
       ]
+    },
+    "261016060843.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 135,
+      "snapshot_sha256": "d61c27d50b3290d9407f02982490d323d18b33fd51c5f0b93eef3a572390798b",
+      "captured_at": "2026-10-16T06:19:02Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1318",
+          "pill_en": "Clear ready and done",
+          "pill_de": "Klare Bereit- und Fertig-Regeln",
+          "benefit_en": "Project checklists show the requirements for Ready, QA and Done; agents cannot override failed entry checks.",
+          "benefit_de": "Projekt-Checklisten zeigen die Anforderungen für Bereit, QA und Fertig; Agenten können unerfüllte Statusprüfungen nicht übersteuern.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1391",
+          "pill_en": "Trustworthy review approvals",
+          "pill_de": "Vertrauenswürdige Review-Freigaben",
+          "benefit_en": "A review approval in PAIMOS always comes from the reviewer that actually did the review.",
+          "benefit_de": "Eine Review-Freigabe in PAIMOS stammt immer von dem Reviewer, der wirklich geprüft hat.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1398",
+          "pill_en": "Desk shows step-ups",
+          "pill_de": "Desk zeigt Freigaben",
+          "benefit_en": "Pending step-up approvals stay visible on the Decision Desk even when part of the read fails.",
+          "benefit_de": "Offene Step-up-Freigaben bleiben im Decision Desk sichtbar, auch wenn ein Teil des Abrufs scheitert.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1409",
+          "pill_en": "Current models listed",
+          "pill_de": "Aktuelle Modelle gelistet",
+          "benefit_en": "The model catalog refreshes automatically and includes Opus 5.5; worker use follows existing model and account approvals.",
+          "benefit_de": "Der Modellkatalog wird automatisch aktualisiert und enthält Opus 5.5; die Nutzung durch Agenten folgt den bestehenden Modell- und Kontofreigaben.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1422",
+          "pill_en": "Faster ticket creation",
+          "pill_de": "Schnelleres Ticket-Anlegen",
+          "benefit_en": "Creating many tickets at once is much faster, and test runs finish sooner.",
+          "benefit_de": "Viele Tickets auf einmal anzulegen geht deutlich schneller, und Testläufe sind früher fertig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1425",
+          "pill_en": "Project names fit",
+          "pill_de": "Projektnamen passen",
+          "benefit_en": "Project names stay readable in narrow windows and next to an open ticket, without overlapping the header.",
+          "benefit_de": "Projektnamen bleiben in schmalen Fenstern und neben einem offenen Ticket lesbar, ohne die Kopfzeile zu überlagern.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1427",
+          "pill_en": "Isolated Codex reviews",
+          "pill_de": "Isolierte Codex-Prüfungen",
+          "benefit_en": "With a qualified account, agents can resolve an isolated, read-only Codex command for cross-family reviews.",
+          "benefit_de": "Mit einem qualifizierten Konto lässt sich für Reviews durch eine andere Modellfamilie ein isolierter Codex-Befehl mit reinem Lesezugriff auflösen.",
+          "group": "fixes"
+        }
+      ]
     }
   }
 }
