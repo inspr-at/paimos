@@ -14,7 +14,7 @@ func TestGoalLinksSurviveQuestionMerge(t *testing.T) {
 	f := newFixture(t)
 	goals := []string{uid(), uid(), uid()}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix) VALUES($1,'goal','Goal','GOAL')`, f.person.TenantID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'goal','Goal','GOAL','goal')`, f.person.TenantID); err != nil {
 			return err
 		}
 		for i, id := range goals {

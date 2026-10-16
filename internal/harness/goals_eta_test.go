@@ -16,7 +16,7 @@ func TestGoalETAHeartbeatAndDirectWriteTransitions(t *testing.T) {
 	goal, outcome := uid(), uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		for _, spec := range [][3]string{{"goal", "Goal", "GOAL"}, {"outcome", "Outcome", "OUT"}} {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, f.person.TenantID, spec[0], spec[1], spec[2]); err != nil {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,$2,$3,$4,'goal') ON CONFLICT DO NOTHING`, f.person.TenantID, spec[0], spec[1], spec[2]); err != nil {
 				return err
 			}
 		}

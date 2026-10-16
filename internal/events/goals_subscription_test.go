@@ -29,7 +29,7 @@ func TestGoalsSubscriptionUsesOutcomeVisibility(t *testing.T) {
 	}
 	err := db.InTenant(dbtest.Seed(ctx), d.App, p.TenantID, func(tx pgx.Tx) error {
 		for _, slug := range []string{"goal", "outcome"} {
-			if _, err := tx.Exec(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix) VALUES($1,$2,$2,upper($2))`, p.TenantID, slug); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,$2,$2,upper($2),'goal')`, p.TenantID, slug); err != nil {
 				return err
 			}
 		}
