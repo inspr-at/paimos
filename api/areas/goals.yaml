@@ -2,6 +2,32 @@
 # aeon:owner internal/goals
 paths:
   /goals:
+    get:
+      operationId: listGoals
+      summary: List visible goals with current rollup
+      description: "Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. At most 1000 matching goals are expanded per request; larger candidate sets require narrower project/group filters rather than partial totals."
+      security: *auth
+      parameters:
+        - {name: project, in: query, schema: {type: string, maxLength: 64}}
+        - {name: group, in: query, schema: {type: string, maxLength: 64}, description: "Group UUID or none"}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+        - {name: state, in: query, schema: {type: string, enum: [moving, queued, paused, done]}}
+        - {name: hide_done, in: query, schema: {type: boolean, default: false}}
+        - {name: sort, in: query, schema: {type: string, enum: [eta, name, progress, project, moving, queued, done], default: eta}}
+        - {name: dir, in: query, schema: {type: string, enum: [asc, desc]}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: "Visible goals and full-filter totals; totals_partial marks unexpanded oversized goals"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalList'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
     post:
       operationId: createGoal
       summary: Create a project or workspace goal
@@ -29,6 +55,22 @@ paths:
   /goals/{goalId}:
     parameters:
       - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}, description: "Goal key or UUID; release nodes are also goals"}
+    get:
+      operationId: getGoal
+      summary: Read a goal with visibility-filtered derived values
+      description: "An outcome contributes only when its goal and every serves end are visible. Oversized expansion returns HTTP 200 with counts and expansion too_large, omitting outcome states, progress and ETA fallback. Passed uses a fixed ten-minute grace and is computed before scheduled revalidation."
+      security: *auth
+      responses:
+        '200':
+          description: "Goal snapshot"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalDetail'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
     patch:
       operationId: updateGoal
       summary: Atomically update a goal and its outcomes
@@ -54,6 +96,28 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
+  /goals/{goalId}/history:
+    get:
+      operationId: goalHistory
+      summary: Read bounded goal or immutable outcome history
+      description: "Outcome history follows its immutable id across moves; it does not filter by the current goal or client ref. All events remain subject to current visibility. ETA popovers use value-bearing goal.eta_changed events and ignore change pings."
+      security: *auth
+      parameters:
+        - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}}
+        - {name: outcome, in: query, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 19}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: "Newest first, with the next event-id cursor"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalHistory'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
 components:
   parameters:
     GoalIdempotencyKey:
@@ -65,7 +129,7 @@ components:
   headers:
     GoalsContract:
       description: "Goals API contract"
-      schema: {type: string, enum: [goals/1.0]}
+      schema: {type: string, enum: [goals/1.1]}
   schemas:
     GoalCreate:
       type: object
@@ -147,3 +211,14 @@ components:
               properties:
                 ref: {type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
                 detail: {type: string, maxLength: 2000}
+    GoalEffectiveETA: {"type":"object","required":["source","partial"],"properties":{"source":{"type":"string","enum":["none","agent","worker","outcomes"]},"text":{"type":"string","maxLength":40},"at":{"type":"string","format":"date-time"},"by":{"type":"string"},"partial":{"type":"boolean"}}}
+    GoalCoverage: {"type":"object","required":["estimated_leaves","total_leaves"],"properties":{"estimated_leaves":{"type":"integer","minimum":0},"total_leaves":{"type":"integer","minimum":0}}}
+    GoalStateCounts: {"type":"object","required":["moving","queued","paused","done"],"properties":{"moving":{"type":"integer","minimum":0},"queued":{"type":"integer","minimum":0},"paused":{"type":"integer","minimum":0},"done":{"type":"integer","minimum":0}}}
+    GoalCounts: {"type":"object","required":["outcomes","tickets"],"properties":{"outcomes":{"type":"integer","minimum":0},"tickets":{"type":"integer","minimum":0}}}
+    GoalProjectBadge: {"type":"object","required":["id","key","name","group_ids"],"properties":{"id":{"type":"string","format":"uuid"},"key":{"type":"string"},"name":{"type":"string"},"group_ids":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":1}}}
+    GoalWaits: {"type":"object","required":["count","question_ids"],"properties":{"count":{"type":"integer","minimum":0},"question_ids":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":3}}}
+    GoalProgress: {"type":"object","required":["pct","computed_pct","source","basis","total","done","items_without_estimate","items_partially_estimated"],"properties":{"pct":{"type":"integer","minimum":0,"maximum":100},"computed_pct":{"type":"integer","minimum":0,"maximum":100},"source":{"type":"string","enum":["computed","override"]},"basis":{"type":"string","enum":["count","estimate","mixed"]},"total":{"type":"integer","minimum":0},"done":{"type":"integer","minimum":0},"items_without_estimate":{"type":"integer","minimum":0},"items_partially_estimated":{"type":"integer","minimum":0},"override_by":{"type":"string","format":"uuid"},"override_at":{"type":"string","format":"date-time"}}}
+    GoalOutcome: {"type":"object","required":["id","ref","label","note","position","keys","state","session_ids","eta","passed","coverage","weight","handed_over"],"properties":{"id":{"type":"string","format":"uuid"},"ref":{"type":"string"},"label":{"type":"string"},"note":{"type":"string"},"position":{"type":"number"},"keys":{"type":"array","maxItems":20,"items":{"type":"string"}},"state":{"type":"string","enum":["moving","queued","paused","done"]},"reason":{"type":"string"},"session_ids":{"type":"array","maxItems":200,"items":{"type":"string","format":"uuid"}},"eta":{"$ref":"#/components/schemas/GoalEffectiveETA"},"passed":{"type":"boolean"},"coverage":{"$ref":"#/components/schemas/GoalCoverage"},"weight":{"type":"number","minimum":0},"handed_over":{"type":"boolean"}}}
+    GoalDetail: {"type":"object","required":["id","key","title","kind","project_id","workspace","expansion","counts","steps","next_step","projects","waits","read_through","generation"],"properties":{"id":{"type":"string","format":"uuid"},"key":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string","enum":["goal","release"]},"project_id":{"type":["string","null"],"format":"uuid"},"workspace":{"type":"boolean"},"expansion":{"type":"string","enum":["full","too_large"]},"counts":{"$ref":"#/components/schemas/GoalCounts"},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/components/schemas/GoalOutcome"}},"steps":{"type":"array","maxItems":20,"items":{"$ref":"#/components/schemas/GoalStep"}},"next_step":{"anyOf":[{"$ref":"#/components/schemas/GoalStep"},{"type":"null"}]},"projects":{"type":"array","maxItems":4001,"items":{"$ref":"#/components/schemas/GoalProjectBadge"}},"waits":{"$ref":"#/components/schemas/GoalWaits"},"progress":{"$ref":"#/components/schemas/GoalProgress"},"eta":{"$ref":"#/components/schemas/GoalEffectiveETA"},"passed":{"type":"boolean"},"states":{"$ref":"#/components/schemas/GoalStateCounts"},"done":{"type":"boolean"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
+    GoalList: {"type":"object","required":["items","totals","totals_partial","quiet_projects","truncated","read_through","generation"],"properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/GoalDetail"}},"totals":{"$ref":"#/components/schemas/GoalStateCounts"},"totals_partial":{"type":"boolean"},"quiet_projects":{"type":"object","required":["count","keys"],"properties":{"count":{"type":"integer","minimum":0},"keys":{"type":"array","maxItems":2000,"items":{"type":"string"}}}},"next_cursor":{"type":"string"},"truncated":{"type":"boolean"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
+    GoalHistory: {"type":"object","required":["items","read_through","generation"],"properties":{"items":{"type":"array","maxItems":50,"items":{"$ref":"#/components/schemas/Event"}},"next_cursor":{"type":"string"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}

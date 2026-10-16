@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -55,7 +56,7 @@ func readWriteResult(t *testing.T, r *httptest.ResponseRecorder, status int) Wri
 		if err := json.Unmarshal(r.Body.Bytes(), &out); err != nil {
 			t.Fatal(err)
 		}
-		if r.Header().Get("Aeon-Contract") != "goals/1.0" {
+		if r.Header().Get("Aeon-Contract") != reportercontract.Goals {
 			t.Fatal("missing contract")
 		}
 	}

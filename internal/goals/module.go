@@ -27,8 +27,11 @@ type module struct {
 	now  func() time.Time
 }
 
-func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool: pool, now: time.Now} }
+func New(pool *pgxpool.Pool) *module { return &module{pool: pool, now: time.Now} }
 func (m *module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/goals", reportercontract.WithHeader(reportercontract.Goals, m.list))
+	mux.HandleFunc("GET /api/goals/{goalId}", reportercontract.WithHeader(reportercontract.Goals, m.get))
+	mux.HandleFunc("GET /api/goals/{goalId}/history", reportercontract.WithHeader(reportercontract.Goals, m.history))
 	mux.HandleFunc("POST /api/goals", reportercontract.WithHeader(reportercontract.Goals, m.create))
 	mux.HandleFunc("PATCH /api/goals/{goalId}", reportercontract.WithHeader(reportercontract.Goals, m.patch))
 }
@@ -78,6 +81,7 @@ func requestPrincipal(w http.ResponseWriter, r *http.Request) (tenant.Principal,
 	return p, ok
 }
 func (m *module) patch(w http.ResponseWriter, r *http.Request) {
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Second))
 	p, ok := requestPrincipal(w, r)
 	if !ok {
 		return
@@ -120,6 +124,7 @@ type WriteResult struct {
 }
 
 func (m *module) create(w http.ResponseWriter, r *http.Request) {
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Second))
 	p, ok := requestPrincipal(w, r)
 	if !ok {
 		return

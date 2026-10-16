@@ -16,7 +16,7 @@ import (
 )
 
 func (rt *runtime) cmdGoal() *Command {
-	return &Command{Name: "goal", Short: "Goals and outcomes", Use: "goal <create|update>", subs: []*Command{rt.cmdGoalCreate(), rt.cmdGoalUpdate()}}
+	return &Command{Name: "goal", Short: "Goals and outcomes", Use: "goal <create|update|list|get|history>", subs: []*Command{rt.cmdGoalCreate(), rt.cmdGoalUpdate(), rt.cmdGoalList(), rt.cmdGoalGet(), rt.cmdGoalHistory()}}
 }
 func (rt *runtime) goalWrite(method, path, key string, body any, dry bool) error {
 	clean, err := goals.CleanIdempotencyKey(key)

@@ -6458,6 +6458,16 @@
     ,
     {"kind":"go","package":"internal/questions","name":"TestGoalLinksSurviveQuestionMerge","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalFilteredReadCoverageETAAndWorkerState","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalReadGenerationOrdersReversedCompletion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPassedRevalidationIsFixedAndIdempotent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalTooLargeDetailKeepsOnlyVisibleCounts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListFiltersTotalsAndMoveHistory","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalClockBoundariesAndWatermarks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalIdempotencyKeyGrammar","tier":"ESSENTIAL"}

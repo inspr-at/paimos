@@ -440,6 +440,13 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 				return pgx.ErrNoRows
 			}
 		}
+		if desired != "" {
+			for ref, n := range source {
+				if ref != desired && fieldString(n, "handed_over_at") != "" {
+					return fail(409, "items.handed_over: clear the existing handover first")
+				}
+			}
+		}
 		// Clear first, preserving the one-live-handover unique index throughout.
 		for ref, n := range source {
 			if fieldString(n, "handed_over_at") == "" {
