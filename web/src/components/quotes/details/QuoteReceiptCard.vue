@@ -25,25 +25,32 @@ let generation = 0
 const hasReceipt = computed(() => !!job.value?.receipt_sha256)
 const when = (iso: string | undefined) => iso ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)) : ''
 
-async function load() {
-  const current = ++generation
-  try {
-    const [next, readyState] = await Promise.all([getConfirmation(props.quoteId, props.version), ready.value ? Promise.resolve(ready.value) : readiness().catch(() => null)])
-    if (current !== generation) return
-    job.value = next; ready.value = readyState; error.value = ''; failures.value = 0
-  } catch (e) { if (current === generation && ++failures.value >= (job.value ? 3 : 1)) error.value = lifecycleError(e, 'The receipt could not be read.') }
-  finally { if (current === generation) loaded.value = true }
+function still(current: number, quoteId: string, version: number) {
+  return current === generation && props.quoteId === quoteId && props.version === version
 }
-watch(() => [props.quoteId, props.version], () => { job.value = null; loaded.value = false; checked.value = false; failures.value = 0; void load() }, { immediate: true })
+async function load() {
+  const quoteId = props.quoteId, version = props.version, current = ++generation
+  try {
+    const [next, readyState] = await Promise.all([getConfirmation(quoteId, version), ready.value ? Promise.resolve(ready.value) : readiness().catch(() => null)])
+    if (!still(current, quoteId, version)) return
+    job.value = next; ready.value = readyState; error.value = ''; failures.value = 0
+  } catch (e) { if (still(current, quoteId, version) && ++failures.value >= (job.value ? 3 : 1)) error.value = lifecycleError(e, 'The receipt could not be read.') }
+  finally { if (still(current, quoteId, version)) loaded.value = true }
+}
+watch(() => [props.quoteId, props.version], () => { job.value = null; loaded.value = false; checked.value = false; failures.value = 0; error.value = ''; busy.value = false; void load() }, { immediate: true })
 onMounted(() => poll.start())
 onBeforeUnmount(() => { generation++; poll.stop() })
 
 async function retry() {
   if (busy.value) return
+  const quoteId = props.quoteId, version = props.version, uncertain = job.value?.state === 'uncertain', current = ++generation
   busy.value = true; error.value = ''
-  try { job.value = await retryConfirmation(props.quoteId, props.version, job.value?.state === 'uncertain'); toast('The receipt is being made again.'); void load() }
-  catch (e) { error.value = lifecycleError(e, 'The receipt could not be retried.') }
-  finally { busy.value = false }
+  try {
+    const next = await retryConfirmation(quoteId, version, uncertain)
+    if (!still(current, quoteId, version)) return
+    job.value = next; toast('The receipt is being made again.'); void load()
+  } catch (e) { if (still(current, quoteId, version)) error.value = lifecycleError(e, 'The receipt could not be retried.') }
+  finally { if (still(current, quoteId, version)) busy.value = false }
 }
 async function copyDigest(value: string) {
   try { await navigator.clipboard.writeText(value); toast('Fingerprint copied.') } catch { toast('Copying did not work here.', { tone: 'error' }) }
