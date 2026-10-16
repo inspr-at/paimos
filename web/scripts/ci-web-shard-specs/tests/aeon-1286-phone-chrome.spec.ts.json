@@ -1,5 +1,9 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 24.414634,
+    "selectedTests": 11
+  },
   "spec": {
     "file": "tests/aeon-1286-phone-chrome.spec.ts",
     "listedTests": 11,
