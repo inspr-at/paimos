@@ -3,8 +3,17 @@ package delivery
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -779,5 +788,145 @@ func TestAdmissionReconcileLeavesMergedSHAUnchanged(t *testing.T) {
 			t.Fatalf("merged outbox not retired in place: head %v %s group %v %s", headRetired, headState, groupRetired, groupState)
 		}
 		return nil
+	})
+}
+
+func TestAdmissionHistoricalHeadsOneReadAfterCheck(t *testing.T) {
+	// Risk: one check update re-arms every historical head, and the next pass
+	// reads each of them. One current head may be read; its history must not.
+	f := newAdmissionFixture(t)
+	ctx := t.Context()
+	original := strings.Repeat("b", 40)
+	for i, head := range []string{strings.Repeat("d", 40), strings.Repeat("e", 40), strings.Repeat("f", 40)} {
+		p := f.gh.pulls[7]
+		p.Head = head
+		f.gh.pulls[7] = p
+		f.webhook(t, "pull_request", "synchronize", "hist-head-"+string(rune('a'+i)), 204)
+	}
+	current := f.gh.pulls[7].Head
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='superseded',checked_at=$2 WHERE repository=$3 AND pull_request=7 AND head_sha=$1`, original, f.at, f.m.config.Repository)
+		return err
+	})
+	p := f.gh.pulls[7]
+	p.Checks[0].Conclusion = "failure"
+	f.gh.pulls[7] = p
+	f.webhook(t, "check_run", "completed", "hist-check", 204)
+	var superseded, pendingHist int
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM delivery_admission_queue WHERE pull_request=7 AND head_sha=$1 AND enforcement='superseded'`, original).Scan(&superseded); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT count(*) FROM delivery_admission_queue WHERE pull_request=7 AND head_sha<>$1 AND enforcement='pending'`, current).Scan(&pendingHist)
+	})
+	if superseded != 1 {
+		t.Fatalf("check update re-armed the superseded historical head (%d still superseded)", superseded)
+	}
+	if pendingHist < 2 {
+		t.Fatalf("historical pending rows=%d, want at least 2", pendingHist)
+	}
+	counter := &admissionPullCounter{GitHub: f.gh}
+	f.m.github = counter
+	if err := f.m.reconcileAdmissionQueue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if counter.n > 1 {
+		t.Fatalf("check update pass reads=%d, want at most 1", counter.n)
+	}
+}
+
+func TestAdmissionIdlePassMintsNoToken(t *testing.T) {
+	// Risk: every 5s queue pass mints and revokes an installation token before
+	// it knows whether any row needs a read.
+	f := newAdmissionFixture(t)
+	ctx := t.Context()
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='queued',checked_at=$1 WHERE pull_request=7`, f.at)
+		return err
+	})
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(dir, "fixture.pem")
+	if err = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	minted, revoked, other := 0, 0, 0
+	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		var body any
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/456/access_tokens":
+			minted++
+			body = map[string]any{"token": "delivery-fixture-token", "permissions": map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}, "repositories": []any{map[string]string{"full_name": "example/delivery"}}}
+		case r.Method == http.MethodDelete && r.URL.Path == "/installation/token":
+			revoked++
+			body = map[string]any{}
+		default:
+			other++
+			body = map[string]any{}
+		}
+		raw, _ := json.Marshal(body)
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	})}
+	cfg := f.m.config
+	cfg.KeyFile = keyFile
+	f.m.github = AppReader{App: &crossreview.GitHubApp{Config: cfg, Client: client}}
+	if err = f.m.reconcileAdmissionQueue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if minted != 0 || revoked != 0 || other != 0 {
+		t.Fatalf("idle pass minted %d, revoked %d, other GitHub calls %d", minted, revoked, other)
+	}
+}
+
+func TestAdmissionClosedBeforeDestroyDoesNotPostOnGroupSHA(t *testing.T) {
+	// Risk: pull_request.closed stored before merge_group.destroyed posts
+	// aeon/admission=failure on the group SHA, which is already on the default branch.
+	f := newAdmissionFixture(t)
+	ctx := t.Context()
+	p := f.gh.pulls[7]
+	p.Queued = true
+	f.gh.pulls[7] = p
+	group := strings.Repeat("c", 40)
+	if err := f.m.publishAdmission(ctx, p.Head); err != nil {
+		t.Fatal(err)
+	}
+	f.webhook(t, "merge_group", "checks_requested", "closed-before-destroy-group", 204)
+	if err := f.m.publishAdmission(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, f, group, "success")
+	posts := len(f.writer.posts)
+	p.Open, p.Merged, p.Queued = false, true, false
+	f.gh.pulls[7] = p
+	f.webhook(t, "pull_request", "closed", "closed-before-destroy", 204)
+	f.at = f.at.Add(time.Minute)
+	for range 2 {
+		if err := f.m.reconcileAdmission(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, post := range f.writer.posts[posts:] {
+		if strings.HasPrefix(post, group+":") {
+			t.Fatalf("closed-before-destroy posted on the group SHA: %s", post)
+		}
+	}
+	if len(f.writer.posts) != posts {
+		t.Fatalf("closed-before-destroy published %v", f.writer.posts[posts:])
+	}
+	requireAdmissionState(t, f, group, "success")
+	f.tx(t, func(tx pgx.Tx) error {
+		var retired bool
+		var state string
+		err := tx.QueryRow(ctx, `SELECT retired IS TRUE, confirmed_state FROM delivery_admission_outbox WHERE sha=$1`, group).Scan(&retired, &state)
+		if err == nil && (!retired || state != "success") {
+			t.Fatalf("merged group stayed active: retired=%v state=%s", retired, state)
+		}
+		return err
 	})
 }

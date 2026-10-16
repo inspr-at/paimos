@@ -94,10 +94,18 @@ func (m *Module) admissionStateTx(ctx context.Context, tx pgx.Tx, sha string) (a
 	if p.Invalidated || !p.Active || !p.Resolved || len(p.Members) == 0 || len(p.Members) > 100 {
 		return p, "failure", nil
 	}
+	mergedAtHead := 0
 	for _, member := range p.Members {
 		item, err := load(ctx, tx, stableID(m.config.TenantID, m.config.Repository, subject(&member.PR, nil)))
 		if err != nil {
 			return p, "", err
+		}
+		// A member already merged at this head is terminal. It must not turn the
+		// group SHA — which may already be the default branch — into a failure,
+		// including when closed is stored before merge_group.destroyed.
+		if item != nil && item.Head == member.Head && item.Observation.Merged {
+			mergedAtHead++
+			continue
 		}
 		if item == nil || item.Head != member.Head {
 			return p, "failure", nil
@@ -122,6 +130,13 @@ func (m *Module) admissionStateTx(ctx context.Context, tx pgx.Tx, sha string) (a
 		if quarantined || item.Observation.QueueFailure {
 			return p, "failure", nil
 		}
+	}
+	if mergedAtHead == len(p.Members) {
+		if _, err = tx.Exec(ctx, `UPDATE delivery_admission_outbox SET retired=true WHERE repository=$1 AND sha=$2 AND context=$3 AND retired IS NOT TRUE`, m.config.Repository, sha, AdmissionContext); err != nil {
+			return p, "", err
+		}
+		p.Retired = true
+		return p, p.ConfirmedState, nil
 	}
 	return p, "success", nil
 }

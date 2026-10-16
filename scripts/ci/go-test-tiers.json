@@ -5900,9 +5900,15 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionCIExcludesOwnContext","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionClosedBeforeDestroyDoesNotPostOnGroupSHA","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionDiffReadsMergeBaseAndRenameSides","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionGroupsValidatePrecedingEntriesAndInvalidateEveryGroup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionHistoricalHeadsOneReadAfterCheck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestAdmissionIdlePassMintsNoToken","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAdmissionPlainMergeDoesNotReportLostHold","tier":"ESSENTIAL"}
     ,

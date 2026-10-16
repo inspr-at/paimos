@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -164,20 +165,77 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 	return finishPull(out, missing, err)
 }
 
-// WithPulls mints one read-only installation token for every pull in a queue
-// pass. Callers still revoke it when the pass returns. It does not authorize
-// enqueue or status writes.
-func (g AppReader) WithPulls(ctx context.Context, fn func(context.Context, func(context.Context, int64) (Pull, error)) error) error {
+// WithPulls shares one read-only installation token across the pulls a queue
+// pass actually performs, and revokes it when the pass returns. The token is
+// minted on the first pull, so a pass with nothing to read mints nothing.
+// It does not authorize enqueue or status writes.
+func (g AppReader) WithPulls(ctx context.Context, fn func(context.Context, func(context.Context, int64) (Pull, error)) error) (err error) {
 	if fn == nil || g.App == nil {
 		return errRead
 	}
-	return g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
-		pull := func(_ context.Context, n int64) (Pull, error) {
-			out, missing, err := readOnePull(get, queue, g.App.Config.Repository, n)
-			return finishPull(out, missing, err)
+	type installed struct {
+		get   func(string, any) error
+		queue func(int64, string) (bool, string, error)
+	}
+	var mu sync.Mutex
+	var once sync.Once
+	var session installed
+	var openErr error
+	started := false
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan error, 1)
+	defer func() {
+		close(release)
+		if !started {
+			return
 		}
-		return fn(ctx, pull)
-	})
+		if waitErr := <-finished; err == nil {
+			err = waitErr
+		}
+	}()
+	pull := func(_ context.Context, n int64) (Pull, error) {
+		once.Do(func() {
+			started = true
+			go func() {
+				entered := false
+				callErr := g.readInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
+					entered = true
+					mu.Lock()
+					session = installed{get, queue}
+					mu.Unlock()
+					close(ready)
+					<-release
+					return nil
+				})
+				if !entered {
+					mu.Lock()
+					openErr = callErr
+					if openErr == nil {
+						openErr = errRead
+					}
+					mu.Unlock()
+					close(ready)
+				}
+				finished <- callErr
+			}()
+		})
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return Pull{}, ctx.Err()
+		}
+		mu.Lock()
+		get, queue, failure := session.get, session.queue, openErr
+		mu.Unlock()
+		if failure != nil {
+			return Pull{}, failure
+		}
+		out, missing, readErr := readOnePull(get, queue, g.App.Config.Repository, n)
+		return finishPull(out, missing, readErr)
+	}
+	err = fn(ctx, pull)
+	return err
 }
 func openPulls(get func(string, any) error, repo string) ([]Pull, error) {
 	out := []Pull{}

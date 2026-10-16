@@ -86,9 +86,11 @@ BEGIN
  AND (pr IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(o.members) m WHERE m->>'pr'=pr))
  AND (pr IS NOT NULL OR project IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(o.members) m WHERE m->>'project'=project));
  -- Confirmation belongs to the policy observed at the final GitHub action.
+ -- A delivery item wakes only its current head. Historical queue rows stay put.
  UPDATE delivery_admission_queue q SET enforcement='pending'
  WHERE q.tenant_id=(fact->>'tenant_id')::uuid AND (repo IS NULL OR q.repository=repo)
  AND (pr IS NULL OR q.pull_request::text=pr)
+ AND (TG_TABLE_NAME<>'delivery_items' OR q.head_sha=fact->'observation'->>'head_sha')
  AND (pr IS NOT NULL OR project IS NULL OR EXISTS(SELECT 1 FROM delivery_items i WHERE i.tenant_id=q.tenant_id AND i.repository=q.repository AND i.pull_request=q.pull_request AND i.project_id::text=project));
  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
  RETURN NEW;

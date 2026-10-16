@@ -129,6 +129,52 @@ func (m *Module) admitQueueEntry(ctx context.Context, e admissionQueueEntry) err
 	return m.admitQueueEntryWith(ctx, e, m.github.Pull)
 }
 
+func (m *Module) settleAdmissionQueueLocally(ctx context.Context, e admissionQueueEntry) (bool, error) {
+	settled, notify := false, false
+	err := db.InTenant(ctx, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTree(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		item, err := load(ctx, tx, stableID(m.config.TenantID, m.config.Repository, subject(&e.PR, nil)))
+		if err != nil {
+			return err
+		}
+		if item == nil || item.Head != e.Head || !item.Observation.Open || item.Observation.Merged {
+			settled = true
+			_, err = tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='superseded',checked_at=$4 WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head, m.now())
+			return err
+		}
+		stored, err := AdmissionTx(ctx, tx, *item)
+		var problem *apiError
+		denied := errors.Is(err, pgx.ErrNoRows) || errors.As(err, &problem)
+		if err != nil && !denied {
+			return err
+		}
+		if !denied && !stored.Decision.Admissible {
+			denied = true
+		}
+		if !denied || item.Observation.Queued {
+			return nil
+		}
+		var attempts int
+		if err = tx.QueryRow(ctx, `SELECT attempts FROM delivery_admission_queue WHERE repository=$1 AND pull_request=$2 AND head_sha=$3 FOR UPDATE`, m.config.Repository, e.PR, e.Head).Scan(&attempts); err != nil {
+			return err
+		}
+		// attempts counts an enqueue this lane already committed. The stored
+		// observation can still say "not queued" until the webhook arrives.
+		if attempts > 0 {
+			return nil
+		}
+		settled, notify = true, true
+		_, err = tx.Exec(ctx, `UPDATE delivery_admission_queue SET enforcement='removed',checked_at=$4 WHERE repository=$1 AND pull_request=$2 AND head_sha=$3`, m.config.Repository, e.PR, e.Head, m.now())
+		return err
+	})
+	if err != nil || !settled || !notify {
+		return settled, err
+	}
+	return true, m.admissionNotice(ctx, e)
+}
+
 func (m *Module) admitQueueEntryWith(ctx context.Context, e admissionQueueEntry, pull func(context.Context, int64) (Pull, error)) error {
 	conn, release, err := db.Acquire(ctx, m.pool)
 	if err != nil {
@@ -142,6 +188,12 @@ func (m *Module) admitQueueEntryWith(ctx context.Context, e admissionQueueEntry,
 	}
 	defer unlock(conn, key)
 	ctx = db.AllProjects(db.WithConnection(ctx, m.pool, conn), "configured admission queue authority")
+	// Historical heads and denials that were never queued are settled from the
+	// stored item. A row this lane already enqueued still reads, so a hold can
+	// dequeue and a merge during that dequeue is still reported.
+	if settled, err := m.settleAdmissionQueueLocally(ctx, e); err != nil || settled {
+		return err
+	}
 	live, err := pull(ctx, e.PR)
 	if err != nil {
 		return err
