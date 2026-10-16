@@ -959,7 +959,8 @@ function reply(message: ProjectMessage) {
 // The field grows with its text: one line idle, at most six, then it scrolls.
 function grow() {
   const field = textarea.value
-  if (!field) return
+  // A hidden tab has no layout to measure; it grows again when shown.
+  if (!field || !field.getClientRects().length) return
   const style = getComputedStyle(field)
   const edges = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
   const line = parseFloat(style.lineHeight) || 22
@@ -970,6 +971,7 @@ function grow() {
   field.style.overflowY = full > most + 0.5 ? 'auto' : 'hidden'
 }
 watch(draft, () => { void nextTick(grow) })
+watch(() => props.active, active => { if (active) void nextTick(grow) })
 onMounted(() => { grow(); window.addEventListener('resize', grow) })
 onBeforeUnmount(() => window.removeEventListener('resize', grow))
 function closeReferences(restore: boolean) {
@@ -1109,7 +1111,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .compose-box { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; padding: 10px 8px 8px 14px; border-radius: 16px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line-2); }
 .compose-box:focus-within { box-shadow: 0 0 0 1px var(--primary-line), 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent); }
-.compose-box textarea { display: block; width: 100%; min-width: 0; height: 23px; margin: 0; padding: 0 6px 0 0; border: 0; outline: 0; border-radius: 0; resize: none; overflow-y: hidden; background: transparent; box-shadow: none; color: var(--ink); font: 14.5px/23px var(--font); }
+.compose-box textarea { display: block; width: 100%; min-width: 0; height: 23px; min-height: 23px; margin: 0; padding: 0 6px 0 0; border: 0; outline: 0; border-radius: 0; resize: none; overflow-y: hidden; background: transparent; box-shadow: none; color: var(--ink); font: 14.5px/23px var(--font); }
 .compose-box textarea::placeholder { color: var(--ink-3); }
 .compose-box textarea:disabled { cursor: not-allowed; }
 .plus { display: none; }
