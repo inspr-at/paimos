@@ -73,10 +73,12 @@ test('detail shows now, activity, ticket status and hides unreported fields', as
   await expect(panel.locator('.service-tier .tier-head strong')).toHaveText('Default')
   await expect(panel).not.toContainText('Not reported')
   await expect(panel).not.toContainText('Account not reported')
-  const actions = panel.getByRole('group', { name: 'Session actions' })
-  await expect(actions.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible()
-  await expect(actions.getByRole('button', { name: 'Interrupt', exact: true })).toBeEnabled()
-  await expect(panel.getByRole('button', { name: 'Stop…', exact: true })).toBeVisible()
+  // AEON-1309 / #678 condensed the head: Interrupt and Stop live in More session actions.
+  await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+  const actions = page.getByRole('menu', { name: 'More session actions' })
+  await expect(actions.getByRole('menuitem', { name: /^Interrupt/ })).toBeVisible()
+  await expect(actions.getByRole('menuitem', { name: /^Interrupt/ })).toBeEnabled()
+  await expect(actions.getByRole('menuitem', { name: /^Stop…/ })).toBeVisible()
 })
 
 test('an unreported service tier stays explicit while optional setup fields stay absent', async ({ page }) => {

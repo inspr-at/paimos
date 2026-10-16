@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { collectBrowserNow, flattenBrowser } from './collect.mjs'
 import { browserBatches, browserCaseSeconds } from './web-batches.mjs'
 import { plan, run } from './cli.mjs'
-import { key } from './core.mjs'
+import { key, fullGateTests } from './core.mjs'
 
 const row = (file, id) => ({ kind: 'browser', file: `tests/${file}.spec.ts`, name: id, id, line: 10,
   config: 'playwright.ui.config.ts', project: '', tier: 'GATED-FULL', active: true })
@@ -139,7 +139,7 @@ test('AEON-1023 browser-only discovery preserves full/catalogue/changed-area dec
   assert.equal(new Set(executed).size, executed.length)
   assert.deepEqual(executed.sort(), beforeKeys.sort())
   assert.deepEqual([...new Set(executed.map(id => id.split(':')[1]))].sort(),
-    [...new Set(inventory.tests.filter(row => row.kind === 'browser' && row.tier !== 'NIGHTLY').map(row => row.file))].sort())
+    [...new Set(fullGateTests(inventory.tests).filter(row => row.kind === 'browser').map(row => row.file))].sort())
   for (const options of [
     { all: true, event: 'schedule' },
     { event: 'pull_request', paths: ['web/tests/clip-tip.spec.ts'] },

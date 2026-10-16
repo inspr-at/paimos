@@ -118,8 +118,11 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   const { writes, confirm, getState } = await setup(page)
   await page.goto(`/agents/${id}`)
   await expect(page.locator('.session-panel')).toHaveClass(/docked/)
-  // Overview can open wider than the compact-table boundary. Use the live
-  // divider to exercise the narrow layout without changing its width checks.
+  // AEON-1309 / #678 opens sessions in Focus, whose two-line list has no Time
+  // column. Overview can open wider than the compact-table boundary; use the
+  // live divider to exercise the narrow layout without changing its width checks.
+  await page.keyboard.press('s')
+  await expect(page.locator('.agents-work')).toHaveAttribute('data-layout', 'overview')
   await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
   // The five-column list retains the menu; tier controls live in the panel (AEON-1213).
   const list = page.locator('.sessions'), time = row(page).locator('.c-time'), actions = row(page).locator('.more')
