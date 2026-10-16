@@ -6889,32 +6889,16 @@
     "261016060843.0.0": {
       "release_channel": "stable",
       "release_sequence": 135,
-      "snapshot_sha256": "1a4e95c99540f2efd682071f1512239fb9db92236316d9236bf14b861a295088",
-      "captured_at": "2026-10-16T06:09:08Z",
+      "snapshot_sha256": "d61c27d50b3290d9407f02982490d323d18b33fd51c5f0b93eef3a572390798b",
+      "captured_at": "2026-10-16T06:19:02Z",
       "release_revision": 1,
       "items": [
-        {
-          "key": "AEON-1309",
-          "pill_en": "Owned agent sessions",
-          "pill_de": "Eigene Agentensitzungen",
-          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
-          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
-          "group": "features"
-        },
         {
           "key": "AEON-1318",
           "pill_en": "Clear ready and done",
           "pill_de": "Klare Bereit- und Fertig-Regeln",
-          "benefit_en": "Each project shows what a ticket needs before it is ready, in QA or done, and agents cannot skip a step.",
-          "benefit_de": "Jedes Projekt zeigt, was ein Ticket vor Bereit, QA oder Fertig braucht; Agenten können keinen Schritt überspringen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1334",
-          "pill_en": "Faster pull request checks",
-          "pill_de": "Schnellere PR-Prüfungen",
-          "benefit_en": "Pull requests are tested by real impact, so more run at once and merge sooner; main stays fully protected.",
-          "benefit_de": "Pull Requests werden nach echter Wirkung geprüft; mehr laufen gleichzeitig und werden früher gemergt; main bleibt voll geschützt.",
+          "benefit_en": "Project checklists show the requirements for Ready, QA and Done; agents cannot override failed entry checks.",
+          "benefit_de": "Projekt-Checklisten zeigen die Anforderungen für Bereit, QA und Fertig; Agenten können unerfüllte Statusprüfungen nicht übersteuern.",
           "group": "features"
         },
         {
@@ -6924,22 +6908,6 @@
           "benefit_en": "A review approval in PAIMOS always comes from the reviewer that actually did the review.",
           "benefit_de": "Eine Review-Freigabe in PAIMOS stammt immer von dem Reviewer, der wirklich geprüft hat.",
           "group": "fixes"
-        },
-        {
-          "key": "AEON-1392",
-          "pill_en": "Exact-commit approvals",
-          "pill_de": "Commitgenaue Freigaben",
-          "benefit_en": "Every merge-queue decision rests on recorded, exact-commit approvals and visible holds.",
-          "benefit_de": "Jede Merge-Queue-Entscheidung beruht auf festgehaltenen, commitgenauen Freigaben und sichtbaren Sperren.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1393",
-          "pill_en": "Safe merge-queue admission",
-          "pill_de": "Sichere Queue-Zulassung",
-          "benefit_en": "Only approved code enters main, even when holds arrive while the merge queue is building.",
-          "benefit_de": "Nur freigegebener Code kommt nach main, auch wenn eine Sperre während des Queue-Laufs kommt.",
-          "group": "features"
         },
         {
           "key": "AEON-1398",
@@ -6953,8 +6921,8 @@
           "key": "AEON-1409",
           "pill_en": "Current models listed",
           "pill_de": "Aktuelle Modelle gelistet",
-          "benefit_en": "The model list picks up new models like Opus 5.5 by itself, and workers actually use them.",
-          "benefit_de": "Die Modellliste erkennt neue Modelle wie Opus 5.5 selbst, und die Agenten nutzen sie auch.",
+          "benefit_en": "The model catalog refreshes automatically and includes Opus 5.5; worker use follows existing model and account approvals.",
+          "benefit_de": "Der Modellkatalog wird automatisch aktualisiert und enthält Opus 5.5; die Nutzung durch Agenten folgt den bestehenden Modell- und Kontofreigaben.",
           "group": "fixes"
         },
         {
@@ -6975,42 +6943,10 @@
         },
         {
           "key": "AEON-1427",
-          "pill_en": "Review gates resolve",
-          "pill_de": "Prüfstufen auflösbar",
-          "benefit_en": "Agents get a working cross-family reviewer from the model registry instead of a closed gate.",
-          "benefit_de": "Agenten erhalten aus der Modellverwaltung einen funktionierenden Prüfer einer anderen Modellfamilie statt einer geschlossenen Prüfstufe.",
-          "group": "fixes"
-        },
-        {
-          "key": "AEON-1431",
-          "pill_en": "Nightly tests green again",
-          "pill_de": "Nachttests wieder grün",
-          "benefit_en": "The full nightly test run passes its web setup again, and a change to test selection can no longer pass PR checks while breaking the nightly.",
-          "benefit_de": "Der vollständige nächtliche Testlauf besteht die Web-Vorbereitung wieder, und eine Änderung der Testauswahl kann nicht mehr die PR-Prüfung bestehen und gleichzeitig den Nachtlauf brechen.",
-          "group": "fixes"
-        },
-        {
-          "key": "AEON-1433",
-          "pill_en": "Nightly checks green",
-          "pill_de": "Nachtprüfungen grün",
-          "benefit_en": "The full nightly test run checks the agents page and the Decision Desk again without false alarms, so real regressions show up the next morning.",
-          "benefit_de": "Der vollständige Nachtlauf prüft die Agenten-Seite und den Entscheidungs-Desk wieder ohne Fehlalarme, sodass echte Regressionen am nächsten Morgen auffallen.",
-          "group": "fixes"
-        },
-        {
-          "key": "AEON-1435",
-          "pill_en": "Safer merge gate",
-          "pill_de": "Sicherere Merge-Prüfung",
-          "benefit_en": "The merge gate can go live with the permissions it already has: only reviewed code reaches main, without new access rights.",
-          "benefit_de": "Die Merge-Prüfung kann mit den vorhandenen Berechtigungen live gehen: Nur geprüfter Code erreicht main, ohne neue Zugriffsrechte.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1436",
-          "pill_en": "Steadier nightly tests",
-          "pill_de": "Stabilere Nachttests",
-          "benefit_en": "Three tests that failed by chance now pass reliably, so a red nightly run means a real problem.",
-          "benefit_de": "Drei Tests, die zufällig fehlschlugen, laufen jetzt zuverlässig; ein roter Nachtlauf bedeutet damit ein echtes Problem.",
+          "pill_en": "Isolated Codex reviews",
+          "pill_de": "Isolierte Codex-Prüfungen",
+          "benefit_en": "With a qualified account, agents can resolve an isolated, read-only Codex command for cross-family reviews.",
+          "benefit_de": "Mit einem qualifizierten Konto lässt sich für Reviews durch eine andere Modellfamilie ein isolierter Codex-Befehl mit reinem Lesezugriff auflösen.",
           "group": "fixes"
         }
       ]
