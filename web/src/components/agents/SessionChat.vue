@@ -1092,7 +1092,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .queue-item[data-status="not_delivered"] .queue-when { color: var(--danger); font-weight: 600; }
 .queue-meta .icon-btn { flex: none; border-radius: 8px; color: var(--ink-3); }
 @media (hover: hover) { .queue-meta .icon-btn:hover:not(:disabled) { color: var(--teal-ink); background: var(--row-hover); } }
-@media (pointer: coarse) { .queue-meta .icon-btn { width: 44px; height: 44px; } }
+@media (pointer: coarse), (max-width: 720px) { .queue-meta .icon-btn, .replying .icon-btn { width: 44px; height: 44px; } }
 .binding-error { color: var(--ink-2); font-size: 13.5px; overflow-wrap: anywhere; margin: 12px 0; }
 .gemini-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-2); }
 .chat-questions { display: grid; gap: 10px; padding: 12px 0; }

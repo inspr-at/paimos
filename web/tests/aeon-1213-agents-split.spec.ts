@@ -358,11 +358,16 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
     })
     expect(Math.abs(geometry.gap - geometry.inset), `${width}: composer pinned to pane bottom`).toBeLessThanOrEqual(.5)
     // AEON-1438: the field grows upward with a long draft; its bottom edge and the actions stay.
-    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).getByRole('button', { name: 'More session actions', exact: true }) }, { grows: ['composer'] })
+    // On phones, typing during a running turn opens the composer's second row by design
+    // (Send now · After this turn), so there only the header and the pinned footer are held.
+    const phone = width <= 720
+    const guard = await controlStability(page, { ...(phone ? {} : { composer, send: pane(page).locator('.compose .send') }), stop: pane(page).getByRole('button', { name: 'More session actions', exact: true }) }, { grows: ['composer'] })
     for (const draft of ['Die vollständigen Berechtigungseinstellungen für sämtliche angeschlossenen Arbeitsbereiche zuverlässig prüfen.', '']) {
       await guard.check(async () => {
         await composer.fill(draft); await composer.blur()
         await expect(footer).toBeInViewport({ ratio: 1 })
+        const gap = await pane(page).evaluate(el => el.getBoundingClientRect().bottom - el.querySelector('.composer')!.getBoundingClientRect().bottom - parseFloat(getComputedStyle(el).borderBottomWidth) - parseFloat(getComputedStyle(el).paddingBottom))
+        expect(Math.abs(gap), `${width}: composer stays pinned while typing`).toBeLessThanOrEqual(.5)
       })
     }
     guard.done()

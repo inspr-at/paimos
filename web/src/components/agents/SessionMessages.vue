@@ -238,6 +238,9 @@ onBeforeUnmount(() => {
   .msg[tabindex]:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 10px; }
 }
 @media (max-width: 720px) {
+  /* Phones keep 44 px targets, also with a mouse. */
+  .message-actions { height: 44px; margin: 0 0 0 -14px; }
+  .message-actions .icon-btn { width: 44px; height: 44px; border-radius: 10px; }
   .msg-meta { gap: 8px; margin-bottom: 4px; font-size: 12px; line-height: 16px; }
   .msg-author { flex: none; max-width: 60%; font-size: 13px; }
   .msg-meta .sep { display: none; }
