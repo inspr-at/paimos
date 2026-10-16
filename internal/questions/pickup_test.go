@@ -23,16 +23,17 @@ import (
 // never learns that pickup stalled. Exercise real durable replies and receipts
 // through every reader, with a fake clock and a subscribed SSE barrier.
 func TestDeliveryOfflinePickupAndStall(t *testing.T) {
-	for _, mode := range []string{"inbox", "long poll", "stream", "project inbox"} {
+	for _, mode := range []string{"inbox", "long poll", "stream", "project inbox", "project alias", "session alias"} {
 		t.Run(mode, func(t *testing.T) {
 			f := deliveryFixtureFor(t)
 			f.agent.Scopes = append(f.agent.Scopes, "inbox.read", "inbox.send")
+			f.otherAgent.Scopes = append(f.otherAgent.Scopes, "inbox.read")
 			var qs []Question
 			var ids []string
 			for i := range 2 {
 				in := input()
 				in.Question = fmt.Sprintf("Offline question %d?", i)
-				if mode == "long poll" || mode == "stream" {
+				if mode == "long poll" || mode == "stream" || mode == "session alias" {
 					in.SessionID = f.session
 				}
 				q := f.answer(t, f.ask(t, in), fmt.Sprintf("Answer %d", i))
@@ -50,6 +51,18 @@ func TestDeliveryOfflinePickupAndStall(t *testing.T) {
 			}
 			if len(ids) != 2 {
 				t.Fatalf("inbox replies=%v", ids)
+			}
+			if mode == "project alias" || mode == "session alias" {
+				path := "/api/projects/" + f.project + "/messages/listen?to=codex:worker"
+				if w := request(t.Context(), f.mux, f.otherAgent, "GET", "/api/projects/"+f.project+"/messages/listen", nil); w.Code != 200 {
+					t.Fatalf("ownership control lacks inbox read access: %d %s", w.Code, w.Body.String())
+				}
+				if w := request(t.Context(), f.mux, f.otherAgent, "GET", path, nil); w.Code != 403 {
+					t.Fatalf("another principal read the asker's alias: %d %s", w.Code, w.Body.String())
+				}
+				if w := request(t.Context(), f.mux, f.agent, "GET", path+"&session="+f.otherSession, nil); w.Code != 404 {
+					t.Fatalf("another session was accepted: %d %s", w.Code, w.Body.String())
+				}
 			}
 			if _, err := f.d.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET deliver_by=clock_timestamp()-interval '1 minute'`); err != nil {
 				t.Fatal(err)
@@ -95,6 +108,11 @@ func TestDeliveryOfflinePickupAndStall(t *testing.T) {
 					}
 				case "project inbox":
 					path = "/api/projects/" + f.project + "/messages/listen?limit=10"
+				case "project alias", "session alias":
+					path = "/api/projects/" + f.project + "/messages/listen?limit=10&to=codex:worker"
+					if mode == "session alias" {
+						path += "&session=" + f.session
+					}
 				}
 				if mode != "stream" {
 					w := request(t.Context(), f.mux, f.agent, "GET", path, nil)

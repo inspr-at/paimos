@@ -92,7 +92,9 @@ outbox state `delivered` means dispatched, while `receipt_state` reports `queued
 Desk answers stay pending while the asking agent is offline (AEON-1432).
 Neither `no_listener` nor an elapsed inbox deadline discards a Desk answer.
 The next principal inbox read, exact-session listen, project inbox read or SSE
-subscription returns the pending replies in sent-event order. Unacknowledged
+subscription returns the pending replies in sent-event order. Address-filtered
+project listeners include these principal-addressed answers after verifying the
+alias belongs to the caller, while retaining exact-session ownership. Unacknowledged
 replies can replay after a crash with the same message and answer IDs; pickup
 events and receipt confirmation are idempotent. Acknowledged answers leave the
 pending inbox. Ended generations still use only the verified successor path.
