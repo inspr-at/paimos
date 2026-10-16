@@ -740,7 +740,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .all-clear .line svg { flex: none; color: var(--ok); }
 /* Inline flow, so a narrow card wraps the sentence and keeps Try again with it. */
 .all-clear .quiet { justify-self: stretch; min-height: 20px; margin: 0; font-size: 12.5px; line-height: 20px; color: var(--ink-3); text-wrap: balance; }
-.all-clear .quiet svg { vertical-align: -2px; margin-right: 6px; }
+/* Base svg is a block; inline here, so the icon flows with its sentence. */
+.all-clear .quiet svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .all-clear .quiet .sep { margin: 0 6px; opacity: .6; }
 .all-clear .linkish, .empty-line .linkish { font-weight: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .all-clear.reading > :not(.reading-note) { visibility: hidden; }

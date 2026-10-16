@@ -51,6 +51,8 @@ async function onePicture(page: Page, theme: 'light' | 'dark') {
     await expect(image).toHaveAttribute('height', '560')
   }
   await expect.poll(() => shown.evaluate(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth)).toBe(840)
+  // Decoded and painted before any screenshot: the picture decodes asynchronously.
+  await shown.evaluate(async image => { await (image as HTMLImageElement).decode(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))) })
 }
 
 for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
