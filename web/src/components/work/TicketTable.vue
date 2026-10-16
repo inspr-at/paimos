@@ -1431,16 +1431,19 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .c-check { display: none; }
 .phone-check { display: none; }
 @media (max-width: 720px) {
-  .table-card { border-radius: 14px; overflow: visible; }
+  /* The page keeps its 12px inset. The card uses that inset so a whole status
+     label and a 14px priority slot fit at 320px (AEON-1379). */
+  .table-card { margin-inline: -12px; border-radius: 14px; overflow: visible; }
   .tickets, .tickets tbody { display: block; }
   .tickets thead { display: none; }
   .ticket-row { -webkit-touch-callout: none; }
   .ticket-row {
     /* Key and date stay whole. Status may shrink. Spare room stays in the
-       priority column. Its minimum is 0, not max-content: the title spans this
-       column, and a max-content minimum would adopt the title's full line and
-       shove the card sideways (AEON-1379). The icon's own min-width keeps the slot. */
-    display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; grid-template-areas: "key status prio updated" "title title title title";
+       priority column. Its minimum is the 14px icon, not max-content and not 0:
+       the title spans this column, and a max-content minimum would adopt the
+       title's full line (AEON-1379). A 0 minimum lets the status track take the
+       icon's slot, so the mark overflows into the date. */
+    display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(14px, 1fr) max-content; grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
   /* The compact status visual is 2px shorter; leave its 44px reach inside the card. */
@@ -1448,9 +1451,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
   .table-card.selectable .ticket-row {
-    grid-template-columns: 44px max-content minmax(0, max-content) minmax(0, 1fr) max-content;
+    grid-template-columns: 44px max-content minmax(0, max-content) minmax(14px, 1fr) max-content;
     grid-template-areas: "check key status prio updated" "check title title title title";
-    padding-left: 2px; column-gap: 6px;
+    padding-left: 0; padding-right: 0; column-gap: 4px;
   }
   .c-check { display: flex; grid-area: check; align-self: center; justify-content: center; }
   .phone-check {
@@ -1478,8 +1481,12 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
      before that label. The priority mark never shrinks below the icon and
      carries no negative margin. */
   .c-status { min-width: 0; }
-  .table-card:not(.customised) .c-prio,
-  .table-card:not(.customised) .c-prio .cell { min-width: max-content; margin: 0; }
+  /* The icon sits at the end of its slot, so the gap to the date is the column
+     gap plus the date's margin, not whatever free space the track absorbed. */
+  .table-card:not(.customised) .c-prio .cell { min-width: 0; margin: 0; gap: 0; justify-content: flex-end; }
+  .table-card.selectable:not(.customised) .c-updated,
+  .table-card.selectable:not(.customised) .c-eta { margin-left: 4px; }
+  .table-card:not(.customised) .key-btn { margin-inline: 0; padding-inline: 0; }
   /* An hour estimate sits at the end of the title line. An empty cell stays off the card. */
   .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
   .c-estimate .cell { height: auto; }
@@ -1490,7 +1497,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
   .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
   .table-card.selectable:not(.customised) .ticket-row:has(.progress-read) {
-    grid-template-columns: 44px max-content minmax(0, max-content) minmax(0, 1fr) max-content;
+    grid-template-columns: 44px max-content minmax(0, max-content) minmax(14px, 1fr) max-content;
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
@@ -1540,7 +1547,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.top td { border-top: 0; }
   .more-row { display: block; padding: 6px 14px; }
   .more-row td { display: block; height: auto; border: 0; padding: 0; }
-  .status-btn { min-width: 0; height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+  .status-btn { min-width: 0; height: 24px; margin-left: 0; gap: 4px; padding: 0 4px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
   .status-btn .status-icon { flex: none; }
   .status-btn > span:not(.status-icon) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .prio-label { display: none; }
