@@ -143,9 +143,15 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 	if name == "workflow_run" {
 		return webhookNothingToRecord, nil
 	}
+	// The publisher's own aeon/admission status is an echo of a write already
+	// committed. It must not take the observation lock or read GitHub, and it
+	// must not invalidate the acknowledged revision.
+	if name == "status" && admissionStatusEcho(raw) {
+		return webhookNothingToRecord, nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	ctx, release, err := m.observationLock(ctx)
+	ctx, release, err := m.tryObservationLock(ctx)
 	if err != nil {
 		return webhookFailed, err
 	}
@@ -343,6 +349,13 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 		return webhookFailed, err
 	}
 	return webhookRecorded, nil
+}
+
+func admissionStatusEcho(raw []byte) bool {
+	var body struct {
+		Context string `json:"context"`
+	}
+	return json.Unmarshal(raw, &body) == nil && body.Context == AdmissionContext
 }
 
 func (m *Module) recordMetricEventTx(ctx context.Context, tx pgx.Tx) error {

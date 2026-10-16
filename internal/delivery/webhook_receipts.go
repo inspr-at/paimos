@@ -39,6 +39,15 @@ var webhookSteps = []string{"projection", "fanout", "check_audit", "merge_audit"
 
 var errWebhookBusy = webhookClass("delivery_in_progress")
 
+// errObservationBusy means reconciliation already holds the tenant observation
+// lock. The receipt is durable; GitHub must not redeliver and the retry must
+// not treat the wait as a failed attempt.
+var errObservationBusy = webhookClass("observation_busy")
+
+func webhookClaimHeld(err error) bool {
+	return errors.Is(err, errWebhookBusy) || errors.Is(err, errObservationBusy)
+}
+
 type webhookReceipt struct {
 	id, event, action, repository, installation, hash string
 	raw                                               []byte
@@ -116,6 +125,12 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = m.processWebhook(ctx, id, true); err != nil {
+		// A held observation lock is not an origin failure. The receipt is
+		// already saved and due immediately, so GitHub must not redeliver it.
+		if errors.Is(err, errObservationBusy) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		m.rejectWebhookStep(w, r, e.Action, err)
 		return
 	}
@@ -318,11 +333,14 @@ func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step
 		class = &value
 	}
 	limited := class != nil && webhookLimited(*class)
+	busy := class != nil && *class == string(errObservationBusy)
 	permission := class != nil && webhookPermission(*class)
-	if limited || permission && receipt.attempts >= webhookMaxAttempts {
+	if limited || busy || permission && receipt.attempts >= webhookMaxAttempts {
 		// Reservation still fences crashes; a confirmed rate-limit wait refunds
 		// it atomically with the due time and never exhausts the retry budget.
 		// A permission pause at the cap retains one explicit repair attempt.
+		// An observation wait is the same: the lock holder, not this delivery,
+		// is the reason the attempt did no work.
 		receipt.attempts = max(0, receipt.attempts-1)
 	}
 	exhausted := receipt.attempts >= webhookMaxAttempts && !permission
@@ -334,6 +352,8 @@ func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step
 	delay := webhookErrorBackoff(receipt.attempts, cause)
 	if limited {
 		delay = webhookLimitBackoff(cause, at)
+	} else if busy {
+		delay = 0
 	} else if permission {
 		delay = time.Hour
 	}
@@ -547,7 +567,7 @@ func (m *Module) retryWebhooks(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := m.processWebhook(ctx, due.id, false); err != nil && !errors.Is(err, errWebhookBusy) {
+		if err := m.processWebhook(ctx, due.id, false); err != nil && !webhookClaimHeld(err) {
 			failures = append(failures, err)
 		}
 	}
@@ -589,7 +609,7 @@ func (m *Module) probePausedReceipts(ctx context.Context, prober installationPro
 			if held.Err() != nil {
 				return permissionIDs, errors.Join(append(failures, held.Err())...)
 			}
-			if err = m.processWebhook(held, id, false); err != nil && !errors.Is(err, errWebhookBusy) {
+			if err = m.processWebhook(held, id, false); err != nil && !webhookClaimHeld(err) {
 				failures = append(failures, err)
 			}
 		}

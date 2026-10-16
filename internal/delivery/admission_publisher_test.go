@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,12 +12,16 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1175,4 +1180,226 @@ func TestAdmissionStatusOnlyPublishesHoldOnGroupWithoutQueue(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestAdmissionPublisherWebhooksAckWhilePublicationHolds(t *testing.T) {
+	// Risk: publishing aeon/admission for several heads while reconciliation
+	// holds the observation lock turns status, check_run and check_suite
+	// deliveries into 502s, or the publisher's own echo dirties its revision.
+	f := newAdmissionFixture(t)
+	head := f.gh.pulls[7].Head
+	foreign := receiptBody(t, f.fixture, map[string]any{"sha": head, "state": "success", "context": "ci/foreign"})
+	own := receiptBody(t, f.fixture, map[string]any{"sha": head, "state": "failure", "context": AdmissionContext})
+	checkRun := receiptBody(t, f.fixture, map[string]any{"action": "completed", "check_run": map[string]any{"head_sha": head, "name": "go-test", "status": "completed", "conclusion": "success", "pull_requests": []any{map[string]any{"number": 7}}}})
+	checkSuite := receiptBody(t, f.fixture, map[string]any{"action": "completed", "check_suite": map[string]any{"id": 900, "head_sha": head, "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{map[string]any{"number": 7}}}})
+	controls := []struct {
+		event, id string
+		raw       []byte
+	}{
+		{"status", "control-foreign", foreign},
+		{"check_run", "control-check-run", checkRun},
+		{"check_suite", "control-check-suite", checkSuite},
+	}
+	for _, c := range controls {
+		if got := admissionWebhook(f.fixture, c.event, c.id, c.raw, 0); got != http.StatusNoContent {
+			t.Fatalf("control %s: %d", c.id, got)
+		}
+	}
+	controlPoints := map[string]map[string]webhookOutcome{}
+	for _, c := range controls {
+		_, _, finished, points, step, class := receiptState(t, f.fixture, c.id)
+		if finished == nil || step != nil || class != nil {
+			t.Fatalf("control %s did not finish: step %v class %v", c.id, step, class)
+		}
+		controlPoints[c.id] = points
+	}
+	var revision int64
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT revision FROM delivery_admission_outbox WHERE sha=$1`, head).Scan(&revision)
+	})
+	synthetic := strings.Repeat("e", 40)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_admission_outbox(tenant_id,repository,sha,context,kind,members,active,resolved) VALUES($1,$2,$3,$4,'head','[]',true,true)`, f.person.TenantID, f.m.config.Repository, synthetic, AdmissionContext)
+		return err
+	})
+
+	_, releaseObservation, err := f.m.observationLock(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observationHeld := true
+	releaseObservationOnce := func() {
+		if observationHeld {
+			releaseObservation()
+			observationHeld = false
+		}
+	}
+	t.Cleanup(releaseObservationOnce)
+
+	releasePost := make(chan struct{})
+	var closePost sync.Once
+	releasePublishers := func() { closePost.Do(func() { close(releasePost) }) }
+	t.Cleanup(releasePublishers)
+	var arrived atomic.Int32
+	entered := make(chan struct{})
+	f.writer.post = func(ctx context.Context, _, _ string) error {
+		if arrived.Add(1) == 2 {
+			close(entered)
+		}
+		select {
+		case <-releasePost:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	heads := []string{head, synthetic}
+	pubErr := make(chan error, len(heads))
+	for _, sha := range heads {
+		go func(sha string) { pubErr <- f.m.publishAdmission(t.Context(), sha) }(sha)
+	}
+	select {
+	case <-entered:
+	case <-time.After(15 * time.Second):
+		t.Fatal("publishers did not reach PostStatus together")
+	}
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	f.m.webhookFailures.logger = logger
+	previous := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	burst := []struct {
+		event, id string
+		raw       []byte
+	}{
+		{"status", "burst-own", own},
+		{"status", "burst-foreign", foreign},
+		{"check_run", "burst-check-run", checkRun},
+		{"check_suite", "burst-check-suite", checkSuite},
+	}
+	codes := make([]int, len(burst))
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i, job := range burst {
+		wg.Add(1)
+		go func(i int, job struct {
+			event, id string
+			raw       []byte
+		}) {
+			defer wg.Done()
+			<-start
+			codes[i] = admissionWebhook(f.fixture, job.event, job.id, job.raw, 3*time.Second)
+		}(i, job)
+	}
+	close(start)
+	finishedBurst := make(chan struct{})
+	go func() { wg.Wait(); close(finishedBurst) }()
+	select {
+	case <-finishedBurst:
+	case <-time.After(10 * time.Second):
+		t.Fatal("webhooks waited on the publisher or the observation lock")
+	}
+	for i, job := range burst {
+		if codes[i] != http.StatusNoContent {
+			t.Fatalf("%s answered %d while publication and observation were in progress", job.id, codes[i])
+		}
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("webhook acceptance logged %s", logs.String())
+	}
+	f.writer.mu.Lock()
+	posts := append([]string{}, f.writer.posts...)
+	f.writer.mu.Unlock()
+	if len(posts) != 0 {
+		t.Fatal("webhooks waited for admission POST to finish")
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var after int64
+		if err := tx.QueryRow(t.Context(), `SELECT revision FROM delivery_admission_outbox WHERE sha=$1`, head).Scan(&after); err != nil {
+			return err
+		}
+		if after != revision {
+			t.Fatalf("own admission echo changed revision %d to %d", revision, after)
+		}
+		return nil
+	})
+	_, _, ownFinished, ownPoints, _, _ := receiptState(t, f.fixture, "burst-own")
+	if ownFinished == nil || ownPoints["projection"] != webhookNothingToRecord || admissionEvents(t, f, "burst-own") != 0 {
+		t.Fatalf("own echo projection: finished %v points %v", ownFinished != nil, ownPoints)
+	}
+	for _, id := range []string{"burst-foreign", "burst-check-run", "burst-check-suite"} {
+		attempts, _, finished, _, step, class := receiptState(t, f.fixture, id)
+		if finished != nil || attempts != 0 || step == nil || *step != "projection" || class == nil || *class != "observation_busy" || admissionEvents(t, f, id) != 0 {
+			t.Fatalf("%s while observation was busy: attempts %d finished %v step %v class %v", id, attempts, finished != nil, step, class)
+		}
+	}
+	if err := f.m.retryWebhooks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"burst-foreign", "burst-check-run", "burst-check-suite"} {
+		attempts, _, finished, _, _, class := receiptState(t, f.fixture, id)
+		if finished != nil || attempts != 0 || class == nil || *class != "observation_busy" {
+			t.Fatalf("retry while observation was busy finished %s: attempts %d class %v", id, attempts, class)
+		}
+	}
+	releaseObservationOnce()
+	if err := f.m.retryWebhooks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	retried := map[string]string{"burst-foreign": "control-foreign", "burst-check-run": "control-check-run", "burst-check-suite": "control-check-suite"}
+	for id, control := range retried {
+		_, _, finished, points, step, class := receiptState(t, f.fixture, id)
+		if finished == nil || step != nil || class != nil || !reflect.DeepEqual(points, controlPoints[control]) || admissionEvents(t, f, id) != 1 {
+			t.Fatalf("%s after the observation lock: finished %v step %v class %v points %v", id, finished != nil, step, class, points)
+		}
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var after int64
+		if err := tx.QueryRow(t.Context(), `SELECT revision FROM delivery_admission_outbox WHERE sha=$1`, head).Scan(&after); err != nil {
+			return err
+		}
+		if after != revision {
+			t.Fatalf("retried foreign delivery changed revision %d to %d", revision, after)
+		}
+		return nil
+	})
+	releasePublishers()
+	for range heads {
+		if err := <-pubErr; err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.writer.mu.Lock()
+	defer f.writer.mu.Unlock()
+	if len(f.writer.posts) != len(heads) {
+		t.Fatalf("publishers posted %v", f.writer.posts)
+	}
+}
+
+func admissionWebhook(f *fixture, event, id string, raw []byte, timeout time.Duration) int {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/github/webhook", bytes.NewReader(raw))
+	r.Header.Set("X-GitHub-Event", event)
+	r.Header.Set("X-GitHub-Delivery", id)
+	r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	return w.Code
+}
+
+func admissionEvents(t *testing.T, f *admissionFixture, id string) int {
+	t.Helper()
+	var n int
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_github_events WHERE delivery_id=$1`, id).Scan(&n)
+	})
+	return n
 }
