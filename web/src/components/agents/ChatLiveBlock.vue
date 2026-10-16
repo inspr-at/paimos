@@ -23,7 +23,7 @@ const foldLabel = computed(() => `${words.value.tools(props.turn.tools.length)} 
 <template>
   <section class="live-turn" :aria-label="words.live" :aria-busy="running" :data-state="turn.ended ? 'ended' : turn.state">
     <p class="live-meta">
-      <Avatar :name="name" kind="agent" :size="18" />
+      <Avatar :name="name" kind="agent" :size="20" />
       <span class="live-author" :title="name">{{ name }}</span>
       <span class="live-tag" tabindex="0" :data-tip="words.liveOnly" :aria-label="words.liveOnly">Live</span>
     </p>
@@ -57,9 +57,11 @@ const foldLabel = computed(() => `${words.value.tools(props.turn.tools.length)} 
 
 <style scoped>
 .live-turn { min-width: 0; padding: 6px 0; margin-top: 10px; }
-.live-meta { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 4px; font-size: 11.5px; }
+/* The same quiet meta line as a message (AEON-1438): name, then "Live" in plain type. */
+.live-meta { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 20px; margin-bottom: 5px; font-size: 12.5px; color: var(--ink-3); }
 .live-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; color: var(--ink); }
-.live-tag { padding: 1px 6px; border-radius: 999px; font-size: 10px; background: var(--chip-bg); color: var(--ink-2); white-space: nowrap; }
+.live-tag { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+@media (max-width: 720px) { .live-meta { gap: 8px; margin-bottom: 4px; font-size: 12px; } .live-author { font-size: 13px; } }
 .tools { display: grid; gap: 1px; margin: 0 0 8px; padding: 0; list-style: none; }
 .tool { display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; font-size: 13px; color: var(--ink-2); }
 .tool > svg { flex: none; color: var(--ink-3); }
