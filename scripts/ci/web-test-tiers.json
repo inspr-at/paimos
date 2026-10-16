@@ -6074,7 +6074,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024 sanity: the docked head and its anchored menu are unchanged in form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024 sanity: the desktop head and its anchored menu keep their form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 320x568: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

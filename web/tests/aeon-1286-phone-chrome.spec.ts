@@ -249,7 +249,7 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1286 short landscape $
   await report(info.outputPath(`AEON-1286/landscape-${look}.md`), [`thread ${Math.round(thread.height)} px of ${LANDSCAPE.height} = ${(thread.height / LANDSCAPE.height * 100).toFixed(1)} %`])
 })
 
-test('AEON-1286 1024 sanity: the docked head and its anchored menu are unchanged in form', async ({ page }, info) => {
+test('AEON-1286 1024 sanity: the desktop head and its anchored menu keep their form', async ({ page }, info) => {
   await openLeadChat(page, { width: 1024, height: 768 }, 'light')
   const panel = panelOf(page), head = panel.locator('.panel-head')
   await expect(head.locator('.pane-back')).toBeHidden()
