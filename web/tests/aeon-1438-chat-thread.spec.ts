@@ -371,7 +371,8 @@ test.describe('touch', () => {
       await expect(menu).toHaveCount(0)
       await expect(message).not.toHaveClass(/pressed/)
     })
-    // Your own message offers Copy only; a tap on Copy hands focus back to the message, still without a ring.
+    // Your own message offers Copy only; a tap on Copy copies it and hands focus back to the message, still without a ring.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     const mine = panel.locator('.msg.mine').last()
     await longPress(page, mine)
     await expect(menu.getByRole('menuitem')).toHaveText(['Copy'])
@@ -380,6 +381,11 @@ test.describe('touch', () => {
     await expect(mine).toBeFocused()
     await expect(mine).toHaveCSS('outline-style', 'none')
     await expect(mine).toHaveCSS('box-shadow', 'none')
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Start it now. Keep the CI fixes in their own PR.')
+    const toastHost = page.locator('.toast-host')
+    await expect(toastHost).toContainText('Copied')
+    await toastHost.getByRole('button', { name: 'Dismiss' }).click()
+    await expect(toastHost.locator('.toast')).toHaveCount(0)
     // The keyboard reaches the same menu: Enter on the focused message, and there the ring shows.
     await message.focus()
     await page.keyboard.press('Enter')
