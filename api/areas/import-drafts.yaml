@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/projectdraft
+paths:
+  /import/project-draft:
+    post:
+      operationId: handOverProjectDraft
+      summary: 'Hand a START conversation to Paimos as a project draft (AEON-1441)'
+      servers: [{url: /}]
+      security: []
+      description: 'A top-level browser form POST from START (navigation, never fetch; no CORS). One field, payload, holds the strict v1 JSON document of at most 512 KiB. The draft lands in the one import tenant the instance configures (AEON_IMPORT_TENANT_SLUG); the payload, a session cookie or the caller can never choose a tenant, project or destination. Cookies are not read. Attempts are rate-limited per client address (the transport peer, or X-Forwarded-For behind AEON_TRUSTED_PROXIES), and live drafts are capped in count and bytes. Success is 303 to /new-project#draft=<capability>: 256 random bits in the fragment, so no server or proxy log records them; only their SHA-256 is stored. Drafts expire after 30 minutes and are deleted by a scheduled sweep. Refusals are small HTML pages in the conversation or browser language with Cache-Control no-store and Referrer-Policy no-referrer.'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload: {type: string, maxLength: 524288, description: 'JSON text of ProjectDraftPayloadV1.'}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload: {type: string, maxLength: 524288, description: 'JSON text of ProjectDraftPayloadV1.'}
+      responses:
+        '303': {description: 'Draft stored; Location is /new-project#draft=<capability>.', headers: {Location: {schema: {type: string}}}}
+        '400': {description: 'The payload field is missing or does not match payload v1 (HTML page).'}
+        '413': {description: 'The payload is larger than 512 KiB (HTML page).'}
+        '415': {description: 'Not a form submission (HTML page).'}
+        '422': {description: 'The payload version is not 1 (HTML page).'}
+        '429': {description: 'Too many attempts from this client, or too many live drafts (HTML page with Retry-After).'}
+        '503': {description: 'The handoff is off on this instance, or storage is unavailable (HTML page).'}
+    get:
+      operationId: getProjectDraft
+      summary: 'Read the project draft the assistant shows, without consuming it'
+      description: 'People only, in the configured import tenant, with nodes.write. The capability travels in the Aeon-Import-Draft header, never in the URL. Reading never consumes the draft. An unknown, expired, used or another person''s draft is the same 404, so nothing about it leaks. After the caller''s own create committed, status is created and project is the node it made.'
+      security: [{session: []}]
+      parameters:
+        - {name: Aeon-Import-Draft, in: header, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}, description: 'The capability from the handoff fragment; never logged.'}
+      responses:
+        '200': {description: 'The draft.', content: {application/json: {schema: {$ref: '#/components/schemas/ProjectDraft'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /import/project-draft/create:
+    post:
+      operationId: createProjectFromDraft
+      summary: 'Create the project from a draft, consuming it once'
+      description: 'One transaction under the access-change lock: the draft row is fenced, then the project (owner as assignee, optional end_date), one work item per chosen open point, the memory entry From the START conversation and the transcript attachment are created through the ordinary node, knowledge and attachment guards, and the draft is marked used; events are appended last. Any failure rolls everything back and leaves the draft usable. A second person, or a second create after the first committed, gets the same 404; a retry by the person who created it gets 200 with replayed true and the same project.'
+      security: [{session: []}]
+      parameters:
+        - {name: Aeon-Import-Draft, in: header, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}, description: 'The capability from the handoff fragment; never logged.'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProjectDraftCreate'}
+      responses:
+        '201': {description: 'Created.', content: {application/json: {schema: {$ref: '#/components/schemas/ProjectDraftCreated'}}}}
+        '200': {description: 'Already created by the caller; the same project.', content: {application/json: {schema: {$ref: '#/components/schemas/ProjectDraftCreated'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    ProjectDraftPayloadV1:
+      type: object
+      additionalProperties: false
+      required: [version, source, language, title, summary, facts, open_points, transcript]
+      description: 'The handoff document START posts. Unknown fields are refused; a version other than 1 is refused separately.'
+      properties:
+        version: {type: integer, const: 1}
+        source:
+          type: object
+          additionalProperties: false
+          required: [product, host, session_id]
+          properties:
+            product: {type: string, const: aithema}
+            host: {type: string, maxLength: 253, description: 'Shown as text only; never a destination.'}
+            session_id: {type: string, maxLength: 200}
+        language: {type: string, enum: [de, en]}
+        title: {type: string, maxLength: 200}
+        summary: {type: string, maxLength: 4000, description: 'Aktuelle Einschätzung.'}
+        facts: {type: array, maxItems: 50, items: {type: string, maxLength: 500}, description: 'Was wir konkret gesehen haben.'}
+        open_points: {type: array, maxItems: 50, items: {type: string, maxLength: 500}, description: 'Was noch offen ist.'}
+        transcript:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            additionalProperties: false
+            required: [role, text]
+            properties:
+              role: {type: string, enum: [user, assistant]}
+              text: {type: string}
+              at: {type: [string, 'null'], format: date-time}
+    ProjectDraft:
+      type: object
+      required: [status, language, handed_over_at, expires_at, title, summary, facts, open_points, messages]
+      properties:
+        status: {type: string, enum: [ready, created]}
+        language: {type: string, enum: [de, en]}
+        handed_over_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        source:
+          type: object
+          required: [product, host]
+          properties:
+            product: {type: string}
+            host: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        facts: {type: array, items: {type: string}}
+        open_points: {type: array, items: {type: string}}
+        messages: {type: integer, description: 'Transcript turns that come along as the attachment.'}
+        project: {$ref: '#/components/schemas/Node'}
+        tickets: {type: integer}
+    ProjectDraftCreate:
+      type: object
+      additionalProperties: false
+      required: [name, key, owner_id, open_points]
+      properties:
+        name: {type: string, maxLength: 500}
+        key: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$'}
+        owner_id: {type: string, format: uuid, description: 'An active person of the tenant.'}
+        target_date: {type: [string, 'null'], format: date}
+        open_points: {type: array, maxItems: 50, uniqueItems: true, items: {type: integer, minimum: 0}, description: 'Indices of the open points that become work items.'}
+    ProjectDraftCreated:
+      type: object
+      required: [project, tickets, replayed]
+      properties:
+        project: {$ref: '#/components/schemas/Node'}
+        tickets: {type: integer}
+        replayed: {type: boolean}
