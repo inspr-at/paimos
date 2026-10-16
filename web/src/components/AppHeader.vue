@@ -251,12 +251,9 @@ function nameSliver(name: HTMLElement | null): name is HTMLElement {
   const font = parseFloat(style.fontSize) || 13.5
   return name.scrollWidth > name.clientWidth && name.clientWidth < 3 * font
 }
-// Set for the follow-up that just judged the name a sliver, or dropped a cut
-// segment. The next refit clears both, so a wider window measures the trail again.
-// Restoring either in the same turn still sees the 1px stand-in, and the row
-// then settles on the cut (AEON-1439: the name at 887, the PHAROS chip at 712).
+// Set for the follow-up that just judged the name a sliver. The next refit
+// clears it, so a wider window measures the name again.
 let nameHeld = false
-let trailHeld = false
 function keepSliver(name: HTMLElement | null) {
   if (!nameSliver(name)) return
   drop(name)
@@ -266,29 +263,14 @@ function restorePart(part: HTMLElement) {
   if (part.dataset.dropped === 'tab') part.removeAttribute('tabindex')
   delete part.dataset.dropped
 }
-// Drop whole segments from the start while a chip is cut. The page you are on
-// goes last. A name sliver is not a reason: the caller drops that name first.
-function dropSegments(trail: HTMLElement) {
-  const parts = [...trail.children] as HTMLElement[]
-  const crumbs = parts.filter(part => part.classList.contains('crumb') && getComputedStyle(part).display !== 'none')
-  const joined = !trail.classList.contains('lead')
-  for (let gone = 1; gone <= crumbs.length && cutTrail(trail); gone++) {
-    const first = crumbs[gone]
-    const from = first ? parts.indexOf(first) - (joined && first.previousElementSibling?.classList.contains('sep') ? 1 : 0) : parts.length
-    parts.slice(0, from).forEach(drop)
-    if (!first) trail.dataset.empty = ''
-    trailHeld = true
-  }
-}
 function fitTrail(trail: HTMLElement | null, wide: boolean) {
   if (!trail) return
   delete trail.dataset.empty
   // Phones show the short crumb, not this name. A desktop follow-up keeps a
-  // sliver name, and a segment dropped for a cut chip, out of the row.
-  if (!wide) { nameHeld = false; trailHeld = false }
+  // sliver name out: restoring it in the same turn still measures the 1px box.
+  if (!wide) nameHeld = false
   for (const part of trail.querySelectorAll<HTMLElement>('[data-dropped]')) {
-    if (wide && trailHeld && !part.classList.contains('crumb-name')) continue
-    if (wide && nameHeld && part.classList.contains('crumb-name')) continue
+    if (nameHeld && part.classList.contains('crumb-name')) continue
     restorePart(part)
   }
   if (!wide) return
@@ -296,8 +278,16 @@ function fitTrail(trail: HTMLElement | null, wide: boolean) {
   const name = trail.querySelector<HTMLElement>('.crumb-name')
   void name?.offsetWidth
   keepSliver(name)
-  void trail.offsetWidth
-  dropSegments(trail)
+  const parts = [...trail.children] as HTMLElement[]
+  const crumbs = parts.filter(part => part.classList.contains('crumb') && getComputedStyle(part).display !== 'none')
+  // A trail that continues from a place keeps the separator before its first crumb.
+  const joined = !trail.classList.contains('lead')
+  for (let gone = 1; gone <= crumbs.length && cutTrail(trail); gone++) {
+    const first = crumbs[gone]
+    const from = first ? parts.indexOf(first) - (joined && first.previousElementSibling?.classList.contains('sep') ? 1 : 0) : parts.length
+    parts.slice(0, from).forEach(drop)
+    if (!first) trail.dataset.empty = ''
+  }
   // The segment pass lays the row out for real. A name that still comes back under
   // three em was missed by the check above, which can run before that shrink.
   void name?.offsetWidth
@@ -379,13 +369,12 @@ function refit() {
   cancelAnimationFrame(fitFrame)
   const generation = ++fitGeneration
   nameHeld = false
-  trailHeld = false
   // Fit before paint, and once more on the next frame: a newly rendered ticket
   // key may only reach its width then. Keep going while the row that arrives is
-  // not the row just fitted. Drop a sliver, then a cut segment, before the fit
-  // restores anything — restoring to remeasure is what left the cut on screen.
-  // A confirming frame that already matches does not fit again. A handful of
-  // frames is the cap.
+  // not the row just fitted, or a project name is still a sliver. Drop that
+  // sliver before the fit, so the fit cannot put it back, and before the frame
+  // cap, so the cap cannot leave it on screen. A confirming frame that already
+  // matches does not fit again. A handful of frames is the cap.
   let frames = 0
   let left = ''
   const tick = () => {
@@ -393,13 +382,14 @@ function refit() {
     const name = header.value?.querySelector<HTMLElement>('.crumbs .crumb-name') ?? null
     const trail = header.value?.querySelector<HTMLElement>('.crumbs') ?? null
     keepSliver(name)
-    if (trail) void trail.offsetWidth
-    if (trail && cutTrail(trail)) dropSegments(trail)
     // A stable row can still be a cut chip: the width did not change, the letters did
-    // (AEON-1439). Keep fitting until the trail probe would agree. A drop just made
-    // is not stable yet: the next frame is the one that shows the clip.
+    // (AEON-1439). Keep fitting until the trail probe would agree.
     if (frames >= 2 && trailSignature() === left && !nameSliver(name) && !cutTrail(trail)) { fitFrame = 0; return }
-    if (frames >= 6) { fitFrame = 0; return }
+    if (frames >= 6) {
+      if (cutTrail(trail)) fitHeader()
+      fitFrame = 0
+      return
+    }
     fitHeader()
     // A resize during the fit starts a new follow-up. This one must not replace it.
     if (generation !== fitGeneration) return
@@ -610,8 +600,6 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .crumb-short { display: none; }
 .project-crumb { min-width: 0; }
-/* Once the name has stepped aside, the chip stays whole. The trail drops the segment rather than clip it. */
-.project-crumb:has(> .crumb-name[data-dropped]) { min-width: max-content; }
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
