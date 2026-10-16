@@ -474,6 +474,13 @@ watch(owner, () => {
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
 const stopAccess = onAccessRevalidate({ reset: resetDesk })
+// Below about 360 px the tab row's container query shows the arrow alone (AEON-1448); its name then also comes as a tip.
+const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), iconOnly = ref(false)
+function readIconOnly() { const label = oneByOne.value?.querySelector('.label'); iconOnly.value = !!label && getComputedStyle(label).display === 'none' }
+watch(oneByOne, readIconOnly, { flush: 'post' })
+let rowSize: ResizeObserver | undefined
+onMounted(() => { rowSize = new ResizeObserver(readIconOnly); if (tabRow.value) rowSize.observe(tabRow.value) })
+onBeforeUnmount(() => rowSize?.disconnect())
 // How the round ended: after the last decision the desk returns to where it was opened (AEON-1339).
 function closed(result?: DeskClose) {
   opened.value = false; ruleEdit.value = undefined; changeId.value = ''
@@ -491,7 +498,8 @@ function closed(result?: DeskClose) {
     router.back()
     return
   }
-  void nextTick(() => { if (document.activeElement === document.body || !document.activeElement) (document.querySelector<HTMLElement>('[data-testid="desk-one-by-one"]') ?? document.getElementById('desk-title'))?.focus({ preventScroll: true }) })
+  // A round action that is fading out (nothing left to answer) is no place for focus (AEON-1448).
+  void nextTick(() => { if (document.activeElement === document.body || !document.activeElement) ((openRound.value.length ? oneByOne.value : undefined) ?? document.getElementById('desk-title'))?.focus({ preventScroll: true }) })
 }
 // Undo after closing acts as Change until a withdraw exists (AEON-1340): the memo reopens on the answer.
 function undoAfterClose(id: string) {
@@ -503,13 +511,6 @@ function undoAfterClose(id: string) {
 }
 function undoRow(item: DeskItem) { filter.value = 'decided'; outcomeFilter.value = ''; changeId.value = item.id; begin(item.id) }
 function beginOpen() { if (!openRound.value.length) return; filter.value = 'open'; begin() }
-// Below about 360 px the tab row's container query shows the arrow alone (AEON-1448); its name then also comes as a tip.
-const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), iconOnly = ref(false)
-function readIconOnly() { const label = oneByOne.value?.querySelector('.label'); iconOnly.value = !!label && getComputedStyle(label).display === 'none' }
-watch(oneByOne, readIconOnly, { flush: 'post' })
-let rowSize: ResizeObserver | undefined
-onMounted(() => { rowSize = new ResizeObserver(readIconOnly); if (tabRow.value) rowSize.observe(tabRow.value) })
-onBeforeUnmount(() => rowSize?.disconnect())
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
