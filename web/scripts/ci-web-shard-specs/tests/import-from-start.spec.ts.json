@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 10.9,
+    "selectedTests": 8
+  },
+  "spec": {
+    "file": "tests/import-from-start.spec.ts",
+    "listedTests": 8,
+    "weightSeconds": 60,
+    "weightSource": "unmeasured-estimate"
+  }
+}

@@ -8,8 +8,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"regexp"
 	"slices"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var deliveryID = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
@@ -243,7 +246,7 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 		if e.Action == "checks_requested" {
 			// Persist a fail-closed publication even when membership resolution
 			// fails. Receipt retries can fill the immutable member snapshot.
-			err = db.InTenant(db.AllProjects(ctx, "admission unknown group"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+			err = m.webhookProjectionTx(db.AllProjects(ctx, "admission unknown group"), func(tx pgx.Tx) error {
 				if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 					return err
 				}
@@ -301,7 +304,7 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 	}
 	at := m.now()
 	service := db.AllProjects(ctx, "authenticated delivery webhook")
-	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	err = m.webhookProjectionTx(service, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
@@ -349,6 +352,29 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 		return webhookFailed, err
 	}
 	return webhookRecorded, nil
+}
+
+// Retry only a definite lock-timeout rollback, never an ambiguous commit or a
+// GitHub read. Each attempt re-enters RLS and takes the tenant fence before
+// reading current platform/admission facts. The observation session stays held
+// across retries, preserving snapshot order. Three attempts and the enclosing
+// projection deadline bound the wait; the normal lock_timeout stays in force.
+func (m *Module) webhookProjectionTx(ctx context.Context, write func(pgx.Tx) error) error {
+	for attempt := 0; ; attempt++ {
+		err := db.InTenant(ctx, m.pool, m.config.TenantID, write)
+		var postgres *pgconn.PgError
+		if !errors.As(err, &postgres) || postgres.Code != "55P03" || attempt == 2 {
+			return err
+		}
+		backoff := time.Duration(50+rand.Int64N(100)) * time.Millisecond * time.Duration(1<<attempt)
+		delay := time.NewTimer(backoff)
+		select {
+		case <-delay.C:
+		case <-ctx.Done():
+			delay.Stop()
+			return ctx.Err()
+		}
+	}
 }
 
 func admissionStatusEcho(raw []byte) bool {

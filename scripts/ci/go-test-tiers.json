@@ -6172,6 +6172,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookPermissionNoticeAtomicity","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookProjectionLockBurst","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookRateHintBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookReceiptIntegrityAndClaims","tier":"ESSENTIAL"}
@@ -9017,6 +9019,22 @@
     {"kind":"go","package":"internal/profile","name":"TestProfileTenantUniquenessAvatarAndUndo","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestValidateAndCrop","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestClientIPTrustsOnlyConfiguredProxies","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestConcurrentCreatesConsumeOnce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestCreateFromDraft","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestCreateRollsBackAsOneTransaction","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestDraftExpiry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestHandoffRefusals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestMarkdownTextStaysText","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestParsePayloadV1","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/projectgroups","name":"TestDeletedProjectsLeaveSharedGroups","tier":"GATED-FULL"}
     ,

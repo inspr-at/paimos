@@ -6,13 +6,13 @@ import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
-import { arrivals, deskItemID, deskLinkItem, deskSourceLines, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
+import { arrivals, deskEmptyState, deskItemID, deskLinkItem, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import { agentName, harnessLabel, RISK_LABEL, riskFor } from '../lib/agentState'
 import { captureToastOwner, toast } from '../lib/toast'
-import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readDeskTickets, readQuestion, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
+import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readDeskTickets, readQuestion, tierSessionsFromRefresh, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
 import { phoneCapability } from '../lib/deskPhoneApproval'
 import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessRevalidate } from '../lib/authz'
@@ -24,6 +24,8 @@ import { revokeApproval } from '../lib/agents'
 import { getRun } from '../lib/agentRows'
 import { undoKnowledge } from '../lib/knowledge'
 import { doctrineInbox, inboxChanged } from '../lib/doctrineInbox'
+import deskLight from '../assets/desk/desk-empty-light.webp'
+import deskDark from '../assets/desk/desk-empty-dark.webp'
 
 const session = useSession()
 const agents = useAgents()
@@ -33,7 +35,7 @@ const makeAdapters = () => ({ approvalRun: async (id: string) => {
   const run = await getRun(id)
   if (session.identity !== identity || !session.authenticationCurrent()) throw new Error('The person changed while reading approval ownership.')
   return agents.admitRun(run)
-}, tiers: nativeTierAdapter(async () => { await agents.refreshSessions(); return agents.sessions }, can, async (project, id) => {
+}, tiers: nativeTierAdapter(async () => tierSessionsFromRefresh(await agents.refreshSessions(), agents.sessions), can, async (project, id) => {
   await agents.loadSessionDetail(project, id)
   return agents.sessionById(id)
 }) })
@@ -43,7 +45,7 @@ const items = ref<DeskItem[]>([]), roundItems = ref<DeskItem[]>([]), round = ref
 // Same-view links can close and reopen in one render; each new round must
 // discard the prior memo's index, drafts and pending context reads.
 const memoRound = ref(0)
-const state = ref<'loading' | 'ready'>('loading'), warnings = ref<string[]>([]), more = ref({ open: false, answered: false }), loading = ref(false), pages = ref({ open: 1, answered: 1 }), filter = ref<'open' | 'decided'>('open'), outcomeFilter = ref<DeskOutcome | 'approvals' | ''>('')
+const state = ref<'loading' | 'ready'>('loading'), warnings = ref<string[]>([]), unanswered = ref<DeskSource[]>([]), more = ref({ open: false, answered: false }), loading = ref(false), pages = ref({ open: 1, answered: 1 }), filter = ref<'open' | 'decided'>('open'), outcomeFilter = ref<DeskOutcome | 'approvals' | ''>('')
 const roundBaseline = ref<string[]>([]), phoneVerification = ref<boolean | undefined>(), capabilityError = ref('')
 // Names the step-up method on Approve; the server makes the actual choice.
 const stepupMethod = ref('Passkey or sign-in')
@@ -88,7 +90,7 @@ const emptyCopy = computed(() => {
   if (filter.value === 'decided') return 'No recorded decisions in this view.'
   const place = scopePlace.value
   if (scopeActive.value && scopeKind.value === 'lesson') return place ? `No lessons wait in ${place}.` : 'No lessons are waiting.'
-  if (scopeActive.value && place) return `Nothing is waiting in ${place}.`
+  if (scopeActive.value && place) return `Nothing waits for you in ${place}`
   if (scopeActive.value) return 'Nothing in this view is waiting.'
   return 'Nothing is waiting in the available sources.'
 })
@@ -104,13 +106,16 @@ const openSourceIDs = computed(() => desk.projection ? new Set(desk.projection.i
 // source counts them, including while a committed write response is pending.
 const openItems = computed(() => items.value.filter(item => !item.decided && inScope(item)
   && (!item.personStep || !openSourceIDs.value || openSourceIDs.value.has(item.id))))
+// The first read shows no count yet (AEON-1406); the empty slot keeps the tab width.
+const reading = computed(() => state.value === 'loading' && !items.value.length)
 const openCountLabel = computed(() => {
+  if (reading.value) return ''
   if (!scopeActive.value) return desk.count ?? '?'
   if (state.value !== 'ready' || desk.count === null) return '?'
   return openItems.value.length
 })
 const groupOpenCount = (rows: DeskItem[]) => rows.filter(item => openItems.value.includes(item)).length
-const decidedCountLabel = computed(() => items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
+const decidedCountLabel = computed(() => reading.value ? '' : items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
 const visible = computed(() => items.value.filter(item => inScope(item) && (item.decided === (filter.value === 'decided') || filter.value === 'open' && item.personStep && settledSteps.value.has(item.id)) && (filter.value === 'open' || !outcomeFilter.value
   || (outcomeFilter.value === 'approvals' ? item.kind === 'approval' : (item.kind === 'question' || item.kind === 'handover') && item.outcome === outcomeFilter.value))))
 // Link-out rows are decided on their settings page, so they never join a memo round.
@@ -236,6 +241,16 @@ function rowFormKeys(event: KeyboardEvent, item: DeskItem) {
 }
 // Failed sources say so in one calm line each, at the end of the card; truncation stays explicit.
 const sourceLines = computed(() => deskSourceLines(warnings.value, linkError.value !== ''))
+const failedLines = computed(() => deskSourceLines(warnings.value).filter(line => line.retry))
+// AEON-1406: the empty Open tab. Any source that did not answer gives B, never A.
+const emptyState = computed(() => filter.value === 'open' ? deskEmptyState({ reading: reading.value, open: visible.value.length, scoped: scopeActive.value, unanswered: unanswered.value, failed: failedLines.value.length > 0 }) : null)
+// Reading, all clear and a silent source share one frame, so switching between them moves nothing.
+const clearFrame = computed(() => !scopeActive.value && (emptyState.value === 'reading' || emptyState.value === 'clear' || emptyState.value === 'incomplete'))
+const unansweredLine = computed(() => deskUnansweredLine(unanswered.value))
+// In that frame the quiet line names the failed sources once; truncation and link lines stay listed below.
+const listedLines = computed(() => clearFrame.value ? sourceLines.value.filter(line => !failedLines.value.some(failed => failed.text === line.text)) : sourceLines.value)
+// A project scope says its name and Show all in the empty line itself (design C), so the scope line steps aside.
+const scopeInCard = computed(() => filter.value === 'open' && !visible.value.length && !!scopeProject.value && !scopeKind.value)
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
 async function refresh() {
   if (!session.authenticationCurrent()) return
@@ -282,7 +297,7 @@ async function refresh() {
     applyRead(result)
     followLink()
     void readTickets(result.items.filter(item => !item.decided).slice(0, 300))
-  } catch { if (turn === generation) warnings.value = ['The desk could not be read. Try refreshing.'] }
+  } catch { if (turn === generation) { warnings.value = ['The desk could not be read. Try refreshing.']; unanswered.value = ['desk'] } }
   finally { if (alive && turn === generation) { state.value = 'ready'; loading.value = false } }
 }
 function applyRead(result: DeskRead) {
@@ -298,7 +313,7 @@ function applyRead(result: DeskRead) {
   }
   result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
   currentRead = result
-  sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
+  sources = result.sources; items.value = result.items; warnings.value = result.warnings; unanswered.value = result.unanswered ?? []; more.value = result.hasMore
   projectNames.value = result.projectNames
   nextKeyTrims.value = result.nextKeyTrims
   pages.value = { open: result.questionPositions.open?.pages ?? pages.value.open, answered: result.questionPositions.answered?.pages ?? pages.value.answered }
@@ -462,7 +477,7 @@ function resetDesk() {
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
-  warnings.value = []; more.value = { open: false, answered: false }; loading.value = false
+  warnings.value = []; unanswered.value = []; more.value = { open: false, answered: false }; loading.value = false
 }
 watch(owner, () => {
   resetDesk()
@@ -526,12 +541,20 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
         <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
       </div>
     </div>
-    <p v-if="scopeActive" class="scope-line" data-testid="desk-scope">{{ scopeCopy }} <RouterLink :to="showAllTo">Show all</RouterLink></p>
+    <p v-if="scopeActive && !scopeInCard" class="scope-line" data-testid="desk-scope">{{ scopeCopy }} <RouterLink :to="showAllTo">Show all</RouterLink></p>
     <nav v-if="nextKeyTrims[trimState] || trimCursors[trimState]" class="trim-pages" aria-label="Key trim pages"><button type="button" class="btn sm ghost" :disabled="loading || !trimCursors[trimState]" @click="pageKeyTrims(true)">First key trims</button><button type="button" class="btn sm ghost" :disabled="loading || !nextKeyTrims[trimState]" @click="pageKeyTrims()">Next key trims</button><span>Up to 100 key trims per page</span></nav>
     <section class="queue glass-card list-only" :class="{ clear: filter !== 'open' || !visible.length }" :aria-label="filter === 'open' ? 'Open' : 'Decided'" :aria-busy="loading" data-testid="desk-list">
-      <p v-if="state === 'loading' && !items.length" class="empty-line" role="status"><AppIcon name="clock" :size="16" /><span>Reading the desk…</span></p>
+      <!-- AEON-1406 (Tick's approved design): D reading, A all clear and B a silent source share this frame;
+           B's line has its slot in A and D, so none of them moves the card. -->
+      <div v-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
+        <span class="art" aria-hidden="true"><template v-if="emptyState !== 'reading'"><img class="light" :src="deskLight" alt="" width="840" height="560" decoding="async" loading="lazy"><img class="dark" :src="deskDark" alt="" width="840" height="560" decoding="async" loading="lazy"></template></span>
+        <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />Nothing waits for you</template></p>
+        <p class="quiet" role="status" data-testid="desk-unanswered"><template v-if="emptyState === 'incomplete'"><AppIcon name="clock" :size="14" /><span>{{ unansweredLine }}</span><span class="sep" aria-hidden="true">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
+        <p v-if="emptyState === 'reading'" class="reading-note" role="status">Reading the desk…</p>
+      </div>
+      <p v-else-if="reading" class="empty-line" role="status"><AppIcon name="clock" :size="16" /><span>Reading the desk…</span></p>
       <template v-else-if="filter === 'open'">
-        <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon :name="sourceLines.some(line => line.retry) ? 'alert' : 'check'" :size="16" /><span>{{ scopeActive ? emptyCopy : sourceLines.some(line => line.retry) ? 'Nothing to show from the sources that answered' : 'Nothing waits for you' }}</span></p>
+        <p v-if="!visible.length" class="empty-line" data-testid="desk-empty"><AppIcon name="check" :size="16" /><span>{{ emptyCopy }}<template v-if="scopeInCard"> · <RouterLink class="linkish" :to="showAllTo">Show all</RouterLink></template></span></p>
         <div v-for="group in [{ key: 'held', label: 'Waiting on you', note: 'something is held up until you answer', rows: heldRows }, { key: 'ready', label: 'When you’re ready', note: 'the agents carry on meanwhile', rows: readyRows }].filter(group => group.rows.length)" :key="group.key" class="q-group" :class="group.key">
           <p class="q-group-label">{{ group.label }}<span class="n">{{ groupOpenCount(group.rows) }}</span><span class="group-note">{{ group.note }}</span></p>
           <ul class="items desk-list" :aria-label="group.label">
@@ -580,8 +603,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
             </template>
         </ul>
       </template>
-      <div v-if="sourceLines.length || more[filter === 'open' ? 'open' : 'answered']" class="source-warnings" role="status">
-        <p v-for="line in sourceLines" :key="line.text" class="src-error"><AppIcon name="alert" :size="14" /><span>{{ line.text }}</span><template v-if="line.retry"><span class="sep">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
+      <div v-if="listedLines.length || more[filter === 'open' ? 'open' : 'answered']" class="source-warnings" role="status">
+        <p v-for="line in listedLines" :key="line.text" class="src-error"><AppIcon name="alert" :size="14" /><span>{{ line.text }}</span><template v-if="line.retry"><span class="sep">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
         <p v-if="more[filter === 'open' ? 'open' : 'answered']" class="src-error"><AppIcon name="list" :size="14" /><span>More questions are available</span><span class="sep">·</span><button v-if="pages[filter === 'open' ? 'open' : 'answered'] < MAX_QUESTION_PAGES" type="button" class="linkish" :disabled="loading" @click="loadMore">Load 100 more</button><span v-else>the view shows up to 1,000 questions per state</span></p>
       </div>
     </section>
@@ -700,8 +723,32 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .linkish:disabled { opacity: .55; cursor: default; }
 .linkish:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .empty-line { display: flex; align-items: center; gap: 8px; margin: 0; padding: 26px 22px; font-size: 14px; color: var(--ink-2); }
-.empty-line svg { color: var(--ok); }
+.empty-line svg { flex: none; color: var(--ok); }
+/* AEON-1406: the calm empty desk. The picture sits above one line; a silent source adds a quiet line in its reserved slot. */
+.all-clear { position: relative; display: grid; justify-items: center; gap: 10px; padding: 28px 22px 30px; text-align: center; }
+.all-clear .art { display: block; width: min(100%, 340px); aspect-ratio: 3 / 2; }
+.all-clear .art img { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* One picture per theme; the other is never shown (and, lazy and undisplayed, never fetched). */
+.all-clear .art .dark { display: none; }
+:root[data-theme="dark"] .all-clear .art .light { display: none; }
+:root[data-theme="dark"] .all-clear .art .dark { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .all-clear .art .light { display: none; }
+  :root:not([data-theme="light"]) .all-clear .art .dark { display: block; }
+}
+.all-clear .line { display: inline-flex; align-items: center; gap: 8px; min-height: 22px; margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.all-clear .line svg { flex: none; color: var(--ok); }
+/* Inline flow, so a narrow card wraps the sentence and keeps Try again with it. */
+.all-clear .quiet { justify-self: stretch; min-height: 20px; margin: 0; font-size: 12.5px; line-height: 20px; color: var(--ink-3); text-wrap: balance; }
+/* Base svg is a block; inline here, so the icon flows with its sentence. */
+.all-clear .quiet svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.all-clear .quiet .sep { margin: 0 6px; opacity: .6; }
+.all-clear .linkish, .empty-line .linkish { font-weight: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.all-clear.reading > :not(.reading-note) { visibility: hidden; }
+.reading-note { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; font-size: 13px; color: var(--ink-3); }
 .arrival-line { margin: 12px 4px 0; font-size: 12px; color: var(--teal-ink); }
+/* The quiet line takes two lines in a narrow card, so its slot does too. */
+@container queue (max-width: 640px) { .all-clear .quiet { min-height: 40px; } }
 @container queue (max-width: 760px) {
   .item { grid-template-columns: 30px minmax(0, 1fr); }
   .row-actions { grid-column: 2; justify-self: start; }
@@ -719,5 +766,6 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
   .res-title { max-width: 100%; }
   .q-group-label { padding: 0 14px; }
 }
+@media (max-width: 560px) { .all-clear { padding: 20px 16px 24px; } .all-clear .art { width: min(100%, 250px); } }
 @media (pointer: coarse) { .seg button { height: 40px; min-width: 44px; } .dp-bar { gap: 14px; } .linkish { position: relative; } .linkish::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); } }
 </style>

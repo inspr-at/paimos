@@ -1957,6 +1957,28 @@
       "locator": {
         "tenant_column": "tenant_id"
       }
+    },
+    {
+      "table": "import_project_drafts",
+      "classification": "personal",
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "capability_digest": "secret",
+        "payload": "personal",
+        "payload_bytes": "metadata",
+        "language": "metadata",
+        "created_at": "metadata",
+        "expires_at": "metadata",
+        "consumed_at": "personal",
+        "consumed_by": "personal",
+        "project_id": "metadata",
+        "ticket_count": "metadata"
+      },
+      "locator": {
+        "person_column": "consumed_by",
+        "tenant_column": "tenant_id"
+      }
     }
   ],
   "version": 1

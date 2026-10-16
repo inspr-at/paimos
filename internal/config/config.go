@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -87,6 +88,15 @@ type Config struct {
 	ReviewAppTenantID      string
 	ReviewAppRepository    string
 	ReviewWebhookSecret    []byte // Host-owned HMAC key; never logged or tenant-writable.
+	// ImportTenantSlug names the one tenant that receives conversations handed
+	// over from START as project drafts (AEON-1441, AEON_IMPORT_TENANT_SLUG).
+	// It defaults to the bootstrap tenant; "off" disables the handoff. A
+	// payload or a session cookie can never choose another tenant.
+	ImportTenantSlug string
+	// TrustedProxies are the reverse-proxy peers whose X-Forwarded-For names
+	// the client for public rate limits (AEON_TRUSTED_PROXIES: comma-separated
+	// addresses or CIDRs, default loopback, "none" trusts no proxy).
+	TrustedProxies []netip.Prefix
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -169,6 +179,12 @@ func FromEnv() (Config, error) {
 	}
 	if raw := os.Getenv("AEON_AITHEMA_OPERATOR_LOCAL_SERVICES"); raw != "" {
 		cfg.AithemaOperatorLocalServices = strings.Split(raw, ",")
+	}
+	cfg.ImportTenantSlug = getenv("AEON_IMPORT_TENANT_SLUG", cfg.BootstrapTenantSlug)
+	var proxyErr error
+	cfg.TrustedProxies, proxyErr = TrustedProxies(getenv("AEON_TRUSTED_PROXIES", "127.0.0.0/8,::1"))
+	if proxyErr != nil {
+		return Config{}, proxyErr
 	}
 	var policyErr error
 	cfg.DoctrineBinaryAllowlist, policyErr = doctrineBinaryAllowlist(os.Getenv("AEON_DOCTRINE_BINARY_ALLOWLIST"))
@@ -378,4 +394,28 @@ func withPasswordFile(dsn, file string) (string, error) {
 	}
 	u.User = url.UserPassword(u.User.Username(), pw)
 	return u.String(), nil
+}
+
+// TrustedProxies parses AEON_TRUSTED_PROXIES. "none" trusts no proxy; every
+// other entry is an IP address or a CIDR. A bad entry stops startup rather
+// than silently trusting forwarded headers from anyone.
+func TrustedProxies(raw string) ([]netip.Prefix, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "none" {
+		return nil, nil
+	}
+	var out []netip.Prefix
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if prefix, err := netip.ParsePrefix(item); err == nil {
+			out = append(out, prefix.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, fmt.Errorf("AEON_TRUSTED_PROXIES: %q is not an address or CIDR", item)
+		}
+		out = append(out, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
+	}
+	return out, nil
 }
