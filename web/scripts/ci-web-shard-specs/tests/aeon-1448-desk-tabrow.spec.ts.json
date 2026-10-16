@@ -1,7 +1,7 @@
 {
   "group": "decision-desk",
   "nightlyTiming": {
-    "seconds": 60,
+    "seconds": 20.1,
     "selectedTests": 4
   },
   "spec": {
