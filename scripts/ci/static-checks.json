@@ -257,12 +257,12 @@
     },
     {
       "id": "request-body-ownership",
-      "command": "go test ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1",
+      "command": "go test -p 2 ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1",
       "cwd": ".",
       "ci": {
         "job": "go-static",
         "step": "Bound every HTTP request body read",
-        "command": "go test ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1",
+        "command": "go test -p 2 ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1",
         "cwd": "."
       },
       "needs": [
