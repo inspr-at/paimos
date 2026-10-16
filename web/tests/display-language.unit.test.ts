@@ -2,8 +2,11 @@
 import { expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { displayLanguage } from '../src/lib/displayLanguage'
+import { draftLanguage } from '../src/lib/importDraft'
 import { displayLanguageViolations } from '../scripts/check-display-language.mjs'
 import { releaseLang } from '../src/lib/releases'
+
+const HANDOFF = 'A'.repeat(43)
 
 // Risk: a German regional profile translates a single card inside an English page.
 it('keeps the incomplete app in English and preserves the independent release-note choice', () => {
@@ -31,6 +34,26 @@ it('rejects direct and aliased locale detectors while allowing language selectio
   expect(displayLanguageViolations(allowed, 'lib/words.ts')).toEqual([])
   expect(displayLanguageViolations("<script setup>const de = profile.locale === 'de'</script>", 'components/New.vue')).toHaveLength(1)
   expect(displayLanguageViolations('<template><Card :german="profile.profile?.locale === \'de\'" /></template>', 'components/New.vue')).toHaveLength(1)
+})
+
+// Risk: the START sheet detects the browser language on its own, so one card
+// can be German while the rest of the app stays English, or a German browser
+// is ignored before the draft is read (AEON-1441).
+it('follows the START handoff language, else the browser, through the shared helper', () => {
+  expect(displayLanguage('de-AT', 'start')).toBe('de')
+  expect(displayLanguage(' DE-de ', 'start')).toBe('de')
+  expect(displayLanguage('en-GB', 'start')).toBe('en')
+  expect(displayLanguage('fr-FR', 'start')).toBe('en')
+  expect(displayLanguage(undefined, 'start')).toBe('en')
+  expect(displayLanguage('de-AT')).toBe('en')
+  const source = readFileSync(new URL('../src/lib/importDraft.ts', import.meta.url), 'utf8')
+  expect(displayLanguageViolations(source, 'lib/importDraft.ts'), source).toEqual([])
+  expect(draftLanguage({ draft: HANDOFF, lang: 'en' }, 'de-AT')).toBe('en')
+  expect(draftLanguage({ draft: HANDOFF, lang: 'de' }, 'en-GB')).toBe('de')
+  expect(draftLanguage({ draft: HANDOFF, lang: null }, 'de-AT')).toBe('de')
+  expect(draftLanguage(null, 'de')).toBe('de')
+  expect(draftLanguage(null, 'fr-FR')).toBe('en')
+  expect(draftLanguage(null, ' de-AT ')).toBe('de')
 })
 
 // This whole-source guard also catches files that were not in AEON-998's inventory.

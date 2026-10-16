@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,6 +128,9 @@ func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, s
 		var github *crossreview.GitHubHTTPError
 		if errors.As(err, &github) {
 			attrs = append(attrs, "github_status", github.StatusCode)
+		}
+		if sqlstate, ok := strings.CutPrefix(httpapi.ErrorClass(err), "postgres_"); ok && sqlstate != "unknown" {
+			attrs = append(attrs, "sqlstate", sqlstate)
 		}
 		logger := m.webhookFailures.logger
 		if logger == nil {

@@ -11,6 +11,7 @@ import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
 import { announceAttachCode, attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
 import { scopeOwner } from './lib/identityScope'
+import { carriesDraft, draftInAddress, holdDraft } from './lib/importDraft'
 import { expiredSignIn, takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
@@ -27,6 +28,8 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
+    // AEON-1441: a conversation handed over from START opens the New project sheet over Projects.
+    { path: '/new-project', component: ProjectsView, meta: { title: 'New project' } },
     { path: '/briefing', redirect: '/agents' },
     { path: '/activity', component: () => import('./views/ActivityView.vue'), meta: { title: 'Activity' } },
     // One record for the project page: its list, the open ticket and its Knowledge
@@ -149,6 +152,14 @@ router.beforeEach(async (to, from) => {
       return { path: projectSettingsPath(String(to.params.projectKey), section), query: to.query, hash: to.hash, replace: true }
     }
   }
+  // START's handoff carries its capability in the fragment (AEON-1441). Like the
+  // attach code below, it leaves the address bar before any other rule runs and
+  // waits in this tab; the sign-in continuation is the bare /new-project.
+  if (to.path === '/new-project' && carriesDraft(to.hash, to.query)) {
+    const held = draftInAddress(to.hash, to.query)
+    if (held) holdDraft(held)
+    return { path: '/new-project', query: {}, hash: '', replace: true }
+  }
   // The terminal's attach link carries a one-time code in its fragment. It leaves the
   // address bar before any other rule runs, so no redirect, return path or report can
   // copy it; the page that opens the review picks it up from memory (AEON-440).
@@ -216,6 +227,7 @@ router.beforeEach(async (to, from) => {
     // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
     if (to.path.startsWith('/phone-approvals/')) return { path: '/signin', query: { return: to.fullPath } }
+    if (to.path === '/new-project') return { path: '/signin', query: { return: '/new-project' } }
     if (wasSignedIn) return signInAgain(to.fullPath)
     dropAttachCode()
     return '/signin'

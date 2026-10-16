@@ -233,7 +233,7 @@ function routeRecords(): Router {
     './stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } }, refresh: async () => {} }) },
     './stores/workVocabulary': { useWorkVocabulary: () => ({ load: async () => {} }) },
     './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
-    './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/identityScope': {}, './lib/signInReturn': { takeSignInReturn: () => '/' },
+    './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': { takeSignInReturn: () => '/' },
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
     './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },
   }).router

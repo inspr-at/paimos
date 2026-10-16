@@ -1,0 +1,8 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/import/project-draft": "nodes.write",
+    "POST /api/import/project-draft/create": "nodes.write",
+    "POST /import/project-draft": "public"
+  }
+}

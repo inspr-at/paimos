@@ -290,6 +290,12 @@
     ,
     "browser:tests/aeon-1285-agent-rows.spec.ts:light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
     ,
+    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once"
+    ,
+    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once"
+    ,
+    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 light refreshes keep the chosen tab and write the opening line once"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -6112,6 +6118,14 @@
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"touch › AEON-1438 phone composer: the choice row follows typing during a turn, never the turn itself","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 1440 light refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 390 light refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -9671,6 +9685,22 @@
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"missing/unsafe preview keeps download and refuses app-origin iframe","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/indicator-controls.spec.ts","name":"100% fills the space inside each ring; 30% is 30% of it; unset keeps each drawing","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -15158,6 +15188,8 @@
     ,
     {"kind":"node","file":"tests/aeon-1355-measure-contract.test.ts","name":"AEON-1355 time budget decides pass and long tasks fail only search and scroll","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/aeon-1439-panel-opening.test.ts","name":"AEON-1439: only another person or another session opens the panel again; refreshes never do and an abandoned opening opens on the next sight","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/aeon-635.test.ts","name":"Other follows the displayed groups when an untold feature or fix is shown as maintenance (AEON-635)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/aeon-635.test.ts","name":"a named ticket claims all its commits and does not make the release match Other (AEON-635)","tier":"GATED-FULL"}
@@ -16227,6 +16259,8 @@
     {"kind":"node","file":"tests/project-header.test.ts","name":"new and invalid device choices use Compact without importing row height","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/project-header.test.ts","name":"physical Period works while Shift changes its character on English or German layouts","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/project-key-suggest.test.ts","name":"German letters are spelt out before the key is suggested","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/project-order.test.ts","name":"custom order: ranked projects first, new ones after them and equal among themselves","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -17804,6 +17838,8 @@
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"follows the START handoff language, else the browser, through the shared helper","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps the incomplete app in English and preserves the independent release-note choice","tier":"ESSENTIAL"}
@@ -17951,6 +17987,12 @@
     {"kind":"vitest","file":"tests/header-graph-setting.unit.test.ts","name":"the Display menu has no header graph switch","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/header-graph-setting.unit.test.ts","name":"the developer setting is off by default, also after an earlier list:display choice, and toggles the graph","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/import-draft-routing.unit.test.ts","name":"holds nothing for a malformed capability, and still opens the page","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/import-draft-routing.unit.test.ts","name":"keeps the handoff through sign-in: the continuation is the bare assistant","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/import-draft-routing.unit.test.ts","name":"moves the capability out of the address into this tab before anything else","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/indicator-renderers.unit.test.ts","name":"Orbit: inner size scales only the artwork layer and ignores invalid values","tier":"GATED-FULL"}
     ,

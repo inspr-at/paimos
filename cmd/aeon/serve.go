@@ -76,6 +76,7 @@ import (
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
+	"github.com/inspr-at/paimos/internal/projectdraft"
 	"github.com/inspr-at/paimos/internal/projectgroups"
 	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/inspr-at/paimos/internal/recurrences"
@@ -306,6 +307,20 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	historyMod.WithBackfills(pool, "AEON")
 	portalMod := portal.New(pool, cfg.Env != "dev", authCfg.SessionKey)
 	startWorker(func() { portalMod.RunLimitSweep(workerCtx) })
+	// AEON-1441: conversations handed over from START land in the one import
+	// tenant this instance configures; a missing tenant turns the handoff off.
+	importTenant := ""
+	if cfg.ImportTenantSlug != "" && cfg.ImportTenantSlug != "off" {
+		err := pool.QueryRow(ctx, `SELECT id::text FROM tenants WHERE slug=$1`, cfg.ImportTenantSlug).Scan(&importTenant)
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("START handoff off: AEON_IMPORT_TENANT_SLUG names no tenant")
+		} else if err != nil {
+			closeListener()
+			return fmt.Errorf("import tenant: %w", err)
+		}
+	}
+	draftMod := projectdraft.New(projectdraft.Options{Pool: pool, TenantID: importTenant, Store: fileStore, MacKey: authCfg.SessionKey, TrustedProxies: cfg.TrustedProxies})
+	startWorker(func() { draftMod.RunExpirySweep(workerCtx) })
 	// AEON-178: invites can create the sign-in account through a configured identity
 	// provisioner (none by default). A misconfigured provisioner stops startup.
 	provisioner, err := identity.FromEnv()
@@ -464,6 +479,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			themes.New(pool),
 			imports.New(pool),
+			draftMod,
 			// R2: agents
 			inbox.New(pool, attachedMessages),
 			chat.New(pool, chat.Options{Enabled: cfg.ChatEnabled}),
