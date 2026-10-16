@@ -45,6 +45,21 @@ test('static CI commands are registered and every origin still exists', () => {
   }
 })
 
+// AEON-1451: the full-mode shard literal lives inside the tier-plan run body.
+// Refreshing that literal without a new not-static inventory digest is unclassified.
+test('tier-plan sixteen-shard full list is classified and a twelve-shard body is not', () => {
+  const jobs = parseWorkflow(workflow)
+  const body = jobs.get('tier-plan').filter(step => step.run).map(step => step.run).join('\n')
+  const sixteen = '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]'
+  const twelve = '[1,2,3,4,5,6,7,8,9,10,11,12]'
+  assert.equal(body.split(sixteen).length - 1, 3)
+  assert.equal(body.includes(twelve), false)
+  assert.equal(validateRegistry(registry, jobs), registry.checks)
+  const stale = workflow.replaceAll(sixteen, twelve)
+  assert.notEqual(stale, workflow)
+  assert.throws(() => validateRegistry(registry, parseWorkflow(stale)), /Unclassified CI run in not-static job: tier-plan/)
+})
+
 test('drift guard catches newly added commands in each full static job', () => {
   for (const job of ['go-static', 'release-check-run', 'web-catalogue', 'web-setup', 'migration-compat', 'web-unit']) for (const command of ['node --test scripts/new.test.mjs', 'bash scripts/new-check.sh', 'go run ./scripts/new', 'python3 scripts/new.py', './scripts/x.sh', 'FOO=1 node scripts/new.mjs']) {
     const mutated = workflow.replace(`  ${job}:\n`, `  ${job}:\n    steps:\n      - name: New static check\n        run: ${command}\n`)
