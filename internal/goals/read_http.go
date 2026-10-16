@@ -49,6 +49,12 @@ func (m *module) readSnapshot(r *http.Request, p tenant.Principal, fn func(conte
 		if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
 			return err
 		}
+		// Goal/root cardinalities vary sharply. A cached generic plan can turn
+		// the same bounded visibility walk into repeated tenant-wide RLS scans.
+		// Plan against this request's actual immutable ids and array sizes.
+		if _, err := tx.Exec(ctx, `SET LOCAL plan_cache_mode='force_custom_plan'`); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout='5s'`); err != nil {
 			return err
 		}
