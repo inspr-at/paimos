@@ -16,7 +16,7 @@ import (
 func validDoc() map[string]any {
 	return map[string]any{
 		"version":     1,
-		"source":      map[string]any{"product": "aithema", "host": "start.augmentoring.com", "session_id": "0f4c2a1e-7d1b-4c55-9a0e-2b8f6d3c1a90"},
+		"source":      map[string]any{"product": "aithema", "host": "start.example.com", "session_id": "0f4c2a1e-7d1b-4c55-9a0e-2b8f6d3c1a90"},
 		"language":    "de",
 		"title":       "Vorbestell-App für die Bäckerei",
 		"summary":     "Eine Bäckerei mit zwei Filialen möchte Vorbestellungen.",

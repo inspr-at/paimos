@@ -16,8 +16,8 @@ or destination.
 
 - The draft lands in the one import tenant the instance configures:
   `AEON_IMPORT_TENANT_SLUG`, default the bootstrap tenant; `off` turns the
-  handoff off. START's own host option decides which Paimos it posts to (START
-  → pm.augmentoring.com).
+  handoff off. START's own host option decides which Paimos instance it posts
+  to; nothing is hard-wired to one instance.
 - Bounds, checked before anything is stored: 512 KiB wire payload, title ≤ 200,
   summary ≤ 4,000, facts and open points ≤ 50 × 500, transcript ≤ 2,000 turns,
   unknown fields refused, version other than 1 refused with its own page. A

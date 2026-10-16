@@ -14,7 +14,7 @@ const POINTS = ['Online-Zahlung schon zum Start oder erst später?', 'Tagesliste
 const lena = { id: '22222222-2222-4222-8222-222222222222', name: 'Lena Huber' }
 const draft = (language: 'de' | 'en') => ({
   status: 'ready', language, handed_over_at: '2026-10-16T07:42:00Z', expires_at: '2026-10-16T08:12:00Z',
-  source: { product: 'aithema', host: 'start.augmentoring.com' }, title: 'Vorbestell-App für die Bäckerei',
+  source: { product: 'aithema', host: 'start.example.com' }, title: 'Vorbestell-App für die Bäckerei',
   summary: 'Eine Bäckerei mit zwei Filialen möchte, dass Stammkundinnen und Stammkunden Brot und Gebäck bis 18 Uhr am Vortag vorbestellen und am Morgen ohne Warten abholen. Bezahlt wird vorerst bei der Abholung, eine Online-Zahlung ist für später denkbar. Die Backstube braucht eine einfache Tagesliste, damit weniger übrig bleibt und nichts fehlt.',
   facts: ['Zwei Filialen, gebacken wird in der Hauptfiliale', 'Rund 120 Vorbestellungen pro Woche, heute per Telefon', 'Bestellschluss 18 Uhr am Vortag, Abholung ab 6:30 Uhr', 'Etwa 40 Artikel, das Sortiment wechselt saisonal', 'An der Theke steht ein Tablet für das Personal', 'Die Kasse hat keine Schnittstelle, nur einen CSV-Export'],
   open_points: POINTS, messages: 23,
@@ -119,7 +119,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       arrive.done()
       expect(world.seen.reads.every(r => r.header === CAPABILITY && !r.url.includes(CAPABILITY))).toBe(true)
       await expect(page.locator('#np-key')).toHaveValue('VAFDB')
-      await expect(sheet(page).locator('.np-from')).toHaveText('From your conversation on start.augmentoring.com · 16 Oct, 09:42')
+      await expect(sheet(page).locator('.np-from')).toHaveText('From your conversation on start.example.com · 16 Oct, 09:42')
       await expect(sheet(page).locator('.cnt')).toHaveText('4 of 4')
       await expect(page.locator('#np-owner')).toContainText(me.name)
       await craft(page, width < 600)
@@ -205,7 +205,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await de.goto(`/new-project#draft=${CAPABILITY}&lang=de`)
       await expect(sheet(de).getByRole('heading', { name: 'Neues Projekt aus START' })).toBeVisible()
       await expect(de.locator('#np-key')).toHaveValue('VAFDB')
-      await expect(sheet(de).locator('.np-from')).toHaveText('Aus deinem Gespräch auf start.augmentoring.com · 16. Okt., 09:42')
+      await expect(sheet(de).locator('.np-from')).toHaveText('Aus deinem Gespräch auf start.example.com · 16. Okt., 09:42')
       for (const text of ['Was du anlegst', 'Kürzel', 'Verantwortlich', 'Für jeden offenen Punkt ein Ticket anlegen', '4 von 4']) await expect(sheet(de).getByText(text, { exact: true })).toBeVisible()
       await expect(de.locator('#np-go')).toContainText('Projekt anlegen')
       await craft(de, width < 600)

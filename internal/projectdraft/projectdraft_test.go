@@ -232,7 +232,7 @@ func TestCreateFromDraft(t *testing.T) {
 
 	for range 2 {
 		view := decodeBody[View](t, expectOK(t, f.call(t, f.a, http.MethodGet, "/api/import/project-draft", capability, nil)))
-		if view.Status != "ready" || view.Language != "de" || view.Source.Host != "start.augmentoring.com" || len(view.OpenPoints) != 3 || view.Messages != 2 {
+		if view.Status != "ready" || view.Language != "de" || view.Source.Host != "start.example.com" || len(view.OpenPoints) != 3 || view.Messages != 2 {
 			t.Fatalf("view %+v", view)
 		}
 	}
@@ -267,7 +267,7 @@ func TestCreateFromDraft(t *testing.T) {
 	if !strings.HasPrefix(body, "Aus dem START-Gespräch|") || !strings.Contains(body, `\[Link\](https://evil.example) und # Überschrift`) || !strings.Contains(body, "## Was noch offen ist") {
 		t.Fatalf("knowledge entry %q", body)
 	}
-	if got := f.scalar(t, `SELECT name||'|'||content_type FROM attachments WHERE node_id=$1`, project.ID); got != "start-conversation-start.augmentoring.com.txt|text/plain; charset=utf-8" {
+	if got := f.scalar(t, `SELECT name||'|'||content_type FROM attachments WHERE node_id=$1`, project.ID); got != "start-conversation-start.example.com.txt|text/plain; charset=utf-8" {
 		t.Fatalf("transcript attachment %q", got)
 	}
 	if got := f.scalar(t, `SELECT string_agg(type, ',' ORDER BY id) FROM events WHERE tenant_id=$1 AND metadata->>'imported_from'='start'`, f.tenant); got != "node.created,node.created,node.created,knowledge.created,attachment.added" {
