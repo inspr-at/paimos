@@ -59,4 +59,12 @@ func TestGoalLinksSurviveQuestionMerge(t *testing.T) {
 	if rec.Code != 404 {
 		t.Fatalf("hidden goal %d %s", rec.Code, rec.Body)
 	}
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$3 WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, goals[0], f.hidden); err != nil {
+		t.Fatal(err)
+	}
+	read := question(t, request(t.Context(), f.mux, f.agent, "GET", "/api/questions/"+q.ID, nil), 200)
+	if read.Input.GoalID != "" || read.Askers[0].Input.GoalID != "" {
+		t.Fatal("question replay exposed a goal that became hidden")
+	}
+
 }

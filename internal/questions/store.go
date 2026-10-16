@@ -263,7 +263,7 @@ func (m *Module) read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 }
 func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, check authz.ProjectCheck) (Question, error) {
 	q := Question{Askers: []Asker{}, Pending: []Pending{}}
-	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,q.input,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
+	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,CASE WHEN q.input ? 'goal_id' AND NOT EXISTS(SELECT 1 FROM nodes visible_goal WHERE visible_goal.id::text=q.input->>'goal_id' AND visible_goal.deleted_at IS NULL) THEN q.input-'goal_id' ELSE q.input END,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
  JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id
  WHERE q.tenant_id=$1 AND q.node_id=$2 AND n.deleted_at IS NULL AND project.deleted_at IS NULL FOR SHARE OF q`, p.TenantID, id).Scan(&q.ID, &q.ProjectID, &q.Revision, &q.State, &q.Input, &q.SuggestedOutcome, &q.SuggestionReason, &q.CreatedAt, &q.UpdatedAt)
@@ -273,7 +273,7 @@ func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	if !check("questions.read", q.ProjectID) {
 		return q, missing()
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text,principal_id::text,request_id::text,coalesce(session_id::text,''),reply_root_id::text,comment_node_id::text,created_at,input,coalesce(reused_decision_id::text,''),coalesce(reused_revision,0) FROM desk_askers
+	rows, err := tx.Query(ctx, `SELECT id::text,principal_id::text,request_id::text,coalesce(session_id::text,''),reply_root_id::text,comment_node_id::text,created_at,CASE WHEN input ? 'goal_id' AND NOT EXISTS(SELECT 1 FROM nodes visible_goal WHERE visible_goal.id::text=desk_askers.input->>'goal_id' AND visible_goal.deleted_at IS NULL) THEN input-'goal_id' ELSE input END,coalesce(reused_decision_id::text,''),coalesce(reused_revision,0) FROM desk_askers
  WHERE tenant_id=$1 AND question_id=$2 AND ($3 OR principal_id=$4) ORDER BY created_at,id`, p.TenantID, id, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return q, err
