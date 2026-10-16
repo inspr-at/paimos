@@ -364,6 +364,7 @@ test.describe('touch', () => {
     const first = menu.getByRole('menuitem', { name: 'Reply' })
     await expect(first).toBeFocused()
     await expect(first).toHaveCSS('outline-style', 'none')
+    await expect(first).toHaveCSS('box-shadow', 'none')
     await page.screenshot({ path: testInfo.outputPath(`AEON-1438/long-press-390-${theme}.png`) })
     await guard.check(async () => {
       await page.keyboard.press('Escape')
@@ -377,6 +378,7 @@ test.describe('touch', () => {
     await menu.getByRole('menuitem', { name: 'Copy' }).click()
     await expect(menu).toHaveCount(0)
     await expect(mine).toBeFocused()
+    await expect(mine).toHaveCSS('outline-style', 'none')
     await expect(mine).toHaveCSS('box-shadow', 'none')
     // The keyboard reaches the same menu: Enter on the focused message, and there the ring shows.
     await message.focus()
@@ -384,6 +386,7 @@ test.describe('touch', () => {
     await expect(menu).toBeVisible()
     await expect(menu.getByRole('menuitem', { name: 'Reply' })).toBeFocused()
     await expect(menu.getByRole('menuitem', { name: 'Reply' })).toHaveCSS('outline-style', 'solid')
+    await expect(menu.getByRole('menuitem', { name: 'Reply' })).not.toHaveCSS('box-shadow', 'none')
     if (theme === 'light') await page.screenshot({ path: testInfo.outputPath('AEON-1438/menu-keyboard-390-light.png') })
     await menu.getByRole('menuitem', { name: 'Reply' }).click()
     await expect(panel.locator('.replying')).toContainText('Merged AEON-1182.')

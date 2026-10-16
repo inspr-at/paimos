@@ -253,7 +253,7 @@ onBeforeUnmount(() => {
 .msg-menu-item + .msg-menu-item { box-shadow: 0 -1px 0 var(--line); }
 @media (hover: hover) { .msg-menu-item:hover { background: var(--row-hover); } }
 .msg-menu-item:focus-visible { outline: 2px solid var(--primary-line); outline-offset: -2px; }
-.msg-menu.quiet .msg-menu-item:focus-visible { outline: none; }
+.msg-menu.quiet .msg-menu-item:focus-visible { outline: none; box-shadow: none; }
 @media (hover: none), (pointer: coarse) {
   .message-actions { display: none; }
   .msg.agent, .msg.mine { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
