@@ -25,6 +25,9 @@ for (const width of [390]) for (const theme of ['light', 'dark']) {
     // Keep the one-line rule at 360 px; only smaller phones may wrap a reason.
     for (const phoneWidth of [360, 320]) {
       await page.setViewportSize({ width: phoneWidth, height: 900 })
+      // AEON-1286: the menu row picks its form (labels, smaller labels, icons) from its width in a
+      // ResizeObserver, after this frame's animation callbacks; two frames make it settled.
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
       const more = panel.getByRole('button', { name: 'More session actions' })
       const phoneStable = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more, close: panel.getByRole('button', { name: 'Close session details' }), frame: panel })
       await phoneStable.check(async () => {
