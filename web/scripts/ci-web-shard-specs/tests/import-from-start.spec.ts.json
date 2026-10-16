@@ -1,0 +1,9 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/import-from-start.spec.ts",
+    "listedTests": 8,
+    "weightSeconds": 160,
+    "weightSource": "unmeasured-estimate"
+  }
+}

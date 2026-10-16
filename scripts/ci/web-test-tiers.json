@@ -9638,6 +9638,22 @@
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/indicator-controls.spec.ts","name":"100% fills the space inside each ring; 30% is 30% of it; unset keeps each drawing","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/indicator-controls.spec.ts","name":"Ring and Size edit independently of avatar and Hover; Save persists and previews follow","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16176,6 +16192,8 @@
     ,
     {"kind":"node","file":"tests/project-header.test.ts","name":"physical Period works while Shift changes its character on English or German layouts","tier":"NIGHTLY"}
     ,
+    {"kind":"node","file":"tests/project-key-suggest.test.ts","name":"German letters are spelt out before the key is suggested","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/project-order.test.ts","name":"custom order: ranked projects first, new ones after them and equal among themselves","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/project-order.test.ts","name":"keepOrder saves visible projects once and keeps every active place while the list fits","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -17899,6 +17917,12 @@
     {"kind":"vitest","file":"tests/header-graph-setting.unit.test.ts","name":"the Display menu has no header graph switch","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/header-graph-setting.unit.test.ts","name":"the developer setting is off by default, also after an earlier list:display choice, and toggles the graph","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/import-draft-routing.unit.test.ts","name":"holds nothing for a malformed capability, and still opens the page","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/import-draft-routing.unit.test.ts","name":"keeps the handoff through sign-in: the continuation is the bare assistant","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/import-draft-routing.unit.test.ts","name":"moves the capability out of the address into this tab before anything else","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/indicator-renderers.unit.test.ts","name":"Orbit: inner size scales only the artwork layer and ignores invalid values","tier":"GATED-FULL"}
     ,
