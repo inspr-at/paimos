@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { test, expect, type Locator, type Page } from '@playwright/test'
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
+
+// AEON-1379: a ticket key reads as one piece. The phone card list, the wide
+// rows and a parent's child rows never break a key at its hyphen ("PHAROS- /
+// 11"); the title beside it truncates or wraps instead.
+const grid = (page: Page) => page.getByRole('grid', { name: 'Tickets' })
+const rows = (page: Page) => grid(page).locator('tr.ticket-row:not(.ghost):not(.fit-row)')
+
+// One line box for the key text, nothing clipped, and the key inside its frame.
+async function wholeKey(key: Locator, frame: string) {
+  return key.evaluate((el, selector) => {
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const lines = new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => Math.round(rect.top))).size
+    const box = el.getBoundingClientRect(), outer = el.closest(selector)!.getBoundingClientRect()
+    return { text: el.textContent, lines, clipped: el.scrollWidth > el.clientWidth + 1, inside: box.left >= outer.left - .5 && box.right <= outer.right + .5 }
+  }, frame)
+}
+
+for (const width of [320, 360, 390, 1440]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`ticket keys stay on one line in the list and child rows at ${width}px ${colorScheme}`, async ({ page }, testInfo) => {
+      const errors = watchErrors(page)
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme })
+      const data = fixtures()
+      // A five-digit number on a six-letter project, with a title long enough to give way.
+      Object.assign(data.nodes.find(node => node.id === 'n-2')!, { key: 'PHAROS-14530', title: 'Add an Oracle Cloud connector that provisions guarded tenancies across every configured region' })
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      await expect(rows(page)).toHaveCount(5)
+      await page.evaluate(() => document.fonts.ready)
+      await expect(grid(page).locator('.c-key .key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
+      for (const row of await rows(page).all()) {
+        expect(await wholeKey(row.locator('.c-key .key'), 'tr')).toMatchObject({ lines: 1, clipped: false, inside: true })
+        const title = (await row.locator('.title-link').boundingBox())!, card = (await row.boundingBox())!
+        expect(title.x + title.width, 'the title gives way inside the card').toBeLessThanOrEqual(card.x + card.width + .5)
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+      await page.screenshot({ path: testInfo.outputPath(`keys-list-${width}-${colorScheme}.png`) })
+
+      await rows(page).filter({ hasText: 'PHAROS-10' }).locator('.title-link').click()
+      const panel = page.getByRole('complementary', { name: 'Ticket details' })
+      const children = panel.locator('.child-row')
+      await expect(children).toHaveCount(2)
+      await expect(children.locator('.key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
+      for (const child of await children.all()) {
+        expect(await wholeKey(child.locator('.key'), '.child-row')).toMatchObject({ lines: 1, clipped: false, inside: true })
+        const key = (await child.locator('.key').boundingBox())!, title = (await child.locator('.child-title').boundingBox())!
+        expect(key.x + key.width, 'the key never runs under the title').toBeLessThanOrEqual(title.x + .5)
+      }
+      await page.screenshot({ path: testInfo.outputPath(`keys-children-${width}-${colorScheme}.png`) })
+      expect(errors).toEqual([])
+    })
+  }
+}
