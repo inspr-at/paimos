@@ -14488,6 +14488,12 @@
     ,
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed release rows: only the version copy control reveals; the row still selects","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 Projects opens on the view used last or the default; the pin never moves a segment, and a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 the Releases sheet language leaves this browser for the server once; the view remembers its last choice","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 the ticket list opens on its default (a saved view or a mode) or the mode used last; a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in list despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
