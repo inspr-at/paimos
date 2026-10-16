@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
   <section class="session-messages" aria-label="Conversation">
     <ol v-if="rows.length" class="thread" aria-label="Messages">
       <template v-for="row in rows" :key="row.key">
-        <li v-if="row.type === 'day'" class="day" role="separator">{{ row.label }}</li>
+        <li v-if="row.type === 'day'" class="day" role="separator" :aria-label="row.label"><span aria-hidden="true">{{ row.label }}</span></li>
         <template v-else>
           <li v-if="divider(row)" class="new-divider" role="separator" :aria-label="`${newCount ?? 1} new`"><span>{{ words.newDivider }}</span></li>
           <li v-if="row.type === 'desk'" class="msg desk" :data-event="row.message.optimistic ? undefined : row.lastEvent" :data-id="row.message.id">

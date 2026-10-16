@@ -1366,6 +1366,8 @@
     ,
     "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 390"
     ,
+    "browser:tests/session-requests.spec.ts:the request form keeps its actions still while the catalog loads"
+    ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
     ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
@@ -6077,6 +6079,34 @@
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1024: hover and focus reveal them in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1440: hover and focus reveal them in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1024 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1024 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1440 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1440 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 320 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 320 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 390 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 390 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"touch › AEON-1438 \"+\" inserts a ticket reference, never an attachment","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"touch › AEON-1438 long press opens Reply and Copy in place, 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"touch › AEON-1438 long press opens Reply and Copy in place, 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"touch › AEON-1438 phone composer: the choice row follows typing during a turn, never the turn itself","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13294,6 +13324,8 @@
     ,
     {"kind":"browser","file":"tests/session-requests.spec.ts","name":"light 390: request stays pending until session completion","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-requests.spec.ts","name":"the request form keeps its actions still while the catalog loads","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 1600 detail closed pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 1600 detail closed pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15555,6 +15587,18 @@
     {"kind":"node","file":"tests/chatLive.test.ts","name":"the offered sends match the transport of the next message","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/chatLive.test.ts","name":"the working timer is tabular m:ss","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatThread.test.ts","name":"a Desk delivery is recognised by its question root or its answer record, nothing else","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatThread.test.ts","name":"a message carries at most one chip","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatThread.test.ts","name":"day separators open each day: Today, Yesterday, then the date","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatThread.test.ts","name":"receipts sit only on the latest own message; a Desk answer never takes it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatThread.test.ts","name":"the question root and its answers fold into one card at the first delivery","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatThread.test.ts","name":"the thread never shows the question id or CLI words of a Desk delivery","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/clip-link.test.ts","name":"a record changed away and back still invalidates the in-flight gesture","tier":"ESSENTIAL"}
     ,

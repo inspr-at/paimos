@@ -156,8 +156,8 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
     const text = await thread.innerText()
     for (const word of JARGON) expect(text, String(word)).not.toMatch(word)
     expect(text).not.toContain('Delivered between steps')
-    await expect(thread.getByRole('separator').filter({ hasText: 'Yesterday' })).toHaveCount(1)
-    await expect(thread.getByRole('separator').filter({ hasText: 'Today' })).toHaveCount(1)
+    await expect(thread.getByRole('separator', { name: 'Yesterday', exact: true })).toHaveCount(1)
+    await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toHaveCount(1)
 
     // Receipts only on the latest own message.
     const own = thread.locator('.msg.mine')

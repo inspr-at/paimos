@@ -596,7 +596,8 @@ onMounted(() => {
     // The keyboard or a taller composer shrinks the thread: stay on the latest post.
     resize = new ResizeObserver(() => { if (props.active && entered && stick) keepBottom() })
     resize.observe(scroller.value)
-    const content = scroller.value.querySelector('.session-messages')
+    // The whole column: messages, questions, pending sends and the live turn.
+    const content = scroller.value.querySelector('.thread-col')
     if (content) resize.observe(content)
   }
 })
@@ -1015,6 +1016,19 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
           <div v-if="seenQuestions.length" class="chat-questions">
             <SessionQuestion v-for="question in seenQuestions" :key="`${identity.identity?.tenant.id}:${me}:${s.id}:${question.id}`" :question="question" :label="view.name" :session-id="s.id" :open="!!questions?.some(item => item.id === question.id)" />
           </div>
+          <!-- Sends waiting for their turn sit at the thread's end as pending bubbles (AEON-1438), so the growing field never moves them. -->
+          <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
+            <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id" :data-status="message.send_failed ? 'not_delivered' : statuses[message.id]?.status ?? 'sent'">
+              <p class="queue-text">{{ message.body }}</p>
+              <div class="queue-meta">
+                <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="13" />
+                <span class="queue-when">{{ queueWhen(message) }}</span>
+                <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn sm flat" :aria-label="words.retry" :data-tip="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat" :aria-label="words.edit" :data-tip="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat" :aria-label="words.cancel" :data-tip="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>
+              </div>
+            </li>
+          </ul>
           <ChatLiveBlock v-if="liveTurn && !noPermission" :turn="liveTurn" :name="view.name" :now="now" :can-stop="canStop" />
         </div>
       </div>
@@ -1031,15 +1045,6 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 
     <footer v-if="!noPermission" class="composer" :class="{ two: twoRow }">
       <div class="composer-col">
-        <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
-          <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id" :data-status="message.send_failed ? 'not_delivered' : statuses[message.id]?.status ?? 'sent'">
-            <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="14" />
-            <div class="queue-copy"><span class="queue-text" tabindex="0" :data-tip="message.body" :title="message.body">{{ message.body }}</span><span class="queue-when" tabindex="0">{{ queueWhen(message) }}</span></div>
-            <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn flat" :aria-label="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
-            <button type="button" class="icon-btn flat" :aria-label="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
-            <button type="button" class="icon-btn flat" :aria-label="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>
-          </li>
-        </ul>
         <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
         <form v-else class="compose" @submit.prevent="send()">
           <p v-if="showHookNotice && !queue.length" class="compose-block hook-notice" role="status">{{ bindingReason ? words.unmanagedBlocked : `${view.name} ${words.unmanagedNote}` }}</p>
@@ -1076,15 +1081,19 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .empty-state p { font-size: 13.5px; }
 .suggestions { display: grid; justify-items: center; }
 .suggestions button { min-height: 44px; border: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 13px; }
-.chat-queue { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; padding: 0; margin: 0 0 8px; list-style: none; }
-.queue-item { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 2px 3px 2px 10px; border-radius: 12px; background: var(--code-bg); box-shadow: inset 0 0 0 1px var(--line); }
-.queue-item > svg { flex: none; color: var(--ink-3); }
-.queue-item.editing { background: var(--chip-teal-bg); }
-.queue-copy { flex: 1; min-width: 0; }
-.queue-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.queue-when { display: block; height: 2.8em; overflow-y: auto; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.4; color: var(--ink-3); }
+/* Pending own bubbles: a hairline instead of the delivered tint, when and actions under them. */
+.chat-queue { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 12px 0 0; padding: 0; list-style: none; }
+.queue-item { justify-self: end; display: flex; flex-direction: column; align-items: flex-end; min-width: 0; max-width: min(82%, 640px); }
+.queue-text { margin: 0; padding: 9px 14px; border-radius: 18px; background: transparent; box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--ink); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.queue-item.editing .queue-text { background: var(--chip-teal-bg); }
+.queue-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 2px 4px; min-height: 28px; margin-top: 2px; font-size: 12px; color: var(--ink-3); }
+.queue-meta > svg { flex: none; }
+.queue-when { min-width: 0; margin-right: 2px; overflow-wrap: anywhere; }
+.queue-item[data-status="not_delivered"] .queue-when { color: var(--danger); font-weight: 600; }
+.queue-meta .icon-btn { flex: none; border-radius: 8px; color: var(--ink-3); }
+@media (hover: hover) { .queue-meta .icon-btn:hover:not(:disabled) { color: var(--teal-ink); background: var(--row-hover); } }
+@media (pointer: coarse) { .queue-meta .icon-btn { width: 44px; height: 44px; } }
 .binding-error { color: var(--ink-2); font-size: 13.5px; overflow-wrap: anywhere; margin: 12px 0; }
-.queue-item .icon-btn { flex: none; width: 44px; height: 44px; }
 .gemini-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-2); }
 .chat-questions { display: grid; gap: 10px; padding: 12px 0; }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
@@ -1152,6 +1161,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 @media (max-width: 720px) {
   .thread-scroll { padding: 10px 16px 16px; scrollbar-gutter: auto; }
   .thread-col { max-width: none; }
+  .queue-item { max-width: 85%; }
+  .queue-text { font-size: 15px; line-height: 1.45; border-radius: 18px 18px 6px 18px; }
   .composer { padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }
   .composer-col { max-width: none; }
   .replying { margin: -2px 0 6px; padding-left: 14px; font-size: 13px; background: none; }

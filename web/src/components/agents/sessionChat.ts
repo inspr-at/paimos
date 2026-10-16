@@ -276,14 +276,14 @@ export const capabilityWords = {
   en: {
     native: ['Steers mid-turn', 'Send now reaches the agent during this turn. After this turn waits until it is done.'],
     next: ['Gets your message at the next step', 'It reads a message before its next step, not during a step. After this turn waits until it is done.'],
-    queue: ['Gets your message after this turn', 'This harness cannot take input mid-turn. Your message waits above the composer until the turn ends.'],
+    queue: ['Gets your message after this turn', 'This harness cannot take input mid-turn. Your message waits at the end of the conversation until the turn ends.'],
     abort: ['A new message stops its turn', 'Gemini ends the active turn when it gets a new prompt. After this turn is safe; Stop and send interrupts on purpose.'],
     between: ['Receives between steps', 'Runs outside PAIMOS. It reads messages between steps; idle at its prompt it gets nothing until it acts again.'],
   },
   de: {
     native: ['Lenkbar mitten in der Runde', 'Jetzt senden erreicht den Agenten noch in der laufenden Runde. Nach dieser Runde wartet, bis sie fertig ist.'],
     next: ['Erhält deine Nachricht beim nächsten Schritt', 'Liest eine Nachricht vor dem nächsten Schritt, nicht mitten im Schritt. Nach dieser Runde wartet, bis sie fertig ist.'],
-    queue: ['Erhält deine Nachricht nach dieser Runde', 'Diese Harness nimmt während einer Runde nichts an. Deine Nachricht wartet über dem Eingabefeld, bis die Runde endet.'],
+    queue: ['Erhält deine Nachricht nach dieser Runde', 'Diese Harness nimmt während einer Runde nichts an. Deine Nachricht wartet am Ende des Gesprächs, bis die Runde endet.'],
     abort: ['Eine neue Nachricht beendet die Runde', 'Gemini beendet die laufende Runde, sobald ein neuer Prompt kommt. Nach dieser Runde ist sicher; Stoppen und senden unterbricht bewusst.'],
     between: ['Empfängt zwischen Schritten', 'Läuft außerhalb von PAIMOS. Liest Nachrichten zwischen Schritten; am Prompt wartend empfängt er nichts, bis er wieder etwas tut.'],
   },

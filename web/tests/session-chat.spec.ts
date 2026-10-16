@@ -208,7 +208,7 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   // Remembered per viewer, and the posts stay read.
   await page.reload()
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
-  await expect(panel.getByRole('separator')).toHaveCount(0)
+  await expect(panel.getByRole('separator', { name: /^\d+ new$/ })).toHaveCount(0)
   await rememberTab(page, 'Details')
   await page.reload()
   await expect(panel.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
@@ -310,7 +310,7 @@ test('a late server read marker opens the thread at the first unread message', a
     const opened = page.goto(`/agents/${worker.id}`)
     const panel = panelOf(page)
     await expect(panel.locator('.msg').last()).toBeInViewport()
-    await expect(panel.getByRole('separator')).toHaveCount(0)
+    await expect(panel.getByRole('separator', { name: /^\d+ new$/ })).toHaveCount(0)
     expect(await localEvent(page, worker.id)).toBe(0)
     release()
     await opened
@@ -592,7 +592,7 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await expect(panel.locator('.msg').first()).toBeVisible()
   // A first visit opens at the latest exchange, without a divider.
   await expect(panel.locator('.msg').last()).toBeInViewport()
-  await expect(panel.getByRole('separator')).toHaveCount(0)
+  await expect(panel.getByRole('separator', { name: /^\d+ new$/ })).toHaveCount(0)
   await expect(panel.getByRole('button', { name: /new messages, go to the latest/ })).toHaveCount(0)
   // Reading to the bottom clears the badge.
   await thread.evaluate(el => el.scrollTo({ top: el.scrollHeight }))

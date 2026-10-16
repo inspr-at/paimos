@@ -135,7 +135,7 @@ test('an accepted request reads the lists again', async ({ page }) => {
   await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
 
-test('a managed or stopped session has no session requests', async ({ page }) => {
+test('a managed or stopped session has no request composer', async ({ page }) => {
   const { worker } = await setup(page)
   worker.management_mode = 'managed'
   await page.goto(`/agents/${worker.id}?tab=messages`)
