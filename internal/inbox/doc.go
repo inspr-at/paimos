@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package inbox is AEON's durable principal inbox (AEON-27, migration 0200).
+// Decision Desk replies (AEON-1432) wait for their asking agent: no_listener
+// and elapsed deadlines leave their delivery and receipt pending. Reads keep
+// sent-event order and replay the same IDs until an idempotent acknowledgement.
+// Ended-session routing and terminal adapter failures retain their semantics.
 //
 // Coordinator wiring — this package does not edit cmd/aeon:
 //
@@ -57,8 +61,8 @@
 // closed_reason=session_ended, attributed to System. No reply is fabricated.
 //
 // AEON-280 delivery guarantee: a message to an agent is delivered or its
-// sender is told loudly. Every new queued receipt carries deliver_by (session
-// 5 min, otherwise 30 min, tenant-configurable at /api/settings/inbox-delivery
+// sender is told loudly. Except for Desk replies, new queued receipts carry an
+// enforced deliver_by (session 5 min, otherwise 30 min, tenant-configurable at /api/settings/inbox-delivery
 // with the adapter attempt cap, default 8). paimos serve runs NewSweeper(pool);
 // a session advisory lock keeps it a single runner. Past the deadline, over
 // the cap, or when the bound session ends (FailSessionMessages, called by the
