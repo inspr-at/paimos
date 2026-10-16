@@ -342,10 +342,10 @@ const setupLine = computed(() => {
 })
 const recentRunModel = (item: typeof recentRuns.value[number]) => panelModelLine({ harness: s.value?.harness ?? 'codex', model: runModel(item), reasoning_effort: '' }, agents.models)
 const modelLine = computed(() => s.value ? panelModelLine(reported.value || s.value, agents.models, props.view?.model) : '')
+// The composer is the panel's foot only while Chat shows it (AEON-1286).
+const chatting = computed(() => tab.value === 'chat' && !!props.view && !props.loading && !reported.value?.watch && !nativeKnown.value)
 // AEON-1286 phone head: ← · avatar · name over "state · model" · ⋯. The state is said once:
 // line 2 shows it; the avatar is artwork there, and screen readers hear it in the heading.
-// The composer is the panel's foot only while Chat shows it.
-const chatting = computed(() => tab.value === 'chat' && !!props.view && !props.loading && !reported.value?.watch && !nativeKnown.value)
 const phoneMedia = window.matchMedia('(max-width: 720px)')
 const phoneHead = ref(phoneMedia.matches)
 const syncPhoneHead = () => { phoneHead.value = phoneMedia.matches }

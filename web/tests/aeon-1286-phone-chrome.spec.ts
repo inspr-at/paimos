@@ -265,39 +265,77 @@ test('AEON-1286 1024 sanity: the docked head and its anchored menu are unchanged
   await page.screenshot({ path: info.outputPath('AEON-1286/chat-1024-light.png') })
 })
 
-// Ticket list and agent view: rows first. The phone keeps the primary task on screen.
-// Baseline measurement while the compact rule for these lists is settled.
+// Ticket list and agent view: rows first. A page opened on a phone folds the dial's body (its
+// saved fold belongs to wider screens), and on short landscape screens the footer lies over
+// the page and folds away while reading. Row counts are recorded as evidence for the hand-over.
 const fullyVisible = (page: Page, rows: string) => page.evaluate(selector => [...document.querySelectorAll<HTMLElement>(selector)].filter(row => {
   const b = row.getBoundingClientRect(), x = b.left + Math.min(b.width / 2, 120)
   if (b.height === 0 || b.top < 0 || b.bottom > innerHeight) return false
   const top = document.elementFromPoint(x, b.top + 1), bottom = document.elementFromPoint(x, b.bottom - 1)
   return !!top && !!bottom && row.contains(top) && row.contains(bottom)
 }).length, rows)
+async function listWorld(page: Page, size: Size) {
+  const now = Date.parse('2026-10-16T08:00:00Z')
+  await page.setViewportSize(size)
+  await page.clock.install({ time: now })
+  const work = fixtures({ bigProject: 40 })
+  await mockWork(page, work, { admin: true })
+  const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
+  const base = data.sessions[1]!
+  for (let n = 0; n < 24; n++) data.sessions.push({ ...base, id: `5e000000-0000-4000-8000-${String(100 + n).padStart(12, '0')}`, display_label: `worker-${n + 1}` } as typeof base)
+  await mockAgents(page, data)
+  return work
+}
+// Read down the page: the app's scroller moves by whole steps, as a finger would.
+const readDown = (page: Page, by: number) => page.locator('main').evaluate((main, step) => { main.scrollTop += step }, by)
 
-for (const size of [{ width: 390, height: 664 }, { width: 844, height: 340 }, { width: 320, height: 568 }]) {
-  test(`AEON-1286 rows ${size.width}x${size.height}: ticket list and agent view`, async ({ page }, info) => {
-    const now = Date.parse('2026-10-16T08:00:00Z')
-    await page.setViewportSize(size)
-    await page.clock.install({ time: now })
-    const work = fixtures({ bigProject: 40 })
-    await mockWork(page, work, { admin: true })
-    const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
-    const base = data.sessions[1]!
-    for (let n = 0; n < 24; n++) data.sessions.push({ ...base, id: `5e000000-0000-4000-8000-${String(100 + n).padStart(12, '0')}`, display_label: `worker-${n + 1}` } as typeof base)
-    await mockAgents(page, data)
-    await page.goto('/p/AEON')
-    await expect(page.locator('tr.ticket-row').nth(5)).toBeVisible()
-    const tickets = await fullyVisible(page, 'tr.ticket-row')
-    await page.screenshot({ path: info.outputPath(`AEON-1286/tickets-${size.width}x${size.height}.png`) })
-    await page.locator('main').evaluate(main => { main.scrollTop = 600 })
-    const ticketsScrolled = await fullyVisible(page, 'tr.ticket-row')
+for (const size of [{ width: 390, height: 664 }, { width: 320, height: 568 }]) {
+  test(`AEON-1286 agent view ${size.width}x${size.height}: a phone opens on the sessions, the dial folded for the visit`, async ({ page }, info) => {
+    const work = await listWorld(page, size)
+    // The person's saved fold is open (as on the desktop); the phone still opens folded.
+    work.preferences['ui.agents.sections'] = { dial: true }
     await page.goto('/agents')
-    await expect(page.locator('[data-row^="s:"]').nth(5)).toBeVisible()
-    const sessions = await fullyVisible(page, '[data-row^="s:"]')
+    const fold = page.locator('.cdial .fs-tog'), rows = page.locator('[data-row^="s:"]')
+    await expect(rows.nth(5)).toBeAttached()
+    await expect(fold).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.locator('.dial-card')).toHaveCount(0)
+    const firstRow = await box(rows.first())
+    expect(firstRow.y, 'the first session is on the first screen').toBeLessThan(size.height)
+    const atTop = await fullyVisible(page, '[data-row^="s:"]')
     await page.screenshot({ path: info.outputPath(`AEON-1286/agents-${size.width}x${size.height}.png`) })
-    await page.locator('main').evaluate(main => { main.scrollTop = 800 })
-    const sessionsScrolled = await fullyVisible(page, '[data-row^="s:"]')
-    await page.screenshot({ path: info.outputPath(`AEON-1286/agents-scrolled-${size.width}x${size.height}.png`) })
-    await report(info.outputPath(`AEON-1286/rows-${size.width}x${size.height}.md`), [`${size.width}x${size.height}: tickets ${tickets} at the top, ${ticketsScrolled} scrolled; sessions ${sessions} at the top, ${sessionsScrolled} scrolled`])
+    await readDown(page, 900)
+    const reading = await fullyVisible(page, '[data-row^="s:"]')
+    await page.screenshot({ path: info.outputPath(`AEON-1286/agents-reading-${size.width}x${size.height}.png`) })
+    // Its toggle unfolds the body for this visit; the saved choice stays as it was.
+    await readDown(page, -5000)
+    await fold.click()
+    await expect(page.locator('.dial-card')).toBeVisible()
+    expect(work.preferences['ui.agents.sections']).toEqual({ dial: true })
+    await report(info.outputPath(`AEON-1286/agents-rows-${size.width}x${size.height}.md`), [`agents ${size.width}x${size.height}: first session row at ${Math.round(firstRow.y)} px; ${atTop} rows fully on screen at the top, ${reading} while reading (baseline on main: first row ~1,940 px, 0 rows)`])
   })
 }
+
+for (const look of ['light', 'dark'] as const) test(`AEON-1286 short landscape ${LANDSCAPE.width}x${LANDSCAPE.height} ${look}: the footer folds away while reading the lists`, async ({ page }, info) => {
+  await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
+  await listWorld(page, LANDSCAPE)
+  const footer = page.locator('.app-footer')
+  const lines: string[] = []
+  for (const [name, path, rows] of [['tickets', '/p/AEON', 'tr.ticket-row'], ['sessions', '/agents', '[data-row^="s:"]']] as const) {
+    await page.goto(path)
+    await expect(page.locator(rows).nth(5)).toBeAttached()
+    await expect(footer).not.toHaveClass(/hidden/)
+    // The footer lies over the page's end; the page keeps its room so the last row clears it.
+    expect(await page.locator('main').evaluate(main => parseFloat(getComputedStyle(main).paddingBottom))).toBeGreaterThan(0)
+    await readDown(page, 400)
+    await expect(footer, `${name}: the footer folds away while reading down`).toHaveClass(/hidden/)
+    await expect.poll(() => footer.evaluate(el => el.getBoundingClientRect().top), `${name}: folded below the screen`).toBeGreaterThanOrEqual(LANDSCAPE.height - .5)
+    const reading = await fullyVisible(page, rows)
+    await page.screenshot({ path: info.outputPath(`AEON-1286/${name}-reading-${LANDSCAPE.width}-${look}.png`) })
+    // The footer settles for 260 ms after it moves; past that, reading back up brings it back.
+    await page.clock.runFor(300)
+    await readDown(page, -40)
+    await expect(footer, `${name}: reading back up brings it back`).not.toHaveClass(/hidden/)
+    lines.push(`${name} ${LANDSCAPE.width}x${LANDSCAPE.height}: ${reading} rows fully on screen while reading`)
+  }
+  await report(info.outputPath(`AEON-1286/landscape-rows-${look}.md`), lines)
+})
