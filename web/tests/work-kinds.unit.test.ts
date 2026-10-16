@@ -9,6 +9,7 @@ import * as kinds from '../src/lib/workKinds'
 import { displayLanguage } from '../src/lib/displayLanguage'
 import { textForKinds } from '../src/lib/workKindsCopy'
 import { deferred, flush, setupSource, sourceModule, sourceText } from './record-source'
+import { settleConfirm } from '../src/lib/confirm'
 
 const kind = (id = 'design', extra: Partial<kinds.WorkKind> = {}): kinds.WorkKind => ({ id, slug: id, label: id, hint: 'A plain sentence.', position: 0, examples: ['An example'], labels: ['ui'], ticket_count: 2, ...extra })
 const limits: kinds.SituationLimits = { small_hours: 2, fix_rounds: 3, revision: 7, set_by: null, set_at: null }
@@ -193,7 +194,7 @@ function settingsRouter(): Router {
     './lib/projectSettings': sourceModule('lib/projectSettings.ts', {}),
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: vi.fn(async () => {}) }) },
-    './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
+    './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {}, './lib/confirm': { settleConfirm },
     './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': {},
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
     './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },

@@ -9,6 +9,7 @@ import { useWorkVocabulary } from './stores/workVocabulary'
 import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
+import { settleConfirm } from './lib/confirm'
 import { announceAttachCode, attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
 import { scopeOwner } from './lib/identityScope'
 import { carriesDraft, draftInAddress, holdDraft } from './lib/importDraft'
@@ -146,6 +147,10 @@ function refreshSession() {
 // A code held for a session that is gone is dropped, and the return path never carries it.
 function signInAgain(fullPath: string) { dropAttachCode(); return expiredSignIn(fullPath) }
 router.beforeEach(async (to, from) => {
+  // An open confirmation belongs to the record that was on screen. Back,
+  // Forward and another quote change that record before this guard continues,
+  // so the confirmation is refused and cannot land on the record now shown.
+  settleConfirm(false)
   if (to.meta.projectSection === 'settings') {
     const section = legacyProjectSettingsSection(to.hash, to.query)
     if (section && section !== projectSettingsSection(to.params.settingsSection)) {
