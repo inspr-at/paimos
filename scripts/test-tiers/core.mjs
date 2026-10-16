@@ -4,6 +4,7 @@ import { dirname, extname, resolve, relative } from 'node:path'
 import { migrationObjects } from './migration.mjs'
 import { inputBounds, inputMetadata, readInput } from './inputs.mjs'
 import { browserImpact } from './browser-impact.mjs'
+import { validateManifest as validateBrowserPolicy } from '../../web/scripts/ci-web-shard.mjs'
 
 export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${row.kind}:${row.file}:${row.name}${row.occurrence===undefined?'':`#${row.occurrence}`}`
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -85,14 +86,76 @@ const generatedPattern = /(?:^|[/.])(?:generated|codegen)(?:\/|\.)|\.(?:gen|pb)\
 // them; every lane that reaches web-unit shard 1 and go-static re-validates them.
 const manifestPattern = /^(?:scripts\/ci\/(?!static-checks\.json$)[^/]+\.(?:json|txt)|web\/ci-web-shards\.json|web\/scripts\/ci-web-shard-specs\/.+\.spec\.ts\.json|scripts\/migration-policy[^/]*\.json|scripts\/audit\/[^/]+\.json|web\/scripts\/(?:ci-web-shard|aeon-676-ci|aeon-681-ci)\.test\.mjs)$/
 export const tierManifestPattern = /^scripts\/ci\/(?:go|web)-test-tiers\.json$/
+export const semanticRegistryPattern = /^(?:scripts\/ci\/(?:go|web)-test-tiers\.json|web\/ci-web-shards\.json)$/
 // R9: regression tests of the unconditional migration-compat job.
 const alwaysOnTestPattern = /^scripts\/(?:check-migrations\.test\.mjs|migration_compat_probe_test\.py)$/
-const docsPattern = /^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$))/
-// AEON-766: instruction files are test inputs (web/tests/no-shift-rules.test.ts
-// pins AGENTS.md through the rules rollout manifest), never docs-like.
+// Established documentation only. Fixture, testdata, server-delivered and
+// test-pinned Markdown widen; AGENTS.md and CLAUDE.md are instruction inputs.
+const docsPattern = /^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$)|web\/README(?:\.|$))/
 const instructionPattern = /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i
-export const isDocsLike = path => !instructionPattern.test(path) &&
-  (docsPattern.test(path) || (/\.md$/i.test(path) && !/(?:^|\/)testdata\//.test(path) && !/^(?:internal|cmd)\//.test(path)))
+export const isDocsLike = path => !instructionPattern.test(path) && docsPattern.test(path)
+// Research allowlist stays empty. Timing-only registry edits narrow by content
+// comparison, never because their path is listed here.
+export const browserScopeNoneAllowlist = []
+const driftObligations = JSON.parse(readFileSync(new URL('./drift-obligations.json', import.meta.url), 'utf8'))
+const driftGoKeys = new Set(driftObligations.goKeys ?? [])
+const componentSpecs = driftObligations.componentSpecs ?? {}
+const appearancePackage = 'internal/themes'
+const appearancePrefix = 'TestAppearanceMigration'
+const sharedSchemaPattern = /^(?:internal\/(?:auth|principallink|profile|themes|fieldschema)\/|api\/areas\/|api\/openapi|internal\/db\/(?:migrations|schema)(?:\/|$))/
+// The recorded titles that caught drift, by kind and file. The corpus replay
+// resolves a title the same way: exact, or across a describe prefix.
+export const driftCases = new Map()
+for (const { kind, file, name } of driftObligations.cases ?? []) {
+  if (!['browser', 'vitest', 'node'].includes(kind) || typeof file !== 'string' || typeof name !== 'string' || !name)
+    throw new Error('invalid drift obligation case')
+  const owner = `${kind}:${file}`
+  if (!driftCases.has(owner)) driftCases.set(owner, [])
+  driftCases.get(owner).push(name)
+}
+const sameCase = (name, recorded) => name === recorded || name.endsWith(` › ${recorded}`) || recorded.endsWith(` › ${name}`)
+
+// Recorded drift cases for the full gate. A recorded title that no current
+// case resolves (renamed or split) widens to its whole file, so a rename
+// cannot silently drop the obligation.
+function driftCaseKeys(tests) {
+  const rows = new Map()
+  for (const row of tests) if (row.kind !== 'go' && driftCases.has(`${row.kind}:${row.file}`)) {
+    const owner = `${row.kind}:${row.file}`
+    if (!rows.has(owner)) rows.set(owner, [])
+    rows.get(owner).push(row)
+  }
+  const wanted = new Set()
+  for (const [owner, names] of driftCases) {
+    const candidates = rows.get(owner) ?? []
+    for (const name of names) {
+      const found = candidates.filter(row => sameCase(row.name, name))
+      for (const row of found.length ? found : candidates) wanted.add(key(row))
+    }
+  }
+  return wanted
+}
+
+// Cases whose omission let real drift reach main. A full gate runs every
+// recorded behaviour case; a narrowed diff runs the component's specs and the
+// old-schema appearance fixtures when principal, auth or schema changes.
+export function behaviourObligation(tests, paths, { allDrift = false } = {}) {
+  const files = new Set()
+  if (!allDrift && Array.isArray(paths)) for (const path of paths) for (const file of componentSpecs[path] ?? []) files.add(file)
+  const shared = !allDrift && Array.isArray(paths) && paths.some(path => sharedSchemaPattern.test(path))
+  const wanted = allDrift ? driftCaseKeys(tests) : new Set()
+  for (const row of tests) {
+    if (row.kind !== 'go' && files.has(row.file)) wanted.add(key(row))
+    else if (row.kind === 'go' && allDrift && driftGoKeys.has(key(row))) wanted.add(key(row))
+    else if (row.kind === 'go' && row.package === appearancePackage && row.name.startsWith(appearancePrefix) && (allDrift || shared)) wanted.add(key(row))
+  }
+  return wanted
+}
+
+export function fullGateTests(tests, paths) {
+  const extra = behaviourObligation(tests, paths, { allDrift: true })
+  return tests.filter(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL' || extra.has(key(row)))
+}
 export const tierRank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
 // Two essential Go shards carry about one full hosted shard each; wider
 // consumer sets are cheaper in the seven-shard full layout.
@@ -112,6 +175,107 @@ export function manifestPromotions(base = {}, head = {}) {
     }
   }
   return { keys: new Set(promoted.map(key)), kinds: new Set(promoted.map(row => row.kind)), count: promoted.length }
+}
+
+const stableRegistry = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
+  ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
+const registryObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+const timingEntry = (entry, positive = false) => {
+  if (!registryObject(entry) || !Number.isFinite(entry.seconds) || (positive ? entry.seconds <= 0 : entry.seconds < 0) ||
+      !Number.isSafeInteger(entry.selectedTests) || entry.selectedTests < 1) throw new Error('invalid measured timing')
+  const { seconds, selectedTests, caseSeconds, split, ...policy } = entry
+  if (caseSeconds !== undefined) {
+    if (!registryObject(caseSeconds) || Object.values(caseSeconds).some(seconds => !Number.isFinite(seconds) || seconds < 0))
+      throw new Error('invalid case timings')
+  }
+  if (split !== undefined) {
+    // Two remains the AEON-1024 balancer fixture. Three is the recorded
+    // AEON-1338 measurement. Any other count, or a field beside the
+    // measurements, is policy and fails wide.
+    if (!registryObject(split) || ![2, 3].includes(split.count) || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
+        !registryObject(split.caseSeconds) || Object.values(split.caseSeconds).some(seconds => !Number.isFinite(seconds) || seconds < 0))
+      throw new Error('invalid split timing')
+    const { overheadSeconds, caseSeconds, count, ...splitPolicy } = split
+    if (Object.keys(splitPolicy).length) policy.split = splitPolicy
+  }
+  return Object.keys(policy).length ? policy : undefined
+}
+const timingMap = entries => {
+  if (!registryObject(entries)) throw new Error('invalid timing owners')
+  return Object.fromEntries(Object.entries(entries).flatMap(([owner, entry]) => {
+    const policy = timingEntry(entry)
+    return policy ? [[owner, policy]] : []
+  }))
+}
+
+// Strip only known scheduling measurements at their schema locations. A flag
+// named "seconds" or an unknown field inside timing data remains policy.
+function registryPolicy(file, registry) {
+  const result = structuredClone(registry)
+  if (tierManifestPattern.test(file)) {
+    result.tests = result.tests.map(row => ({ ...row, tier: undefined })).sort((a, b) => key(a).localeCompare(key(b)))
+    if (result.timingWeights !== undefined) {
+      if (!registryObject(result.timingWeights)) throw new Error('invalid timing weights')
+      result.timingWeights.owners = timingMap(result.timingWeights.owners)
+      // These bind measurements, not execution. Unknown provenance stays policy.
+      delete result.timingWeights.runId
+      delete result.timingWeights.sha
+      if (!Object.keys(result.timingWeights.owners ?? {}).length) delete result.timingWeights.owners
+      if (!Object.keys(result.timingWeights).length) delete result.timingWeights
+    }
+  } else {
+    for (const group of result.groups ?? []) for (const spec of group.specs ?? []) {
+      if (spec.tierTiming !== undefined) {
+        const policy = timingEntry(spec.tierTiming, true)
+        if (policy) spec.tierTiming = policy
+        else delete spec.tierTiming
+      }
+      delete spec.weightSeconds
+    }
+    if (result.nightlyTiming !== undefined) {
+      if (result.nightlyTiming.files !== undefined) {
+        result.nightlyTiming.files = timingMap(result.nightlyTiming.files)
+        if (!Object.keys(result.nightlyTiming.files).length) delete result.nightlyTiming.files
+      }
+    }
+  }
+  return result
+}
+
+// Content semantics replace R1's blanket registry exemption. Native inventory
+// checks still run; this comparison cannot approve removal or demotion.
+export function registryImpact(file, before, after) {
+  const full = (reason, requiresApproval = false) => ({ full: true, reason, requiresApproval, promoted: [] })
+  try {
+    if (!semanticRegistryPattern.test(file) || before?.version !== 1 || after?.version !== 1)
+      return full('registry inputs missing, invalid or unclassified')
+    if (tierManifestPattern.test(file)) {
+      for (const manifest of [before, after]) {
+        if (manifest.tests?.length > 20_000) return full('registry case count bound')
+        validate(manifest, manifest.tests, { version: 1, entries: [] }, { strict: true })
+        if (manifest.tests.some(row => file.includes('/go-') ? row.kind !== 'go' : row.kind === 'go')) return full('registry kind changed')
+      }
+      const previous = new Map(before.tests.map(row => [key(row), row]))
+      const demoted = after.tests.some(row => previous.has(key(row)) && tierRank[row.tier] < tierRank[previous.get(key(row)).tier])
+      if (demoted) return full('tier demotion requires explicit person approval and full validation', true)
+      if (before.tests.length !== after.tests.length || after.tests.some(row => !previous.has(key(row))))
+        return full('catalogue membership changed')
+    } else if (before.specSource !== undefined || after.specSource !== undefined) {
+      // Per-spec records hold membership. The source document keeps empty spec
+      // lists, so the assembled nonempty-specs check does not apply here.
+      if (before.specSource !== after.specSource || typeof before.specSource !== 'string')
+        return full('registry ownership, exclusions, configuration or execution policy changed')
+    } else {
+      validateBrowserPolicy(before); validateBrowserPolicy(after)
+    }
+    if (stableRegistry(registryPolicy(file, before)) !== stableRegistry(registryPolicy(file, after)))
+      return full('registry ownership, exclusions, configuration or execution policy changed')
+    const promoted = tierManifestPattern.test(file)
+      ? manifestPromotions({ go: before }, { go: after }).keys : new Set()
+    const rows = (after.tests ?? []).filter(row => promoted.has(key(row)))
+    return { full: false, requiresApproval: false, promoted: rows,
+      reason: rows.length ? 'tier promotions execute' : 'timing-only or semantically unchanged registry' }
+  } catch { return full('invalid registry or timing data') }
 }
 
 export { migrationObjects } from './migration.mjs'
@@ -136,7 +300,11 @@ export function affectedRisk(path, webImports = {}) {
   if (generatedPattern.test(path)) return { full: true, reason: `unnarrowed generated/configuration risk: ${path}` }
   if (machineryPattern.test(path)) return { full: true, reason: `CI machinery stays full: ${path}` }
   if (isDocsLike(path)) return { full: false, rule: 'docs', layout: 'static', skip: true, reason: `docs-like: ${path}` }
-  if (manifestPattern.test(path)) return { full: false, rule: 'R1', layout: 'static', skip: true, manifest: tierManifestPattern.test(path), reason: `R1: manifest/static checks: ${path}` }
+  if (manifestPattern.test(path)) {
+    if (semanticRegistryPattern.test(path)) return { full: false, rule: 'R1', layout: 'static', skip: true, registry: true, reason: `R1: semantic registry checks: ${path}` }
+    if (specShardRecordPattern.test(path) || !/\.(?:json|txt)$/.test(path)) return { full: false, rule: 'R1', layout: 'static', skip: true, reason: `R1: manifest/static checks: ${path}` }
+    return { full: true, reason: `unclassified registry or execution policy stays full: ${path}` }
+  }
   if (/^scripts\/audit\//.test(path)) return { full: false, rule: 'R5', layout: 'static', skip: true, reason: `R5: audit static checks: ${path}` }
   if (alwaysOnTestPattern.test(path)) return { full: false, rule: 'R9', layout: 'static', skip: true, reason: `R9: migration-compat regression test: ${path}` }
   // Sources of the generated bundle use the bundle's reader scan, never their
@@ -176,7 +344,7 @@ const goCaseCount = (tests, packages) => tests.filter(row => row.kind === 'go' &
 // Whole-diff decision. layout "static" keeps only the static, unit, release
 // and migration jobs; "full" keeps the essential shard layout. The returned
 // seeds extend the changed area; handled paths skip the generic mapping.
-export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, promotions, readFile, tests = [] }) {
+export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, registryChanges, readFile, tests = [] }) {
   const reasons = [], handled = new Set(), goSeeds = new Set(), webSeeds = new Set()
   const full = reason => ({ full: true, reasons: [reason], layout: 'full', handled, goSeeds, webSeeds, promoted: new Set() })
   // Instruction inputs require the full gate even when affected narrowing is off.
@@ -192,7 +360,7 @@ export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, 
   if (rules.some(([, rule]) => rule.rule === 'R2') && paths.some(path => path.startsWith('internal/reportercontract/')))
     return full('R2 full: OpenAPI lint package changed with the contract')
   // An empty diff proves nothing about static sufficiency; keep the shards.
-  let layout = paths.length ? 'static' : 'full', promoted = new Set()
+  let layout = paths.length ? 'static' : 'full', promoted = new Set(), promotedKinds = new Set()
   const sqlNeedles = new Set()
   for (const [path, rule] of rules) {
     if (rule.layout !== 'static') layout = 'full'
@@ -231,9 +399,11 @@ export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, 
       }
       if (rule.web) for (const file of found.webFiles) webSeeds.add(file)
     }
-    if (rule.manifest) {
-      if (!promotions) return full(`R1 full: manifest promotions unavailable: ${path}`)
-      promoted = new Set([...promoted, ...promotions.keys])
+    if (rule.registry) {
+      const change = registryChanges?.get(path)
+      if (!change || change.full) return full(`R1 full: ${change?.reason ?? 'semantic registry comparison unavailable'}: ${path}`)
+      for (const row of change.promoted) { promoted.add(key(row)); promotedKinds.add(row.kind) }
+      reasons.push(`R1: ${change.reason}: ${path}`)
     }
   }
   if (sqlNeedles.size) {
@@ -244,9 +414,9 @@ export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, 
   const extra = goCaseCount(tests, goSeeds)
   if (extra > consumerCaseBound) return full(`consumer fan-out exceeds ${consumerCaseBound} gated Go cases (${extra} in ${goSeeds.size} packages)`)
   if (promoted.size) {
-    const kinds = [...promotions.kinds].sort().join('/')
+    const kinds = [...promotedKinds].sort().join('/')
     reasons.push(`R1: ${promoted.size} promoted ${kinds} cases execute`)
-    if (promotions.kinds.has('go') || promotions.kinds.has('browser')) layout = 'full'
+    if (promotedKinds.has('go') || promotedKinds.has('browser')) layout = 'full'
   }
   if (goSeeds.size) reasons.push(`consumer packages: ${[...goSeeds].sort().join(', ')}`)
   if (webSeeds.size) reasons.push(`consumer web tests: ${[...webSeeds].sort().join(', ')}`)
@@ -280,12 +450,12 @@ export function goImpact(tests, paths, imports = {}, seeds = new Set()) {
 
 // A missing diff, unmapped source, or shared input widens selection. The merge
 // queue always proves the full gate, independently of the affected PR switch.
-export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, fingerprint, impact, affectedLane, forceFull = false, forceAll = false, tree, promotions, readFile }) {
+export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, fingerprint, impact, affectedLane, forceFull = false, forceAll = false, tree, registryChanges, readFile }) {
   const full = reason => {
-    // Full CI retains the established gate. Only nightly/--all widens to the
-    // entire catalogue; missing impact data must not promote ungated cases.
+    // Full CI retains the established gate plus the behaviour cases that caught
+    // real drift. Only nightly/--all widens to the entire catalogue.
     const catalogue = forceAll || event === 'schedule'
-    const selected = catalogue ? tests : tests.filter(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL')
+    const selected = catalogue ? tests : fullGateTests(tests, paths)
     return { full: true, reason, scope: catalogue ? 'catalogue' : 'gated-full',
       deferredBrowserCases: tests.filter(row => row.kind === 'browser').length - selected.filter(row => row.kind === 'browser').length, tests: selected }
   }
@@ -296,7 +466,7 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
   if (!validImpactPaths(paths)) return full('invalid or oversized impact diff')
   const browserData = paths.find(browserDataInput)
   if (tests.some(row => row.kind === 'browser') && browserData) return full(`browser CSS, asset or data input: ${browserData}`)
-  const risk = impactRisk(paths, { event, affectedLane, webImports, tree, promotions, readFile, tests })
+  const risk = impactRisk(paths, { event, affectedLane, webImports, tree, registryChanges, readFile, tests })
   if (risk.full) return full(risk.reasons.join('; ') || 'full event or uncertain impact')
   const packages = new Set([...tests.filter(t => t.kind === 'go').map(t => t.package), ...Object.keys(imports)])
   const hasGo=tests.some(t=>t.kind==='go'),hasWeb=tests.some(t=>t.kind!=='go')
@@ -327,8 +497,9 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
   if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return full('web module has no mapped test importer')
   if (tests.filter(t => t.kind === 'browser' && web.has(t.file)).length > 300) return full('browser fan-out exceeds 300 cases')
   const reason = 'essential plus changed area and reverse dependencies'
+  const extra = affectedLane === 'on' ? behaviourObligation(tests, paths) : new Set()
   return { full: false, reason: risk.reasons.length ? `${reason}; ${risk.reasons.join('; ')}` : reason,
-    tests: tests.filter(t => t.tier === 'ESSENTIAL' || risk.promoted.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
+    tests: tests.filter(t => t.tier === 'ESSENTIAL' || risk.promoted.has(key(t)) || extra.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
 }
 
 export function measuredWeights(manifest, rows) {

@@ -53,7 +53,10 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await requests.getByRole('textbox', { name: 'Requested session name' }).fill('Ready for release')
     await requests.getByRole('button', { name: 'Send request' }).click()
     await expect(requests).toContainText('Requested · waiting for the session')
-    await expect(panel.getByRole('heading', { name: 'Release checks', exact: true })).toBeVisible()
+    // The pending rename must not replace the current name. AEON-1212 keeps that
+    // name in the identity span; the heading's accessible name also includes status.
+    await expect(panel.locator('h2.pane-title .name')).toHaveText('Release checks')
+    await expect(panel.locator('h2.pane-title')).not.toContainText('Ready for release')
     expect(submissions[0]?.expected_generation).toBe(worker.id)
     expect(submissions[0]?.kind).toBe('rename_request')
     await requests.getByText('Ask this session to…').click()

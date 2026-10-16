@@ -177,19 +177,17 @@ for (const [state, change, panelHint] of [
     await page.keyboard.press('Escape')
     await expect(row(page, lead.id).getByRole('button', { name: 'Interrupt claude-lead' })).toHaveCount(0)
     await page.goto(`/agents/${lead.id}`)
-    const controls = page.getByRole('region', { name: 'Session controls' })
-    // AEON-1212 / #592 exposes the current managed stop eligibility in the unified head.
-    const stop = page.getByRole('group', { name: 'Session actions' }).getByRole('button', { name: 'Stop…', exact: true })
+    // AEON-1309 / #678 condensed the head: Stop, Interrupt and Steer live in More
+    // session actions, each enabled only where the server accepts it.
+    await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions', exact: true }).click()
+    const actions = page.getByRole('menu', { name: 'More session actions' })
+    const stop = actions.getByRole('menuitem', { name: /^Stop…/ }), steer = actions.getByRole('menuitem', { name: /^Steer…/ })
     if (panelHint) await expect(stop).toBeDisabled()
     else await expect(stop).toBeEnabled()
-    await expect(controls.getByRole('button', { name: 'Steer', exact: true })).toBeDisabled()
-    await controls.getByRole('button', { name: 'More session controls', exact: true }).click()
-    if (panelHint) {
-      await expect(controls).toContainText(panelHint)
-      await expect(page.getByRole('menuitem', { name: /^Interrupt this step/ })).toBeDisabled()
-    } else {
-      await expect(page.getByRole('menuitem', { name: /^Interrupt/ })).toHaveCount(0)
-    }
+    await expect(steer).toBeDisabled()
+    // The quiet line now explains the disabled Steer.
+    if (panelHint) await expect(steer).toContainText(panelHint)
+    await expect(actions.getByRole('menuitem', { name: /^Interrupt/ })).toBeDisabled()
     expect([managed, legacy]).toEqual([[], []])
   })
 }
@@ -215,12 +213,12 @@ test('a project-only harness.control grant controls that project in the row and 
   await row(page, elsewhere.id).getByRole('button', { name: 'Actions for aeon-worker' }).click()
   await expect(page.getByRole('menu', { name: 'Actions for aeon-worker' }).getByRole('menuitem', { name: /^(Pause…|Stop now…|Interrupt)/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
-  // The panel agrees with the row.
+  // The panel agrees with the row (AEON-1309 / #678: through More session actions).
   await page.goto(`/agents/${lead.id}`)
-  const controls = page.getByRole('region', { name: 'Session controls' })
-  await controls.getByRole('button', { name: 'More session controls', exact: true }).click()
-  await expect(page.getByRole('menuitem', { name: /^Interrupt this step/ })).toBeEnabled()
-  await page.getByRole('menuitem', { name: /^Interrupt this step/ }).click()
+  await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'More session actions', exact: true }).click()
+  const interrupt = page.getByRole('menu', { name: 'More session actions' }).getByRole('menuitem', { name: /^Interrupt/ })
+  await expect(interrupt).toBeEnabled()
+  await interrupt.click()
   await expect.poll(() => managed.length).toBe(1)
 })
 
@@ -265,8 +263,10 @@ test('the panel of an outside inbox session offers durable Pause/Stop, one quiet
   await expect(panel.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Runs on$/ }) })).toContainText('runs on its own')
   await expect(panel.getByRole('region', { name: 'Session controls' })).toHaveCount(0)
   await expect(panel.getByRole('button', { name: 'More session actions', exact: true })).toBeVisible()
-  for (const name of ['Pause', 'Stop…']) await expect(panel.getByRole('button', { name, exact: true })).toBeVisible()
   await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+  // AEON-1309 / #678 moved the durable Pause and Stop into More session actions.
+  const menu = page.getByRole('menu', { name: 'More session actions' })
+  for (const name of [/^Pause/, /^Stop…/]) await expect(menu.getByRole('menuitem', { name })).toBeEnabled()
   await expect(page.getByRole('menuitem', { name: 'Remove codex-outside' })).toHaveText('Remove…')
   await page.goto(`/agents/${lost.id}`)
   await expect(panel).toContainText('Lost contact')

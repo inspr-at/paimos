@@ -77,7 +77,10 @@ test('an open panel refreshes metadata history after a heartbeat without an acti
   history.push({ field: 'reasoning_effort', previous_value: 'xhigh', value: 'high', at: new Date(now + 10_001).toISOString() })
   expect(worker.activity_note).toBe(unchangedNote)
   await page.clock.runFor(20_100)
-  await expect(panel.getByRole('heading', { name: 'release worker', exact: true })).toBeVisible()
+  // AEON-1212 shows the ticket key as the panel name. The heartbeat refresh is
+  // the history and the model fact below.
+  expect(worker.ticket?.key).toBe('PHAROS-12')
+  await expect(panel.locator('h2.pane-title .name')).toHaveText('PHAROS-12')
   await expect(changes).toContainText('Model gpt-6-sol to gpt-6-astra')
   await expect(changes).toContainText('Effort xhigh to high')
   // AEON-1240 / #612 renders registry display names, while history retains raw values.
