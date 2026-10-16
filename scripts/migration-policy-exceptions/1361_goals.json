@@ -3,9 +3,9 @@
   "exceptions": [
     {
       "file": "1361_goals.sql",
-      "sha256": "b971ae196bc9e458778a1105bcb0f570ca65605a1fe026f59d778555256a350c",
+      "sha256": "745825d4928d6bae9669815441ad62c14288b83944ff9e1a4b34d689e08cfd32",
       "ticket": "AEON-1456",
-      "reason": "Concept r3 D1-D3/E1: widen the relation CHECK only by serves and asks_for; keep every existing event family, named type, actor exception, tenant boundary and node-reference check while adding goal events under visible-goal/outcome RLS. CREATE SEQUENCE goal_response_seq allocates response generations and rewrites no table. No backfill, sample rows or destructive data step. ALTER POLICY, CHECK replacement and CREATE SEQUENCE are outside the expand-safe allowlist. Exact bytes require coordinator cross-family review and whole-chain previous-binary compatibility/backup gates before merge or release. This artifact grants no acceptance, push or deployment authority."
+      "reason": "Concept r3 D1-D3/E1: widen the relation CHECK only by serves and asks_for; keep every existing event family, named type, actor exception, tenant boundary and node-reference check while adding goal events under visible-goal/outcome RLS. CREATE SEQUENCE goal_response_seq allocates response generations and rewrites no table. No backfill, sample rows or destructive data step. ALTER POLICY, CHECK replacement and CREATE SEQUENCE are outside the expand-safe allowlist. Exact bytes require coordinator cross-family review and whole-chain previous-binary compatibility/backup gates before merge or release. This artifact grants no acceptance, push or deployment authority. Round 2 isolates the identical goal-event invoker visibility checks in aeon_goal_event_visible to prevent recursive policy-plan expansion; it does not change accepted subjects, tenants, projects, actor exceptions or node-reference checks."
     }
   ]
 }

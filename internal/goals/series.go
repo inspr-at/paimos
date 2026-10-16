@@ -206,6 +206,10 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 			rows.Close()
 			return out, err
 		}
+		if err := out.add(e); err != nil {
+			rows.Close()
+			return out, err
+		}
 		var n storedNode
 		if err := json.Unmarshal(e.After, &n); err != nil {
 			rows.Close()
@@ -218,10 +222,7 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 				return out, fail(413, "series root bound exceeded")
 			}
 		}
-		if err := out.add(e); err != nil {
-			rows.Close()
-			return out, err
-		}
+
 	}
 	err = rows.Err()
 	rows.Close()

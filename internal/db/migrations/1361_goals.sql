@@ -108,6 +108,37 @@ CREATE POLICY nodes_outcome_ticket_visibility ON nodes AS RESTRICTIVE
         OR kind_id NOT IN (SELECT id FROM node_kinds WHERE slug = 'outcome')
         OR aeon_outcome_tickets_visible(id));
 
+-- Keep the invoker visibility walk behind a procedural boundary. Inlining
+-- three copies of nodes RLS into the event policy caused multi-second query
+-- planning even for a handful of events. No visibility is widened here.
+CREATE FUNCTION aeon_goal_event_visible(p_id uuid) RETURNS boolean
+LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    tenant uuid := NULLIF(current_setting('aeon.tenant_id', true), '')::uuid;
+    subject_kind text;
+    goal_id uuid;
+BEGIN
+    SELECT sk.slug, CASE WHEN sk.slug = 'outcome' THEN subject.parent_id ELSE subject.id END
+      INTO subject_kind, goal_id
+      FROM nodes subject
+      JOIN node_kinds sk ON sk.tenant_id = subject.tenant_id AND sk.id = subject.kind_id
+     WHERE subject.tenant_id = tenant AND subject.id = p_id;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+    RETURN EXISTS (
+        SELECT 1 FROM nodes goal
+        JOIN node_kinds gk ON gk.tenant_id = goal.tenant_id AND gk.id = goal.kind_id
+            AND gk.slug IN ('goal', 'release')
+        JOIN nodes outcome ON outcome.tenant_id = goal.tenant_id AND outcome.parent_id = goal.id
+        JOIN node_kinds ok ON ok.tenant_id = outcome.tenant_id AND ok.id = outcome.kind_id
+            AND ok.slug = 'outcome'
+        WHERE goal.tenant_id = tenant AND goal.id = goal_id
+            AND outcome.deleted_at IS NULL
+            AND (subject_kind <> 'outcome' OR outcome.id = p_id));
+END;
+$$;
+
 -- Keep the existing families, named autopilot types, actor exception and
 -- hidden-reference guard. A project reader receives goal events only when
 -- that goal has a visible outcome; an outcome event requires that very child.
@@ -123,19 +154,7 @@ ALTER POLICY events_project_visibility ON events
                             'requirements', 'release', 'releases', 'knowledge', 'view', 'views', 'tag', 'tags',
                             'kind', 'kinds', 'profile', 'recurrence')
                          OR type IN ('status_autopilot.proposed', 'status_autopilot.attention_apply', 'status_autopilot.attention_dismiss', 'status_autopilot.attention_undone', 'status_autopilot.changed', 'status_autopilot.undone', 'status_autopilot.skipped', 'status_autopilot.derived', 'status_autopilot.retained', 'status_autopilot.causal_undo')
-                         OR (split_part(type, '.', 1) = 'goal' AND EXISTS (
-                             SELECT 1 FROM nodes subject
-                             JOIN node_kinds sk ON sk.tenant_id = subject.tenant_id AND sk.id = subject.kind_id
-                             JOIN nodes goal ON goal.tenant_id = subject.tenant_id
-                                 AND goal.id = CASE WHEN sk.slug = 'outcome' THEN subject.parent_id ELSE subject.id END
-                             JOIN node_kinds gk ON gk.tenant_id = goal.tenant_id AND gk.id = goal.kind_id
-                                 AND gk.slug IN ('goal', 'release')
-                             JOIN nodes outcome ON outcome.tenant_id = goal.tenant_id AND outcome.parent_id = goal.id
-                             JOIN node_kinds ok ON ok.tenant_id = outcome.tenant_id AND ok.id = outcome.kind_id
-                                 AND ok.slug = 'outcome'
-                             WHERE subject.tenant_id = events.tenant_id AND subject.id = events.node_id
-                                 AND outcome.deleted_at IS NULL
-                                 AND (sk.slug <> 'outcome' OR outcome.id = subject.id)))
+                         OR (split_part(type, '.', 1) = 'goal' AND aeon_goal_event_visible(node_id))
                          OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[]))
             END
             AND (cardinality(node_refs) = 0
