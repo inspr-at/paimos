@@ -8,6 +8,8 @@
 // rhythm between items depends on their kind (Copy/Reply reserving a row);
 // a touch-opened menu shows the keyboard focus ring.
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
@@ -125,6 +127,19 @@ const rhythm = (thread: Locator) => thread.evaluate(list => {
   const items = [...list.children]
   return items.slice(1).map((item, index) => ({ pair: `${kind(items[index]!)}→${kind(item)}`, gap: Math.round((bounds(item).top - bounds(items[index]!).bottom) * 10) / 10 }))
 })
+// Every item's box relative to the list, so a scroll does not count as a move.
+const itemBoxes = (thread: Locator) => thread.evaluate(list => {
+  const origin = list.getBoundingClientRect()
+  return [...list.children].map(item => { const box = item.getBoundingClientRect(); return [box.left - origin.left, box.top - origin.top, box.width, box.height] })
+})
+const largestShift = (before: number[][], after: number[][]) => Math.max(...before.flatMap((box, index) => box.map((value, side) => Math.abs(after[index]![side]! - value))))
+// The measured gaps as evidence beside the shots.
+async function writeRhythm(path: string, title: string, columns: Record<string, { pair: string; gap: number }[]>, notes: string[]) {
+  const names = Object.keys(columns), rows = Object.values(columns)[0]!
+  const table = [`| pair | ${names.join(' | ')} |`, `|---|${names.map(() => '---|').join('')}`, ...rows.map((row, index) => `| ${row.pair} | ${names.map(name => `${columns[name]![index]!.gap} px`).join(' | ')} |`)]
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, [`# ${title}`, '', ...table, '', ...notes.map(note => `- ${note}`), ''].join('\n'))
+}
 // WCAG contrast of an element's text over the layers actually behind it,
 // including a ::before paper (the Desk card) and translucent tints.
 async function contrast(locator: Locator) {
@@ -282,7 +297,12 @@ for (const width of [1440, 1024, 390]) test(`AEON-1438 Copy and Reply on demand 
   await expect(message.locator('.message-actions')).toHaveCSS('opacity', '0')
   await panel.locator('.pane-bar').hover()
   const guard = await controlStability(page, { message, next, copy, reply, composer: panel.locator('.compose-box') })
+  const resting = await itemBoxes(thread)
   await guard.check(async () => { await message.hover(); await expect(message.locator('.message-actions')).toHaveCSS('opacity', '1') })
+  // Hover changes no box: no item in the thread moves or resizes while the actions show.
+  const hovered = await rhythm(thread), hoverShift = largestShift(resting, await itemBoxes(thread))
+  expect(hoverShift, 'hover moves no thread item').toBeLessThanOrEqual(.5)
+  expect(hovered, 'hover leaves the rhythm alone').toEqual(gaps)
   // The icons sit in the gap under the message: below its text, above the next item.
   const place = await message.evaluate(row => {
     const text = row.querySelector('.chat-markdown, .markdown-body')!.getBoundingClientRect(), after = row.nextElementSibling!.getBoundingClientRect()
@@ -308,7 +328,12 @@ for (const width of [1440, 1024, 390]) test(`AEON-1438 Copy and Reply on demand 
     await expect(panel.getByRole('textbox', { name: 'Message to AEON-LEAD' })).toBeFocused()
   })
   guard.done()
-  expect(await rhythm(thread), 'hover and Reply leave the rhythm alone').toEqual(gaps)
+  const replied = await rhythm(thread)
+  expect(replied, 'hover and Reply leave the rhythm alone').toEqual(gaps)
+  await writeRhythm(testInfo.outputPath(`AEON-1438/rhythm-${width}-light.md`), `AEON-1438 thread rhythm at ${width} px, fine pointer (expected ${expected} px ±1)`, { resting: gaps, hover: hovered, 'after Reply': replied }, [
+    `Hover over the message: the largest change of any thread item's box (x, y, width, height; ${resting.length} items) is ${Math.round(hoverShift * 100) / 100} px (limit 0.5 px).`,
+    'Message, next card, Copy, Reply and composer stay within 0.5 px through hover, the pointer travelling the gap, focus on Copy and Reply.',
+  ])
 })
 
 // The thread opens with its day: a thread that starts today shows "Today" first, at scrollTop 0.
@@ -349,7 +374,9 @@ test.describe('touch', () => {
     // Touch has no hover: no action row at all, so nothing is permanently visible.
     await expect(message.locator('.message-actions')).toBeHidden()
     await expect(panel.getByRole('article', { name: /^Decision Desk: Ship the 135 notes/ })).toContainText('Waiting for you')
-    for (const item of await rhythm(panel.getByRole('list', { name: 'Messages', exact: true }))) expect(Math.abs(item.gap - 16), `${item.pair} gap ${item.gap} px`).toBeLessThanOrEqual(1)
+    const gaps = await rhythm(panel.getByRole('list', { name: 'Messages', exact: true }))
+    for (const item of gaps) expect(Math.abs(item.gap - 16), `${item.pair} gap ${item.gap} px`).toBeLessThanOrEqual(1)
+    if (theme === 'light') await writeRhythm(testInfo.outputPath('AEON-1438/rhythm-390-touch-light.md'), 'AEON-1438 thread rhythm at 390 px, touch (expected 16 px ±1)', { resting: gaps }, ['Touch has no Copy/Reply row at all; the long press is the way in.'])
     const menu = page.getByRole('menu', { name: 'Message actions' })
     const guard = await controlStability(page, { message, next: panel.locator('.msg.desk').last(), send: panel.locator('.compose .send'), plus: panel.getByRole('button', { name: 'Add a ticket or session' }) })
     await guard.check(async () => {
