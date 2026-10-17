@@ -50,20 +50,24 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const error = ref('')
   const reading = ref(false)
   const loadingMore = ref(false)
-  let turn = 0
+  let turn = 0, shownQuery = ''
   let controller: AbortController | undefined
   const query = () => ({ q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, sort: sort.value, dir: dir.value })
   function read(): Promise<void> {
     if (!owner.value || !options.active()) return Promise.resolve()
     controller?.abort()
     const abort = new AbortController(); controller = abort
-    const mine = ++turn, who = owner.value
+    const mine = ++turn, who = owner.value, asked = JSON.stringify(query())
     reading.value = true
     // The answer counts only for the person, query and turn it was asked for.
     const current = () => mine === turn && who === owner.value
     return listGoals(query(), abort.signal).then(answer => {
       if (!current()) return
-      list.value = answer; error.value = ''; reading.value = false
+      reading.value = false
+      // The same question never goes back to an older snapshot than the one on screen.
+      const shown = list.value
+      if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) return
+      list.value = answer; shownQuery = asked; error.value = ''
     }, cause => {
       if (!current() || abort.signal.aborted) return
       error.value = cause instanceof Error ? cause.message : 'Goals could not be read.'

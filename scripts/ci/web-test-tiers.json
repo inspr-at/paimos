@@ -788,6 +788,28 @@
     ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
     ,
+    "browser:tests/goals-view.spec.ts:1024 dark: essentials stay, nothing overflows, axe is clean"
+    ,
+    "browser:tests/goals-view.spec.ts:1024 light: essentials stay, nothing overflows, axe is clean"
+    ,
+    "browser:tests/goals-view.spec.ts:1440 dark: essentials stay, nothing overflows, axe is clean"
+    ,
+    "browser:tests/goals-view.spec.ts:1440 light: essentials stay, nothing overflows, axe is clean"
+    ,
+    "browser:tests/goals-view.spec.ts:390 dark: essentials stay, nothing overflows, axe is clean"
+    ,
+    "browser:tests/goals-view.spec.ts:390 light: essentials stay, nothing overflows, axe is clean"
+    ,
+    "browser:tests/goals-view.spec.ts:Waiting on you lists live Desk items; header labels sort with LANDS first; the footer names the quiet projects"
+    ,
+    "browser:tests/goals-view.spec.ts:a list that cannot be read says so and offers Try again; the counts never pretend"
+    ,
+    "browser:tests/goals-view.spec.ts:an opened goal lists what’s missing, then Moving, Queued (five, then a fold), Paused and Done folded; one agent column; nothing moves"
+    ,
+    "browser:tests/goals-view.spec.ts:empty states replace the list in place and never show examples"
+    ,
+    "browser:tests/goals-view.spec.ts:the ETA popover says who set it and what it was, where the pace lands it, right-aligned and flipping above; passed ETAs are gold"
+    ,
     "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1024"
     ,
     "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1440"
@@ -9088,6 +9110,32 @@
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1440 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1440 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"390 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"390 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"Goals is the third segment; the filter and group chips stay put; chips count items and add up; Hide done and E never move a control","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"Waiting on you lists live Desk items; header labels sort with LANDS first; the footer names the quiet projects","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"a list that cannot be read says so and offers Try again; the counts never pretend","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"an opened goal lists what’s missing, then Moving, Queued (five, then a fold), Paused and Done folded; one agent column; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"empty states replace the list in place and never show examples","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the ETA popover says who set it and what it was, where the pace lands it, right-aligned and flipping above; passed ETAs are gold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the bar opens a stepped chart in place; one global range; the signal row and its stall rule; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"a glimpse renderer takes its host size when its engine loads after the first resize pass","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"the shared canvas consumes a ticket adapter and honors its FPS prop","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15967,6 +16015,16 @@
     {"kind":"node","file":"tests/fatal.test.ts","name":"render-breaking errors are recognised in development and production form","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/fatal.test.ts","name":"the report keeps a short first line, a reference and the retry path, never a stack","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/goal-rate.test.ts","name":"a goal younger than the window counts only from its creation and starts from what it held","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/goal-rate.test.ts","name":"the chart fits its domain, keeps at least 20 points of height and starts where the goal did","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/goal-rate.test.ts","name":"the projection lands at the pace shown, and is omitted where Tick’s rules say so","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/goal-rate.test.ts","name":"the rate is the change over the window, per hour for 24 h and per day for 7 d and 30 d","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/goal-rate.test.ts","name":"the stall line counts whole hours; the point line names the bucket and what changed","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour","tier":"GATED-FULL"}
     ,
