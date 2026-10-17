@@ -19,9 +19,9 @@ type AuditGitHub interface {
 }
 
 type MergeFact struct {
-	SHA, Head, Title, Branch, MergedBy string
-	PR                                 *int64
-	At                                 time.Time
+	SHA, Head, Base, Title, Branch, MergedBy string
+	PR                                       *int64
+	At                                       time.Time
 }
 
 type auditPull struct {
@@ -39,6 +39,7 @@ type auditPull struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	Base struct {
+		SHA  string `json:"sha"`
 		Ref  string `json:"ref"`
 		Repo struct {
 			Name string `json:"full_name"`
@@ -54,7 +55,7 @@ func auditPullFact(p auditPull, repo, branch string) (*MergeFact, error) {
 		return nil, errRead
 	}
 	n := p.Number
-	return &MergeFact{SHA: p.MergeSHA, Head: p.Head.SHA, Title: p.Title, Branch: p.Head.Ref, MergedBy: p.MergedBy.Login, PR: &n, At: *p.MergedAt}, nil
+	return &MergeFact{SHA: p.MergeSHA, Head: p.Head.SHA, Base: p.Base.SHA, Title: p.Title, Branch: p.Head.Ref, MergedBy: p.MergedBy.Login, PR: &n, At: *p.MergedAt}, nil
 }
 
 func auditDefault(get func(string, any) error, repo string) (string, error) {
