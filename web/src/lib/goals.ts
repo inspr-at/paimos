@@ -46,7 +46,6 @@ export interface GoalEvent { id: number; actor_principal_id: string; node_id: st
 export type GoalSort = 'eta' | 'name' | 'progress' | 'project' | 'moving' | 'queued' | 'done'
 // The direction a column sorts in first; the header flips it on a second click.
 export const SORT_DIR: Record<GoalSort, 'asc' | 'desc'> = { eta: 'asc', name: 'asc', project: 'asc', progress: 'desc', moving: 'desc', queued: 'desc', done: 'desc' }
-export const isGoalSort = (value: unknown): value is GoalSort => typeof value === 'string' && value in SORT_DIR
 
 // ---------- Reads ----------
 async function read<T>(path: string, signal?: AbortSignal): Promise<T> {

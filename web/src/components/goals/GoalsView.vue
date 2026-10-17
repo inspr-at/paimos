@@ -23,7 +23,7 @@ import type { LiveAgent } from '../../lib/liveAgents'
 import type { RowAction } from '../../lib/rowActions'
 
 const props = defineProps<{ page: GoalsPage; term: string; now: number; hiddenGroups: boolean }>()
-const emit = defineEmits<{ clear: []; search: [] }>()
+const emit = defineEmits<{ clear: [] }>()
 const session = useSession()
 const live = useLiveAgents()
 const route = useRoute()
