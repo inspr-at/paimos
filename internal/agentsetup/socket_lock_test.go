@@ -9,10 +9,59 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/hooknote"
 	"golang.org/x/sys/unix"
 )
+
+// Risk: format validation or failed kernel inspection could disguise a live
+// foreign daemon; PID reuse must compare the recorded identity, not our binary.
+func TestSocketPeerLivenessIsConservative(t *testing.T) {
+	// Releases 131 (b29aecd4b), 133 (66ca220d1), and 134 (d1564f33a)
+	// all publish this shape, with the same pid/started/exe ownership fields.
+	const legacy = `{"pid":42,"uid":501,"started":"100:1","exe":"/older/agentd","dev":1,"ino":2,"pidv":7}`
+	current := hooknote.Process{PID: 42, Started: "100:1", Executable: "/older/agentd"}
+	for _, tc := range []struct {
+		name       string
+		raw        string
+		killErr    error
+		process    hooknote.Process
+		observeErr error
+		live       bool
+	}{
+		{name: "release 131 133 134", raw: legacy, process: current, live: true},
+		{name: "dead foreign release", raw: legacy, killErr: syscall.ESRCH},
+		{name: "permission denied", raw: legacy, killErr: syscall.EPERM, observeErr: syscall.EPERM, live: true},
+		{name: "observation unavailable", raw: legacy, observeErr: hooknote.ErrPeer, live: true},
+		{name: "unknown metadata", raw: `{"pid":42,"uid":"future","schema":999}`, process: current, live: true},
+		{name: "malformed optional identity", raw: `{"pid":42,"started":123,"exe":{}}`, process: current, live: true},
+		{name: "partial observation", raw: legacy, process: hooknote.Process{PID: 42, Started: "100:1"}, live: true},
+		{name: "reused pid", raw: legacy, process: hooknote.Process{PID: 42, Started: "200:1", Executable: "/older/agentd"}},
+		{name: "different loaded executable", raw: legacy, process: hooknote.Process{PID: 42, Started: "100:1", Executable: "/other/program"}},
+		{name: "unknown format", raw: `{"schema":999}`},
+		{name: "malformed", raw: `{`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			peer := parseSocketPeer([]byte(tc.raw))
+			got := peer.live(func(pid int, signal syscall.Signal) error {
+				if pid != 42 || signal != 0 {
+					t.Fatalf("unexpected process probe: %d %d", pid, signal)
+				}
+				return tc.killErr
+			}, func(pid int) (hooknote.Process, error) {
+				if pid != 42 || errors.Is(tc.killErr, syscall.ESRCH) {
+					t.Fatal("inspected an invalid or already dead PID")
+				}
+				return tc.process, tc.observeErr
+			})
+			if got != tc.live {
+				t.Fatalf("live=%v, want %v", got, tc.live)
+			}
+		})
+	}
+}
 
 func socketLockStore(t *testing.T, boundary bool) *Store {
 	t.Helper()

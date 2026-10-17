@@ -1822,6 +1822,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPairedSocketRefusesUnsafeArtifacts","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestPairedSocketRollbackRuntimeFiles","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestPairedSocketShutdownRequiresVerifiedLock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPairingFailureOverridesProbeTimeoutAndRecovers","tier":"GATED-FULL"}
@@ -3291,6 +3293,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestSocketPathLegacyDiscoveryAndReferenceRejection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSocketPathNeedsHomeOnlyForFallback","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSocketPeerLivenessIsConservative","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSocketShutdownRefusesReplacedArtifacts","tier":"GATED-FULL"}
     ,

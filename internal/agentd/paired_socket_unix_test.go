@@ -6,20 +6,24 @@ package agentd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/hooknote"
 	"golang.org/x/sys/unix"
 )
 
@@ -57,17 +61,24 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	var paused *net.UnixListener
-	if args[3] == "legacy" || args[3] == "full-queue" {
+	terminated := make(chan os.Signal, 1)
+	if args[3] == "hook-sigterm" {
+		signal.Notify(terminated, syscall.SIGTERM)
+		defer signal.Stop(terminated)
+	}
+	if args[3] == "legacy" || args[3] == "full-queue" || args[3] == "hook-foreign" {
 		sockets, err := agentsetup.OpenStore(filepath.Dir(args[2]), false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer sockets.Close()
-		lock, err := sockets.LockSocket(filepath.Base(args[2]))
-		if err != nil {
-			t.Fatal(err)
+		if args[3] != "hook-foreign" {
+			lock, err := sockets.LockSocket(filepath.Base(args[2]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Close()
 		}
-		defer lock.Close()
 		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: args[2], Net: "unix"})
 		if err != nil {
 			t.Fatal(err)
@@ -84,7 +95,7 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 			if err := os.Rename(args[2], filepath.Join(sockets.Path(), ".s01234567")); err != nil {
 				t.Fatal(err)
 			}
-		} else {
+		} else if args[3] == "full-queue" {
 			// Keep the queue small so saturation is deterministic and does not
 			// depend on the runner's SOMAXCONN or descriptor limit.
 			raw, err := listener.SyscallConn()
@@ -115,7 +126,24 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 		}
 		defer local.Close()
 	}
+	if args[3] == "hook-foreign" || args[3] == "hook-sigterm" {
+		self, err := hooknote.ObserveDaemonSelf()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(hooknote.PinFrom(self))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Write("hook-peer.json", raw, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fmt.Println("ready")
+	if args[3] == "hook-sigterm" {
+		<-terminated
+		return
+	}
 	_, _ = input.ReadString('\n')
 	if paused != nil {
 		if err := paused.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -322,6 +350,175 @@ func TestPairedSocketRecoversLegacyQuarantineCrash(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("legacy residue %s: %v", name, err)
 		}
+	}
+}
+
+// Risk: rollback residue can prevent startup, or cleanup can take over an older
+// daemon that is alive but does not hold the current release's lifetime lock.
+func TestPairedSocketRollbackRuntimeFiles(t *testing.T) {
+	t.Run("live foreign peer then a2 dead foreign peer", func(t *testing.T) {
+		s, _, _ := testSupervisor(t)
+		socket := filepath.Join(socketTestDir(t), "agentd.sock")
+		if err := os.WriteFile(socket+".lock", nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		child := startSocketProcess(t, s, socket, "hook-foreign")
+		child.start(t)
+		if got := child.line(t); got != "ready" {
+			t.Fatalf("foreign fixture startup: %q", got)
+		}
+		pin, err := s.state.Read("hook-peer.json", 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := socketArtifacts(t, filepath.Dir(socket))
+		for _, raw := range [][]byte{pin, []byte(fmt.Sprintf(`{"pid":%d,"future":{"version":999},"uid":"unknown"}`, child.cmd.Process.Pid))} {
+			if err := s.state.Write("hook-peer.json", raw, false); err != nil {
+				t.Fatal(err)
+			}
+			local, err := ServePairedLocal(s, socket)
+			if local != nil {
+				local.Close()
+			}
+			if !errors.Is(err, agentsetup.ErrBusy) || !strings.Contains(err.Error(), "hook-peer.json names live pid") {
+				t.Fatalf("live foreign PID was not refused: %v", err)
+			}
+			assertSocketArtifacts(t, filepath.Dir(socket), before)
+			if got, err := s.state.Read("hook-peer.json", 4096); err != nil || string(got) != string(raw) {
+				t.Fatalf("refusal changed foreign pin: %v", err)
+			}
+			assertSocketConnects(t, socket)
+		}
+		child.kill(t) // Wait reaps the child before the dead-PID recovery attempt.
+		// OPS a2: the binary's exe/dev/ino may belong to a different release;
+		// the candidate PID is dead, so those fields cannot block recovery.
+		if err := s.state.Write("hook-peer.json", pin, false); err != nil {
+			t.Fatal(err)
+		}
+		local, err := ServePairedLocal(s, socket)
+		if err != nil {
+			t.Fatalf("a2 restart with a dead foreign pin: %v", err)
+		}
+		defer local.Close()
+		assertSocketConnects(t, socket)
+		if _, err := s.state.Read("hook-peer.json", 4096); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("dead foreign pin survived startup: %v", err)
+		}
+	})
+	for _, scenario := range []string{"a3 missing", "malformed", "unknown format", "oversized", "unreadable"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, _, _ := testSupervisor(t)
+			socket := filepath.Join(socketTestDir(t), "agentd.sock")
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listener.SetUnlinkOnClose(false)
+			if err := listener.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(socket, 0600); err != nil {
+				t.Fatal(err)
+			}
+			raw := map[string]string{"malformed": `{`, "unknown format": `{"version":999,"peer":{}}`, "oversized": strings.Repeat("x", 4097), "unreadable": `{"pid":1}`}[scenario]
+			if raw != "" {
+				if err := s.state.Write("hook-peer.json", []byte(raw), false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "unreadable" {
+				if err := os.Chmod(filepath.Join(s.state.Path(), "hook-peer.json"), 0000); err != nil {
+					t.Fatal(err)
+				}
+			}
+			local, err := ServePairedLocal(s, socket)
+			if err != nil {
+				t.Fatalf("stale runtime files blocked startup: %v", err)
+			}
+			defer local.Close()
+			assertSocketConnects(t, socket)
+			if _, err := os.Lstat(filepath.Join(s.state.Path(), "hook-peer.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("stale hook survived startup: %v", err)
+			}
+		})
+	}
+	t.Run("SIGTERM cleans socket and own hook", func(t *testing.T) {
+		s, _, _ := testSupervisor(t)
+		socket := filepath.Join(socketTestDir(t), "agentd.sock")
+		child := startSocketProcess(t, s, socket, "hook-sigterm")
+		child.start(t)
+		if got := child.line(t); got != "ready" {
+			t.Fatalf("signal fixture startup: %q", got)
+		}
+		if err := child.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-child.done:
+		case <-time.After(15 * time.Second):
+			t.Fatalf("SIGTERM fixture did not exit: %s", child.diagnostics())
+		}
+		if err := child.cmd.Wait(); err != nil {
+			t.Fatalf("clean SIGTERM exit: %v\n%s", err, child.diagnostics())
+		}
+		for _, path := range []string{socket, socket + ".token", filepath.Join(s.state.Path(), "hook-peer.json")} {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("clean SIGTERM left %s: %v", filepath.Base(path), err)
+			}
+		}
+	})
+	for _, sameDirectory := range []bool{true, false} {
+		t.Run(fmt.Sprintf("idempotent close and foreign pin preservation same-dir=%v", sameDirectory), func(t *testing.T) {
+			dir := socketTestDir(t)
+			state := dir
+			if !sameDirectory {
+				state = filepath.Join(dir, "daemon")
+			}
+			store, err := agentsetup.OpenStore(state, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			s := &Supervisor{state: store}
+			socket := filepath.Join(dir, "agentd.sock")
+			local, err := ServePairedLocal(s, socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer local.Close()
+			if err := store.Write("hook-peer.json", []byte(fmt.Sprintf(`{"pid":%d}`, os.Getpid())), false); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := local.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, path := range []string{socket, socket + ".token", filepath.Join(state, "hook-peer.json")} {
+				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("clean close left %s: %v", filepath.Base(path), err)
+				}
+			}
+			next, err := ServePairedLocal(s, socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer next.Close()
+			foreign := []byte(fmt.Sprintf(`{"pid":%d}`, os.Getppid()))
+			if err := store.Write("hook-peer.json", foreign, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := local.Close(); err != nil {
+				t.Fatal(err)
+			}
+			assertSocketConnects(t, socket)
+			if err := next.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := store.Read("hook-peer.json", 4096); err != nil || string(got) != string(foreign) {
+				t.Fatalf("shutdown removed another PID's pin: %v", err)
+			}
+		})
 	}
 }
 
