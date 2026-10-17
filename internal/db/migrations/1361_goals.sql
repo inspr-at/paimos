@@ -269,7 +269,6 @@ LANGUAGE plpgsql STABLE AS $$
 DECLARE
  scope_roots uuid[];
  scope_nodes uuid[];
- fact_nodes uuid[];
 BEGIN
  -- Bound the caller's root array before traversal, including duplicate roots.
  IF cardinality(roots)>4096 THEN
@@ -282,7 +281,7 @@ BEGIN
   SELECT n.id,n.id,NULL::uuid,false FROM (SELECT DISTINCT r.id FROM unnest(roots) r(id)) seed
   CROSS JOIN LATERAL (SELECT n.id FROM nodes n
    WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
-    AND n.id=seed.id AND n.deleted_at IS NULL OFFSET 0) n
+    AND n.id=seed.id AND n.deleted_at IS NULL ORDER BY n.id LIMIT 1) n
   UNION
   SELECT w.root,c.* FROM walk w CROSS JOIN LATERAL (
    (SELECT c.*,row_number() OVER (ORDER BY c.id)=128 FROM (
@@ -302,33 +301,28 @@ BEGIN
  IF cardinality(scope_nodes)>50000 THEN
   RAISE EXCEPTION 'work scope expansion budget exceeded' USING ERRCODE='54000';
  END IF;
- SELECT array_agg(DISTINCT p.id) INTO fact_nodes FROM unnest(scope_nodes) p(id);
  RETURN QUERY
  WITH walk AS MATERIALIZED (
   SELECT p.root,p.id FROM unnest(scope_roots,scope_nodes) AS p(root,id)
- ), work_parents AS MATERIALIZED (
-  -- Resolve visible direct work parents once for the bounded scope. A
-  -- correlated child-kind join can rescan nodes for each root when a newly
-  -- cloned or small tenant has no useful kind statistics.
-  SELECT DISTINCT c.parent_id FROM nodes c
-  JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
-  WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid
-   AND c.parent_id=ANY(fact_nodes) AND c.deleted_at IS NULL
-   AND ck.slug IN ('work','epic','ticket','task')
  ), facts AS MATERIALIZED (
-  SELECT n.id,k.slug,n.fields,n.project_id,
+  SELECT n.id,k.slug,n.fields,n.project_id,n.parent_id,
    CASE aeon_work_status_category(n.state,k.field_schema)
     WHEN 'delivered' THEN 'done' WHEN 'accepted' THEN 'done' WHEN 'blocked' THEN 'open'
-    ELSE aeon_work_status_category(n.state,k.field_schema) END AS bucket,
-   k.slug IN ('work','epic','ticket','task') AND NOT EXISTS (
-    SELECT 1 FROM work_parents p WHERE p.parent_id=n.id) AS is_leaf
+    ELSE aeon_work_status_category(n.state,k.field_schema) END AS bucket
   FROM (SELECT DISTINCT w.id FROM walk w) u CROSS JOIN LATERAL (
-   SELECT n.id,n.tenant_id,n.kind_id,n.fields,n.state,n.project_id FROM nodes n WHERE n.id=u.id
+   SELECT n.id,n.tenant_id,n.kind_id,n.fields,n.state,n.project_id,n.parent_id FROM nodes n WHERE n.id=u.id
     AND n.tenant_id=current_setting('aeon.tenant_id')::uuid OFFSET 0
   ) n CROSS JOIN LATERAL (
    SELECT k.slug,k.field_schema FROM node_kinds k WHERE k.tenant_id=n.tenant_id AND k.id=n.kind_id OFFSET 0
   ) k
- ) SELECT w.root,f.id,f.slug,f.fields,f.bucket,f.is_leaf,f.project_id FROM walk w JOIN facts f ON f.id=w.id;
+ ), work_parents AS MATERIALIZED (
+  -- Every visible child of a completed scope is already among these bounded
+  -- facts. Derive direct work parents here instead of probing other trees.
+  SELECT DISTINCT f.parent_id FROM facts f WHERE f.slug IN ('work','epic','ticket','task')
+ ) SELECT w.root,f.id,f.slug,f.fields,f.bucket,
+  f.slug IN ('work','epic','ticket','task') AND NOT EXISTS (
+   SELECT 1 FROM work_parents p WHERE p.parent_id=f.id),f.project_id
+ FROM walk w JOIN facts f ON f.id=w.id;
 END;
 $$;
 

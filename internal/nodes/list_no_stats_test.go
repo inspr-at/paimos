@@ -250,7 +250,7 @@ func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
 						}
 					case map[string]any:
 						if n["Relation Name"] == "nodes" {
-							t.Logf("scope scan: type=%v index=%v rows=%v loops=%v removed=%v condition=%v", n["Node Type"], n["Index Name"], n["Actual Rows"], n["Actual Loops"], n["Rows Removed by Filter"], n["Index Cond"])
+							t.Logf("scope scan: type=%v index=%v rows=%v loops=%v removed=%v condition=%v filter=%v", n["Node Type"], n["Index Name"], n["Actual Rows"], n["Actual Loops"], n["Rows Removed by Filter"], n["Index Cond"], n["Filter"])
 						}
 						walk(n["Plan"])
 						walk(n["Plans"])
