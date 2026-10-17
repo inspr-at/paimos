@@ -520,6 +520,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeFromRootWorkingDirectory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeKeepsDrainingBusyRun","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeRestartsWithUnconfirmedLedgerIntent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedSyncTombstoneProbesAndFailureDiagnostics","tier":"GATED-FULL"}
@@ -1455,6 +1457,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestClaudeTierConfirmsFreshVendorState","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeVerificationSDKEnforcesNoTools","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCleanStopReleasesOwnedRuntime","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexAcknowledgedTerminalAndDrain","tier":"GATED-FULL"}
     ,
