@@ -59,8 +59,18 @@ export function headerGlimpseWide(layoutWidth: number): boolean {
 // catches up by one pixel, so a stale 1279 sample cannot undo a real widen.
 // A queued matches:true from that widen can arrive after the next shrink; a
 // layout that has already left the threshold (390, 1278) stays narrow.
+// The root's box can lay out at 390 while the query and innerWidth still say
+// 1600 (PR #743). That box is narrow. A classic scrollbar, a few pixels under
+// a still-wide innerWidth, is not.
 const GLIMPSE_WIDTH_CATCHUP = 1
-export function nextHeaderGlimpseWide(signal: { mediaMatches: boolean | null; layoutWidth: number }): boolean {
+const GLIMPSE_BOX_SLOP = 20
+export function nextHeaderGlimpseWide(signal: { mediaMatches: boolean | null; layoutWidth: number; boxWidth?: number }): boolean {
+  const box = signal.boxWidth
+  if (typeof box === 'number' && Number.isFinite(box) && box < GLIMPSE_MIN_WIDTH - GLIMPSE_WIDTH_CATCHUP) {
+    const layout = signal.layoutWidth
+    const scrollbar = Number.isFinite(layout) && layout >= GLIMPSE_MIN_WIDTH && layout - box <= GLIMPSE_BOX_SLOP
+    if (!scrollbar) return false
+  }
   if (signal.mediaMatches === null) return headerGlimpseWide(signal.layoutWidth)
   if (!signal.mediaMatches) return false
   if (Number.isFinite(signal.layoutWidth) && signal.layoutWidth < GLIMPSE_MIN_WIDTH - GLIMPSE_WIDTH_CATCHUP) return false
