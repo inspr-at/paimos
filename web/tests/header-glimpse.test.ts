@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide } from '../src/lib/headerGlimpse.ts'
+import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseWide, nextHeaderGlimpseWide } from '../src/lib/headerGlimpse.ts'
 
 const on = { enabled: true, reduced: false, wide: true, tickets: 8 }
 
@@ -11,16 +11,16 @@ test('the header glimpse needs a wide viewport, motion, and eight tickets', () =
   assert.equal(headerGlimpseAllowed({ ...on, reduced: true }), false)
   assert.equal(headerGlimpseAllowed({ ...on, wide: false }), false)
   assert.equal(headerGlimpseAllowed({ ...on, tickets: 7 }), false)
-})
-
-test('a stale wide media query cannot keep the header glimpse once the layout is below 1280', () => {
-  assert.equal(headerGlimpseViewportWide(true, 1280), true)
-  assert.equal(headerGlimpseViewportWide(true, 1600), true)
-  assert.equal(headerGlimpseViewportWide(true, 1279), false)
-  assert.equal(headerGlimpseViewportWide(true, 390), false)
-  assert.equal(headerGlimpseViewportWide(false, 1280), false)
-  assert.equal(headerGlimpseViewportWide(false, 1600), false)
-  assert.equal(headerGlimpseViewportWide(true, Number.NaN), false)
+  assert.equal(headerGlimpseWide(1280), true)
+  assert.equal(headerGlimpseWide(1279), false)
+  assert.equal(headerGlimpseWide(390), false)
+  assert.equal(headerGlimpseWide(Number.NaN), false)
+  // The CI failure: viewport 1280 turned the glimpse on, then 390 dropped the
+  // MediaQueryList change and the previous flag stayed on.
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: null, layoutWidth: 390 }), false)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: null, layoutWidth: 1280 }), true)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1279 }), true)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: false, layoutWidth: 1280 }), false)
 })
 
 test('a ready graph has eight tickets and at least one link', () => {

@@ -194,6 +194,13 @@ function keys(event: KeyboardEvent) {
 .nr-source { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
 .nr-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .nr-agent { display: flex; gap: 6px; color: var(--ink-3); font-size: 12px; }
+/* AEON-1396: a link, never a browser button. Keyboard focus shows the app ring; the open reason form shows
+   through the link's own pressed ink at the same weight, so nothing moves and no outline appears. */
+.link-btn { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--teal-ink); font: inherit; font-size: 12.5px; font-weight: 600; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; cursor: pointer; }
+@media (hover: hover) { .link-btn:hover { text-decoration-color: currentColor; } }
+.link-btn:focus { outline: none; }
+.link-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.link-btn[aria-expanded="true"] { color: var(--ink); text-decoration-color: currentColor; }
 .nr-phone-actions { display: none; }
 .nr-form { display: grid; gap: 6px; padding: 10px; background: var(--surface-sunken); border-radius: 10px; }
 .nr-form-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
