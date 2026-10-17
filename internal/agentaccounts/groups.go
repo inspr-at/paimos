@@ -99,7 +99,7 @@ func (m *Module) groups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out any
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
 		if r.Method == http.MethodGet {
 			items, err := listGroups(r.Context(), tx)
 			out = items
@@ -142,7 +142,7 @@ func (m *Module) group(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out AccountGroup
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		if r.Method == http.MethodDelete {
 			return deleteGroup(r.Context(), tx, p, id)
 		}
@@ -185,7 +185,7 @@ func (m *Module) pins(w http.ResponseWriter, r *http.Request) {
 		in.Harness = r.URL.Query().Get("harness")
 	}
 	var out []TicketPin
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
 		switch r.Method {
 		case http.MethodGet:
 			var err error
@@ -323,7 +323,7 @@ func (m *Module) runTarget(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "run.create", func(tx pgx.Tx) error {
 		return setRunTarget(r.Context(), tx, p, runID, strings.ToLower(in.AccountID), strings.ToLower(in.GroupID))
 	})
 	if err != nil {
