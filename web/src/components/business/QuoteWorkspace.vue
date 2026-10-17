@@ -6,6 +6,7 @@ import { setPageTitle } from '../../lib/brand'
 import { headerFolded } from '../../lib/chrome'
 import { confirmAction } from '../../lib/confirm'
 import { usePreference } from '../../lib/preferences'
+import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
 import { selectionAnchor } from '../../lib/quotePresence'
 import type { ConflictChoices } from '../../lib/quoteMerge'
 import { acquireQuote, dropQuote, releaseQuote, type LiveQuote, type Scope } from '../../lib/quoteWorkspace'
@@ -292,11 +293,14 @@ const sideMode = computed<'dock' | 'overlay' | 'sheet'>(() => mode.value === 'sh
 type Pane = 'format' | 'details'
 const pref = usePreference<{ zoom?: ZoomMode; phoneZoom?: ZoomMode; inspector?: boolean; pane?: Pane | 'none'; headerFolded?: boolean }>('quote-editor')
 const floating = ref<Pane | null>(null)
-const savedPane = computed<Pane | null>(() => {
-  const stored = pref.value.value
-  if (stored?.pane === 'none' || stored?.inspector === false) return null
-  return stored?.pane === 'details' ? 'details' : 'format'
+// The docked side panel is a view switch (AEON-1453): the person's default pane, else the
+// one used last (or none, closed). quote-editor.pane kept it before and counts until replaced.
+const paneSwitch = useViewSwitch({
+  key: viewKey('quote.pane'), options: ['format', 'details', 'none'], fallback: 'format',
+  legacy: { key: 'quote-editor', read: value => ({ last: value?.pane === 'none' || value?.inspector === false ? 'none' : value?.pane }) },
 })
+const savedPane = computed<Pane | null>(() => paneSwitch.current.value === 'none' ? null : paneSwitch.current.value === 'details' ? 'details' : 'format')
+const paneDefault = computed(() => paneSwitch.defaultId.value === 'format' || paneSwitch.defaultId.value === 'details' ? paneSwitch.defaultId.value : null)
 const canFormat = computed(() => isDraft.value && viewing.value === null)
 const pane = computed<Pane | null>(() => {
   const chosen = sideMode.value === 'dock' ? savedPane.value : floating.value
@@ -304,10 +308,8 @@ const pane = computed<Pane | null>(() => {
   return chosen
 })
 function setPane(next: Pane) {
-  if (sideMode.value === 'dock') {
-    const open = pane.value === next ? 'none' : next
-    pref.save({ ...(pref.value.value ?? {}), pane: open, inspector: open !== 'none' })
-  } else floating.value = floating.value === next ? null : next
+  if (sideMode.value === 'dock') paneSwitch.choose(pane.value === next ? 'none' : next)
+  else floating.value = floating.value === next ? null : next
 }
 function openPane(next: Pane) { if (pane.value !== next) setPane(next) }
 function toggleHeader() {
@@ -547,8 +549,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
       class="quote-titlebar" :offer-no="offerNo" :status="status" :archived="!!projection?.archived" :revising="revising" :local="viewing !== null ? 'read-only' : view?.local ?? 'loading'"
       :can-save="saveReady" :save-hint="saveHint" :can-undo="canUndo" :can-redo="canRedo" :zoom="effectiveZoom" :percent="percent" :pane="pane" :can-format="canFormat"
       :header-collapsed="headerFolded" :printing="printing" :compact="compact" :layout="layout" :presence="presence" :principal-id="identity.identity?.principal.id ?? ''"
-      :admin="admin" :staff="staff"
-      @save="save" @undo="undo" @redo="redo" @zoom="setZoom" @print="print" @toggle-header="toggleHeader" @pane="setPane"
+      :admin="admin" :staff="staff" :pane-default="paneDefault" :pane-menu="sideMode === 'dock'"
+      @save="save" @undo="undo" @redo="redo" @zoom="setZoom" @print="print" @toggle-header="toggleHeader" @pane="setPane" @pane-default="value => paneSwitch.setDefault(value)"
       @close="emit('close')" @expand="emit('expand')" @collapse="emit('collapse')" @duplicate="duplicate" @archive="archive" @copy-number="copyNumber" @issue="issue"
     >
       <template v-if="document && (isDraft ? staff : true)" #profile="{ folded }">

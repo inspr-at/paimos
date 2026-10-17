@@ -179,7 +179,8 @@ test('cards: the switch is remembered; a card shows its ring, aligned counts, pe
   const { calls } = await open(page)
   await page.getByRole('radio', { name: 'Cards view' }).click()
   await expect(page.getByRole('radio', { name: 'Cards view' })).toHaveAttribute('aria-checked', 'true')
-  await expect.poll(() => lastPut(calls, 'projects')?.value).toEqual({ view: 'cards' })
+  // List · Cards is a view switch with its own key (AEON-1453).
+  await expect.poll(() => lastPut(calls, 'view:projects')?.value).toEqual({ last: 'cards' })
   const card = projects(page).locator('.card').filter({ hasText: 'PHAROS' })
   await expect(card.locator('.ring .pct')).toHaveText('17%')
   await expect(card.locator('.counts .stat-label')).toHaveText(['Open', 'Doing', 'Done'])

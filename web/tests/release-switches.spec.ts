@@ -179,16 +179,21 @@ test('the language is remembered per person and defaults to the profile', async 
   await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true')
   await expect(block(page, 'Lesbarer Risiko-Chip')).toBeVisible()
   await expect(page).not.toHaveURL(/release_lang=/)
-  // EN chosen once stays EN on a fresh open without it in the address.
+  // EN chosen once stays EN on a fresh open without it in the address. It is kept on the
+  // server per person (AEON-1453): wait for the save before leaving the page.
+  const kept = page.waitForResponse(response => response.request().method() === 'PUT' && decodeURIComponent(new URL(response.url()).pathname) === '/api/preferences/view:releases.lang')
   await radio(page, 'DE').focus()
   await page.keyboard.press('ArrowLeft')
   await expect(radio(page, 'EN')).toHaveAttribute('aria-checked', 'true')
   await expect(radio(page, 'EN')).toBeFocused()
+  await kept
   await page.goto(`/releases/${V102}`)
   await expect(radio(page, 'EN')).toHaveAttribute('aria-checked', 'true')
   await expect(block(page, 'Readable risk chip')).toBeVisible()
-  // Another person on this device starts from their own profile.
+  // Another person on this device starts from their own profile. The server keeps each
+  // person's preferences apart; the shared mock store stands in with an empty answer.
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
+  await page.route('**/api/preferences/view*releases.lang', route => route.request().method() === 'GET' ? route.fulfill({ json: { key: 'view:releases.lang', value: null, updated_at: null } }) : route.fallback())
   await page.goto(`/releases/${V102}`)
   await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true')
 })

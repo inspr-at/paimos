@@ -61,6 +61,23 @@ export function readPrefs(value: unknown): DeliveryPrefs {
     window: WINDOWS.includes(saved.window as WindowDays) ? saved.window as WindowDays : DEFAULT_PREFS.window,
   }
 }
+// The window and level used last stay where they always were; the person's explicit
+// defaults (right-click › Open here by default, AEON-1453) sit beside them and win.
+export interface DeliveryDefaults { level?: Level | null; window?: WindowDays | null }
+export type StoredDeliveryPrefs = Partial<DeliveryPrefs> & { defaults?: DeliveryDefaults }
+export function readDefaults(value: unknown): { level: Level | null; window: WindowDays | null } {
+  const raw = value && typeof value === 'object' ? (value as { defaults?: unknown }).defaults : null
+  const saved = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  return {
+    level: saved.level === 'expert' || saved.level === 'simple' ? saved.level : null,
+    window: WINDOWS.includes(saved.window as WindowDays) ? saved.window as WindowDays : null,
+  }
+}
+// What the page opens with: each default, else the value used last.
+export function openingPrefs(value: unknown): DeliveryPrefs {
+  const last = readPrefs(value), chosen = readDefaults(value)
+  return { level: chosen.level ?? last.level, window: chosen.window ?? last.window }
+}
 export const bucketOf = (days: WindowDays): BucketUnit => days <= 30 ? 'day' : days <= 180 ? 'week' : 'month'
 
 // ---------- Numbers in words ----------

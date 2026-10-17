@@ -11,7 +11,7 @@ import { run } from '../lib/commands'
 import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, viewResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
 import { loadViews, viewsOf } from '../lib/savedViews'
 import { filtersFromView, filtersToQuery } from '../lib/ticketList'
-import { usePreference } from '../lib/preferences'
+import { savedViewId, useTicketListSwitch } from '../lib/ticketListSwitch'
 import { useSession } from '../stores/session'
 import { recents } from '../lib/recents'
 import { dark, toggleTheme } from '../lib/theme'
@@ -102,12 +102,13 @@ function projectFor(key: string) {
 // The saved views of the project in scope, by name.
 const session = useSession()
 const viewProject = computed(() => scopeProject.value ?? (scope.value ? undefined : routeProject.value))
-const viewPref = computed(() => viewProject.value ? usePreference<{ defaultView?: string | null }>(`list:${viewProject.value.id}`) : null)
+// The saved view the project opens with: its ticket list switch's default (AEON-1453).
+const viewSwitch = useTicketListSwitch(() => viewProject.value?.id)
 const views = computed(() => {
   const project = viewProject.value
   if (!project) return []
   const me = session.identity?.principal.id
-  const preferred = viewPref.value?.value.value?.defaultView ?? null
+  const preferred = savedViewId(viewSwitch.defaultId.value)
   return viewsOf(project.id).items.map(view => ({ id: view.id, name: view.name, shared: view.shared, mine: view.owner_principal_id === me, isDefault: view.id === preferred }))
 })
 const groups = computed<Group[]>(() => assemble(query.value, {

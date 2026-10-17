@@ -6,7 +6,10 @@ import type { PresenceSnapshot } from '../../lib/quotePresence'
 import { STATUS_META, type QuoteStatus } from '../../lib/quotes/list'
 import { stepZoom, type ZoomMode } from '../../lib/quotes/zoom'
 import AppIcon from '../AppIcon.vue'
+import ViewDefaultMenu from '../ViewDefaultMenu.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
+import { defaultTip } from '../../lib/viewSwitch'
+import { useViewMenuTrigger } from '../../lib/viewMenuTrigger'
 import QuotePeople from './collaboration/QuotePeople.vue'
 import QuoteIcon from './inspector/QuoteIcon.vue'
 import QuoteStatusIcon from './QuoteStatusIcon.vue'
@@ -22,9 +25,12 @@ const props = defineProps<{
   offerNo: string; status: QuoteStatus; archived: boolean; revising: boolean; local: LocalState | 'loading'; canSave: boolean; saveHint?: string; canUndo: boolean; canRedo: boolean
   zoom: ZoomMode; percent: number; pane: 'format' | 'details' | null; canFormat: boolean; headerCollapsed: boolean; printing: boolean; compact: boolean
   layout: 'full' | 'dock'; presence: PresenceSnapshot | null; principalId: string; admin: boolean; staff: boolean
+  // The pane a docked editor opens with by default (AEON-1453); with paneMenu, right-click,
+  // a long press or Shift+F10 on Details or Format sets or stops it.
+  paneDefault?: 'format' | 'details' | null; paneMenu?: boolean
 }>()
 const emit = defineEmits<{
-  save: []; undo: []; redo: []; zoom: [mode: ZoomMode]; print: []; toggleHeader: []; pane: [pane: 'format' | 'details']
+  save: []; undo: []; redo: []; zoom: [mode: ZoomMode]; print: []; toggleHeader: []; pane: [pane: 'format' | 'details']; paneDefault: [pane: 'format' | 'details' | null]
   close: []; expand: []; collapse: []; duplicate: []; archive: []; copyNumber: []; issue: []
 }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -44,6 +50,14 @@ const menu = ref<HTMLElement | null>(null)
 const more = ref<HTMLButtonElement>()
 function toggleMenu(event: MouseEvent) { menu.value = menu.value ? null : event.currentTarget as HTMLElement }
 function closeMenu(restore: boolean) { menu.value = null; if (restore) more.value?.focus() }
+type Pane = 'format' | 'details'
+const PANE_LABEL: Record<Pane, string> = { details: 'Details', format: 'Format panel' }
+const paneMenuAt = ref<{ pane: Pane; anchor: HTMLElement } | null>(null)
+const paneTrigger = useViewMenuTrigger((pane, anchor) => { if (props.paneMenu) paneMenuAt.value = { pane: pane as Pane, anchor } })
+function closePaneMenu(restore: boolean) { const anchor = paneMenuAt.value?.anchor; paneMenuAt.value = null; if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true }) }
+function setPaneDefault(makeDefault: boolean) { const at = paneMenuAt.value; if (!at) return; emit('paneDefault', makeDefault ? at.pane : null); closePaneMenu(true) }
+function paneClick(event: MouseEvent, pane: Pane) { if (!paneTrigger.heldClick(event)) emit('pane', pane) }
+const paneTip = (pane: Pane, tip: string) => props.paneMenu && props.paneDefault === pane ? defaultTip(PANE_LABEL[pane]) : tip
 function act(action: 'duplicate' | 'archive' | 'copyNumber' | 'issue' | 'expand' | 'collapse') {
   menu.value = null
   if (action === 'duplicate') emit('duplicate'); else if (action === 'archive') emit('archive'); else if (action === 'copyNumber') emit('copyNumber')
@@ -164,10 +178,19 @@ function menuKeys(event: KeyboardEvent) {
       </div>
       <button ref="more" type="button" class="icon-btn sm flat" aria-label="More actions" aria-haspopup="menu" :aria-expanded="!!menu" data-tip="More" @click="toggleMenu"><AppIcon name="more" :size="15" /></button>
       <span class="divider" aria-hidden="true" />
-      <button type="button" class="btn sm pane-btn" :aria-pressed="pane === 'details'" aria-label="Details" :aria-controls="pane ? 'quote-side' : undefined" data-tip="Status, customer link, versions and files" @click="emit('pane', 'details')">
+      <button type="button" class="btn sm pane-btn" :aria-pressed="pane === 'details'" aria-label="Details" :aria-controls="pane ? 'quote-side' : undefined" :data-tip="paneTip('details', 'Status, customer link, versions and files')"
+        :aria-description="paneMenu && paneDefault === 'details' ? 'Opens here by default' : undefined" @click="paneClick($event, 'details')"
+        @contextmenu="paneMenu && paneTrigger.contextmenu($event, 'details')" @keydown="paneMenu && paneTrigger.keydown($event, 'details')"
+        @pointerdown="paneMenu && paneTrigger.pointerdown($event, 'details')" @pointermove="paneTrigger.pointermove" @pointerup="paneTrigger.pointerend" @pointercancel="paneTrigger.pointerend">
         <QuoteIcon name="seal" :size="14" /><span class="pane-text">Details</span>
+        <span v-if="paneMenu && paneDefault === 'details'" class="view-pin" aria-hidden="true"><AppIcon name="pin" :size="10" /></span>
       </button>
-      <button v-if="canFormat" type="button" class="icon-btn sm sidebar" :aria-pressed="pane === 'format'" aria-label="Format panel" :aria-controls="pane ? 'quote-side' : undefined" :data-tip="pane === 'format' ? 'Hide the format panel' : 'Show the format panel'" @click="emit('pane', 'format')"><QuoteIcon name="sidebar" :size="16" /></button>
+      <button v-if="canFormat" type="button" class="icon-btn sm sidebar" :aria-pressed="pane === 'format'" aria-label="Format panel" :aria-controls="pane ? 'quote-side' : undefined" :data-tip="paneTip('format', pane === 'format' ? 'Hide the format panel' : 'Show the format panel')"
+        :aria-description="paneMenu && paneDefault === 'format' ? 'Opens here by default' : undefined" @click="paneClick($event, 'format')"
+        @contextmenu="paneMenu && paneTrigger.contextmenu($event, 'format')" @keydown="paneMenu && paneTrigger.keydown($event, 'format')"
+        @pointerdown="paneMenu && paneTrigger.pointerdown($event, 'format')" @pointermove="paneTrigger.pointermove" @pointerup="paneTrigger.pointerend" @pointercancel="paneTrigger.pointerend"
+      ><QuoteIcon name="sidebar" :size="16" /><span v-if="paneMenu && paneDefault === 'format'" class="view-pin" aria-hidden="true"><AppIcon name="pin" :size="10" /></span></button>
+      <ViewDefaultMenu v-if="paneMenuAt" :anchor="paneMenuAt.anchor" :label="PANE_LABEL[paneMenuAt.pane]" :is-default="paneDefault === paneMenuAt.pane" @set="setPaneDefault" @close="closePaneMenu" />
       <template v-if="layout === 'dock' && !compact">
         <span class="divider" aria-hidden="true" />
         <button type="button" class="icon-btn sm flat" aria-label="Open on its own page" data-tip="Open on its own page" @click="emit('expand')"><AppIcon name="expand" :size="15" /></button>
@@ -248,6 +271,9 @@ function menuKeys(event: KeyboardEvent) {
 .chevron { width: 26px; }
 .divider { width: 1px; height: 20px; margin: 0 2px; background: var(--line); }
 .pane-btn { gap: 6px; padding: 0 10px; font-weight: 600; color: var(--ink-2); }
+/* The default pane's pin sits in its button's corner (AEON-1453): no button grows or moves for it. */
+.pane-btn, .sidebar { position: relative; -webkit-touch-callout: none; }
+.view-pin { position: absolute; right: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); pointer-events: none; }
 .pane-btn[aria-pressed="true"], .sidebar[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .win { display: flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }

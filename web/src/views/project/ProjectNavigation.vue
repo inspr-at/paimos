@@ -2,20 +2,20 @@
 <script setup lang="ts">
 
 import AppIcon from '../../components/AppIcon.vue'
-import ProjectTabs from '../../components/work/ProjectTabs.vue'
+import ViewSwitch from '../../components/ViewSwitch.vue'
 import ViewBar from '../../components/work/ViewBar.vue'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
 const props = defineProps<{ project: Project }>()
 const { project } = toRefs(props)
-const { setSection, projectSections, section, ticketsHeader, me, views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, viewBar, startSave, startRename, saveActive, duplicate, setDefaultView, share, copyViewLink, remove } = useProjectPageContext()
+const { setSection, sectionSwitch, projectSections, section, ticketsHeader, me, views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, viewBar, startSave, startRename, saveActive, duplicate, setDefaultView, share, copyViewLink, remove } = useProjectPageContext()
 const bindViewBar = bindProjectRef(viewBar)
 </script>
 
 <template>
   <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
-    <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
+    <ViewSwitch :options="projectSections" :selected="section" label="Project sections" look="sections" tips :default-id="sectionSwitch.defaultId.value" @select="setSection" @set-default="sectionSwitch.setDefault" />
     <RouterLink v-if="ticketsHeader" class="attention-view-link" :to="{ path: '/tickets', query: { view: 'needs-attention', project_id: project.id } }"><AppIcon name="flag" :size="13" />Needs attention</RouterLink>
     <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
   <ViewBar

@@ -7,7 +7,10 @@ import { can } from '../../lib/authz'
 import { useDensity } from '../../lib/prefs'
 import { useDeveloperSettings } from '../../lib/developerSettings'
 import { useProjectHeader } from '../../lib/useProjectHeader'
-import { filtersFromQuery } from '../../lib/ticketList'
+import { filtersFromQuery, filtersFromView, filtersToQuery } from '../../lib/ticketList'
+import { viewsOf } from '../../lib/savedViews'
+import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
+import { savedViewId, useTicketListSwitch } from '../../lib/ticketListSwitch'
 import type { TicketGraphState } from '../../lib/ticketGraphRenderer'
 import { scopeOwner } from '../../lib/identityScope'
 import { useProjects, type Project } from '../../stores/projects'
@@ -18,7 +21,7 @@ import { useReleases } from '../../stores/releases'
 import { usePoller } from '../../lib/usePolledData'
 import FilterSheet from '../../components/work/FilterSheet.vue'
 import ListToolbar from '../../components/work/ListToolbar.vue'
-import { PROJECT_SECTIONS, projectSection, ticketView, type ProjectSection, type TicketView } from '../../components/work/projectNavigation'
+import { KNOWLEDGE_VIEWS, PROJECT_SECTIONS, projectSection, ticketView, type ProjectSection, type TicketView } from '../../components/work/projectNavigation'
 import TicketTable from '../../components/work/TicketTable.vue'
 import TicketWorkspace from '../../components/work/TicketWorkspace.vue'
 import { isKnowledgeType } from '../../lib/knowledge'
@@ -61,6 +64,26 @@ export function useProjectState() {
   onBeforeUnmount(() => queuePoller.stop())
   function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
   const section = computed(() => projectSection(route))
+  // ---------- View switches (AEON-1453): per person, per project, on the server ----------
+  // Sections: the default or the one used last opens a bare /p/KEY. Settings is visited,
+  // so it never becomes the section a project opens with unless the person makes it the default.
+  const sectionSwitch = useViewSwitch({
+    key: () => projectId.value ? viewKey('project-section', projectId.value) : null,
+    options: () => projectSections.value.map(item => item.id), fallback: 'tickets', remembers: id => id !== 'settings',
+  })
+  // The ticket list: List, Outline or Graph used last; its default may also be a saved view.
+  const ticketSwitch = useTicketListSwitch(() => projectId.value)
+  const knowledgeSwitch = useViewSwitch({
+    key: () => projectId.value ? viewKey('knowledge', projectId.value) : null,
+    options: KNOWLEDGE_VIEWS.map(item => item.id), fallback: 'entries', link: () => route.query.view,
+  })
+  // The address a plain ticket list opens with: the saved view or the mode the switch prefers.
+  function ticketOpeningQuery(): Record<string, string> {
+    const want = ticketSwitch.preferred.value, saved = savedViewId(want)
+    const view = saved ? viewsOf(projectId.value).items.find(item => item.id === saved) : null
+    if (view) return filtersToQuery(filtersFromView(view))
+    return want !== 'list' && !saved ? { view: want } : {}
+  }
   const { headerDensity } = useProjectHeader()
   const ticketsHeader = computed(() => section.value === 'tickets')
   const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
@@ -84,8 +107,9 @@ export function useProjectState() {
   const knowledgeSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : '')
   const knowledgeEntryOpen = computed(() => knowledgeActive.value && !!knowledgeType.value && !!knowledgeSlug.value)
   const knowledgeFilters = computed(() => knowledgeFiltersFrom(route.query))
-  // Keep the chosen view when closing an entry or editing its filters.
-  const knowledgeView = computed(() => route.query.view === 'graph' ? 'graph' : 'entries')
+  // Keep the chosen view when closing an entry or editing its filters; without one in the
+  // address, the person's default or the view used last.
+  const knowledgeView = computed(() => knowledgeSwitch.current.value === 'graph' ? 'graph' : 'entries')
   const knowledgeDisplay = computed(() => ({ view: knowledgeView.value }))
   const fullViewQuery = computed(() => !!ticketKey.value && (route.query.panel === 'full' || route.query.view === 'full'))
   const viewMode = computed<ViewMode>(() => section.value === 'tickets' ? activeTicketView.value.id as TicketView : section.value)
@@ -127,5 +151,5 @@ export function useProjectState() {
   const skipGuard = ref(false)
   function ticketPath(key: string) { return `/p/${encodeURIComponent(routeKey.value)}/${encodeURIComponent(key)}` }
 
-  return { route, router, projects, session, projectSections, projectKey, ticketKey, recovery, recovering, authorizedProject, project, projectId, routeKey, queue, releases, vocabulary, queueAnchor, assigneeMenu, queueSnapshot, queueError, mayQueue, queuePoller, closeQueue, section, headerDensity, ticketsHeader, sectionPath, ticketSectionQuery, onKnowledge, filters, density, setDensity, showHeaderGraph, developerLoading, headerGraph, glimpseShown, glimpseActive, now, activeTicketView, knowledgeActive, knowledgeType, knowledgeSlug, knowledgeEntryOpen, knowledgeFilters, knowledgeView, knowledgeDisplay, fullViewQuery, viewMode, settingsActive, deliveryActive, graphActive, graphState, ticketGraphView, outlineActive, toolbarWrap, stickMark, toolbar, table, panel, filterSheet, scrollRoot, toolbarHeight, stuck, cursorId, collapsed, statusMenu, creating, fullView, me, workspaceOwner, workspacePerson, writable, nodeDeletable, nodeMovable, relationLinkable, relationUnlinkable, commentable, commentDeletable, attachable, knowledgeWritable, knowledgeDeletable, skipGuard, ticketPath }
+  return { sectionSwitch, ticketSwitch, knowledgeSwitch, ticketOpeningQuery, route, router, projects, session, projectSections, projectKey, ticketKey, recovery, recovering, authorizedProject, project, projectId, routeKey, queue, releases, vocabulary, queueAnchor, assigneeMenu, queueSnapshot, queueError, mayQueue, queuePoller, closeQueue, section, headerDensity, ticketsHeader, sectionPath, ticketSectionQuery, onKnowledge, filters, density, setDensity, showHeaderGraph, developerLoading, headerGraph, glimpseShown, glimpseActive, now, activeTicketView, knowledgeActive, knowledgeType, knowledgeSlug, knowledgeEntryOpen, knowledgeFilters, knowledgeView, knowledgeDisplay, fullViewQuery, viewMode, settingsActive, deliveryActive, graphActive, graphState, ticketGraphView, outlineActive, toolbarWrap, stickMark, toolbar, table, panel, filterSheet, scrollRoot, toolbarHeight, stuck, cursorId, collapsed, statusMenu, creating, fullView, me, workspaceOwner, workspacePerson, writable, nodeDeletable, nodeMovable, relationLinkable, relationUnlinkable, commentable, commentDeletable, attachable, knowledgeWritable, knowledgeDeletable, skipGuard, ticketPath }
 }

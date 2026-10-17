@@ -3,6 +3,7 @@
 import type { RouteLocationRaw } from 'vue-router'
 import type { SavedView } from '../../lib/api'
 import AppIcon from '../AppIcon.vue'
+import { defaultTip } from '../../lib/viewSwitch'
 import type { ProjectTab } from './projectNavigation'
 
 // What the collapsed project header hides, as two blocks at the top of the Display
@@ -35,7 +36,7 @@ function open(event: MouseEvent, id: string | null) {
   event.preventDefault()
   emit('view', id)
 }
-const tip = (view: SavedView) => view.shared && !mine(view) ? 'Shared with the project' : view.shared ? 'Yours, shared with the project' : undefined
+const tip = (view: SavedView) => view.id === props.defaultId ? defaultTip(view.name) : view.shared && !mine(view) ? 'Shared with the project' : view.shared ? 'Yours, shared with the project' : undefined
 </script>
 
 <template>
@@ -57,7 +58,7 @@ const tip = (view: SavedView) => view.shared && !mine(view) ? 'Shared with the p
       </li>
       <li v-for="view in views" :key="view.id" class="row">
         <a class="view-row" :href="hrefFor(view.id)" :aria-current="view.id === activeId ? 'page' : undefined" :data-tip="tip(view)" @click="open($event, view.id)">
-          <AppIcon v-if="view.id === defaultId" name="star" :size="12" class="lead star" />
+          <AppIcon v-if="view.id === defaultId" name="pin" :size="12" class="lead pin" />
           <span v-clip-tip class="name">{{ view.name }}</span>
           <AppIcon v-if="view.shared" name="users" :size="12" class="shared" />
           <span v-if="view.id === activeId" :style="{ visibility: dirty ? 'visible' : 'hidden' }" class="dirty" role="img" aria-label="changed since saved" />
@@ -91,7 +92,7 @@ const tip = (view: SavedView) => view.shared && !mine(view) ? 'Shared with the p
 .name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lead { flex-shrink: 0; color: var(--ink-3); }
 .view-row[aria-current="page"] .lead { color: var(--teal-ink); }
-.star { color: var(--secondary-line); }
+.pin { color: var(--ink-3); }
 .shared { flex-shrink: 0; color: var(--ink-3); }
 .dirty { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 2px var(--chip-teal-bg); }
 .row-action { display: grid; place-items: center; flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); }

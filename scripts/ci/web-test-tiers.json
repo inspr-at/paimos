@@ -12390,6 +12390,14 @@
     ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"an outdated page says so in the status line, under the codename the server runs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1181px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1280px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1380px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1440px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 761×360 the stacked cards scroll and release rows stay reachable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 800×360 the stacked cards scroll and release rows stay reachable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14545,6 +14553,12 @@
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed footer release: hover and keyboard focus show seconds in the card; a click opens history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed release rows: only the version copy control reveals; the row still selects","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 Projects opens on the view used last or the default; the pin never moves a segment, and a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 the Releases sheet language leaves this browser for the server once; the view remembers its last choice","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 the ticket list opens on its default (a saved view or a mode) or the mode used last; a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -17822,6 +17836,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"time to first green names how many never went green, per branch and per commit, from exact counts","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-pref-owner.unit.test.ts","name":"a delayed delivery default never writes one person's choice into the next person's preferences","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"Learn opens on focus, pins with Enter or a click, and Esc closes it and keeps focus on the button","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"TileSpark draws the green target zone, the dashed target, \"better\" on the axis and hatched days","tier":"ESSENTIAL"}
@@ -19086,6 +19102,10 @@
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"questions bind to the lead’s exact session, also after it stopped; another generation’s stay on the Desk","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"a bare project still opens the remembered section when nothing else is asked","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"a ticket opened while preferences load stays on that ticket","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"assignee opening rejects people loaded for an older project generation","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"columns in a saved view change its URL while plain-list columns save the person preference","tier":"ESSENTIAL"}
@@ -19097,6 +19117,8 @@
     {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"keyboard keeps browser shortcuts native and submits selection through its owner","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"knowledge queues filter writes against the latest landed query","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"leaving the plain list and returning while preferences load does not open the remembered section","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-page-owners.unit.test.ts","name":"live application preserves an open row and advances the cursor before removing it","tier":"ESSENTIAL"}
     ,
@@ -22963,6 +22985,24 @@
     {"kind":"vitest","file":"tests/version-crossfade.unit.test.ts","name":"reveals seconds with shared opacity for a Pretty value of undefined","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/version-crossfade.unit.test.ts","name":"touch does not hover; keyboard focus survives pointer exit and leaves on blur; disposal removes listeners","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a delayed default never writes one person's choice into the next person's preferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a failed remember stays unconfirmed until the same choice is accepted","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a hold or Shift+F10 opens the menu; the hold never also switches, movement cancels it, and a mouse never holds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a link wins once: it shows its view without writing, until the person chooses or follows another link","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a memory that could not be read is never overwritten; the next write after a read merges into it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"an explicit default wins over the view used last; stopping it returns to the last used, and the older store never comes back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"each project keeps its own memory under its own key","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"signing in again as the same person during a default write keeps the stored default","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"the view used last opens the next visit, kept on the server only","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/webcore-recovery.unit.test.ts","name":"S8-010: human numeric input > normalizes leading zeros and decimal separators without throwing","tier":"NIGHTLY"}
     ,
