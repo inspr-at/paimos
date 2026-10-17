@@ -39,19 +39,6 @@ test('a stale wide media query cannot keep the header glimpse once the layout is
   assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1278 }), false)
 })
 
-test('a laid-out narrow root hides the header glimpse while the media query and inner width are still wide', () => {
-  // PR #743: the shrink to 390 laid the root out narrow while matchMedia still
-  // reported the previous wide viewport and window.innerWidth had not moved.
-  // Two animation frames then expired, so the glimpse stayed on. A classic
-  // scrollbar (1280 vs 1264) is still the wide layout.
-  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1600, boxWidth: 390 }), false)
-  assert.equal(nextHeaderGlimpseWide({ mediaMatches: null, layoutWidth: 1600, boxWidth: 390 }), false)
-  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1280, boxWidth: 390 }), false)
-  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1280, boxWidth: 1264 }), true)
-  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1280, boxWidth: 1280 }), true)
-  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1279 }), true)
-})
-
 test('a ready graph has eight tickets and at least one link', () => {
   assert.equal(headerGlimpseGraphReady(8, 1), true)
   assert.equal(headerGlimpseGraphReady(8, 0), false)

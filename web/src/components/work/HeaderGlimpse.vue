@@ -86,53 +86,45 @@ function scheduleMeasure() {
 }
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
-// The root lays out at the new width before matchMedia and innerWidth agree.
-// A zero reading is the document mid-detach, not a narrow viewport.
-let boxWidth = Number.NaN
-function refreshBox() {
-  const width = document.documentElement.clientWidth
-  if (width > 0) boxWidth = width
-}
-function decideWide(mediaMatches: boolean | null) {
-  return nextHeaderGlimpseWide({ mediaMatches, layoutWidth: window.innerWidth, ...(Number.isFinite(boxWidth) ? { boxWidth } : {}) })
+// Re-read a fresh query. The list from setup can miss `change` while the
+// canvas is painting, and its matches flag can stay true after a shrink.
+function readWide() {
+  return headerGlimpseViewportWide(window.matchMedia(wideMedia).matches, window.innerWidth)
 }
 function syncWide() {
-  refreshBox()
-  const next = decideWide(window.matchMedia(wideMedia).matches)
+  const next = readWide()
   if (wide.value !== next) wide.value = next
 }
-let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, watchLeft = 0
-// Later frames can only clear. A stale wide sample must not turn the glimpse
-// back on after the root has already gone narrow, and a burst of height-only
-// observations must not keep this loop alive.
-function armClear() {
-  watchLeft = 20
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0
+function followViewport() {
+  syncWide()
   if (viewportFrame) return
+  let left = 2
   const tick = () => {
-    refreshBox()
-    const next = decideWide(window.matchMedia(wideMedia).matches)
-    if (!next && wide.value) wide.value = false
-    viewportFrame = wide.value && --watchLeft > 0 ? requestAnimationFrame(tick) : 0
+    syncWide()
+    viewportFrame = --left > 0 ? requestAnimationFrame(tick) : 0
   }
   viewportFrame = requestAnimationFrame(tick)
 }
-function followViewport() {
-  syncWide()
-  armClear()
-}
 function applyDeliveredWide(mediaMatches: boolean) {
-  refreshBox()
-  const next = decideWide(mediaMatches)
+  const next = nextHeaderGlimpseWide({ mediaMatches, layoutWidth: window.innerWidth })
   if (wide.value !== next) wide.value = next
   if (next) scheduleMeasure()
 }
 function onWide(event: MediaQueryListEvent) {
   // A delivered media change is authoritative while innerWidth catches up by
   // one pixel. A queued matches:true must not turn the glimpse back on after
-  // the layout has already left 1280. The root's box is read again over the
-  // next frames and can only clear a wide the layout no longer supports.
+  // the layout has already left 1280. The next frames re-read the live query
+  // and can only clear a wide that the layout no longer supports.
   applyDeliveredWide(event.matches)
-  followViewport()
+  if (viewportFrame) return
+  let left = 2
+  const tick = () => {
+    const next = nextHeaderGlimpseWide({ mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: window.innerWidth })
+    if (!next && wide.value) wide.value = false
+    viewportFrame = --left > 0 ? requestAnimationFrame(tick) : 0
+  }
+  viewportFrame = requestAnimationFrame(tick)
 }
 // #main's scroll and the observer can disagree. A delivery may carry the
 // pre-scroll sample first, or the scroll may never be delivered. The box on
@@ -211,10 +203,7 @@ onMounted(() => {
   reducedQuery.addEventListener('change', onReduced)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('resize', onResize)
-  window.visualViewport?.addEventListener('resize', onResize)
-  // The observer's box is the shrink signal when the media change and the
-  // window resize are both late or dropped. Height changes only re-read it.
-  viewportWatch = new ResizeObserver(() => { syncWide() })
+  viewportWatch = new ResizeObserver(followViewport)
   viewportWatch.observe(document.documentElement)
   syncWide()
   const start = () => { if (mounted) idle.value = true }
@@ -233,7 +222,6 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(viewportFrame)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
-  window.visualViewport?.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)
