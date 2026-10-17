@@ -1456,6 +1456,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeVerificationSDKEnforcesNoTools","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestCleanStopReleasesOwnedRuntime","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexAcknowledgedTerminalAndDrain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexAppServerProtocolAndSteer","tier":"ESSENTIAL"}
