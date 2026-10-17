@@ -24,6 +24,7 @@ func listResult(t *testing.T, f storageFixture, m *module, query string) GoalLis
 	t.Helper()
 	r := goalRequest(t.Context(), m, f.reader, "GET", "/api/goals"+query, "", "")
 	if r.Code != 200 {
+		logListStages(t, f)
 		logListPlan(t, f)
 		t.Fatalf("list %d %s", r.Code, r.Body)
 	}
@@ -32,6 +33,36 @@ func listResult(t *testing.T, f storageFixture, m *module, query string) GoalLis
 		t.Fatal(err)
 	}
 	return out
+}
+
+func logListStages(t *testing.T, f storageFixture) {
+	t.Helper()
+	prefix, _, ok := strings.Cut(listPageQuery(), "SELECT 'bound'::text")
+	if !ok {
+		t.Log("page stage boundaries unavailable")
+		return
+	}
+	for _, stage := range []string{"outcomes", "relations", "serves", "page_scope", "facts", "root_eta", "history_nodes", "bounded_events"} {
+		ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), f.reader), 7*time.Second)
+		start := time.Now()
+		var count int
+		err := db.InTenant(ctx, f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout='5s'`); err != nil {
+				return err
+			}
+			var ids []string
+			if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil {
+				return err
+			}
+			starts, _, err := planSeries(apiClock, "24h")
+			if err != nil {
+				return err
+			}
+			return tx.QueryRow(ctx, prefix+"SELECT count(*) FROM "+stage, ids, apiClock, true, f.reader.ID, starts[0]).Scan(&count)
+		})
+		cancel()
+		t.Logf("page stage %s rows=%d elapsed=%v err=%v", stage, count, time.Since(start), err)
+	}
 }
 
 // Failed page regressions retain a bounded plan, without request arguments,
