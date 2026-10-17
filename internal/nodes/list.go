@@ -1323,16 +1323,14 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
 		}
 	}
-	// Child expansion stays a lateral index lookup. A plain join is free to
-	// seq-scan nodes when a bulk import has not refreshed statistics. The
-	// outcome policy's kind catalog is one InitPlan, so this lookup does not
-	// repeat the serves walk for ordinary children.
+	// Join a recursion level as a set. A forced lateral lookup can choose a
+	// full scan for the common parent and repeat it for every leaf when nodes
+	// statistics are fresh. The policy's ordinary-kind shortcut also keeps
+	// indexed joins available when a bulk import has no statistics yet.
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
-            ORDER BY updated_at DESC OFFSET 0
-        ) c
+        UNION ALL SELECT c.id FROM scope s JOIN nodes c ON c.parent_id=s.id
+        WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
