@@ -32,6 +32,11 @@ test('a stale wide media query cannot keep the header glimpse once the layout is
   assert.equal(headerGlimpseViewportWide(false, 1600), false)
   assert.equal(headerGlimpseViewportWide(true, Number.NaN), false)
   assert.equal(headerGlimpseViewportWide(true, Number.POSITIVE_INFINITY), false)
+  // PR #737: 1279 → 1280 → 390 delivered the earlier matches:true after the
+  // layout had already left the threshold, and the glimpse stayed on.
+  // One pixel of catch-up remains wide; 390 and 1278 do not.
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 390 }), false)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1278 }), false)
 })
 
 test('a ready graph has eight tickets and at least one link', () => {
