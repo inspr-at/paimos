@@ -935,6 +935,8 @@ and the exact previous binary/release pin. Record the daemon identity and copy
 time without recording file contents. Forward migration does not automatically
 retain backups. Avoid copying credentials or the whole pairing root.
 
+For rollback to releases before 136, after confirming the daemon has stopped, manually remove `daemon/agentd.sock` (or its recorded short fallback socket) and `daemon/hook-peer.json`; release 136 and later clean up their own pin on stop and recover stale runtime files on start.
+
 On a downgrade, version-aware readers refuse a newer checkpoint/WAL with its
 stored and supported versions and a remedy; both state files remain intact.
 Historical 123/124 binaries still use their old generic unsupported/corrupt

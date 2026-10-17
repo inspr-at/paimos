@@ -158,6 +158,7 @@ func TestPairedServeFromRootWorkingDirectory(t *testing.T) {
 	}
 	exited := make(chan struct{})
 	var serveErr error
+	var controlSocket string
 	go func() { serveErr = cmd.Wait(); close(exited) }()
 	defer func() {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
@@ -171,6 +172,15 @@ func TestPairedServeFromRootWorkingDirectory(t *testing.T) {
 		if serveErr != nil {
 			t.Errorf("root-cwd serve failed: %v\n%s", serveErr, output.String())
 		}
+		// AEON-1404: exercise the production SIGTERM handler and publication
+		// path. The next version must not inherit our socket or hook pin.
+		if controlSocket != "" {
+			for _, path := range []string{controlSocket, controlSocket + ".token", filepath.Join(root, "daemon", "hook-peer.json")} {
+				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("SIGTERM left runtime artifact %s: %v", filepath.Base(path), err)
+				}
+			}
+		}
 	}()
 	select {
 	case <-ready:
@@ -183,6 +193,7 @@ func TestPairedServeFromRootWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	controlSocket = local.Socket
 	op, stop := context.WithTimeout(t.Context(), 5*time.Second)
 	defer stop()
 	status, err := local.Lifecycle(op, "")

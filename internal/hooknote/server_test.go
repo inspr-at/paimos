@@ -144,6 +144,14 @@ func TestKernelPeerMatchesProcess(t *testing.T) {
 	if self.PID != os.Getpid() || self.UID != os.Getuid() || self.Executable != exe || self.CWD != cwd || self.Started == "" || self.Ino == 0 {
 		t.Fatalf("observe mismatch pid %d uid %d", self.PID, self.UID)
 	}
+	started, err := ProcessStarted(os.Getpid())
+	if err != nil || started != self.Started {
+		t.Fatalf("kernel start %q != observation %q: %v", started, self.Started, err)
+	}
+	daemon, err := ObserveDaemon(os.Getpid())
+	if err != nil || daemon.Started != self.Started || daemon.PID != self.PID || daemon.Executable != self.Executable {
+		t.Fatal("daemon observation diverged", err)
+	}
 	again, err := Observe(os.Getpid())
 	if err != nil || !SameIdentity(self, again) {
 		t.Fatal("start identity was not stable")
