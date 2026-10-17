@@ -249,41 +249,23 @@ watch(ids, value => emit('layout', value.filter((id): id is ColumnId => COLUMN_B
 const measuring = ref(false)
 const autoWidths = ref<Partial<Record<string, number>>>({})
 const foldSpace = ref(0)
-// Stays false while a fit used the fallback face. font-display:swap can load
-// JetBrains Mono afterwards; the next navigation then measures the real face
-// and the title shifts by however far the key grew past its design width.
-const columnsSettled = ref(false)
 let fitGeneration = 0
 let fittedColumns = new Set<string>()
-let columnsAlive = true
-let fontRefitPending = false
-function fontsLoaded() {
-  return typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded'
-}
-function columnsAreSettled() { return fontsLoaded() && !fontRefitPending }
 async function fitLoaded() {
   const generation = ++fitGeneration
-  if (!columnsAlive) return
-  if (props.loading) { measuring.value = false; columnsSettled.value = false; return }
-  if (phone.value) { measuring.value = false; columnsSettled.value = true; return }
+  if (props.loading || phone.value) { measuring.value = false; return }
   // Fit each column when it first appears. Loading or expanding more rows must
   // not move controls already on screen; explicit Fit still uses all loaded rows.
   if (!ids.value.some(id => id !== 'title' && !Number.isFinite(props.prefs?.widths?.[id]) && dragWidths.value[id] === undefined && !fittedColumns.has(id))) {
     measuring.value = false
-    columnsSettled.value = columnsAreSettled()
     return
   }
   // Folded groups still contribute their loaded values. Briefly render their
   // rows out of flow for measurement, then remove them before the next paint.
-  columnsSettled.value = false
   measuring.value = true
   await nextTick()
-  if (generation !== fitGeneration || !columnsAlive) return
-  if (props.loading || phone.value || !grid.value) {
-    measuring.value = false
-    if (phone.value && !props.loading) columnsSettled.value = true
-    return
-  }
+  if (generation !== fitGeneration) return
+  if (props.loading || phone.value || !grid.value) { measuring.value = false; return }
   const next = { ...autoWidths.value }
   for (const id of ids.value) {
     if (id === 'title' || Number.isFinite(props.prefs?.widths?.[id]) || dragWidths.value[id] !== undefined) continue
@@ -293,8 +275,6 @@ async function fitLoaded() {
   }
   autoWidths.value = next
   measuring.value = false
-  if (generation !== fitGeneration || !columnsAlive) return
-  columnsSettled.value = columnsAreSettled()
 }
 watch(() => props.loading, (loading, wasLoading) => {
   if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedColumns.clear() }
@@ -337,18 +317,7 @@ let sizer: ResizeObserver | undefined
 const phoneChange = () => { phone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
 onMounted(() => {
-  phoneChange()
-  if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
-    fontRefitPending = true
-    void document.fonts.ready.then(() => {
-      if (!columnsAlive) return
-      columnsSettled.value = false
-      fontRefitPending = false
-      fittedColumns.clear()
-      void fitLoaded()
-    })
-  }
-  void fitLoaded(); phoneQuery.addEventListener('change', phoneChange)
+  phoneChange(); void fitLoaded(); phoneQuery.addEventListener('change', phoneChange)
   coarseQuery.addEventListener('change', coarseChange)
   if (card.value) {
     // The first fit happens before paint, so the columns never jump into place.
@@ -357,7 +326,7 @@ onMounted(() => {
     sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value)
   }
 })
-onBeforeUnmount(() => { columnsAlive = false; fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); coarseQuery.removeEventListener('change', coarseChange); sizer?.disconnect() })
+onBeforeUnmount(() => { fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); coarseQuery.removeEventListener('change', coarseChange); sizer?.disconnect() })
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
 let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's
@@ -725,7 +694,7 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised, overflowing: !phone && layoutWidth > width + 1 }]">
+  <div ref="card" class="table-card" :class="[density, { selectable, selecting, customised, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />

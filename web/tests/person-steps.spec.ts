@@ -66,17 +66,6 @@ async function installSteps(page: Page, data: Fixtures, mode: 'owner' | 'admin' 
   return { state, steps, manualNode, humanNode, waiting }
 }
 
-// The list fits columns after paint, then once more when JetBrains Mono
-// replaces the fallback face. Samples taken on either side of that fit disagree:
-// the design key is 118px and the loaded face can be wider, so the title moves.
-async function settledColumns(page: Page) {
-  await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
-  await page.evaluate(async () => {
-    await document.fonts.ready
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-  })
-}
-
 // Risk: ownership text, overlays or the waiting mark move controls or list
 // rows. Run the approved views with long German record text at all widths and
 // in both themes, measuring positive-size controls around real interactions.
@@ -93,13 +82,12 @@ test('AEON-1318 owner controls and person-waiting views stay stable', async ({ b
       const row = page.locator('tr.ticket-row').filter({ hasText: manualNode.key })
       await expect(row.locator('.person-waiting svg')).toBeVisible()
       await expect(row.locator('.person-waiting')).toHaveAttribute('data-tip', `Waiting for ${me.name}: ${longLabel}`)
-      await settledColumns(page)
       // Fix8 intentionally reclaims an empty phone waiting slot. Row bounds
       // and actions stay fixed; only phone title content uses that freed room.
       const rows = await controlStability(page, { row, ...(width === 390 ? {} : { title: row.locator('.title-text') }), status: row.getByRole('button', { name: /^Status:/ }), otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
       await rows.check(() => row.locator('.person-waiting').hover())
-      await rows.check(async () => { state.checked = true; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toHaveCount(0); await settledColumns(page) })
-      await rows.check(async () => { state.checked = false; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toBeVisible(); await settledColumns(page) })
+      await rows.check(async () => { state.checked = true; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toHaveCount(0) })
+      await rows.check(async () => { state.checked = false; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toBeVisible() })
       rows.done()
       await page.evaluate(value => document.documentElement.dataset.theme = value, theme)
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-list-${width}-${theme}.png`) })
