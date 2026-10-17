@@ -76,3 +76,7 @@ A failed stop prints that directory and retains the existing heartbeat retry
 intent. Reuse `run-heartbeat` to settle it; `run` refuses to launch a second job
 from an already-used directory. These helpers confer no additional permissions
 and do not replace the ticket's worker marker or release review gates.
+
+The same wrapper supports [interactive commands](interactive-harness-run.md) on
+macOS and Linux, handing the foreground terminal to the owned child group and
+restoring it on exit. Nonzero child exits also print a wrapper diagnostic.

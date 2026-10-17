@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -14,6 +15,107 @@ import (
 	"testing"
 	"time"
 )
+
+// Risk: a failed registration, preflight, launch, child or cleanup is silent,
+// so an operator keeps working without knowing the session was not recorded.
+func TestHarnessRunReportsFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		code       int
+	}{
+		{"missing command", "argument", 2},
+		{"invalid role", "invalid --role", 2},
+		{"missing project", "--project", 2},
+		{"invalid parent", "invalid parent session", 2},
+		{"invalid interval", "--interval", 2},
+		{"caller denied", "api 401", 1},
+		{"project missing", "api 404", 1},
+		{"state unavailable", "not a directory", 1},
+		{"state reused", "state directory already used", 2},
+		{"registration denied", "api 403", 1},
+		{"registration missing id", "registration did not return a session id", 1},
+		{"launch missing", "no such file", 1},
+		{"silent child failure", "child exit status 7", 7},
+		{"child diagnostic", "child exit status 9", 9},
+		{"cleanup failure", "session cleanup failed", 1},
+		{"child and cleanup failure", "session cleanup failed", 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []hbCall
+			srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+				status := 0
+				switch {
+				case tc.name == "caller denied" && r.URL.Path == "/api/me":
+					status = http.StatusUnauthorized
+				case tc.name == "project missing" && r.URL.Path == "/api/projects/lookup":
+					status = http.StatusNotFound
+				case tc.name == "registration denied" && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/harness-sessions"):
+					status = http.StatusForbidden
+				case tc.name == "registration missing id" && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/harness-sessions"):
+					_, _ = w.Write([]byte(`{}`))
+					return true
+				case strings.Contains(tc.name, "cleanup failure") && strings.HasSuffix(r.URL.Path, "/stop"):
+					status = http.StatusInternalServerError
+				}
+				if status == 0 {
+					return false
+				}
+				w.WriteHeader(status)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "fixture failure " + r.Header.Get("X-Aeon-Worker-Lease")})
+				return true
+			})
+			defer srv.Close()
+			_, _, _ = heartbeatRuntime(t, srv)
+			t.Setenv("PATH", t.TempDir()) // Never probe an installed model CLI.
+			dir := t.TempDir()
+			state := filepath.Join(dir, "state")
+			args := []string{"aeon", "harness", "run", "--project", "AEON", "--agent", "worker", "--harness", "claude", "--state-dir", state}
+			child := []string{"/bin/sh", "-c", "exit 0"}
+			switch tc.name {
+			case "missing command":
+				child = nil
+			case "invalid role":
+				args = append(args, "--role", "invalid")
+			case "missing project":
+				args = append(args, "--project", "")
+			case "invalid parent":
+				args = append(args, "--parent-session", "invalid")
+			case "invalid interval":
+				args = append(args, "--interval", "0")
+			case "state unavailable":
+				if err := os.WriteFile(state, []byte("fixture"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "--state-dir", filepath.Join(state, "child"))
+			case "state reused":
+				first := append(append([]string{}, args...), "--", "/bin/sh", "-c", "exit 0")
+				if code, _, stderr := runCLI(first, ""); code != 0 {
+					t.Fatalf("first launch: %d %s", code, stderr)
+				}
+			case "launch missing":
+				child = []string{filepath.Join(dir, "missing-command")}
+			case "silent child failure", "child and cleanup failure":
+				child[2] = "exit 7"
+			case "child diagnostic":
+				child[2] = "printf 'fixture child diagnostic\\n' >&2; exit 9"
+			}
+			args = append(append(args, "--"), child...)
+			code, stdout, stderr := runCLI(args, "")
+			if code != tc.code || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("code=%d want=%d stdout=%q stderr=%q (want %q)", code, tc.code, stdout, stderr, tc.want)
+			}
+			assertNoSecret(t, stdout+stderr)
+			if tc.name == "child diagnostic" && !strings.Contains(stderr, "fixture child diagnostic") {
+				t.Fatal("child stderr was lost")
+			}
+			if strings.Contains(tc.name, "cleanup failure") {
+				if _, err := os.Stat(filepath.Join(state, "stop.intent")); err != nil {
+					t.Fatal("cleanup failure lost recovery intent")
+				}
+			}
+		})
+	}
+}
 
 func TestHarnessRunStopsAndPreservesExit(t *testing.T) {
 	for _, tc := range []struct {

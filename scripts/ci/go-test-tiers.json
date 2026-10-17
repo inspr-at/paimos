@@ -4792,7 +4792,11 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRenameProducerEndToEnd","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessRunInteractiveTTY","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRunLaunchFailureStops","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessRunReportsFailures","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRunSIGTERM","tier":"GATED-FULL"}
     ,
