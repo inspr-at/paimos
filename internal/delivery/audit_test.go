@@ -80,8 +80,11 @@ func auditSend(t *testing.T, f *fixture, name, id string, body map[string]any, w
 	}
 }
 func auditPRBody(f *fixture, fact MergeFact) map[string]any {
-	p := f.pull()
-	return map[string]any{"action": "closed", "pull_request": map[string]any{"number": *fact.PR, "title": fact.Title, "merged": true, "merge_commit_sha": fact.SHA, "merged_at": fact.At, "merged_by": map[string]string{"login": fact.MergedBy}, "head": map[string]string{"sha": fact.Head, "ref": fact.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]string{"full_name": f.m.config.Repository}}}}
+	base := fact.Base
+	if base == "" {
+		base = f.pull().Base
+	}
+	return map[string]any{"action": "closed", "pull_request": map[string]any{"number": *fact.PR, "title": fact.Title, "merged": true, "merge_commit_sha": fact.SHA, "merged_at": fact.At, "merged_by": map[string]string{"login": fact.MergedBy}, "head": map[string]string{"sha": fact.Head, "ref": fact.Branch}, "base": map[string]any{"sha": base, "ref": "main", "repo": map[string]string{"full_name": f.m.config.Repository}}}}
 }
 func auditRead(t *testing.T, f *fixture, sha string) MergeAudit {
 	t.Helper()
