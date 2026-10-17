@@ -31,16 +31,83 @@ CREATE POLICY goal_update_receipts_tenant ON goal_update_receipts
 -- with the same visible event watermark; it does not allocate event ids.
 CREATE SEQUENCE goal_response_seq AS bigint;
 
--- History discovery starts at immutable node references, never a tenant-wide
--- event scan. Node/time and ticket/time indexes also serve the bounded range
--- and the indexed prefix needed for an exact baseline and stall.since.
-CREATE INDEX events_goal_history_refs_idx ON events USING gin(node_refs);
+-- RLS cannot push non-leakproof JSON/array predicates into their indexes.
+-- Normalize immutable references into plain UUID keys instead. This is an
+-- index projection only: snapshots and visibility still come from events.
+CREATE TABLE goal_event_refs (
+    tenant_id uuid NOT NULL REFERENCES tenants(id),
+    node_id uuid NOT NULL,
+    event_id bigint NOT NULL,
+    type text NOT NULL,
+    at timestamptz NOT NULL,
+    PRIMARY KEY(tenant_id,node_id,event_id)
+);
+CREATE INDEX goal_event_refs_node_at_idx ON goal_event_refs(tenant_id,node_id,at,event_id);
+ALTER TABLE goal_event_refs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE goal_event_refs FORCE ROW LEVEL SECURITY;
+CREATE POLICY goal_event_refs_tenant ON goal_event_refs
+    USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
+    WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+CREATE POLICY goal_event_refs_visible ON goal_event_refs AS RESTRICTIVE FOR SELECT
+    USING (EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=goal_event_refs.tenant_id AND e.id=goal_event_refs.event_id));
+CREATE FUNCTION aeon_goal_event_refs() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.type LIKE 'node.%' OR NEW.type LIKE 'import.%' OR NEW.type LIKE 'harness.%'
+        OR NEW.type IN ('goal.items_changed','goal.updated') THEN
+        INSERT INTO goal_event_refs(tenant_id,node_id,event_id,type,at)
+            SELECT NEW.tenant_id,ref,NEW.id,NEW.type,NEW.at
+            FROM (SELECT DISTINCT unnest(NEW.node_refs||ARRAY[NEW.node_id]) AS ref) refs
+            WHERE ref IS NOT NULL AND ref<>'00000000-0000-0000-0000-000000000000'::uuid;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER events_goal_refs AFTER INSERT ON events FOR EACH ROW EXECUTE FUNCTION aeon_goal_event_refs();
+-- Previous writers also feed this projection through the event trigger. Seed
+-- existing references tenant by tenant, without rewriting any event or node.
+DO $$
+DECLARE
+    target_tenant uuid;
+    prior_tenant text := current_setting('aeon.tenant_id',true);
+    prior_visible text := current_setting('aeon.visible_projects',true);
+BEGIN
+    FOR target_tenant IN SELECT id FROM tenants ORDER BY id LOOP
+        PERFORM set_config('aeon.tenant_id',target_tenant::text,true);
+        PERFORM set_config('aeon.visible_projects','*',true);
+        INSERT INTO goal_event_refs(tenant_id,node_id,event_id,type,at)
+            SELECT e.tenant_id,refs.ref,e.id,e.type,e.at FROM events e
+            CROSS JOIN LATERAL (SELECT DISTINCT unnest(e.node_refs||ARRAY[e.node_id]) AS ref) refs
+            WHERE e.tenant_id=target_tenant AND refs.ref IS NOT NULL
+                AND refs.ref<>'00000000-0000-0000-0000-000000000000'::uuid
+                AND (e.type LIKE 'node.%' OR e.type LIKE 'import.%' OR e.type LIKE 'harness.%'
+                    OR e.type IN ('goal.items_changed','goal.updated'));
+    END LOOP;
+    PERFORM set_config('aeon.tenant_id',coalesce(prior_tenant,''),true);
+    PERFORM set_config('aeon.visible_projects',coalesce(prior_visible,''),true);
+END;
+$$;
+-- Direct node snapshots also use plain identity/time index conditions.
 CREATE INDEX events_goal_node_at_idx ON events(tenant_id,node_id,at,id)
     WHERE node_id IS NOT NULL;
-CREATE INDEX events_goal_harness_after_idx ON events(tenant_id,(after->>'ticket_node_id'),at,id)
-    WHERE type LIKE 'harness.%';
-CREATE INDEX events_goal_harness_before_idx ON events(tenant_id,(before->>'ticket_node_id'),at,id)
-    WHERE type LIKE 'harness.%';
+
+-- A reference probe either returns its complete bounded candidate set or
+-- raises the history budget error. Never truncate before inspecting snapshots.
+CREATE FUNCTION aeon_goal_history_refs(p_node uuid,p_type text,p_from timestamptz,p_until timestamptz)
+RETURNS TABLE(event_id bigint) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    event_ids bigint[];
+BEGIN
+    SELECT array_agg(e.event_id) INTO event_ids FROM (
+        SELECT r.event_id FROM goal_event_refs r
+        WHERE r.tenant_id=current_setting('aeon.tenant_id')::uuid AND r.node_id=p_node
+            AND r.type LIKE p_type AND r.at>p_from AND r.at<=p_until LIMIT 20001
+    ) e;
+    IF cardinality(event_ids)>20000 THEN
+        RAISE EXCEPTION 'series reference history budget exceeded' USING ERRCODE='54000';
+    END IF;
+    RETURN QUERY SELECT unnest(event_ids);
+END;
+$$;
 
 -- Bound matching records before unpacking bulk or wrapped node snapshots.
 -- The prefix is still required: a tree can move away before the selected
@@ -51,24 +118,21 @@ RETURNS TABLE(id uuid) LANGUAGE plpgsql STABLE AS $$
 DECLARE
     event_ids bigint[];
 BEGIN
-    SELECT array_agg(e.id) INTO event_ids FROM (
-        (SELECT e.id FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
-         AND e.node_refs @> ARRAY[p_parent] AND e.at<p_start
-         AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')
-         LIMIT 20001)
-        UNION ALL
-        (SELECT e.id FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
-         AND e.node_refs @> ARRAY[p_parent] AND e.at>=p_start AND e.at<=p_end
-         AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')
-         LIMIT 20001)
+    SELECT array_agg(e.event_id) INTO event_ids FROM (
+        SELECT r.event_id FROM aeon_goal_history_refs(p_parent,'node.%','-infinity',p_start) r
+        UNION ALL SELECT r.event_id FROM aeon_goal_history_refs(p_parent,'node.%',p_start,p_end) r
+        UNION ALL SELECT r.event_id FROM aeon_goal_history_refs(p_parent,'import.%','-infinity',p_start) r
+        UNION ALL SELECT r.event_id FROM aeon_goal_history_refs(p_parent,'import.%',p_start,p_end) r
         LIMIT 20001
     ) e;
     IF cardinality(event_ids)>20000 THEN
         RAISE EXCEPTION 'series parent history budget exceeded' USING ERRCODE='54000';
     END IF;
     RETURN QUERY SELECT DISTINCT coalesce(aeon_uuid_or_null(s.item->>'id'),e.node_id)
-        FROM unnest(event_ids) ref(id) JOIN events e ON e.id=ref.id
-            AND e.tenant_id=current_setting('aeon.tenant_id')::uuid
+        FROM unnest(event_ids) ref(id) CROSS JOIN LATERAL (
+            SELECT e.node_id,e.type,e.before,e.after FROM events e WHERE e.id=ref.id
+                AND e.tenant_id=current_setting('aeon.tenant_id')::uuid OFFSET 0
+        ) e
         CROSS JOIN LATERAL (VALUES(e.before),(e.after)) snapshots(data)
         CROSS JOIN LATERAL jsonb_array_elements(CASE
             WHEN e.type='node.bulk_changed' AND jsonb_typeof(snapshots.data->'items')='array' THEN snapshots.data->'items'
@@ -211,14 +275,23 @@ BEGIN
  -- LIMIT consumes at most budget+1 recursive pairs, before facts/session reads
  -- or the overlapping-root cross product can materialize unbounded work.
  -- UNION still detects cycles; there is no arbitrary depth cutoff.
- WITH RECURSIVE walk(root,id) AS (
-  SELECT n.id,n.id FROM nodes n
+ WITH RECURSIVE walk(root,id,parent_id,position,next_page) AS (
+  SELECT n.id,n.id,NULL::uuid,0::numeric,false FROM nodes n
   WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
    AND n.id=ANY(roots) AND n.deleted_at IS NULL
   UNION
-  SELECT w.root,c.id FROM walk w CROSS JOIN LATERAL (
-   SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
-    AND n.parent_id=w.id AND n.deleted_at IS NULL ORDER BY n.position,n.id OFFSET 0
+  SELECT w.root,c.* FROM walk w CROSS JOIN LATERAL (
+   (SELECT c.*,row_number() OVER (ORDER BY c.position,c.id)=128 FROM (
+    SELECT n.id,n.parent_id,n.position FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+     AND n.parent_id=w.id AND n.deleted_at IS NULL AND n.id<>w.root
+     ORDER BY n.position,n.id LIMIT 128
+   ) c)
+   UNION ALL
+   (SELECT c.*,row_number() OVER (ORDER BY c.position,c.id)=128 FROM (
+    SELECT n.id,n.parent_id,n.position FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+     AND w.next_page AND n.parent_id=w.parent_id AND n.deleted_at IS NULL AND n.id<>w.root
+     AND (n.position,n.id)>(w.position,w.id) ORDER BY n.position,n.id LIMIT 128
+   ) c)
   ) c
  ), bounded AS MATERIALIZED (SELECT w.root,w.id FROM walk w LIMIT 50001)
  SELECT array_agg(b.root),array_agg(b.id) INTO scope_roots,scope_nodes FROM bounded b;

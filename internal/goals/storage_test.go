@@ -180,6 +180,13 @@ func TestGoalStorageVisibility(t *testing.T) {
 		if !reflect.DeepEqual(eventsSeen, []int64{visibleEvent, pingEvent}) || strings.Contains(payloads, "private-ETA-sentinel") || strings.Contains(payloads, "2026-10-17") {
 			t.Fatalf("goal event leak or missing visible event: %v payloads=%s", eventsSeen, payloads)
 		}
+		var indexedEvents []int64
+		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT DISTINCT event_id FROM goal_event_refs WHERE event_id=ANY($1::bigint[]) ORDER BY event_id)`, []int64{visibleEvent, hiddenRefEvent, workspaceEvent}).Scan(&indexedEvents); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(indexedEvents, []int64{visibleEvent}) {
+			t.Fatalf("reference index exposed a hidden event: %v", indexedEvents)
+		}
 		// Replay uses the same event RLS, including hidden node_refs.
 		var replay []int64
 		if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(id ORDER BY id),'{}') FROM events WHERE type LIKE 'goal.%' AND id>$1`, visibleEvent-1).Scan(&replay); err != nil || !reflect.DeepEqual(replay, eventsSeen) {
@@ -206,6 +213,13 @@ func TestGoalStorageVisibility(t *testing.T) {
 		}
 		if !reflect.DeepEqual(ids, []int64{visibleEvent, pingEvent, hiddenEvent, hiddenRefEvent, workspaceEvent, noVisibleOutcomeEvent, emptyEvent}) {
 			t.Fatalf("fixture lost hidden events: %v", ids)
+		}
+		var indexedEvents []int64
+		if err := tx.QueryRow(t.Context(), `SELECT ARRAY(SELECT DISTINCT event_id FROM goal_event_refs WHERE event_id=ANY($1::bigint[]) ORDER BY event_id)`, []int64{visibleEvent, hiddenRefEvent, workspaceEvent}).Scan(&indexedEvents); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(indexedEvents, []int64{visibleEvent, hiddenRefEvent, workspaceEvent}) {
+			t.Fatalf("reference fixture lost hidden events: %v", indexedEvents)
 		}
 		return nil
 	})

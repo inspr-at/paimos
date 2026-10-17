@@ -1323,14 +1323,23 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
 		}
 	}
-	// Keep each child probe dependent on its parent, including without table
-	// statistics. The sibling index visits only this subtree; materializing
-	// tenant-wide adjacency makes a tiny scope pay for every unrelated tree.
-	return `WITH RECURSIVE scope(id) AS (
-        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
-                AND parent_id=s.id AND deleted_at IS NULL ORDER BY position,id OFFSET 0
+	// Child pages keep the sibling-index probe cheap even when stale statistics
+	// estimate that every node has the same parent. Only the last row of a full
+	// page continues its siblings; every scoped node also starts its own children.
+	// The root has no paging parent, so siblings outside the scope stay excluded.
+	return `WITH RECURSIVE scope(id,parent_id,position,next_page) AS (
+        SELECT id,NULL::uuid,0::numeric,false FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
+        UNION ALL SELECT c.* FROM scope s CROSS JOIN LATERAL (
+            (SELECT c.*,row_number() OVER (ORDER BY position,id)=128 FROM (
+                SELECT id,parent_id,position FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                    AND parent_id=s.id AND deleted_at IS NULL ORDER BY position,id LIMIT 128
+            ) c)
+            UNION ALL
+            (SELECT c.*,row_number() OVER (ORDER BY position,id)=128 FROM (
+                SELECT id,parent_id,position FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                    AND s.next_page AND parent_id=s.parent_id AND deleted_at IS NULL
+                    AND (position,id)>(s.position,s.id) ORDER BY position,id LIMIT 128
+            ) c)
         ) c
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `

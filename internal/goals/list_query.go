@@ -65,8 +65,9 @@ func listPageQuery() string {
  OR EXISTS(SELECT 1 FROM node_relations r WHERE r.type='asks_for' AND r.source_node_id=a.comment_node_id AND r.target_node_id=g.id)
  ), subjects AS MATERIALIZED (
  SELECT DISTINCT g.id AS goal,n.id FROM page g
- CROSS JOIN LATERAL (SELECT e.* FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
- AND e.node_refs @> ARRAY[g.id] AND e.type='goal.items_changed'
+ CROSS JOIN LATERAL aeon_goal_history_refs(g.id,'goal.items_changed','-infinity',$2) ref
+ CROSS JOIN LATERAL (SELECT e.node_id,e.before,e.after FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ref.event_id
  AND (e.before->>'goal_node_id'=g.id::text OR e.after->>'goal_node_id'=g.id::text) OFFSET 0) e
  JOIN nodes n ON n.id=e.node_id AND e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='outcome'

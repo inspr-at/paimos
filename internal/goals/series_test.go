@@ -369,6 +369,34 @@ func TestGoalHistoryIgnoresUnrelatedEvents(t *testing.T) {
 		if count < 6003 {
 			return fmt.Errorf("unrelated history fixture missing: %d", count)
 		}
+		// Explain the installed reference helper's query too. Otherwise an
+		// opaque function scan could hide unrelated work from the counters.
+		var definition string
+		if err := tx.QueryRow(ctx, `SELECT prosrc FROM pg_proc WHERE oid='aeon_goal_history_refs(uuid,text,timestamptz,timestamptz)'::regprocedure`).Scan(&definition); err != nil {
+			return err
+		}
+		_, referenceSQL, ok := strings.Cut(definition, "SELECT r.event_id")
+		if !ok {
+			return fmt.Errorf("installed reference query missing")
+		}
+		referenceSQL, _, ok = strings.Cut(referenceSQL, ") e;")
+		if !ok {
+			return fmt.Errorf("installed reference query boundary missing")
+		}
+		referenceSQL = "SELECT r.event_id" + strings.NewReplacer("p_node", "$1::uuid", "p_type", "$2::text", "p_from", "$3::timestamptz", "p_until", "$4::timestamptz").Replace(referenceSQL)
+		var raw []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE,FORMAT JSON,TIMING OFF) "+referenceSQL, f.ticket, "node.%", apiClock.Add(-120*time.Hour), apiClock).Scan(&raw); err != nil {
+			return err
+		}
+		var referencePlan any
+		if err := json.Unmarshal(raw, &referencePlan); err != nil {
+			return err
+		}
+		refVisits, eventVisits := relationPlanVisits(referencePlan, "goal_event_refs"), relationPlanVisits(referencePlan, "events")
+		t.Logf("installed reference helper visits: references=%.0f events=%.0f", refVisits, eventVisits)
+		if refVisits <= 0 || refVisits > 10 || eventVisits <= 0 || eventVisits > 10 {
+			t.Errorf("reference helper scans unrelated history: references=%.0f events=%.0f", refVisits, eventVisits)
+		}
 		traced := &goalHistoryPlanTx{Tx: tx, t: t}
 		h, err := loadReconstruction(ctx, traced, f.secondGoal, apiClock)
 		if err != nil {

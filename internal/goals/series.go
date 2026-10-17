@@ -169,15 +169,19 @@ func (m *module) series(w http.ResponseWriter, r *http.Request) {
 // history_nodes supplies (goal,id), and page supplies the goal identities.
 func nodeHistoryQuery(nowArg, startArg string) string {
 	parts := []string{}
-	for _, period := range []string{"e.at<" + startArg, "e.at>=" + startArg + " AND e.at<=" + nowArg} {
+	for i, period := range []string{"e.at<" + startArg, "e.at>=" + startArg + " AND e.at<=" + nowArg} {
 		parts = append(parts, `(SELECT e.id,e.at,CASE WHEN e.type='node.project_moved' THEN e.after->'node' ELSE e.after END AS after
  FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id=h.id
  AND `+period+` AND (e.type LIKE 'node.%' OR e.type LIKE 'import.%' OR e.type LIKE 'status_autopilot.%')
  ORDER BY e.at,e.id LIMIT 20001)`)
-		parts = append(parts, `(SELECT e.id,e.at,s.item AS after FROM (
- SELECT e.id,e.at,e.after FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
- AND e.type='node.bulk_changed' AND e.node_refs @> ARRAY[h.id] AND `+period+`
- ORDER BY e.at,e.id LIMIT 20001 OFFSET 0) e
+		fromArg, untilArg := "'-infinity'", startArg
+		if i == 1 {
+			fromArg, untilArg = startArg, nowArg
+		}
+		parts = append(parts, `(SELECT e.id,e.at,s.item AS after
+ FROM aeon_goal_history_refs(h.id,'node.bulk_changed',`+fromArg+`,`+untilArg+`) ref
+ CROSS JOIN LATERAL (SELECT e.id,e.at,e.after FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ref.event_id OFFSET 0) e
  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.after->'items')='array' THEN e.after->'items' ELSE '[]'::jsonb END) s(item)
  WHERE s.item->>'id'=h.id::text)`)
 	}
@@ -191,18 +195,21 @@ func nodeHistoryQuery(nowArg, startArg string) string {
 
 func sessionHistoryQuery(nowArg, startArg string) string {
 	parts := []string{}
-	for _, period := range []string{"e.at<" + startArg, "e.at>=" + startArg + " AND e.at<=" + nowArg} {
+	for i, period := range []string{"e.at<" + startArg, "e.at>=" + startArg + " AND e.at<=" + nowArg} {
 		parts = append(parts, `(SELECT g.id AS goal,e.id,e.at,g.id AS node_id,e.after,'goal'::text AS family,NULL::text AS bucket
  FROM page g CROSS JOIN LATERAL (SELECT e.id,e.at,e.after FROM events e
  WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id=g.id AND e.type='goal.updated'
  AND `+period+` ORDER BY e.at,e.id LIMIT 20001) e)`)
-		for _, snapshot := range []string{"before", "after"} {
-			parts = append(parts, `(SELECT h.goal,e.id,e.at,h.id AS node_id,e.after,'session'::text AS family,NULL::text AS bucket
- FROM history_nodes h CROSS JOIN LATERAL (SELECT e.id,e.at,e.after FROM events e
- WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.type LIKE 'harness.%'
- AND e.`+snapshot+`->>'ticket_node_id'=h.id::text AND `+period+`
- AND e.after ? 'id' AND e.after ? 'phase' ORDER BY e.at,e.id LIMIT 20001) e)`)
+		fromArg, untilArg := "'-infinity'", startArg
+		if i == 1 {
+			fromArg, untilArg = startArg, nowArg
 		}
+		parts = append(parts, `(SELECT h.goal,e.id,e.at,e.node_id,e.after,'session'::text AS family,NULL::text AS bucket
+ FROM history_nodes h CROSS JOIN LATERAL aeon_goal_history_refs(h.id,'harness.%',`+fromArg+`,`+untilArg+`) ref
+ CROSS JOIN LATERAL (SELECT e.id,e.at,e.node_id,e.after,e.before FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ref.event_id OFFSET 0) e
+ WHERE (e.after->>'ticket_node_id'=h.id::text OR e.before->>'ticket_node_id'=h.id::text)
+ AND e.after ? 'id' AND e.after ? 'phase')`)
 	}
 	// Before and after can name the same ticket. Replay a session event only
 	// once per goal, while retaining both ends of a ticket rebind.
@@ -226,14 +233,15 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 	// Discovery uses immutable outcome subjects, including visible moved-away
 	// outcomes. Values still come only from their RLS-filtered event snapshots.
 	rows, err := tx.Query(ctx, `WITH subjects AS MATERIALIZED (
- SELECT DISTINCT e.node_id FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
- AND e.node_refs @> ARRAY[$1::uuid] AND e.type='goal.items_changed'
- AND e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
+ SELECT DISTINCT e.node_id FROM aeon_goal_history_refs($1::uuid,'goal.items_changed','-infinity',$2) ref
+ CROSS JOIN LATERAL (SELECT e.node_id,e.before,e.after FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ref.event_id OFFSET 0) e
+ WHERE e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
  AND (e.before->>'goal_node_id'=$1::uuid::text OR e.after->>'goal_node_id'=$1::uuid::text)
  ORDER BY e.node_id LIMIT 4097)
  SELECT n.id::text FROM subjects s JOIN nodes n ON n.id=s.node_id
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='outcome'
- ORDER BY n.id`, goal)
+ ORDER BY n.id`, goal, now)
 	if err != nil {
 		return out, err
 	}
@@ -385,7 +393,7 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 	}
 	rows, err = tx.Query(ctx, `WITH page AS MATERIALIZED (SELECT $1::uuid AS id),
  history_nodes AS MATERIALIZED (SELECT id,$1::uuid AS goal FROM unnest($3::uuid[]) s(id))
- SELECT e.id,e.at,e.node_id::text,e.after,e.family FROM `+sessionHistoryQuery("$2", "$4")+` e`, goal, now, nodeIDs, start)
+ SELECT e.id,e.at,coalesce(e.node_id::text,''),e.after,e.family FROM `+sessionHistoryQuery("$2", "$4")+` e`, goal, now, nodeIDs, start)
 	if err != nil {
 		return out, err
 	}
