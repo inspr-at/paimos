@@ -185,7 +185,7 @@ func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
 				t.Fatalf("fresh intent invented admission or launch: %v, calls=%d", l, calls)
 			}
 			l = claimLead(t, f, session, lease, l["revision"])
-			wantReason := map[string]string{"missing": "admission_unavailable", "error": "admission_unavailable", "host_error": "host_unavailable", "dial_full": "dial_full", "harness_full": "harness_full", "account_unknown": "account_unavailable", "host_stale": "host_unavailable", "future": "host_unavailable", "ready": ""}[mode]
+			wantReason := map[string]string{"missing": "admission_not_configured", "error": "admission_unavailable", "host_error": "host_unavailable", "dial_full": "dial_full", "harness_full": "harness_full", "account_unknown": "account_unavailable", "host_stale": "host_unavailable", "future": "host_unavailable", "ready": ""}[mode]
 			if l["reason"] != wantReason || l["automatic_launch_enabled"] != false {
 				t.Fatalf("incorrect admission reason or launch policy: %v; want reason %q", l, wantReason)
 			}
@@ -204,6 +204,47 @@ func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Risk: a project with no admission adapter, whose bound session has already
+// stopped, is shown as "the admission adapter can't be read".
+func TestProjectLeadStoppedAbsentAdmissionShowsNotConfigured(t *testing.T) {
+	f := projectLeadFixture(t, nil)
+	session, lease, _ := leadCandidate(t, f)
+	base := "/api/projects/" + f.project
+	expect(t, f.call(f.agent, "POST", base+"/harness-sessions/"+session+"/heartbeat", map[string]any{"activity_sequence": 1, "phase": "working", "activity": "busy"}, lease), 200)
+	pending := decode(t, f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, ""))
+	bound := claimLead(t, f, session, lease, pending["revision"])
+	if bound["state"] != "working" || bound["generation"] != float64(1) || bound["session_id"] != session {
+		t.Fatalf("adoption did not bind: %v", bound)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='stopped' WHERE id=$1`, session); err != nil {
+			return err
+		}
+		// The historical claim stored the old absence code. The read must not rewrite it.
+		_, err := tx.Exec(t.Context(), `UPDATE project_leads SET state='waiting_for_room',reason='admission_unavailable' WHERE project_id=$1`, f.project)
+		return err
+	})
+	w := f.call(f.person, "GET", base+"/lead", nil, "")
+	expect(t, w, 200)
+	got := decode(t, w)
+	if got["state"] != "paused" || got["reason"] != "admission_not_configured" || got["process_active"] != false || got["session_id"] != session || got["generation"] != float64(1) {
+		t.Fatalf("stopped absent adapter still reported as an unreadable read: %v", got)
+	}
+	if strings.Contains(w.Body.String(), "admission_unavailable") {
+		t.Fatal("response kept the unreadable-adapter reason")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var state, reason string
+		if err := tx.QueryRow(t.Context(), `SELECT state,reason FROM project_leads WHERE project_id=$1`, f.project).Scan(&state, &reason); err != nil {
+			return err
+		}
+		if state != "waiting_for_room" || reason != "admission_unavailable" {
+			return errors.New("read rewrote the stored claim: " + state + " " + reason)
+		}
+		return nil
+	})
 }
 
 func TestProjectLeadLegacyUnclaimedStartStaysCancellable(t *testing.T) {
@@ -674,7 +715,7 @@ func TestProjectLeadAdoptionNeedsPersonAndExactLease(t *testing.T) {
 			})
 			// Adoption does not enable launch admission or change ordinary reclaims.
 			again := claimLead(t, f, session, lease, bound["revision"])
-			if again["state"] != "waiting_for_room" || again["reason"] != "admission_unavailable" || again["generation"] != float64(1) || again["automatic_launch_enabled"] != false {
+			if again["state"] != "waiting_for_room" || again["reason"] != "admission_not_configured" || again["generation"] != float64(1) || again["automatic_launch_enabled"] != false || again["process_active"] != true {
 				t.Fatal("ordinary claim admission was weakened")
 			}
 		})

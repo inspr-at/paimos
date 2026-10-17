@@ -59,5 +59,9 @@ func (m *Module) writeRoutineExecution(r *http.Request, tx pgx.Tx, p tenant.Prin
 }
 
 func (m *Module) projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Lead, error) {
-	return projectLead(ctx, tx, p, l, m.routineRuntime)
+	view, err := projectLead(ctx, tx, p, l, m.routineRuntime)
+	if err != nil {
+		return view, err
+	}
+	return projectAdmissionAbsence(view, m.leadAdmission != nil), nil
 }
