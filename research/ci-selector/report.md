@@ -9,8 +9,10 @@ not evidence for enabling an area. No workflow or area is activated here.
 
 ## Reproduction and provenance
 
-This branch is based on unmerged `work/aeon-1336-ci-s4-affected`, commit
-`da9f418e756a5da7483103d7136b22d597d367dc`, as permitted by the brief.
+The initial implementation used unmerged `work/aeon-1336-ci-s4-affected`, commit
+`da9f418e756a5da7483103d7136b22d597d367dc`, as permitted by the brief. The
+merge-main round now includes `origin/main` at
+`17012e35a5f8ebd7b4451b801cfd442af7e95ff3`, which contains AEON-1336.
 The decisions in AEON-1336's LEAD comment and AEON-1332/concept v2 are retained:
 unknown impact stays broad, the merge queue stays full, and narrowing needs
 zero misses on historical trees rather than a calendar wait.
@@ -205,7 +207,7 @@ ownership fails the mapping test; changing full fallback back to the gated
 subset fails the NIGHTLY-retention test. Original sources are restored and
 the tests pass.
 
-### Handover checks
+### Initial handover checks
 
 - `node --test scripts/test-tiers/browser-candidate.test.mjs
   scripts/test-tiers/browser-areas.test.mjs`: 11 passed.
@@ -226,3 +228,40 @@ the tests pass.
   remains below 100 until that required check runs on an approved host or CI.
 - No browser run, model review, push to origin, deployment, workflow edit or
   area activation is part of this change.
+
+### Merge-main round (2026-10-18)
+
+Normal merge commit `666f772ad` merges main without conflicts. Of 119 incoming
+files, 118 match main byte for byte. The combined `test-tiers.test.mjs` matches
+main plus the existing candidate-test import. The research implementation is
+unchanged. Main's comment-only change in `core.mjs` required refreshing that
+file's implementation checksum; the complete historical replay still matches.
+No migrations changed and agents, releases and work remain `gated-full`.
+
+Validation through the coordinator's `remote-test.sh` on mbp2606:
+
+- `go test ./internal/reportercontract/`: passed, regenerating the local
+  OpenAPI bundle from the merged area sources.
+- `node --test scripts/check-migrations.test.mjs
+  scripts/test-tiers/browser-candidate.test.mjs
+  scripts/test-tiers/browser-areas.test.mjs`: 58 passed.
+- `node scripts/check-migrations.mjs --base-ref v261017115202.0.0`: passed,
+  checking 362 unique migration numbers against the latest published release.
+- `node scripts/test-tiers/browser-candidate-replay.mjs --check`: passed,
+  including all 294 proof rows and the refreshed implementation checksum.
+- `node scripts/test-tiers/cli.mjs manifests --check`: passed.
+- `node --test scripts/test-tiers/test-tiers.test.mjs
+  web/scripts/ci-web-shard.test.mjs`: 389 passed, zero failed or skipped.
+  Missing dependencies were installed once in the remote checkout with browser
+  downloads disabled. No browser was launched.
+- `python3 -B -m unittest discover -s scripts/audit`: 33 passed.
+
+`ci-static-locked.sh` returned **exit 3 on both merge-round attempts** because
+remote static checks are paused at night. The full required
+`node scripts/ci-static.mjs --merge-main` proof remains blocked until an
+approved static run or hosted CI; no local fallback or guard bypass was used.
+Worker status stays at 95 rather than claiming this check passed.
+
+The branch still differs from main only in the original six AEON-1485 paths.
+No feature changes, area activation, authored workflow or registry changes,
+origin push, deployment, model CLI calls or review gates were performed.
