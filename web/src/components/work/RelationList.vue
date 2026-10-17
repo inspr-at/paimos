@@ -88,7 +88,7 @@ defineExpose({ el: root })
 .relation-label { flex-shrink: 0; width: 96px; font-size: 12.5px; color: var(--ink-2); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 4px; }
 .rel-chip { display: inline-flex; align-items: center; height: 24px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
-.rel-open { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 9px 0 7px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font: 500 11.5px/1 var(--mono); font-variant-ligatures: none; }
+.rel-open { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 9px 0 7px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font: 500 11.5px/1 var(--mono); font-variant-ligatures: none; white-space: nowrap; }
 .removable .rel-open { padding-right: 4px; }
 @media (hover: hover) { button.rel-open:hover { background: var(--row-hover); } .rel-chip:has(button.rel-open:hover) { box-shadow: inset 0 0 0 1px var(--glass-rim); } }
 .rel-open:focus-visible, .rel-remove:focus-visible { box-shadow: var(--focus-ring); }
