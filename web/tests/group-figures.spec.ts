@@ -133,9 +133,9 @@ test('AEON-1388 figures land in reserved slots: the group row and the header nev
 })
 
 test('AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again', async ({ page }) => {
-  // PHAROS-18 (medium) carries 3 h here: In progress reads ~10.5h unfiltered and ~7.5h for high priority alone.
+  // PHAROS-18 (medium) carries 1 h here: In progress reads ~8.5h unfiltered and ~7.5h for high priority alone.
   const d = data()
-  Object.assign(d.nodes.find(n => n.id === 'n-8')!.fields, { estimate_hours: 3 })
+  Object.assign(d.nodes.find(n => n.id === 'n-8')!.fields, { estimate_hours: 1 })
   let release!: () => void, seen!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   const held = new Promise<void>(resolve => { seen = resolve })
@@ -144,7 +144,7 @@ test('AEON-1388 a filter change empties the group figures at once: no group show
     if (new URL(route.request().url()).searchParams.get('priority')) { seen(); await gate }
     await route.fallback()
   }) })
-  await expect(cell(page, 'In progress', 'estimate')).toHaveText('~10.5h')
+  await expect(cell(page, 'In progress', 'estimate')).toHaveText('~8.5h')
   await page.getByRole('toolbar').getByRole('button', { name: 'Add a filter' }).click()
   await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Priority', exact: true }).click()
   await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('High', { exact: true }).click()
