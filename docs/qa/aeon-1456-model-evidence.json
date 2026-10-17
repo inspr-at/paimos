@@ -1,11 +1,11 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "ticket": "AEON-1456",
-  "brief": "aeon-1456-goals-api-r3",
+  "brief": "aeon-1456-goals-api-fix3",
   "round": 3,
   "status": "complete-concept-acceptance-passed",
-  "base_commit": "8c237953d",
-  "implementation_head": "280cd4d91",
+  "base_commit": "713dd3ec1",
+  "implementation_head": "df65241e1",
   "concept": "Goals model r3 D1–D12/E1–E6; AEON-1452 r5 series addendum",
   "completion_pct": 100,
   "implementation": {
@@ -252,11 +252,11 @@
     "visibility_cost": "The scale regression traced a timeout to the visible-event watermark before page expansion. Identity-bound invoker checks preserve hidden-reference, cycle, tenant and project behavior and pass the 50x30 single-expansion-query case.",
     "aggregate_retries": "The real 50000-pair test initially exceeded the request deadline through repeated identical failures. Failed root-set reuse and deterministic batch splitting now pass without changing the five-second statement/eight-second request limits.",
     "older_migration_replay": "TestAttentionEventsMigrationUpgradeAndReapply caught 1241 overwriting the Goals policy. Original identity/definition/replay assertions are retained, with extra required Goals/reference predicate checks. Full DB passes after the transactional preservation fix.",
-    "ordinary_node_performance": "Whole-package latency failures exposed repeated per-parent RLS initialization. A minimal equivalent recursive child join fixes the cost; the full nodes package passes original performance and row-result checks.",
+    "ordinary_node_performance": "Fresh parent statistics made the forced LATERAL child lookup seq-scan 6001 nodes for every scope row. A set join expands each recursion level once; the narrow <> ALL ARRAY outcome-kind shortcut keeps indexed paths available without statistics. Both original no-statistics assertions are retained. The existing stale-kind test now also bounds actual scope node visits.",
     "pool_headroom": "Configured startup caught an unmarked Goals scheduler borrowing foreground capacity. It now uses the existing background worker context; both barrier cases and full cmd/aeon pass."
   },
   "shared_changes": "Minimal additive authored goals contract, header/pin and four tier rows; generated OpenAPI rebuilt rather than hand-edited. Unreleased migration 1361 helper/policy updates and its exception hash remain scoped to Goals visibility. Existing migrator replay, scoped-node traversal and scheduler wiring received the necessary safety/performance fixes. No AGENTS.md, go.mod, web package, new schema columns or DSAR classifications changed in round three.",
-  "migration_1361_sha256": "034c6b96c9adda9a1ac5952169430b205cbba701e6043f4f33359548f6aaf3b7",
+  "migration_1361_sha256": "a76e0a77ca8143afa1cea6c3c2fc79a66deadacbc0001c7b162aeb1e273ff830",
   "preserved_baseline_failure": "Round-two full internal/cli failed after unchanged backend_memory_regression_test.go temporarily changed AEON_TEST_DATABASE_URL before dbtest global template initialization; later tests rejected the restored maintenance URL. That test was not changed, skipped or loosened. The explicitly requested thirteen-case fresh-process rerun passes, including on implementation 280cd4d91. No claim is made that the complete CLI package is green.",
   "pending_ci": [
     "Full ci-static --merge-main (night-protocol exit 3).",
@@ -277,5 +277,49 @@
     "ticket_status_changed": false,
     "release_acceptance": false,
     "temporary_harness_refs": "Only the explicitly sanctioned remote-test harness temporary refs were pushed to the private test repository; no branch push."
+  },
+  "fix3": {
+    "date": "2026-10-17",
+    "runner": "mbp2606 via remote-test.sh; PostgreSQL 18.6; NOBYPASSRLS request role; unchanged 6000-node fixture",
+    "risk": "A filtered ordinary-node list repeats full child scans under the Goals RLS policy, exceeding the unchanged 600ms CI budget; narrowing visibility must preserve hidden-outcome and reference protection.",
+    "changes": [
+      "Expose the ordinary-kind predicate with <> ALL (ARRAY(SELECT ...)) instead of a whole-policy CASE. The kind catalog is one InitPlan; the existing outcome visibility function, tenant/project policies, cycle bound and restoration remain intact.",
+      "Join each recursive scope level to its children as a set; preserve the existing dependent filtered-node/kind lookups.",
+      "Keep TestScopedListWithoutStatisticsUsesChildIndex and every existing performance threshold unchanged; add a scope row-visit bound to TestList6000FiltersWithStaleKindStatistics. No new test names or tier rows."
+    ],
+    "before": {
+      "head": "713dd3ec1",
+      "filtered_request_ms": 3015.03825,
+      "list_explain_ms": 1487.948,
+      "facets_explain_ms": 1474.529,
+      "recursive_child_scan": "Seq Scan on nodes",
+      "child_scan_loops_per_query": 6001,
+      "scope_node_visits_per_query": 36012002,
+      "scope_shared_hit_blocks_per_query": 1440243,
+      "result": "Both filtered-list tests failed the original 300ms remote threshold; this also exceeds the 600ms CI threshold."
+    },
+    "after": {
+      "head": "afa642634",
+      "filtered_request_ms": 84.875208,
+      "tag_facet_request_ms": 52.572542,
+      "cost_unit_facet_request_ms": 46.623833,
+      "epic_none_request_ms": 77.665708,
+      "list_explain_ms": 24.802,
+      "facets_explain_ms": 19.622,
+      "child_scan_loops_per_query": 2,
+      "scope_node_visits_per_query": 12003,
+      "scope_shared_hit_blocks_per_query": 483,
+      "result": "All seven selected 6000-node and no-statistics cases passed, including the original index-plan assertion. No CI environment override was set; the stricter original local thresholds passed."
+    },
+    "negative_control": "The captured 713dd3ec1 EXPLAIN gives 36012002 scope node visits in each query, exceeding the new unchanged-fixture cap of 12003. The original elapsed-time test already fails at that head.",
+    "status_icons": {
+      "classification": "unrelated to Goals database/query changes",
+      "evidence": [
+        "web/tests/status-icons.spec.ts:318 installs mockWork and performs no locator.click.",
+        "web/tests/work-fixtures.ts:390 intercepts **/api/**; its GET /api/nodes branch at line 706 fulfills from fixture rows, without contacting the Go server or database.",
+        "review-ci725-0322.out records this exact budget test passing with 26 icons at 0.0377ms/frame, followed by 115 passed and only project-groups.spec.ts failing in that job. Other status-icons cases in the same run also complete."
+      ],
+      "action": "No browser retries, timeout changes or unrelated UI edits."
+    }
   }
 }
