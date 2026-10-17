@@ -95,6 +95,8 @@ test('AEON-1473: every page leads with the badge’s count: none at 0, (1), (9),
 })
 
 test('AEON-1473: a rise pops the favicon dot once in six frames; the visible title never swaps', async ({ page }) => {
+  // The UI config reduces motion by default; this case is about the motion.
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.clock.install({ time: T0 })
   const desk = await setup(page, { open: 2 })
   await page.goto('/')
@@ -125,6 +127,7 @@ test('AEON-1473: a rise pops the favicon dot once in six frames; the visible tit
 
 test('AEON-1473: a background tab reads the Desk itself and says New decision for two seconds, without focus or sound', async ({ page }) => {
   await watchFocusAndSound(page)
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.clock.install({ time: T0 })
   const desk = await setup(page, { open: 1 })
   await page.goto('/')
