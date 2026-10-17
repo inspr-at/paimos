@@ -76,6 +76,118 @@ func TestDeliveryFlowCheckSuitesFillLinkedChanges(t *testing.T) {
 	}
 }
 
+func TestDeliveryFlowRecoversHarnessBuildBeforePRLink(t *testing.T) {
+	// Risk: the projector consumes a worker's complete build before LEAD opens
+	// the PR, leaving later linked checks, reviews and ship decisions without it.
+	for _, feed := range []string{"check_suite", "review", "ship"} {
+		t.Run(feed, func(t *testing.T) {
+			f := newFixture(t)
+			start, stop := f.at.Add(-50*time.Minute), f.at.Add(-20*time.Minute)
+			author, reviewer, coordinator, other, gate := requestID(711), requestID(712), requestID(713), requestID(714), requestID(715)
+			f.tx(t, func(tx pgx.Tx) error {
+				var otherTicket string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-849',id,'Unrelated ticket' FROM node_kinds WHERE slug='work' RETURNING id::text`, f.person.TenantID, f.project).Scan(&otherTicket); err != nil {
+					return err
+				}
+				for _, s := range []struct{ id, ticket, role, shape string }{
+					{author, f.ticket, "worker", "ship"},
+					{reviewer, f.ticket, "worker", "scout"},
+					{coordinator, f.ticket, "coordinator", "ship"},
+					{other, otherTicket, "worker", "ship"},
+				} {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,model,created_at) VALUES($1,$2,$3,$4,$5,'codex','fixture','unmanaged',$6,$7,$8,$8,'build-model',$9)`, f.person.TenantID, s.id, f.project, f.agent.ID, s.ticket, s.role, s.shape, []byte(s.id), start); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			snap := map[string]any{"id": author, "project_id": f.project, "agent_principal_id": f.agent.ID, "ticket_node_id": f.ticket, "role": "worker", "work_shape": "ship", "created_at": start, "model": "build-model", "finished": false}
+			appendFlowSource(t, f, events.Change{NodeID: &f.project, Type: "harness.registered", After: snap, At: &start})
+			f.tx(t, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=$2,stop_reason='process_exited',progress_pct=100 WHERE id=$1`, author, stop)
+				return err
+			})
+			snap["stopped_at"], snap["finished"] = stop, true
+			appendFlowSource(t, f, events.Change{NodeID: &f.project, Type: "harness.stopped", After: snap, At: &stop})
+			syncFlowAll(t, f)
+			var cursor, stoppedEvent int64
+			var items int
+			f.tx(t, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT last_event_id,(SELECT max(id) FROM events WHERE type='harness.stopped'),(SELECT count(*) FROM delivery_flow_items) FROM delivery_flow_cursors`).Scan(&cursor, &stoppedEvent, &items)
+			})
+			if cursor != stoppedEvent || items != 0 || flowEventCount(t, f) != 0 {
+				t.Fatalf("unlinked build was not consumed without creating Flow: cursor=%d stopped=%d items=%d", cursor, stoppedEvent, items)
+			}
+			p := f.pull()
+			f.gh.pulls[7] = p
+			if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			var project func()
+			switch feed {
+			case "check_suite":
+				project = func() {
+					if err := f.m.flowFromRuns(t.Context(), []metricRun{{ID: -900, Attempt: 1, Workflow: defaultCIWorkflow, Event: "pull_request", Head: p.Head, PR: int64ptr(7), Created: stop, Started: stop, Completed: f.at, Conclusion: "success"}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "review":
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO review_runs(tenant_id,id,ticket_node_id,project_id,repository,pull_request,target_branch,base_sha,head_sha,scope,kind,author_session_id,reviewer_session_id,reviewer_principal_id,author_family,reviewer_family,harness,model,reasoning_effort,created_by,created_at,expires_at) VALUES($1,$2,$3,$4,$5,7,'main',$6,$7,$6||'..'||$7,'review',$8,$9,$10,'openai','anthropic','claude','review-model','high',$10,$11,$12)`, f.person.TenantID, gate, f.ticket, f.project, f.m.config.Repository, p.Base, p.Head, author, reviewer, f.agent.ID, stop, f.at)
+					return err
+				})
+				project = func() {
+					appendFlowSource(t, f, events.Change{NodeID: &f.ticket, Type: "review_run.created", After: map[string]any{"id": gate}, At: &stop})
+					syncFlowAll(t, f)
+				}
+			case "ship":
+				project = func() {
+					appendFlowSource(t, f, events.Change{NodeID: &f.project, Type: "delivery.ship.decision", After: shipSnapshot{Project: f.project, Decision: &ShipDecision{ShipInput: ShipInput{Request: requestID(716)}, Project: f.project, Claimant: f.agent.ID, Repository: f.m.config.Repository, Execute: true, Claimed: true, Action: "enqueue", Facts: ShipFacts{PR: int64ptr(7)}}}, At: &stop})
+					syncFlowAll(t, f)
+				}
+			}
+			project()
+			var run DeliveryFlowRun
+			itemID := flowItemID(f.person.TenantID, f.project, "change", "AEON-848")
+			f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/flow/runs/"+itemID, nil, 200, &run)
+			buildID := flowStepID(f.person.TenantID, itemID, "paimos", "harness/"+author)
+			var builds []FlowStep
+			for _, s := range run.Steps {
+				if s.StepKey == "build" {
+					builds = append(builds, s)
+				}
+			}
+			if len(builds) != 1 {
+				t.Fatalf("linked %s did not recover exactly the ticket's ship worker: %+v", feed, run.Steps)
+			}
+			s := builds[0]
+			if s.ID != buildID || s.Source != "paimos" || s.Kind != "work" || s.Round != 1 || s.Actor.Type != "agent" || s.Actor.PrincipalID == nil || *s.Actor.PrincipalID != f.agent.ID || s.Actor.Model == nil || *s.Actor.Model != "build-model" || !s.StartedAt.Equal(start) || s.EndedAt == nil || !s.EndedAt.Equal(stop) || s.Outcome == nil || *s.Outcome != "ok" {
+				t.Fatalf("recovered build lost session evidence: %+v", s)
+			}
+			if run.Item.StartedAt == nil || !run.Item.StartedAt.Equal(start) || len(run.Item.PRs) != 1 || run.Item.PRs[0] != 7 {
+				t.Fatalf("linked change lost its initial build or PR: %+v", run.Item)
+			}
+			snapshot := func() string {
+				var out string
+				f.tx(t, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT jsonb_build_array((SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM delivery_flow_items i),(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM delivery_flow_steps s))::text`).Scan(&out)
+				})
+				return out
+			}
+			before, beforeEvents := snapshot(), flowEventCount(t, f)
+			project()
+			f.tx(t, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE delivery_flow_cursors SET last_event_id=0`)
+				return err
+			})
+			syncFlowAll(t, f)
+			if snapshot() != before || flowEventCount(t, f) != beforeEvents {
+				t.Fatal("replaying the linked feed and pre-link harness events changed Flow rows or events")
+			}
+		})
+	}
+}
+
 func TestDeliveryFlowHarnessProjectsOnceAndPreservesOPSReleases(t *testing.T) {
 	// Risk: harness deliveries without work orders stay invisible, replay
 	// adds rows/events, or a backfill rewrites OPS-owned releases and incident 135.
@@ -129,8 +241,8 @@ func TestDeliveryFlowHarnessProjectsOnceAndPreservesOPSReleases(t *testing.T) {
 	start, stop := f.at.Add(-50*time.Minute), f.at.Add(-20*time.Minute)
 	author, reviewer, gate := requestID(701), requestID(702), requestID(703)
 	f.tx(t, func(tx pgx.Tx) error {
-		for _, id := range []string{author, reviewer} {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,'codex','fixture','unmanaged','worker','ship',$6,$6)`, f.person.TenantID, id, f.project, f.agent.ID, f.ticket, []byte(id)); err != nil {
+		for _, s := range []struct{ id, shape, model string }{{author, "ship", "build-model"}, {reviewer, "scout", "review-model"}} {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,model,created_at,phase,stopped_at,stop_reason,progress_pct) VALUES($1,$2,$3,$4,$5,'codex','fixture','unmanaged','worker',$6,$7,$7,$8,$9,'stopped',$10,'process_exited',100)`, f.person.TenantID, s.id, f.project, f.agent.ID, f.ticket, s.shape, []byte(s.id), s.model, start, stop); err != nil {
 				return err
 			}
 		}

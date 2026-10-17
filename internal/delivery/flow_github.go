@@ -174,7 +174,7 @@ func (m *Module) flowRunBatchTx(ctx context.Context, tx pgx.Tx, pr int64, runs [
 		return nil, nil
 	}
 	batch := &flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{pr}, Repository: m.config.Repository}, Steps: flowStepsFromRuns(own)}
-	return batch, nil
+	return m.flowWithHarnessBuildsTx(ctx, tx, batch)
 }
 
 // flowLiveRun is one workflow-run transition. Phase is queued, running or
@@ -434,8 +434,11 @@ func (m *Module) flowFromWorkflowRun(ctx context.Context, raw []byte) error {
 			}
 			writeSteps = flowLiveStepsKeepingClass(run, known)
 		}
-		batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{run.PR}, Repository: m.config.Repository}, Steps: writeSteps}
-		return apply([]flowBatch{batch})
+		batch, err := m.flowWithHarnessBuildsTx(ctx, tx, &flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{run.PR}, Repository: m.config.Repository}, Steps: writeSteps})
+		if err != nil {
+			return err
+		}
+		return apply([]flowBatch{*batch})
 	})
 	return err
 }

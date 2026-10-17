@@ -40,6 +40,52 @@ func (m *Module) flowHarnessItemTx(ctx context.Context, tx pgx.Tx, ticket, proje
 	return &flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, Repository: repository, PRs: prs}}, nil
 }
 
+// A worker can finish before LEAD opens the PR and the projector can already
+// have consumed its events. Recover those builds from the current session rows
+// whenever a linked feed projects the ticket, using the live events' same keys.
+func (m *Module) flowWithHarnessBuildsTx(ctx context.Context, tx pgx.Tx, b *flowBatch) (*flowBatch, error) {
+	if b == nil || b.Item.Kind != "change" || b.Item.Ticket == nil || len(b.Item.PRs) == 0 || b.Item.Repository != "" && b.Item.Repository != m.config.Repository {
+		return b, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT s.id::text,s.agent_principal_id::text,
+	 CASE WHEN p.kind='person' THEN 'person' ELSE 'agent' END,s.model,s.created_at,s.stopped_at,
+	 aeon_session_finished(s.stopped_at,s.stop_reason,s.progress_pct)
+	 FROM harness_sessions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.agent_principal_id
+	 WHERE s.project_id=$1 AND s.ticket_node_id=$2 AND s.role='worker' AND s.work_shape='ship'
+	 AND EXISTS(SELECT 1 FROM delivery_items d JOIN nodes n ON n.tenant_id=d.tenant_id AND n.id=d.ticket_node_id
+	 WHERE d.project_id=s.project_id AND d.ticket_node_id=s.ticket_node_id AND n.project_id=s.project_id
+	 AND d.repository=$3 AND d.pull_request=ANY($4::bigint[]))
+	 ORDER BY s.created_at,s.id LIMIT 20`, b.Item.Project, *b.Item.Ticket, m.config.Repository, b.Item.PRs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for _, s := range b.Steps {
+		if s.Source == "paimos" {
+			seen[s.Key] = true
+		}
+	}
+	for rows.Next() {
+		var id, principal string
+		var finished bool
+		step := flowStepInput{Source: "paimos", StepKey: "build", Round: 1, Kind: "work", Actor: FlowActor{Label: "Builder"}, Merge: true}
+		if err := rows.Scan(&id, &principal, &step.Actor.Type, &step.Actor.Model, &step.Started, &step.Ended, &finished); err != nil {
+			return nil, err
+		}
+		step.Key = "harness/" + id
+		if seen[step.Key] {
+			continue
+		}
+		step.Actor.PrincipalID = &principal
+		if finished {
+			step.Outcome = flowStr("ok")
+		}
+		b.Steps = append(b.Steps, step)
+	}
+	return b, rows.Err()
+}
+
 func (m *Module) flowFromHarnessTx(ctx context.Context, tx pgx.Tx, e flowSourceEvent) (*flowBatch, error) {
 	if e.Type == "review_run.created" || e.Type == "coordinator_review.recorded" {
 		return m.flowFromHarnessReviewTx(ctx, tx, e)

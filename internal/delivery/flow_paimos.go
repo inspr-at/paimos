@@ -194,13 +194,20 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 }
 
 func (m *Module) flowSourceBatchTx(ctx context.Context, tx pgx.Tx, tid string, e flowSourceEvent) (*flowBatch, error) {
-	if strings.HasPrefix(e.Type, "harness.") || e.Type == "review_run.created" || e.Type == "coordinator_review.recorded" {
-		return m.flowFromHarnessTx(ctx, tx, e)
+	var b *flowBatch
+	var err error
+	switch {
+	case strings.HasPrefix(e.Type, "harness.") || e.Type == "review_run.created" || e.Type == "coordinator_review.recorded":
+		b, err = m.flowFromHarnessTx(ctx, tx, e)
+	case e.Type == "delivery.ship.decision":
+		b, err = m.flowFromShipTx(ctx, tx, e)
+	default:
+		b, err = flowFromPaimosTx(ctx, tx, tid, e)
 	}
-	if e.Type == "delivery.ship.decision" {
-		return m.flowFromShipTx(ctx, tx, e)
+	if err != nil {
+		return nil, err
 	}
-	return flowFromPaimosTx(ctx, tx, tid, e)
+	return m.flowWithHarnessBuildsTx(ctx, tx, b)
 }
 
 // flowRoundSnapshot reads the fields of work and review round snapshots.
