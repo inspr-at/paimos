@@ -33,7 +33,7 @@ import NewProjectSheet from '../components/projects/NewProjectSheet.vue'
 import GoalsView from '../components/goals/GoalsView.vue'
 import GoalsToolbar from '../components/goals/GoalsToolbar.vue'
 import { useGoalsPage } from '../components/goals/goalsPage'
-import type { Goal, GoalSort } from '../lib/goals'
+import { SORT_DIR, type Goal, type GoalSort } from '../lib/goals'
 import { heldDraft, type HeldDraft } from '../lib/importDraft'
 
 // Each sort has its icon; the Display button shows the current one (AEON-174).
@@ -165,11 +165,26 @@ const GOAL_SORTS: { value: GoalSort; label: string; phrase: string; icon: IconNa
   { value: 'name', label: 'Name', phrase: 'name', icon: 'sort-name' },
   { value: 'progress', label: 'Progress', phrase: 'progress', icon: 'progress' },
   { value: 'project', label: 'Project', phrase: 'project', icon: 'folder' },
+  { value: 'moving', label: 'Moving', phrase: 'moving', icon: 'play' },
+  { value: 'queued', label: 'Queued', phrase: 'queued', icon: 'queue' },
+  { value: 'done', label: 'Done', phrase: 'done', icon: 'check' },
 ]
-const goalSortMeta = computed(() => GOAL_SORTS.find(s => s.value === goals.sort.value) ?? { value: goals.sort.value, label: '', phrase: goals.sort.value === 'moving' ? 'moving' : goals.sort.value === 'queued' ? 'queued' : 'done', icon: 'sort' as IconName })
+const goalSortMeta = computed(() => GOAL_SORTS.find(s => s.value === goals.sort.value) ?? { value: goals.sort.value, label: goals.sort.value, phrase: goals.sort.value, icon: 'sort' as IconName })
+// Moving, Queued and Done headers hide at 1199 px. While one of them sorts the list, Display carries that label and direction.
+const STAT_SORTS = new Set<GoalSort>(['moving', 'queued', 'done'])
+const statsQuery = window.matchMedia('(max-width: 1199px)')
+const statsNarrow = ref(statsQuery.matches)
+const statsChange = () => { statsNarrow.value = statsQuery.matches }
+statsQuery.addEventListener('change', statsChange)
+const goalHoldsSort = computed(() => view.value === 'goals' && statsNarrow.value)
+const goalSortHidden = computed(() => goalHoldsSort.value && STAT_SORTS.has(goals.sort.value))
 const display = computed(() => view.value === 'goals'
   ? { icon: goalSortMeta.value.icon, phrase: goalSortMeta.value.phrase, on: !(goals.sort.value === 'eta' && goals.dir.value === 'asc'), tip: `Sorted by ${goalSortMeta.value.phrase} · sort` }
   : { icon: sortMeta.value.icon, phrase: sortMeta.value.phrase, on: sort.value !== 'activity', tip: `Sorted by ${sortMeta.value.phrase} · ${view.value === 'list' ? 'sort and columns' : 'sort'}` })
+const displayAria = computed(() => {
+  if (!goalSortHidden.value) return `Display, sorted by ${display.value.phrase}`
+  return `Display, sorted by ${goalSortMeta.value.phrase}, now ${goals.dir.value === 'asc' ? 'ascending' : 'descending'}`
+})
 async function clearGoalFilters() { term.value = ''; goals.filter.value = 'all'; await nextTick(); search.value?.focus() }
 
 // ---------- Columns ----------
@@ -886,7 +901,7 @@ watch(listCard, element => {
   sizer = new ResizeObserver(([entry]) => { listWidth.value = entry!.contentRect.width })
   sizer.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); stopLive?.(); clearTimeout(liveNewsTimer); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
+onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); stopLive?.(); clearTimeout(liveNewsTimer); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange); statsQuery.removeEventListener('change', statsChange) })
 const who = computed(() => session.identity?.tenant.name ?? 'Workspace')
 // One line under the sorts says how to arrange your own order. Touch screens
 // scroll when a card is dragged, so there the card's menu arranges it.
@@ -933,9 +948,9 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         <span class="tools">
           <ViewSwitch class="view-seg" look="seg" label="View" :options="viewOptions" :selected="view" :default-id="viewSwitch.defaultId.value" @select="setView" @set-default="viewSwitch.setDefault" />
           <button
-            type="button" class="btn sm display-btn" :class="{ on: display.on }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display, sorted by ${display.phrase}`"
-            :data-tip="display.tip" :data-sort="view === 'goals' ? goals.sort.value : sort" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
-          ><AppIcon :name="display.icon" :size="14" class="sort-icon" /><span class="display-label">Display</span><AppIcon name="chevron" :size="12" class="chev" /></button>
+            type="button" class="btn sm display-btn" :class="{ on: display.on, 'shows-sort': goalSortHidden }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="displayAria"
+            :data-tip="display.tip" :data-sort="view === 'goals' ? goals.sort.value : sort" :data-sort-dir="goalSortHidden ? goals.dir.value : undefined" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
+          ><AppIcon :name="display.icon" :size="14" class="sort-icon" /><span class="display-words" :class="{ 'holds-sort': goalHoldsSort, showing: goalSortHidden }"><span class="display-label">Display</span><span v-if="goalHoldsSort" class="sort-state"><AppIcon :name="goals.dir.value === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" class="sort-arrow" /><span class="sort-names"><span class="sizer" aria-hidden="true">Queued</span><span>{{ goalSortMeta.label }}</span></span></span></span><AppIcon name="chevron" :size="12" class="chev" /></button>
           <GoalsToolbar v-if="view === 'goals'" :page="goals" part="more" />
         </span>
         <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="290" :tallest="640" align="end" label="Display options" @close="closeDisplay">
@@ -944,7 +959,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
             <div class="sort-grid" role="radiogroup" aria-label="Sort goals by">
               <button
                 v-for="option in GOAL_SORTS" :key="option.value" type="button" role="radio" class="sort-option" :aria-checked="goals.sort.value === option.value"
-                :data-sort="option.value" :data-autofocus="goals.sort.value === option.value ? '' : undefined" @click="goals.setSort(option.value, option.value === 'progress' ? 'desc' : 'asc')"
+                :data-sort="option.value" :data-autofocus="goals.sort.value === option.value ? '' : undefined" @click="goals.setSort(option.value, SORT_DIR[option.value])"
               ><AppIcon :name="option.icon" :size="14" /><span>{{ option.label }}</span></button>
             </div>
             <p class="fine sort-hint">The column headers sort too; a second click turns the order around.</p>
@@ -1070,6 +1085,14 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .display-btn { gap: 6px; color: var(--ink-2); }
 .display-btn .sort-icon { flex-shrink: 0; }
 .display-btn.on .sort-icon { color: var(--teal-ink); }
+/* "Display" and the hidden-column sort share one box, so picking Moving, Queued or Done never moves the button. */
+.display-words.holds-sort { display: inline-grid; align-items: center; }
+.display-words.holds-sort > .display-label, .display-words.holds-sort > .sort-state { grid-area: 1 / 1; justify-self: start; }
+.display-words.holds-sort:not(.showing) > .sort-state, .display-words.holds-sort.showing > .display-label { visibility: hidden; }
+.sort-state { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.sort-arrow { flex: none; }
+.sort-names { display: inline-grid; }
+.sort-names > span { grid-area: 1 / 1; }
 .chev { color: var(--ink-3); }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .sort-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
@@ -1096,7 +1119,13 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .state p { font-size: 13.5px; }
 .state .btn { margin-top: 10px; }
 @media (max-width: 1100px) { .view-seg :deep(.tab-label) { display: none; } .view-seg :deep(button) { padding: 0 8px; } }
-@media (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
+@media (max-width: 900px) {
+  .display-label { display: none; }
+  .display-btn { padding: 0 9px; }
+  /* The word Display is already gone; keep the icon button until a hidden column is the sort. */
+  .display-words.holds-sort:not(.showing) > .sort-state { display: none; }
+  .display-btn.shows-sort { padding: 0 10px; }
+}
 @media (max-width: 760px) {
   .projects-page { padding: 14px 12px 28px; }
   .page-head { margin-bottom: 14px; padding: 0 4px; }

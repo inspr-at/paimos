@@ -4,7 +4,7 @@
 // series, plus the words the view uses for them. Writes belong to agents.
 import { api, APIError, getNode } from './api'
 import { ticketPath } from './work'
-import type { GoalRange, RatePoint } from './goalRate'
+import { listDayMonth, listWeekday, type GoalRange, type RatePoint } from './goalRate'
 
 export type GoalState = 'moving' | 'queued' | 'paused' | 'done'
 export const GOAL_STATES: readonly GoalState[] = ['moving', 'queued', 'paused', 'done']
@@ -89,10 +89,11 @@ export function goalCreatedAt(id: string): Promise<number | null> {
 const clock = (ms: number, timeZone?: string) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(new Date(ms))
 const sameDay = (a: number, b: number, timeZone?: string) => { const f = new Intl.DateTimeFormat('en-CA', { timeZone }); return f.format(new Date(a)) === f.format(new Date(b)) }
 // "17:58" today, "Fri 15:12" this week, "14 Oct 15:12" further away.
+// The day and month are listDate's words, so the list and the ETA projection both say "Sep".
 export function whenText(ms: number, now: number, timeZone?: string): string {
   if (sameDay(ms, now, timeZone)) return clock(ms, timeZone)
   const far = Math.abs(ms - now) > 6 * 86_400_000
-  const day = new Intl.DateTimeFormat('en-GB', far ? { day: 'numeric', month: 'short', timeZone } : { weekday: 'short', timeZone }).format(new Date(ms))
+  const day = far ? listDayMonth(ms, timeZone) : listWeekday(ms, timeZone)
   return `${day} ${clock(ms, timeZone)}`
 }
 // The ETA as its author wrote it ("~21:00", "after 136"), else its time.

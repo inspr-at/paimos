@@ -63,7 +63,11 @@ export function rateText(rate: Pick<Rate, 'perHour'>, range: GoalRange, locale?:
   const shown = Math.abs(value) < 0.05 ? 0 : value
   return `Ø ${decimal(shown, locale).replace('-', '−')} %/${perDay ? 'day' : 'h'}`
 }
-export const signalText = (rate: Pick<Rate, 'perHour'>, range: GoalRange, locale?: string) => `${rateText(rate, range, locale)} · ${RANGE_LABEL[range]}`
+// Under 0.05 %/h the closed signal says the pace is flat. The view still lets the gold stall line win.
+export function signalText(rate: Pick<Rate, 'perHour'>, range: GoalRange, locale?: string): string {
+  if (Math.abs(rate.perHour) < MIN_PROJECTING_RATE) return `no change · ${RANGE_LABEL[range]}`
+  return `${rateText(rate, range, locale)} · ${RANGE_LABEL[range]}`
+}
 
 // The gold stall line wins over the rate (rule 1); the server decides the stall.
 export function stallText(since: number, now: number): string {
@@ -72,7 +76,26 @@ export function stallText(since: number, now: number): string {
 
 const clockFormat = (timeZone?: string) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })
 const dayKey = (ms: number, timeZone?: string) => new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(ms))
-const weekdayDay = (ms: number, timeZone?: string) => new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone }).format(new Date(ms)).replace(',', '')
+// The list's date words (whenText / etaText). Fixed English abbreviations, so September is "Sep", never en-GB "Sept".
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function zoneParts(ms: number, timeZone?: string) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms))
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? ''
+  const month = Number(get('month'))
+  return { weekday: get('weekday').slice(0, 3), day: Number(get('day')), month: MONTHS[month - 1] ?? '' }
+}
+/** "Thu 24 Sep" — the date the Goals list writes. */
+export function listDate(ms: number, timeZone?: string): string {
+  const p = zoneParts(ms, timeZone)
+  return `${p.weekday} ${p.day} ${p.month}`
+}
+export function listDayMonth(ms: number, timeZone?: string): string {
+  const p = zoneParts(ms, timeZone)
+  return `${p.day} ${p.month}`
+}
+export function listWeekday(ms: number, timeZone?: string): string {
+  return zoneParts(ms, timeZone).weekday
+}
 
 // "At Ø 0.8 %/h this lands ~19:40": a clock time today, a date when past today,
 // "beyond 30 days" past that. Omitted at 0.05 %/h or less, with fewer than three
@@ -86,14 +109,14 @@ export function projectionText(rate: Rate | null, range: GoalRange, now: number,
     const rounded = Math.round(at / (5 * 60_000)) * 5 * 60_000
     return `${lead} ~${clockFormat(options.timeZone).format(new Date(rounded))}`
   }
-  return `${lead} ~${weekdayDay(at, options.timeZone)}`
+  return `${lead} ~${listDate(at, options.timeZone)}`
 }
 
 // The point line names the bucket's start: "11:00", "Mon 06:00", "14 Oct".
 export function bucketLabel(range: GoalRange, t: number, timeZone?: string): string {
   if (range === '24h') return clockFormat(timeZone).format(new Date(t))
-  if (range === '7d') return `${new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone }).format(new Date(t))} ${clockFormat(timeZone).format(new Date(t))}`
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone }).format(new Date(t))
+  if (range === '7d') return `${listWeekday(t, timeZone)} ${clockFormat(timeZone).format(new Date(t))}`
+  return listDayMonth(t, timeZone)
 }
 // "13:00 · 20 % (+7) · AEON-1445, AEON-1441 +1 changed", or "· no change".
 export function pointText(range: GoalRange, point: RatePoint, timeZone?: string): string {
@@ -107,7 +130,7 @@ export function pointText(range: GoalRange, point: RatePoint, timeZone?: string)
 export function historySince(createdAt: number, now: number, timeZone?: string): string {
   const time = clockFormat(timeZone).format(new Date(createdAt))
   if (dayKey(createdAt, timeZone) === dayKey(now, timeZone)) return `History since ${time}`
-  return `History since ${new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone }).format(new Date(createdAt)).replace(',', '')} ${time}`
+  return `History since ${listDate(createdAt, timeZone)} ${time}`
 }
 
 // The y-domain is fitted to the window: [max(0, min − 5), min(100, max + 5)], at least 20 points tall.

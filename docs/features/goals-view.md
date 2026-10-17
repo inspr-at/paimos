@@ -19,7 +19,9 @@ default, and `?view=goals` once.
   server marks the totals partial, the chips and a line on the list say the counts
   omit oversized goals. Below 1420 px
   these controls take the toolbar's second row. Display sorts by ETA, name,
-  progress or project.
+  progress, project, moving, queued or done. Below 1200 px the Moving, Queued
+  and Done headers hide, and while one of those sorts the list, Display's
+  trigger shows that sort and its direction.
 - **Waiting on you** lists the person's live Decision Desk items from the same
   projection as the header badge: the count, at most three first lines
   (project key · question · goal, or the project when the question is not attached
@@ -40,7 +42,8 @@ default, and `?view=goals` once.
   what it was before, right-aligned to the ETA and flipping above when there is no
   room. A passed ETA (the server's bit) is gold: "passed · update pending". For a goal
   it adds where the recent pace lands it, "At Ø 0.8 %/h this lands ~19:40" (a date
-  past today, "beyond 30 days" past that); it is omitted at 0.05 %/h or less, with
+  past today, in the list's words — "Sat 26 Sep", never "Sept" — and "beyond 30 days"
+  past that); it is omitted at 0.05 %/h or less, with
   fewer than three values, or once the goal is done. LANDS stays the agent's ETA.
 - **Progress over time.** The bar is a button: it swaps for a stepped chart in place
   (Enter, click or Esc swap back; focus returns to the bar). The range 24 h · 7 d · 30 d
@@ -49,9 +52,10 @@ default, and `?view=goals` once.
   ("13:00 · 20 % (+7) · AEON-1445 changed"). A goal younger than the window draws from
   its creation; with fewer than three values it says "History since 16:40".
 - **The signal row** under the bar shows the average pace over the available history,
-  "Ø 0.8 %/h · 24 h" (per day for 7 d and 30 d), or in gold "no progress for N h" when
-  the server flags a stall (moving items, no change for four hours or more). Its slot
-  reserves the longest form.
+  "Ø 0.8 %/h · 24 h" (per day for 7 d and 30 d). Under 0.05 %/h, when the stall rule
+  does not apply, it says "no change · 24 h" (or "· 7 d" / "· 30 d") in the same muted
+  ink. In gold, "no progress for N h" when the server flags a stall (moving items, no
+  change for four hours or more); that line wins. Its slot reserves the longest form.
 - **Footer.** "N projects with nothing moving: KEY KEY …" and the keyboard line.
 - **Phones** show name, ETA and progress; the state chips, Hide done and Expand all are
   behind ⋯, with a 44 px Expand all row above the first goal. An opened item links

@@ -302,7 +302,8 @@ test('the ETA popover says who set it and what it was, where the pace lands it, 
   const tip = page.getByRole('tooltip').filter({ hasText: 'set by camy' })
   await expect(tip).toBeVisible()
   await expect(tip).toContainText('set by camy 12:58 · was ~15:30 (set 10:12)')
-  await expect(tip).toContainText(/At Ø 0\.9 %\/h this lands ~Sat 26 Sep/)
+  await expect(tip).toContainText(/At Ø 0\.9 %\/h this lands ~Sat 26 Sep\b/)
+  await expect(tip).not.toContainText('Sept')
   const [tipBox, etaBox, card] = [await box(tip), await box(eta), await box(page.locator('.projects-card'))]
   expect(Math.abs(tipBox.right - (etaBox.right - 4))).toBeLessThanOrEqual(1.5)
   expect(tipBox.right).toBeLessThanOrEqual(card.right)
@@ -427,6 +428,113 @@ test('a list that cannot be read says so and offers Try again; the counts never 
   await expect(alert).toContainText('Goals could not be loaded')
   await expect(alert).toContainText('the database did not answer')
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
+})
+
+// ---------- Fix round 3: Sep, a flat pace, and sorts whose columns are hidden ----------
+test('September lands as Sep, a flat pace says no change, and hidden columns sort from Display', async ({ page }, info) => {
+  for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height })
+      await page.emulateMedia({ colorScheme })
+      const w = world()
+      delete w.data.preferences.goals
+      const flat = w.goals.find(goal => goal.id === 'g-hnet')!
+      // Flat from before the 30-day window, so every range is 0 %/h and the goal is not young.
+      flat.created = NOW - 800 * HOUR
+      flat.hist = [[-900, 40, []], [-40, 40, []], [-10, 40, []]]
+      await openGoals(page, w)
+      const release = goalRow(page, 'g-r136')
+      const haus = goalRow(page, 'g-hnet')
+      const joed = goalRow(page, 'g-joed')
+      await expect(release.locator('.signal .sg-t')).toHaveText('Ø 0.9 %/h · 24 h')
+      await expect(haus.locator('.signal .sg-t')).toHaveText('no change · 24 h')
+      await expect(haus.locator('.signal')).not.toHaveClass(/stall/)
+      await expect(joed.locator('.signal.stall .sg-t')).toHaveText('no progress for 6 h')
+      const ink = await page.evaluate(() => {
+        const color = (id: string) => getComputedStyle(document.querySelector(`.goal[data-goal-id="${id}"] .signal`)!).color
+        return { flat: color('g-hnet'), pace: color('g-r136'), stall: color('g-joed') }
+      })
+      expect(ink.flat).toBe(ink.pace)
+      expect(ink.flat).not.toBe(ink.stall)
+      const signalWidth = () => haus.locator('.signal').evaluate(el => el.getBoundingClientRect().width)
+      const reserved = await signalWidth()
+      // The list's own date stays "Sep"; the projection uses that formatter, so September is not "Sept".
+      await release.locator('.goal-eta').hover()
+      const tip = page.getByRole('tooltip').filter({ hasText: 'this lands' })
+      await expect(tip).toContainText(/At Ø 0\.9 %\/h this lands ~Sat 26 Sep\b/)
+      await expect(tip).not.toContainText('Sept')
+      await expect(joed.locator('.goal-eta')).toHaveText('Thu 24 Sep 18:00')
+      await page.mouse.move(8, 8)
+      await expect(tip).toHaveCount(0)
+      // One global range: the flat goal follows it, in the same slot, and the stall still wins.
+      await release.locator('.bar-btn').click()
+      await release.locator('.range').getByRole('button', { name: '7 d' }).click()
+      await expect(haus.locator('.signal .sg-t')).toHaveText('no change · 7 d')
+      await expect(joed.locator('.signal.stall .sg-t')).toHaveText('no progress for 6 h')
+      expect(Math.abs(await signalWidth() - reserved)).toBeLessThanOrEqual(0.5)
+      await release.locator('.range').getByRole('button', { name: '30 d' }).click()
+      await expect(haus.locator('.signal .sg-t')).toHaveText('no change · 30 d')
+      expect(Math.abs(await signalWidth() - reserved)).toBeLessThanOrEqual(0.5)
+      await release.getByRole('button', { name: /Hide progress over time/ }).click()
+      await expect(release.locator('.chart')).toHaveCount(0)
+
+      const display = page.locator('.display-btn')
+      const search = page.locator('.project-search')
+      const views = page.locator('.view-seg')
+      const headers = page.locator('.goal-head .h-stat')
+      await display.click()
+      const menu = page.getByRole('dialog', { name: 'Display options' })
+      await expect(menu).toBeVisible()
+      const pick = (name: string) => menu.getByRole('radio', { name, exact: true }).click()
+      if (width > 1199) {
+        await expect(headers).toHaveCount(3)
+        await expect(headers.first()).toBeVisible()
+        const guard = await controlStability(page, { display, search, views })
+        await guard.check(async () => {
+          await pick('Moving')
+          await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving')
+          await expect(display).not.toHaveAttribute('data-sort-dir')
+          await expect(display.locator('.sort-state')).toHaveCount(0)
+          await expect(page.getByRole('button', { name: 'Sort by moving, now descending' })).toHaveAttribute('data-sort-dir', 'desc')
+        })
+      } else {
+        await expect(headers).toHaveCount(3)
+        await expect(headers.first()).toBeHidden()
+        const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
+        const neighbors = width <= 760 ? { search, views, more } : { search, views }
+        if (width > 900) {
+          const guard = await controlStability(page, { display, ...neighbors })
+          await guard.check(async () => {
+            await pick('Moving')
+            await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving, now descending')
+            await expect(display).toHaveAttribute('data-sort-dir', 'desc')
+            await expect(display.locator('.sort-state')).toBeVisible()
+            await expect(display.locator('.sort-state')).toContainText('Moving')
+          })
+          await guard.check(async () => { await pick('Queued'); await expect(display.locator('.sort-state')).toContainText('Queued') })
+          await guard.check(async () => { await pick('Done'); await expect(display.locator('.sort-state')).toContainText('Done') })
+        } else {
+          const before = await box(display)
+          const guard = await controlStability(page, neighbors)
+          await guard.check(async () => {
+            await pick('Moving')
+            await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving, now descending')
+            await expect(display).toContainText('Moving')
+          })
+          const grown = await box(display)
+          expect(Math.abs(grown.right - before.right), 'display.right').toBeLessThanOrEqual(0.5)
+          expect(grown.height).toBeGreaterThanOrEqual(44)
+          const stable = await controlStability(page, { display, ...neighbors })
+          await stable.check(async () => { await pick('Queued'); await expect(display.locator('.sort-state')).toContainText('Queued') })
+          await stable.check(async () => { await pick('Done'); await expect(display.locator('.sort-state')).toContainText('Done') })
+        }
+      }
+      await expect(menu).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+      await shot(page, info, `goals-fix3-${width}-${colorScheme}`)
+    }
+  }
 })
 
 // ---------- 1440 · 1024 · 390, light and dark ----------

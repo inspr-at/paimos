@@ -4,8 +4,9 @@
 // signal row that is always reserved. The bar is a button: it swaps for a stepped
 // chart of progress over time in place, in the same footprint, and back (click,
 // Enter or Esc; focus returns to the bar). The signal row says the average pace,
-// "Ø 0.8 %/h · 24 h", or in gold that nothing moved for hours while items are
-// moving (the server decides); with the chart open the range switch leads it.
+// "Ø 0.8 %/h · 24 h", a muted "no change · 24 h" when the pace is under 0.05 %/h,
+// or in gold that nothing moved for hours while items are moving (the server decides,
+// and that line wins); with the chart open the range switch leads it.
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import GoalTip from './GoalTip.vue'

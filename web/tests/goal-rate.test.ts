@@ -5,7 +5,7 @@
 // shown where Tick's rules omit it (≤ 0.05 %/h, fewer than three values, done).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { availablePoints, averageRate, chartShape, fittedDomain, historySince, pointText, projectionText, rateText, signalText, stallText, type RatePoint } from '../src/lib/goalRate.ts'
+import { availablePoints, averageRate, chartShape, fittedDomain, historySince, listDate, listDayMonth, pointText, projectionText, rateText, signalText, stallText, type RatePoint } from '../src/lib/goalRate.ts'
 
 const TZ = 'Europe/Vienna'
 const HOUR = 3_600_000
@@ -70,6 +70,23 @@ test('the projection lands at the pace shown, and is omitted where Tick’s rule
   assert.equal(projectionText({ ...base, perHour: 4, current: 60 }, '24h', NOW, true), null)
   assert.equal(projectionText({ ...base, perHour: 4, current: 100 }, '24h', NOW, false), null)
   assert.equal(projectionText(null, '24h', NOW, false), null)
+  // 23 Sep 2026 14:00 Vienna. 30 % at 1 %/h lands 70 hours later: Sat 26 Sep 12:00, the list's "Sep", never en-GB "Sept".
+  const sepNow = Date.parse('2026-09-23T12:00:00Z')
+  const lands = sepNow + 70 * HOUR
+  assert.equal(listDate(lands, TZ), 'Sat 26 Sep')
+  assert.equal(listDayMonth(Date.parse('2026-09-30T10:00:00Z'), TZ), '30 Sep')
+  assert.equal(projectionText({ from: sepNow, values: 3, perHour: 1, current: 30 }, '24h', sepNow, false, { timeZone: TZ, locale: 'en' }), 'At Ø 1.0 %/h this lands ~Sat 26 Sep')
+  assert.equal(pointText('30d', { t: new Date(lands).toISOString(), pct: 13, delta: 0 }, TZ), '26 Sep · 13 % · no change')
+  assert.equal(historySince(Date.parse('2026-09-15T05:40:00Z'), sepNow, TZ), 'History since Tue 15 Sep 07:40')
+  // Under 0.05 %/h the closed signal says the pace is flat, on every range. The gold stall line is the view's, and it still wins there.
+  assert.equal(signalText({ perHour: 0 }, '24h', 'en'), 'no change · 24 h')
+  assert.equal(signalText({ perHour: 0.049 }, '24h', 'en'), 'no change · 24 h')
+  assert.equal(signalText({ perHour: -0.04 }, '30d', 'en'), 'no change · 30 d')
+  // 0.04 %/h would print as about 1.0 %/day; the threshold is the hourly rate, so the day unit does not bring the number back.
+  assert.equal(signalText({ perHour: 0.04 }, '7d', 'en'), 'no change · 7 d')
+  assert.equal(signalText({ perHour: 0.05 }, '24h', 'en'), 'Ø 0.1 %/h · 24 h')
+  assert.equal(signalText({ perHour: 0.05 }, '7d', 'en'), 'Ø 1.2 %/day · 7 d')
+  assert.equal(signalText({ perHour: -0.06 }, '24h', 'en'), 'Ø −0.1 %/h · 24 h')
 })
 
 test('the stall line counts whole hours; the point line names the bucket and what changed', () => {
