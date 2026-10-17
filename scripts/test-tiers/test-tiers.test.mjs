@@ -1252,9 +1252,6 @@ test('AEON-1451 the full web layout and the essential gate stay inside the shard
   assert.deepEqual(full.shards,fullWebShards)
   assertWebShardBudget(full)
   for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
-  const previous=webShardPlan(browser(fullGateTests(replayRows)),policy,{mode:'full',maximum:12})
-  assert.equal(previous.fitsBudget,false)
-  assert.throws(()=>assertWebShardBudget(previous),/over the 900s budget/)
   const essential=webShardPlan(browser(replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL')),policy)
   assertWebShardBudget(essential)
   assert.ok(essential.shards.length>=4&&essential.shards.length<=fullWebShardCount)
@@ -1291,8 +1288,7 @@ test('AEON-1453 the merged full web catalogue needs seventeen shards to stay ins
 
   // The current catalogue must still overflow at sixteen, report its exact
   // worst projection, and retain every case within budget at seventeen,
-  // including main's Goals, group-figures and seven desk-tab browser cases
-  // and AEON-1477's painted-glimpse and Desk tab-row cases.
+  // including main's Goals, group-figures and seven desk-tab browser cases.
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
@@ -1308,6 +1304,100 @@ test('AEON-1453 the merged full web catalogue needs seventeen shards to stay ins
   assertWebShardBudget(full)
   for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
+})
+
+const assignWebShards=(rows,policy,plan)=>{
+  const weights=tierWeights(policy,rows)
+  return plan.shards.map(index=>shard(rows,index,plan.shards.length,weights))
+}
+// Live catalogue checks stay invariant. Exact shard numbers and predicted
+// seconds belong on shardBudgetFixture, so a new spec does not re-pin them.
+const assertWebShardInvariants=(rows,policy,options)=>{
+  const plan=webShardPlan(rows,policy,options)
+  const again=webShardPlan(rows.map(row=>({...row})),structuredClone(policy),options)
+  assert.deepEqual(again,plan,'identical input keeps the same shard plan')
+  assertWebShardBudget(plan)
+  for(const bin of plan.projections) assert.ok(bin.seconds<=plan.budgetSeconds,`shard ${bin.shard} is ${bin.seconds}s`)
+  const bins=assignWebShards(rows,policy,plan)
+  const assigned=bins.flat()
+  assert.deepEqual(assigned.map(key).sort(),rows.map(key).sort(),'every spec is assigned exactly once')
+  assert.equal(new Set(assigned.map(key)).size,rows.length)
+  const owners=new Map()
+  bins.forEach((bin,index)=>bin.forEach(row=>{
+    const shardIndex=plan.shards[index]
+    if(owners.has(row.file)) assert.equal(owners.get(row.file),shardIndex,row.file)
+    owners.set(row.file,shardIndex)
+  }))
+  return plan
+}
+const shardBudgetFixture=(entries,maximum)=>{
+  const specs=entries.map(([file,weightSeconds])=>({file,weightSeconds}))
+  const rows=specs.map(spec=>({kind:'browser',file:spec.file,name:'case',tier:'GATED-FULL'}))
+  const policy={groups:[{specs}]}
+  return {rows,policy,plan:webShardPlan(rows,policy,{mode:'full',maximum})}
+}
+
+test('AEON-1483 live web shards keep budget, once-only assignment and determinism',()=>{
+  const policy=loadWebPolicy()
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const full=assertWebShardInvariants(gate,policy,{mode:'full'})
+  assert.deepEqual(full.shards,fullWebShards)
+  assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
+  // A test-only extra spec must not require a new expected shard or seconds string.
+  const extraFile='tests/aeon-1483-budget-extra.spec.ts'
+  const copied=structuredClone(policy)
+  const group=copied.groups.find(item=>item.specs?.length)
+  group.specs.push({file:extraFile,weightSeconds:1})
+  const augmented=[...gate,{kind:'browser',file:extraFile,name:'synthetic extra case',tier:'GATED-FULL'}]
+  const withExtra=assertWebShardInvariants(augmented,copied,{mode:'full'})
+  assert.deepEqual(withExtra.shards,full.shards)
+  assert.ok(assignWebShards(augmented,copied,withExtra).flat().some(row=>row.file===extraFile))
+  const source=readFileSync(new URL('./test-tiers.test.mjs',import.meta.url),'utf8')
+  const live=source.slice(source.indexOf("test('AEON-1483 live web shards"),source.indexOf("test('AEON-1483 synthetic catalogue"))
+  assert.ok(live.includes(extraFile))
+  assert.doesNotMatch(live,/Web shard \d+ predicts \d/)
+})
+
+test('AEON-1483 synthetic catalogue pins shard and seconds, and still fails over 900s',()=>{
+  // Fixed names and whole-file weights. Four bins pack the 384s file onto the
+  // first 400s file: overhead 120 + 784 = 904.0. Five bins give each file its own bin.
+  const packed=[
+    ['tests/fixture-a.spec.ts',400],
+    ['tests/fixture-b.spec.ts',400],
+    ['tests/fixture-c.spec.ts',400],
+    ['tests/fixture-d.spec.ts',400],
+    ['tests/fixture-e.spec.ts',384],
+  ]
+  const narrow=shardBudgetFixture(packed,4)
+  assert.equal(narrow.plan.shards.length,4)
+  assert.equal(narrow.plan.fitsBudget,false)
+  assert.throws(()=>assertWebShardBudget(narrow.plan),/Web shard 1 predicts 904\.0s, over the 900s budget/)
+  const fitted=shardBudgetFixture(packed,5)
+  assertWebShardInvariants(fitted.rows,fitted.policy,{mode:'full',maximum:5})
+  // A different fixed catalogue overflows a different shard. This replaces the
+  // live "previous layout" pin, which moved whenever main re-timed a spec.
+  const other=[
+    ['tests/fixture-a.spec.ts',410],
+    ['tests/fixture-b.spec.ts',410],
+    ['tests/fixture-c.spec.ts',410],
+    ['tests/fixture-d.spec.ts',400],
+    ['tests/fixture-e.spec.ts',390],
+  ]
+  const previous=shardBudgetFixture(other,4)
+  assert.equal(previous.plan.fitsBudget,false)
+  assert.throws(()=>assertWebShardBudget(previous.plan),/Web shard 4 predicts 910\.0s, over the 900s budget/)
+  const wide=shardBudgetFixture(other,5)
+  assertWebShardInvariants(wide.rows,wide.policy,{mode:'full',maximum:5})
+  // The fitting fixture still fails when one file pushes its shard over 900s.
+  const over=shardBudgetFixture([
+    ['tests/fixture-a.spec.ts',781],
+    ['tests/fixture-b.spec.ts',400],
+    ['tests/fixture-c.spec.ts',400],
+    ['tests/fixture-d.spec.ts',400],
+    ['tests/fixture-e.spec.ts',384],
+  ],5)
+  assert.equal(over.plan.fitsBudget,false)
+  assert.throws(()=>assertWebShardBudget(over.plan),/Web shard 1 predicts 901\.0s, over the 900s budget/)
 })
 
 test('AEON-1334 a recorded drift title resolves across describe prefixes and a renamed one widens to its file',()=>{
