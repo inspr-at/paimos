@@ -400,6 +400,22 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		gate["run"] = strings.Replace(gate["run"].(string), `full) expected=success`, `full) expected=skipped`, 1)
 	})
 	add("missing-web-dependency", "ci.yml", "effective lane publisher", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
+	for _, field := range []string{"if", "continue-on-error", "env", "run"} {
+		add("web-scope-validation-weakened/"+field, "ci.yml", "validate browser execution scope unconditionally", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["web"])["steps"].([]any)
+			scope := mapping(steps[0])
+			switch field {
+			case "if":
+				scope[field] = "needs.tree-reuse.outputs.reuse == 'none'"
+			case "continue-on-error":
+				scope[field] = true
+			case "env":
+				mapping(scope[field])["BROWSER_SCOPE"] = "gated-full"
+			case "run":
+				delete(scope, field)
+			}
+		})
+	}
 	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
 	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}

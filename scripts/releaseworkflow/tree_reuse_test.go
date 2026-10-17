@@ -839,6 +839,15 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id == "web-shard" {
+				// AEON-1336 supplies plans only to affected PR execution. Prove
+				// that exact binding before pinning every older full-run field.
+				stepEnv := treeMap(reuseStep(t, j, "Run selected UI cases without retries")["env"])
+				if stepEnv["AEON_BROWSER_PLAN"] != "${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && needs.tier-plan.outputs.browser_plan || '' }}" {
+					t.Fatal("only an affected PR may supply a browser execution plan")
+				}
+				delete(stepEnv, "AEON_BROWSER_PLAN")
+			}
 			if id == "release-check-run" || id == "e2e-run" {
 				// AEON-582 pins the remaining v7 actions. Assert the exact pins
 				// before restoring their historical tags for the unchanged CI

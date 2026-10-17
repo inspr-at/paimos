@@ -883,7 +883,7 @@ jobs:
           CI_CHANGED_SPECS: ${{ needs.ci-plan.outputs.specs }}
           AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
-          AEON_BROWSER_PLAN: ${{ needs.tier-plan.outputs.browser_plan }}
+          AEON_BROWSER_PLAN: ${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && needs.tier-plan.outputs.browser_plan || '' }}
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
@@ -939,6 +939,34 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: Validate browser execution scope
+        env:
+          BROWSER_SCOPE: ${{ needs.tier-plan.outputs.browser_scope || 'gated-full' }}
+          TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
+          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          WEB_SHARD: ${{ needs.web-shard.result }}
+        run: |
+          set -euo pipefail
+          if [ "${CI_IMPACT:-}" = off ]; then test "$BROWSER_SCOPE" = gated-full; fi
+          case "$BROWSER_SCOPE" in
+            affected)
+              test "$CI_IMPACT" = on
+              test "$CI_AFFECTED_LANE" = on
+              test "$GITHUB_EVENT_NAME" = pull_request
+              test "$TIER_MODE" = essential
+              test "$TIER_LAYOUT" = full
+              test "$CI_LANE" = full
+              test "$WEB_SHARD" = success
+              ;;
+            none)
+              test "$GITHUB_EVENT_NAME" = pull_request
+              test "$CI_LANE" = docs-only || test "$TIER_LAYOUT" = static
+              test "$WEB_SHARD" = skipped
+              ;;
+            gated-full) ;;
+            *) exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
         with:
@@ -1042,35 +1070,6 @@ jobs:
                 *) exit 1 ;;
               esac
               ;;
-            *) exit 1 ;;
-          esac
-
-      - name: Validate browser execution scope
-        env:
-          BROWSER_SCOPE: ${{ needs.tier-plan.outputs.browser_scope || 'gated-full' }}
-          TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
-          WEB_SHARD: ${{ needs.web-shard.result }}
-        run: |
-          set -euo pipefail
-          if [ "${CI_IMPACT:-}" = off ]; then test "$BROWSER_SCOPE" = gated-full; fi
-          case "$BROWSER_SCOPE" in
-            affected)
-              test "$CI_IMPACT" = on
-              test "$CI_AFFECTED_LANE" = on
-              test "$GITHUB_EVENT_NAME" = pull_request
-              test "$TIER_MODE" = essential
-              test "$TIER_LAYOUT" = full
-              test "$CI_LANE" = full
-              test "$WEB_SHARD" = success
-              ;;
-            none)
-              test "$GITHUB_EVENT_NAME" = pull_request
-              test "$CI_LANE" = docs-only || test "$TIER_LAYOUT" = static
-              test "$WEB_SHARD" = skipped
-              ;;
-            gated-full) ;;
             *) exit 1 ;;
           esac
 

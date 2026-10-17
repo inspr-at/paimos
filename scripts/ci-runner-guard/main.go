@@ -608,13 +608,29 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		}
 		steps, _ := job["steps"].([]any)
 		stepCount := 4
-		if context == "go" {
-			stepCount++ // Main's gate precedes the PR-only proof sequence.
+		if context == "go" || context == "web" {
+			stepCount++ // Main's Go gate or browser scope precedes the proof sequence.
 		}
 		if len(steps) != stepCount || !reflect.DeepEqual(mapping(job["permissions"]), map[string]any{"contents": "read", "actions": "read"}) {
 			return fmt.Errorf("required check %q must retain read-only PR proof revalidation", context)
 		}
 		proofSteps := steps
+		if context == "web" {
+			// Scope validation precedes the unchanged four-step proof sequence.
+			// It must also run on reuse paths, before an aggregate can exit early.
+			scope := mapping(steps[0])
+			body, _ := scope["run"].(string)
+			if len(scope) != 3 || scope["name"] != "Validate browser execution scope" || strings.TrimSpace(body) == "" || !reflect.DeepEqual(mapping(scope["env"]), map[string]any{
+				"BROWSER_SCOPE": "${{ needs.tier-plan.outputs.browser_scope || 'gated-full' }}",
+				"TIER_MODE":     "${{ needs.tier-plan.outputs.mode }}",
+				"TIER_LAYOUT":   "${{ needs.tier-plan.outputs.layout }}",
+				"CI_LANE":       "${{ needs.tier-plan.outputs.lane }}",
+				"WEB_SHARD":     "${{ needs.web-shard.result }}",
+			}) {
+				return fmt.Errorf("web must validate browser execution scope unconditionally before proof revalidation")
+			}
+			proofSteps = steps[1:]
+		}
 		if context == "go" {
 			mainGate := mapping(steps[0])
 			mainBody, _ := mainGate["run"].(string)
