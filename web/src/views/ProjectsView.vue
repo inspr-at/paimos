@@ -30,6 +30,10 @@ import ProjectBulkBar from '../components/projects/ProjectBulkBar.vue'
 import ProjectCards from '../components/projects/ProjectCards.vue'
 import ProjectList, { type ProjectSection } from '../components/projects/ProjectList.vue'
 import NewProjectSheet from '../components/projects/NewProjectSheet.vue'
+import GoalsView from '../components/goals/GoalsView.vue'
+import GoalsToolbar from '../components/goals/GoalsToolbar.vue'
+import { useGoalsPage } from '../components/goals/goalsPage'
+import type { Goal, GoalSort } from '../lib/goals'
 import { heldDraft, type HeldDraft } from '../lib/importDraft'
 
 // Each sort has its icon; the Display button shows the current one (AEON-174).
@@ -65,16 +69,17 @@ type PagePrefs = { view?: 'list' | 'cards'; columns?: ProjectColumnPrefs }
 const pagePref = usePreference<PagePrefs>('projects')
 const ORDER_KEY = 'projects:order'
 const orderPref = usePreference<{ ids?: string[] }>(ORDER_KEY)
-// List or Cards (AEON-1453): the person's default, else the view used last; ?view= wins once.
-const PROJECT_VIEWS = ['list', 'cards'] as const
+// List, Cards or Goals (AEON-1453, AEON-1457): the person's default, else the view used last; ?view= wins once.
+const PROJECT_VIEWS = ['list', 'cards', 'goals'] as const
 const viewSwitch = useViewSwitch({ key: viewKey('projects'), options: PROJECT_VIEWS, fallback: 'list', link: () => route.query.view, legacy: { key: 'projects', read: value => ({ last: value?.view }) } })
 const viewOptions = [
   { id: 'list', label: 'List', icon: 'list', ariaLabel: 'List view', tip: 'List · every project in rows' },
   { id: 'cards', label: 'Cards', icon: 'cards', ariaLabel: 'Cards view', tip: 'Cards · progress at a glance' },
+  { id: 'goals', label: 'Goals', icon: 'target', ariaLabel: 'Goals view', tip: 'Goals · what we are working toward' },
 ] as const
 const pageReady = ref(false)
 void Promise.all([pagePref.ready, orderPref.ready, viewSwitch.ready()]).then(() => { pageReady.value = true })
-const view = computed<'list' | 'cards'>(() => viewSwitch.current.value === 'cards' ? 'cards' : 'list')
+const view = computed<'list' | 'cards' | 'goals'>(() => viewSwitch.current.value === 'cards' || viewSwitch.current.value === 'goals' ? viewSwitch.current.value : 'list')
 const columnPrefs = computed(() => pagePref.value.value?.columns ?? null)
 function savePage(patch: PagePrefs) {
   const next = { ...(pagePref.value.value ?? {}), ...patch }
@@ -147,6 +152,25 @@ function label(project: Project) {
   return `${project.routeKey} ${project.title}, ${project.open + project.in_progress} open, ${project.in_progress} in progress, ${project.done} done${working ? `, ${working}` : ''}${selected.value.has(project.id) ? ', selected' : ''}`
 }
 const validateName = (name: string, except?: string) => nameProblem(name, defs.value, except)
+
+// ---------- Goals (AEON-1457) ----------
+// A goal stays in view while one of its projects is in a shown group; workspace goals always do.
+function goalShown(goal: Goal) {
+  if (!goal.projects.length) return true
+  return goal.projects.some(badge => { const project = store.byId(badge.id); return !project || !groups.hidden.has(groups.where(project)) })
+}
+const goals = useGoalsPage({ term, active: () => view.value === 'goals', shown: goalShown })
+const GOAL_SORTS: { value: GoalSort; label: string; phrase: string; icon: IconName }[] = [
+  { value: 'eta', label: 'ETA', phrase: 'ETA', icon: 'timer' },
+  { value: 'name', label: 'Name', phrase: 'name', icon: 'sort-name' },
+  { value: 'progress', label: 'Progress', phrase: 'progress', icon: 'progress' },
+  { value: 'project', label: 'Project', phrase: 'project', icon: 'folder' },
+]
+const goalSortMeta = computed(() => GOAL_SORTS.find(s => s.value === goals.sort.value) ?? { value: goals.sort.value, label: '', phrase: goals.sort.value === 'moving' ? 'moving' : goals.sort.value === 'queued' ? 'queued' : 'done', icon: 'sort' as IconName })
+const display = computed(() => view.value === 'goals'
+  ? { icon: goalSortMeta.value.icon, phrase: goalSortMeta.value.phrase, on: !(goals.sort.value === 'eta' && goals.dir.value === 'asc'), tip: `Sorted by ${goalSortMeta.value.phrase} · sort` }
+  : { icon: sortMeta.value.icon, phrase: sortMeta.value.phrase, on: sort.value !== 'activity', tip: `Sorted by ${sortMeta.value.phrase} · ${view.value === 'list' ? 'sort and columns' : 'sort'}` })
+async function clearGoalFilters() { term.value = ''; goals.filter.value = 'all'; await nextTick(); search.value?.focus() }
 
 // ---------- Columns ----------
 type PickerColumn = ProjectColumnId | 'key' | 'project'
@@ -442,6 +466,12 @@ function typing(target: EventTarget | null) {
 }
 function keydown(event: KeyboardEvent) {
   if (document.querySelector('dialog[open], .floating')) return
+  // Goals has its own keys (registered with the shortcut runtime); only / is shared.
+  if (view.value === 'goals') {
+    if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !typing(event.target)) { event.preventDefault(); search.value?.focus() }
+    else if (event.key === 'Escape' && event.target === search.value && term.value) { event.preventDefault(); term.value = '' }
+    return
+  }
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && !typing(event.target) && onScreen.value.length) {
     event.preventDefault(); selectAll(); return
   }
@@ -890,20 +920,36 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
       <div class="projects-toolbar">
         <label class="search-field project-search">
           <AppIcon name="search" :size="14" />
-          <input ref="search" v-model="term" class="field" type="search" placeholder="Filter projects" aria-label="Filter projects" autocomplete="off" spellcheck="false" />
+          <input ref="search" v-model="term" class="field" type="search" :placeholder="view === 'goals' ? 'Filter goals' : 'Filter projects'" :aria-label="view === 'goals' ? 'Filter goals' : 'Filter projects'" autocomplete="off" spellcheck="false" />
           <kbd v-if="!term" class="keycap slash" aria-hidden="true">/</kbd>
         </label>
-        <GroupChips v-if="ready" class="chips" :chips="chips" :drop-on="dropOn" :creating="!!createAnchor" @toggle="groups.toggleVisible" @create="openCreate" />
+        <div v-if="view === 'goals'" class="chips goals-chips">
+          <GroupChips v-if="ready" class="goal-groups" :chips="chips" :drop-on="dropOn" :creating="!!createAnchor" @toggle="groups.toggleVisible" @create="openCreate" />
+          <span v-else class="chips-skeleton"><span class="skeleton" /></span>
+          <GoalsToolbar :page="goals" part="chips" />
+        </div>
+        <GroupChips v-else-if="ready" class="chips" :chips="chips" :drop-on="dropOn" :creating="!!createAnchor" @toggle="groups.toggleVisible" @create="openCreate" />
         <span v-else class="chips chips-skeleton"><span class="skeleton" /></span>
         <span class="tools">
           <ViewSwitch class="view-seg" look="seg" label="View" :options="viewOptions" :selected="view" :default-id="viewSwitch.defaultId.value" @select="setView" @set-default="viewSwitch.setDefault" />
           <button
-            type="button" class="btn sm display-btn" :class="{ on: sort !== 'activity' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display, sorted by ${sortMeta.phrase}`"
-            :data-tip="`Sorted by ${sortMeta.phrase} · ${view === 'list' ? 'sort and columns' : 'sort'}`" :data-sort="sort" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
-          ><AppIcon :name="sortMeta.icon" :size="14" class="sort-icon" /><span class="display-label">Display</span><AppIcon name="chevron" :size="12" class="chev" /></button>
+            type="button" class="btn sm display-btn" :class="{ on: display.on }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display, sorted by ${display.phrase}`"
+            :data-tip="display.tip" :data-sort="view === 'goals' ? goals.sort.value : sort" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
+          ><AppIcon :name="display.icon" :size="14" class="sort-icon" /><span class="display-label">Display</span><AppIcon name="chevron" :size="12" class="chev" /></button>
+          <GoalsToolbar v-if="view === 'goals'" :page="goals" part="more" />
         </span>
         <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="290" :tallest="640" align="end" label="Display options" @close="closeDisplay">
-          <div class="display-panel">
+          <div v-if="view === 'goals'" class="display-panel">
+            <p class="eyebrow">Sort goals by</p>
+            <div class="sort-grid" role="radiogroup" aria-label="Sort goals by">
+              <button
+                v-for="option in GOAL_SORTS" :key="option.value" type="button" role="radio" class="sort-option" :aria-checked="goals.sort.value === option.value"
+                :data-sort="option.value" :data-autofocus="goals.sort.value === option.value ? '' : undefined" @click="goals.setSort(option.value, option.value === 'progress' ? 'desc' : 'asc')"
+              ><AppIcon :name="option.icon" :size="14" /><span>{{ option.label }}</span></button>
+            </div>
+            <p class="fine sort-hint">The column headers sort too; a second click turns the order around.</p>
+          </div>
+          <div v-else class="display-panel">
             <p class="eyebrow">Sort by</p>
             <div class="sort-grid" role="radiogroup" aria-label="Sort projects by">
               <button
@@ -922,7 +968,8 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         </FloatingPanel>
       </div>
 
-      <div v-if="store.error && !store.loaded" class="state" role="alert">
+      <GoalsView v-if="view === 'goals'" :page="goals" :term="term" :now="now" :hidden-groups="goals.hiddenByGroups.value" @clear="clearGoalFilters" />
+      <div v-else-if="store.error && !store.loaded" class="state" role="alert">
         <AppIcon name="alert" :size="20" />
         <h2>Projects could not be loaded</h2>
         <p>{{ store.error }}</p>
@@ -952,6 +999,14 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
       />
     </template>
     <HiddenGroups v-if="view === 'cards' && ready" :items="hiddenItems" :filtering="filtering" @show="ids => groups.setVisible(ids, true)" />
+    <p v-if="view === 'goals'" class="keys-line" aria-label="Keyboard">
+      <span class="kg"><kbd class="keycap">/</kbd>filter</span>
+      <span class="kg"><kbd class="keycap">1</kbd>–<kbd class="keycap">5</kbd>all, moving, queued, paused, done</span>
+      <span class="kg"><kbd class="keycap">H</kbd>hide done</span>
+      <span class="kg"><kbd class="keycap">E</kbd>expand all</span>
+      <span class="kg"><kbd class="keycap">J</kbd><kbd class="keycap">K</kbd>move</span>
+      <span class="kg"><kbd class="keycap"><AppIcon name="enter" :size="10" /></kbd>fold goal</span>
+    </p>
 
     <FloatingPanel v-if="createAnchor" :anchor="createAnchor" :width="300" label="New group" @close="closeCreate">
       <form class="create-panel" @submit.prevent="submitCreate">
@@ -984,7 +1039,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 /* Search, chips and tools on one line when there is room; below 1200px the chips
    take their own line, so the toolbar is as tall before the groups load as after. */
 .projects-toolbar { display: grid; grid-template-columns: 280px minmax(0, 1fr) auto; grid-template-areas: "search chips tools"; align-items: center; gap: 10px 14px; padding: 14px 16px; }
-.view-list .projects-toolbar, .projects-card:has(.state) .projects-toolbar { border-bottom: 1px solid var(--line); }
+.view-list .projects-toolbar, .view-goals .projects-toolbar, .projects-card:has(.state) .projects-toolbar { border-bottom: 1px solid var(--line); }
 .project-search { grid-area: search; min-width: 0; }
 .project-search .field { padding-right: 32px; }
 .project-search .field::-webkit-search-cancel-button { display: none; }
@@ -995,6 +1050,22 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .chips-skeleton .skeleton { width: 140px; }
 .tools { grid-area: tools; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 @media (max-width: 1199px) { .projects-toolbar { grid-template-columns: minmax(0, 280px) 1fr auto; grid-template-areas: "search . tools" "chips chips chips"; } }
+/* One filter width in all three views (AEON-1457): from 1420 px it gives way to the
+   Goals controls (back at 280 px from about 1536 px), and List and Cards follow, so a
+   view switch never moves the group chips. Below 1420 the Goals controls take the
+   existing second row. */
+@media (min-width: 1420px) { .projects-toolbar { grid-template-columns: clamp(160px, calc(100vw - 1256px), 280px) minmax(0, 1fr) auto; } }
+@media (max-width: 1419px) { .view-goals .projects-toolbar { grid-template-columns: minmax(0, 280px) 1fr auto; grid-template-areas: "search . tools" "chips chips chips"; } }
+.goals-chips { display: flex; align-items: center; gap: 6px; }
+.goals-chips > .goal-groups { flex: 0 1 auto; min-width: 0; }
+/* "+ Group" shows its icon only while the Goals controls share its line (and on small tablets). */
+@media (min-width: 1420px), (min-width: 761px) and (max-width: 960px) {
+  .goals-chips :deep(.chip-add) { width: 30px; padding: 0; justify-content: center; }
+  .goals-chips :deep(.chip-add span) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+.keys-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 14px; margin: 16px 0 0; font-size: 12px; color: var(--ink-3); }
+.keys-line .kg { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 760px), (hover: none) { .keys-line { display: none; } }
 .view-seg :deep(button) { height: 26px; padding: 0 11px; }
 .display-btn { gap: 6px; color: var(--ink-2); }
 .display-btn .sort-icon { flex-shrink: 0; }
