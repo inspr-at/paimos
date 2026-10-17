@@ -127,7 +127,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		d.DisallowUnknownFields()
 		var req agentsetup.SetupRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid local enrollment request", 400)
+			rejectBoundedBody(w, r, "invalid local enrollment request")
 			return
 		}
 		s.mu.Lock()
@@ -161,7 +161,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		d.DisallowUnknownFields()
 		var req AccountLinkRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid account link", 400)
+			rejectBoundedBody(w, r, "invalid account link")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -184,7 +184,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		d.DisallowUnknownFields()
 		var req StatuslineRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid statusline", 400)
+			rejectBoundedBody(w, r, "invalid statusline")
 			return
 		}
 		out, err := s.ReportStatusline(r.Context(), req, time.Now().UTC())
@@ -216,7 +216,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			d.DisallowUnknownFields()
 			var in AttachedHookRequest
 			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
-				http.Error(w, "invalid hook binding", 400)
+				rejectBoundedBody(w, r, "invalid hook binding")
 				return
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -309,7 +309,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		d.DisallowUnknownFields()
 		var req DrainRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid drain", http.StatusBadRequest)
+			rejectBoundedBody(w, r, "invalid drain")
 			return
 		}
 		status, err := s.Drain(req)
@@ -331,7 +331,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		d.DisallowUnknownFields()
 		var config LedgerConfig
 		if d.Decode(&config) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid ledger handover", 400)
+			rejectBoundedBody(w, r, "invalid ledger handover")
 			return
 		}
 		if err := s.EnableLedger(r.Context(), config); err != nil {
@@ -348,7 +348,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		}
 		raw, err := httpapi.ReadRequestBody(w, r, 2, httpapi.DefaultBodyReadTimeout)
 		if err != nil || len(raw) != 0 {
-			http.Error(w, "invalid ledger leave", 400)
+			rejectBoundedBody(w, r, "invalid ledger leave")
 			return
 		}
 		if err := s.LeaveLedger(r.Context()); err != nil {
@@ -375,7 +375,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		decoder.DisallowUnknownFields()
 		var req ControlRequest
 		if decoder.Decode(&req) != nil || decoder.Decode(&struct{}{}) != io.EOF || req.RunID != r.PathValue("runID") {
-			http.Error(w, "invalid control", http.StatusBadRequest)
+			rejectBoundedBody(w, r, "invalid control")
 			return
 		}
 		receipt, err := s.Control(r.Context(), req)
@@ -416,6 +416,14 @@ func (s *Supervisor) SetSetupHandler(setup func(context.Context, agentsetup.Setu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.setup = setup
+}
+
+// rejectBoundedBody keeps the socket route's 400. An oversized control, ledger
+// or enrollment body is invalid input for that route, not a transport 413.
+// A timed-out read still becomes 408 through the body-status writer.
+func rejectBoundedBody(w http.ResponseWriter, r *http.Request, message string) {
+	httpapi.RetainClassifiedBodyStatus(r)
+	http.Error(w, message, http.StatusBadRequest)
 }
 
 func authorized(r *http.Request, token string) bool {

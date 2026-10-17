@@ -121,6 +121,18 @@ func bodyFailureStatus(err error) int {
 	}
 }
 
+// RetainClassifiedBodyStatus keeps a route's own client status for an oversized
+// body. The status writer would otherwise replace that 400 with the transport
+// suggestion of 413, including when the response text is the route's validation
+// error. A timed-out read still suggests 408.
+func RetainClassifiedBodyStatus(r *http.Request) {
+	state, _ := r.Context().Value(bodyReadFailureKey{}).(*bodyReadState)
+	if state == nil {
+		return
+	}
+	state.status.CompareAndSwap(int32(http.StatusRequestEntityTooLarge), 0)
+}
+
 // BeginRequestBodyStream is the disk-staging exception to buffered reads. The
 // caller must finish(true) before admitting a write and defer finish(false)
 // to abort without draining on errors.

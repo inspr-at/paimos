@@ -438,6 +438,7 @@ func (m *AttachManager) serve(w http.ResponseWriter, r *http.Request, token stri
 	r.Body = httpapi.RequestBodyReader(w, r, 8192)
 	var in AttachLocalRequest
 	if workorders.Decode(r, &in) != nil {
+		httpapi.RetainClassifiedBodyStatus(r)
 		http.Error(w, "invalid attach", 400)
 		return
 	}

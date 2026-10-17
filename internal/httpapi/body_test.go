@@ -376,6 +376,32 @@ func TestRequestBodyDeadlineResponsesAndStreaming(t *testing.T) {
 			}
 		})
 	}
+	t.Run("classified oversized body keeps its 400", func(t *testing.T) {
+		server := httptest.NewServer(RequestBodyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				X int `json:"x"`
+			}
+			if err := DecodeJSON(w, r, 16, &in); err != nil {
+				RetainClassifiedBodyStatus(r)
+				WriteError(w, 400, "invalid JSON")
+				return
+			}
+			w.WriteHeader(204)
+		})))
+		defer server.Close()
+		response, err := server.Client().Post(server.URL, "application/json", strings.NewReader(`{"x":1234567890123456789}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		raw, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != 400 || strings.TrimSpace(string(raw)) != `{"error":"invalid JSON"}` {
+			t.Fatalf("classified oversized body status=%d body=%s", response.StatusCode, raw)
+		}
+	})
 	for _, tc := range []struct {
 		name, body string
 		want       int
