@@ -286,12 +286,14 @@ const fold = ref(false), keysOpen = ref(false)
 // The done view's summary: what this round decided, and when the last answer goes out.
 const doneSummary = computed(() => {
   const rows = done.value.map(id => props.items.find(row => row.id === id)).filter((row): row is DeskItem => !!row)
-  const questions = rows.filter(row => row.kind === 'question' || row.kind === 'handover'), other = rows.length - questions.length
+  const questions = rows.filter(row => row.kind === 'question' || row.kind === 'handover'), lessons = rows.filter(row => row.kind === 'lesson').length, other = rows.length - questions.length - lessons
   const keep = questions.length === 1 ? `, stamped ${outcomeLabels[questions[0]!.outcome]}` : ''
-  const parts = [questions.length ? `${questions.length} answered${keep}` : '', other ? `${other} other decision${other > 1 ? 's' : ''}` : ''].filter(Boolean)
+  const parts = [questions.length ? `${questions.length} answered${keep}` : '', lessons ? `${lessons} lesson${lessons > 1 ? 's' : ''} decided` : '', other ? `${other} other decision${other > 1 ? 's' : ''}` : ''].filter(Boolean)
   const last = rows.at(-1)
   const grace = last && (last.kind === 'question' || last.kind === 'handover') && last.deliveryState === 'pending' && graceLeft(last) > 0 ? last : undefined
-  return { text: parts.length ? `${parts.join(' · ')}.` : 'Nothing was decided in this round.', grace, agent: grace ? whoOf(grace)?.name ?? 'the agent' : '' }
+  // A lesson decided last keeps its native Undo here, which restores it before deciding again.
+  const lesson = props.undo && last?.kind === 'lesson' && last.decided && last.undoEvent ? last : undefined
+  return { text: parts.length ? `${parts.join(' · ')}.` : 'Nothing was decided in this round.', grace, lesson, agent: grace ? whoOf(grace)?.name ?? 'the agent' : '' }
 })
 
 let pendingDecisionFocus: { id: string; revision: number } | undefined
@@ -441,6 +443,8 @@ function scheduleClose() {
   closeTimer = setTimeout(() => { if (holdClose.value) { scheduleClose(); return } closeAfterLast() }, 1200)
 }
 function closeAfterLast() {
+  // An Undo in flight decides what the round ends with; closing waits for it.
+  if (busy.value) return
   const last = props.items.find(row => row.id === done.value.at(-1))
   dialog.value?.close(); emit('close', { afterLast: true, last })
 }
@@ -481,11 +485,7 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     await nextTick()
     if (live) {
       busy.value = false
-      // Keep the native lesson progression; a single lesson stays with Undo.
-      if (current.kind === 'lesson') {
-        done.value = [...done.value.filter(id => id !== capturedId), capturedId]
-        navigate(1, notice); await nextTick(); focusDecision(); return
-      }
+      // Lessons join every other kind: the next open item, or "All decided" after the last (AEON-1385).
       advance(capturedId, notice); await nextTick(); if (!finished.value) focusDecision()
     }
   } catch (cause) {
@@ -560,6 +560,25 @@ async function undoLesson() {
     await nextTick(); setStatus('Undone.')
   } catch (cause) { if (live && item.value?.id === id) setStatus(cause instanceof Error ? cause.message : 'Undo did not work.') }
   finally { if (live) busy.value = false }
+}
+// Undo on "All decided" after a lesson (AEON-1385): restores the lesson and shows it open again. A failed
+// Undo says why and the round still ends by itself, where the toast offers Undo once more.
+async function undoLastLesson() {
+  const row = doneSummary.value.lesson
+  if (!row?.undoEvent || !props.undo || busy.value || !finished.value) return
+  const id = row.id
+  clearTimeout(closeTimer); busy.value = true; setStatus('Undoing the decision…')
+  try {
+    const restored = await props.undo({ ...row })
+    if (!live) return
+    drafts.value[id] = draftFor(restored); emit('recorded', restored)
+    done.value = done.value.filter(decided => decided !== id); finished.value = false; holdClose.value = false
+    const at = props.round.indexOf(id)
+    if (at >= 0) jumpTo(at)
+    await nextTick(); setStatus('Undone.'); focusDecision()
+  } catch (cause) {
+    if (live) { setStatus(cause instanceof Error ? cause.message : 'Undo did not work.'); scheduleClose() }
+  } finally { if (live) busy.value = false }
 }
 function openPager() { if (busy.value || finished.value) return; pager.value = !pager.value; jumpIndex.value = index.value; if (pager.value) void nextTick(() => dialog.value?.querySelector<HTMLElement>('[role="listbox"]')?.focus()) }
 function pickJump(at: number) { if (busy.value) return; pager.value = false; status.value = ''; jumpTo(at); void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
@@ -707,7 +726,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
             <span class="done-mark"><AppIcon name="check" :size="22" /></span>
             <h2>All decided</h2>
             <p class="done-sum">{{ doneSummary.text }}<template v-if="doneSummary.grace"> It goes to {{ doneSummary.agent }} in <span class="n">{{ graceLeft(doneSummary.grace) }}</span> s.</template></p>
-            <p class="done-acts"><button v-if="doneSummary.grace" type="button" class="btn sm" data-testid="desk-undo" @pointerenter="holdClose = true" @pointerleave="holdClose = false" @focus="holdClose = true" @blur="holdClose = false" @click="changeDecision(doneSummary.grace.id)"><AppIcon name="rollback" :size="13" />Undo</button><span>The desk closes by itself.</span></p>
+            <p class="done-acts"><button v-if="doneSummary.grace" type="button" class="btn sm" data-testid="desk-undo" @pointerenter="holdClose = true" @pointerleave="holdClose = false" @focus="holdClose = true" @blur="holdClose = false" @click="changeDecision(doneSummary.grace.id)"><AppIcon name="rollback" :size="13" />Undo</button><button v-else-if="doneSummary.lesson" type="button" class="btn sm" data-testid="desk-undo" @pointerenter="holdClose = true" @pointerleave="holdClose = false" @focus="holdClose = true" @blur="holdClose = false" @click="undoLastLesson"><AppIcon name="rollback" :size="13" />Undo</button><span>The desk closes by itself.</span></p>
           </div>
           <template v-else-if="item && draft">
             <header class="memo-head memo-heading">

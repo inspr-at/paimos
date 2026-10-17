@@ -37,7 +37,7 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
   const tier = { session_id: 'tier-session', revision: 2, read_only: false, active_tier: 'default', pending: null, reports: [], requests: [tierRequest] }
   const calls: { path: string; body: Record<string, unknown> }[] = []
   const reads: string[] = []
-  const control = { questions, calls, reads, projectionTime: undefined as number | undefined, denyPermission: !!options.denied, denyWrite: false, failQuestions: false, failProjection: false, approvalOutsideList: false, denyContext: false, hold: undefined as undefined | Promise<void>, approval, action, rule, ownership, tier }
+  const control = { questions, calls, reads, projectionTime: undefined as number | undefined, answerTime: undefined as number | undefined, denyPermission: !!options.denied, denyWrite: false, failQuestions: false, failProjection: false, approvalOutsideList: false, denyContext: false, hold: undefined as undefined | Promise<void>, approval, action, rule, ownership, tier }
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method()
     if (method === 'GET') reads.push(new URL(request.url()).pathname + new URL(request.url()).search)
@@ -114,7 +114,7 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
       if (control.denyWrite) return route.fulfill({ status: 409, json: { code: 'revision_conflict', error: 'The question changed. Reopen it before deciding.' } })
       const previous = question.answer, revision = question.revision + 1
       question.revision = revision; question.state = 'answered'; question.answer = { id: `answer-${revision}`, revision, answer: body.answer || question.input.options.find(option => option.id === body.option_id)!.answer,
-        option_id: body.option_id, reason: body.reason, outcome: body.outcome, decided_by: 'person', created_at: new Date().toISOString(), deliver_after: new Date(Date.now() + 10_000).toISOString(), ...(previous && question.pending.some(effect => effect.state === 'delivered') ? { replaces: previous.id } : {}) }
+        option_id: body.option_id, reason: body.reason, outcome: body.outcome, decided_by: 'person', created_at: new Date(control.answerTime ?? Date.now()).toISOString(), deliver_after: new Date((control.answerTime ?? Date.now()) + 10_000).toISOString(), ...(previous && question.pending.some(effect => effect.state === 'delivered') ? { replaces: previous.id } : {}) }
       question.pending = [{ id: `pending-${revision}`, revision, kind: 'inbox', state: 'pending', deliver_after: question.answer.deliver_after }]
       return route.fulfill({ json: question })
     }
