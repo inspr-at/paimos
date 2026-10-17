@@ -31,8 +31,8 @@ func listPageQuery() string {
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  WHERE n.parent_id=ANY($1::uuid[]) AND n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug='outcome')) AND k.slug='outcome' AND n.deleted_at IS NULL
  ), relations AS MATERIALIZED (
- SELECT r.source_node_id,r.target_node_id FROM node_relations r
- WHERE r.type='serves' AND r.source_node_id IN (SELECT id FROM outcomes)
+ SELECT o.id AS source_node_id,r.target_node_id FROM outcomes o
+ CROSS JOIN LATERAL aeon_outcome_serves(o.id) r
  ), counts AS MATERIALIZED (
  SELECT g.id,count(DISTINCT o.id)::int AS outcomes,count(DISTINCT r.target_node_id)::int AS tickets
  FROM page g LEFT JOIN outcomes o ON o.parent_id=g.id LEFT JOIN relations r ON r.source_node_id=o.id GROUP BY g.id

@@ -117,6 +117,33 @@ CREATE POLICY nodes_outcome_ticket_visibility ON nodes AS RESTRICTIVE
         OR kind_id <> ALL (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
         OR aeon_outcome_tickets_visible(id));
 
+-- Authorize the outcome once before collecting its bounded serves ends.
+-- Relation RLS otherwise re-checks the source outcome (and all twenty ends)
+-- for each edge, making a page quadratic in its targets. A visible outcome
+-- already proves that every serves end is visible under the original scope.
+-- Invoker tenant isolation remains active throughout; restore project scope
+-- before returning any rows, including when the relation query fails.
+CREATE FUNCTION aeon_outcome_serves(p_id uuid) RETURNS TABLE(target_node_id uuid)
+LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    prior text := current_setting('aeon.visible_projects', true);
+    tenant uuid := NULLIF(current_setting('aeon.tenant_id', true), '')::uuid;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id = tenant AND n.id = p_id
+        AND n.kind_id = ANY (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))) THEN
+        RETURN;
+    END IF;
+    PERFORM set_config('aeon.visible_projects', '*', true);
+    RETURN QUERY SELECT r.target_node_id FROM node_relations r
+        WHERE r.tenant_id = tenant AND r.source_node_id = p_id AND r.type = 'serves'
+        ORDER BY r.target_node_id LIMIT 21;
+    PERFORM set_config('aeon.visible_projects', coalesce(prior, ''), true);
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('aeon.visible_projects', coalesce(prior, ''), true);
+    RAISE;
+END;
+$$;
+
 -- Keep the invoker visibility walk behind a procedural boundary. Inlining
 -- three copies of nodes RLS into the event policy caused multi-second query
 -- planning even for a handful of events. No visibility is widened here.

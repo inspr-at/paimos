@@ -78,7 +78,9 @@ func logListPlan(t *testing.T, f storageFixture, candidates ...string) {
 				if v["Execution Time"] != nil {
 					t.Logf("page planning_ms=%v execution_ms=%v", v["Planning Time"], v["Execution Time"])
 				}
-				if cost, ok := v["Total Cost"].(float64); ok && cost > 10000 {
+				cost, _ := v["Total Cost"].(float64)
+				elapsed, _ := v["Actual Total Time"].(float64)
+				if cost > 10000 || elapsed > 20 {
 					t.Logf("plan %v cte=%v relation=%v rows=%v cost=%v loops=%v actual_rows=%v actual_ms=%v removed=%v", v["Node Type"], v["Subplan Name"], v["Relation Name"], v["Plan Rows"], cost, v["Actual Loops"], v["Actual Rows"], v["Actual Total Time"], v["Rows Removed by Join Filter"])
 					count++
 				}

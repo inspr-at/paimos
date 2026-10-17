@@ -160,6 +160,18 @@ func TestGoalStorageVisibility(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(source_node_id::text),'{}') FROM node_relations WHERE type='serves'`).Scan(&relationIDs); err != nil || len(relationIDs) != 1 || relationIDs[0] != f.outcome {
 			t.Fatalf("hidden outcome's apparently visible serves end leaked: %v %v", relationIDs, err)
 		}
+		for _, outcome := range []struct {
+			id   string
+			want []string
+		}{{f.outcome, []string{f.ticket}}, {f.hiddenOutcome, []string{}}, {f.workspaceOutcome, []string{}}, {f.keylessOutcome, []string{}}, {f.ticket, []string{}}} {
+			var targets []string
+			if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT target_node_id::text FROM aeon_outcome_serves($1))`, outcome.id).Scan(&targets); err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(targets, outcome.want) {
+				t.Fatalf("bounded serves leaked a hidden or non-outcome source: got %v, want %v", targets, outcome.want)
+			}
+		}
 		var eventsSeen []int64
 		var payloads string
 		if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(id ORDER BY id),'{}'),coalesce(string_agg(after::text,''),'') FROM events WHERE type LIKE 'goal.%'`).Scan(&eventsSeen, &payloads); err != nil {
