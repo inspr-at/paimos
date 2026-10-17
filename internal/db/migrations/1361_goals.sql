@@ -102,10 +102,10 @@ CREATE POLICY nodes_outcome_ticket_visibility ON nodes AS RESTRICTIVE
     -- The kind subquery is an uncorrelated lookup, avoiding a function call
     -- (and a widened probe) for every ordinary node on existing read paths.
     USING ((SELECT aeon_visible_all())
-        OR kind_id NOT IN (SELECT id FROM node_kinds WHERE slug = 'outcome')
+        OR kind_id <> ALL (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
         OR aeon_outcome_tickets_visible(id))
     WITH CHECK ((SELECT aeon_visible_all())
-        OR kind_id NOT IN (SELECT id FROM node_kinds WHERE slug = 'outcome')
+        OR kind_id <> ALL (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
         OR aeon_outcome_tickets_visible(id));
 
 -- Keep the invoker visibility walk behind a procedural boundary. Inlining
@@ -128,14 +128,34 @@ BEGIN
     END IF;
     RETURN EXISTS (
         SELECT 1 FROM nodes goal
-        JOIN node_kinds gk ON gk.tenant_id = goal.tenant_id AND gk.id = goal.kind_id
-            AND gk.slug IN ('goal', 'release')
-        JOIN nodes outcome ON outcome.tenant_id = goal.tenant_id AND outcome.parent_id = goal.id
-        JOIN node_kinds ok ON ok.tenant_id = outcome.tenant_id AND ok.id = outcome.kind_id
-            AND ok.slug = 'outcome'
         WHERE goal.tenant_id = tenant AND goal.id = goal_id
-            AND outcome.deleted_at IS NULL
-            AND (subject_kind <> 'outcome' OR outcome.id = p_id));
+          AND goal.kind_id = ANY (ARRAY(SELECT id FROM node_kinds WHERE slug IN ('goal', 'release'))))
+      AND EXISTS (
+        SELECT 1 FROM nodes outcome
+        WHERE outcome.tenant_id = tenant AND outcome.parent_id = goal_id
+          AND outcome.kind_id = ANY (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
+          AND outcome.deleted_at IS NULL
+          AND (subject_kind <> 'outcome' OR outcome.id = p_id));
+END;
+$$;
+
+-- A correlated membership subquery can hash every visible node before checking
+-- one event. Check immutable reference identities through point lookups instead,
+-- retaining invoker RLS and the prior treatment of empty/null reference arrays.
+CREATE FUNCTION aeon_event_refs_visible(refs uuid[]) RETURNS boolean
+LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    tenant uuid := NULLIF(current_setting('aeon.tenant_id', true), '')::uuid;
+    ref uuid;
+BEGIN
+    FOREACH ref IN ARRAY coalesce(refs, '{}'::uuid[]) LOOP
+        IF ref IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM nodes n WHERE n.tenant_id = tenant AND n.id = ref
+        ) THEN
+            RETURN false;
+        END IF;
+    END LOOP;
+    RETURN true;
 END;
 $$;
 
@@ -158,5 +178,4 @@ ALTER POLICY events_project_visibility ON events
                          OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[]))
             END
             AND (cardinality(node_refs) = 0
-                 OR NOT EXISTS (SELECT 1 FROM unnest(node_refs) AS ref(id)
-                                WHERE ref.id NOT IN (SELECT n.id FROM nodes n)))));
+                 OR aeon_event_refs_visible(node_refs))));
