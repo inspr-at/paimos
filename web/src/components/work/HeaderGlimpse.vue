@@ -101,7 +101,16 @@ function syncWide() {
   const next = readWide()
   if (wide.value !== next) wide.value = next
 }
-let viewportWatch: ResizeObserver | undefined, viewportFrame = 0
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, paintViewportFrame = 0
+function followPaintViewport() {
+  paintViewportFrame = 0
+  if (!mounted || !paint.value) return
+  // A software-rendered canvas can outlive all resize/media/observer deliveries.
+  // Keep the active decoration bound to real layout on its animation frames;
+  // no polling remains once the glimpse stops painting or is unmounted.
+  syncWide()
+  if (wide.value) paintViewportFrame = requestAnimationFrame(followPaintViewport)
+}
 function followViewport() {
   syncWide()
   if (viewportFrame) return
@@ -201,7 +210,11 @@ async function load() {
     applyMotion()
   } catch { /* A missing graph leaves the header as it was. */ }
 }
-watch(paint, value => emit('active', value))
+watch(paint, value => {
+  emit('active', value)
+  cancelAnimationFrame(paintViewportFrame)
+  paintViewportFrame = value ? requestAnimationFrame(followPaintViewport) : 0
+})
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
   mounted = true
@@ -226,6 +239,7 @@ onBeforeUnmount(() => {
   changes?.disconnect()
   cancelAnimationFrame(measureFrame)
   cancelAnimationFrame(viewportFrame)
+  cancelAnimationFrame(paintViewportFrame)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
