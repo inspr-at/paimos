@@ -288,12 +288,12 @@ const GROUP_TIP = 'grp:'
 const figuresRow = computed(() => !!props.groupFigures && grouped.value && !phone.value)
 const progressLive = (row: ListItem) => { const progress = progressOf(row); return !!progress && !progress.stale && workersOf(row).length > 0 }
 const groupFacts = computed(() => {
-  const out = new Map<string, { cells: Record<string, string>; agents: LiveAgent[]; moreAgents: number; working: string; people: string; live: string; stale: string; phone: [string, string][]; failed: string | null }>()
+  const out = new Map<string, { cells: Record<string, string>; agents: LiveAgent[]; moreAgents: number; working: string; people: string; live: string; stale: string; phone: [string, string][] }>()
   if (!props.groupFigures || !grouped.value) return out
   const ctx = { now: props.now, grouped: groupedColumn.value, modelName: groupModelName.value }
   for (const group of props.groups) {
-    const state = props.groupFigures.get(group.key) ?? null
-    const figures = state?.figures ?? null
+    // A group still counting, or one that could not be counted, says so in its cells' tips.
+    const figures = props.groupFigures.get(group.key)?.figures ?? null
     const complete = !group.hasMore && group.rows.length >= group.total
     const workingRows = group.rows.filter(row => workersOf(row).length > 0)
     const agents = new Map<string, LiveAgent>()
@@ -307,7 +307,7 @@ const groupFacts = computed(() => {
     out.set(group.key, {
       cells, agents: [...agents.values()].slice(0, 3), moreAgents: Math.max(0, agents.size - 3), working,
       people: working ? '' : peopleText(figures), live: liveRows ? `${rowCount(liveRows, complete)} live` : '', stale,
-      phone: phoneFacts({ working, stale, estimate: groupCellText('estimate', figures, { ...ctx, grouped: null }) }), failed: state?.failed ?? null,
+      phone: phoneFacts({ working, stale, estimate: groupCellText('estimate', figures, { ...ctx, grouped: null }) }),
     })
   }
   return out
@@ -809,7 +809,7 @@ defineExpose({
       <thead>
         <tr>
           <th
-            v-for="column in columns" :key="column.id" scope="col" :data-column-id="column.id" :class="[column.cls, { end: column.end, 'key-head': column.id === 'key', 'group-head-col': groupsFlip(column.id) }]" :aria-sort="ariaSort(column.field)"
+            v-for="column in columns" :key="column.id" scope="col" :data-column-id="column.id" :class="[column.cls, { end: column.end, 'key-head': column.id === 'key' }]" :aria-sort="ariaSort(column.field)"
             :style="column.id === 'key' ? { '--slot': `${keySlots.size}px`, '--fold-x': `${keySlots.fold}px`, '--check-x': `${keySlots.check}px`, '--sort-x': `${keySlots.sort}px`, '--rest-x': selectable ? '36px' : '18px' } : undefined"
           >
             <!-- The first cell's slots (AEON-1388 §3): expand/collapse all above the group chevrons, select all above the group (or row) checkboxes. -->
