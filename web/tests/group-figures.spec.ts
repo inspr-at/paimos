@@ -311,8 +311,10 @@ test('AEON-1388 phones: one muted line after the name, at most three facts in or
   expect(Math.abs(lineBox.y + lineBox.height / 2 - (label.y + label.height / 2)), 'the facts share the name’s line').toBeLessThanOrEqual(2)
   expect(await line.evaluate(el => el.getClientRects().length)).toBe(1)
   await expect(grid(page).locator('.group-row td.group-fig')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Grouped by status' }).click()
-  await page.getByRole('radiogroup', { name: 'Groups' }).getByRole('radio', { name: 'Reversed' }).click()
+  // No column headers on a phone: Filters › Display settings… › Groups is the way to order the groups.
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+  await display(page).getByRole('radiogroup', { name: 'Groups' }).getByRole('radio', { name: 'Reversed' }).click()
   await expect(labels(page)).toHaveText(['QA', 'In progress', 'Backlog', 'New'])
 })
 
