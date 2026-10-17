@@ -99,6 +99,7 @@ import (
 	"github.com/inspr-at/paimos/internal/themes"
 	"github.com/inspr-at/paimos/internal/ticketwork"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
+	"github.com/inspr-at/paimos/internal/version"
 	"github.com/inspr-at/paimos/internal/views"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/web"
@@ -340,7 +341,11 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	startWorker(func() { inbox.NewSweeper(pool).Run(workerCtx) })
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	startWorker(func() { knowledge.NewTagger(pool).Run(workerCtx) })
-	statusAuto := statusautopilot.New(pool)
+	publication, err := releasehistory.EmbeddedPublication()
+	if err != nil {
+		return err
+	}
+	statusAuto := statusautopilot.New(pool).WithPublication(publication, version.Version, cfg.ReviewAppTenantID, cfg.ReviewAppRepository)
 	startWorker(func() { statusAuto.Run(workerCtx) })
 	recurringWork := recurrences.New(pool)
 	publishedHistory, err := releasehistory.Embedded()
