@@ -1274,11 +1274,6 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	kindCTE := ""
 	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
 	if q.Within != nil || (q.ParentSet && q.Descendants) {
-		if q.Within != nil {
-			scopeRoot = `$7::uuid`
-		} else {
-			scopeRoot = `$9::uuid`
-		}
 		// Drive scoped lists from the tree. A membership subquery can rescan
 		// every scope ID for every candidate when the bulk-import statistics
 		// change, while a lateral ID lookup stays bounded per tree row.
