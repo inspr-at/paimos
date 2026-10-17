@@ -888,6 +888,7 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 }
 
 func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id string) error {
+	ctx = db.WithKeyScopeChange(tenant.WithPrincipal(ctx, p), p.TenantID, id)
 	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if p.ID != "" {
 			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
@@ -1002,8 +1003,9 @@ func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principa
 // only the replacement. Both recheck live grants without configuring roles.
 func (m *Module) rotateAgentKeyWithScopes(ctx context.Context, p tenant.Principal, id string, expires *time.Time, proposed []string, mode ...*bool) (keyRecord, error) {
 	var replacement keyRecord
+	ctx = db.WithKeyScopeChange(tenant.WithPrincipal(ctx, p), p.TenantID, id)
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		// Match creation/access-management lock order: tenant, then resource.
+		// After key admission, match access-management order: tenant, then resource.
 		// Serializing on the tenant also fences concurrent grants and rotation.
 		var tenantID string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantID); err != nil {

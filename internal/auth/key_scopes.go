@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -153,8 +154,11 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 	if (p.Kind != tenant.Person && !authz.OwnerWorkstation(p)) || p.ID == "" {
 		return view, authz.ErrForbidden
 	}
+	// Management reads can prune retired scopes, so they also need the exclusive
+	// target fence. Include any authenticating workstation key in the same batch.
+	ctx = db.WithKeyScopeChange(tenant.WithPrincipal(ctx, p), p.TenantID, id)
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		// Match role management and rotation: tenant first, then key. All live
+		// After key admission: tenant first, then key rows. All live
 		// grants, role extensions, cleanup and audit share this transaction.
 		var locked string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&locked); err != nil {

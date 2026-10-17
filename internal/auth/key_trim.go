@@ -570,7 +570,7 @@ func (m *Module) decideKeyTrim(ctx context.Context, p tenant.Principal, id strin
 		if err := tx.QueryRow(ctx, `SELECT key_id::text FROM key_trim_proposals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, id).Scan(&keyID); err != nil {
 			return err
 		}
-		if err := authz.LockKeyScopeUseTx(ctx, tx, p.TenantID, keyID); err != nil {
+		if err := authz.LockKeyScopeChangeTx(ctx, tx, p.TenantID, keyID); err != nil {
 			return err
 		}
 		if err := trimFence(ctx, tx, p, "keys.manage"); err != nil {
