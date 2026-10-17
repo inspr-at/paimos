@@ -101,38 +101,117 @@ func publicationAuthorityTx(ctx context.Context, tx pgx.Tx, tid, project string)
 	return authz.ErrForbidden
 }
 
+// gitDeltaSQL starts from the release delta: ticket keys, active merge events,
+// or merge-audit rows whose SHA is in this publication. The unlocked page runs
+// before LockWorkTreeTx; the locked recheck repeats it for that page only.
+// A later minute still sees evidence that arrives after tagging.
+var gitDeltaSQL = `WITH delta AS (
+ SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND key = ANY($3::text[])
+ UNION
+ SELECT e.node_id FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id IS NOT NULL AND ` + mergeEvidenceSQL + ` AND e.metadata->>'repository'=$4 AND e.metadata->>'merge_sha' = ANY($5::text[])
+ UNION
+ SELECT a.ticket_node_id FROM delivery_merge_audit a WHERE a.tenant_id=current_setting('aeon.tenant_id')::uuid AND a.ticket_node_id IS NOT NULL AND a.repository=$4 AND a.pull_request IS NOT NULL AND a.merge_sha = ANY($5::text[])
+)
+SELECT n.id::text FROM delta d
+ JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=d.id
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ JOIN nodes project ON project.tenant_id=n.tenant_id AND project.id=n.project_id AND project.deleted_at IS NULL AND project.fields->>'project_key'=$1
+ WHERE n.deleted_at IS NULL AND k.slug='work' AND ` + candidateStateSQL + `='done'
+ AND ($2='' OR n.id>nullif($2,'')::uuid) AND (NOT $6 OR n.id=ANY($7::uuid[]))
+ ORDER BY n.id LIMIT $8`
+
+func gitDeltaIDsTx(ctx context.Context, tx pgx.Tx, projectKey, repository, after string, keys, commits, only []string) ([]string, error) {
+	restricted := only != nil
+	if keys == nil {
+		keys = []string{}
+	}
+	if commits == nil {
+		commits = []string{}
+	}
+	if only == nil {
+		only = []string{}
+	}
+	rows, err := tx.Query(ctx, gitDeltaSQL, projectKey, after, keys, repository, commits, restricted, only, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	return collectIDs(rows)
+}
+
+func (m *Module) gitPublishEnabled(ctx context.Context, tenantID string, now time.Time) (bool, error) {
+	var on bool
+	err := db.InTenantReadSnapshot(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		s, err := Load(ctx, tx)
+		if err != nil {
+			return err
+		}
+		on = s.Rules["publish"].Enabled && s.ModeAt(now) != "off"
+		return nil
+	})
+	return on, err
+}
+
+func (m *Module) gitDeltaPage(ctx context.Context, tenantID, projectKey, repository, after string, keys, commits []string) ([]string, error) {
+	var ids []string
+	err := db.InTenantReadSnapshot(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var err error
+		ids, err = gitDeltaIDsTx(ctx, tx, projectKey, repository, after, keys, commits, nil)
+		return err
+	})
+	return ids, err
+}
+
 func (m *Module) publishGit(ctx context.Context, actor tenant.Principal, now time.Time) error {
 	if m.publication == nil || m.publicationTenant != actor.TenantID {
 		return nil
 	}
+	p := m.publication
+	if len(p.Commits) > releasehistory.MaxPublicationCommits || len(p.Tickets) > releasehistory.MaxPublicationCommits {
+		slog.Warn("release publication automation disabled: evidence exceeds the commit bound", "commits", len(p.Commits), "tickets", len(p.Tickets))
+		return nil
+	}
+	on, err := m.gitPublishEnabled(ctx, actor.TenantID, now)
+	if err != nil || !on {
+		return err
+	}
+	keys := make([]string, 0, len(p.Tickets))
+	for key := range p.Tickets {
+		keys = append(keys, key)
+	}
+	commits := p.Commits
+	if commits == nil {
+		commits = []string{}
+	}
 	after := ""
 	for {
-		count := 0
-		err := db.InTenant(ctx, m.pool, actor.TenantID, func(tx pgx.Tx) error {
+		ids, err := m.gitDeltaPage(ctx, actor.TenantID, p.ProjectKey, p.Repository, after, keys, commits)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		var stop bool
+		err = db.InTenant(ctx, m.pool, actor.TenantID, func(tx pgx.Tx) error {
 			if err := db.LockWorkTreeTx(ctx, tx); err != nil {
 				return err
 			}
 			s, err := Load(ctx, tx)
-			if err != nil || !s.Rules["publish"].Enabled || s.ModeAt(now) == "off" {
-				return err
-			}
-			rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- JOIN nodes project ON project.tenant_id=n.tenant_id AND project.id=n.project_id AND project.deleted_at IS NULL AND project.fields->>'project_key'=$1
- WHERE n.deleted_at IS NULL AND k.slug='work' AND `+candidateStateSQL+`='done'
- AND ($2='' OR n.id>nullif($2,'')::uuid) ORDER BY n.id LIMIT $3`, m.publication.ProjectKey, after, batchSize)
 			if err != nil {
 				return err
 			}
-			ids, err := collectIDs(rows)
-			if err != nil {
-				return err
-			}
-			count = len(ids)
-			if count == 0 {
+			if !s.Rules["publish"].Enabled || s.ModeAt(now) == "off" {
+				stop = true
 				return nil
 			}
-			after = ids[count-1]
-			candidates, err := loadCandidates(ctx, tx, ids, now)
+			fresh, err := gitDeltaIDsTx(ctx, tx, p.ProjectKey, p.Repository, "", keys, commits, ids)
+			if err != nil {
+				return err
+			}
+			if len(fresh) == 0 {
+				return nil
+			}
+			candidates, err := loadCandidates(ctx, tx, fresh, now)
 			if err != nil {
 				return err
 			}
@@ -190,9 +269,10 @@ func (m *Module) publishGit(ctx context.Context, actor tenant.Principal, now tim
 		if err != nil {
 			return err
 		}
-		if count < batchSize {
+		if stop || len(ids) < batchSize {
 			return nil
 		}
+		after = ids[len(ids)-1]
 	}
 }
 

@@ -10560,6 +10560,8 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestGitPublicationDeliveryAndOneDayAcceptance","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestGitPublicationSkipsDoneOutsideReleaseDelta","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestGraceExpiryRescansWithinSameDay","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestHumanChecksPermitNonDeliveryDailyRules","tier":"GATED-FULL"}

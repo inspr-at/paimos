@@ -2,14 +2,20 @@
 package statusautopilot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/releasehistory"
+	"github.com/inspr-at/paimos/internal/systemactor"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -153,5 +159,136 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 	}
 	if f.state(off).State != "done" {
 		t.Fatal("publication ignored revoked write authority")
+	}
+}
+
+// Risk: every minute publication locked and loaded every Done leaf, including
+// tickets with no key and no merge SHA in the release delta.
+func TestGitPublicationSkipsDoneOutsideReleaseDelta(t *testing.T) {
+	f := setup(t)
+	inSHA, auditSHA, eventSHA, decoySHA := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40), strings.Repeat("d", 40)
+	p := &releasehistory.Publication{
+		ProjectKey: "AUT", Repository: "inspr-at/paimos", Version: "261017115202.0.0", Name: "Aglow Apsis",
+		Tag: "v261017115202.0.0", PreviousTag: "v261016060843.0.0", Commit: strings.Repeat("e", 40), TaggedAt: f.now,
+		Commits: []string{inSHA, auditSHA, eventSHA}, Tickets: map[string]string{"AUT-201": inSHA},
+	}
+	if f.m.WithPublication(p, p.Version, f.p.TenantID, p.Repository).publication == nil {
+		t.Fatal("publication was not armed")
+	}
+	var actor tenant.Principal
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{project_key}','"AUT"') WHERE id=$1`, f.project); err != nil {
+			return err
+		}
+		rules, err := json.Marshal(Defaults().Rules)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(t.Context(), `INSERT INTO status_autopilot_settings(tenant_id,enabled,rules) VALUES($1,true,$2)`, f.p.TenantID, rules); err != nil {
+			return err
+		}
+		actor, err = systemactor.Ensure(t.Context(), tx, f.p.TenantID)
+		return err
+	})
+	fillers := make([]string, 0, batchSize+1)
+	for i := range batchSize + 1 {
+		fillers = append(fillers, f.add(fmt.Sprintf("AUT-%d", i+300), "work", "done", 2, nil))
+	}
+	// An empty delta must finish while another writer holds the work-tree fence.
+	// Paging every Done leaf takes that fence before it can see that none qualify.
+	publishWhileHeld(t, f, actor, func(tx pgx.Tx) error { return db.LockWorkTreeTx(t.Context(), tx) })
+	for _, id := range fillers {
+		if f.state(id).State != "done" {
+			t.Fatalf("unrelated Done ticket %s changed", id)
+		}
+	}
+
+	keyOnly := f.add("AUT-201", "work", "done", 2, nil)
+	auditOnly := f.add("AUT-202", "work", "done", 2, nil)
+	eventOnly := f.add("AUT-203", "work", "done", 2, nil)
+	outside := f.add("AUT-204", "work", "done", 2, nil)
+	undone := f.add("AUT-205", "work", "done", 2, nil)
+	f.tx(func(tx pgx.Tx) error {
+		merge := func(id, sha string) error {
+			meta, err := json.Marshal(map[string]any{"repository": p.Repository, "merge_sha": sha, "merged_at": f.now.Add(-time.Hour).Format(time.RFC3339Nano)})
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,metadata,at,before,after) VALUES($1,$2,$3,'delivery.merge_done',$4,$5,'{"state":"done"}','{"state":"done"}')`, f.p.TenantID, f.p.ID, id, meta, f.now.Add(-time.Hour))
+			return err
+		}
+		if err := merge(eventOnly, eventSHA); err != nil {
+			return err
+		}
+		if err := merge(outside, decoySHA); err != nil {
+			return err
+		}
+		if err := merge(undone, inSHA); err != nil {
+			return err
+		}
+		var eventID int64
+		if err := tx.QueryRow(t.Context(), `SELECT id FROM events WHERE node_id=$1 AND type='delivery.merge_done'`, undone).Scan(&eventID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after,undo_of) VALUES($1,$2,$3,'delivery.merge_undone','{"state":"done"}','{"state":"done"}',$4)`, f.p.TenantID, f.p.ID, undone, eventID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at) VALUES($1,$2,$3,7,$4,$5,'test',true,true,true,'{}',$6)`, f.p.TenantID, p.Repository, auditSHA, auditOnly, f.project, f.now.Add(-time.Hour))
+		return err
+	})
+	// A decoy SHA and an undone in-range merge stay locked by the fixture. The
+	// publication pass may lock only the three delta leaves.
+	publishWhileHeld(t, f, actor, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(t.Context(), `SELECT id FROM nodes WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, []string{outside, undone})
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 2 {
+			return fmt.Errorf("locked %d decoy rows", tag.RowsAffected())
+		}
+		return nil
+	})
+	for id, want := range map[string]string{keyOnly: "delivered", auditOnly: "delivered", eventOnly: "delivered", outside: "done", undone: "done"} {
+		if got := f.state(id).State; got != want {
+			t.Fatalf("%s state %s; want %s", id, got, want)
+		}
+	}
+	for _, id := range fillers {
+		if f.state(id).State != "done" {
+			t.Fatalf("filler %s changed", id)
+		}
+	}
+}
+
+func publishWhileHeld(t *testing.T, f *fixture, actor tenant.Principal, hold func(pgx.Tx) error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	holder, err := f.d.App.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.Background())
+	if _, err = holder.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err = hold(holder); err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if err = holder.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		errCh <- f.m.publishGit(db.AllProjects(ctx, "daily status autopilot"), actor, f.now)
+	}()
+	if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, uint32(pid), done); lock != "" {
+		t.Fatalf("publication blocked on %s while scanning Done work outside the release delta", lock)
+	}
+	if err = <-errCh; err != nil {
+		t.Fatal(err)
 	}
 }
