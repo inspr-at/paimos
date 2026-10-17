@@ -282,6 +282,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			// A proxy/server may reflect a request header in an error body.
 			// Worker callers log these errors, so remove both proof forms
 			// before decoding messages or retaining structured refusals.
+			var proofs []string
 			for _, name := range []string{workerlease.Header, workerlease.LegacyHeader} {
 				proof := req.Header.Get(name)
 				if name == workerlease.Header {
@@ -292,6 +293,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 				if proof == "" {
 					continue
 				}
+				proofs = append(proofs, proof)
 				encoded, _ := json.Marshal(proof)
 				payload = bytes.ReplaceAll(payload, encoded[1:len(encoded)-1], []byte("[redacted]"))
 			}
@@ -301,7 +303,15 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 				ReasonCode    string `json:"reason_code"`
 			}
 			_ = json.Unmarshal(payload, &detail)
-			status := &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			// Decode before the final pass too: a JSON escape must not bring
+			// the proof back into a message after byte-level redaction.
+			redact := func(value string) string {
+				for _, proof := range proofs {
+					value = strings.ReplaceAll(value, proof, "[redacted]")
+				}
+				return value
+			}
+			status := &StatusError{Status: res.StatusCode, Message: redact(errorMessage(payload)), AttachRefusal: redact(detail.AttachRefusal), ReasonCode: redact(detail.ReasonCode), RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
 			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= maxEntryChecksFailureBytes && json.Valid(payload) {
 				status.EntryChecksFailure = payload
 			}
