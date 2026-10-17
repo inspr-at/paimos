@@ -6950,6 +6950,183 @@
           "group": "fixes"
         }
       ]
+    },
+    "261017115202.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 136,
+      "snapshot_sha256": "66a9afa1c2fb74b8e6969954b8453fc3acb8d05742d3dbce13bfc62a8ddfe8d5",
+      "captured_at": "2026-10-17T12:06:06Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1212",
+          "pill_en": "One panel per lead",
+          "pill_de": "Ein Panel pro Lead",
+          "benefit_en": "One panel combines Lead, Session and Chat, with opening rules for questions, held starts and session problems.",
+          "benefit_de": "Ein Panel vereint Lead, Sitzung und Chat mit Startregeln für offene Fragen, zurückgehaltene Starts und Sitzungsprobleme.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1254",
+          "pill_en": "Clearer session delivery",
+          "pill_de": "Klarere Sitzungszustellung",
+          "benefit_en": "For supported sessions, Chat shows Paimos inbox messages and explains binding or delivery failures.",
+          "benefit_de": "Bei unterstützten Sitzungen zeigt der Chat Paimos-Inbox-Nachrichten und erläutert Verbindungs- oder Zustellfehler.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1286",
+          "pill_en": "Phone layout fits",
+          "pill_de": "Telefon-Layout passt",
+          "benefit_en": "On a phone the ticket list, agent view and chat show content instead of controls; the rest sits behind ⋯.",
+          "benefit_de": "Am Telefon zeigen Ticketliste, Agentenansicht und Chat Inhalte statt Bedienelementen; der Rest liegt hinter ⋯.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1377",
+          "pill_en": "Fewer false merge alerts",
+          "pill_de": "Weniger falsche Merge-Warnungen",
+          "benefit_en": "Merge alerts allow time for queue provenance and recognize reviews preserved by a clean base merge, reducing false alarms.",
+          "benefit_de": "Merge-Warnungen berücksichtigen verspätete Warteschlangen-Nachweise und bei einem sauberen Basis-Merge erhaltene Reviews; dadurch sinkt die Zahl falscher Warnungen.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1379",
+          "pill_en": "Keys never wrap",
+          "pill_de": "Schlüssel ohne Umbruch",
+          "benefit_en": "Ticket keys always read as one piece on phones.",
+          "benefit_de": "Ticket-Schlüssel stehen auf dem Handy immer in einem Stück.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1385",
+          "pill_en": "Lessons close calmly",
+          "pill_de": "Lektionen schließen ruhig",
+          "benefit_en": "On the Decision Desk, lessons now behave like decisions: after the last one, the panel shows All decided and offers a short Undo before it closes.",
+          "benefit_de": "Auf dem Decision Desk verhalten sich Lektionen jetzt wie Entscheidungen: Nach der letzten zeigt das Panel „Alles entschieden“ und bietet kurz ein Rückgängig an, bevor es schließt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1396",
+          "pill_en": "Cleaner checklist focus",
+          "pill_de": "Saubererer Fokus",
+          "benefit_en": "The checklist's 'Move anyway' link uses the app's focus ring instead of a browser outline.",
+          "benefit_de": "Der Link 'Trotzdem verschieben' in der Checkliste nutzt den Fokusring der App statt eines Browser-Rahmens.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1403",
+          "pill_en": "Clean avatar stacks",
+          "pill_de": "Saubere Avatar-Stapel",
+          "benefit_en": "Overlapping people and agent avatars on the projects page look clean: each face sits fully on top of the one behind it.",
+          "benefit_de": "Überlappende Personen- und Agenten-Avatare auf der Projektseite wirken sauber: Jedes Gesicht liegt vollständig über dem dahinter.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1404",
+          "pill_en": "Clean agent restarts",
+          "pill_de": "Saubere Agent-Neustarts",
+          "benefit_en": "The Mac agent app starts cleanly after an update or a rollback, without manual cleanup.",
+          "benefit_de": "Die Mac-Agenten-App startet nach einem Update oder einer Rücknahme sauber, ohne manuelles Aufräumen.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1406",
+          "pill_en": "Calm empty Desk",
+          "pill_de": "Ruhiger leerer Desk",
+          "benefit_en": "When nothing waits on you, the Decision Desk shows a calm picture instead of an empty error-like card.",
+          "benefit_de": "Wenn kein Handlungsbedarf besteht, zeigt der Decision Desk ein ruhiges Bild statt einer leeren, fehlerartigen Karte.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1411",
+          "pill_en": "Safer administration saves",
+          "pill_de": "Sicherere Verwaltungsänderungen",
+          "benefit_en": "Agent-account settings, plugins, feature flags, project groups and cost rates now recheck current permissions when saved.",
+          "benefit_de": "Beim Speichern von Agentenkonten, Plugins, Funktionsschaltern, Projektgruppen und Kostensätzen werden die aktuellen Rechte erneut geprüft.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1421",
+          "pill_en": "Right quote links",
+          "pill_de": "Richtige Angebotslinks",
+          "benefit_en": "Switching quotes quickly never shows or revokes the wrong customer link.",
+          "benefit_de": "Schnelles Wechseln zwischen Angeboten zeigt oder widerruft nie den falschen Kundenlink.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1426",
+          "pill_en": "Lead card correct",
+          "pill_de": "Lead-Karte korrekt",
+          "benefit_en": "The project lead card shows what the lead is really doing instead of a read error.",
+          "benefit_de": "Die Lead-Karte des Projekts zeigt, was der Lead wirklich tut, statt eines Lesefehlers.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1432",
+          "pill_en": "Desk answers stay queued",
+          "pill_de": "Desk-Antworten bleiben vorgemerkt",
+          "benefit_en": "Desk answers survive missing listeners, with retries and alerts for stalled pickup.",
+          "benefit_de": "Desk-Antworten bleiben bei fehlenden Empfängern erhalten; Zustellversuche werden wiederholt und stockende Abholungen gemeldet.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1438",
+          "pill_en": "Clearer agent chat",
+          "pill_de": "Klarerer Agenten-Chat",
+          "benefit_en": "Agent chats read like a conversation: decisions show as Desk cards, messages carry one quiet line of details, and the composer stays simple on every screen.",
+          "benefit_de": "Agenten-Chats lesen sich wie ein Gespräch: Entscheidungen erscheinen als Desk-Karten, Nachrichten tragen eine ruhige Detailzeile, und das Eingabefeld bleibt auf jedem Bildschirm einfach.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1439",
+          "pill_en": "Session tabs stay put",
+          "pill_de": "Sitzungs-Tabs bleiben",
+          "benefit_en": "The session panel keeps the tab you chose; it no longer blinks or jumps back while it refreshes.",
+          "benefit_de": "Das Sitzungsfenster behält den gewählten Tab; es blinkt nicht mehr und springt beim Aktualisieren nicht zurück.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1441",
+          "pill_en": "Projects from START",
+          "pill_de": "Projekte aus START",
+          "benefit_en": "A START conversation becomes a new Paimos project in a few clicks: the assistant fills in what the conversation already says and asks only for what is missing.",
+          "benefit_de": "Ein START-Gespräch wird mit wenigen Klicks zu einem neuen Paimos-Projekt: Der Assistent übernimmt, was das Gespräch schon enthält, und fragt nur nach dem Fehlenden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1444",
+          "pill_en": "Leaner database memory",
+          "pill_de": "Schlankerer Datenbankspeicher",
+          "benefit_en": "Decision Desk queries were split to reduce database memory pressure.",
+          "benefit_de": "Abfragen des Decision Desks wurden aufgeteilt, um den Speicherbedarf der Datenbank zu senken.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1448",
+          "pill_en": "Tighter Desk on phones",
+          "pill_de": "Kompakterer Desk am Handy",
+          "benefit_en": "On phones the Decision Desk no longer wastes space above the tabs when nothing waits.",
+          "benefit_de": "Am Handy verschwendet der Entscheidungs-Desk keinen Platz mehr über den Reitern, wenn nichts wartet.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1453",
+          "pill_en": "Views open your way",
+          "pill_de": "Ansichten wie gewohnt",
+          "benefit_en": "View switches remember the last choice or a chosen default across devices within a workspace. Direct links and session attention rules can choose another opening view.",
+          "benefit_de": "Ansichtsumschalter merken sich je Person und Arbeitsbereich die letzte Auswahl oder eine festgelegte Standardansicht geräteübergreifend. Direkte Links und Sitzungshinweise können die Startansicht vorgeben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1456",
+          "pill_en": "Goals API and CLI",
+          "pill_de": "Ziele mit API/CLI",
+          "benefit_en": "Agents can create and update goals and read recorded progress and available ETAs through the API and CLI.",
+          "benefit_de": "Agenten können Ziele per API und CLI anlegen und aktualisieren sowie den erfassten Fortschritt und vorhandene Fertigstellungsschätzungen abrufen.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
