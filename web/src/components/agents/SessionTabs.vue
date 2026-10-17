@@ -118,17 +118,17 @@ button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .label-width { font-weight: 700; visibility: hidden; }
 .count { position: absolute; right: 1px; top: -2px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 9px var(--font); }
 /* The pin's slot is there on every tab that can be the default, so marking one never moves a
-   tab (AEON-1453). Beside the label it is inline; on an icon-only tab it is a small badge in
-   the bottom corner, as the unread count is in the top one. */
+   tab (AEON-1453). Beside the label it is inline, centred and muted. On an icon-only tab it is
+   the same 12 px glyph as every other view switch: inside the segment, top-right, no disc.
+   The unread count stays in the top corner; when both are on one tab the pin moves bottom-left. */
 button { -webkit-touch-callout: none; }
 .pin-slot { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; color: var(--ink-3); line-height: 0; pointer-events: none; }
 .view-pin { display: grid; }
 .icons .tab-label { display: none; }
 /* Icon-only, the label's wrapper takes no room, so the tab keeps the width it had without a pin. */
 .icons .tab-text { display: contents; }
-.icons .pin-slot { position: absolute; right: 1px; bottom: -2px; width: 14px; height: 14px; }
-.icons .view-pin { place-items: center; width: 14px; height: 14px; border-radius: 999px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); color: var(--ink-2); }
-.icons .view-pin :deep(svg) { width: 9px; height: 9px; }
+.icons .pin-slot { position: absolute; top: 18%; right: 18%; }
+.icons button:has(.count) .pin-slot { top: auto; right: auto; bottom: 18%; left: 18%; }
 .icons button { padding-inline: 5px; }
 /* AEON-1286 phones: the flat menu's own row, 44 px items in a 48 px track. */
 @media (max-width: 720px) {

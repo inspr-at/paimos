@@ -672,11 +672,11 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const deskTabRow = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/aeon-1448-desk-tabrow.spec.ts')
   assert.ok(deskTabRow && deskTabRow.listedTests === 4, 'Desk tab-row regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === deskTabRow.file), 'Desk tab-row regressions must remain gated')
-  // AEON-1453 adds six ViewSwitch cases (Projects, the ticket list default, the Releases sheet; package B:
-  // the session panel's old pin, its phone ⋯ choice and its ?tab= link) after the historical budget,
-  // charged like the empty Desk: only this file's scheduling weight.
+  // AEON-1453 adds seven ViewSwitch cases (Projects, the ticket list default, the Releases sheet; package B:
+  // the session panel's old pin, its phone ⋯ choice, its ?tab= link and the worker last tab) after the
+  // historical budget, charged like the empty Desk: only this file's scheduling weight.
   const viewSwitch = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/view-switch.spec.ts')
-  assert.ok(viewSwitch && viewSwitch.listedTests === 6, 'ViewSwitch regressions must remain declared')
+  assert.ok(viewSwitch && viewSwitch.listedTests === 7, 'ViewSwitch regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === viewSwitch.file), 'ViewSwitch regressions must remain gated')
   const priorGate = {
     ...real,

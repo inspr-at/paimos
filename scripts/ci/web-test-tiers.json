@@ -14608,6 +14608,8 @@
     ,
     {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 the ticket list opens on its default (a saved view or a mode) or the mode used last; a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 worker panel: the last tab kept before the switch opens this visit and is never rewritten","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in list despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

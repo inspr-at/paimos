@@ -12,6 +12,7 @@ import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
 import { mockReleases } from './releases-fixtures'
 import { historicHistory } from './releases-historic-fixtures'
 import { mockLeadFlow, LEAD_SESSION } from './lead-flow-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -355,6 +356,15 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
   await page.setViewportSize({ width: 390, height: 844 })
   const errors = watchErrors(page)
   const world = await leadPanel(page)
+  // questions.decide is unused until the icon-only overlap check publishes one ask.
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    for (const grant of ['run.create', 'harness.read', 'harness.control', 'work_orders.read', 'questions.read', 'questions.decide']) {
+      permissions.workspace.permissions.push(grant)
+      permissions.project?.permissions.push(grant)
+    }
+    return route.fulfill({ json: permissions })
+  })
   await page.goto(`/agents/${LEAD_SESSION}`)
   const lead = panelTab(page, 'Lead'), details = panelTab(page, 'Details'), chat = panelTab(page, 'Chat'), events = panelTab(page, 'Events')
   await expect(lead).toHaveAttribute('aria-selected', 'true')
@@ -405,7 +415,7 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
   expect(await pinOn(page)).toEqual(['Lead'])
 
   // Every form of the tabs: the pin stays inside its tab, after the label where one shows and as a
-  // badge on an icon-only tab, where stopping and setting it again moves no tab either.
+  // glyph on an icon-only tab, where stopping and setting it again moves no tab either.
   const tablist = panelOf(page).getByRole('tablist'), forms: string[] = []
   for (const width of [390, 320, 1440, 1100, 900]) for (const look of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: width < 600 ? 700 : 900 })
@@ -414,13 +424,40 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     await expect(lead.locator('.view-pin')).toBeVisible()
     const placed = await lead.evaluate(tab => {
-      const pin = tab.querySelector('.view-pin')!.getBoundingClientRect(), box = tab.getBoundingClientRect(), label = tab.querySelector('.tab-label')!
+      const pinEl = tab.querySelector('.view-pin')!
+      const pin = pinEl.getBoundingClientRect(), box = tab.getBoundingClientRect(), label = tab.querySelector('.tab-label')!
       const labelled = label.checkVisibility()
-      return { labelled, pin: { x: pin.x, right: pin.right }, tab: { x: box.x, right: box.right }, labelRight: labelled ? label.getBoundingClientRect().right : null }
+      const style = getComputedStyle(pinEl)
+      return {
+        labelled,
+        pin: { x: pin.x, y: pin.y, right: pin.right, bottom: pin.bottom, w: pin.width, h: pin.height },
+        tab: { x: box.x, y: box.y, right: box.right, bottom: box.bottom },
+        labelRight: labelled ? label.getBoundingClientRect().right : null,
+        background: style.backgroundColor, shadow: style.boxShadow,
+      }
     })
     expect(placed.pin.x, `${width}: pin inside its tab`).toBeGreaterThanOrEqual(placed.tab.x - .5)
+    expect(placed.pin.y, `${width}: pin inside its tab`).toBeGreaterThanOrEqual(placed.tab.y - .5)
     expect(placed.pin.right, `${width}: pin inside its tab`).toBeLessThanOrEqual(placed.tab.right + .5)
+    expect(placed.pin.bottom, `${width}: pin inside its tab`).toBeLessThanOrEqual(placed.tab.bottom + .5)
     if (placed.labelRight !== null) expect(Math.abs(placed.pin.x - placed.labelRight - 4), `${width}: four pixels after the label`).toBeLessThanOrEqual(1)
+    if (!placed.labelled) {
+      const midX = (placed.pin.x + placed.pin.right) / 2, midY = (placed.pin.y + placed.pin.bottom) / 2
+      expect(midX, `${width}: icon-only pin sits in the top-right`).toBeGreaterThan((placed.tab.x + placed.tab.right) / 2)
+      expect(midY, `${width}: icon-only pin sits in the top-right`).toBeLessThan((placed.tab.y + placed.tab.bottom) / 2)
+      expect(placed.pin.w, `${width}: 10–12 px glyph`).toBeGreaterThanOrEqual(10)
+      expect(placed.pin.h, `${width}: 10–12 px glyph`).toBeGreaterThanOrEqual(10)
+      expect(placed.pin.w, `${width}: 10–12 px glyph`).toBeLessThanOrEqual(12.5)
+      expect(placed.pin.h, `${width}: 10–12 px glyph`).toBeLessThanOrEqual(12.5)
+      expect(placed.background, `${width}: no disc`).toBe('rgba(0, 0, 0, 0)')
+      expect(placed.shadow, `${width}: no disc`).toBe('none')
+      const radius = Math.min(placed.tab.right - placed.tab.x, placed.tab.bottom - placed.tab.y) / 2
+      for (const [x, y] of [[placed.pin.x, placed.pin.y], [placed.pin.right, placed.pin.y], [placed.pin.x, placed.pin.bottom], [placed.pin.right, placed.pin.bottom]] as const) {
+        const cx = x < placed.tab.x + radius ? placed.tab.x + radius : placed.tab.right - radius
+        const cy = y < placed.tab.y + radius ? placed.tab.y + radius : placed.tab.bottom - radius
+        expect((x - cx) ** 2 + (y - cy) ** 2, `${width}: pin corner stays on the pill`).toBeLessThanOrEqual((radius + .75) ** 2)
+      }
+    }
     forms.push(`${width}-${placed.labelled ? 'labels' : 'icons'}`)
     await tablist.screenshot({ path: info.outputPath(`AEON-1453/session-tabs-${width}-${look}-${placed.labelled ? 'labels' : 'icons'}.png`) })
     if (placed.labelled || look === 'dark') continue
@@ -436,6 +473,87 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
     badge.done()
   }
   expect(forms, 'the narrowest phone shows icon-only tabs').toContain('320-icons')
+
+  // Chat can carry the pin and the unread count at once. The count stays where it was;
+  // the pin moves to the bottom-left inside the tab, and the two boxes never meet.
+  await page.setViewportSize({ width: 320, height: 700 })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.route('**/api/decision-desk*', route => {
+    const open = new URL(route.request().url()).searchParams.get('state') === 'open'
+    return route.fulfill({ json: { items: open ? [{
+      id: 'qqqqqqqq-0000-4000-8000-000000000099', project_id: 'p-pharos', revision: 1, state: 'open',
+      suggested_outcome: 'once', suggestion_reason: 'agent_suggestion', pending: [],
+      created_at: '2026-10-06T09:39:00Z', updated_at: '2026-10-06T09:39:00Z',
+      input: { request_id: 'ask-pin', session_id: LEAD_SESSION, question: 'Keep the count?', meanwhile: 'parked', recommend: 'yes',
+        options: [{ id: 'yes', title: 'Yes', description: 'Keep it.', answer: 'Yes' }] },
+      askers: [{ id: 'asker', principal_id: 'lead-agent', session_id: LEAD_SESSION, reply_root_id: '', comment_node_id: '',
+        input: { request_id: 'ask-pin', question: 'Keep the count?', options: [], meanwhile: 'parked' } }],
+    }] : [], has_more: false } })
+  })
+  await page.evaluate(async () => { await (await import('/src/stores/agentProjection.ts')).useAgentProjection().refresh() })
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  const count = chat.locator('.count')
+  await expect(count).toHaveText('1')
+  const countAt = await count.boundingBox()
+  const shared = await controlStability(page, { lead, details, chat, events })
+  await shared.check(async () => {
+    await chat.focus()
+    await page.keyboard.press('Shift+F10')
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Open here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual(['Chat'])
+  })
+  shared.done()
+  const countNow = await count.boundingBox()
+  expect(countAt && countNow, 'the unread count stays where it was').toBeTruthy()
+  expect(Math.abs(countNow!.x - countAt!.x), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  expect(Math.abs(countNow!.y - countAt!.y), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  expect(Math.abs(countNow!.width - countAt!.width), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  expect(Math.abs(countNow!.height - countAt!.height), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  const both = await chat.evaluate(tab => {
+    const pin = tab.querySelector('.view-pin')!.getBoundingClientRect()
+    const mark = tab.querySelector('.count')!.getBoundingClientRect()
+    const box = tab.getBoundingClientRect()
+    return {
+      pin: { x: pin.x, y: pin.y, right: pin.right, bottom: pin.bottom },
+      count: { x: mark.x, y: mark.y, right: mark.right, bottom: mark.bottom },
+      tab: { x: box.x, y: box.y, right: box.right, bottom: box.bottom },
+    }
+  })
+  expect(both.pin.x, '320: pin inside its tab').toBeGreaterThanOrEqual(both.tab.x - .5)
+  expect(both.pin.y, '320: pin inside its tab').toBeGreaterThanOrEqual(both.tab.y - .5)
+  expect(both.pin.right, '320: pin inside its tab').toBeLessThanOrEqual(both.tab.right + .5)
+  expect(both.pin.bottom, '320: pin inside its tab').toBeLessThanOrEqual(both.tab.bottom + .5)
+  expect((both.pin.x + both.pin.right) / 2, '320: shared pin sits bottom-left').toBeLessThan((both.tab.x + both.tab.right) / 2)
+  expect((both.pin.y + both.pin.bottom) / 2, '320: shared pin sits bottom-left').toBeGreaterThan((both.tab.y + both.tab.bottom) / 2)
+  const apart = both.pin.right <= both.count.x + .5 || both.count.right <= both.pin.x + .5 || both.pin.bottom <= both.count.y + .5 || both.count.bottom <= both.pin.y + .5
+  expect(apart, '320: pin and unread count never intersect').toBe(true)
+  expect(errors).toEqual([])
+})
+
+const WORKER_SESSION = 'aaaaaaaa-0000-4000-8000-000000000002'
+test('AEON-1453 worker panel: the last tab kept before the switch opens this visit and is never rewritten', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const errors = watchErrors(page)
+  const world = await leadPanel(page, { 'agents:session-panel': { last: 'chat' } })
+  const legacy: string[] = []
+  page.on('request', request => { if (preferencePut('agents:session-panel')(request)) legacy.push(request.postData() ?? '') })
+  await page.goto(`/agents/${WORKER_SESSION}`)
+  const details = panelTab(page, 'Details'), chat = panelTab(page, 'Chat')
+  await expect(panelOf(page)).toContainText('PHAROS-11')
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  expect(await pinOn(page), 'a worker panel has no default pin').toEqual([])
+  const put = saved(page, 'view:session-panel')
+  await details.click()
+  await put
+  expect(world.data.preferences['view:session-panel']).toEqual({ last: 'overview' })
+  expect(world.data.preferences['agents:session-panel']).toEqual({ last: 'chat' })
+  expect(legacy, 'the older last tab is read, never rewritten').toEqual([])
+  await page.reload()
+  await expect(details).toHaveAttribute('aria-selected', 'true')
+  expect(world.data.preferences['agents:session-panel']).toEqual({ last: 'chat' })
   expect(errors).toEqual([])
 })
 
