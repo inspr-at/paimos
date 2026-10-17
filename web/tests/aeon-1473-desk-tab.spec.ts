@@ -44,8 +44,8 @@ const T0 = Date.parse('2026-10-17T10:00:00Z')
 async function pauseClock(page: Page) { await page.clock.pauseAt(T0 + 20_000) }
 // A background tab reads the Desk once its last answer is a minute old. Jump the paused
 // clock past that minute in one step (timers due in between fire once, as after a closed
-// laptop lid); the header's poll wakes and clears the store too, and the read it drops is
-// asked for again. Nothing after the read (the two-second notice) runs until runFor.
+// laptop lid); the header's poll wakes and cancels the store's read too, and the read it
+// drops is asked for again. Nothing after the read (the two-second notice) runs until runFor.
 async function backgroundRead(page: Page, desk: { reads: number }) {
   const before = desk.reads
   await page.clock.fastForward(75_000)
@@ -133,7 +133,7 @@ test('AEON-1473: a background tab reads the Desk itself and says New decision fo
   await pauseClock(page)
   await recordTab(page)
   await hideTab(page)
-  // The header's poll stops in a background tab and clears the store; the count it read stays.
+  // The header's poll stops in a background tab and cancels the store's read; the count it read stays.
   await page.clock.runFor(5000)
   await expect(page).toHaveTitle(/^\(1\) Projects · /)
   desk.open = 2

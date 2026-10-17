@@ -90,6 +90,14 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
     })()
     return flight
   }
+  // A reader without the header's poll (the background tab, AEON-1473): the poll
+  // cancels this read when it wakes and keeps the count, so a cancelled read is
+  // asked for once more. A failed read is not; its failure stays counted.
+  async function refreshPastCancel(): Promise<boolean> {
+    const failed = failures.value
+    if (await refresh()) return true
+    return !!owner.value && failures.value === failed && refresh()
+  }
   // Live events open a three-second window and get one trailing read at its
   // end, after any read already running, so a burst refetches at most once per
   // window and its last event is still read. Explicit reads (Try again,
@@ -107,5 +115,5 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   const stopAccess = onAccessRevalidate({ reset: invalidate, refresh: () => { void refresh() } })
   const stopWakes = onProjectionWake(requestRefresh)
   onScopeDispose(() => { stopWakes(); stopAccess(); invalidate() })
-  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null) }
+  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null) }
 })

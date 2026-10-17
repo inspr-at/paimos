@@ -17838,6 +17838,8 @@
     ,
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"retired Business and compatibility URLs still resolve to their canonical owners, and external account links remain","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 asks a background read the header’s wake cancelled once more, keeping the count; a failed read is not asked again","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 coalesces a two-second burst of twenty live events into one trailing read, and Try again reads at once","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 keeps a cancelled first load quiet and a genuine first failure unknown","tier":"ESSENTIAL"}

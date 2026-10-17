@@ -135,6 +135,29 @@ it('AEON-1477 keeps a cancelled first load quiet and a genuine first failure unk
   expect(desk.count).toBeNull(); expect(desk.error).toContain('(500)'); expect(desk.failures).toBe(1)
 })
 
+// The background tab's reader (AEON-1473) has no poll of its own to retry: when the
+// header's poll wakes it cancels that read but keeps the count, and the read must still happen.
+it('AEON-1477 asks a background read the header’s wake cancelled once more, keeping the count; a failed read is not asked again', async () => {
+  vi.mocked(loadDeskProjection).mockResolvedValueOnce(page(1))
+  const { session, desk } = setup()
+  session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }
+  await desk.refresh(); expect(desk.count).toBe(1)
+  vi.mocked(loadDeskProjection)
+    .mockImplementationOnce(signal => new Promise((_, reject) => signal!.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')))))
+    .mockResolvedValueOnce(page(2))
+  const read = desk.refreshPastCancel()
+  expect(loadDeskProjection).toHaveBeenCalledTimes(2)
+  desk.cancelRefresh()
+  expect(desk.count).toBe(1)
+  expect(await read).toBe(true)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(3)
+  expect(desk.count).toBe(2); expect(desk.failures).toBe(0)
+  vi.mocked(loadDeskProjection).mockRejectedValueOnce(new Error('Decision Desk could not be read (500).'))
+  expect(await desk.refreshPastCancel()).toBe(false)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(4)
+  expect(desk.count).toBe(2); expect(desk.failures).toBe(1); expect(desk.error).toBe('')
+})
+
 it('AEON-1477 keeps a decided lesson learning so Undo can re-check it after the pending list drops it', () => {
   const learning: MethodLearning = {
     id: 'n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', source: 'ticket', node_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', key: 'AEON-1', title: 'Recovery failed during release',
