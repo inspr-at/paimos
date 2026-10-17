@@ -197,11 +197,19 @@ function click(event: MouseEvent) {
 .markdown-body :deep(.task-box:checked::after) { content: ''; width: 7px; height: 4px; border-left: 1.6px solid var(--surface); border-bottom: 1.6px solid var(--surface); transform: translateY(-1px) rotate(-45deg); }
 .markdown-body :deep(pre) { overflow: auto; margin: 0 0 1em; padding: 12px 14px; border-radius: var(--radius-s); background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
 .markdown-body :deep(code) { font-family: var(--mono); font-size: .92em; font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
-/* Inline code is a quiet tint that stays inside the line box; only code blocks keep a frame.
-   Block padding stays at most 1 px, the line-height is the parent's, and the chip sits on the baseline,
-   so a chip line is the same height as a line without one. The tint clones onto each wrapped fragment.
-   The prefixed break comes first: the minifier keeps the last spelling of a paired property. */
-.markdown-body :deep(:not(pre) > code) { padding-block: .5px; padding-inline: 4px; border-radius: 4px; background: var(--code-bg); -webkit-box-decoration-break: clone; box-decoration-break: clone; color: var(--ink); line-height: inherit; vertical-align: baseline; }
+/* Inline chips in prose (code, ticket keys) stay inside the line box: block padding at most 1 px, no
+   block margin or minimum height, the parent's line-height, on the baseline, so a chip line is the same
+   height as a line without one (AEON-1286). The tint clones onto each wrapped fragment. The prefixed
+   break comes first: the minifier keeps the last spelling of a paired property. */
+.markdown-body :deep(:not(pre) > code), .markdown-body :deep(.md-ticket > .inline) { display: inline; min-height: 0; margin-block: 0; padding-block: .5px; -webkit-box-decoration-break: clone; box-decoration-break: clone; line-height: inherit; vertical-align: baseline; }
+/* Inline code is a quiet tint; only code blocks keep a frame. */
+.markdown-body :deep(:not(pre) > code) { padding-inline: 4px; border-radius: 4px; background: var(--code-bg); color: var(--ink); }
+/* A key is one word. On a phone its link keeps a 44 px target that lies outside the layout. */
+.markdown-body :deep(.md-ticket > .inline) { white-space: nowrap; }
+@media (max-width: 600px) {
+  .markdown-body :deep(.md-ticket > a.inline) { position: relative; }
+  .markdown-body :deep(.md-ticket > a.inline::after) { content: ''; position: absolute; inset-inline: 0; top: 50%; height: 44px; translate: 0 -50%; }
+}
 .markdown-body :deep(pre code) { font-size: .88em; }
 /* A quote reads as typography: indented on a quiet tint, no coloured rule (rule 11). */
 .markdown-body :deep(blockquote) { margin: 0 0 1em 12px; padding: 8px 14px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); }
