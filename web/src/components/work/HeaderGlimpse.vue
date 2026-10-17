@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { projectSection } from './projectNavigation'
-import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide, nextHeaderGlimpseWide } from '../../lib/headerGlimpse'
+import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide } from '../../lib/headerGlimpse'
 import { filtersFromQuery, filtersToQuery, type ListFilters } from '../../lib/ticketList'
 import { ticketGraphData } from '../../lib/ticketGraphRenderer'
 import type { GraphData, GraphFPS } from '../../lib/graphRenderer'
@@ -91,14 +91,32 @@ function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.va
 function readWide() {
   return headerGlimpseViewportWide(window.matchMedia(wideMedia).matches, window.innerWidth)
 }
+// A delivered widen can precede innerWidth. Hold that long before a narrow
+// sample undoes it. A layout that is already below 1280 hides at once.
+const WIDEN_CATCHUP_MS = 120
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, layoutTimer = 0, narrowHold = 0
+function disarmLayoutWatch() {
+  if (!layoutTimer) return
+  window.clearInterval(layoutTimer)
+  layoutTimer = 0
+}
+// Resize, ResizeObserver and the wide-media change can all be missed, or they
+// can arrive before innerWidth moves. While the glimpse is on, keep reading
+// the live query and the layout so a later shrink still clears it.
+function armLayoutWatch() {
+  if (layoutTimer || !wide.value) return
+  layoutTimer = window.setInterval(() => { if (mounted) syncWide(); else disarmLayoutWatch() }, 50)
+}
 function syncWide() {
   const next = readWide()
-  if (wide.value !== next) wide.value = next
+  if (next) { narrowHold = 0; if (!wide.value) wide.value = true; return }
+  if (narrowHold > performance.now()) return
+  narrowHold = 0
+  if (wide.value) wide.value = false
 }
-let viewportWatch: ResizeObserver | undefined, viewportFrame = 0
 function followViewport() {
   syncWide()
-  if (viewportFrame) return
+  if (viewportFrame) cancelAnimationFrame(viewportFrame)
   let left = 2
   const tick = () => {
     syncWide()
@@ -107,11 +125,15 @@ function followViewport() {
   viewportFrame = requestAnimationFrame(tick)
 }
 function onWide(event: MediaQueryListEvent) {
-  // A delivered media change is authoritative while innerWidth catches up.
-  // Missing changes still use fresh query/layout samples over the next frames.
-  const next = nextHeaderGlimpseWide({ mediaMatches: event.matches, layoutWidth: window.innerWidth })
-  wide.value = next
-  if (next) scheduleMeasure()
+  const layoutWide = headerGlimpseViewportWide(true, window.innerWidth)
+  // A false delivery hides at once. A true delivery must not keep the glimpse
+  // once the layout is already narrow. A widen from narrow still turns on
+  // while innerWidth catches up.
+  if (!event.matches || (wide.value && !layoutWide)) { narrowHold = 0; wide.value = false; return }
+  narrowHold = layoutWide ? 0 : performance.now() + WIDEN_CATCHUP_MS
+  wide.value = true
+  scheduleMeasure()
+  if (layoutWide) followViewport()
 }
 // #main's scroll and the observer can disagree. A delivery may carry the
 // pre-scroll sample first, or the scroll may never be delivered. The box on
@@ -183,6 +205,7 @@ async function load() {
   } catch { /* A missing graph leaves the header as it was. */ }
 }
 watch(paint, value => emit('active', value))
+watch(wide, value => { if (value) armLayoutWatch(); else disarmLayoutWatch() })
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
   mounted = true
@@ -190,9 +213,11 @@ onMounted(() => {
   reducedQuery.addEventListener('change', onReduced)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('resize', onResize)
+  window.visualViewport?.addEventListener('resize', onResize)
   viewportWatch = new ResizeObserver(followViewport)
   viewportWatch.observe(document.documentElement)
   syncWide()
+  if (wide.value) armLayoutWatch()
   const start = () => { if (mounted) idle.value = true }
   if (typeof window.requestIdleCallback === 'function') idleId = window.requestIdleCallback(start, { timeout: 1500 })
   else requestAnimationFrame(() => requestAnimationFrame(start))
@@ -207,8 +232,10 @@ onBeforeUnmount(() => {
   changes?.disconnect()
   cancelAnimationFrame(measureFrame)
   cancelAnimationFrame(viewportFrame)
+  disarmLayoutWatch()
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
+  window.visualViewport?.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)
