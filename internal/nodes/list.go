@@ -1283,7 +1283,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		// Drive scoped lists from the tree. A membership subquery can rescan
 		// every scope ID for every candidate when the bulk-import statistics
 		// change, while a lateral ID lookup stays bounded per tree row.
-		from = `scope s CROSS JOIN LATERAL (
+		from = `scope level CROSS JOIN LATERAL unnest(level.ids) s(id) CROSS JOIN LATERAL (
             SELECT * FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND id=s.id OFFSET 0
         ) n`
 		// Keep kind lookup dependent on the node. Stale tenant statistics on
@@ -1323,16 +1323,16 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
 		}
 	}
-	// Keep child probes dependent on each parent and ordered by the existing
-	// parent/updated index. Without the order a common parent can favor a full
-	// scan repeated for every leaf; a free join also repeats broad scans when
-	// bulk-import statistics are absent.
-	return `WITH RECURSIVE scope(id) AS (
-        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
-            ORDER BY updated_at DESC OFFSET 0
-        ) c
+	// Expand one array of parents per level. A per-parent probe can repeat a
+	// full scan for every leaf with fresh statistics; a free join can compare
+	// all parents and children without statistics. ANY batches those probes
+	// while the sibling-index order keeps the no-statistics path indexed.
+	return `WITH RECURSIVE scope(ids) AS (
+        SELECT ARRAY(SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `)
+        UNION ALL SELECT ARRAY(
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=ANY(s.ids) AND deleted_at IS NULL
+            ORDER BY parent_id,position,id
+        ) FROM scope s WHERE cardinality(s.ids)>0
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
