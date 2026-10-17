@@ -513,6 +513,87 @@ func TestRequestBodyDeadlineResponsesAndStreaming(t *testing.T) {
 			t.Fatalf("second SSE chunk=%q err=%v", remaining, err)
 		}
 	})
+	// Risk: Server.ReadTimeout stays armed on a body-less HTTP/1.1 request, the
+	// keep-alive read times out, and net/http cancels the handler while the
+	// response is still live. The barrier is the handler blocked after the
+	// first chunk; the wait is that server deadline, and the longer timeout
+	// only guards a hang. Cancellation must lose to the barrier.
+	t.Run("stream outlives read timeout", func(t *testing.T) {
+		const readTimeout = 200 * time.Millisecond
+		for _, route := range []struct {
+			method, pattern, path string
+		}{
+			{http.MethodGet, "GET /api/events/stream", "/api/events/stream"},
+			{http.MethodPost, "POST /api/projects/{projectId}/delivery/merge-backfill", "/api/projects/project/delivery/merge-backfill"},
+		} {
+			t.Run(route.method+" "+route.path, func(t *testing.T) {
+				release := make(chan struct{})
+				entered := make(chan struct{})
+				cancelled := make(chan struct{}, 1)
+				s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+					mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {
+						if _, hasDeadline := r.Context().Deadline(); hasDeadline {
+							t.Error("live handler retained the ordinary request deadline")
+						}
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = io.WriteString(w, "data: first\n\n")
+						_ = http.NewResponseController(w).Flush()
+						close(entered)
+						select {
+						case <-release:
+							_, _ = io.WriteString(w, "data: second\n\n")
+						case <-r.Context().Done():
+							cancelled <- struct{}{}
+						}
+					})
+				})}}
+				server := httptest.NewUnstartedServer(s.Handler())
+				server.Config.ReadHeaderTimeout = time.Second
+				server.Config.ReadTimeout = readTimeout
+				server.Config.IdleTimeout = time.Minute
+				server.Start()
+				defer server.Close()
+				request, err := http.NewRequest(route.method, server.URL+route.path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := server.Client()
+				client.Timeout = 5 * time.Second // Hang guard, not timing evidence.
+				response, err := client.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				if response.Proto != "HTTP/1.1" {
+					t.Fatalf("protocol=%s, want HTTP/1.1", response.Proto)
+				}
+				reader := bufio.NewReader(response.Body)
+				if line, err := reader.ReadString('\n'); err != nil || line != "data: first\n" {
+					t.Fatalf("first chunk=%q err=%v", line, err)
+				}
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("handler did not reach the stream barrier; hang guard")
+				}
+				select {
+				case <-cancelled:
+					t.Fatal("live response context cancelled by Server.ReadTimeout")
+				case <-time.After(2 * readTimeout):
+				}
+				close(release)
+				remaining, err := io.ReadAll(reader)
+				if err != nil || string(remaining) != "\ndata: second\n\n" {
+					t.Fatalf("second chunk=%q err=%v", remaining, err)
+				}
+				select {
+				case <-cancelled:
+					t.Fatal("live response context cancelled after the read timeout")
+				default:
+				}
+			})
+		}
+	})
 }
 
 type observedDeadlineWriter struct {
