@@ -4,12 +4,15 @@ package goals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const maxListBytes = 32 << 20
@@ -171,6 +174,18 @@ func (b listBudget) fits() bool {
 	return len(b.events) <= maxSeriesEvents && bytes <= maxListBytes
 }
 
+// A failed work scope is monotonic in its root set within this fenced read.
+// Retain only already visibility-filtered identities/counts emitted before the
+// scope error, so retries can avoid repeating a known over-budget traversal.
+type listScopeFailure struct {
+	cause error
+	roots map[string][]string
+	bases map[string]GoalView
+}
+
+func (e *listScopeFailure) Error() string { return e.cause.Error() }
+func (e *listScopeFailure) Unwrap() error { return e.cause }
+
 type listPageData struct {
 	goals     map[string]GoalView
 	children  map[string][]storedNode
@@ -214,6 +229,26 @@ func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 		}
 	}
 	if err := rows.Err(); err != nil {
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == "54000" && strings.HasPrefix(pg.Message, "work scope ") && len(d.goals) == len(ids) {
+			roots := map[string][]string{}
+			for _, id := range ids {
+				set := map[string]bool{}
+				for _, child := range d.children[id] {
+					for _, root := range child.Targets {
+						if d.work[root] {
+							set[root] = true
+						}
+					}
+				}
+				roots[id] = []string{}
+				for root := range set {
+					roots[id] = append(roots[id], root)
+				}
+				sort.Strings(roots[id])
+			}
+			return nil, &listScopeFailure{cause: err, roots: roots, bases: d.goals}
+		}
 		return nil, err
 	}
 	out := []GoalView{}
@@ -431,59 +466,129 @@ func (d *listPageData) read(section, id string, raw []byte, w Watermark) error {
 func readGoalList(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []storedNode, now time.Time, w Watermark) ([]GoalView, error) {
 	out := []GoalView{}
 	responseBytes := 0
+	knownRoots := map[string][]string{}
+	bases := map[string]GoalView{}
+	failedSets := []map[string]bool{}
+	appendValues := func(values []GoalView) error {
+		for _, g := range values {
+			raw, err := json.Marshal(g)
+			if err != nil {
+				return err
+			}
+			responseBytes += len(raw)
+			if responseBytes > maxListBytes {
+				return fail(413, "goals: narrow project/group filters to fit the list byte budget")
+			}
+		}
+		out = append(out, values...)
+		return nil
+	}
+	knownFailure := func(nodes []storedNode) bool {
+		union := map[string]bool{}
+		for _, n := range nodes {
+			roots, ok := knownRoots[n.ID]
+			if !ok {
+				return false
+			}
+			for _, root := range roots {
+				union[root] = true
+			}
+		}
+		for _, failed := range failedSets {
+			contains := true
+			for root := range failed {
+				if !union[root] {
+					contains = false
+					break
+				}
+			}
+			if contains {
+				return true
+			}
+		}
+		return false
+	}
 	var load func([]storedNode) error
 	load = func(nodes []storedNode) error {
 		ids := make([]string, len(nodes))
 		for i, n := range nodes {
 			ids[i] = n.ID
 		}
-		nested, err := tx.Begin(ctx)
-		if err != nil {
-			return err
-		}
-		values, err := loadListPage(ctx, nested, p, ids, now, w)
-		if err == nil {
-			if err := nested.Commit(ctx); err != nil {
-				return err
+		var values []GoalView
+		var err error
+		if knownFailure(nodes) {
+			err = fail(413, "known work scope budget exceeded")
+		} else {
+			nested, beginErr := tx.Begin(ctx)
+			if beginErr != nil {
+				return beginErr
 			}
-			for _, g := range values {
-				raw, err := json.Marshal(g)
-				if err != nil {
+			values, err = loadListPage(ctx, nested, p, ids, now, w)
+			if err == nil {
+				if err := nested.Commit(ctx); err != nil {
 					return err
 				}
-				responseBytes += len(raw)
-				if responseBytes > maxListBytes {
-					return fail(413, "goals: narrow project/group filters to fit the list byte budget")
-				}
+			} else if rollback := nested.Rollback(ctx); rollback != nil {
+				return rollback
 			}
-			out = append(out, values...)
-			return nil
 		}
-		if rollback := nested.Rollback(ctx); rollback != nil {
-			return rollback
+		if err == nil {
+			return appendValues(values)
 		}
 		if !tooLarge(err) {
 			return err
 		}
+		var scope *listScopeFailure
+		if errors.As(err, &scope) {
+			failed := map[string]bool{}
+			for id, roots := range scope.roots {
+				knownRoots[id] = roots
+				bases[id] = scope.bases[id]
+				for _, root := range roots {
+					failed[root] = true
+				}
+			}
+			if len(failed) > 0 {
+				failedSets = append(failedSets, failed)
+			}
+			// Isolate the largest contribution first. Learned failures then prune
+			// unions containing it, without another database traversal.
+			nodes = append([]storedNode{}, nodes...)
+			sort.Slice(nodes, func(i, j int) bool {
+				a, b := len(knownRoots[nodes[i].ID]), len(knownRoots[nodes[j].ID])
+				if a == b {
+					return nodes[i].ID < nodes[j].ID
+				}
+				return a > b
+			})
+		}
 		if len(nodes) > 1 {
+			if scope != nil {
+				if err := load(nodes[:1]); err != nil {
+					return err
+				}
+				return load(nodes[1:])
+			}
 			mid := len(nodes) / 2
 			if err := load(nodes[:mid]); err != nil {
 				return err
 			}
 			return load(nodes[mid:])
 		}
-		g, err := baseGoal(nodes[0], w)
-		if err != nil {
-			return err
+		g, ok := bases[nodes[0].ID]
+		if !ok {
+			g, err = baseGoal(nodes[0], w)
+			if err != nil {
+				return err
+			}
+			err = tx.QueryRow(ctx, `SELECT count(DISTINCT o.id)::int,count(DISTINCT r.target_node_id)::int FROM nodes o JOIN node_kinds k ON k.tenant_id=o.tenant_id AND k.id=o.kind_id AND k.slug='outcome' LEFT JOIN node_relations r ON r.source_node_id=o.id AND r.type='serves' WHERE o.parent_id=$1 AND o.deleted_at IS NULL`, g.ID).Scan(&g.Counts.Outcomes, &g.Counts.Tickets)
+			if err != nil {
+				return err
+			}
 		}
 		g.Expansion = "too_large"
 		g.budget = newListBudget()
-		err = tx.QueryRow(ctx, `SELECT count(DISTINCT o.id)::int,count(DISTINCT r.target_node_id)::int FROM nodes o JOIN node_kinds k ON k.tenant_id=o.tenant_id AND k.id=o.kind_id AND k.slug='outcome' LEFT JOIN node_relations r ON r.source_node_id=o.id AND r.type='serves' WHERE o.parent_id=$1 AND o.deleted_at IS NULL`, g.ID).Scan(&g.Counts.Outcomes, &g.Counts.Tickets)
-		if err != nil {
-			return err
-		}
-		out = append(out, g)
-		return nil
+		return appendValues([]GoalView{g})
 	}
 	for len(nodes) > 0 {
 		n := min(100, len(nodes))
