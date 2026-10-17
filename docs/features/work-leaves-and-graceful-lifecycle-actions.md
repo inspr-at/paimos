@@ -27,7 +27,8 @@ the full two hours. Confirmed stops release immediately; live sessions and unkno
 reasons keep their holds. Expiry changes no closure, lease or historical binding
 and never proves process exit. Bindings of an unconfirmed generation cannot
 detach or move away while
-its work action is pending. The same generation may revive and finish handover.
+its work action is pending. A stopped generation cannot revive using its old
+lease; the same worker may still confirm exit and settle usage.
 Cooperative wrap-up delivery expires after ten minutes. **Check handover** and
 the background worker retry expired delivery under the original person's current
 authority, with an audit trail, while retaining the fence. Retries never escalate

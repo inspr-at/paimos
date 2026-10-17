@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/views"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/yaml.v3"
@@ -287,6 +288,17 @@ func TestProjectLeadLostContactDoesNotPermitSuccession(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='heartbeat_lost',phase='stopped' WHERE id=$1`, session)
 		return err
 	})
+	for _, headers := range []map[string]string{
+		{"X-Aeon-Worker-Lease": lease},
+		{"Authorization": workerlease.Value(f.key, lease)},
+	} {
+		stoppedPause := f.call(f.agent, "POST", base+"/lead/pause", map[string]any{"expected_revision": l["revision"], "generation": l["generation"]}, "", headers)
+		expect(t, stoppedPause, 403)
+		if decode(t, stoppedPause)["error"] != "current lead worker proof required" {
+			t.Fatal("stopped lead refused for wrong reason")
+		}
+	}
+
 	next, nextLease, nextBody := leadCandidate(t, f)
 	nextBody["succeeds_session_id"] = session
 	expect(t, f.call(f.person, "POST", base+"/harness-sessions", nextBody, ""), 409)

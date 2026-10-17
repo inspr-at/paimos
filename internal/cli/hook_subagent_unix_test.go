@@ -103,14 +103,14 @@ func newSubagentFixture(t *testing.T, shape string) *subagentFixture {
 			if body["activity_sequence"] != float64(f.childSequences[id]) || body["phase"] != "working" {
 				t.Error("heartbeat did not use a monotonically increasing activity sequence")
 			}
-			if f.childSessions[id] == nil || r.Header.Get("X-Aeon-Worker-Lease") != f.childSessions[id]["worker_lease"] {
+			if f.childSessions[id] == nil || receivedWorkerLease(r) != f.childSessions[id]["worker_lease"] {
 				t.Error("heartbeat lost child proof")
 			}
 			fmt.Fprint(w, `{}`)
 		case "POST " + harnessPath(transcriptProjectID, indexAeonAlt) + "/stop", "POST " + harnessPath(transcriptProjectID, hookMessageID) + "/stop":
 			f.stops++
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, harnessPath(transcriptProjectID, "")+"/"), "/stop")
-			if f.childSessions[id] == nil || r.Header.Get("X-Aeon-Worker-Lease") != f.childSessions[id]["worker_lease"] {
+			if f.childSessions[id] == nil || receivedWorkerLease(r) != f.childSessions[id]["worker_lease"] {
 				t.Error("stop lost child proof")
 			}
 			if f.failStop {

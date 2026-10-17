@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 func (f *fixture) grantSend(t *testing.T) {
@@ -172,7 +173,8 @@ func TestAgentdRelayReachesViewerAndPersistsFinalOnce(t *testing.T) {
 	f.bind(t, f.alice, thread, session, "0")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := f.alice
-		if r.Header.Get("Authorization") == "Bearer "+f.key {
+		auth := r.Header.Get("Authorization")
+		if auth == "Bearer "+f.key || auth == workerlease.Value(f.key, lease) {
 			p = f.agent
 		}
 		f.mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), p)))

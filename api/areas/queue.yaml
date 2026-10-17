@@ -53,7 +53,8 @@ paths:
       parameters:
         - {in: header, name: X-Aeon-Lead-Session, required: false, schema: {type: string, format: uuid}, description: Required for projects with an explicit lead intent; the current lead must prove its session lease. Legacy manual routing in unconfigured projects remains compatible.}
         - {in: header, name: X-Aeon-Lead-Generation, required: false, schema: {type: integer, minimum: 1}, description: Exact current project lead generation. All mandatory start checks are repeated; unavailable checks return an admission wait.}
-        - {in: header, name: X-Aeon-Worker-Lease, required: false, schema: {type: string, minLength: 32, maxLength: 256}}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:

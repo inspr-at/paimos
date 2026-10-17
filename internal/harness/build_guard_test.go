@@ -410,7 +410,7 @@ func TestTicketBuilderAdmissionRaceBindingRevivalAndQueue(t *testing.T) {
 	replacement := f.call(f.agent, "POST", base, secondBody, "")
 	expect(t, replacement, 201)
 	replacementID := decode(t, replacement)["id"].(string)
-	buildRefusal(t, f.call(f.agent, "POST", base+"/"+id+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, firstBody["worker_lease"].(string)), "active_builder")
+	expect(t, f.call(f.agent, "POST", base+"/"+id+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, firstBody["worker_lease"].(string)), 403)
 	expect(t, f.call(f.agent, "POST", base+"/"+replacementID+"/stop", map[string]any{"reason": "process_exited"}, secondBody["worker_lease"].(string)), 200)
 	afterStop := f.call(f.agent, "POST", base, buildRegistration(f, "after stop"), "")
 	expect(t, afterStop, 201)

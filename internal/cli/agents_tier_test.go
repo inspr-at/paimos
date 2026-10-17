@@ -23,7 +23,7 @@ func TestAgentsTierShowSetAsk(t *testing.T) {
 				t.Error("invalid body")
 			}
 			posted = append(posted, body)
-			if r.Header.Get("X-Aeon-Worker-Lease") != "" {
+			if receivedWorkerLease(r) != "" {
 				t.Error("ask exposed a daemon lease")
 			}
 			w.WriteHeader(201)

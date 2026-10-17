@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // SessionAuthority is host-owned session state, never supplied by the caller.
@@ -74,7 +75,12 @@ func (m *Module) delegated(next http.HandlerFunc, capability string) http.Handle
 			writeError(w, http.StatusForbidden, "only a person session may accept a draft")
 			return
 		}
-		if ok && strings.EqualFold(scheme, "Bearer") && strings.HasPrefix(raw, "aeon_") {
+		agentKey, malformed := workerlease.AgentToken(header)
+		if malformed {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		if strings.HasPrefix(agentKey, "aeon_") {
 			next(w, r)
 			return
 		}

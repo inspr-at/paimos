@@ -37,6 +37,7 @@
       "title": "Identity, authz and the security core",
       "paths": [
         "internal/auth/**",
+        "internal/workerlease/**",
         "internal/authz/**",
         "internal/db/migrations/1355_authenticated_review_runs.sql",
         "internal/db/migrations/1356_delivery_admission.sql",
