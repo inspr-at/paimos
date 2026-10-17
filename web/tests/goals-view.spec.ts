@@ -150,6 +150,16 @@ async function openGoals(page: Page, w: World, path = '/?view=goals') {
 }
 const goalRow = (page: Page, id: string) => page.locator(`.goal[data-goal-id="${id}"]`)
 const box = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom } })
+// The words a person can see in a control: text whose element is rendered and not visibility-hidden.
+const visibleWords = (locator: Locator) => locator.evaluate(el => {
+  const words: string[] = []
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent?.trim(), parent = node.parentElement!
+    if (text && parent.getClientRects().length && getComputedStyle(parent).visibility === 'visible') words.push(text)
+  }
+  return words
+})
 async function shot(page: Page, info: TestInfo, name: string) { await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true }) }
 
 // ---------- Decisions 1 and 2: the third segment and its toolbar ----------
@@ -494,7 +504,8 @@ test('September lands as Sep, a flat pace says no change, and hidden columns sor
           await pick('Moving')
           await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving')
           await expect(display).not.toHaveAttribute('data-sort-dir')
-          await expect(display.locator('.sort-state')).toHaveCount(0)
+          await expect(display.locator('.sort-state.shown')).toBeHidden()
+          expect(await visibleWords(display)).toEqual(['Display'])
           await expect(page.getByRole('button', { name: 'Sort by moving, now descending' })).toHaveAttribute('data-sort-dir', 'desc')
         })
       } else {
@@ -502,38 +513,68 @@ test('September lands as Sep, a flat pace says no change, and hidden columns sor
         await expect(headers.first()).toBeHidden()
         const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
         const neighbors = width <= 760 ? { search, views, more } : { search, views }
-        if (width > 900) {
-          const guard = await controlStability(page, { display, ...neighbors })
-          await guard.check(async () => {
-            await pick('Moving')
-            await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving, now descending')
-            await expect(display).toHaveAttribute('data-sort-dir', 'desc')
-            await expect(display.locator('.sort-state')).toBeVisible()
-            await expect(display.locator('.sort-state')).toContainText('Moving')
-          })
-          await guard.check(async () => { await pick('Queued'); await expect(display.locator('.sort-state')).toContainText('Queued') })
-          await guard.check(async () => { await pick('Done'); await expect(display.locator('.sort-state')).toContainText('Done') })
-        } else {
-          const before = await box(display)
-          const guard = await controlStability(page, neighbors)
-          await guard.check(async () => {
-            await pick('Moving')
-            await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving, now descending')
-            await expect(display).toContainText('Moving')
-          })
-          const grown = await box(display)
-          expect(Math.abs(grown.right - before.right), 'display.right').toBeLessThanOrEqual(0.5)
-          expect(grown.height).toBeGreaterThanOrEqual(44)
-          const stable = await controlStability(page, { display, ...neighbors })
-          await stable.check(async () => { await pick('Queued'); await expect(display.locator('.sort-state')).toContainText('Queued') })
-          await stable.check(async () => { await pick('Done'); await expect(display.locator('.sort-state')).toContainText('Done') })
+        // Phones hide every header, so Display names every sort there; wider, only the hidden counts.
+        expect(await visibleWords(display)).toEqual([width <= 760 ? 'ETA' : 'Display'])
+        const guard = await controlStability(page, { display, ...neighbors })
+        await guard.check(async () => {
+          await pick('Moving')
+          await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving, now descending')
+          await expect(display).toHaveAttribute('data-sort-dir', 'desc')
+          await expect(display.locator('.sort-name')).toHaveText('Moving')
+          expect(await visibleWords(display)).toEqual(['Moving'])
+        })
+        for (const name of ['Queued', 'Done']) {
+          await guard.check(async () => { await pick(name); await expect(display.locator('.sort-name')).toHaveText(name); expect(await visibleWords(display)).toEqual([name]) })
         }
+        expect((await box(display)).height).toBeGreaterThanOrEqual(width <= 760 ? 44 : 28)
+        guard.done()
       }
       await expect(menu).toBeVisible()
       await page.keyboard.press('Escape')
       await expect(menu).toHaveCount(0)
       await shot(page, info, `goals-fix3-${width}-${colorScheme}`)
     }
+  }
+})
+
+// ---------- Fix round 4: one Display box through every sort and view ----------
+test('Display keeps one box through every sort at 1024, 820 and 390, shows only the active name, and a view switch never moves it', async ({ page }, info) => {
+  const SORTS = ['Name', 'Progress', 'Project', 'Moving', 'Queued', 'Done', 'ETA']
+  const COUNTS = new Set(['Moving', 'Queued', 'Done'])
+  for (const [width, height] of [[1024, 800], [820, 1180], [390, 844]] as const) {
+    await page.setViewportSize({ width, height })
+    const w = world()
+    delete w.data.preferences.goals
+    await openGoals(page, w)
+    const display = page.locator('.display-btn')
+    const search = page.locator('.project-search')
+    const views = page.locator('.view-seg')
+    const phone = width <= 760
+    const neighbors = phone ? { search, views, more: page.getByRole('button', { name: 'More: state filter, hide done, expand all' }) } : { search, views }
+    await display.click()
+    const menu = page.getByRole('dialog', { name: 'Display options' })
+    await expect(menu).toBeVisible()
+    const guard = await controlStability(page, { display, ...neighbors })
+    for (const name of SORTS) {
+      await guard.check(async () => {
+        await menu.getByRole('radio', { name, exact: true }).click()
+        await expect(menu.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true')
+        // Only the active words are visible: never a sizing copy underneath.
+        const shows = phone || COUNTS.has(name)
+        await expect.poll(() => visibleWords(display), `${width}: ${name}`).toEqual([shows ? name : 'Display'])
+        if (shows) await expect(display).toHaveAttribute('aria-label', new RegExp(`^Display, sorted by ${name === 'ETA' ? 'ETA' : name.toLowerCase()}, now (a|de)scending$`))
+      })
+    }
+    guard.done()
+    await shot(page, info, `goals-fix4-${width}`)
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    if (phone) continue
+    // Below 1200 px Display has the same box in all three views, so the view switch stays under the pointer.
+    await guard.check(async () => { await page.getByRole('radio', { name: 'List view' }).click(); await expect(page.getByRole('searchbox', { name: 'Filter projects' })).toBeVisible() })
+    expect(await visibleWords(display)).toEqual(['Display'])
+    await guard.check(async () => { await page.getByRole('radio', { name: 'Cards view' }).click(); await expect(page.getByRole('radio', { name: 'Cards view' })).toHaveAttribute('aria-checked', 'true') })
+    await guard.check(async () => { await page.getByRole('radio', { name: 'Goals view' }).click(); await expect(page.locator('.goal-list .goal').first()).toBeVisible() })
   }
 })
 

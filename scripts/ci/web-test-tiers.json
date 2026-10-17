@@ -9122,6 +9122,8 @@
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"390 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"Display keeps one box through every sort at 1024, 820 and 390, shows only the active name, and a view switch never moves it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"Goals is the third segment; the filter and group chips stay put; chips count items and add up; Hide done and E never move a control","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"September lands as Sep, a flat pace says no change, and hidden columns sort from Display","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

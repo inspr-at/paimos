@@ -21,7 +21,10 @@ default, and `?view=goals` once.
   these controls take the toolbar's second row. Display sorts by ETA, name,
   progress, project, moving, queued or done. Below 1200 px the Moving, Queued
   and Done headers hide, and while one of those sorts the list, Display's
-  trigger shows that sort and its direction.
+  trigger shows that sort and its direction. Phones hide every header, so there
+  the trigger always shows the sort and its direction. The trigger keeps one size
+  through every sort, and below 1200 px the same size in List, Cards and Goals,
+  so neither a sort nor a view switch moves a control.
 - **Waiting on you** lists the person's live Decision Desk items from the same
   projection as the header badge: the count, at most three first lines
   (project key · question · goal, or the project when the question is not attached

@@ -170,14 +170,18 @@ const GOAL_SORTS: { value: GoalSort; label: string; phrase: string; icon: IconNa
   { value: 'done', label: 'Done', phrase: 'done', icon: 'check' },
 ]
 const goalSortMeta = computed(() => GOAL_SORTS.find(s => s.value === goals.sort.value) ?? { value: goals.sort.value, label: goals.sort.value, phrase: goals.sort.value, icon: 'sort' as IconName })
-// Moving, Queued and Done headers hide at 1199 px. While one of them sorts the list, Display carries that label and direction.
+// Moving, Queued and Done headers hide at 1199 px and phones hide every header. While a hidden
+// header sorts the list, Display carries that label and direction in a box sized for the widest.
 const STAT_SORTS = new Set<GoalSort>(['moving', 'queued', 'done'])
 const statsQuery = window.matchMedia('(max-width: 1199px)')
 const statsNarrow = ref(statsQuery.matches)
 const statsChange = () => { statsNarrow.value = statsQuery.matches }
 statsQuery.addEventListener('change', statsChange)
-const goalHoldsSort = computed(() => view.value === 'goals' && statsNarrow.value)
-const goalSortHidden = computed(() => goalHoldsSort.value && STAT_SORTS.has(goals.sort.value))
+const phoneQuery = window.matchMedia('(max-width: 760px)')
+const phone = ref(phoneQuery.matches)
+const phoneChange = () => { phone.value = phoneQuery.matches }
+phoneQuery.addEventListener('change', phoneChange)
+const goalSortHidden = computed(() => view.value === 'goals' && (phone.value || (statsNarrow.value && STAT_SORTS.has(goals.sort.value))))
 const display = computed(() => view.value === 'goals'
   ? { icon: goalSortMeta.value.icon, phrase: goalSortMeta.value.phrase, on: !(goals.sort.value === 'eta' && goals.dir.value === 'asc'), tip: `Sorted by ${goalSortMeta.value.phrase} · sort` }
   : { icon: sortMeta.value.icon, phrase: sortMeta.value.phrase, on: sort.value !== 'activity', tip: `Sorted by ${sortMeta.value.phrase} · ${view.value === 'list' ? 'sort and columns' : 'sort'}` })
@@ -194,10 +198,6 @@ const own = (ids: PickerColumn[]) => ids.filter((id): id is ProjectColumnId => !
 const listWidth = ref(0)
 let sizer: ResizeObserver | undefined
 // Phones stack each row (progress, the three counts and the time always show).
-const phoneQuery = window.matchMedia('(max-width: 760px)')
-const phone = ref(phoneQuery.matches)
-const phoneChange = () => { phone.value = phoneQuery.matches }
-phoneQuery.addEventListener('change', phoneChange)
 const columns = computed<ProjectColumnId[]>(() => phone.value ? ['open', 'doing', 'done', 'progress', 'activity'] : fittingProjectColumns(listWidth.value, columnPrefs.value))
 const pickerColumns = computed(() => ({
   order: [...PINNED_COLUMNS, ...projectColumnOrder(columnPrefs.value)] as PickerColumn[],
@@ -948,9 +948,11 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         <span class="tools">
           <ViewSwitch class="view-seg" look="seg" label="View" :options="viewOptions" :selected="view" :default-id="viewSwitch.defaultId.value" @select="setView" @set-default="viewSwitch.setDefault" />
           <button
-            type="button" class="btn sm display-btn" :class="{ on: display.on, 'shows-sort': goalSortHidden }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="displayAria"
+            type="button" class="btn sm display-btn" :class="{ on: display.on }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="displayAria"
             :data-tip="display.tip" :data-sort="view === 'goals' ? goals.sort.value : sort" :data-sort-dir="goalSortHidden ? goals.dir.value : undefined" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
-          ><AppIcon :name="display.icon" :size="14" class="sort-icon" /><span class="display-words" :class="{ 'holds-sort': goalHoldsSort, showing: goalSortHidden }"><span class="display-label">Display</span><span v-if="goalHoldsSort" class="sort-state"><AppIcon :name="goals.dir.value === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" class="sort-arrow" /><span class="sort-names"><span class="sizer" aria-hidden="true">Queued</span><span>{{ goalSortMeta.label }}</span></span></span></span><AppIcon name="chevron" :size="12" class="chev" /></button>
+          ><AppIcon :name="display.icon" :size="14" class="sort-icon" /><span class="display-words" :class="{ showing: goalSortHidden }"><span class="display-label">Display</span><span
+            v-for="option in GOAL_SORTS" :key="option.value" class="sort-state sizer" :class="{ count: STAT_SORTS.has(option.value) }" aria-hidden="true"
+          ><AppIcon name="arrow-down" :size="11" class="sort-arrow" /><span>{{ option.label }}</span></span><span v-if="view === 'goals'" class="sort-state shown"><AppIcon :name="goals.dir.value === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" class="sort-arrow" /><span class="sort-name">{{ goalSortMeta.label }}</span></span></span><AppIcon name="chevron" :size="12" class="chev" /></button>
           <GoalsToolbar v-if="view === 'goals'" :page="goals" part="more" />
         </span>
         <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="290" :tallest="640" align="end" label="Display options" @close="closeDisplay">
@@ -1085,14 +1087,17 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .display-btn { gap: 6px; color: var(--ink-2); }
 .display-btn .sort-icon { flex-shrink: 0; }
 .display-btn.on .sort-icon { color: var(--teal-ink); }
-/* "Display" and the hidden-column sort share one box, so picking Moving, Queued or Done never moves the button. */
-.display-words.holds-sort { display: inline-grid; align-items: center; }
-.display-words.holds-sort > .display-label, .display-words.holds-sort > .sort-state { grid-area: 1 / 1; justify-self: start; }
-.display-words.holds-sort:not(.showing) > .sort-state, .display-words.holds-sort.showing > .display-label { visibility: hidden; }
-.sort-state { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+/* "Display" and the sort of a hidden header share one box, sized by invisible copies of the
+   widest sort, so picking a sort never resizes the button. Below 1200 px the box is the same in
+   all three views, so a view switch never moves the view switch either. */
+.display-words { display: inline-grid; align-items: center; justify-items: center; }
+.display-words > * { grid-area: 1 / 1; }
+.display-words > .sort-state { display: none; }
+.sort-state { align-items: center; gap: 4px; white-space: nowrap; }
+.sort-state.sizer, .display-words.showing > .display-label { visibility: hidden; }
 .sort-arrow { flex: none; }
-.sort-names { display: inline-grid; }
-.sort-names > span { grid-area: 1 / 1; }
+.display-btn.on .sort-arrow { color: var(--teal-ink); }
+@media (max-width: 1199px) { .display-words.showing > .sort-state.shown, .display-words > .sort-state.sizer.count { display: inline-flex; } }
 .chev { color: var(--ink-3); }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .sort-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
@@ -1119,13 +1124,6 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .state p { font-size: 13.5px; }
 .state .btn { margin-top: 10px; }
 @media (max-width: 1100px) { .view-seg :deep(.tab-label) { display: none; } .view-seg :deep(button) { padding: 0 8px; } }
-@media (max-width: 900px) {
-  .display-label { display: none; }
-  .display-btn { padding: 0 9px; }
-  /* The word Display is already gone; keep the icon button until a hidden column is the sort. */
-  .display-words.holds-sort:not(.showing) > .sort-state { display: none; }
-  .display-btn.shows-sort { padding: 0 10px; }
-}
 @media (max-width: 760px) {
   .projects-page { padding: 14px 12px 28px; }
   .page-head { margin-bottom: 14px; padding: 0 4px; }
@@ -1137,6 +1135,12 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
   .tools { justify-content: space-between; }
   .view-goals .tools { justify-content: flex-start; }
   .view-goals .display-btn { margin-left: auto; }
+  /* List and Cards keep the icon button. Goals hide every header here, so Display always names
+     the sort: the arrow and the name take the icon's place, in a box sized for the widest name. */
+  .projects-page:not(.view-goals) .display-words { display: none; }
+  .projects-page:not(.view-goals) .display-btn { padding: 0 9px; }
+  .view-goals .display-btn .sort-icon, .view-goals .display-label { display: none; }
+  .view-goals .display-words > .sort-state.sizer { display: inline-flex; }
   .view-seg :deep(button) { height: 44px; min-width: 48px; }
   .display-btn { height: 44px; min-width: 44px; }
   .cards-area { margin-top: 16px; }
