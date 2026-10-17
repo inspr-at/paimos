@@ -134,7 +134,7 @@ func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpapi.WriteError(w, 500, "decision desk could not be read")
+		httpapi.WriteInternalError(w, r, "decision_desk", err, "decision desk could not be read")
 		return
 	}
 	httpapi.WriteJSON(w, 200, page)

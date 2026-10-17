@@ -219,11 +219,15 @@ test('agents 390: a refresh after one 40 px swipe lands without moving the rows 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} 390: the footer folds away over the page; the page's scroller never changes size while scrolling`, async ({ page }, info) => {
     const { cdp } = await openAgents(page, theme)
-    // Reading mid-page with the footer showing: back up a little after the jump down folded it.
+    const footer = page.locator('.app-footer')
+    // Native scroll delivery runs outside the injected clock. Observe the setup jump's
+    // fold before advancing its cooldown, or a late scroll can start the cooldown only
+    // after runFor returns and swallow the reverse scroll (AEON-1477, CI on Linux).
+    await expect(footer).toHaveClass(/hidden/)
     await page.clock.runFor(400)
+    // Reading mid-page with the footer showing: back up after the jump's cooldown.
     await page.locator('main').evaluate(el => { el.scrollTop -= 80 })
     await watchTouch(page, SESSION_ROWS)
-    const footer = page.locator('.app-footer')
     await expect(footer).not.toHaveClass(/hidden/)
     await expect(footer).toBeInViewport()
     // Showing it starts a 260 ms cooldown. Advance the injected clock before reversing again.

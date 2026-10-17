@@ -7280,6 +7280,8 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestClassicAPIPathsAreGone","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestClientCancellationIs499InsteadOfServerFailure","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestHTTPReadDeadlineOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHTTPRequestBodyOwnership","tier":"ESSENTIAL"}

@@ -6,7 +6,7 @@ import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
-import { arrivals, deskEmptyState, deskItemID, deskLinkItem, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
+import { arrivals, deskEmptyState, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
@@ -54,6 +54,8 @@ const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided'
 let sources: DeskSources = emptySources(), generation = 0, alive = true
 let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
+let hydratedProjection: DeskProjection | undefined, hydration: Promise<void> | undefined
+const lastGoodAt = ref<number | null>(null), hydrationFailures = ref(0), hydrationFailedSince = ref<number | null>(null)
 const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>()), pendingSteps = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
 let followed = ''
@@ -107,7 +109,7 @@ const openSourceIDs = computed(() => desk.projection ? new Set(desk.projection.i
 const openItems = computed(() => items.value.filter(item => !item.decided && inScope(item)
   && (!item.personStep || !openSourceIDs.value || openSourceIDs.value.has(item.id))))
 // The first read shows no count yet (AEON-1406); the empty slot keeps the tab width.
-const reading = computed(() => state.value === 'loading' && !items.value.length)
+const reading = computed(() => state.value === 'loading' && !items.value.length && !desk.error)
 const openCountLabel = computed(() => {
   if (reading.value) return ''
   if (!scopeActive.value) return desk.count ?? '?'
@@ -252,54 +254,84 @@ const listedLines = computed(() => clearFrame.value ? sourceLines.value.filter(l
 // A project scope says its name and Show all in the empty line itself (design C), so the scope line steps aside.
 const scopeInCard = computed(() => filter.value === 'open' && !visible.value.length && !!scopeProject.value && !scopeKind.value)
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
+const refreshFailures = computed(() => Math.max(desk.failures, hydrationFailures.value))
+const refreshHint = computed(() => {
+  const since = [desk.failedSince, hydrationFailedSince.value].filter((at): at is number => at !== null)
+  return deskRefreshNotice(refreshFailures.value, since.length ? Math.min(...since) : null, lastGoodAt.value, now.value)
+})
+const refreshEscalated = computed(() => refreshHint.value === 'escalated')
+const lastGoodTime = computed(() => lastGoodAt.value === null ? '' : new Date(lastGoodAt.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }))
 async function refresh() {
   if (!session.authenticationCurrent()) return
-  now.value = Date.now()
-  const turn = ++generation, identity = owner.value
-  loading.value = true
-  try {
-    await desk.refresh()
-    const projection = desk.projection
-    const result = await loadDesk(pages.value, adapters, trimCursors.value, desk.projection)
-    const linked = deskLinkItem(route.query.item ?? route.query.needs)
-    const existing = result.items.find(item => item.id === linked)
-    // A selected source gets one bounded detail read even if the bulk detail
-    // budget left its canonical row unavailable. Keep that row's authority.
-    function includeLinked(read: DeskItem) {
-      // A bounded detail read names no project for some sources; keep the listed one.
-      const projectId = read.projectId || existing?.projectId || ''
-      const item = { ...read, projectId, projectName: read.projectId ? read.projectName : existing?.projectName ?? read.projectName, projectKey: projectId ? result.projectKeys?.get(projectId) : undefined }
-      const row = projection?.items.find(row => deskItemID(row) === linked)
-      const confirmed = item.decided ? item : row ? { ...item, held: row.held, source: row.source,
-        unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
-        : { ...item, unavailable: 'This source is outside the confirmed open desk. Retry before deciding.' }
-      const at = result.items.findIndex(item => item.id === linked)
-      if (at < 0) result.items.push(confirmed)
-      else result.items.splice(at, 1, confirmed)
-    }
-    if (linked.startsWith('q:') && (!existing || existing.unavailable)) {
-      try {
-        const question = await readQuestion(linked.slice(2))
-        if (question.id !== linked.slice(2)) throw new Error('Source identity changed')
-        result.sources.questions.set(linked, question)
-        includeLinked(questionItem(question, existing?.projectName ?? 'Project name unavailable'))
-      } catch { result.warnings.push('The linked question could not be read. Retry before reviewing it.') }
-    }
-    if (linked.startsWith('a:') && (!existing || existing.unavailable)) {
-      try {
-        const approval = await readApproval(linked.slice(2))
-        if (approval.id !== linked.slice(2)) throw new Error('Source identity changed')
-        result.sources.approvals.set(linked, approval)
-        includeLinked(approvalItem(approval, existing?.projectName))
-      } catch { result.warnings.push('The linked approval could not be read. Retry before reviewing it.') }
-    }
-    if (!alive || turn !== generation || identity !== owner.value) return
-    applyRead(result)
-    followLink()
-    void readTickets(result.items.filter(item => !item.decided).slice(0, 300))
-  } catch { if (turn === generation) { warnings.value = ['The desk could not be read. Try refreshing.']; unanswered.value = ['desk'] } }
-  finally { if (alive && turn === generation) { state.value = 'ready'; loading.value = false } }
+  const read = await desk.refresh()
+  if (read && alive && desk.projection) await hydrate(desk.projection)
 }
+// Header polls and live events share the projection read. Hydration also has
+// one flight; an intervening projection gets exactly one trailing hydration.
+async function hydrate(projection: DeskProjection): Promise<void> {
+  const waitingTurn = generation, identity = owner.value
+  if (hydration) {
+    await hydration
+    if (alive && waitingTurn === generation && identity === owner.value && desk.projection) return hydrate(desk.projection)
+    return
+  }
+  if (projection === hydratedProjection || !session.authenticationCurrent()) return
+  const turn = ++generation
+  const current = () => alive && turn === generation && identity === owner.value && desk.projection === projection && session.authenticationCurrent()
+  now.value = Date.now()
+  loading.value = true
+  const read = (async () => {
+    try {
+      const result = await loadDesk(pages.value, adapters, trimCursors.value, projection)
+      const linked = deskLinkItem(route.query.item ?? route.query.needs)
+      const existing = result.items.find(item => item.id === linked)
+      // A selected source gets one bounded detail read even if the bulk detail
+      // budget left its canonical row unavailable. Keep that row's authority.
+      function includeLinked(read: DeskItem) {
+        // A bounded detail read names no project for some sources; keep the listed one.
+        const projectId = read.projectId || existing?.projectId || ''
+        const item = { ...read, projectId, projectName: read.projectId ? read.projectName : existing?.projectName ?? read.projectName, projectKey: projectId ? result.projectKeys?.get(projectId) : undefined }
+        const row = projection?.items.find(row => deskItemID(row) === linked)
+        const confirmed = item.decided ? item : row ? { ...item, held: row.held, source: row.source,
+          unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
+          : { ...item, unavailable: 'This source is outside the confirmed open desk. Retry before deciding.' }
+        const at = result.items.findIndex(item => item.id === linked)
+        if (at < 0) result.items.push(confirmed)
+        else result.items.splice(at, 1, confirmed)
+      }
+      if (linked.startsWith('q:') && (!existing || existing.unavailable)) {
+        try {
+          const question = await readQuestion(linked.slice(2))
+          if (question.id !== linked.slice(2)) throw new Error('Source identity changed')
+          result.sources.questions.set(linked, question)
+          includeLinked(questionItem(question, existing?.projectName ?? 'Project name unavailable'))
+        } catch { result.warnings.push('The linked question could not be read. Retry before reviewing it.') }
+      }
+      if (linked.startsWith('a:') && (!existing || existing.unavailable)) {
+        try {
+          const approval = await readApproval(linked.slice(2))
+          if (approval.id !== linked.slice(2)) throw new Error('Source identity changed')
+          result.sources.approvals.set(linked, approval)
+          includeLinked(approvalItem(approval, existing?.projectName))
+        } catch { result.warnings.push('The linked approval could not be read. Retry before reviewing it.') }
+      }
+      if (!current()) return
+      applyRead(result)
+      hydratedProjection = projection
+      lastGoodAt.value = Date.now(); hydrationFailures.value = 0; hydrationFailedSince.value = null
+      followLink()
+      void readTickets(result.items.filter(item => !item.decided).slice(0, 300))
+    } catch (cause) {
+      if (current() && !deskReadAborted(cause)) {
+        hydrationFailures.value++; hydrationFailedSince.value ??= Date.now()
+        if (!currentRead) { warnings.value = ['The desk could not be read. Try refreshing.']; unanswered.value = ['desk'] }
+      }
+    } finally { if (alive && turn === generation) { state.value = 'ready'; loading.value = false } }
+  })()
+  hydration = read
+  try { await read } finally { if (hydration === read) hydration = undefined }
+}
+watch(() => desk.projection, projection => { if (projection) void hydrate(projection) })
 function applyRead(result: DeskRead) {
   const present = new Set(result.items.map(item => item.id))
   // A server refresh can omit an already committed request while its write
@@ -311,7 +343,7 @@ function applyRead(result: DeskRead) {
     const at = successor ? result.items.findIndex(row => row.id === successor.id) : Math.min(index, result.items.length)
     result.items.splice(at, 0, item); present.add(item.id)
   }
-  result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
+  retainDecidedLessons(items.value, result.items, result.sources.lessons)
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; unanswered.value = result.unanswered ?? []; more.value = result.hasMore
   projectNames.value = result.projectNames
@@ -486,8 +518,11 @@ function resetDesk() {
   projectNames.value = new Map()
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
+  hydratedProjection = undefined; hydration = undefined
+  lastGoodAt.value = null; hydrationFailures.value = 0; hydrationFailedSince.value = null
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
   warnings.value = []; unanswered.value = []; more.value = { open: false, answered: false }; loading.value = false
+  state.value = 'loading'
 }
 watch(owner, () => {
   resetDesk()
@@ -566,7 +601,11 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
           <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
           <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
         </div>
-        <div v-if="filter === 'decided'" class="seg dec-filter" role="radiogroup" aria-label="Stamp">
+        <div class="refresh-slot" data-testid="desk-refresh-slot">
+          <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
+        </div>
+        <!-- On Open the stamp filter keeps its box unseen, so switching tabs moves nothing below the row (AEON-1477). -->
+        <div class="seg dec-filter" :class="{ reserved: filter !== 'decided' }" role="radiogroup" aria-label="Stamp" :aria-hidden="filter !== 'decided' || undefined" :inert="filter !== 'decided' || undefined">
           <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
         </div>
         <Transition name="one-by-one">
@@ -576,10 +615,11 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
     </div>
     <p v-if="scopeActive && !scopeInCard" class="scope-line" data-testid="desk-scope">{{ scopeCopy }} <RouterLink :to="showAllTo">Show all</RouterLink></p>
     <nav v-if="nextKeyTrims[trimState] || trimCursors[trimState]" class="trim-pages" aria-label="Key trim pages"><button type="button" class="btn sm ghost" :disabled="loading || !trimCursors[trimState]" @click="pageKeyTrims(true)">First key trims</button><button type="button" class="btn sm ghost" :disabled="loading || !nextKeyTrims[trimState]" @click="pageKeyTrims()">Next key trims</button><span>Up to 100 key trims per page</span></nav>
-    <section class="queue glass-card list-only" :class="{ clear: filter !== 'open' || !visible.length }" :aria-label="filter === 'open' ? 'Open' : 'Decided'" :aria-busy="loading" data-testid="desk-list">
+    <section class="queue glass-card list-only" :class="{ clear: filter !== 'open' || !visible.length }" :aria-label="filter === 'open' ? 'Open' : 'Decided'" :aria-busy="loading || desk.loading" data-testid="desk-list">
       <!-- AEON-1406 (Tick's approved design): D reading, A all clear and B a silent source share this frame;
            B's line has its slot in A and D, so none of them moves the card. -->
-      <div v-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
+      <p v-if="!desk.projection && desk.error" class="empty-line" role="status" data-testid="desk-first-error"><AppIcon name="refresh" :size="14" /><span>The desk couldn’t be loaded · <button type="button" class="linkish" :disabled="desk.loading" @click="refresh">Try again</button></span></p>
+      <div v-else-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
         <span class="art" aria-hidden="true"><template v-if="emptyState !== 'reading'"><img class="light" :src="deskLight" alt="" width="840" height="560" decoding="async" loading="lazy"><img class="dark" :src="deskDark" alt="" width="840" height="560" decoding="async" loading="lazy"></template></span>
         <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />Nothing waits for you</template></p>
         <p class="quiet" role="status" data-testid="desk-unanswered"><template v-if="emptyState === 'incomplete'"><AppIcon name="clock" :size="14" /><span>{{ unansweredLine }}</span><span class="sep" aria-hidden="true">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
@@ -658,11 +698,28 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }
 .dp-head .head-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
 /* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
-   the Decided stamp filter takes a second line of its own; the button keeps the first, so it never wraps or adds height. */
+   the Decided stamp filter takes a line of its own; the button keeps the first, so it never wraps or adds height. */
 .dp-tabrow { container: desk-tabs / inline-size; }
-.dp-bar { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+.dp-bar { display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
 .dp-bar .view-tabs { grid-area: 1 / 1; }
 .dp-bar .view-tabs button { white-space: nowrap; }
+/* AEON-1477 (Tick): on a wide row the hint takes the row's free end, right-aligned before the round action. Its slot
+   is the row's own height and adds none; centred while it fits, a hint that needs more lines grows upward into the
+   header's empty right side, never down onto the list. */
+.refresh-slot { grid-area: 1 / 3; align-self: stretch; position: relative; min-width: 0; }
+.refresh-hint { position: absolute; right: 0; bottom: 0; min-height: 100%; max-width: 100%; display: flex; align-items: center; margin: 0; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: right; }
+/* A separator stays with the word before it, so a wrapped line never starts with "·". */
+.refresh-copy { text-wrap: balance; }
+.refresh-hint svg { display: inline-block; margin-right: 4px; vertical-align: -1px; }
+.refresh-hint.escalated { color: var(--warn-ink); }
+.refresh-retry { white-space: nowrap; opacity: 0; }
+.refresh-retry.shown, .refresh-hint:hover .refresh-retry, .refresh-hint:focus-within .refresh-retry { opacity: 1; }
+.refresh-hint .linkish { color: inherit; font-weight: inherit; }
+/* Touch has no hover to reveal it: Try again shows with the hint, on a 44 × 44 box that adds no line height. */
+@media (pointer: coarse) {
+  .refresh-retry { opacity: 1; }
+  .refresh-hint .linkish { display: inline-block; min-width: 44px; min-height: 44px; margin: -14px 0; }
+}
 /* 12.5 px is the tabs' type (a plain .btn is 13 px), so the label fits beside them on a 390 px phone. */
 .one-by-one { grid-area: 1 / -2; justify-self: end; gap: 6px; padding: 0 12px; font-size: 12.5px; }
 /* Coarse pointers: 44 px tall, and 44 × 44 as the arrow alone. */
@@ -671,14 +728,18 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .one-by-one-enter-from, .one-by-one-leave-to { opacity: 0; }
 .dp-bar .seg button .n { font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .dp-bar .seg button[aria-checked="true"] .n { color: var(--teal-ink); }
-/* The stamp filter stays one line; on a phone it scrolls sideways instead of wrapping (AEON-1339). */
+/* The stamp filter stays one line beside the tabs; on a phone it scrolls sideways instead of wrapping (AEON-1339). */
 .dp-bar .dec-filter { grid-area: 1 / 2; justify-self: start; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.dp-bar .dec-filter.reserved { visibility: hidden; }
 .dp-bar .dec-filter::-webkit-scrollbar { display: none; }
 .dp-bar .dec-filter button { flex: none; white-space: nowrap; }
-/* 910 px: a 960 px window with a classic gutter still wraps; 1024 stays on one line, where the filter fits. */
+/* 910 px: a 960 px window with a classic gutter wraps; 1024 keeps one row, where the filter and the hint fit.
+   Below it the hint owns a reserved line under the tabs and the filter the line after it. */
 @container desk-tabs (max-width: 909.98px) {
   .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
-  .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
+  .refresh-slot { grid-area: 2 / 1 / auto / -1; align-self: auto; min-height: 40px; display: grid; align-items: center; }
+  .refresh-hint { position: static; min-height: 0; display: block; line-height: 20px; text-align: left; }
+  .dp-bar .dec-filter { grid-area: 3 / 1 / auto / -1; }
 }
 /* Below about 420 px the view tabs and the round action give up a little padding so the label still clears the tabs.
    The stamp filter is unchanged: on a phone it keeps scrolling (AEON-1339). */
