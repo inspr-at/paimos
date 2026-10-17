@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto'
 import { browserIdentity } from './browser-impact.mjs'
+import { boundedText } from './inputs.mjs'
+
+// Transport only a path and SHA-256 through Actions outputs/environment. Even
+// the essential catalogue exceeds Linux's per-environment-string byte limit.
+export function readBrowserPlan(checkout, file, digest) {
+  if (typeof file !== 'string' || !file || file.length > 4096 || !/^[a-f0-9]{64}$/.test(digest ?? '')) return undefined
+  const text = boundedText(checkout, file, 512 * 1024)
+  return typeof text === 'string' && createHash('sha256').update(text).digest('hex') === digest ? text : undefined
+}
 
 const oid = /^[a-f0-9]{40}$/
 const active = tests => tests.filter(row => row.kind === 'browser' && row.active !== false)

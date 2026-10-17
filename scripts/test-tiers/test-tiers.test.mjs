@@ -1514,11 +1514,11 @@ test('merge-group planner writes full without needing payload, checkout history 
   for(const affectedLane of ['','off','on']) {
     const output=resolve(directory,`output-${affectedLane}`)
     assert.equal(tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output}),0)
-    assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=full\nweb_shards=${fullWebShardJSON}\nbrowser_scope=gated-full\nbrowser_plan=\n`)
+    assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=full\nweb_shards=${fullWebShardJSON}\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n`)
     for(const raw of ['full','spec-only','docs-only']) {
       writeFileSync(output,'')
       tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_PLAN_LANE:raw,CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output})
-      assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=${affectedLane==='on'?'full':raw}\nweb_shards=${fullWebShardJSON}\nbrowser_scope=gated-full\nbrowser_plan=\n`)
+      assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=${affectedLane==='on'?'full':raw}\nweb_shards=${fullWebShardJSON}\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n`)
     }
   }
 })
