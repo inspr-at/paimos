@@ -288,6 +288,57 @@ test('AEON-1286 chat 390 light: a ticket key or a code chip keeps the line box o
     for (const step of chip.steps) expect(Math.abs(step - line), `${name} line step ${step} px vs ${line.toFixed(2)} px`).toBeLessThanOrEqual(1)
     expect(Math.abs(chip.height - chip.lines * line), `${name} paragraph ${chip.height} px for ${chip.lines} lines of ${line.toFixed(2)} px`).toBeLessThanOrEqual(1)
   }
+  // Risk (gate at 039790dc): a key's tap target taller than its line covers the words on the lines
+  // above and below it. Every prose glyph on a neighbouring line within the key's x-range is probed at
+  // its top, middle and bottom; the point must land on the paragraph's own prose, not on the link
+  // (and not on anything covering the paragraph, so a probe cannot pass for the wrong reason).
+  const probe = (start: string) => paragraph(start).evaluate(p => {
+    p.scrollIntoView({ block: 'center', behavior: 'instant' })
+    const link = p.querySelector<HTMLElement>('.md-ticket > a')!
+    const key = link.getBoundingClientRect()
+    const glyphs: { char: string; rect: DOMRect }[] = []
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement!.closest('.md-ticket, code')) continue
+      const text = node.textContent ?? ''
+      for (let index = 0; index < text.length; index++) {
+        if (/\s/.test(text[index]!)) continue
+        const range = document.createRange()
+        range.setStart(node, index); range.setEnd(node, index + 1)
+        const rect = range.getBoundingClientRect()
+        if (rect.height > 0) glyphs.push({ char: text[index]!, rect })
+      }
+    }
+    const lines: { top: number; bottom: number; glyphs: typeof glyphs }[] = []
+    for (const glyph of glyphs.sort((a, b) => a.rect.top - b.rect.top)) {
+      const last = lines.at(-1)
+      if (last && glyph.rect.top - last.top <= 4) { last.glyphs.push(glyph); last.bottom = Math.max(last.bottom, glyph.rect.bottom) } else lines.push({ top: glyph.rect.top, bottom: glyph.rect.bottom, glyphs: [glyph] })
+    }
+    const middle = (key.top + key.bottom) / 2
+    const own = lines.findIndex(l => l.top <= middle && middle <= l.bottom)
+    const results: { char: string; line: 'above' | 'below'; y: number; on: string }[] = []
+    for (const [line, side] of [[lines[own - 1], 'above'], [lines[own + 1], 'below']] as const) {
+      for (const { char, rect } of line?.glyphs ?? []) {
+        if (rect.right <= key.left || rect.left >= key.right) continue
+        const x = Math.min(Math.max((rect.left + rect.right) / 2, key.left + 1), key.right - 1)
+        for (const y of [rect.top + 1, (rect.top + rect.bottom) / 2, rect.bottom - 1]) {
+          const hit = document.elementFromPoint(x, y)
+          const on = hit && link.contains(hit) ? 'link' : hit && p.contains(hit) ? 'prose' : `${hit?.tagName.toLowerCase()}.${hit?.className}`
+          results.push({ char, line: side, y: +(y - middle).toFixed(1), on })
+        }
+      }
+    }
+    return { own, lines: lines.length, key: { top: +key.top.toFixed(1), bottom: +key.bottom.toFixed(1) }, results }
+  })
+  const probes: [string, Awaited<ReturnType<typeof probe>>][] = []
+  for (const start of ['With a key,', 'Morning.', 'Merged PHAROS-11']) probes.push([start, await probe(start)])
+  await report(info.outputPath('AEON-1286/key-targets-390-light.md'), probes.map(([start, result]) =>
+    `${start} key on line ${result.own + 1} of ${result.lines}, ${result.results.length} probes, ${result.results.filter(point => point.on !== 'prose').length} off the prose`))
+  for (const [start, result] of probes) {
+    expect(result.own, `the key in "${start}" sits on a prose line: ${JSON.stringify(result)}`).toBeGreaterThanOrEqual(0)
+    expect(result.results.length, `"${start}" has glyphs beside the key on a neighbouring line: ${JSON.stringify(result)}`).toBeGreaterThan(0)
+    for (const point of result.results) expect(point.on, `"${start}": "${point.char}" ${point.line} the key, ${point.y} px from its middle`).toBe('prose')
+  }
   expect(errors).toEqual([])
 })
 
