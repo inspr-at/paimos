@@ -60,6 +60,8 @@ type StatusError struct {
 	AttachRefusal string
 	ReasonCode    string
 	RetryAfter    time.Duration
+	// EntryChecksFailure retains only the bounded public entry-refusal body.
+	EntryChecksFailure json.RawMessage
 }
 
 func (e *StatusError) Error() string {
@@ -279,6 +281,9 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			}
 			_ = json.Unmarshal(payload, &detail)
 			status := &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= 65536 && json.Valid(payload) {
+				status.EntryChecksFailure = payload
+			}
 			enabled, _ := ctx.Value(workReadRetryKey{}).(bool)
 			if attempt == 0 && enabled && method == http.MethodGet && body == nil &&
 				workReadPath(path) && req.Header.Get(stepup.Header) == "" &&
@@ -349,19 +354,31 @@ func errorMessage(payload []byte) string {
 		// Render only this public contract, with bounded output, never raw JSON.
 		if wrap.Error == "entry_checks_failed" && len(payload) <= 65536 {
 			var details struct {
+				Checks []struct {
+					ID     string `json:"id"`
+					Label  string `json:"label"`
+					Reason string `json:"reason"`
+				} `json:"checks"`
 				Failed []struct {
 					ID     string `json:"id"`
 					Label  string `json:"label"`
 					Reason string `json:"reason"`
 				} `json:"failed"`
 			}
-			if json.Unmarshal(payload, &details) != nil || len(details.Failed) > 32 {
+			if json.Unmarshal(payload, &details) != nil {
+				return wrap.Error
+			}
+			checks := details.Checks
+			if checks == nil {
+				checks = details.Failed
+			}
+			if len(checks) > 32 {
 				return wrap.Error
 			}
 			parts := []string{wrap.Error}
 			const omitted = "additional check details omitted"
 			remaining := 4096 - len(wrap.Error) - len(omitted) - 2
-			for _, check := range details.Failed {
+			for _, check := range checks {
 				part := check.ID + " (" + check.Label + "): " + check.Reason
 				if len(part)+2 > remaining {
 					parts = append(parts, omitted)

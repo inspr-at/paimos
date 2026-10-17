@@ -23,7 +23,13 @@ func (m *Module) entryChecksTx(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	if err != nil {
 		return out, err
 	}
-	if err = authz.RequireTx(ctx, tx, p, "nodes.read", entryScope(t.ProjectID)); err != nil {
+	err = authz.RequireTx(ctx, tx, p, "nodes.read", entryScope(t.ProjectID))
+	if errors.Is(err, authz.ErrForbidden) {
+		// Writers need to see why this ticket's status change was refused.
+		// Keep the alternative scoped to this preview and current project.
+		err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID))
+	}
+	if err != nil {
 		return out, err
 	}
 	out.Definition, err = workqueue.EntryDefinitionTx(ctx, tx, t.ProjectID, true)

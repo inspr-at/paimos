@@ -4702,6 +4702,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestDoctrineProposeCommand","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestEntryRefusalReasonsAndWriterPreview","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestEstimateCLIFlagsAndPlan","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestEstimateMissingMigratedWorkLeaves","tier":"ESSENTIAL"}
