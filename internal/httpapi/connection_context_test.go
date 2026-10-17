@@ -207,6 +207,69 @@ func TestRequestOnCancelledConnectionClosesIt(t *testing.T) {
 	}
 }
 
+// AEON-1477: a client abort during auth or the desk read must be logged as
+// 499, while an internal deadline and a genuine failure remain server faults.
+func TestClientCancellationIs499InsteadOfServerFailure(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	for _, tc := range []struct {
+		name   string
+		err    error
+		cancel bool
+		status int
+		level  string
+	}{
+		{"cancelled error", errors.Join(errors.New("private fixture text"), context.Canceled), false, 499, "INFO"},
+		{"cancelled request", errors.New("private fixture text"), true, 499, "INFO"},
+		{"internal deadline", context.DeadlineExceeded, false, 500, "ERROR"},
+		{"server failure", errors.New("private fixture text"), false, 500, "ERROR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs.Reset()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			handler := requestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.cancel {
+					cancel() // The handler is already running: this is not a stale connection arrival.
+				}
+				WriteInternalError(w, r, "authenticate", tc.err, "internal")
+			}))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/decision-desk/projection", nil).WithContext(ctx))
+			if rec.Code != tc.status {
+				t.Fatalf("status %d, want %d", rec.Code, tc.status)
+			}
+			if strings.Contains(logs.String(), "private fixture text") {
+				t.Fatal("private error text reached logs")
+			}
+			var requests, failures int
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var record map[string]any
+				if err := json.Unmarshal([]byte(line), &record); err != nil {
+					t.Fatal(err)
+				}
+				switch record["msg"] {
+				case "request":
+					requests++
+					if record["status"] != float64(tc.status) || record["status_class"] != statusClass(tc.status) {
+						t.Fatalf("incorrect request status: %v", record)
+					}
+				case "request failed":
+					failures++
+					if record["level"] != tc.level || record["step"] != "authenticate" {
+						t.Fatalf("incorrect failure level or step: %v", record)
+					}
+				}
+			}
+			if requests != 1 || failures != 1 {
+				t.Fatalf("request/failure records = %d/%d, want 1/1", requests, failures)
+			}
+		})
+	}
+}
+
 // AEON-1228: failures outside auth must remain diagnosable without logging
 // URL capabilities, headers, response bodies or driver error text.
 func TestHandlerFailureLoggingIsContentFree(t *testing.T) {

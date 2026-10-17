@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { api, APIError } from './api.ts'
+import { api, APIError, StaleRequestError } from './api.ts'
 import type { KeyTrimProposal } from './keyTrim'
 import type { Approval } from './agents'
 import type { DoctrineInboxItem } from './doctrine'
@@ -218,6 +218,30 @@ export function deskUnansweredLine(unanswered: readonly DeskSource[]): string {
   const named = [...new Set(unanswered)]
   const who = named.includes('desk') ? SOURCE_NAMES.desk : named.length === 1 ? SOURCE_NAMES[named[0]!] : 'Some sources'
   return `${who} didn’t answer, so this may be incomplete`
+}
+
+// Cancellation discards a read; it says nothing about the desk's availability.
+export function deskReadAborted(cause: unknown, signal?: AbortSignal): boolean {
+  return !!signal?.aborted || cause instanceof StaleRequestError || cause instanceof APIError && cause.status === 499 || cause instanceof Error && cause.name === 'AbortError'
+}
+
+export function deskRefreshNotice(failures: number, failedSince: number | null, updatedAt: number | null, now: number): 'quiet' | 'escalated' | null {
+  if (updatedAt === null || failures < 2) return null
+  return failures >= 5 || failedSince !== null && now - failedSince > 60_000 ? 'escalated' : 'quiet'
+}
+
+// A decided lesson leaves the pending projection. Keep the row and the learning
+// this visit already confirmed, so Undo re-checks that same record. Omitting
+// the learning makes the decision look unauthorized the moment the list refreshes.
+export function retainDecidedLessons(previous: readonly DeskItem[], nextItems: DeskItem[], lessons: Map<string, MethodLearning>) {
+  const present = new Set(nextItems.map(item => item.id))
+  for (const item of previous) {
+    if (item.kind !== 'lesson' || !item.decided || present.has(item.id)) continue
+    nextItems.push(item)
+    present.add(item.id)
+    const learning = item.lesson?.learning
+    if (learning && !lessons.has(item.id)) lessons.set(item.id, learning)
+  }
 }
 
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {

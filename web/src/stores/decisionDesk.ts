@@ -3,23 +3,34 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { onAccessRevalidate } from '../lib/authz'
-import { loadDeskProjection, type DeskProjection } from '../lib/decisionDesk'
+import { deskReadAborted, loadDeskProjection, type DeskProjection } from '../lib/decisionDesk'
+import { onProjectionWake } from '../lib/agents'
 import { getDoctrineInbox } from '../lib/doctrine'
 import { readDoctrineProjects } from '../lib/decisionDeskApi'
 
 // The badge uses the server's total, never session presence or a loaded page.
+const wakeWindow = 3000
 export const useDecisionDesk = defineStore('decisionDesk', () => {
   const session = useSession()
   const owner = computed(() => session.identity?.principal.kind === 'person' ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
   const projection = ref<DeskProjection | null>(null), error = ref(''), loading = ref(false)
-  let generation = 0, controller: AbortController | undefined, flight: Promise<void> | undefined
+  const failures = ref(0), failedSince = ref<number | null>(null), refreshedAt = ref<number | null>(null)
+  let generation = 0, controller: AbortController | undefined, flight: Promise<boolean> | undefined
+  let wakeTimer: ReturnType<typeof setTimeout> | undefined, wake: object | undefined
   // A rule change names no project; its ticket does. One cache for the Agents panel and the
   // header preview, so the preview opens with what the panel already read (AEON-1339).
   const ruleProjects = ref(new Map<string, string>()), ruleProjectError = ref('')
   let ruleTurn = 0, ruleFlight: { page: DeskProjection; done: Promise<void> } | undefined
-  function invalidate() {
+  // Waking a suspended poll cancels its read but keeps the last good state.
+  // Identity/permission resets still clear everything synchronously below.
+  function cancelRefresh() {
     generation++; controller?.abort(); controller = undefined; flight = undefined
-    projection.value = null; error.value = ''; loading.value = false
+    dropWake(); loading.value = false
+  }
+  function dropWake() { clearTimeout(wakeTimer); wakeTimer = undefined; wake = undefined }
+  function invalidate() {
+    cancelRefresh()
+    projection.value = null; error.value = ''; failures.value = 0; failedSince.value = null; refreshedAt.value = null
     ruleTurn++; ruleFlight = undefined; ruleProjects.value = new Map(); ruleProjectError.value = ''
   }
   function resolveRuleProjects(): Promise<void> {
@@ -53,24 +64,48 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
     ruleFlight = { page, done }
     return done
   }
-  function refresh(): Promise<void> {
-    if (!owner.value) return Promise.resolve()
+  function refresh(): Promise<boolean> {
+    if (!owner.value || !session.authenticationCurrent()) return Promise.resolve(false)
     if (flight) return flight
     const identity = owner.value, turn = generation
+    // A read that starts now covers every live event so far.
+    dropWake()
     const abort = new AbortController(); controller = abort; loading.value = true
     const current = () => turn === generation && identity === owner.value && session.authenticationCurrent()
     flight = (async () => {
       try {
         const page = await loadDeskProjection(abort.signal)
-        if (current()) { projection.value = page; error.value = '' }
+        if (!current() || abort.signal.aborted) return false
+        projection.value = page; error.value = ''; failures.value = 0; failedSince.value = null; refreshedAt.value = Date.now()
+        return true
       } catch (cause) {
-        if (current()) { projection.value = null; error.value = cause instanceof Error ? cause.message : 'Decision Desk could not be read. Retry.' }
+        if (current() && !deskReadAborted(cause, abort.signal)) {
+          failures.value++; failedSince.value ??= Date.now()
+          // Previews and the first load retain their existing error treatment;
+          // a refresh never replaces good data with an error or an empty count.
+          if (!projection.value) error.value = cause instanceof Error ? cause.message : 'Decision Desk could not be read. Retry.'
+        }
+        return false
       } finally { if (current()) { loading.value = false; flight = undefined; controller = undefined } }
     })()
     return flight
   }
+  // Live events open a three-second window and get one trailing read at its
+  // end, after any read already running, so a burst refetches at most once per
+  // window and its last event is still read. Explicit reads (Try again,
+  // opening the Desk, the header poll) call refresh() directly and run at once.
+  function requestRefresh() {
+    if (wake || !owner.value || !session.authenticationCurrent()) return
+    const token = wake = {}
+    wakeTimer = setTimeout(async () => {
+      wakeTimer = undefined
+      if (flight) await flight
+      if (wake === token) void refresh()
+    }, wakeWindow)
+  }
   watch(owner, () => { invalidate(); void refresh() }, { immediate: true, flush: 'sync' })
   const stopAccess = onAccessRevalidate({ reset: invalidate, refresh: () => { void refresh() } })
-  onScopeDispose(() => { stopAccess(); invalidate() })
-  return { projection, error, loading, refresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null) }
+  const stopWakes = onProjectionWake(requestRefresh)
+  onScopeDispose(() => { stopWakes(); stopAccess(); invalidate() })
+  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null) }
 })

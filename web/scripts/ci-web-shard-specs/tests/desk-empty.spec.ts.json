@@ -6,8 +6,8 @@
   },
   "spec": {
     "file": "tests/desk-empty.spec.ts",
-    "listedTests": 4,
-    "weightSeconds": 8.878049,
+    "listedTests": 15,
+    "weightSeconds": 33.292684,
     "weightSource": "unmeasured-test-rate"
   }
 }

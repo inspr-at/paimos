@@ -8640,6 +8640,28 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1024, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1440, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 390, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 a genuinely failed first load never claims an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"touch › AEON-1477 on touch Try again shows with the hint on a 44 px target","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
@@ -9365,6 +9387,8 @@
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"saved views, assignee, type, priority and server search determine the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"scrolling the entire backdrop out of view pauses it and returning resumes it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1477 a painted glimpse hides below 1280 when resize, media and the document observer stay silent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a dropped wide-media change still hides the glimpse below 1280","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -16166,6 +16190,8 @@
     ,
     {"kind":"node","file":"tests/head-counts.test.ts","name":"working, waiting and problems always show; the rest only while non-zero and after them","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/header-glimpse.test.ts","name":"AEON-1477 a paint frame clears a glimpse the viewport signals left on below 1280","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"a ready graph has eight tickets and at least one link","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"a stale wide media query cannot keep the header glimpse once the layout is below 1280","tier":"ESSENTIAL"}
@@ -17811,6 +17837,16 @@
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"production runtime exports have a lexical consumer or an explained exception","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"retired Business and compatibility URLs still resolve to their canonical owners, and external account links remain","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 coalesces a two-second burst of twenty live events into one trailing read, and Try again reads at once","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 keeps a cancelled first load quiet and a genuine first failure unknown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 keeps a decided lesson learning so Undo can re-check it after the pending list drops it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 retains the last good projection through 429, 500 and abort, resetting failures only on success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 shows the hint after two failures and escalates strictly after sixty seconds or at five failures","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
     ,

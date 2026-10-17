@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseWide, nextHeaderGlimpseWide, headerGlimpseViewportWide } from '../src/lib/headerGlimpse.ts'
+import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpsePaintClears, headerGlimpseWide, nextHeaderGlimpseWide, headerGlimpseViewportWide } from '../src/lib/headerGlimpse.ts'
 
 const on = { enabled: true, reduced: false, wide: true, tickets: 8 }
 
@@ -37,6 +37,18 @@ test('a stale wide media query cannot keep the header glimpse once the layout is
   // One pixel of catch-up remains wide; 390 and 1278 do not.
   assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 390 }), false)
   assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1278 }), false)
+})
+
+test('AEON-1477 a paint frame clears a glimpse the viewport signals left on below 1280', () => {
+  // 835d2134 kept the glimpse on after 1279 → 1280 → 390: resize, the media
+  // change and the document observer can all stay silent while the canvas
+  // paints. The frame may only clear. Catch-up of one pixel stays wide.
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 390 }), true)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 1278 }), true)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: false, layoutWidth: 1600 }), true)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 1279 }), false)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 1280 }), false)
+  assert.equal(headerGlimpsePaintClears(false, { mediaMatches: true, layoutWidth: 390 }), false)
 })
 
 test('a ready graph has eight tickets and at least one link', () => {
