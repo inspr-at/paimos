@@ -1,108 +1,272 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "ticket": "AEON-1456",
-  "brief": "aeon-1456-goals-api-r2",
-  "round": 2,
-  "status": "partial-handoff-remote-validation-blocked-by-ops",
-  "base_commit": "3f76ea86f",
-  "concept": "Goals model r3, D1–D12 and E1–E6",
-  "attribution": {
-    "tracker": "PPM",
-    "instance": "ppm",
-    "session": "aeon-1456-goals-api",
-    "session_id": "0f3f204d-36a2-4d70-b3bf-d86404c1ff0f",
-    "marker": "Coordinator marker and selected ppm account verified before repository writes"
+  "brief": "aeon-1456-goals-api-r3",
+  "round": 3,
+  "status": "complete-concept-acceptance-passed",
+  "base_commit": "8c237953d",
+  "implementation_head": "280cd4d91",
+  "concept": "Goals model r3 D1–D12/E1–E6; AEON-1452 r5 series addendum",
+  "completion_pct": 100,
+  "implementation": {
+    "list": "One page-wide MATERIALIZED invoker expansion statement for up to 100 goals; shared work scope, distinct leaf facts and eta.AggregateScopeSQL, plus batched history, badges and waits. Full-filter totals and computed sorting use bounded batches across at most 1000 candidates.",
+    "paging": "Union budgets of 4096 roots/50000 root-node pairs shrink the page with truncated=true and a filter-bound keyset cursor. Savepoint retries reuse already visibility-filtered counts and known failed work-root sets. A singleton above its budget remains counts-only too_large while siblings expand; totals_partial exposes omitted derived totals.",
+    "r5": "goals/1.4 adds changed_keys and retains keys/keys_truncated. Visible outcome/ticket state transitions are listed even when pct stays unchanged. Delta compares the preceding bucket, including the exact first-bucket boundary. Event-backed 24 hourly/28 six-hour/30 daily buckets and inclusive four-hour stall remain.",
+    "safety_fixes": "Invoker visibility uses identity lookups instead of recursively hashing unrelated outcomes. The original non-outcome shortcut is retained. Scheduled revalidation uses workerCtx/background pool admission. Scoped node walks share child visibility setup. Reapplying released migration 1241 preserves the current later Goals event policy within the same DDL transaction."
   },
-  "slices": [
-    {
-      "slice": 1,
-      "implementation": "complete",
-      "scope": "Additive goals OpenAPI/1.3, create/update API and CLI, stable required refs, method/target/body-bound durable receipts, current transactional authorization before replay, sorted locks, no-op receipts, atomic removal/replace/move/retirement and handover. Release-first updates restore kinds. Relative ETA bounds apply only to fresh receipts."
-    },
-    {
-      "slice": 2,
-      "implementation": "complete",
-      "scope": "Write-time agent, heartbeat and direct coordinator ETA transitions; outcome move events; value-free goal fallback pings; goal subscription allowlist with current event RLS; per-ask asks_for associations retained through merges and filtered against current node/key read authority."
-    },
-    {
-      "slice": 3,
-      "implementation": "complete-with-documented-list-scale-limit",
-      "scope": "Filtered goal/detail/list/history, coverage/shared-leaf weighting, worker-first state, effective ETA, strict ten-minute passed, snapshot watermark/generation, keyset cursors, totals/quiet projects, counts-only too-large state, scheduled bounded passed flips, visible handover and override attribution."
-    },
-    {
-      "slice": 4,
-      "implementation": "complete",
-      "scope": "24 hourly, 28 six-hour and 30 daily UTC event-backed points; historical outcome moves and node state/estimate/tree facts; worker and override facts; current visibility; deltas/changed keys; count/byte/root/pair/work bounds; inclusive four-hour stall since the last displayed percentage change."
-    }
-  ],
+  "ac_to_tests": {
+    "A1 lost-response upsert, changed body, stable refs": [
+      "TestGoalAPIAtomicReceipts"
+    ],
+    "A2 lost-response move, immutable identity": [
+      "TestGoalAPIMoveReplaceAndRetiredRefs"
+    ],
+    "A3 missing/deleted/retired refs": [
+      "TestUpdateValidationBounds",
+      "TestGoalStorageIdentityAndReceipts",
+      "TestGoalAPIMoveReplaceAndRetiredRefs"
+    ],
+    "A4 current authorization under access fence": [
+      "TestGoalAPIReplayReauthorizesUnderFence"
+    ],
+    "A5 tenant/project/serves visibility": [
+      "TestGoalStorageVisibility",
+      "TestGoalProjectWriterUpdatesOnlyVisibleOutcomes"
+    ],
+    "A6 all input bounds and atomic rollback": [
+      "TestUpdateValidationBounds",
+      "TestGoalAPIAtomicReceipts"
+    ],
+    "A7 sorted move locks, replace watermark, ref clashes": [
+      "TestGoalStorageIdentityAndReceipts",
+      "TestGoalAPIMoveReplaceAndRetiredRefs"
+    ],
+    "A8 cross-target/method receipt reuse": [
+      "TestGoalAPIAtomicReceipts",
+      "TestGoalAPICreateAndCurrentTarget"
+    ],
+    "A9 revoked authority before replay": [
+      "TestGoalAPIReplayReauthorizesUnderFence"
+    ],
+    "B1 worker-first state and empty/all-done leaves": [
+      "TestGoalStateWorkerWins",
+      "TestGoalFilteredReadCoverageETAAndWorkerState",
+      "TestGoalPauseUsesLatestStoppedSession"
+    ],
+    "B2 partial coverage, shared hours, unestimated mean": [
+      "TestGoalRollupPartialAndSharedEstimates",
+      "TestGoalFilteredReadCoverageETAAndWorkerState"
+    ],
+    "B3 fixed ten-minute passed at 1/240-minute cadence, idempotent flips": [
+      "TestGoalClockBoundariesAndWatermarks",
+      "TestGoalPassedRevalidationIsFixedAndIdempotent"
+    ],
+    "B4/B11 durable source writes and A→B→A before revalidation": [
+      "TestGoalAPIWriteTimeETAsAndHiddenPings",
+      "TestGoalETAHeartbeatAndDirectWriteTransitions"
+    ],
+    "B5 complete outcome timeline across move, current visibility": [
+      "TestGoalListFiltersTotalsAndMoveHistory"
+    ],
+    "B6 merged per-ask goal links, dedup/visibility, detail/list waits": [
+      "TestGoalLinksSurviveQuestionMerge"
+    ],
+    "B7 reversed completion, equal watermark, receipt pair preserved": [
+      "TestGoalReadGenerationOrdersReversedCompletion",
+      "TestGoalReceiptReplaySurvivesETAClockWindow"
+    ],
+    "B8 singleton too_large, siblings, aggregate shrink/no lost goal": [
+      "TestGoalTooLargeDetailKeepsOnlyVisibleCounts",
+      "TestGoalListAggregateBudgetPaginatesWithoutLoss"
+    ],
+    "B9 positive/replayed subscription and hidden references": [
+      "TestGoalStorageVisibility",
+      "TestGoalsSubscriptionUsesOutcomeVisibility"
+    ],
+    "B10 hidden ETA excluded from reads and derived pings": [
+      "TestGoalAPIWriteTimeETAsAndHiddenPings",
+      "TestGoalFilteredReadCoverageETAAndWorkerState",
+      "TestGoalsSubscriptionUsesOutcomeVisibility"
+    ],
+    "B12 event-backed ranges/moves, hidden state, four-hour stall": [
+      "TestGoalSeriesPlannerAndMoveTimeline",
+      "TestGoalSeriesVisibilityAndFourHourStall"
+    ],
+    "D12 project badges/groups/search/all sorts/effective ETA/totals/footer": [
+      "TestGoalListViewFiltersAndOrdering"
+    ],
+    "page scale and detail parity including retained deleted references": [
+      "TestGoalListPageWideProjection"
+    ],
+    "r5 bucket delta/changed_keys, no-pct transitions, hidden keys": [
+      "TestGoalSeriesChangedKeysWithoutPercentageChange",
+      "TestGoalSeriesVisibilityAndFourHourStall"
+    ],
+    "CLI stable patch/ref/receipt command": [
+      "TestGoalUpdateCommandPreservesPatchAndReceipt"
+    ],
+    "D1 lazy kinds, release-first repair, steps and no sample outcomes": [
+      "TestGoalLazyKindSeeding",
+      "TestGoalReleaseFirstUpdateRestoresKinds",
+      "TestGoalKindSchemasAndNextStep"
+    ],
+    "D2 canonical patch intent and idempotency key grammar": [
+      "TestUpdateDigestRetainsPatchIntent",
+      "TestGoalIdempotencyKeyGrammar"
+    ],
+    "D7 bounded reference-only outcome chains/cycles": [
+      "TestGoalOutcomeReferenceVisibilityIsBounded"
+    ],
+    "handover attribution, manual override and conflict": [
+      "TestGoalHandedOverReadAndConflict"
+    ]
+  },
   "checks": [
     {
-      "command": "remote-test.sh WORKTREE ./internal/goals -count=1 at 3f76ea86f",
+      "command": "remote-test.sh ./internal/goals ./internal/events ./internal/harness ./internal/questions ./internal/cli -run TestGoal|TestUpdate|<the twelve other CLI cases> -count=1",
+      "head": "280cd4d91",
       "result": "passed",
-      "scope": "All 11 round-one groups, including the four previously unexecuted DB groups"
+      "scope": "All 36 mapped acceptance groups, plus all thirteen required clean-process CLI cases. Goals 52.837 s, events 10.143 s, harness 5.456 s, questions 5.174 s, CLI 18.288 s."
     },
     {
-      "command": "remote-test.sh WORKTREE ./internal/goals ./internal/authz ./internal/events -run TestGoal|TestUpdate|TestDomainPolicyComposition|TestRealMuxRouteCoverage -count=1 at a71441013",
+      "command": "remote-test.sh <affected full packages> -count=1, followed by full DB/nodes reruns after their fixes",
+      "result": "passed-by-full-package",
+      "packages": {
+        "internal/goals": {
+          "head": "785a650e9",
+          "seconds": 70.829,
+          "result": "passed"
+        },
+        "internal/eta": {
+          "head": "785a650e9",
+          "seconds": 0.407,
+          "result": "passed"
+        },
+        "internal/authz": {
+          "head": "785a650e9",
+          "seconds": 89.65,
+          "result": "passed"
+        },
+        "internal/events": {
+          "head": "785a650e9",
+          "seconds": 85.119,
+          "result": "passed"
+        },
+        "internal/harness": {
+          "head": "785a650e9",
+          "seconds": 385.158,
+          "result": "passed"
+        },
+        "internal/questions": {
+          "head": "785a650e9",
+          "seconds": 138.458,
+          "result": "passed"
+        },
+        "internal/reportercontract": {
+          "head": "785a650e9",
+          "seconds": 8.667,
+          "result": "passed"
+        },
+        "internal/agentpairing": {
+          "head": "785a650e9",
+          "seconds": 384.322,
+          "result": "passed"
+        },
+        "internal/dsar": {
+          "head": "785a650e9",
+          "seconds": 0.253,
+          "result": "passed"
+        },
+        "cmd/aeon": {
+          "head": "785a650e9",
+          "seconds": 52.88,
+          "result": "passed"
+        },
+        "internal/db": {
+          "head": "8135063c6",
+          "seconds": 89.334,
+          "result": "passed"
+        },
+        "internal/nodes": {
+          "head": "280cd4d91",
+          "seconds": 177.023,
+          "result": "passed"
+        }
+      },
+      "scope": "Ten packages passed in the last broad run. The DB reapply and node performance failures were fixed, then their entire packages passed. No threshold, assertion, tier, environment flag or test was loosened or skipped."
+    },
+    {
+      "command": "remote-test.sh ./internal/nodes ./internal/goals ./cmd/aeon -run TestList6000Filters|TestGoal|TestUpdate|TestServeBackgroundPoolHeadroom -count=1",
+      "head": "785a650e9",
       "result": "passed",
-      "scope": "All 26 then-current Goals groups; strict authorization composition/mux fixtures; goal subscription regression. Goals 21.656 s, authz 0.483 s, events 1.977 s. Includes the event-policy planning fix."
+      "scope": "Both original 6000-node performance cases, all 32 Goals groups, and both background-pool headroom cases."
     },
     {
-      "command": "Broad remote-test.sh affected 10-package run at 01417f09c",
-      "result": "partially-passed",
-      "scope": "Full harness (316.268 s), events (93.772 s), questions (147.793 s), reportercontract (8.331 s), agentpairing (252.469 s), DSAR (0.177 s), cmd/aeon (51.809 s) passed. Goals series request deadline and strict authz fixture failures were fixed and rerun successfully. Full CLI remains subject to its existing process-wide test database URL mutation."
-    },
-    {
-      "command": "GOMAXPROCS=2 GOTOOLCHAIN=local go test -p 2 ./internal/goals -run TestUpdate|TestGoalClock|TestGoalState|TestGoalRollup|TestGoalIdempotency|TestGoalKind|TestGoalSeriesPlanner -count=1",
+      "command": "remote-test.sh clean-process thirteen-case CLI selection -count=1",
+      "head": "785a650e9",
       "result": "passed",
-      "scope": "Local small-package fallback permitted by the OPS hold; compiles final model/API tests without executing their DB groups"
+      "seconds": 13.171,
+      "cases": [
+        "TestCompatEndToEnd",
+        "TestMessagingCompatEndToEnd",
+        "TestProjectOnlyAgentDoctorAuth",
+        "TestClaudeCoordinatorRegistersChildrenEndToEnd",
+        "TestHarnessRegisterContinuesDeliveryEndToEnd",
+        "TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration",
+        "TestRunHeartbeatLiveOwnerAgainstDatabase",
+        "TestHarnessRenameProducerEndToEnd",
+        "TestClaudeSubagentHookEndToEnd",
+        "TestRulesReceiveRegisteredGenerationEndToEnd",
+        "TestTellPersonHeldReplyUsesSessionCookie",
+        "TestMigratedWorkCLICompletionGate",
+        "TestGoalUpdateCommandPreservesPatchAndReceipt"
+      ]
     },
     {
-      "command": "Scoped canonical test-tier classify with scripts/test-tiers/go-package AST collector",
+      "command": "node api/generate.mjs --check; node scripts/test-tiers/cli.mjs manifests --check",
       "result": "passed",
-      "scope": "32 acceptance groups registered ESSENTIAL; no whole-repo collection"
-    },
-    {
-      "command": "node scripts/test-tiers/cli.mjs manifests --check; node api/generate.mjs --check",
-      "result": "passed"
-    },
-    {
-      "command": "node --test --test-concurrency=2 scripts/test-tiers/manifests.test.mjs scripts/test-tiers/test-tiers.test.mjs",
-      "result": "366 passed, one canonical-manifest failure subsequently fixed",
-      "scope": "Focused canonical-manifest regression rerun passed after committing normalized own rows; injected runner failures are test fixtures, not external model/browser runs"
-    },
-    {
-      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/audit",
-      "result": "passed",
-      "scope": "33 tests; all new sources owned by existing slices"
+      "scope": "Authored goals contract regenerated and pinned at goals/1.4; four new acceptance groups registered ESSENTIAL; canonical manifests unchanged by the final fixes."
     },
     {
       "command": "node scripts/check-migrations.mjs --base-ref v261016060843.0.0",
       "result": "passed",
-      "scope": "362 migration numbers; migration 1361 exact-byte exception updated for invoker-only event visibility helper; no new tables or columns beyond round one"
+      "scope": "362 unique numbers; minimal helper-only edits to unreleased 1361 with matching exact-byte exception. No new migration number, table or column."
     },
     {
-      "command": "Small-package Go overlay negative control: TestGoalSeriesPlannerAndMoveTimeline",
-      "result": "proved",
-      "scope": "Removing historical goal-membership filtering fails the expected move-boundary assertion (asof 19:00 pct=100 want=0); the unchanged tracked implementation passes. Overlay files removed; no throwaway commit."
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/audit",
+      "result": "passed",
+      "scope": "33 tests. New sources list_query.go/list_test.go are covered by the existing internal/goals/** slice."
     },
     {
-      "command": "remote-test.sh WORKTREE ./internal/goals ./internal/reportercontract -count=1 at 25324caa2",
+      "command": "gofmt -l <all changed Go sources>; git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "ci-static-remote.sh (full node scripts/ci-static.mjs --merge-main)",
       "result": "not-executed-exit-3",
-      "scope": "Repeated sanctioned attempts refused by the explicit OPS AIT-160 hold since 2026-10-16T22:51:41Z. No hold override or local DB fallback was attempted."
+      "scope": "Night protocol refused full static on the final implementation. This is incomplete, not green; hosted PR CI must run it."
     }
   ],
-  "pending_validation": [
-    "Final remote Goals/reportercontract run, specifically TestGoalPauseUsesLatestStoppedSession and TestGoalReceiptReplaySurvivesETAClockWindow. All 28 Goals groups must execute at the final implementation HEAD; OPS AIT-160 hold returned exit 3.",
-    "Fresh-process CLI rerun: TestCompatEndToEnd, TestMessagingCompatEndToEnd, TestProjectOnlyAgentDoctorAuth, TestClaudeCoordinatorRegistersChildrenEndToEnd, TestHarnessRegisterContinuesDeliveryEndToEnd, TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration, TestRunHeartbeatLiveOwnerAgainstDatabase, TestHarnessRenameProducerEndToEnd, TestClaudeSubagentHookEndToEnd, TestRulesReceiveRegisteredGenerationEndToEnd, TestTellPersonHeldReplyUsesSessionCookie, TestMigratedWorkCLICompletionGate, and TestGoalUpdateCommandPreservesPatchAndReceipt. Preserve the full CLI failure: unchanged backend_memory_regression_test.go temporarily changes AEON_TEST_DATABASE_URL before dbtest global template initialization and later tests reject the restored maintenance URL. No tests were skipped or weakened.",
-    "Full ci-static --merge-main: ci-static-remote.sh refused with exit 3 under the night protocol. Not green; PR CI required.",
-    "Previous-binary migration compatibility, backup and cross-family release gates belong to the coordinator; no worker gate was run."
+  "resolved_regressions": {
+    "pending_db_cases": "Latest-stop fixture now has phase=stopped; latest-stop and aging-receipt cases pass in every final full Goals run.",
+    "visibility_cost": "The scale regression traced a timeout to the visible-event watermark before page expansion. Identity-bound invoker checks preserve hidden-reference, cycle, tenant and project behavior and pass the 50x30 single-expansion-query case.",
+    "aggregate_retries": "The real 50000-pair test initially exceeded the request deadline through repeated identical failures. Failed root-set reuse and deterministic batch splitting now pass without changing the five-second statement/eight-second request limits.",
+    "older_migration_replay": "TestAttentionEventsMigrationUpgradeAndReapply caught 1241 overwriting the Goals policy. Original identity/definition/replay assertions are retained, with extra required Goals/reference predicate checks. Full DB passes after the transactional preservation fix.",
+    "ordinary_node_performance": "Whole-package latency failures exposed repeated per-parent RLS initialization. A minimal equivalent recursive child join fixes the cost; the full nodes package passes original performance and row-result checks.",
+    "pool_headroom": "Configured startup caught an unmarked Goals scheduler borrowing foreground capacity. It now uses the existing background worker context; both barrier cases and full cmd/aeon pass."
+  },
+  "shared_changes": "Minimal additive authored goals contract, header/pin and four tier rows; generated OpenAPI rebuilt rather than hand-edited. Unreleased migration 1361 helper/policy updates and its exception hash remain scoped to Goals visibility. Existing migrator replay, scoped-node traversal and scheduler wiring received the necessary safety/performance fixes. No AGENTS.md, go.mod, web package, new schema columns or DSAR classifications changed in round three.",
+  "migration_1361_sha256": "034c6b96c9adda9a1ac5952169430b205cbba701e6043f4f33359548f6aaf3b7",
+  "preserved_baseline_failure": "Round-two full internal/cli failed after unchanged backend_memory_regression_test.go temporarily changed AEON_TEST_DATABASE_URL before dbtest global template initialization; later tests rejected the restored maintenance URL. That test was not changed, skipped or loosened. The explicitly requested thirteen-case fresh-process rerun passes, including on implementation 280cd4d91. No claim is made that the complete CLI package is green.",
+  "pending_ci": [
+    "Full ci-static --merge-main (night-protocol exit 3).",
+    "Previous-binary compatibility, backup and release acceptance remain coordinator responsibilities; no worker review/release gate was run."
   ],
   "limitations": [
-    "The list uses bounded per-goal expansion, not the concept’s single page-query optimization. It supports at most 1000 matching goals before asking for narrower project/group filters; totals_partial marks oversized goals excluded from state totals.",
-    "Historical reconstruction is explicitly bounded to 20000 events, 32 MiB snapshots, 4096 roots, 50000 pairs and a 20000000-unit projection work budget; larger histories return expansion too_large rather than partial values.",
-    "No UI or deployment is included. AEON-1457 consumes this API."
+    "Full-filter candidate discovery is bounded to 1000 goals; larger sets require narrower project/group filters.",
+    "Batch decoding and retained list snapshots are bounded to 32 MiB. History remains bounded to 20000 events, 4096 roots, 50000 pairs and 20000000 projection units per goal.",
+    "No UI or deployment; AEON-1457 consumes this API."
   ],
-  "migration_1361_sha256": "745825d4928d6bae9669815441ad62c14288b83944ff9e1a4b34d689e08cfd32",
   "safety": {
     "branch_pushed": false,
     "deployments": false,
@@ -112,13 +276,6 @@
     "credentials_read_or_printed": false,
     "ticket_status_changed": false,
     "release_acceptance": false,
-    "temporary_harness_refs": "Explicitly sanctioned by the round-two brief; only remote test harness refs were pushed."
-  },
-  "completion_pct": 80,
-  "implementation_head": "25324caa2",
-  "remaining_work": [
-    "Execute final remote DB and clean-process CLI checks when OPS releases the sanctioned lane; fix genuine failures within scope.",
-    "Replace the documented bounded per-goal list expansion with the concept’s page-wide materialized query and aggregate page-budget shrink/truncated behavior. This optimization and its budget acceptance coverage are not complete.",
-    "Full ci-static --merge-main and previous-binary/release checks remain for coordinator/PR CI; no review gate was run."
-  ]
+    "temporary_harness_refs": "Only the explicitly sanctioned remote-test harness temporary refs were pushed to the private test repository; no branch push."
+  }
 }
