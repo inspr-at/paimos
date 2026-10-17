@@ -663,9 +663,11 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.equal(personSteps.weightSeconds, personTiming?.seconds, 'Charge only the measured person-step scheduling cost')
   assert.ok(personSteps.weightSeconds <= 40, 'The five person-step flows must retain their independently bounded measured cost')
   // AEON-1406 adds four empty-Desk cases (two widths x two themes) after the historical budget.
+  // AEON-1477 adds six refresh-stability cases, the failed-first-load case, three
+  // Open/Decided tab-switch cases and one touch Try again case.
   // Keep the old budget and charge only this file's scheduling weight, as for project name wrap.
   const deskEmpty = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/desk-empty.spec.ts')
-  assert.ok(deskEmpty && deskEmpty.listedTests === 4, 'Empty Desk regressions must remain declared')
+  assert.ok(deskEmpty && deskEmpty.listedTests === 15, 'Empty Desk and refresh regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === deskEmpty.file), 'Empty Desk regressions must remain gated')
   // AEON-1448 adds four Desk tab-row cases after the historical budget.
   // Keep the old budget and charge only this file's scheduling weight, as for project name wrap.

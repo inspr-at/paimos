@@ -5496,6 +5496,10 @@
     ,
     {"kind":"go","package":"internal/client","name":"TestWorkAggregateReadRetryIsOptInOnceAndCancellable","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/client","name":"TestWorkerProofHeadersRedactReflectedFailures","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/client","name":"TestWorkerProofHeadersRefuseRedirects","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/config","name":"TestChatEnabledFromEnv","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/config","name":"TestDeliveryAdmissionQueueDefaultsOff","tier":"ESSENTIAL"}
@@ -6808,7 +6812,7 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestLiveEtaWaitsOutAProjectMove","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/harness","name":"TestLostContactRevivesOnSameWorkerProof","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/harness","name":"TestLostContactRevokesSameWorkerProofExceptStop","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLostContactStaysClosedAfterItsReplacementStops","tier":"GATED-FULL"}
     ,
@@ -6866,7 +6870,7 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestPauseBatchExclusionsAndResumeRegistration","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/harness","name":"TestPauseControlSurvivesLostContactAndRevive","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/harness","name":"TestPauseControlHistorySurvivesLostContactWithoutRevival","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestPauseLevelsDefaultAndCapabilityHonesty","tier":"GATED-FULL"}
     ,
@@ -7162,7 +7166,7 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestWorkLeafExitBodyReadBeforeLocks","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/harness","name":"TestWorkLeafPendingLostContactCanReviveAndStop","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafPendingLostContactRejectsRevivalAndConfirmsStop","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestWorkLeafRecoveryFencesBeforeResourceLocks","tier":"GATED-FULL"}
     ,
@@ -7171,6 +7175,8 @@
     {"kind":"go","package":"internal/harness","name":"TestWorkLeafResumeDefersEventsUntilSuccessorLocks","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestWorkLeafUncertainExitConfirmation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkerLeaseHeaderTransitionAndStoppedAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harnesslaunch","name":"TestEntrypointAndEnvironment","tier":"ESSENTIAL"}
     ,
@@ -7283,6 +7289,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestCapabilityAndPanicDetailsNeverEnterRequestLogs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestClassicAPIPathsAreGone","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestClientCancellationIs499InsteadOfServerFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHTTPReadDeadlineOwnership","tier":"ESSENTIAL"}
     ,
@@ -10901,6 +10909,10 @@
     {"kind":"go","package":"internal/views","name":"TestViewModeRoundTripAndValidation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestViewsShareReadOwnerWriteAndAppendEvents","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/workerlease","name":"TestTransitionRejectsAmbiguousProofAndNeverLogsValues","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/workerlease","name":"TestWorkerSchemeSurvivesHopByHopProxy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestBufferBodyBoundsAndDecode","tier":"GATED-FULL"}
     ,

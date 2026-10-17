@@ -46,7 +46,7 @@ func finishPaused(t *testing.T, f *harnessFixture, path, lease, control string) 
 	expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "paused", "handover": pauseHandover()}, lease), 200)
 }
 
-func TestPauseControlSurvivesLostContactAndRevive(t *testing.T) {
+func TestPauseControlHistorySurvivesLostContactWithoutRevival(t *testing.T) {
 	for _, planned := range []bool{false, true} {
 		t.Run(fmt.Sprintf("planned=%t", planned), func(t *testing.T) {
 			f := fixture(t)
@@ -78,16 +78,14 @@ func TestPauseControlSurvivesLostContactAndRevive(t *testing.T) {
 				}
 				return nil
 			})
-			w := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease), 403)
+			expect(t, f.call(f.agent, "POST", path+"/pause-plan", plan, lease), 403)
+			// The pending control remains historical; only exit confirmation
+			// can settle this closed generation using its original lease.
+			w := f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "process_exited"}, lease)
 			expect(t, w, 200)
-			if got := decode(t, w); got["stopped_at"] != nil || got["pause"].(map[string]any)["control_id"] != control {
-				t.Fatalf("pause lost on revive: %v", got)
-			}
-			expect(t, f.call(f.agent, "POST", path+"/pause-plan", plan, lease), 200)
-			w = f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "paused", "handover": pauseHandover()}, lease)
-			expect(t, w, 200)
-			if got := decode(t, w); got["stop_reason"] != "paused" || got["pause"].(map[string]any)["state"] != "paused" {
-				t.Fatalf("revived pause did not finish: %v", got)
+			if got := decode(t, w); got["stop_reason"] != "process_exited" || got["stopped_at"] == nil {
+				t.Fatal("stop confirmation changed the closed-generation boundary")
 			}
 		})
 	}

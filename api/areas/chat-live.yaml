@@ -25,15 +25,8 @@ paths:
         '413':
           description: "Final body exceeds 64 KiB; no writes"
       parameters:
-        -
-          name: "X-Aeon-Worker-Lease"
-          in: "header"
-          required: true
-          schema:
-            type: "string"
-            minLength: 32
-            maxLength: 4096
-          description: "Existing private registration proof; never logged or returned."
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -62,15 +55,8 @@ paths:
         '408':
           description: "Three-second request body/work deadline exceeded"
       parameters:
-        -
-          name: "X-Aeon-Worker-Lease"
-          in: "header"
-          required: true
-          schema:
-            type: "string"
-            minLength: 32
-            maxLength: 4096
-          description: "Existing private registration proof; never logged or returned."
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -99,15 +85,8 @@ paths:
         '408':
           description: "Three-second request body/work deadline exceeded"
       parameters:
-        -
-          name: "X-Aeon-Worker-Lease"
-          in: "header"
-          required: true
-          schema:
-            type: "string"
-            minLength: 32
-            maxLength: 4096
-          description: "Existing private registration proof; never logged or returned."
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -136,15 +115,8 @@ paths:
         '408':
           description: "Three-second request body/work deadline exceeded"
       parameters:
-        -
-          name: "X-Aeon-Worker-Lease"
-          in: "header"
-          required: true
-          schema:
-            type: "string"
-            minLength: 32
-            maxLength: 4096
-          description: "Existing private registration proof; never logged or returned."
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:

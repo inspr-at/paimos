@@ -14,7 +14,6 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
-	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // AEON-291. The product must not depend on every launcher marking its run
@@ -27,9 +26,9 @@ import (
 // Managed generations are left to their daemon, which owns the process and
 // reports ownership_lost itself. Nothing here signals a process.
 //
-// No false kills: a later heartbeat with the same worker proof revives the
-// generation (harness.revived), unless it was archived or a new generation
-// already holds the same session reference.
+// Closing revokes ordinary worker proof, including heartbeat recovery. A returning
+// worker registers a fresh generation and lease; stop confirmation and usage
+// settlement can still authenticate the historical generation.
 
 const (
 	StopReasonHeartbeatLost      = "heartbeat_lost"
@@ -90,48 +89,6 @@ func (m *Module) putHeartbeatLost(r *http.Request, tx pgx.Tx, p tenant.Principal
 // lostContact reports a generation the sweeper closed and nobody archived.
 func lostContact(s Session) bool {
 	return s.ID != "" && s.ArchivedAt == nil && s.StoppedAt != nil && s.StopReason != nil && *s.StopReason == StopReasonHeartbeatLost
-}
-
-// revive reopens a lost-contact generation for its own worker. The caller has
-// verified the worker proof and holds the row lock. Once any newer generation
-// registered the same session reference, whatever its state now, it replaced
-// this one for good: the old generation stays closed.
-func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase string) (Session, error) {
-	if s.HandedOverToID != nil {
-		return s, workorders.Fail(403, "harness generation handed over")
-	}
-	var taken bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND id<>$3 AND (created_at,id)>($4,$3::uuid))`, s.ProjectID, s.refDigest, s.ID, s.CreatedAt).Scan(&taken); err != nil {
-		return s, err
-	}
-	if taken {
-		return s, workorders.Fail(403, "harness worker proof rejected")
-	}
-	admission, err := workorders.HarnessBuildAdmissionTx(ctx, tx, s.Branch, s.TicketNodeID, s.WorkOrderID, s.RunID)
-	if err != nil {
-		return s, err
-	}
-	if s.Role == "worker" {
-		buildTicket, err := workqueue.BuildTicketTx(ctx, tx, s.TicketNodeID, s.WorkOrderID, s.RunID)
-		if err != nil {
-			return s, err
-		}
-		if buildTicket != nil {
-			if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, *buildTicket, s.ID, nil, &admission); err != nil {
-				return s, err
-			}
-		}
-	}
-	before := s
-	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,stopped_at=NULL,stop_reason=NULL,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, phase))
-	if err != nil {
-		return s, err
-	}
-	s.BuildContinuation = admission.Continuation
-	if err = record(ctx, tx, p, s, "revived", before, s); err == nil {
-		err = recordBuildContinuation(ctx, tx, p, admission, s.ID)
-	}
-	return s, err
 }
 
 // SweepLostContact closes one tenant's silent unmanaged generations and

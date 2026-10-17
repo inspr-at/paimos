@@ -560,6 +560,8 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/live-eta:
     parameters:
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
     put:
       operationId: putNodeLiveEta

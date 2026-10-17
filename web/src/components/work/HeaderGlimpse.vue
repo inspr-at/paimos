@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { projectSection } from './projectNavigation'
-import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide, nextHeaderGlimpseWide } from '../../lib/headerGlimpse'
+import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpsePaintClears, headerGlimpseViewportWide, nextHeaderGlimpseWide } from '../../lib/headerGlimpse'
 import { filtersFromQuery, filtersToQuery, type ListFilters } from '../../lib/ticketList'
 import { ticketGraphData } from '../../lib/ticketGraphRenderer'
 import type { GraphData, GraphFPS } from '../../lib/graphRenderer'
@@ -101,16 +101,7 @@ function syncWide() {
   const next = readWide()
   if (wide.value !== next) wide.value = next
 }
-let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, paintViewportFrame = 0
-function followPaintViewport() {
-  paintViewportFrame = 0
-  if (!mounted || !paint.value) return
-  // A software-rendered canvas can outlive all resize/media/observer deliveries.
-  // Keep the active decoration bound to real layout on its animation frames;
-  // no polling remains once the glimpse stops painting or is unmounted.
-  syncWide()
-  if (wide.value) paintViewportFrame = requestAnimationFrame(followPaintViewport)
-}
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, paintSample = 0
 function followViewport() {
   syncWide()
   if (viewportFrame) return
@@ -164,6 +155,19 @@ function togglePause() { userPaused.value = !userPaused.value; applyMotion() }
 function onReduced() { reduced.value = reducedQuery.matches }
 function onVisibility() { applyMotion() }
 function onResize() { followViewport(); scheduleMeasure() }
+// The observers above can all stay silent while the canvas is painting.
+// Keep reading until the paint ends, and only clear.
+function samplePaintedViewport() {
+  if (!mounted || !paint.value) { paintSample = 0; return }
+  const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: viewportWidth() }
+  if (headerGlimpsePaintClears(wide.value, signal)) wide.value = false
+  if (!mounted || !paint.value) { paintSample = 0; return }
+  paintSample = requestAnimationFrame(samplePaintedViewport)
+}
+function startPaintSample() {
+  if (!mounted || !paint.value || paintSample) return
+  samplePaintedViewport()
+}
 function attachSizing() {
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
   if (!sizing || !header || !page) return
@@ -212,8 +216,9 @@ async function load() {
 }
 watch(paint, value => {
   emit('active', value)
-  cancelAnimationFrame(paintViewportFrame)
-  paintViewportFrame = value ? requestAnimationFrame(followPaintViewport) : 0
+  cancelAnimationFrame(paintSample)
+  paintSample = 0
+  if (value) startPaintSample()
 })
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
@@ -239,7 +244,7 @@ onBeforeUnmount(() => {
   changes?.disconnect()
   cancelAnimationFrame(measureFrame)
   cancelAnimationFrame(viewportFrame)
-  cancelAnimationFrame(paintViewportFrame)
+  cancelAnimationFrame(paintSample)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)

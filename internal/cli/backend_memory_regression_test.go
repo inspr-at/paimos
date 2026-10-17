@@ -55,10 +55,15 @@ func BenchmarkBackendMemoryRelease(b *testing.B) {
 
 func runBackendMemoryWorkload(t testing.TB, diagnostics bool) {
 	t.Helper()
-	// Keep dbtest's exit watcher independent of the runner's short-lived DB.
-	if u, err := url.Parse(os.Getenv(dbtest.EnvDatabaseURL)); err == nil && strings.HasPrefix(u.Path, "/aeon_run_") {
-		u.Path = "/postgres"
-		t.Setenv(dbtest.EnvDatabaseURL, u.String())
+	// The standalone benchmark retargets maintenance so its template watcher
+	// outlives remote-test.sh's short-lived database. The in-package test must
+	// keep the process URL: dbtest caches that URL, and changing it fails every
+	// later database test in this package.
+	if diagnostics {
+		if u, err := url.Parse(os.Getenv(dbtest.EnvDatabaseURL)); err == nil && strings.HasPrefix(u.Path, "/aeon_run_") {
+			u.Path = "/postgres"
+			t.Setenv(dbtest.EnvDatabaseURL, u.String())
+		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()

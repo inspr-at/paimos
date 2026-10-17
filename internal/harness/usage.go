@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -282,7 +283,7 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if err != nil {
 		return nil, err
 	}
-	lease := r.Header.Get("X-Aeon-Worker-Lease")
+	lease := workerlease.Read(r)
 	if p.Kind != tenant.Agent || p.ID != s.AgentPrincipalID || len(lease) < 32 || len(lease) > 256 ||
 		subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) != 1 {
 		return nil, workorders.Fail(403, "harness worker proof rejected")

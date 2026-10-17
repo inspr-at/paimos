@@ -15,7 +15,7 @@ project. Workers require distinct assignment slots. Handover preserves the
 conversation and prior binding records; a native session cannot be reused for
 another private role or person. Automation binding delegation is deferred.
 
-Workers use their scoped agent key and existing `X-Aeon-Worker-Lease` through
+Workers use their scoped agent key and lease together as `Authorization: Aeon-Worker <agent-key> <worker-lease>` through
 `POST /api/chat-deliveries/binding/resolve`. The proof is checked against the
 exact live external registration (heartbeat or initial registration within two
 minutes), person, project, role and epoch. Public references and session IDs

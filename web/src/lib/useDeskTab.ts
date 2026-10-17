@@ -100,10 +100,9 @@ export function useDeskTab() {
   watch(() => desk.projection, page => { if (page) lastAsked = Date.now() }, { flush: 'sync' })
   async function readAgain() {
     lastAsked = Date.now()
-    await desk.refresh()
-    // The header's poll clears the store when it wakes from a throttled timer, which
-    // drops a read in flight; that read is asked for once more.
-    if (owner.value && !desk.projection && !desk.error) await desk.refresh()
+    // The header's poll cancels a read in flight when it wakes from a throttled
+    // timer and keeps the count; the store asks for that dropped read once more.
+    await desk.refreshPastCancel()
   }
   const reader = window.setInterval(() => {
     if (owner.value && Date.now() - lastAsked >= DESK_TAB_STALE_MS) void readAgain()

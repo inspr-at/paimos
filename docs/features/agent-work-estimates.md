@@ -202,8 +202,10 @@ Heartbeat, session/control reads and the periodic sweep complete its cooperative
 control with reason `pause_deadline_expired`. Level-aware requests also queue
 Stop now; historical requests without a level retain cancel-only expiry. Before
 the deadline, a
-`heartbeat_lost` close preserves the pending or claimed pause control so the
-same worker can heartbeat, plan and stop with its handover after revival.
+`heartbeat_lost` close preserves the pending or claimed pause control as history.
+The closed generation rejects heartbeat and pause-plan with 403; its historical
+lease can still confirm process exit and settle usage. A returning worker must
+register a fresh generation and lease.
 An unarchived paused or resume-requested generation continues to occupy its
 ticket, suppressing the status autopilot's stale-progress rule until it is
 resumed or archived.

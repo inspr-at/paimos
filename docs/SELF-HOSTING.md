@@ -144,6 +144,89 @@ first matching OIDC sign-in creates the administrator. Add members through
 Aeon's membership/invitation controls. Keep `AEON_ENV=prod`; the development
 login is not an installation shortcut.
 
+## Keep worker credentials out of access logs
+
+Release 137 clients send one `Authorization` value,
+`Aeon-Worker <agent-key> <worker-lease>`. The same header carries the scoped
+agent key and the exact worker generation. Ordinary reverse proxies forward
+`Authorization` and redact it from access logs. The server accepts the
+deprecated `X-Aeon-Worker-Lease` beside `Authorization: Bearer <agent-key>` for
+this transition release and emits a warning containing only the header names.
+Upgrade the server before CLI and agentd. Do not put the lease in
+`Proxy-Authorization` or any other hop-by-hop header: Traefik and Caddy remove
+those before the request reaches Aeon.
+
+[Caddy redacts Authorization by default](https://caddyserver.com/docs/caddyfile/directives/log).
+Use an explicit log filter for the legacy header too; keep `log_credentials`
+disabled. No extra `header_up` is required for the worker scheme:
+
+```caddyfile
+work.example.org {
+    log {
+        format filter {
+            request>headers>Authorization delete
+            request>headers>X-Aeon-Worker-Lease delete
+        }
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+For [Traefik access logs](https://doc.traefik.io/traefik/reference/install-configuration/observability/logs-and-accesslogs/),
+merge this into the static configuration. Dropping all headers is the default
+here; explicit entries also protect them if other header logging is enabled.
+Traefik forwards `Authorization` on an ordinary HTTP router:
+
+```yaml
+accessLog:
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        Authorization: drop
+        X-Aeon-Worker-Lease: drop
+        Cookie: drop
+        Set-Cookie: drop
+```
+
+For [nginx access logs](https://nginx.org/en/docs/http/ngx_http_log_module.html),
+use an allowlisted format without request-header variables. Define the format in
+`http` and select it in the Aeon `server`. `proxy_pass_request_headers` already
+forwards `Authorization`; do not copy the lease into a separate header:
+
+```nginx
+# http context
+log_format aeon_safe '$remote_addr [$time_local] "$request_method $uri $server_protocol" '
+                     '$status $body_bytes_sent';
+
+# Aeon server context
+access_log /var/log/nginx/aeon-access.log aeon_safe;
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+}
+```
+
+Apply the policy to every proxy hop and log destination. Keep debug/request-body
+logging disabled for authenticated traffic. Verify log absence with synthetic
+credentials before upgrading clients; log filters do not remove values already
+written to historical logs.
+
+A lease has no independent wall-clock expiry, but ordinary worker proof is
+revoked as soon as `stopped_at` is set (including heartbeat-loss closure) or the
+generation is archived. A returning worker registers with a fresh lease rather
+than reviving a closed generation. Historical proof remains usable only for
+stop/exit confirmation and usage settlement, always alongside the same agent's
+live scoped API key. Archive also blocks usage settlement; confirmed exit is
+still reportable after archive. A log reader with only the lease cannot act as
+the agent. Key revocation also blocks worker calls.
+
 ## Back up, upgrade, and recover
 
 Back up the database, file directory, four secrets, and non-secret configuration

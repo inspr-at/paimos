@@ -68,7 +68,7 @@ func TestHarnessRunReportsFailures(t *testing.T) {
 					return false
 				}
 				w.WriteHeader(status)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "fixture failure " + r.Header.Get("X-Aeon-Worker-Lease")})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "fixture failure " + receivedWorkerLease(r)})
 				return true
 			})
 			defer srv.Close()

@@ -49,10 +49,10 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 					return
 				}
 				calls++
-				if (action == "claim" || action == "yield") && r.Header.Get("X-Aeon-Worker-Lease") != proof {
+				if (action == "claim" || action == "yield") && receivedWorkerLease(r) != proof {
 					t.Error("lease not bound to claim")
 				}
-				if (action != "claim" && action != "yield") && r.Header.Get("X-Aeon-Worker-Lease") != "" {
+				if (action != "claim" && action != "yield") && receivedWorkerLease(r) != "" {
 					t.Error("person control sent worker proof")
 				}
 				if action != "status" {
@@ -128,7 +128,7 @@ func TestLeadHandoffCLIAndQueueDispatchPrivacy(t *testing.T) {
 					}
 					_, _ = w.Write([]byte(`{"run_id":"` + id + `","ticket_id":"` + id + `","state":"launch_unknown","lead_generation":1,"work_order_revision":2}`))
 				} else {
-					if r.Method != "POST" || r.URL.Path != "/api/queue/next" || r.Header.Get("X-Aeon-Lead-Session") != id || r.Header.Get("X-Aeon-Lead-Generation") != "3" || r.Header.Get("X-Aeon-Worker-Lease") != proof {
+					if r.Method != "POST" || r.URL.Path != "/api/queue/next" || r.Header.Get("X-Aeon-Lead-Session") != id || r.Header.Get("X-Aeon-Lead-Generation") != "3" || receivedWorkerLease(r) != proof {
 						t.Error("dispatch proof lost")
 					}
 					var body map[string]any
@@ -197,7 +197,7 @@ func TestHarnessLeadClaimUsesExistingFilesAndRedactsProof(t *testing.T) {
 				case "/api/kinds":
 					_, _ = w.Write([]byte(`{"items":[{"id":"p","slug":"project"}]}`))
 				case "/api/projects/" + project + "/lead":
-					if r.Method != "GET" || r.Header.Get("X-Aeon-Worker-Lease") != "" {
+					if r.Method != "GET" || receivedWorkerLease(r) != "" {
 						t.Error("state read leaked proof or mutated")
 					}
 					revision := 1
@@ -211,7 +211,7 @@ func TestHarnessLeadClaimUsesExistingFilesAndRedactsProof(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Error(err)
 					}
-					if r.Method != "POST" || r.Header.Get("X-Aeon-Worker-Lease") != lease || body["harness_session_ref"] != ref || body["expected_revision"] != float64(1) || len(body) != 2 {
+					if r.Method != "POST" || receivedWorkerLease(r) != lease || body["harness_session_ref"] != ref || body["expected_revision"] != float64(1) || len(body) != 2 {
 						t.Error("wrong claim proof or revision")
 					}
 					if mode == "server_error" {
@@ -263,20 +263,20 @@ func TestHarnessLeadClaimDerivesRegisteredReferenceFromState(t *testing.T) {
 					switch r.URL.Path {
 					case harnessPath(transcriptProjectID, transcriptSessionID):
 						metadataReads++
-						if r.Method != "GET" || r.Header.Get("X-Aeon-Worker-Lease") != "" {
+						if r.Method != "GET" || receivedWorkerLease(r) != "" {
 							t.Error("metadata read mutated or leaked proof")
 						}
 						_ = json.NewEncoder(w).Encode(map[string]any{"id": transcriptSessionID, "harness": "claude", "role": "coordinator"})
 						return true
 					case "/api/projects/" + transcriptProjectID + "/lead":
-						if r.Method != "GET" || r.Header.Get("X-Aeon-Worker-Lease") != "" {
+						if r.Method != "GET" || receivedWorkerLease(r) != "" {
 							t.Error("lead read mutated or leaked proof")
 						}
 						_ = json.NewEncoder(w).Encode(map[string]any{"revision": 4, "reason": "adoption_pending"})
 						return true
 					case "/api/projects/" + transcriptProjectID + "/lead/claim":
 						claims++
-						if r.Method != "POST" || r.Header.Get("X-Aeon-Worker-Lease") != expectedLease || body["harness_session_ref"] != expectedRef || body["expected_revision"] != float64(4) || len(body) != 2 {
+						if r.Method != "POST" || receivedWorkerLease(r) != expectedLease || body["harness_session_ref"] != expectedRef || body["expected_revision"] != float64(4) || len(body) != 2 {
 							t.Error("claim did not match registered proof and displayed revision")
 						}
 						_ = json.NewEncoder(w).Encode(map[string]any{"project_id": transcriptProjectID, "revision": 5, "generation": 1, "state": "working"})
