@@ -9240,11 +9240,15 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"a large project with fewer than eight linked matches has no glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"collapsing the project header pauses the backdrop and expanding resumes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"other sections keep their own search out of the ticket backdrop","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"saved views, assignee, type, priority and server search determine the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"scrolling the entire backdrop out of view pauses it and returning resumes it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a dropped wide-media change still hides the glimpse below 1280","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a priority filter that keeps eight tickets but no link hides the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15979,6 +15983,8 @@
     {"kind":"node","file":"tests/head-counts.test.ts","name":"working, waiting and problems always show; the rest only while non-zero and after them","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"a ready graph has eight tickets and at least one link","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/header-glimpse.test.ts","name":"a stale wide media query cannot keep the header glimpse once the layout is below 1280","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"hover controls drop to the compact size when the labelled row cannot fit","tier":"GATED-FULL"}
     ,

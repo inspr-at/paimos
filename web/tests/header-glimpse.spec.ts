@@ -259,6 +259,30 @@ test('eight linked tickets appear once the viewport reaches 1280', async ({ page
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
+// The mounted min-width list can miss `change` while the WebGL loop is running.
+// Shrinking must still clear the glimpse. This listener swallow is the regression
+// for that miss: the layout width is the only signal left.
+test('a dropped wide-media change still hides the glimpse below 1280', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = original(query)
+      if (query === '(min-width: 1280px)') {
+        const ignore = () => {}
+        Object.defineProperty(list, 'addEventListener', { configurable: true, value: ignore })
+        Object.defineProperty(list, 'removeEventListener', { configurable: true, value: ignore })
+      }
+      return list
+    }
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+})
+
 test.describe('reduced motion', () => {
   test.use({ reducedMotion: 'reduce' })
   test('shows nothing', async ({ page }) => {
