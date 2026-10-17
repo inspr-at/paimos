@@ -300,7 +300,7 @@
     "pool_headroom": "Configured startup caught an unmarked Goals scheduler borrowing foreground capacity. It now uses the existing background worker context; both barrier cases and full cmd/aeon pass."
   },
   "shared_changes": "Minimal additive authored goals contract, header/pin and four tier rows; generated OpenAPI rebuilt rather than hand-edited. Unreleased migration 1361 helper/policy updates and its exception hash remain scoped to Goals visibility. Existing migrator replay, scoped-node traversal and scheduler wiring received the necessary safety/performance fixes. No AGENTS.md, go.mod, web package, new schema columns or DSAR classifications changed in round three.",
-  "migration_1361_sha256": "a76e0a77ca8143afa1cea6c3c2fc79a66deadacbc0001c7b162aeb1e273ff830",
+  "migration_1361_sha256": "4cbfb808bfda04018a6934eb42ec2edbe381038231ebdb79f7b2824f6cfc1923",
   "preserved_baseline_failure": "Round-two full internal/cli failed after unchanged backend_memory_regression_test.go temporarily changed AEON_TEST_DATABASE_URL before dbtest global template initialization; later tests rejected the restored maintenance URL. That test was not changed, skipped or loosened. The explicitly requested thirteen-case fresh-process rerun passes, including on implementation 280cd4d91. No claim is made that the complete CLI package is green.",
   "pending_ci": [
     "Full ci-static --merge-main: ci-static-locked.sh returned exit 3 under the host night protocol in fix3. This is incomplete, not green; the coordinator must obtain the hosted static pass before merge.",
@@ -386,5 +386,98 @@
       "exit_code": 3,
       "reason": "Night protocol pauses remote static checks; no local heavy fallback is authorized for this refusal."
     }
+  },
+  "fix4": {
+    "date": "2026-10-17",
+    "baseline": "a573bd61f",
+    "integration_base": "86a2b0768",
+    "implementation": "f11ea61d9",
+    "scope": "Only the CI-blocking Goals aggregate page, HTTP body ownership, no-statistics node list, and neutral QA evidence findings. No web implementation or non-blocking follow-up changes.",
+    "changes": [
+      "Both Goals mutations consume bounded bytes through ReadRequestBody; patch decoding uses a bytes.Reader. Existing transport timeout, byte cap and final-transaction authorization are retained.",
+      "Scoped lists materialize visible adjacency before recursion. Repeated security-qualified parent/child joins become hash joins without changing RLS, filters, ordering, paging or the original performance/index assertions.",
+      "The unreleased 1361 migration preserves the aeon_work_scope signature and all root/pair/cycle/leaf semantics while sharing visible adjacency and deduplicating direct-parent probes. Original root/node memberships remain intact.",
+      "The bounded invoker aeon_outcome_serves projection authorizes each outcome under the original scope, reads at most 21 serves targets under widened project visibility, and restores that setting on success/error. Tenant isolation and hidden-outcome/rule checks remain active. Candidate discovery and page expansion use it.",
+      "Shared leaf facts are encoded/decoded once per leaf; compact root memberships preserve rollups and pair budgets. Root fact order is restored before deriving weights.",
+      "QA evidence uses a neutral remote-runner description. No public-name allowlist or test assertion was relaxed."
+    ],
+    "measurements": {
+      "ordinary_no_statistics_before": {
+        "head": "a573bd61f",
+        "list_explain_ms": 1565.551,
+        "facets_explain_ms": 1418.172
+      },
+      "ordinary_no_statistics_after": {
+        "head": "3ea8033b5",
+        "list_explain_ms": 131.369,
+        "facets_explain_ms": 19.573,
+        "scope_visits": 12002,
+        "rejected_join_pairs": 0,
+        "original_statement_budget_ms": 2000
+      },
+      "aggregate_scope_before": {
+        "head": "839c41c88",
+        "scope_function_ms": 1241.369,
+        "page_execution_ms": 1594.166
+      },
+      "aggregate_scope_after": {
+        "head": "3ea8033b5",
+        "scope_function_ms": 38.855,
+        "page_execution_ms": 413.598,
+        "largest_successful_batch_rows": 851,
+        "row_limit_assertion": 2000,
+        "request_deadline_seconds": 8,
+        "statement_deadline_seconds": 5
+      },
+      "over_budget_probe_after_ms": [
+        75.796416,
+        51.675959,
+        48.464541,
+        42.892
+      ]
+    },
+    "regressions": [
+      "TestGoalListAggregateBudgetPaginatesWithoutLoss retains page/totals/oversized assertions and additionally bounds actual successful query row counts, rejecting repeated shared leaf payloads.",
+      "TestListWithoutStatistics additionally counts actual node visits and rejected recursive join pairs, rejecting quadratic work even on a fast runner. Original request, facet and two-second statement checks remain.",
+      "TestList6000FiltersWithStaleKindStatistics retains the original budgets and includes adjacency materialization in its existing scope-work count. TestScopedListWithoutStatisticsUsesChildIndex is unchanged.",
+      "TestGoalStorageVisibility checks the bounded serves helper for visible, hidden, workspace, keyless and non-outcome sources and retains the existing setting-restoration check.",
+      "TestHTTPRequestBodyOwnership from current main covers both Goals handlers. No new test names, tier rows, source files or ownership-slice rows were introduced."
+    ],
+    "validation": {
+      "targeted_remote": "Passed all selected Goals aggregate/page/visibility/reference cases and ordinary fresh/stale/no-statistics/index regressions; WorkAggregatesETAIntervalOnceAndParity passed.",
+      "status_icons_remote": {
+        "result": "passed",
+        "cases": 12,
+        "seconds": 23.5,
+        "runner": "Approved remote-spec.sh with REMOTE_ONLY=1; isolated headless browser; no local browser fallback. The approved repository remote browser script has remoteLaneReady=false, so no CI-equivalent Linux lane was available."
+      },
+      "test_tier_selfcheck": {
+        "passed": 337,
+        "failed": 0
+      },
+      "web_shard_selfcheck": {
+        "passed": 33,
+        "failed": 0
+      },
+      "ownership_audit": {
+        "passed": 33,
+        "failed": 0
+      },
+      "migration_checker_tests": {
+        "passed": 43,
+        "failed": 0
+      },
+      "migration_guard": "Passed against the published base, including the refreshed exact-byte 1361 exception.",
+      "public_name_guard": "Passed; original source on the scratch control reproduces exactly the two reported QA-evidence failures.",
+      "full_affected_go": "Running remotely on f11ea61d9.",
+      "negative_controls": "Scratch branch checks/aeon-1456-fix4-before is a573bd61 plus current main and only the strengthened regression tests; remote run initially refused while full acceptance held the single Go slot. No negative-control commit is on the delivery branch.",
+      "ci_static": {
+        "result": "blocked",
+        "exit_code": 3,
+        "reason": "Approved static runner refuses full checks during the host night protocol; no local heavy fallback or guard bypass. Hosted CI evidence remains required."
+      }
+    },
+    "shared_changes": "Only existing unreleased migration 1361 and its exact-byte exception are authored shared changes. No schema table/column, DSAR classification, permission, API route/contract or new test registration changes. Current main merged cleanly; its unrelated changes are inherited.",
+    "safety": "No origin push, deployment, model CLI, subagent, cross-family review gate, release acceptance or ticket status change."
   }
 }
