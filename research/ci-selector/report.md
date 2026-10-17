@@ -17,7 +17,8 @@ zero misses on historical trees rather than a calendar wait.
 
 The corpus is the unchanged `scripts/test-tiers/affected-replay.json`, SHA-256
 `d960c3419d4522a04f90c4b61ffa12eb96fc09d3b44413826c44410e57c51d59`, matching
-`scripts/ci/browser-area-rollout.json`. [measurement.json](measurement.json)
+`scripts/ci/browser-area-rollout.json`.
+[browser-candidate-measurement.json](../../scripts/test-tiers/browser-candidate-measurement.json)
 contains all changed file lists, observed specs and exact failure identities,
 per-case classifications, base/tested SHAs, selection results, fallback reasons,
 graph summaries and implementation hashes.

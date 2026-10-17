@@ -102,7 +102,7 @@ test('AEON-1485 replay rejects changed pins and missing history and cannot activ
 
 test('AEON-1485 published measurement accounts for every pinned proof row and never qualifies catalogue fallback as narrowing', () => {
   const fixture = JSON.parse(readFileSync(new URL('./affected-replay.json', import.meta.url), 'utf8'))
-  const measurement = JSON.parse(readFileSync(new URL('../../research/ci-selector/measurement.json', import.meta.url), 'utf8'))
+  const measurement = JSON.parse(readFileSync(new URL('./browser-candidate-measurement.json', import.meta.url), 'utf8'))
   const supported = new Set(['source-supported', 'bisected', 'ticket-confirmed', 'fix-diff-confirmed', 'recorded-failure'])
   const proof = fixture.historicalRegressions.filter(row => row.observed.kind === 'browser' && supported.has(row.causalConfidence))
   assert.equal(measurement.corpus_sha256, corpusPin)

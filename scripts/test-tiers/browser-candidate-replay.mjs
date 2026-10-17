@@ -2,7 +2,7 @@
 // Local Git reads only. This is research, never an Actions planner entry point.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { candidateBounds, candidateGraph, candidateSelection, candidateID } from './browser-candidate.mjs'
@@ -187,8 +187,8 @@ export function main(args = process.argv.slice(2)) {
   const report = replayCandidate(corpus, policy, historicalSnapshots())
   report.implementation_sha256 = Object.fromEntries(['browser-candidate.mjs', 'browser-candidate-replay.mjs', 'core.mjs'].map(file =>
     [file, digest(boundedText(root, `scripts/test-tiers/${file}`))]))
-  const directory = resolve(root, 'research/ci-selector'), output = resolve(directory, 'measurement.json')
-  if (args[0] === '--write') { mkdirSync(directory, { recursive: true }); writeFileSync(output, stable(report)) }
+  const output = resolve(root, 'scripts/test-tiers/browser-candidate-measurement.json')
+  if (args[0] === '--write') writeFileSync(output, stable(report))
   else if (readFileSync(output, 'utf8') !== stable(report)) throw new Error('selector research measurement drift; rerun --write and inspect')
   console.log(stable({ corpus_sha256: report.corpus_sha256, overall: report.overall, areas: report.areas }))
   return 0
