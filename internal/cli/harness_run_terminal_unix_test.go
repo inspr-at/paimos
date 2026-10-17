@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,7 +35,8 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 		}
 		if len(args) == 1 && args[0] == "interactive-child" {
 			for _, f := range []*os.File{os.Stdin, os.Stdout, os.Stderr} {
-				if !term.IsTerminal(int(f.Fd())) {
+				wantTerminal := f != os.Stdout || os.Getenv("AEON_TEST_INTERACTIVE_MODE") != "captured"
+				if term.IsTerminal(int(f.Fd())) != wantTerminal {
 					os.Exit(21)
 				}
 			}
@@ -45,7 +47,7 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 			if _, err := term.MakeRaw(0); err != nil {
 				os.Exit(23)
 			}
-			fmt.Fprintln(os.Stdout, "AEON1410_READY")
+			fmt.Fprintln(os.Stderr, "AEON1410_READY")
 			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 			if err != nil || line != "fixture input\n" {
 				os.Exit(24)
@@ -53,6 +55,9 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 			fmt.Fprintln(os.Stdout, "AEON1410_STDOUT")
 			fmt.Fprintln(os.Stderr, "AEON1410_STDERR")
 			// Deliberately leave raw mode enabled to prove wrapper restoration.
+			if os.Getenv("AEON_TEST_INTERACTIVE_MODE") == "failed" {
+				os.Exit(7)
+			}
 			os.Exit(0)
 		}
 		code := Run(args, os.Stdin, os.Stdout, os.Stderr)
@@ -67,67 +72,95 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 	if err != nil {
 		t.Fatal("python3 is required for the controlling-terminal fixture")
 	}
-	for _, instance := range []string{"pma", "ppm"} {
-		for _, parent := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/parent=%t", instance, parent), func(t *testing.T) {
-				var calls []hbCall
-				srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
-					if r.Method == http.MethodGet && r.URL.Path == "/api/nodes" && r.URL.Query().Get("q") == "AEON-1410" {
-						_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"id": transcriptEntryID, "key": "AEON-1410", "is_leaf": true}}})
-						return true
-					}
-					return false
-				})
-				defer srv.Close()
-				_, _, _ = heartbeatRuntime(t, srv)
-				t.Setenv("AEON_URL", "")
-				t.Setenv("AEON_API_KEY", "")
-				t.Setenv("AEON_TEST_INTERACTIVE_RUN", "1")
-				// No installed model CLI or account probe may run in this fixture.
-				t.Setenv("PATH", t.TempDir())
-				dir := t.TempDir()
-				cfg := filepath.Join(dir, "config.yaml")
-				if err := saveConfig(cfg, fileConfig{Instances: map[string]fileInstance{instance: {URL: srv.URL, APIKey: testKey}}}); err != nil {
-					t.Fatal(err)
+	for _, tc := range []struct {
+		instance, role, mode, reason string
+		parent                       bool
+		code                         int
+	}{
+		{instance: "pma", role: "worker", reason: "process_exited"},
+		{instance: "pma", role: "coordinator", parent: true, reason: "process_exited"},
+		{instance: "ppm", role: "coordinator", reason: "process_exited"},
+		{instance: "ppm", role: "worker", parent: true, reason: "process_exited"},
+		{instance: "pma", role: "worker", mode: "captured", reason: "process_exited"},
+		{instance: "pma", role: "worker", mode: "failed", reason: "process_failed", code: 7},
+		{instance: "pma", role: "worker", mode: "missing", reason: "process_failed", code: 1},
+		{instance: "pma", role: "worker", mode: "interrupted", reason: "stopped", code: 143},
+	} {
+		t.Run(fmt.Sprintf("%s/parent=%t/%s", tc.instance, tc.parent, tc.mode), func(t *testing.T) {
+			var calls []hbCall
+			srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+				if r.Method == http.MethodGet && r.URL.Path == "/api/nodes" && r.URL.Query().Get("q") == "AEON-1410" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"id": transcriptEntryID, "key": "AEON-1410", "is_leaf": true}}})
+					return true
 				}
-				if err := writeKey(keyPath(cfg, instance), testKey); err != nil {
-					t.Fatal(err)
-				}
-				args := []string{"-c", harnessRunPTYDriver, os.Args[0], "-test.run=^TestHarnessRunInteractiveTTY$", "--", "aeon", "--config", cfg, "--instance", instance,
-					"harness", "run", "--ticket", "AEON-1410", "--agent", "worker", "--harness", "claude", "--label", "START", "--model", "fixture-model", "--effort", "xhigh", "--state-dir", filepath.Join(dir, "state")}
-				if parent {
-					args = append(args, "--parent-session", transcriptEntryID)
-				}
+				return false
+			})
+			defer srv.Close()
+			_, _, _ = heartbeatRuntime(t, srv)
+			t.Setenv("AEON_URL", "")
+			t.Setenv("AEON_API_KEY", "")
+			t.Setenv("AEON_TEST_INTERACTIVE_RUN", "1")
+			t.Setenv("AEON_TEST_INTERACTIVE_MODE", tc.mode)
+			// No installed model CLI or account probe may run in this fixture.
+			t.Setenv("PATH", t.TempDir())
+			dir := t.TempDir()
+			t.Setenv("AEON_TEST_INTERACTIVE_STDOUT", filepath.Join(dir, "stdout"))
+			cfg := filepath.Join(dir, "config.yaml")
+			if err := saveConfig(cfg, fileConfig{Instances: map[string]fileInstance{tc.instance: {URL: srv.URL}}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeKey(keyPath(cfg, tc.instance), testKey); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"-c", harnessRunPTYDriver, os.Args[0], "-test.run=^TestHarnessRunInteractiveTTY$", "--", "aeon", "--config", cfg, "--instance", tc.instance,
+				"harness", "run", "--ticket", "AEON-1410", "--agent", "worker", "--role", tc.role, "--harness", "claude", "--label", "START", "--model", "fixture-model", "--effort", "xhigh", "--state-dir", filepath.Join(dir, "state")}
+			if tc.parent {
+				args = append(args, "--parent-session", transcriptEntryID)
+			}
+			if tc.mode == "missing" {
+				args = append(args, "--", filepath.Join(dir, "missing-command"))
+			} else {
 				args = append(args, "--", os.Args[0], "-test.run=^TestHarnessRunInteractiveTTY$", "--", "interactive-child")
-				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-				defer cancel()
-				output, err := exec.CommandContext(ctx, python, args...).CombinedOutput()
-				if err != nil {
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			output, err := exec.CommandContext(ctx, python, args...).CombinedOutput()
+			code := 0
+			if err != nil {
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) {
 					t.Fatalf("PTY wrapper: %v\n%s", err, output)
 				}
-				if !strings.Contains(string(output), "AEON1410_STDOUT") || !strings.Contains(string(output), "AEON1410_STDERR") || strings.Contains(string(output), "RESTORE_FAILED") {
-					t.Fatalf("terminal streams/restoration changed: %s", output)
+				code = exit.ExitCode()
+			}
+			if code != tc.code {
+				t.Fatalf("PTY wrapper code=%d want=%d\n%s", code, tc.code, output)
+			}
+			if tc.mode != "missing" && tc.mode != "interrupted" && (!strings.Contains(string(output), "AEON1410_STDOUT") || !strings.Contains(string(output), "AEON1410_STDERR")) || strings.Contains(string(output), "RESTORE_FAILED") {
+				t.Fatalf("terminal streams/restoration changed: %s", output)
+			}
+			if tc.code != 0 && !strings.Contains(string(output), "harness run:") && !strings.Contains(string(output), "no such file") {
+				t.Fatalf("silent PTY failure: %s", output)
+			}
+			srv.Close() // Join handlers before reading their recorded requests.
+			regs, stops := hbWhere(calls, http.MethodPost, "/harness-sessions"), hbWhere(calls, http.MethodPost, "/stop")
+			if len(regs) != 1 || len(stops) != 1 || stops[0].body["reason"] != tc.reason {
+				reasons := make([]any, 0, len(stops))
+				for _, stop := range stops {
+					reasons = append(reasons, stop.body["reason"])
 				}
-				srv.Close() // Join handlers before reading their recorded requests.
-				regs, stops := hbWhere(calls, http.MethodPost, "/harness-sessions"), hbWhere(calls, http.MethodPost, "/stop")
-				if len(regs) != 1 || len(stops) != 1 || stops[0].body["reason"] != "process_exited" {
-					reasons := make([]any, 0, len(stops))
-					for _, stop := range stops {
-						reasons = append(reasons, stop.body["reason"])
-					}
-					t.Fatalf("interactive registration/stop: registrations=%d stops=%d reasons=%v output=%s", len(regs), len(stops), reasons, output)
-				}
-				if regs[0].body["harness"] != "claude" || regs[0].body["display_label"] != "START" || regs[0].body["model"] != "fixture-model" || regs[0].body["ticket_node_id"] != transcriptEntryID {
-					t.Fatal("interactive registration lost its metadata")
-				}
-				if got := regs[0].body["parent_harness_session_id"]; parent && got != transcriptEntryID || !parent && got != nil {
-					t.Fatal("parent selection changed")
-				}
-				if _, err := os.Stat(filepath.Join(dir, "state", "state.json")); err != nil {
-					t.Fatal(err)
-				}
-			})
-		}
+				t.Fatalf("interactive registration/stop: registrations=%d stops=%d reasons=%v output=%s", len(regs), len(stops), reasons, output)
+			}
+			if regs[0].body["harness"] != "claude" || regs[0].body["display_label"] != "START" || regs[0].body["role"] != tc.role || regs[0].body["model"] != "fixture-model" || regs[0].body["ticket_node_id"] != transcriptEntryID {
+				t.Fatal("interactive registration lost its metadata")
+			}
+			if got := regs[0].body["parent_harness_session_id"]; tc.parent && got != transcriptEntryID || !tc.parent && got != nil {
+				t.Fatal("parent selection changed")
+			}
+			if _, err := os.Stat(filepath.Join(dir, "state", "state.json")); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -143,6 +176,10 @@ if pid == 0:
     if os.read(start_r, 1) != b'1':
         os._exit(26)
     os.close(start_r)
+    if os.environ['AEON_TEST_INTERACTIVE_MODE'] == 'captured':
+        output_fd = os.open(os.environ['AEON_TEST_INTERACTIVE_STDOUT'], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.dup2(output_fd, 1)
+        os.close(output_fd)
     os.execv(sys.argv[1], sys.argv[1:])
 os.close(start_r)
 before = termios.tcgetattr(master)
@@ -162,8 +199,13 @@ try:
             if not chunk:
                 eof = True
             output.extend(chunk)
+            if len(output) > 1024 * 1024:
+                raise RuntimeError('PTY fixture output exceeded its bound')
             if not sent and b'AEON1410_READY' in output:
-                os.write(master, b'fixture input\n')
+                if os.environ['AEON_TEST_INTERACTIVE_MODE'] == 'interrupted':
+                    os.kill(pid, signal.SIGTERM)
+                else:
+                    os.write(master, b'fixture input\n')
                 sent = True
         if not reaped:
             done, status = os.waitpid(pid, os.WNOHANG)
@@ -181,6 +223,9 @@ try:
     after[3] &= ~termios.PENDIN
     if before != after:
         raise RuntimeError('terminal settings were not restored')
+    if os.environ['AEON_TEST_INTERACTIVE_MODE'] == 'captured':
+        with open(os.environ['AEON_TEST_INTERACTIVE_STDOUT'], 'rb') as captured:
+            sys.stdout.buffer.write(captured.read(4096))
     sys.exit(os.waitstatus_to_exitcode(status))
 finally:
     if not reaped:

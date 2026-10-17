@@ -32,6 +32,7 @@ func TestHarnessRunReportsFailures(t *testing.T) {
 		{"project missing", "api 404", 1},
 		{"state unavailable", "not a directory", 1},
 		{"state reused", "state directory already used", 2},
+		{"state persistence failure", "directory", 1},
 		{"registration denied", "api 403", 1},
 		{"registration missing id", "registration did not return a session id", 1},
 		{"launch missing", "no such file", 1},
@@ -39,9 +40,11 @@ func TestHarnessRunReportsFailures(t *testing.T) {
 		{"child diagnostic", "child exit status 9", 9},
 		{"cleanup failure", "session cleanup failed", 1},
 		{"child and cleanup failure", "session cleanup failed", 7},
+		{"interrupted before launch", "interrupted before child launch", 143},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []hbCall
+			var state string
 			srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
 				status := 0
 				switch {
@@ -54,6 +57,10 @@ func TestHarnessRunReportsFailures(t *testing.T) {
 				case tc.name == "registration missing id" && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/harness-sessions"):
 					_, _ = w.Write([]byte(`{}`))
 					return true
+				case tc.name == "state persistence failure" && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/harness-sessions"):
+					if err := os.Mkdir(filepath.Join(state, "state.json"), 0o700); err != nil {
+						t.Error(err)
+					}
 				case strings.Contains(tc.name, "cleanup failure") && strings.HasSuffix(r.URL.Path, "/stop"):
 					status = http.StatusInternalServerError
 				}
@@ -65,10 +72,10 @@ func TestHarnessRunReportsFailures(t *testing.T) {
 				return true
 			})
 			defer srv.Close()
-			_, _, _ = heartbeatRuntime(t, srv)
+			rt, out, errOut := heartbeatRuntime(t, srv)
 			t.Setenv("PATH", t.TempDir()) // Never probe an installed model CLI.
 			dir := t.TempDir()
-			state := filepath.Join(dir, "state")
+			state = filepath.Join(dir, "state")
 			args := []string{"aeon", "harness", "run", "--project", "AEON", "--agent", "worker", "--harness", "claude", "--state-dir", state}
 			child := []string{"/bin/sh", "-c", "exit 0"}
 			switch tc.name {
@@ -100,7 +107,25 @@ func TestHarnessRunReportsFailures(t *testing.T) {
 				child[2] = "printf 'fixture child diagnostic\\n' >&2; exit 9"
 			}
 			args = append(append(args, "--"), child...)
-			code, stdout, stderr := runCLI(args, "")
+			var code int
+			var stdout, stderr string
+			if tc.name == "interrupted before launch" {
+				// Inject cancellation before registration deterministically, then
+				// use the same exit-error renderer as Run for the returned failure.
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				o := heartbeatTestOptions(dir)
+				o.OwnerPID = os.Getpid()
+				err := rt.runHarnessCommand(ctx, o, child)
+				var exit *exitError
+				if !errors.As(err, &exit) {
+					t.Fatalf("cancelled launch returned the wrong error: %v", err)
+				}
+				rt.printErr(exit)
+				code, stdout, stderr = exit.code, out.String(), errOut.String()
+			} else {
+				code, stdout, stderr = runCLI(args, "")
+			}
 			if code != tc.code || !strings.Contains(stderr, tc.want) {
 				t.Fatalf("code=%d want=%d stdout=%q stderr=%q (want %q)", code, tc.code, stdout, stderr, tc.want)
 			}
