@@ -70,6 +70,14 @@ func TestKeyScopeUsageRegistrationVersusMoveLockOrder(t *testing.T) {
 			if lock != "transactionid" {
 				t.Errorf("%s first: competing operation waited on %q, want tenant row fence", first, lock)
 			}
+			var tenantWait bool
+			if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+			 WHERE $1::int=ANY(pg_blocking_pids(pid)) AND query LIKE '%FROM tenants%FOR NO KEY UPDATE%')`, holder).Scan(&tenantWait); err != nil {
+				t.Fatal(err)
+			}
+			if !tenantWait {
+				t.Fatal("competing operation did not pass shared admission and wait at the tenant fence")
+			}
 			barrier.Release()
 			expect(t, dbtest.Await(t, ctx, firstDone), statusA)
 			expect(t, dbtest.Await(t, ctx, secondDone), statusB)
