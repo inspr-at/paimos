@@ -63,7 +63,7 @@ func receivingFixture(t *testing.T) *receiveFixture {
 		}
 		if r.Method == http.MethodGet {
 			f.gets++
-			if r.Header.Get("X-Aeon-Worker-Lease") != "" {
+			if receivedWorkerLease(r) != "" {
 				t.Error("lease on GET")
 			}
 		}
@@ -87,7 +87,7 @@ func receivingFixture(t *testing.T) *receiveFixture {
 			json.NewEncoder(w).Encode(f.session)
 		case r.Method == http.MethodPost && r.URL.Path == harnessPath(c.ProjectID, receiveSession)+"/rules-receipts":
 			f.posts++
-			if r.Header.Get("X-Aeon-Worker-Lease") != receiveLease {
+			if receivedWorkerLease(r) != receiveLease {
 				t.Error("lost lease")
 			}
 			var in harness.RulesReceiptWrite

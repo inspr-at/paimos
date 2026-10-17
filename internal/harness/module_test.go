@@ -128,7 +128,7 @@ func (f *harnessFixture) tx(t *testing.T, p tenant.Principal, fn func(pgx.Tx) er
 		t.Fatal(err)
 	}
 }
-func (f *harnessFixture) call(p tenant.Principal, method, path string, body any, lease string) *httptest.ResponseRecorder {
+func (f *harnessFixture) call(p tenant.Principal, method, path string, body any, lease string, headers ...map[string]string) *httptest.ResponseRecorder {
 	raw, _ := json.Marshal(body)
 	r := httptest.NewRequest(method, path, bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(context.Background(), p))
 	if p.Kind == tenant.Agent {
@@ -136,6 +136,11 @@ func (f *harnessFixture) call(p tenant.Principal, method, path string, body any,
 	}
 	if lease != "" {
 		r.Header.Set("X-Aeon-Worker-Lease", lease)
+	}
+	for _, group := range headers {
+		for name, value := range group {
+			r.Header.Set(name, value)
+		}
 	}
 	w := httptest.NewRecorder()
 	f.mux.ServeHTTP(w, r)
@@ -376,6 +381,49 @@ func TestHistoricalRegistrationAndHeartbeatWithoutRequestContract(t *testing.T) 
 			if got := decode(t, w); got["harness"] != name || got["phase"] != "working" {
 				t.Fatal("historical heartbeat changed:", got)
 			}
+		})
+	}
+}
+
+// Risk: a leaked generation proof remains usable after stop, or migration drops
+// authentication for either supported transport. Only synthetic proofs are used.
+func TestWorkerLeaseHeaderTransitionAndStoppedAuthority(t *testing.T) {
+	for _, header := range []string{"X-Aeon-Worker-Lease", "Proxy-Authorization"} {
+		t.Run(header, func(t *testing.T) {
+			f := fixture(t)
+			path, _, lease := usageSession(t, f, "unmanaged")
+			value := lease
+			if header == "Proxy-Authorization" {
+				value = "Bearer " + lease
+			}
+			headers := map[string]string{header: value}
+			beat := map[string]any{"phase": "working", "activity_sequence": 1}
+			call := func(suffix string, body any) *httptest.ResponseRecorder {
+				w := f.call(f.agent, "POST", path+suffix, body, "", headers)
+				if strings.Contains(w.Body.String(), lease) {
+					t.Fatal("response exposed worker proof")
+				}
+				return w
+			}
+			expect(t, call("/heartbeat", beat), 200)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, ""), 403)
+			expect(t, f.call(f.person, "POST", path+"/heartbeat", beat, "", headers), 403)
+			wrong := "wrong-worker-lease-" + uid()
+			if header == "Proxy-Authorization" {
+				wrong = "Bearer " + wrong
+			}
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{header: wrong}), 403)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Proxy-Authorization": "Basic " + lease, "X-Aeon-Worker-Lease": lease}), 403)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Proxy-Authorization": "Bearer " + lease, "X-Aeon-Worker-Lease": wrong}), 403)
+			stop := map[string]any{"reason": "process_exited"}
+			expect(t, call("/stop", stop), 200)
+			expect(t, call("/stop", stop), 200)
+			expect(t, call("/confirm-exit", stop), 200)
+			expect(t, call("/heartbeat", beat), 403)
+			expect(t, call("/yield", map[string]any{}), 403)
+			report := usagePayload()
+			expect(t, call("/usage", report), 200)
+			expect(t, call("/usage", report), 200)
 		})
 	}
 }

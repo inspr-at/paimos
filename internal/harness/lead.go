@@ -749,7 +749,7 @@ func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		if err = authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: id}); err != nil {
 			return nil, err
 		}
-		if !leaseProof(s, r, p) {
+		if proof(s, r, p) != nil {
 			return nil, workorders.Fail(403, "current lead worker proof required")
 		}
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 const harnessSafetyPoll = 30 * time.Second
@@ -34,7 +35,7 @@ func (r *Remote) WatchHarness(ctx context.Context, session HarnessSession, wake 
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+r.Client.Token)
-	req.Header.Set("X-Aeon-Worker-Lease", session.Lease)
+	req.Header.Set(workerlease.Header, workerlease.Value(session.Lease))
 	req.Header.Set("Accept", "text/event-stream")
 	hc := *r.Client.HTTP
 	hc.Timeout = 0 // bounded above by the stream context, including connection

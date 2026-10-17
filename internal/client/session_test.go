@@ -43,3 +43,33 @@ func TestAgentAuthenticationRemainsBearerOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Worker proofs must not follow redirects, including to the same origin where
+// Go normally copies headers such as Proxy-Authorization automatically.
+func TestWorkerProofHeadersRefuseRedirects(t *testing.T) {
+	for _, header := range []string{"Proxy-Authorization", "X-Aeon-Worker-Lease"} {
+		t.Run(header, func(t *testing.T) {
+			redirected := false
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/destination" {
+					redirected = true
+					return
+				}
+				if r.Header.Get("Authorization") != "Bearer synthetic-agent" || r.Header.Get(header) == "" {
+					t.Error("missing independent credentials")
+				}
+				http.Redirect(w, r, "/destination", http.StatusTemporaryRedirect)
+			}))
+			defer source.Close()
+			c := New(source.URL, "synthetic-agent")
+			// Use a client that would otherwise follow redirects.
+			c.HTTP = &http.Client{}
+			if err := c.DoWithHeaders(t.Context(), http.MethodPost, "/worker", nil, nil, map[string]string{header: "Bearer synthetic-only-proof"}); err == nil {
+				t.Fatal("redirect reported success")
+			}
+			if redirected {
+				t.Fatal("worker proof followed redirect")
+			}
+		})
+	}
+}

@@ -70,6 +70,7 @@ import (
 	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
@@ -591,9 +592,11 @@ func proof(s Session, r *http.Request, p tenant.Principal) error {
 	return nil
 }
 
-// leaseProof authenticates the generation's own worker, whatever its state.
+// leaseProof checks only credential identity. Ordinary worker calls must use
+// proof, which also fences archived/stopped generations. Only stop/exit and
+// usage settlement may retain authority after stopped_at is set.
 func leaseProof(s Session, r *http.Request, p tenant.Principal) bool {
-	lease := r.Header.Get("X-Aeon-Worker-Lease")
+	lease := workerlease.Read(r)
 	return s.ID != "" && p.Kind == tenant.Agent && p.ID == s.AgentPrincipalID && len(lease) >= 32 && subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) == 1
 }
 func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) (Session, error) {
@@ -1469,10 +1472,6 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		}
 	}
 	s, err := worker(ctx, tx, r, p)
-	if err != nil && !in.InboxBindingReport && lostContact(s) && leaseProof(s, r, p) {
-		// AEON-291: the sweeper closed a silent generation; its own worker is back.
-		s, err = revive(ctx, tx, p, s, in.Phase)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -1731,6 +1730,9 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	if in.Handover != nil {
 		return nil, workorders.Fail(400, "handover requires stop reason paused")
+	}
+	if err != nil && s.ArchivedAt == nil && s.StoppedAt != nil && s.StopReason != nil && *s.StopReason == in.Reason && leaseProof(s, r, p) {
+		return s, nil
 	}
 	if err != nil && lostContact(s) && leaseProof(s, r, p) {
 		// The server already closed this silent generation; the worker's own

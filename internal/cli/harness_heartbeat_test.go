@@ -138,7 +138,7 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 					return true
 				case r.Method == http.MethodPost && r.URL.Path == path+"/claim":
 					claims++
-					if r.Header.Get("Authorization") != "Bearer "+testKey || r.Header.Get("X-Aeon-Worker-Lease") != lease || body["session_id"] != own || body["expected_revision"] != float64(lead.Revision) || len(body) != 2 {
+					if r.Header.Get("Authorization") != "Bearer "+testKey || receivedWorkerLease(r) != lease || body["session_id"] != own || body["expected_revision"] != float64(lead.Revision) || len(body) != 2 {
 						t.Error("claim did not retain its own exact authority, selection and current lead revision")
 					}
 					// Establish ordering through the accepted beat and the saved
@@ -349,7 +349,7 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: receivedWorkerLease(r), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
@@ -1221,7 +1221,7 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: receivedWorkerLease(r), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		if handle != nil && handle(r, body, w) {
 			return
@@ -2920,4 +2920,19 @@ func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxByte
 func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string) (map[string]usageSum, int64, []string, bool, error) {
 	sums, next, ring, disc, _, err := scanUsageWindowState(ctx, path, fallback, offset, maxBytes, recent, discarding, source, nil)
 	return sums, next, ring, disc, err
+}
+
+// Every client fixture also rejects accidental legacy-header or scheme emission.
+func receivedWorkerLease(r *http.Request) string {
+	if r.Header.Get("X-Aeon-Worker-Lease") != "" {
+		return "invalid legacy worker header"
+	}
+	value := r.Header.Get("Proxy-Authorization")
+	if value == "" {
+		return ""
+	}
+	if !strings.HasPrefix(value, "Bearer ") {
+		return "invalid worker scheme"
+	}
+	return strings.TrimPrefix(value, "Bearer ")
 }

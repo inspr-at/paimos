@@ -29,7 +29,7 @@ func TestHarnessLeadUsageReadAndFailure(t *testing.T) {
 			return
 		}
 		calls++
-		if r.Method != http.MethodGet || r.URL.Path != "/api/projects/"+project+"/lead/usage" || r.URL.Query().Get("generation") != "2" || r.URL.Query().Get("from") != "2026-09-01" || r.URL.Query().Get("to") != "2026-10-01" || r.Header.Get("X-Aeon-Worker-Lease") != "" {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/projects/"+project+"/lead/usage" || r.URL.Query().Get("generation") != "2" || r.URL.Query().Get("from") != "2026-09-01" || r.URL.Query().Get("to") != "2026-10-01" || receivedWorkerLease(r) != "" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.RequestURI())
 		}
 		w.WriteHeader(status)

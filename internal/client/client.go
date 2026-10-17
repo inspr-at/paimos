@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/stepup"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Me is the GET /api/me response.
@@ -157,8 +158,8 @@ func (c *Client) Do(ctx context.Context, method, path string, body, dest any) er
 	return c.DoWithHeaders(ctx, method, path, body, dest, nil)
 }
 
-// DoWithHeaders sends one JSON request with additional non-credential protocol
-// headers such as a run's daemon fencing identity.
+// DoWithHeaders sends one JSON request with additional protocol headers. Worker
+// proofs and step-up credentials refuse redirects, even to the same origin.
 // MaxResponseBytes caps one response body the client reads.
 const MaxResponseBytes = 64 << 20
 
@@ -201,7 +202,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	if req.Header.Get(stepup.Header) != "" {
+	if req.Header.Get(stepup.Header) != "" || req.Header.Get(workerlease.Header) != "" || req.Header.Get(workerlease.LegacyHeader) != "" {
 		proofHTTP := *hc
 		proofHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		hc = &proofHTTP

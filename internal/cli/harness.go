@@ -27,6 +27,7 @@ import (
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/version"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // cmdHarnessV2 is the complete P5.3 harness command tree.
@@ -198,7 +199,7 @@ func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string,
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	if lease != "" {
-		req.Header.Set("X-Aeon-Worker-Lease", lease)
+		req.Header.Set(workerlease.Header, workerlease.Value(lease))
 	}
 	for _, headers := range extra {
 		for name, value := range headers {

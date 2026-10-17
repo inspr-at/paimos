@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // chatCapability is advertised only for an owned harness that supplies the S1
@@ -766,7 +767,7 @@ type chatRelayRequest struct {
 func (r *Remote) chatWorker(ctx context.Context, s HarnessSession, path string, body, dest any) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return r.Client.DoWithHeaders(ctx, "POST", path, body, dest, map[string]string{"X-Aeon-Worker-Lease": s.Lease})
+	return r.Client.DoWithHeaders(ctx, "POST", path, body, dest, map[string]string{workerlease.Header: workerlease.Value(s.Lease)})
 }
 
 func chatProof(s HarnessSession, b ChatRelayBinding) chatRelayRequest {

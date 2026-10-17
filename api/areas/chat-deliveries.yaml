@@ -6,7 +6,8 @@ paths:
       operationId: resolveChatWorkerBinding
       description: chat-v1. Authenticate an existing external registration with the principal and its private worker lease, then verify exact current conversation, binding epoch and lasting native-context ownership. A reference, label, X-session-id or shared principal alone never suffices. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. This read does not claim, ACK, extend a lease or alter native execution authority.
       parameters:
-        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 4096}, description: Private existing registration proof; never returned or logged}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -22,7 +23,8 @@ paths:
       operationId: "currentChatWorkerBinding"
       description: "chat-v1. Return the exact current conversation ID and binding epoch for the caller's own session only. Authorised like the relay routes: the session's agent principal, its private worker lease, a live unmanaged inbox registration or a live managed registration advertising chat, an owner person, a heartbeat within two minutes, current chat.receive permission and key scope, and the current binding epoch with native-context ownership. No body content, role, person or session metadata is returned. 404 when no thread is bound. At most 8 KiB body, three-second body/work deadline."
       parameters:
-        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 4096}, description: "Private existing registration proof; never returned or logged"}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -38,7 +40,7 @@ paths:
       operationId: "claimChatDelivery"
       x-aeon-package: "R3"
       description: "Reserved chat-v1 contract for R3; not mounted by R1. Private external lease, exact current binding and scoped key proof. One never-offered intent at a time, with exact attempt/session/epoch and single-flight offer boundary. Successor cannot replay offered/uncertain input. Reauthorize under tenant, role/thread, ordered session, message and attempt locks; event counter last. Null envelope means no eligible intent."
-      parameters: [{"name": "X-Aeon-Worker-Lease", "in": "header", "required": true, "schema": {"type": "string", "minLength": 32, "maxLength": 4096}}]
+      parameters: [{"$ref": "#/components/parameters/WorkerLease"}, {"$ref": "#/components/parameters/LegacyWorkerLease"}]
       responses:
         '200':
           description: "Authorized bounded result"
@@ -65,7 +67,7 @@ paths:
       operationId: "streamChatPendingHints"
       x-aeon-package: "R3"
       description: "Reserved chat-v1 contract for R3; not mounted by R1. Authenticated content-free pending-intent hints for the exact registration, conversation and binding epoch. Stream or bounded long-poll never drains, ACKs or wakes a native process by itself. Every keepalive/query revalidates lease, binding and permissions."
-      parameters: [{"name": "X-Aeon-Worker-Lease", "in": "header", "required": true, "schema": {"type": "string", "minLength": 32, "maxLength": 4096}}, {"name": "conversation_id", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "session_id", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "binding_epoch", "in": "query", "required": true, "schema": {"$ref": "#/components/schemas/ChatPosition"}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "wait_ms", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 25000, "default": 0}}]
+      parameters: [{"$ref": "#/components/parameters/WorkerLease"}, {"$ref": "#/components/parameters/LegacyWorkerLease"}, {"name": "conversation_id", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "session_id", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "binding_epoch", "in": "query", "required": true, "schema": {"$ref": "#/components/schemas/ChatPosition"}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "wait_ms", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 25000, "default": 0}}]
       responses:
         '200':
           description: "Authorized bounded result"
@@ -87,7 +89,7 @@ paths:
       operationId: "reportChatReceipt"
       x-aeon-package: "R3"
       description: "Reserved chat-v1 contract for R3; not mounted by R1. Exact attempt, binding epoch, external lease and prior-offer correlation. Monotonic evidence transitions and identical idempotent settlements. Preview/digest echo/listing/queue ACK never implies full agent_confirmed. Full confirmation requires explicit agent action after full inline delivery or qualified complete body-part coverage."
-      parameters: [{"name": "attemptId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "X-Aeon-Worker-Lease", "in": "header", "required": true, "schema": {"type": "string", "minLength": 32, "maxLength": 4096}}]
+      parameters: [{"name": "attemptId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/WorkerLease"}, {"$ref": "#/components/parameters/LegacyWorkerLease"}]
       responses:
         '200':
           description: "Authorized bounded result"

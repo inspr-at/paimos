@@ -39,8 +39,8 @@ func TestHarnessProvenanceHashesAllowlistedFiles(t *testing.T) {
 	srv := transcriptFixture(t, "memory", "note", &calls)
 	orig := srv.Config.Handler
 	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Aeon-Worker-Lease") != "" {
-			leaseHeader = r.Header.Get("X-Aeon-Worker-Lease")
+		if receivedWorkerLease(r) != "" {
+			leaseHeader = receivedWorkerLease(r)
 		}
 		orig.ServeHTTP(w, r)
 	})

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 type rulesReceiveOptions struct {
@@ -83,7 +84,7 @@ func rulesReceiveDo(api *client.Client, method, path, lease string, maximum int,
 	}
 	headers := map[string]string{rules.ClientMaximumHeader: strconv.Itoa(maximum)}
 	if lease != "" {
-		headers["X-Aeon-Worker-Lease"] = lease
+		headers[workerlease.Header] = workerlease.Value(lease)
 	}
 	return api.DoWithHeaders(ctx, method, path, body, dest, headers)
 }

@@ -116,7 +116,7 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 			registration = body
 			_, _ = w.Write([]byte(`{"id":"session","project_id":"project"}`))
 		case "/api/projects/project/harness-sessions/session/heartbeat":
-			if r.Header.Get("X-Aeon-Worker-Lease") != "owned-lease" {
+			if receivedWorkerLease(r) != "owned-lease" {
 				t.Error("missing owned worker lease")
 			}
 			beats = append(beats, body)
@@ -348,7 +348,7 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"id":"session","project_id":"project"}`))
 		default:
-			if r.Header.Get("X-Aeon-Worker-Lease") != "private-worker-lease-32-characters-minimum" {
+			if receivedWorkerLease(r) != "private-worker-lease-32-characters-minimum" {
 				t.Error("worker lease header missing")
 			}
 			switch r.URL.Path {
@@ -533,4 +533,19 @@ func TestRemoteReplyRetainsProjectAndSession(t *testing.T) {
 	if requests[1]["recipient_session_id"] != recipientSession {
 		t.Fatal("recipient generation lost")
 	}
+}
+
+// Every client fixture also rejects accidental legacy-header or scheme emission.
+func receivedWorkerLease(r *http.Request) string {
+	if r.Header.Get("X-Aeon-Worker-Lease") != "" {
+		return "invalid legacy worker header"
+	}
+	value := r.Header.Get("Proxy-Authorization")
+	if value == "" {
+		return ""
+	}
+	if !strings.HasPrefix(value, "Bearer ") {
+		return "invalid worker scheme"
+	}
+	return strings.TrimPrefix(value, "Bearer ")
 }

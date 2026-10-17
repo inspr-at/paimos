@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -298,7 +299,7 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 	// a version string. The provenance endpoint persists identities only.
 	instructions := work.instructions
 	digest := sha256.Sum256([]byte(instructions))
-	workerHeaders := map[string]string{"X-Aeon-Worker-Lease": lease}
+	workerHeaders := map[string]string{workerlease.Header: workerlease.Value(lease)}
 	if err := s.api.do(work.agent, work.key, http.MethodPost, path+"/provenance", map[string]any{
 		"items": []map[string]any{{
 			"kind": "skill", "logical_name": work.logicalName, "hash_kind": "content",

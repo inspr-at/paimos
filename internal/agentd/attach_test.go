@@ -565,6 +565,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 
 func TestAttachRedactionCredentialVariants(t *testing.T) {
 	for _, line := range []string{
+		"X-Aeon-Worker-Lease: fixture", "x-aeon-worker-lease: fixture", "Proxy-Authorization: Bearer fixture", "worker_lease=fixture",
 		"apiKey=fixture", "accessToken: fixture", "refreshToken=fixture", "clientSecret: fixture", "privateKey=fixture",
 		"secret=fixture", "token = fixture", `"token": "fixture"`, `setting {'secret': 'fixture'}`,
 		"postgres://reader:fixture@db.test/app", "https://reader@host.test/path", "//reader:fixture@host.test/", "ssh://reader:fixture@host.test",

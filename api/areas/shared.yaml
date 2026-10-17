@@ -2326,6 +2326,19 @@ components:
         completed_at: {type: string, format: date-time}
         outcome: {type: string, enum: [completed, failed, cancelled, ownership_lost]}
   parameters:
+    WorkerLease:
+      name: Proxy-Authorization
+      in: header
+      required: false
+      schema: {type: string, minLength: 39, maxLength: 4103, pattern: '^[Bb][Ee][Aa][Rr][Ee][Rr] [^ ]+$'}
+      description: 'Bearer <worker-lease>, alongside Authorization: Bearer <agent-key>. Worker routes require this proof or the deprecated X-Aeon-Worker-Lease for one transition release (137). If both are supplied they must match; malformed new proof never falls back. Never returned or logged. Stopped generations reject ordinary worker calls; only stop/exit confirmation and usage settlement retain proof authority.'
+    LegacyWorkerLease:
+      name: X-Aeon-Worker-Lease
+      in: header
+      required: false
+      deprecated: true
+      schema: {type: string, minLength: 32, maxLength: 4096}
+      description: 'Deprecated in release 137; use Proxy-Authorization: Bearer <worker-lease>. Accepted for one release with a value-free deprecation warning. Never returned or logged.'
     AeonStepUp:
       name: Aeon-Step-Up
       in: header

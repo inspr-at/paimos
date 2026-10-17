@@ -27,6 +27,7 @@ import (
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Remote uses a scoped agent key through AEON's public HTTP contract.
@@ -292,7 +293,7 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 
 func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
 	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest,
-		map[string]string{"X-Aeon-Worker-Lease": s.Lease, rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))})
+		map[string]string{workerlease.Header: workerlease.Value(s.Lease), rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))})
 	var status *client.StatusError
 	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
 		return ErrHarnessArchived

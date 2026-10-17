@@ -87,7 +87,7 @@ var (
 	basicValue  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])basic\s+([A-Za-z0-9+/]{4,}={0,2})(?:[^A-Za-z0-9+/=]|$)`)
 	// A credential label, optionally in Markdown or quotes, and its
 	// separator: password=, **Password:**, `password`:, "api_key": .
-	credentialLabel = regexp.MustCompile("(?i)(?:^|[^A-Za-z0-9])[*_`\"']{0,3}(passw(?:or)?d|pwd|passphrase|client[_-]?secret|secret[_-]?key|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key)[*_`\"']{0,3}[ \\t]*([:=])[*_`]{0,3}[ \\t]*")
+	credentialLabel = regexp.MustCompile("(?i)(?:^|[^A-Za-z0-9])[*_`\"']{0,3}(x-aeon-worker-lease|worker[_-]?lease|passw(?:or)?d|pwd|passphrase|client[_-]?secret|secret[_-]?key|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key)[*_`\"']{0,3}[ \\t]*([:=])[*_`]{0,3}[ \\t]*")
 
 	ticketKey  = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]+$`)
 	versionish = regexp.MustCompile(`^[vV]?[0-9]+([.:/-][0-9]+)+$`)

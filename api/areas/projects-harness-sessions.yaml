@@ -127,7 +127,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       security: *auth
       operationId: completeHarnessDelivery
@@ -154,7 +155,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       operationId: confirmHarnessExit
       security: *auth
@@ -203,7 +205,8 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: controlId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       operationId: completeHarnessControl
       security: *auth
@@ -227,7 +230,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       operationId: drainHarnessInbox
       description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages. Requires existing harness.worker authority and this registration's worker lease."
@@ -247,6 +251,8 @@ paths:
         '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/heartbeat:
     parameters:
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
@@ -319,7 +325,8 @@ paths:
         conflicts never return hidden evidence or bypass event visibility.
         Review links are checked against the existing exact-commit binding and freeze its base/head hashes.
       parameters:
-        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -351,7 +358,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       parameters:
         - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
@@ -424,7 +432,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       operationId: reportHarnessModels
       description: Existing harness.worker authority plus the exact live worker lease reports only this session's harness. Agent evidence also requires an available account owned by the caller on this harness; registering a session does not enroll an account. Health evidence must match this exact session's stored model and effort or its managed run pin; usage for another model is insufficient. No extra key grant is needed. Failures must be five minutes apart to suppress routing, and receipt retention and rate limits also apply here. Evidence is validated, idempotent and content-free; discovered pins remain disabled until person acceptance, and no profile metadata or ladder writes are accepted.
@@ -438,7 +447,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     get:
       operationId: watchHarnessNotifications
       description: "Content-free SSE wake hints for this managed generation's controls and inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
@@ -462,6 +472,8 @@ paths:
         '409': {description: Session or pause transition conflicts}
   /projects/{projectId}/harness-sessions/{sessionId}/pause-plan:
     parameters:
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
@@ -485,9 +497,10 @@ paths:
         '404': {description: Session is not visible}
     post:
       operationId: recordHarnessInstructionProvenance
-      description: The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and X-Aeon-Worker-Lease. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.
+      description: The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and Proxy-Authorization. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.
       parameters:
-        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -704,7 +717,8 @@ paths:
         divergent reuse or competing stale writes return 409. All authorization and generation checks
         precede replay, so expired/revoked credentials and stopped/archived generations cannot replay.
       parameters:
-        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof; never stored in a receipt or returned}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -718,6 +732,8 @@ paths:
         '410': {description: Authenticated archived generation; receipt history remains readable}
   /projects/{projectId}/harness-sessions/{sessionId}/stop:
     parameters:
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
@@ -792,7 +808,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Exact generation worker proof}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       security: *auth
       operationId: reportSessionServiceTiers
@@ -860,7 +877,8 @@ paths:
         caller on this harness, while the session is live and the model and effort match its stored
         identity. Usage for another model remains accounting data and cannot clear model suppression.
       parameters:
-        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
       responses:
         '410': {description: 'Authenticated archived generation; usage proof revoked, existing usage retained'}
@@ -919,7 +937,8 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+      - {$ref: '#/components/parameters/WorkerLease'}
+      - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       security: *auth
       operationId: yieldHarnessSession
@@ -989,7 +1008,7 @@ components:
         note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
         reason: {type: string, maxLength: 240}
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
-        coordinator_session_id: {type: string, format: uuid, description: Agents must prove a live parent coordinator using X-Aeon-Worker-Lease.}
+        coordinator_session_id: {type: string, format: uuid, description: Agents must prove a live parent coordinator using Proxy-Authorization.}
     HarnessProvenanceItem:
       type: object
       required: [kind, logical_name, hash_kind]
