@@ -291,9 +291,6 @@ test('a dropped wide-media change still hides the glimpse below 1280', async ({ 
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
-// The PR shard has shrunk 1280 → 390 without a usable resize or wide-media
-// change for the header (AEON-1410 CI). Drop both for the shrink only: the
-// layout box is the one signal left, and it must still clear the glimpse.
 // 835d2134: 1279 → 1280 → 390 left the painted glimpse on. Resize, the media
 // change and the document-element observer can all stay silent together while
 // the canvas paints. The paint frame is the read that must still clear it.
@@ -328,6 +325,9 @@ test('AEON-1477 a painted glimpse hides below 1280 when resize, media and the do
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
 
+// The PR shard has shrunk 1280 → 390 without a usable resize or wide-media
+// change for the header (AEON-1410 CI). Drop both for the shrink only: the
+// layout box is the one signal left, and it must still clear the glimpse.
 test('a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280', async ({ page }) => {
   await page.addInitScript(() => {
     const dropping = () => (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals === true
