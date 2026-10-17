@@ -8678,6 +8678,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestSchemaAndTagMutationsRequirePersonAdmin","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestScopedListWithoutStatisticsUsesChildIndex","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestServicePrincipalsCannotBeAssignees","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestSiblingPlacementOrdersPositionsNumerically","tier":"ESSENTIAL"}

@@ -104,15 +104,22 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- Ordinary rows must stay index lookups. NOT IN (SELECT …) is planned as an
+-- anti-join, and with the volatile serves walk beside it every node read
+-- becomes a sequential rescan once statistics are missing. The kind catalog
+-- is one scalar InitPlan. CASE does not call the serves walk unless the row's
+-- kind is an outcome.
 CREATE POLICY nodes_outcome_ticket_visibility ON nodes AS RESTRICTIVE
-    -- The kind subquery is an uncorrelated lookup, avoiding a function call
-    -- (and a widened probe) for every ordinary node on existing read paths.
-    USING ((SELECT aeon_visible_all())
-        OR kind_id NOT IN (SELECT id FROM node_kinds WHERE slug = 'outcome')
-        OR aeon_outcome_tickets_visible(id))
-    WITH CHECK ((SELECT aeon_visible_all())
-        OR kind_id NOT IN (SELECT id FROM node_kinds WHERE slug = 'outcome')
-        OR aeon_outcome_tickets_visible(id));
+    USING (CASE
+        WHEN (SELECT aeon_visible_all()) THEN true
+        WHEN kind_id <> ALL (COALESCE((SELECT array_agg(id) FROM node_kinds WHERE slug = 'outcome'), '{}'::uuid[])) THEN true
+        ELSE aeon_outcome_tickets_visible(id)
+    END)
+    WITH CHECK (CASE
+        WHEN (SELECT aeon_visible_all()) THEN true
+        WHEN kind_id <> ALL (COALESCE((SELECT array_agg(id) FROM node_kinds WHERE slug = 'outcome'), '{}'::uuid[])) THEN true
+        ELSE aeon_outcome_tickets_visible(id)
+    END);
 
 -- Keep the invoker visibility walk behind a procedural boundary. Inlining
 -- three copies of nodes RLS into the event policy caused multi-second query

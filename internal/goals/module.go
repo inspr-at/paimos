@@ -82,7 +82,6 @@ func requestPrincipal(w http.ResponseWriter, r *http.Request) (tenant.Principal,
 	return p, ok
 }
 func (m *module) patch(w http.ResponseWriter, r *http.Request) {
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Second))
 	p, ok := requestPrincipal(w, r)
 	if !ok {
 		return
@@ -96,10 +95,15 @@ func (m *module) patch(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
+	// ReadRequestBody owns the transport deadline and the 256 KiB bound.
+	if err = httpapi.BufferRequestBodyTimeout(w, r, MaxBodyBytes, 10*time.Second); err != nil {
+		respond(w, nil, err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	now := m.now()
-	in, err := DecodeRequest(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+	in, err := DecodeRequest(r.Body)
 	if err != nil {
 		respond(w, nil, err)
 		return
@@ -125,7 +129,6 @@ type WriteResult struct {
 }
 
 func (m *module) create(w http.ResponseWriter, r *http.Request) {
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Second))
 	p, ok := requestPrincipal(w, r)
 	if !ok {
 		return
@@ -135,9 +138,13 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
+	if err = httpapi.BufferRequestBodyTimeout(w, r, MaxBodyBytes, 10*time.Second); err != nil {
+		respond(w, nil, err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		respond(w, nil, err)
 		return
