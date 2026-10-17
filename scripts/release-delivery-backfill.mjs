@@ -44,6 +44,8 @@ export function planBackfill({ nodes, merges, membership, live, now, settings })
   return rows.sort((a, b) => Number(a.key.split('-').at(-1)) - Number(b.key.split('-').at(-1)))
 }
 
+const opsReadback = "### CLI and SQL readback for OPS\n\nRegenerate with existing authentication (the command has no apply mode):\n\n```sh\ngit fetch origin main --tags\nnode scripts/release-delivery-backfill.mjs \\\n  --project 23e3f45b-27e4-43c7-985b-bb0c66179fb3 \\\n  --live 261016060843.0.0=2026-10-16T07:57:00Z\n```\n\nWith OPS's established tenant/project visibility, this parameterized read-only check must retain exactly one row from the approved inventory before a write is considered. Recheck the newest immutable merge using the union in `gitMemberTx`; this readback alone authorizes no change.\n\n```sql\nBEGIN READ ONLY;\nSELECT set_config('aeon.tenant_id', :'tenant_id', true);\nSELECT n.id, n.key, n.updated_at, n.human_check\nFROM nodes n\nWHERE n.tenant_id = :'tenant_id'::uuid\n  AND n.project_id = :'project_id'::uuid\n  AND n.id = :'node_id'::uuid\n  AND n.updated_at = :'captured_revision'::timestamptz\n  AND n.deleted_at IS NULL\n  AND regexp_replace(lower(btrim(n.state)), '[[:space:]-]+', '_', 'g') = 'done'\n  AND NOT EXISTS (\n    SELECT 1 FROM nodes child\n    JOIN node_kinds k ON k.tenant_id = child.tenant_id AND k.id = child.kind_id\n    WHERE child.tenant_id = n.tenant_id AND child.parent_id = n.id\n      AND child.deleted_at IS NULL AND k.slug = 'work'\n  );\nROLLBACK;\n```\n"
+
 function render(rows, { now, history, main, live, project, repository, settings }) {
   const delivered = rows.filter(r => r.action === 'Delivered').length
   const accepted = rows.filter(r => r.action.startsWith('Delivered →')).length
@@ -65,6 +67,7 @@ function render(rows, { now, history, main, live, project, repository, settings 
     '4. For rows old enough for acceptance, preserve the historical live-proof instant as separately reviewed delivery evidence. Do not rewrite old events. Run the existing accept evaluator with accept.days from the current workspace policy and the historical delivery anchor, rechecking all person objections/comments and Undo since that instant. Append Delivered and Accepted events in order, using current event timestamps. If historical acceptance evidence is uncertain, leave Delivered and let the ordinary one-day rule start at the new delivery event.',
     '5. Commit only the approved bounded batch. On failure roll back that batch and report the error. Verify per-row events and counts; a retry uses the same receipt anchors. Rollback uses existing event Undo in reverse order. Never directly UPDATE states or receipt/event history.', '',
     'The deployed automatic path processes only its running tagged release. This document authorizes no historic write; an OPS implementation/run and LEAD approval remain required.', '',
+    opsReadback, '',
     '## Inventory', '',
     '| Ticket | Node id / captured revision | Newest merge | First published release | Planned result / reason |',
     '| --- | --- | --- | --- | --- |',

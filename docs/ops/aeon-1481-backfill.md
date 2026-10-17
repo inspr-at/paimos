@@ -28,6 +28,39 @@ Accepted is a conditional plan: OPS must recheck person comments, acceptance Und
 
 The deployed automatic path processes only its running tagged release. This document authorizes no historic write; an OPS implementation/run and LEAD approval remain required.
 
+### CLI and SQL readback for OPS
+
+Regenerate with existing authentication (the command has no apply mode):
+
+```sh
+git fetch origin main --tags
+node scripts/release-delivery-backfill.mjs \
+  --project 23e3f45b-27e4-43c7-985b-bb0c66179fb3 \
+  --live 261016060843.0.0=2026-10-16T07:57:00Z
+```
+
+With OPS's established tenant/project visibility, this parameterized read-only check must retain exactly one row from the approved inventory before a write is considered. Recheck the newest immutable merge using the union in `gitMemberTx`; this readback alone authorizes no change.
+
+```sql
+BEGIN READ ONLY;
+SELECT set_config('aeon.tenant_id', :'tenant_id', true);
+SELECT n.id, n.key, n.updated_at, n.human_check
+FROM nodes n
+WHERE n.tenant_id = :'tenant_id'::uuid
+  AND n.project_id = :'project_id'::uuid
+  AND n.id = :'node_id'::uuid
+  AND n.updated_at = :'captured_revision'::timestamptz
+  AND n.deleted_at IS NULL
+  AND regexp_replace(lower(btrim(n.state)), '[[:space:]-]+', '_', 'g') = 'done'
+  AND NOT EXISTS (
+    SELECT 1 FROM nodes child
+    JOIN node_kinds k ON k.tenant_id = child.tenant_id AND k.id = child.kind_id
+    WHERE child.tenant_id = n.tenant_id AND child.parent_id = n.id
+      AND child.deleted_at IS NULL AND k.slug = 'work'
+  );
+ROLLBACK;
+```
+
 ## Inventory
 
 | Ticket | Node id / captured revision | Newest merge | First published release | Planned result / reason |
