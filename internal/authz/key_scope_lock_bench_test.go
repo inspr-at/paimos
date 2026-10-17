@@ -214,15 +214,40 @@ func scopeLockExplain(b *testing.B, ctx context.Context, d *dbtest.DB, p tenant.
 				[]string{"delivery.step", "delivery.item", "delivery.incident"}, node, after, 100).Scan(&raw); err != nil {
 				return err
 			}
-			var result any
+			var result []map[string]any
 			if err := json.Unmarshal(raw, &result); err != nil {
 				return err
 			}
-			// The fixture is synthetic; the full plan contains no private data.
-			b.Logf("flowHints after=%d EXPLAIN=%s", after, raw)
+			if len(result) != 1 {
+				return fmt.Errorf("expected one EXPLAIN plan, got %d", len(result))
+			}
+			result[0]["Plan"] = scopeLockPlanSummary(result[0]["Plan"].(map[string]any))
+			delete(result[0], "Triggers")
+			summary, err := json.Marshal(result[0])
+			if err != nil {
+				return err
+			}
+			b.Logf("flowHints after=%d EXPLAIN=%s", after, summary)
 			return nil
 		}); err != nil {
 			b.Fatal(fmt.Errorf("flow hints explain: %w", err))
 		}
 	}
+}
+
+func scopeLockPlanSummary(plan map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, field := range []string{"Node Type", "Index Name", "Relation Name", "Actual Rows", "Actual Total Time", "Rows Removed by Filter", "Shared Hit Blocks", "Shared Read Blocks", "Sort Method"} {
+		if value, ok := plan[field]; ok {
+			out[field] = value
+		}
+	}
+	if plans, ok := plan["Plans"].([]any); ok {
+		children := make([]map[string]any, 0, len(plans))
+		for _, child := range plans {
+			children = append(children, scopeLockPlanSummary(child.(map[string]any)))
+		}
+		out["Plans"] = children
+	}
+	return out
 }

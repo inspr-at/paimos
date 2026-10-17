@@ -193,12 +193,14 @@ func TestWorkstationMarkLocksPairingAndComputerBeforeKey(t *testing.T) {
 						keyLocks++
 						// Independent transactions probe real locks at the key-lock
 						// boundary. NOWAIT avoids timing assumptions and deadlocks.
+						// Do not inherit the writer's exclusive key-admission batch.
+						probeCtx := dbtest.Seed(t.Context())
 						for _, probe := range []struct{ name, sql, id string }{
 							{"tenant", `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, tid},
 							{"computer", `SELECT id FROM agent_pairing_computers WHERE id=$1 FOR UPDATE NOWAIT`, f.computer},
 						} {
-							err := db.InTenant(ctx, pool, tid, func(other pgx.Tx) error {
-								_, err := other.Exec(ctx, probe.sql, probe.id)
+							err := db.InTenant(probeCtx, pool, tid, func(other pgx.Tx) error {
+								_, err := other.Exec(probeCtx, probe.sql, probe.id)
 								return err
 							})
 							var pgErr *pgconn.PgError
@@ -206,9 +208,9 @@ func TestWorkstationMarkLocksPairingAndComputerBeforeKey(t *testing.T) {
 								t.Errorf("%s not locked before key: %v", probe.name, err)
 							}
 						}
-						if err := db.InTenant(ctx, pool, tid, func(other pgx.Tx) error {
+						if err := db.InTenant(probeCtx, pool, tid, func(other pgx.Tx) error {
 							var acquired bool
-							if err := other.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`, tid).Scan(&acquired); err != nil {
+							if err := other.QueryRow(probeCtx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`, tid).Scan(&acquired); err != nil {
 								return err
 							}
 							if acquired {

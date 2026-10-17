@@ -153,11 +153,22 @@ func inTenant(ctx, bootstrap context.Context, pool *pgxpool.Pool, tenantID strin
 		// Admission can wait after the repeatable-read snapshot was established.
 		// A locking read rejects a key changed since that snapshot (40001), so a
 		// queued read cannot authorize against scopes/ownership predating a change.
-		// KEY SHARE is compatible with other uses and non-key updates. Run after
-		// the tenant guard and before handler resource rows, never after events.
-		var id string
-		if err := tx.QueryRow(bootstrap, `SELECT id::text FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid FOR KEY SHARE`, tenantID, p.KeyID).Scan(&id); err != nil {
+		// SHARE must conflict with non-key updates too: KEY SHARE can follow their
+		// old versions. Roll back this savepoint to release the probe's row lock
+		// before handler locks; the shared advisory fence protects authority until
+		// commit. Run after the tenant guard and before handler rows/events.
+		probe, err := tx.Begin(bootstrap)
+		if err != nil {
 			return err
+		}
+		var id string
+		err = probe.QueryRow(bootstrap, `SELECT id::text FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE`, tenantID, p.KeyID).Scan(&id)
+		rollbackErr := probe.Rollback(bootstrap)
+		if err != nil {
+			return err
+		}
+		if rollbackErr != nil {
+			return rollbackErr
 		}
 	}
 	if err := fn(tx); err != nil {
