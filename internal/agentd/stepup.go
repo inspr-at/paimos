@@ -152,13 +152,15 @@ func (m *StepUpManager) serve(w http.ResponseWriter, r *http.Request, token stri
 		return
 	}
 	if err := httpapi.BufferRequestBodyTimeout(w, r, 256, 5*time.Second); err != nil {
+		httpapi.RetainClassifiedBodyStatus(r)
 		http.Error(w, "only challenge_id is accepted", 400)
 		return
 	}
-	d := json.NewDecoder(r.Body)
+	d := httpapi.NewRequestDecoder(w, r, 1<<20)
 	d.DisallowUnknownFields()
 	var in stepup.Request
 	if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
+		httpapi.RetainClassifiedBodyStatus(r)
 		http.Error(w, "only challenge_id is accepted", 400)
 		return
 	}

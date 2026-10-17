@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter, type Router, type RouteRecordRaw } from 'vue-router'
 import { defineComponent } from 'vue'
 import { sourceModule } from './record-source'
+import { settleConfirm } from '../src/lib/confirm'
 
 const empty = defineComponent({ render: () => null })
 let router: Router, loadVocabulary: ReturnType<typeof vi.fn>
@@ -16,7 +17,7 @@ beforeEach(() => {
     './lib/projectSettings': sourceModule('lib/projectSettings.ts', {}),
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: loadVocabulary }) },
-    './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
+    './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {}, './lib/confirm': { settleConfirm },
     './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': {},
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
     './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },

@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -173,7 +174,7 @@ func (m *Module) moderate(w http.ResponseWriter, r *http.Request, fn func(contex
 }
 
 func emptyWishBody(r *http.Request) error {
-	buf, err := io.ReadAll(io.LimitReader(r.Body, 64))
+	buf, err := httpapi.ReadRequestBody(nil, r, 64, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) >= 64 {
 		return statusError{status: http.StatusBadRequest, msg: "invalid wish"}
 	}
@@ -188,7 +189,7 @@ func decodeEdit(r *http.Request, dest any) error {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return errors.New("JSON required")
 	}
-	buf, err := io.ReadAll(io.LimitReader(r.Body, portalEditLimit+1))
+	buf, err := httpapi.ReadRequestBody(nil, r, portalEditLimit+1, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) == 0 || len(buf) > portalEditLimit {
 		return errors.New("invalid JSON")
 	}

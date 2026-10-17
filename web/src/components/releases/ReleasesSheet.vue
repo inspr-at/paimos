@@ -6,7 +6,7 @@ import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, setOverlayTitle } from '../../lib/brand'
 import { codenameOf } from '../../lib/codenames'
 import { useDeveloperSettings } from '../../lib/developerSettings'
-import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, span, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { clockSince } from '../../lib/releaseStats'
 import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
@@ -15,6 +15,8 @@ import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
+import ViewSwitch from '../ViewSwitch.vue'
+import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
@@ -45,24 +47,44 @@ const version = useVersion()
 const profile = useProfile()
 const session = useSession()
 const route = useRoute()
-// EN | DE and Highlights | Details (AEON-323). Both live in the address under
-// their own keys, since the page behind the sheet may use ?view= itself, so a
-// link, a reload and a version change keep them. The language is also this
-// person's remembered choice on this device, else the profile's. The labels
-// read the same in both languages.
-const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
-const remembered = ref<string | null>(null)
-watch(langKey, key => { try { remembered.value = key ? localStorage.getItem(key) : null } catch { remembered.value = null } }, { immediate: true })
+// EN | DE and Highlights | Details (AEON-323), two ViewSwitches (AEON-1453). Both live in
+// the address under their own keys, since the page behind the sheet may use ?view= itself,
+// so a link, a reload and a version change keep them; an address wins once. Without one,
+// the person's default or the choice used last, kept on the server for every device; the
+// language else follows the profile. The labels read the same in both languages.
+const LANGS = ['en', 'de'] as const
+const VIEWS = ['highlights', 'details'] as const
+const LANG_OPTIONS = [{ id: 'en', label: 'EN' }, { id: 'de', label: 'DE' }]
+const VIEW_OPTIONS = [{ id: 'highlights', label: 'Highlights' }, { id: 'details', label: 'Details' }]
 // A choice waits here until the address has it, so two quick clicks both land.
 type SwitchKey = 'release_lang' | 'release_view'
 const pending = reactive<Partial<Record<SwitchKey, string>>>({})
 watch(() => route.query, query => { for (const key of ['release_lang', 'release_view'] as const) if (query[key] === pending[key]) delete pending[key] })
-const lang = computed(() => releaseLang(pending.release_lang ?? route.query.release_lang, profile.profile?.locale, remembered.value))
-const view = computed(() => releaseView(pending.release_view ?? route.query.release_view))
+const asked = (key: SwitchKey) => { const value = pending[key] ?? route.query[key]; return Array.isArray(value) ? value[0] : value }
+// The language was kept in this browser before. It counts until the server has one:
+// move it once, and drop the browser copy only after that write is confirmed.
+const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
+const local = ref<string | null>(null)
+watch(langKey, key => { try { local.value = key ? localStorage.getItem(key) : null } catch { local.value = null } }, { immediate: true })
+const langSwitch = useViewSwitch({ key: viewKey('releases.lang'), options: LANGS, fallback: () => releaseLang(null, profile.profile?.locale, local.value), link: () => asked('release_lang') })
+const viewSwitch = useViewSwitch({ key: viewKey('releases'), options: VIEWS, fallback: 'highlights', link: () => asked('release_view') })
+let langTicket = 0
+watch([langKey, langSwitch.loaded, local], ([key, loaded, value]) => {
+  if (!key || !loaded || (value !== 'en' && value !== 'de')) return
+  const ticket = ++langTicket
+  const choice = value
+  void (async () => {
+    const migrate = !langSwitch.lastId.value || (langSwitch.lastId.value === choice && langSwitch.failed.value)
+    const ok = migrate ? await langSwitch.remember(choice) : await langSwitch.confirmed()
+    if (ticket !== langTicket || !ok) return
+    try { localStorage.removeItem(key) } catch { /* the server has the choice; a blocked browser keeps its copy */ }
+    if (ticket === langTicket) local.value = null
+  })()
+}, { immediate: true })
+const lang = computed(() => langSwitch.current.value as ReleaseLang)
+const view = computed(() => viewSwitch.current.value as ReleaseView)
 const locale = lang
 const copyText = computed(() => releaseCopy(lang.value))
-const LANGS = ['en', 'de'] as const
-const VIEWS = ['highlights', 'details'] as const
 // The address changes where the release does: in the app, so a choice and a
 // selection it causes (a filter hiding the selected release) land together.
 function putQuery(key: SwitchKey, value: string) {
@@ -70,26 +92,8 @@ function putQuery(key: SwitchKey, value: string) {
   pending[key] = value
   emit('query', key, value)
 }
-function chooseLang(next: ReleaseLang) {
-  remembered.value = next
-  try { if (langKey.value) localStorage.setItem(langKey.value, next) } catch { /* private window: the address keeps it */ }
-  putQuery('release_lang', next)
-}
-function chooseView(next: ReleaseView) { putQuery('release_view', next) }
-// The W3C radio group: Right and Down choose the next option, Left and Up the
-// one before, wrapping; Home and End the first and last. Focus follows.
-const SWITCH_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
-function switchKeys(event: KeyboardEvent, current: string, options: readonly string[], choose: (value: string) => void) {
-  const key = event.key
-  if (!(key in SWITCH_STEP) && key !== 'Home' && key !== 'End') return
-  event.preventDefault()
-  event.stopPropagation()
-  const index = Math.max(0, options.indexOf(current))
-  const next = key === 'Home' ? 0 : key === 'End' ? options.length - 1 : (index + SWITCH_STEP[key]! + options.length) % options.length
-  choose(options[next]!)
-  const group = event.currentTarget as HTMLElement
-  void nextTick(() => group.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus())
-}
+function chooseLang(next: string) { langSwitch.choose(next); putQuery('release_lang', next) }
+function chooseView(next: string) { viewSwitch.choose(next); putQuery('release_view', next) }
 
 const dialog = ref<HTMLDialogElement>()
 const listbox = ref<HTMLElement>()
@@ -539,14 +543,8 @@ const KINDS = [
           </div>
           <span class="spacer" />
           <div class="switches">
-            <div class="seg" role="radiogroup" aria-label="Language" @keydown="switchKeys($event, lang, LANGS, value => chooseLang(value as ReleaseLang))">
-              <button type="button" role="radio" :aria-checked="lang === 'en'" :tabindex="lang === 'en' ? 0 : -1" @click="chooseLang('en')">EN</button>
-              <button type="button" role="radio" :aria-checked="lang === 'de'" :tabindex="lang === 'de' ? 0 : -1" @click="chooseLang('de')">DE</button>
-            </div>
-            <div class="seg" role="radiogroup" aria-label="View" @keydown="switchKeys($event, view, VIEWS, value => chooseView(value as ReleaseView))">
-              <button type="button" role="radio" :aria-checked="view === 'highlights'" :tabindex="view === 'highlights' ? 0 : -1" @click="chooseView('highlights')">Highlights</button>
-              <button type="button" role="radio" :aria-checked="view === 'details'" :tabindex="view === 'details' ? 0 : -1" @click="chooseView('details')">Details</button>
-            </div>
+            <ViewSwitch look="seg" label="Language" :options="LANG_OPTIONS" :selected="lang" :default-id="langSwitch.defaultId.value" @select="chooseLang" @set-default="langSwitch.setDefault" />
+            <ViewSwitch look="seg" label="View" :options="VIEW_OPTIONS" :selected="view" :default-id="viewSwitch.defaultId.value" @select="chooseView" @set-default="viewSwitch.setDefault" />
           </div>
           <label class="search-field search">
             <AppIcon name="search" :size="14" />
@@ -769,7 +767,7 @@ button.sheet-sum { cursor: pointer; }
 .spacer { display:none; }
 .switches { display:flex; flex-wrap:wrap; flex:none; align-items:center; gap:8px; min-width:0; }
 .switches .seg { padding:0; }
-.switches .seg button { height:36px; padding:0 12px; }
+.switches .seg :deep(button) { height:36px; padding:0 12px; }
 .search { flex:1 1 220px; min-width:140px; }
 .search .field { height:36px; border-radius:999px; padding-right:34px; font-size:12px; }
 .search .field::-webkit-search-cancel-button { display:none; }
@@ -866,7 +864,11 @@ button.sheet-sum { cursor: pointer; }
 .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .toggle:focus-visible,.to-current:focus-visible,.next-up:focus-visible,.evidence-control:focus-visible { outline:none; box-shadow:var(--focus-ring); }
 @media(hover:hover) { .row:hover:not([aria-selected="true"]) { background:var(--row-hover); border-radius:10px; } .toggle:hover { background:var(--btn-bg-hover); } }
-@media(max-width:1180px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
+/* Two rows until one fits: with the switches' reserved pin slots (AEON-1453) one row needs about 1310 px,
+   about 1350 px with wider system fonts; below that Help and Close would wrap alone. The switches, search and
+   Compare share the second row; the search starts at its minimum and takes what is left, so it never wraps
+   onto a row of its own and short windows keep room for the list. */
+@media(max-width:1380px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; flex-basis:140px; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
 @media(max-width:760px) {
  .shell { padding:0 16px; grid-template-rows:auto minmax(0,1fr) auto; }
  .head { gap:10px; padding:12px 0 10px; }
@@ -883,7 +885,7 @@ button.sheet-sum { cursor: pointer; }
  .compare-btn { order:3; width:44px; height:44px; padding:0; }
  .compare-btn .btn-text,.compare-btn .keycap,.slash { display:none; }
  .switches { order:4; flex:1 1 auto; gap:6px; }
- .switches .seg button { height:44px; padding:0 12px; }
+ .switches .seg :deep(button) { height:44px; padding:0 12px; }
  .help-btn { display:flex; order:5; width:44px; height:44px; }
  .body { display:block; min-height:0; }
  .list-pane { height:100%; padding:2px 1px; }

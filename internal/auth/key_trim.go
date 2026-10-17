@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -157,8 +158,7 @@ func validateTrimInput(in *trimInput) error {
 	return nil
 }
 func decodeTrim(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 64<<10)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		writeBadRequest(w, "invalid key trim JSON")

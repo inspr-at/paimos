@@ -1116,7 +1116,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 @media (prefers-reduced-motion: reduce) { .jump-enter-active, .jump-leave-active { transition: none; } }
 
 /* ---------- One calm composer (AEON-1438) ---------- */
-.composer { flex-shrink: 0; padding: 4px 24px 12px; }
+.composer { flex-shrink: 0; padding: 4px 24px max(12px, env(safe-area-inset-bottom)); }
 .composer-col { width: 100%; max-width: 720px; margin: 0 auto; }
 .compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .compose-box { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; padding: 10px 8px 8px 14px; border-radius: 16px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line-2); }
@@ -1159,12 +1159,14 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 @media (max-width: 860px) { .thread-scroll, .composer { padding-inline: 16px; } }
 
 /* ---------- Phones: "+" · field · send in one row ---------- */
-@media (max-width: 720px) {
+/* Short landscape phones use it too, so the thread keeps at least 60 % of the height (AEON-1286). */
+@media (max-width: 720px), (max-height: 480px) {
   .thread-scroll { padding: 10px 16px 16px; scrollbar-gutter: auto; }
   .thread-col { --thread-gap: 16px; max-width: none; }
   .queue-item { max-width: 85%; }
   .queue-text { font-size: 15px; line-height: 1.45; border-radius: 18px 18px 6px 18px; }
-  .composer { padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }
+  /* The home indicator's inset replaces the bottom padding; it is never added on top (AEON-1286). */
+  .composer { padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }
   .composer-col { max-width: none; }
   .replying { margin: -2px 0 6px; padding-left: 14px; font-size: 13px; background: none; }
   .compose-box { grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "plus field send"; column-gap: 4px; align-items: end; padding: 0; border-radius: 0; background: none; box-shadow: none; }

@@ -70,7 +70,8 @@ function quoteSetup(overrides: Record<string, unknown> = {}) {
   const scope = reactive({ identity: { tenant: { id: 't' }, principal: { id: 'p' } } })
   const made = setup('components/business/QuoteWorkspace.vue', props, {
     'vue-router': { onBeforeRouteLeave() {} }, '../../lib/brand': {}, '../../lib/chrome': { headerFolded: ref(false) }, '../../lib/confirm': { confirmAction: async () => true },
-    '../../lib/preferences': { usePreference: () => ({ value: ref(null), ready: Promise.resolve(), save() {} }) }, '../../lib/quotePresence': {}, '../../lib/quoteWorkspace': { acquireQuote: (_s: unknown, id: string) => id === 'A' ? a : b, releaseQuote() {}, dropQuote() {} },
+    '../../lib/preferences': { usePreference: () => ({ value: ref(null), ready: Promise.resolve(), save() {} }) }, '../../lib/quotePresence': {},
+    '../../lib/viewSwitch': { viewKey: (name: string) => `view:${name}`, useViewSwitch: () => ({ current: ref('format'), defaultId: ref(null), choose() {}, setDefault() {} }) }, '../../lib/quoteWorkspace': { acquireQuote: (_s: unknown, id: string) => id === 'A' ? a : b, releaseQuote() {}, dropQuote() {} },
     '../../lib/quotes/api': draft, '../../lib/quotes/editor': {}, '../../lib/quotes/lifecycle': lifecycle,
     '../../lib/quotes/list': { statusOf: () => 'draft' }, '../../lib/quotes/profile': profile, '../../lib/quotes/zoom': {}, '../../lib/quotes/saveProblems': {}, '../../lib/quoteRecovery': {},
     '../../lib/toast': { toast: (_text: string, opts: object = {}) => notices.push(opts) }, '../../stores/business': { useBusiness: () => ({ staff: true, admin: true }) },

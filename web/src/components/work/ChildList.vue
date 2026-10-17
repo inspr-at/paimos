@@ -80,7 +80,8 @@ defineExpose({ startAdd })
 .child-row:active { background: var(--row-selected); }
 .child-row:focus-visible { box-shadow: var(--focus-ring); }
 .child-row.closed .child-title { color: var(--ink-2); }
-.key { flex-shrink: 0; width: 88px; font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+/* Keys line up as a column; a longer key widens its slot and the title gives way (AEON-1379). */
+.key { flex: none; min-width: 88px; font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; white-space: nowrap; }
 .child-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .none { font-size: 13px; color: var(--ink-3); }
 .child-skeleton { display: grid; gap: 10px; padding: 12px; }
@@ -96,7 +97,7 @@ defineExpose({ startAdd })
 .key, .child-title { line-height: 18px; }
 @media (max-width: 720px) {
   .child-row { height: auto; min-height: 44px; padding-block: 6px; align-items: flex-start; }
-  .key { width: 76px; }
+  .key { min-width: 76px; }
   .child-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
   .child-row > svg, .child-row > .status-icon { flex-shrink: 0; margin-top: 2px; }
 }

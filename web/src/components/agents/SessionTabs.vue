@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { PANEL_HEAD_TITLE_MIN, PANEL_TAB_LABEL, panelTabs, type LeadTab, type PanelTab } from '../../lib/leadPanel'
+import { PANEL_HEAD_TITLE_MIN, PANEL_TAB_LABEL, panelTabs, type PanelTab } from '../../lib/leadPanel'
 import { shortcutHint } from '../../lib/shortcuts'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ selected: PanelTab; unread: number; lead?: boolean; terminal?: boolean; watch?: boolean; pinned?: LeadTab | null }>()
+const props = defineProps<{ selected: PanelTab; unread: number; lead?: boolean; terminal?: boolean; watch?: boolean }>()
 const emit = defineEmits<{ select: [tab: PanelTab] }>()
 const tabs = computed(() => panelTabs(!!props.lead, !!props.terminal, !!props.watch))
 const panelId = (tab: PanelTab) => tab === 'chat' ? 'messages' : tab === 'session' ? 'overview' : tab
@@ -12,18 +12,40 @@ const icon = (tab: PanelTab) => tab === 'lead' ? 'tree' : tab === 'chat' ? 'mess
 const menu = ref<HTMLElement>()
 let resize: ResizeObserver | undefined
 onMounted(() => {
+  // After mount: this setup also runs while the recovery evidence is rendered
+  // on the server, where window does not exist.
+  const phone = window.matchMedia('(max-width: 720px)')
+  // Narrow landscape phones put the menu on the head's line (SessionPanel, AEON-1286).
+  const sharedLine = window.matchMedia('(min-width: 480px) and (max-width: 720px) and (max-height: 480px)')
   const element = menu.value, head = element?.closest<HTMLElement>('.pane-bar')
   const identity = head?.querySelector<HTMLElement>('.pane-identity')
   if (!element || !head || !identity) return
   const fit = () => {
     // Measure the complete menu synchronously, then choose before paint. Only
     // opening/resizing changes its form; selection and unread counts cannot.
-    element.classList.remove('icons')
+    element.classList.remove('icons', 'compact')
     const css = getComputedStyle(head), identityCSS = getComputedStyle(identity)
-    const siblings = [...head.children].filter(child => child !== identity)
-    const glyphs = [...identity.children].filter(child => !child.classList.contains('pane-title'))
+    const glyphs = [...identity.children].filter(child => !child.matches('.pane-title, .pane-heading'))
+    if (phone.matches) {
+      // AEON-1286: on phones the menu has its own row: the design's labels while all fit,
+      // then smaller labels, then icons only. The form follows the width, never the
+      // selection, so choosing a tab never moves one (AEON-541). On the head's line it takes
+      // what the avatar and the title's minimum leave.
+      const own = getComputedStyle(element)
+      const room = head.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) - parseFloat(own.marginLeft) - parseFloat(own.marginRight)
+      const titleAt = PANEL_HEAD_TITLE_MIN + glyphs.reduce((width, glyph) => width + glyph.getBoundingClientRect().width + parseFloat(identityCSS.columnGap), 0)
+      const fits = () => sharedLine.matches ? identity.getBoundingClientRect().width >= titleAt - .5 : element.getBoundingClientRect().width <= room + .5
+      for (const form of ['compact', 'icons']) {
+        if (fits()) break
+        element.classList.remove('compact'); element.classList.add(form)
+      }
+      return
+    }
+    // The phone-only back button is not drawn here: it takes neither width nor a gap.
+    const shown = [...head.children].filter(child => getComputedStyle(child).display !== 'none')
+    const siblings = shown.filter(child => child !== identity)
     const labelsAt = Math.ceil(PANEL_HEAD_TITLE_MIN + parseFloat(css.paddingLeft) + parseFloat(css.paddingRight) +
-      parseFloat(css.columnGap) * (head.children.length - 1) + parseFloat(identityCSS.columnGap) * glyphs.length +
+      parseFloat(css.columnGap) * (shown.length - 1) + parseFloat(identityCSS.columnGap) * glyphs.length +
       [...siblings, ...glyphs].reduce((width, child) => width + child.getBoundingClientRect().width, 0))
     // A measured design token: includes the actual tab count, font and actions
     // (the sidebar button is absent when a split cannot fit).
@@ -50,7 +72,6 @@ function move(event: KeyboardEvent) {
     <button v-for="(tab, index) in tabs" :id="`session-tab-${panelId(tab)}`" :key="tab" type="button" role="tab" :data-tab="tab" :aria-label="PANEL_TAB_LABEL[tab]" :data-tip="[PANEL_TAB_LABEL[tab], shortcutHint(`agents.panel.tab.${(index + 1) as 1 | 2 | 3 | 4 | 5}`)].filter(Boolean).join(' · ')" :aria-selected="selected === tab" :aria-controls="`session-panel-${panelId(tab)}`" :tabindex="selected === tab ? 0 : -1" @click="emit('select', tab)">
       <AppIcon :name="icon(tab)" :size="15" /><span class="tab-label"><span class="label-width" aria-hidden="true">{{ PANEL_TAB_LABEL[tab] }}</span><span>{{ PANEL_TAB_LABEL[tab] }}</span></span>
       <span v-if="tab === 'chat' && unread" class="count" :aria-label="`${unread} unread`">{{ unread > 99 ? '99+' : unread }}</span>
-      <span v-if="tab === 'lead' && pinned === 'lead'" class="pinned" aria-label="Your default"><AppIcon name="pin" :size="10" /></span>
     </button>
   </div>
 </template>
@@ -65,10 +86,14 @@ button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .tab-label > span { grid-area: 1 / 1; }
 .label-width { font-weight: 700; visibility: hidden; }
 .count { position: absolute; right: 1px; top: -2px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 9px var(--font); }
-.pinned { position: absolute; right: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); }
 .icons .tab-label { display: none; }
 .icons button { padding-inline: 5px; }
-@media (max-width: 720px) { .session-tabs { height: 44px; padding: 0 2px; } button { min-width: 44px; height: 44px; padding-inline: 5px; gap: 4px; font-size: 12px; } .tab-label, .icons .tab-label { display: inline-grid; } }
-@media (max-width: 360px) { .tab-label, .icons .tab-label { display: none; } }
+/* AEON-1286 phones: the flat menu's own row, 44 px items in a 48 px track. */
+@media (max-width: 720px) {
+  .session-tabs { height: 48px; padding: 2px; box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-black) 8%, transparent); }
+  button { min-width: 44px; height: 44px; padding: 0 13px; gap: 6px; font-size: 14px; }
+  .compact button { padding: 0 8px; gap: 5px; font-size: 12.5px; }
+  .icons button { width: 44px; padding: 0; }
+}
 @media (pointer: coarse) { .session-tabs { height: 44px; padding-block: 0; } button { height: 44px; min-width: 44px; } }
 </style>

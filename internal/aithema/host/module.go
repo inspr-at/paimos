@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -61,7 +60,7 @@ func writeError(w http.ResponseWriter, err error) {
 	reply(w, status, map[string]string{"error": code, "code": code})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	raw, err := httpapi.ReadRequestBody(w, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		return fail(413, "too_large")
 	}

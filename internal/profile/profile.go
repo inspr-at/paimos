@@ -367,9 +367,9 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	r.Body = httpapi.RequestBodyReader(w, r, 16<<10)
 	var raw json.RawMessage
-	decoder := json.NewDecoder(r.Body)
+	decoder := httpapi.NewRequestDecoder(w, r, 1<<20)
 	if err := decoder.Decode(&raw); err != nil {
 		httpapi.WriteJSON(w, 400, map[string]any{"errors": map[string]string{"body": "invalid JSON"}})
 		return

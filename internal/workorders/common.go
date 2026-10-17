@@ -180,6 +180,9 @@ func BufferBody(w http.ResponseWriter, r *http.Request) error {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &timeout) && timeout.Timeout() {
 			return Fail(http.StatusRequestTimeout, "request body read timed out")
 		}
+		// Oversized lifecycle and probe bodies stay 400 invalid JSON. The
+		// transport suggestion must not relabel that classification as 413.
+		httpapi.RetainClassifiedBodyStatus(r)
 		return Fail(http.StatusBadRequest, "invalid JSON")
 	}
 	return nil
@@ -350,7 +353,7 @@ func WriteError(w http.ResponseWriter, err error) {
 
 // Decode accepts one bounded JSON object with no unknown fields.
 func Decode(r *http.Request, dst any) error {
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return Fail(400, "invalid JSON")

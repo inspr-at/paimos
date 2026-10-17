@@ -8,6 +8,7 @@ import { useSession } from '../stores/session'
 import { useLiveAgents } from '../stores/liveAgents'
 import { activeByProject, activeSessions, liveChanges, liveSummary, type LiveAgent } from '../lib/liveAgents'
 import { onPreferenceFailure, usePreference } from '../lib/preferences'
+import { useViewSwitch, viewKey } from '../lib/viewSwitch'
 import { plural } from '../lib/work'
 import { can } from '../lib/authz'
 import { scopeOwner } from '../lib/identityScope'
@@ -18,6 +19,7 @@ import { PROJECT_COLUMNS, chosenProjectColumns, customisedProjectColumns, fittin
 import { byRank, keepOrder, nearestCell, place, prunedOrder, sameOrder } from '../lib/projectOrder'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import WelcomeBlock from '../components/WelcomeBlock.vue'
+import ViewSwitch from '../components/ViewSwitch.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import ColumnPicker from '../components/work/ColumnPicker.vue'
 import RowMenu from '../components/business/RowMenu.vue'
@@ -56,16 +58,23 @@ const fromStart = computed(() => route.path === '/new-project')
 const startDraft = ref<HeldDraft | null>(null), startGeneration = ref(0)
 watch(fromStart, open => { if (open) { startDraft.value = heldDraft(); startGeneration.value++ } }, { immediate: true, flush: 'sync' })
 function closeStart() { if (fromStart.value) void router.replace('/') }
-// The person's view of this page: List or Cards and the list's columns. Their own
-// order of projects (the Custom sort) has a key of its own, so saving one never
-// overwrites the other.
+// The person's view of this page: the list's columns. Their own order of projects
+// (the Custom sort) has a key of its own, so saving one never overwrites the other.
+// `view` is where List or Cards was kept before the view switch had its own key.
 type PagePrefs = { view?: 'list' | 'cards'; columns?: ProjectColumnPrefs }
 const pagePref = usePreference<PagePrefs>('projects')
 const ORDER_KEY = 'projects:order'
 const orderPref = usePreference<{ ids?: string[] }>(ORDER_KEY)
+// List or Cards (AEON-1453): the person's default, else the view used last; ?view= wins once.
+const PROJECT_VIEWS = ['list', 'cards'] as const
+const viewSwitch = useViewSwitch({ key: viewKey('projects'), options: PROJECT_VIEWS, fallback: 'list', link: () => route.query.view, legacy: { key: 'projects', read: value => ({ last: value?.view }) } })
+const viewOptions = [
+  { id: 'list', label: 'List', icon: 'list', ariaLabel: 'List view', tip: 'List · every project in rows' },
+  { id: 'cards', label: 'Cards', icon: 'cards', ariaLabel: 'Cards view', tip: 'Cards · progress at a glance' },
+] as const
 const pageReady = ref(false)
-void Promise.all([pagePref.ready, orderPref.ready]).then(() => { pageReady.value = true })
-const view = computed<'list' | 'cards'>(() => pagePref.value.value?.view === 'cards' ? 'cards' : 'list')
+void Promise.all([pagePref.ready, orderPref.ready, viewSwitch.ready()]).then(() => { pageReady.value = true })
+const view = computed<'list' | 'cards'>(() => viewSwitch.current.value === 'cards' ? 'cards' : 'list')
 const columnPrefs = computed(() => pagePref.value.value?.columns ?? null)
 function savePage(patch: PagePrefs) {
   const next = { ...(pagePref.value.value ?? {}), ...patch }
@@ -160,7 +169,7 @@ function saveColumns(order: PickerColumn[], visible: PickerColumn[]) { savePage(
 function resetColumns() { savePage({ columns: undefined }) }
 const displayAnchor = ref<HTMLElement | null>(null)
 function closeDisplay(restore: boolean) { const anchor = displayAnchor.value; displayAnchor.value = null; if (restore) anchor?.focus() }
-function setView(next: 'list' | 'cards') { if (next !== view.value) savePage({ view: next }) }
+function setView(next: string) { if (next !== view.value) viewSwitch.choose(next) }
 
 // ---------- Selection ----------
 const selected = ref(new Set<string>())
@@ -887,10 +896,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         <GroupChips v-if="ready" class="chips" :chips="chips" :drop-on="dropOn" :creating="!!createAnchor" @toggle="groups.toggleVisible" @create="openCreate" />
         <span v-else class="chips chips-skeleton"><span class="skeleton" /></span>
         <span class="tools">
-          <span class="seg view-seg" role="radiogroup" aria-label="View">
-            <button type="button" role="radio" :aria-checked="view === 'list'" aria-label="List view" data-tip="List · every project in rows" @click="setView('list')"><AppIcon name="list" :size="14" /><span class="view-label">List</span></button>
-            <button type="button" role="radio" :aria-checked="view === 'cards'" aria-label="Cards view" data-tip="Cards · progress at a glance" @click="setView('cards')"><AppIcon name="cards" :size="14" /><span class="view-label">Cards</span></button>
-          </span>
+          <ViewSwitch class="view-seg" look="seg" label="View" :options="viewOptions" :selected="view" :default-id="viewSwitch.defaultId.value" @select="setView" @set-default="viewSwitch.setDefault" />
           <button
             type="button" class="btn sm display-btn" :class="{ on: sort !== 'activity' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display, sorted by ${sortMeta.phrase}`"
             :data-tip="`Sorted by ${sortMeta.phrase} · ${view === 'list' ? 'sort and columns' : 'sort'}`" :data-sort="sort" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
@@ -989,7 +995,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .chips-skeleton .skeleton { width: 140px; }
 .tools { grid-area: tools; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 @media (max-width: 1199px) { .projects-toolbar { grid-template-columns: minmax(0, 280px) 1fr auto; grid-template-areas: "search . tools" "chips chips chips"; } }
-.view-seg button { height: 26px; padding: 0 11px; }
+.view-seg :deep(button) { height: 26px; padding: 0 11px; }
 .display-btn { gap: 6px; color: var(--ink-2); }
 .display-btn .sort-icon { flex-shrink: 0; }
 .display-btn.on .sort-icon { color: var(--teal-ink); }
@@ -1018,7 +1024,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .state h2 { color: var(--ink); font-size: 17px; }
 .state p { font-size: 13.5px; }
 .state .btn { margin-top: 10px; }
-@media (max-width: 1100px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
+@media (max-width: 1100px) { .view-seg :deep(.tab-label) { display: none; } .view-seg :deep(button) { padding: 0 8px; } }
 @media (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
 @media (max-width: 760px) {
   .projects-page { padding: 14px 12px 28px; }
@@ -1029,7 +1035,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
   .project-search .field { height: 44px; font-size: 16px; }
   .chips-skeleton { height: 44px; }
   .tools { justify-content: space-between; }
-  .view-seg button { height: 44px; min-width: 48px; }
+  .view-seg :deep(button) { height: 44px; min-width: 48px; }
   .display-btn { height: 44px; min-width: 44px; }
   .cards-area { margin-top: 16px; }
 }

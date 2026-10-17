@@ -4,11 +4,11 @@ package agentd
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativestream"
 )
@@ -36,8 +36,7 @@ func serveNativeStart(s *Supervisor, authorize func(*http.Request) bool) http.Ha
 			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonInvalidInput))
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, nativecontract.RequestBodyBytes)
-		raw, err := io.ReadAll(r.Body)
+		raw, err := httpapi.ReadRequestBody(w, r, nativecontract.RequestBodyBytes, httpapi.DefaultBodyReadTimeout)
 		if err != nil {
 			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonBufferFull))
 			return

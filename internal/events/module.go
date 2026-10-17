@@ -330,7 +330,7 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		failure(w, ErrConflict)
 		return
 	}
-	decoder := json.NewDecoder(r.Body)
+	decoder := httpapi.NewRequestDecoder(w, r, 1<<20)
 	decoder.DisallowUnknownFields()
 	decodeErr := decoder.Decode(&confirm)
 	if decodeErr != nil && decodeErr != io.EOF {

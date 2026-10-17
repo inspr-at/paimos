@@ -256,7 +256,10 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes+(1<<20))
+	if err := httpapi.BufferRequestBodyTimeout(w, r, maxAvatarBytes+(1<<20), httpapi.UploadBodyReadTimeout); err != nil {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid multipart body")
+		return
+	}
 	mr, err := r.MultipartReader()
 	if err != nil {
 		httpapi.WriteError(w, 400, "multipart body required")

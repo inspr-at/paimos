@@ -11,6 +11,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ref, type App } from 'vue'
 import { createMemoryHistory, createRouter, type Router, type RouteRecordRaw } from 'vue-router'
 import { sourceModule } from './record-source'
+import { settleConfirm } from '../src/lib/confirm'
 import { mountView, textOf } from './webcore-view-harness'
 import * as projectSettings from '../src/lib/projectSettings'
 
@@ -232,7 +233,7 @@ function routeRecords(): Router {
     './lib/brand': { setPageTitle() {} }, './stores/projects': {},
     './stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } }, refresh: async () => {} }) },
     './stores/workVocabulary': { useWorkVocabulary: () => ({ load: async () => {} }) },
-    './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
+    './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {}, './lib/confirm': { settleConfirm },
     './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': { takeSignInReturn: () => '/' },
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
     './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },

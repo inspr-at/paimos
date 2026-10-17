@@ -2,7 +2,6 @@
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -272,7 +271,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			writeJSON(w, http.StatusRequestEntityTooLarge, errorJSON{Error: "action body exceeds 2 MiB"})
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		httpapi.SetRequestBody(r, body)
 		digest, summary := workstationAction(p, r, body)
 		if len(summary) > 256 {
 			if err := m.auditWorkstation(r, p, false, "invalid_action"); err != nil {
@@ -404,7 +403,7 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		writeBadRequest(w, "invalid request")
 		return
 	}
-	decoder := json.NewDecoder(r.Body)
+	decoder := httpapi.NewRequestDecoder(w, r, 1<<20)
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF {
 		writeBadRequest(w, "invalid request")

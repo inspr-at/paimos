@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -434,9 +435,10 @@ func (m *AttachManager) serve(w http.ResponseWriter, r *http.Request, token stri
 		http.Error(w, "interactive kernel-checked helper required", 403)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	r.Body = httpapi.RequestBodyReader(w, r, 8192)
 	var in AttachLocalRequest
 	if workorders.Decode(r, &in) != nil {
+		httpapi.RetainClassifiedBodyStatus(r)
 		http.Error(w, "invalid attach", 400)
 		return
 	}

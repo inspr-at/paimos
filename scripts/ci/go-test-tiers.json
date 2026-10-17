@@ -7214,6 +7214,8 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHTTPReadDeadlineOwnership","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestHTTPRequestBodyOwnership","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestHandlerFailureLoggingIsContentFree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHandlersAndMiddleware","tier":"ESSENTIAL"}
@@ -7229,6 +7231,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadyPoolSaturationAndDatabaseFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestRequestBodyDeadlineResponsesAndStreaming","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestBudgetPrecedesAuthenticationAndPreservesHandlerLifetime","tier":"ESSENTIAL"}
     ,

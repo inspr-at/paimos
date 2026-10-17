@@ -2,7 +2,6 @@
 package releasehistory
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -45,7 +44,7 @@ func (m *Module) writePresentation(w http.ResponseWriter, r *http.Request, clear
 	}
 	var in PresentationInput
 	if !clear {
-		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPresentationBody))
+		dec := httpapi.NewRequestDecoder(w, r, maxPresentationBody)
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&in); err != nil {
 			httpapi.WriteError(w, http.StatusBadRequest, "body must be a presentation object")

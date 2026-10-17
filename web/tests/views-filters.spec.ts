@@ -206,10 +206,10 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   await page.getByRole('dialog', { name: 'Rename view' }).getByLabel('View name').fill('High priority')
   await page.keyboard.press('Enter')
   await expect(bar(page).getByRole('link', { name: 'High priority' })).toBeVisible()
-  // Default: the next visit to the project opens the view.
+  // Default: the next visit to the project opens the view (AEON-1453: the ticket list switch's default).
   await options('High priority').click()
-  await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Open the project with it' }).click()
-  await expect.poll(() => (data.preferences['list:p-pharos'] as { defaultView?: string } | undefined)?.defaultView).toBe(MINE)
+  await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Open here by default' }).click()
+  await expect.poll(() => (data.preferences['view:tickets:p-pharos'] as { default?: string } | undefined)?.default).toBe(`saved:${MINE}`)
   await page.goto('/p/PHAROS')
   await expect(page).toHaveURL(new RegExp(`v=${MINE}`))
   await expect(rows(page)).toHaveCount(2)

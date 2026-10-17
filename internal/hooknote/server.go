@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 type slotKey struct{}
@@ -143,8 +145,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestDeadline, _ := ctx.Deadline()
 	_ = slot.conn.SetReadDeadline(requestDeadline)
 	_ = http.NewResponseController(w).SetWriteDeadline(requestDeadline)
-	r.Body = http.MaxBytesReader(w, r.Body, 2048)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 2048)
 	dec.DisallowUnknownFields()
 	var req wireRequest
 	if dec.Decode(&req) != nil || dec.Decode(&struct{}{}) != io.EOF {

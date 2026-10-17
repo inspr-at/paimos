@@ -123,7 +123,10 @@ test('changing diagnosis remains below every session control and tab', async () 
       sidebarAvailable: true, panelLayout: 'side', fullScreenTip: 'Full screen', openedTab: 'overview', why: '',
       nativeKnown: false, managedControls: management_mode === 'managed', viewerAtOpen: false,
       availableTabs: ['overview', 'chat', 'events', 'terminal'], PANEL_TAB_LABEL,
-      settingReason: () => '', nativeAction: null,
+      settingReason: () => '', nativeAction: null, nativeReason: '', phoneHead: false, requestAnchor: null,
+      menuSeparator: () => false, steer: () => {}, editSetting: () => {}, requestLayout: () => {},
+      openRequest: () => {}, pickTier: () => {}, pinChoice: null, pinNote: '', requestsOffered: false,
+      viewer: { kind: 'agent' }, terminalLink: null, questions: [], tierNote: '',
     }) })
     app.component('SessionTabs', SessionTabs)
     app.component('ManagedSessionControls', { render: () => Vue.h('span', { 'data-control': 'ManagedSessionControls' }) })

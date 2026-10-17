@@ -335,7 +335,7 @@ func (m *Module) prepareAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 }
 
 func decodeAttention(w http.ResponseWriter, r *http.Request, out any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder := httpapi.NewRequestDecoder(w, r, 64<<10)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		return err

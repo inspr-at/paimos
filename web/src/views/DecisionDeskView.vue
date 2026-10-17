@@ -489,6 +489,17 @@ watch(owner, () => {
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
 const stopAccess = onAccessRevalidate({ reset: resetDesk })
+// On a row too narrow for its label the arrow shows alone (AEON-1448); on a fine pointer its name then also comes as a tip.
+const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), arrowTip = ref(false)
+let finePointer: MediaQueryList | undefined
+function readArrowTip() { const label = oneByOne.value?.querySelector('.label'); arrowTip.value = !!label && getComputedStyle(label).display === 'none' && !!finePointer?.matches }
+watch(oneByOne, readArrowTip, { flush: 'post' })
+let rowSize: ResizeObserver | undefined
+onMounted(() => {
+  finePointer = matchMedia('(pointer: fine)'); finePointer.addEventListener('change', readArrowTip)
+  rowSize = new ResizeObserver(readArrowTip); if (tabRow.value) rowSize.observe(tabRow.value)
+})
+onBeforeUnmount(() => { rowSize?.disconnect(); finePointer?.removeEventListener('change', readArrowTip) })
 // How the round ended: after the last decision the desk returns to where it was opened (AEON-1339).
 function closed(result?: DeskClose) {
   opened.value = false; ruleEdit.value = undefined; changeId.value = ''
@@ -506,7 +517,8 @@ function closed(result?: DeskClose) {
     router.back()
     return
   }
-  void nextTick(() => { if (document.activeElement === document.body || !document.activeElement) (document.querySelector<HTMLElement>('[data-testid="desk-one-by-one"]') ?? document.getElementById('desk-title'))?.focus({ preventScroll: true }) })
+  // A round action that is fading out (nothing left to answer) is no place for focus (AEON-1448).
+  void nextTick(() => { if (document.activeElement === document.body || !document.activeElement) ((openRound.value.length ? oneByOne.value : undefined) ?? document.getElementById('desk-title'))?.focus({ preventScroll: true }) })
 }
 // Undo after closing acts as Change until a withdraw exists (AEON-1340): the memo reopens on the answer.
 function undoAfterClose(id: string) {
@@ -529,16 +541,21 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
   <main class="desk-page decision-desk" aria-labelledby="desk-title">
     <header class="dp-head">
       <div><h1 id="desk-title" tabindex="-1">Decision Desk</h1><p class="head-note">Agents keep working unless something is held up.</p></div>
-      <!-- The slot stays on both tabs, so the tabs below never move (AEON-541); it starts the open round. -->
-      <button type="button" class="btn" :style="{ visibility: openRound.length || scopeActive ? 'visible' : 'hidden' }" :disabled="!openRound.length" :aria-hidden="!openRound.length && !scopeActive || undefined" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" />Answer one by one</button>
     </header>
-    <div class="dp-bar">
-      <div class="seg view-tabs" role="radiogroup" aria-label="Show">
-        <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
-        <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
-      </div>
-      <div v-if="filter === 'decided'" class="seg dec-filter" role="radiogroup" aria-label="Stamp">
-        <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
+    <!-- AEON-1448 (Tick): "Answer one by one" sits at the tab row's end, only while the (scoped) open round has items.
+         It is never taller than the tabs, so arriving or leaving fades it in place and moves nothing else. -->
+    <div ref="tabRow" class="dp-tabrow">
+      <div class="dp-bar">
+        <div class="seg view-tabs" role="radiogroup" aria-label="Show">
+          <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
+          <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
+        </div>
+        <div v-if="filter === 'decided'" class="seg dec-filter" role="radiogroup" aria-label="Stamp">
+          <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
+        </div>
+        <Transition name="one-by-one">
+          <button v-if="openRound.length" ref="oneByOne" type="button" class="btn one-by-one" aria-label="Answer one by one" :data-tip="arrowTip ? 'Answer one by one' : undefined" data-testid="desk-one-by-one" @click="beginOpen"><AppIcon name="arrow" :size="14" /><span class="label">Answer one by one</span></button>
+        </Transition>
       </div>
     </div>
     <p v-if="scopeActive && !scopeInCard" class="scope-line" data-testid="desk-scope">{{ scopeCopy }} <RouterLink :to="showAllTo">Show all</RouterLink></p>
@@ -618,17 +635,48 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 /* AEON-1339: the Desk page as the approved rev 11 artifact draws it. */
 .scope-line { display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; min-height: 44px; margin: 0; font-size: 12px; color: var(--ink-3); }.scope-line a { color: var(--teal-ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }.scope-line a:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .desk-page { width: 100%; max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }
+/* This root <main> also takes App's scoped `main` rule. Its stable gutter would reserve a second, empty scrollbar
+   strip inside #main's own on classic-scrollbar desktops. That narrows the tab row and moves the page off centre. */
+.desk-page { scrollbar-gutter: auto; }
 .dp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 18px; }
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }
 .dp-head .head-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
-.dp-head .btn { min-height: 36px; }
-.dp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+/* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
+   the Decided stamp filter takes a second line of its own; the button keeps the first, so it never wraps or adds height. */
+.dp-tabrow { container: desk-tabs / inline-size; }
+.dp-bar { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+.dp-bar .view-tabs { grid-area: 1 / 1; }
+.dp-bar .view-tabs button { white-space: nowrap; }
+/* 12.5 px is the tabs' type (a plain .btn is 13 px), so the label fits beside them on a 390 px phone. */
+.one-by-one { grid-area: 1 / -2; justify-self: end; gap: 6px; padding: 0 12px; font-size: 12.5px; }
+/* Coarse pointers: 44 px tall, and 44 × 44 as the arrow alone. */
+@media (pointer: coarse) { .one-by-one { height: 44px; min-width: 44px; } }
+@media (prefers-reduced-motion: no-preference) { .one-by-one-enter-active, .one-by-one-leave-active { transition: opacity 120ms ease; } }
+.one-by-one-enter-from, .one-by-one-leave-to { opacity: 0; }
 .dp-bar .seg button .n { font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .dp-bar .seg button[aria-checked="true"] .n { color: var(--teal-ink); }
 /* The stamp filter stays one line; on a phone it scrolls sideways instead of wrapping (AEON-1339). */
-.dp-bar .dec-filter { margin-left: auto; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.dp-bar .dec-filter { grid-area: 1 / 2; justify-self: start; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .dp-bar .dec-filter::-webkit-scrollbar { display: none; }
 .dp-bar .dec-filter button { flex: none; white-space: nowrap; }
+/* 910 px: a 960 px window with a classic gutter still wraps; 1024 stays on one line, where the filter fits. */
+@container desk-tabs (max-width: 909.98px) {
+  .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
+  .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
+}
+/* Below about 420 px the view tabs and the round action give up a little padding so the label still clears the tabs.
+   The stamp filter is unchanged: on a phone it keeps scrolling (AEON-1339). */
+@container desk-tabs (max-width: 419.98px) {
+  .dp-bar .view-tabs button { padding: 0 6px; gap: 4px; }
+  .one-by-one { padding: 0 6px; gap: 4px; }
+}
+/* The row decides, not the viewport. Beside the tabs the label needs about 340 px of row with the widest sans the
+   spec meets (CI's DejaVu Sans Bold); below a 352 px row the arrow shows alone and keeps its name. A 390 px phone
+   (358 px row) shows the label; the same window with a classic 15 px scrollbar (343 px row) gets the arrow. */
+@container desk-tabs (max-width: 351.98px) {
+  .one-by-one { width: 32px; padding: 0; }
+  .one-by-one .label { display: none; }
+}
 .trim-pages { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 /* The list card: a warm full tint and a soft gold ring while something waits, never an edge bar. */
 .queue { --agent-state-color: var(--agent-waiting); overflow: clip; container: queue / inline-size; }
@@ -757,8 +805,6 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 }
 @media (max-width: 720px) {
   .desk-page { padding-top: 24px; }
-  .dp-head .btn { width: 100%; min-height: 44px; }
-  .dp-bar .dec-filter { margin-left: 0; }
   .item { padding: 12px 10px; }
   .row-actions .btn { height: 40px; padding: 0 12px; }
   .decision-actions .hint { display: none; }

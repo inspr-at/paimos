@@ -108,7 +108,7 @@ func (m *Module) claimHarnessProbes(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = httpapi.RequestBodyReader(w, r, 4096)
 	var in struct {
 		Daemon     string `json:"daemon_id"`
 		Generation string `json:"daemon_generation"`
@@ -211,7 +211,7 @@ func (m *Module) reportHarnessProbe(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
-	r.Body = http.MaxBytesReader(w, r.Body, modelreport.CatalogBytesMax)
+	r.Body = httpapi.RequestBodyReader(w, r, modelreport.CatalogBytesMax)
 	var in modelreport.CatalogReport
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)

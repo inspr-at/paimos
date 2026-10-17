@@ -135,7 +135,7 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 }
 func decode(r *http.Request, value any) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, 8193))
+	d := httpapi.NewRequestDecoder(nil, r, 8193)
 	d.DisallowUnknownFields()
 	if d.Decode(value) != nil {
 		return errInvalid

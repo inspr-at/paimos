@@ -92,7 +92,7 @@ type ContactRecord struct {
 }
 
 func decodeCRM(r *http.Request, target any) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, 1<<20+1))
+	d := httpapi.NewRequestDecoder(nil, r, 1<<20+1)
 	d.DisallowUnknownFields()
 	if err := d.Decode(target); err != nil {
 		return errInvalid("invalid JSON body")

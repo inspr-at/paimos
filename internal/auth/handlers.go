@@ -5,7 +5,6 @@ package auth
 import (
 	"context"
 	"crypto/hmac"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -328,8 +327,7 @@ func validEmail(s string) bool {
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 1<<20)
 	if err := dec.Decode(dst); err != nil {
 		writeBadRequest(w, "bad request")
 		return false

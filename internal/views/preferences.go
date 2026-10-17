@@ -103,7 +103,7 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid preference key")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxPreferenceBytes+192)
+	r.Body = httpapi.RequestBodyReader(w, r, maxPreferenceBytes+192)
 	var in struct {
 		Value             json.RawMessage `json:"value"`
 		ExpectedUpdatedAt json.RawMessage `json:"expected_updated_at"`

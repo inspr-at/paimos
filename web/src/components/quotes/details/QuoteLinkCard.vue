@@ -32,41 +32,62 @@ const state = computed<'none' | 'active' | 'expired' | 'revoked'>(() => {
 })
 const when = (iso: string | undefined) => iso ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)) : ''
 const endsOn = computed(() => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(Date.now() + days.value * 86_400_000)))
+let generation = 0
+// A read or a click belongs to the quote on screen at that moment. A later
+// switch drops the result instead of painting or revoking the quote now shown.
+function still(current: number, quoteId: string, version: number) {
+  return current === generation && props.quoteId === quoteId && props.version === version
+}
 
 async function load() {
+  const quoteId = props.quoteId, version = props.version, current = ++generation
   error.value = ''
-  if (!props.admin) { loaded.value = true; return }
-  try { link.value = await getLink(props.quoteId, props.version); fresh.value = link.value?.path ? linkUrl(link.value) : ''; now.value = Date.now() }
-  catch (e) { error.value = lifecycleError(e, 'The link could not be read.') }
-  finally { loaded.value = true }
+  if (!props.admin) { if (still(current, quoteId, version)) loaded.value = true; return }
+  try {
+    const next = await getLink(quoteId, version)
+    if (!still(current, quoteId, version)) return
+    link.value = next; fresh.value = next?.path ? linkUrl(next) : ''; now.value = Date.now()
+  } catch (e) { if (still(current, quoteId, version)) error.value = lifecycleError(e, 'The link could not be read.') }
+  finally { if (still(current, quoteId, version)) loaded.value = true }
 }
-watch(() => [props.quoteId, props.version], () => { fresh.value = ''; link.value = null; loaded.value = false; void load() }, { immediate: true })
+watch(() => [props.quoteId, props.version], () => { fresh.value = ''; link.value = null; loaded.value = false; error.value = ''; busy.value = false; void load() }, { immediate: true })
 // The Details pane shows its cards together once this one has read its link.
 watch(loaded, value => emit('loading', !value), { immediate: true })
 onBeforeUnmount(() => emit('loading', false))
 
 async function create() {
   if (busy.value) return
+  const quoteId = props.quoteId, version = props.version
+  const expiresAt = new Date(Date.now() + days.value * 86_400_000).toISOString()
+  // A read already in flight must not replace the link this click just showed.
+  const current = ++generation
   busy.value = true; error.value = ''
   try {
-    const made = await createLink(props.quoteId, props.version, new Date(Date.now() + days.value * 86_400_000).toISOString())
+    const made = await createLink(quoteId, version, expiresAt)
+    if (!still(current, quoteId, version)) return
     fresh.value = linkUrl(made)
     link.value = { ...made, token: undefined, path: undefined }
     now.value = Date.now()
+    loaded.value = true
     emit('changed')
-  } catch (e) { error.value = lifecycleError(e, 'The link was not created. Nothing changed.') }
-  finally { busy.value = false }
+  } catch (e) { if (still(current, quoteId, version)) error.value = lifecycleError(e, 'The link was not created. Nothing changed.') }
+  finally { if (still(current, quoteId, version)) busy.value = false }
 }
 async function revoke() {
+  const quoteId = props.quoteId, version = props.version
   const ok = await confirmAction({
     title: 'Revoke the customer link?', confirmLabel: 'Revoke link', danger: true,
     body: 'Whoever has it can no longer open or accept the quote. The quote itself stays issued, and you can create a new link afterwards.',
   })
-  if (!ok) return
+  if (!ok || props.quoteId !== quoteId || props.version !== version) return
+  const current = ++generation
   busy.value = true; error.value = ''
-  try { link.value = await revokeLink(props.quoteId, props.version); fresh.value = ''; now.value = Date.now(); toast('The link is revoked.'); emit('changed') }
-  catch (e) { error.value = lifecycleError(e, 'The link was not revoked.') }
-  finally { busy.value = false }
+  try {
+    const revoked = await revokeLink(quoteId, version)
+    if (!still(current, quoteId, version)) return
+    link.value = revoked; fresh.value = ''; now.value = Date.now(); toast('The link is revoked.'); emit('changed')
+  } catch (e) { if (still(current, quoteId, version)) error.value = lifecycleError(e, 'The link was not revoked.') }
+  finally { if (still(current, quoteId, version)) busy.value = false }
 }
 async function copy() {
   try { await navigator.clipboard.writeText(fresh.value); copied.value = true; setTimeout(() => { copied.value = false }, 1800) }

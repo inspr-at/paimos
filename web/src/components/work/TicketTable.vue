@@ -1230,7 +1230,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .more-btn:hover { background: var(--row-hover); }
 .more-btn:focus-visible { box-shadow: var(--focus-ring); }
 
-.key-btn { display: inline-flex; align-items: center; height: 22px; margin: 0 -5px; padding: 0 5px; border: 0; border-radius: 6px; background: transparent; cursor: copy; }
+.key-btn { display: inline-flex; align-items: center; height: 22px; margin: 0 -5px; padding: 0 5px; border: 0; border-radius: 6px; background: transparent; cursor: copy; white-space: nowrap; }
 .key-btn:hover { color: var(--teal-ink); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
 .assignee-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; }
 .assignee-btn:hover:not(:disabled) { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
@@ -1436,7 +1436,14 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .tickets thead { display: none; }
   .ticket-row { -webkit-touch-callout: none; }
   .ticket-row {
-    display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "key status prio updated" "title title title title";
+    /* Key and date stay whole. Status may shrink. Spare room stays in the
+       priority column. Its minimum is the 14px icon, not max-content and not 0:
+       the title spans this column, and a max-content minimum would adopt the
+       title's full line (AEON-1379). A 0 minimum lets the status track take the
+       icon's slot, so the mark overflows into the date. The narrowest cards
+       swap the status and date tracks' minima (below). */
+    --card-status: minmax(0, max-content); --card-date: max-content;
+    display: grid; grid-template-columns: max-content var(--card-status) minmax(14px, 1fr) var(--card-date); grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
   /* The compact status visual is 2px shorter; leave its 44px reach inside the card. */
@@ -1444,9 +1451,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
   .table-card.selectable .ticket-row {
-    grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
+    grid-template-columns: 44px max-content var(--card-status) minmax(14px, 1fr) var(--card-date);
     grid-template-areas: "check key status prio updated" "check title title title title";
-    padding-left: 2px; column-gap: 6px;
+    padding-left: 0; column-gap: 4px;
   }
   .c-check { display: flex; grid-area: check; align-self: center; justify-content: center; }
   .phone-check {
@@ -1467,6 +1474,24 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
+  /* The whole key keeps its column (AEON-1379). Spare room stays in the
+     priority column, so the icon keeps its slot beside the status. When the
+     card runs out of room the status label gives way first (its icon stays,
+     the menu names it). The date stays content-sized, so it does not yield
+     before that label. The priority mark never shrinks below the icon and
+     carries no negative margin. */
+  .c-status { min-width: 0; }
+  /* The stale cue keeps a hidden slot beside every status (the cell gap, its
+     margin and the word). A compact card has no hover and no queue action, so
+     that slot only squeezed the label: with wider Linux fonts "In progress" no
+     longer fit at 320px. The ticket's properties still show the cue (AEON-1379). */
+  .table-card:not(.customised) .c-status .stale-hint { display: none; }
+  /* The icon sits at the end of its slot, so the gap to the date is the column
+     gap plus the date's margin, not whatever free space the track absorbed. */
+  .table-card:not(.customised) .c-prio .cell { min-width: 0; margin: 0; gap: 0; justify-content: flex-end; }
+  .table-card.selectable:not(.customised) .c-updated,
+  .table-card.selectable:not(.customised) .c-eta { margin-left: 4px; }
+  .table-card:not(.customised) .key-btn { margin-inline: 0; padding-inline: 0; }
   /* An hour estimate sits at the end of the title line. An empty cell stays off the card. */
   .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
   .c-estimate .cell { height: auto; }
@@ -1477,7 +1502,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
   .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
   .table-card.selectable:not(.customised) .ticket-row:has(.progress-read) {
-    grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
+    grid-template-columns: 44px max-content var(--card-status) minmax(14px, 1fr) var(--card-date);
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
@@ -1486,7 +1511,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* A ready time shows where Updated sits; it is the fresher answer to "when". */
   .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
-  .c-title { grid-area: title; }
+  /* inline-size containment keeps the spanning title out of the column minima. */
+  .c-title { grid-area: title; min-width: 0; contain: inline-size; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
   /* Phones keep main's title line when nothing waits. A waiting mark and its
@@ -1497,8 +1523,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
      so a third line never shows through the reach below (AEON-140). */
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */
-  .title-link { flex: 1 1 calc(100% - 30px - var(--person-wait-room, 0px)); white-space: normal; font-size: 14.5px; line-height: 1.35; }
-  .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .title-link { flex: 1 1 calc(100% - 30px - var(--person-wait-room, 0px)); min-width: 0; white-space: normal; font-size: 14.5px; line-height: 1.35; }
+  .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
   .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
   .row-actions { display: none; }
@@ -1526,7 +1552,19 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.top td { border-top: 0; }
   .more-row { display: block; padding: 6px 14px; }
   .more-row td { display: block; height: auto; border: 0; padding: 0; }
-  .status-btn { height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+  .status-btn { min-width: 0; height: 24px; margin-left: 0; gap: 4px; padding: 0 4px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+  .status-btn .status-icon { flex: none; }
+  .status-btn > span:not(.status-icon) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* The narrowest cards drop the status label whole instead of growing the
+     row: the chip keeps its icon and the button's label names the status.
+     The icon-only chip keeps its width; the date is next to give way, and the
+     key never does. The card keeps the page inset and its border (AEON-1379). */
+  @container tickets (max-width: 314px) {
+    .table-card:not(.customised) .ticket-row { --card-status: max-content; --card-date: minmax(0, max-content); }
+    .table-card:not(.customised) .status-btn > span:not(.status-icon) { display: none; }
+    .table-card:not(.customised) .c-updated time { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .table-card:not(.customised) .c-eta { justify-self: stretch; }
+  }
   .prio-label { display: none; }
   /* A phone card shows priority only when there is one. */
   .c-prio .empty { display: none; }
@@ -1549,8 +1587,11 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .table-card.customised.selectable .tickets .ticket-row { grid-template-columns: 44px minmax(0, 1fr); }
   .table-card.customised .ticket-row td { grid-area: auto; min-width: 0; justify-self: stretch; }
   /* Copy remains a complete, separate touch target even while checks take
-     the first column. Long project keys wrap instead of escaping the card. */
-  .key-btn { min-width: 44px; min-height: 44px; height: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+     the first column. The key reads as one piece and never breaks at its
+     hyphen (AEON-1379); its column takes the whole key and the title gives way.
+     The column is as wide as the text, so the cap adds back the two -5px side
+     margins; a plain 100% cut the padded key 10px short and wrapped it. */
+  .key-btn { flex: none; min-width: 44px; min-height: 44px; height: auto; max-width: calc(100% + 10px); text-align: left; }
   .table-card.customised.selectable .ticket-row td { grid-column: 2; }
   .table-card.customised.selectable .ticket-row .c-check { grid-column: 1; grid-row: 1 / span 2; }
   .table-card.customised .ticket-row td[data-column-label] {

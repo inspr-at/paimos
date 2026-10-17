@@ -450,7 +450,9 @@
         "web/src/components/settings/models/ModelLineRow.vue",
         "web/src/components/settings/models/ModelDiscovery.vue",
         "web/src/components/settings/DefinitionEditor.vue",
-        "web/src/components/settings/ProjectDefinitionsSettings.vue"
+        "web/src/components/settings/ProjectDefinitionsSettings.vue",
+        "web/src/components/ViewSwitch.vue",
+        "web/src/components/ViewDefaultMenu.vue"
       ]
     },
     {
@@ -487,7 +489,12 @@
         "web/src/lib/projectDeliverySettings.ts",
         "web/tests/project-delivery-settings.spec.ts",
         "web/tests/project-delivery-settings.unit.test.ts",
-        "web/src/lib/definitions.ts"
+        "web/src/lib/definitions.ts",
+        "web/src/lib/viewSwitch.ts",
+        "web/src/lib/viewMenuTrigger.ts",
+        "web/src/lib/ticketListSwitch.ts",
+        "web/tests/view-switch.unit.test.ts",
+        "web/tests/view-switch.spec.ts"
       ],
       "exclude": [
         "web/src/views/**",

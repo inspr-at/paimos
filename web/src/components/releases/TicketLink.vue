@@ -46,7 +46,7 @@ const missing = computed(() => ticket.value === null ? `${props.ticketKey} is no
 /* The ticket open beside the history: a filled chip, not an edge mark. */
 .ticket-link.chip[aria-current="true"] { background: var(--primary); box-shadow: inset 0 0 0 1px var(--primary-line); color: var(--primary-on); }
 
-.inline { display: inline-flex; align-items: center; font: 500 11px/1.4 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
+.inline { display: inline-flex; align-items: center; font: 500 11px/1.4 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-link.inline { margin: 0 -4px; padding: 1px 4px; border-radius: 5px; color: var(--teal-ink); }
 .ticket-plain.inline { color: var(--ink-3); }
 @media (hover: hover) { .ticket-link.inline:hover { background: var(--row-selected); text-decoration: underline; text-underline-offset: 2px; } }

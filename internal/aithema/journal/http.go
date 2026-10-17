@@ -5,13 +5,13 @@ package journal
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 // Module uses delegated JWT authentication, independently of person cookies
@@ -75,7 +75,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, area, action stri
 	}
 	var raw []byte
 	if r.Method == http.MethodPost {
-		raw, err = io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		raw, err = httpapi.ReadRequestBody(w, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 		if err != nil {
 			var size *http.MaxBytesError
 			if errors.As(err, &size) {

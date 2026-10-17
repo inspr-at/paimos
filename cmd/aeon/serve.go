@@ -554,7 +554,12 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		Handler:           attachmentsMod.WrapSandbox(agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide)),
 		ConnContext:       api.ConnContext,
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       time.Minute,
+		// ReadTimeout bounds an unconsumed request body. net/http clears that
+		// deadline before its keep-alive background read, so a live response
+		// keeps its context once the body is absent or fully read. Uploads
+		// replace it with their own longer budget. No write timeout: SSE stays live.
+		ReadTimeout: time.Minute,
+		IdleTimeout: time.Minute,
 	}
 
 	// Start the complete worker set only after initialization succeeds.

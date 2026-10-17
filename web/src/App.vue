@@ -176,7 +176,8 @@ watch(() => releases.available, async version => {
 
 // ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
 const footerHidden = ref(false)
-const phoneQuery = window.matchMedia('(max-width: 600px)')
+// Short landscape phones too (AEON-1286): there the bar cost an eighth of the screen.
+const phoneQuery = window.matchMedia('(max-width: 600px), (max-height: 480px)')
 let lastTop = 0, travel = 0, settleUntil = 0
 function scrolled() {
   const el = main.value
@@ -258,8 +259,9 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
 /* Phones: the footer lies over the end of the page and slides away while reading down (AEON-1279).
    The page keeps its size: a scroller that grew under momentum made the scroll run away. Its end
-   keeps the footer's room, so the last row still clears the footer when it shows. */
-@media (max-width: 600px) {
+   keeps the footer's room, so the last row still clears the footer when it shows.
+   Short landscape phones too (AEON-1286). */
+@media (max-width: 600px), (max-height: 480px) {
   .app-shell { grid-template-rows: var(--header-h) minmax(0, 1fr); }
   .app-shell.header-folded { grid-template-rows: minmax(0, 1fr); }
   /* The footer component has two roots (the bar and its hover card), so it carries no scope of ours. */

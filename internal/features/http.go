@@ -100,7 +100,7 @@ func (s *Service) saveHTTP(w http.ResponseWriter, r *http.Request) {
 		Enabled          json.RawMessage `json:"enabled"`
 		ExpectedRevision *int64          `json:"expected_revision"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec := httpapi.NewRequestDecoder(w, r, 4096)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil || dec.Decode(new(any)) != io.EOF || len(in.Enabled) == 0 || in.ExpectedRevision == nil {
 		writeError(w, fault(400, "enabled and expected_revision are required"))
