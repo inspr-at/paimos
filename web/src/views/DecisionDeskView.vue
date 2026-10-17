@@ -6,7 +6,7 @@ import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
-import { arrivals, deskEmptyState, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
+import { arrivals, deskEmptyState, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
@@ -343,7 +343,7 @@ function applyRead(result: DeskRead) {
     const at = successor ? result.items.findIndex(row => row.id === successor.id) : Math.min(index, result.items.length)
     result.items.splice(at, 0, item); present.add(item.id)
   }
-  result.items.push(...items.value.filter(item => item.kind === 'lesson' && item.decided && !present.has(item.id)))
+  retainDecidedLessons(items.value, result.items, result.sources.lessons)
   currentRead = result
   sources = result.sources; items.value = result.items; warnings.value = result.warnings; unanswered.value = result.unanswered ?? []; more.value = result.hasMore
   projectNames.value = result.projectNames

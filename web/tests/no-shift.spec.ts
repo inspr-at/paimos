@@ -58,8 +58,10 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       controls: { review: page.getByTestId('agents-desk-review'), history: page.getByTestId('agents-desk-history'), count },
       interactions: [
         { name: 'new question', run: async () => { world.questions.push(sampleQuestion('new-source')); await refresh(); await expect(count).toHaveText('6') } },
-        { name: 'failed source read', run: async () => { world.failProjection = true; await refresh(); await expect(count).toHaveText('?'); await expect(panel.getByRole('button', { name: 'Try again' })).toBeVisible() } },
-        { name: 'retry preserves the source count', run: async () => { world.failProjection = false; await panel.getByRole('button', { name: 'Try again' }).click(); await expect(count).toHaveText('6') } },
+        // AEON-1477: a failed refresh keeps the last good count. It must not
+        // flicker to unknown or put an error action in place of the items.
+        { name: 'failed source read keeps the last count', run: async () => { world.failProjection = true; await refresh(); await expect(count).toHaveText('6'); await expect(panel.getByRole('button', { name: 'Try again' })).toHaveCount(0) } },
+        { name: 'retry preserves the source count', run: async () => { world.failProjection = false; await refresh(); await expect(count).toHaveText('6'); await expect(panel.getByRole('button', { name: 'Try again' })).toHaveCount(0) } },
       ],
     })
     await page.screenshot({ path: testInfo.outputPath(`agents-desk-${width}-${theme}.png`), fullPage: true })

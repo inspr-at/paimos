@@ -7,9 +7,11 @@ import AgentChores from '../src/components/agents/AgentChores.vue'
 import type { AttachQueueRow } from '../src/lib/attachWatch'
 import { useDecisionDesk } from '../src/stores/decisionDesk'
 import { useSession } from '../src/stores/session'
-import { deskRefreshNotice, loadDeskProjection, type DeskProjection } from '../src/lib/decisionDesk'
+import { deskRefreshNotice, loadDeskProjection, retainDecidedLessons, type DeskItem, type DeskProjection } from '../src/lib/decisionDesk'
+import { decisionPermission, emptySources } from '../src/lib/decisionDeskApi'
 import { onProjectionWake } from '../src/lib/agents'
 import { APIError } from '../src/lib/api'
+import type { MethodLearning } from '../src/lib/knowledge'
 
 vi.mock('../src/stores/session', () => ({ useSession: vi.fn() }))
 vi.mock('../src/lib/decisionDesk', async original => ({ ...await original<object>(), loadDeskProjection: vi.fn() }))
@@ -115,6 +117,32 @@ it('AEON-1477 keeps a cancelled first load quiet and a genuine first failure unk
   vi.mocked(loadDeskProjection).mockRejectedValueOnce(new Error('Decision Desk could not be read (500).'))
   await desk.refresh()
   expect(desk.count).toBeNull(); expect(desk.error).toContain('(500)'); expect(desk.failures).toBe(1)
+})
+
+it('AEON-1477 keeps a decided lesson learning so Undo can re-check it after the pending list drops it', () => {
+  const learning: MethodLearning = {
+    id: 'n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', source: 'ticket', node_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', key: 'AEON-1', title: 'Recovery failed during release',
+    text: 'The recovery check was missing.', href: '/p/AEON/AEON-1', author: null, at: '2026-10-14T08:00:00Z',
+    recommendation: { decision: 'accept', lesson: 'Rehearse recovery before releasing.', knowledge_id: 'k-aeon-deploy', by: { id: 'scout', name: 'Scout' }, at: '2026-10-14T08:30:00Z', event_id: 700, prepared: true, stale: false, target_missing: false },
+  }
+  const decided: DeskItem = {
+    id: 'l:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: 'lesson', title: learning.recommendation!.lesson!, projectId: 'p-aeon', projectName: 'Paimos Aeon',
+    context: learning.recommendation!.source_summary ?? '', findings: '', meanwhile: '', destination: 'Changelog', choices: [], why: '', outcome: 'once', suggestion: 'Accept or Dismiss the prepared lesson.',
+    revision: 700, createdAt: learning.at, held: false, decided: true, undoEvent: 800, lesson: { learning, outdated: false },
+  }
+  const stillThere: DeskItem = { ...decided, id: 'l:still-there' }
+  const open: DeskItem = { ...decided, id: 'l:still-open', decided: false, undoEvent: undefined }
+  const next: DeskItem[] = [stillThere]
+  const lessons = new Map<string, MethodLearning>()
+  retainDecidedLessons([open, decided, stillThere], next, lessons)
+  expect(next.map(item => item.id)).toEqual([stillThere.id, decided.id])
+  expect(lessons.get(decided.id)).toBe(learning)
+  expect(lessons.has(open.id)).toBe(false)
+  expect(lessons.has(stillThere.id)).toBe(false)
+  const sources = emptySources()
+  expect(decisionPermission(decided, sources, () => true)).toBe(false)
+  sources.lessons.set(decided.id, lessons.get(decided.id)!)
+  expect(decisionPermission(decided, sources, () => true)).toBe(true)
 })
 
 it('AEON-1477 shows the hint after two failures and escalates strictly after sixty seconds or at five failures', () => {

@@ -230,6 +230,20 @@ export function deskRefreshNotice(failures: number, failedSince: number | null, 
   return failures >= 5 || failedSince !== null && now - failedSince > 60_000 ? 'escalated' : 'quiet'
 }
 
+// A decided lesson leaves the pending projection. Keep the row and the learning
+// this visit already confirmed, so Undo re-checks that same record. Omitting
+// the learning makes the decision look unauthorized the moment the list refreshes.
+export function retainDecidedLessons(previous: readonly DeskItem[], nextItems: DeskItem[], lessons: Map<string, MethodLearning>) {
+  const present = new Set(nextItems.map(item => item.id))
+  for (const item of previous) {
+    if (item.kind !== 'lesson' || !item.decided || present.has(item.id)) continue
+    nextItems.push(item)
+    present.add(item.id)
+    const learning = item.lesson?.learning
+    if (learning && !lessons.has(item.id)) lessons.set(item.id, learning)
+  }
+}
+
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || (cursor?.length ?? 0) > 512) throw new Error('Invalid Decision Desk page.')
   const params = new URLSearchParams({ limit: String(limit), ...(cursor ? { cursor } : {}) })
