@@ -36,15 +36,21 @@ func prepareHarnessTerminal(cmd *exec.Cmd) (func() error, error) {
 	if err != nil {
 		return nil, fmt.Errorf("harness run: save stdin terminal settings: %w", err)
 	}
-	// Notify suppresses job-control stops while the wrapper is in the
-	// background, including while reclaiming the terminal. Unlike Ignore, its
-	// caught disposition is reset on exec, retaining the child's job control.
+	// A caught disposition is reset on exec, retaining the child's job control.
+	// Do not let background diagnostics stop the wrapper while it owns a child.
+	ignored := signal.Ignored(syscall.SIGTTOU)
 	background := make(chan os.Signal, 1)
 	signal.Notify(background, syscall.SIGTTOU)
 	cmd.SysProcAttr.Foreground = true
 	cmd.SysProcAttr.Ctty = fd // Foreground uses the descriptor in the parent.
 	return func() error {
-		defer signal.Stop(background)
+		// Reclaiming an orphaned background group requires SIGTTOU to be
+		// ignored (a caught handler still gets EIO on Darwin). Only do this
+		// after the child has exited, so it cannot inherit ignored job control.
+		signal.Ignore(syscall.SIGTTOU)
+		if !ignored {
+			defer signal.Reset(syscall.SIGTTOU)
+		}
 		groupErr := unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, foreground)
 		stateErr := term.Restore(fd, state)
 		return errors.Join(groupErr, stateErr)
