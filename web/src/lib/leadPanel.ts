@@ -25,6 +25,19 @@ export function panelTabs(lead: boolean, terminal: boolean, watch = false): Pane
   return [...(lead ? ['lead' as const] : []), lead ? 'session' : 'overview', ...(!watch ? ['chat' as const] : []), 'events', ...(terminal ? ['terminal' as const] : [])]
 }
 export function leadTab(value: unknown): LeadTab | null { return value === 'lead' || value === 'session' || value === 'chat' ? value : null }
+// AEON-1453: the panel's view switch. Every tab may be the one used last; only the tabs a lead
+// panel can open on (not Events or Terminal, whose offer depends on the session) can be its default.
+export const LEAD_PANEL_TABS: readonly PanelTab[] = ['lead', 'session', 'chat', 'events', 'terminal']
+export const WORKER_PANEL_TABS: readonly PanelTab[] = ['overview', 'chat', 'events', 'terminal']
+export const LEAD_DEFAULTS: readonly LeadTab[] = ['lead', 'session', 'chat']
+// The stores before the switch had its own key: agents:lead-panel ({ pinned, last }) and
+// agents:session-panel ({ last }). Read until the person chooses here, never written again.
+export function leadPanelLegacy(value: Record<string, unknown> | null): { last?: unknown; default?: unknown } | null {
+  return value ? { last: value.last, default: leadTab(value.pinned) } : null
+}
+export function workerPanelLegacy(value: Record<string, unknown> | null): { last?: unknown } | null {
+  return value ? { last: value.last } : null
+}
 export function panelQueryTab(value: unknown, lead: boolean): PanelTab | null {
   const tab = Array.isArray(value) ? value[0] : value
   if (tab === 'messages' || tab === 'chat') return 'chat'

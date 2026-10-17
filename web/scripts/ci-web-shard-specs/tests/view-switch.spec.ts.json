@@ -1,13 +1,13 @@
 {
   "group": "stable-controls",
   "nightlyTiming": {
-    "seconds": 15,
-    "selectedTests": 3
+    "seconds": 30,
+    "selectedTests": 7
   },
   "spec": {
     "file": "tests/view-switch.spec.ts",
-    "listedTests": 3,
-    "weightSeconds": 6.658537,
+    "listedTests": 7,
+    "weightSeconds": 13.317073,
     "weightSource": "unmeasured-test-rate"
   }
 }

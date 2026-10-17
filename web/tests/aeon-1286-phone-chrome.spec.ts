@@ -215,7 +215,8 @@ for (const { size, safe } of PHONES) for (const look of ['light', 'dark'] as con
       ['Interrupt', menu.getByRole('menuitem', { name: /^Interrupt/ }).locator('span').first()], ['Stop…', stop.locator('span').first()], ['sub-label', stop.locator('small')],
     ] as const) expect(await contrast(target), `${name} contrast in ⋯`).toBeGreaterThanOrEqual(4.5)
 
-    // The default tab is a labelled choice for the tab on screen; ticking it moves nothing.
+    // The default tab is a labelled choice for the tab on screen; ticking it moves nothing. It sets
+    // the tab switch's own default (AEON-1453), so the pin then shows on the Chat tab.
     const pin = menu.getByRole('menuitemcheckbox', { name: /^Open on Chat by default/ })
     await expect(pin).toHaveAttribute('aria-checked', 'false')
     await expect(pin).toContainText('Now it opens on the last tab used')
@@ -226,12 +227,13 @@ for (const { size, safe } of PHONES) for (const look of ['light', 'dark'] as con
       await expect(pin).toContainText('Unless something needs you')
     })
     guard.done()
-    await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'chat' })
+    await expect.poll(() => world.data.preferences['view:lead-panel']).toMatchObject({ default: 'chat' })
     await expect(menu, 'a ticked choice keeps the sheet open').toBeVisible()
     await page.screenshot({ path: info.outputPath(`AEON-1286/menu-${size.width}-${look}.png`) })
     await page.keyboard.press('Escape')
     await expect(menu).toHaveCount(0)
     await expect(more).toBeFocused()
+    await expect(tabOf(page, 'Chat').locator('.view-pin')).toHaveCount(1)
     expect(errors).toEqual([])
   })
 }
@@ -410,14 +412,15 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1286 rotated phones ${
 
 // On Events (no default of its own) the item names the current default. Clearing it there keeps
 // the row, its focus and everything below it until ⋯ closes, so it can be ticked again in place.
-for (const size of [PHONES[0]!.size, { width: 1024, height: 768 }]) test(`AEON-1286 ${size.width}: clearing the default on Events keeps its row and its focus, and it can be ticked again`, async ({ page }) => {
+// The item is the phone's shortcut to the tab switch's default (AEON-1453); wider screens set it on the tab.
+for (const size of PHONES.map(phone => phone.size)) test(`AEON-1286 ${size.width}: clearing the default on Events keeps its row and its focus, and it can be ticked again`, async ({ page }) => {
   const world = await openLeadChat(page, size, 'light')
   const panel = panelOf(page), menu = menuOf(page)
   const more = panel.getByRole('button', { name: 'More session actions', exact: true })
   const pin = menu.getByRole('menuitemcheckbox', { name: /^Open on Chat by default/ })
   await more.click()
   await pin.click()
-  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'chat' })
+  await expect.poll(() => world.data.preferences['view:lead-panel']).toMatchObject({ default: 'chat' })
   await page.keyboard.press('Escape')
   await tabOf(page, 'Events').click()
   await expect(tabOf(page, 'Events')).toHaveAttribute('aria-selected', 'true')
@@ -430,7 +433,7 @@ for (const size of [PHONES[0]!.size, { width: 1024, height: 768 }]) test(`AEON-1
     await expect(pin).toContainText('Now it opens on the last tab used')
     await expect(pin, 'the cleared item keeps the focus').toBeFocused()
   })
-  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: null })
+  await expect.poll(() => world.data.preferences['view:lead-panel']).toMatchObject({ default: null })
   await guard.check(async () => {
     await pin.click()
     await expect(pin).toHaveAttribute('aria-checked', 'true')
@@ -438,7 +441,7 @@ for (const size of [PHONES[0]!.size, { width: 1024, height: 768 }]) test(`AEON-1
     await expect(pin, 'the restored item keeps the focus').toBeFocused()
   })
   guard.done()
-  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'chat' })
+  await expect.poll(() => world.data.preferences['view:lead-panel']).toMatchObject({ default: 'chat' })
   await expect(menu, 'a ticked choice keeps ⋯ open').toBeVisible()
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
@@ -457,7 +460,9 @@ test('AEON-1286 1024 sanity: the desktop head and its anchored menu keep their f
   await expect(menuOf(page)).toBeVisible()
   await expect(page.locator('.floating.bottom')).toHaveCount(0)
   await expect(page.locator('.floating-scrim')).toHaveCount(0)
-  await expect(menuOf(page).getByRole('menuitemcheckbox', { name: /^Open on Chat by default/ })).toBeVisible()
+  // AEON-1453: wider screens set the default on the tab itself (right-click, Shift+F10), not in ⋯.
+  await expect(menuOf(page).getByRole('menuitem', { name: /^Interrupt/ })).toBeVisible()
+  await expect(menuOf(page).getByRole('menuitemcheckbox', { name: /by default/ })).toHaveCount(0)
   await page.screenshot({ path: info.outputPath('AEON-1286/chat-1024-light.png') })
 })
 
