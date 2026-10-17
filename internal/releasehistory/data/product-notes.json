@@ -6954,24 +6954,24 @@
     "261017115202.0.0": {
       "release_channel": "stable",
       "release_sequence": 136,
-      "snapshot_sha256": "38e5c1a13f3f80951cc02fcb6bc42f2124db7fb6bf79e99abddcc1bdda2db38c",
-      "captured_at": "2026-10-17T11:52:07Z",
+      "snapshot_sha256": "66a9afa1c2fb74b8e6969954b8453fc3acb8d05742d3dbce13bfc62a8ddfe8d5",
+      "captured_at": "2026-10-17T12:06:06Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-1212",
           "pill_en": "One panel per lead",
           "pill_de": "Ein Panel pro Lead",
-          "benefit_en": "One panel per lead with Lead, Session and Chat, opening on whatever needs you first.",
-          "benefit_de": "Ein Panel pro Lead mit Lead, Sitzung und Chat, das dort öffnet, wo zuerst Handlungsbedarf besteht.",
+          "benefit_en": "One panel combines Lead, Session and Chat, with opening rules for questions, held starts and session problems.",
+          "benefit_de": "Ein Panel vereint Lead, Sitzung und Chat mit Startregeln für offene Fragen, zurückgehaltene Starts und Sitzungsprobleme.",
           "group": "features"
         },
         {
           "key": "AEON-1254",
-          "pill_en": "Session chat delivers",
-          "pill_de": "Sitzungs-Chat stellt zu",
-          "benefit_en": "Messages to a running Claude Code session arrive, and its chat shows the conversation; if delivery is impossible, the session says why.",
-          "benefit_de": "Nachrichten an eine laufende Claude-Code-Sitzung kommen an, und ihr Chat zeigt das Gespräch; ist die Zustellung unmöglich, nennt die Sitzung den Grund.",
+          "pill_en": "Clearer session delivery",
+          "pill_de": "Klarere Sitzungszustellung",
+          "benefit_en": "For supported sessions, Chat shows Paimos inbox messages and explains binding or delivery failures.",
+          "benefit_de": "Bei unterstützten Sitzungen zeigt der Chat Paimos-Inbox-Nachrichten und erläutert Verbindungs- oder Zustellfehler.",
           "group": "fixes"
         },
         {
@@ -6986,8 +6986,8 @@
           "key": "AEON-1377",
           "pill_en": "Fewer false merge alerts",
           "pill_de": "Weniger falsche Merge-Warnungen",
-          "benefit_en": "Merge alerts only fire for real bypasses, so a real one stands out.",
-          "benefit_de": "Merge-Warnungen kommen nur bei echten Umgehungen, damit eine echte auffällt.",
+          "benefit_en": "Merge alerts allow time for queue provenance and recognize reviews preserved by a clean base merge, reducing false alarms.",
+          "benefit_de": "Merge-Warnungen berücksichtigen verspätete Warteschlangen-Nachweise und bei einem sauberen Basis-Merge erhaltene Reviews; dadurch sinkt die Zahl falscher Warnungen.",
           "group": "fixes"
         },
         {
@@ -7035,15 +7035,15 @@
           "pill_en": "Calm empty Desk",
           "pill_de": "Ruhiger leerer Desk",
           "benefit_en": "When nothing waits on you, the Decision Desk shows a calm picture instead of an empty error-like card.",
-          "benefit_de": "Wenn nichts auf dich wartet, zeigt der Decision Desk ein ruhiges Bild statt einer leeren, fehlerartigen Karte.",
+          "benefit_de": "Wenn kein Handlungsbedarf besteht, zeigt der Decision Desk ein ruhiges Bild statt einer leeren, fehlerartigen Karte.",
           "group": "features"
         },
         {
           "key": "AEON-1411",
-          "pill_en": "Permissions always rechecked",
-          "pill_de": "Rechte immer geprüft",
-          "benefit_en": "A person who just lost a permission can no longer finish a change with it.",
-          "benefit_de": "Wer gerade ein Recht verloren hat, kann damit keine Änderung mehr abschließen.",
+          "pill_en": "Safer administration saves",
+          "pill_de": "Sicherere Verwaltungsänderungen",
+          "benefit_en": "Agent-account settings, plugins, feature flags, project groups and cost rates now recheck current permissions when saved.",
+          "benefit_de": "Beim Speichern von Agentenkonten, Plugins, Funktionsschaltern, Projektgruppen und Kostensätzen werden die aktuellen Rechte erneut geprüft.",
           "group": "fixes"
         },
         {
@@ -7064,18 +7064,10 @@
         },
         {
           "key": "AEON-1432",
-          "pill_en": "Answers always arrive",
-          "pill_de": "Antworten kommen immer an",
-          "benefit_en": "When you decide something on the Desk, the agent that asked always receives your answer, even if it was busy at that moment, so nothing waits for hours unnoticed.",
-          "benefit_de": "Eine Entscheidung auf dem Desk erreicht den fragenden Agenten immer, auch wenn er gerade beschäftigt war; nichts bleibt stundenlang unbemerkt liegen.",
-          "group": "fixes"
-        },
-        {
-          "key": "AEON-1434",
-          "pill_en": "No stuck test runs",
-          "pill_de": "Keine hängenden Testläufe",
-          "benefit_en": "A test run that hangs no longer blocks every other browser test; it is detected and stopped after ten minutes, so checks keep flowing.",
-          "benefit_de": "Ein hängender Testlauf blockiert nicht mehr alle anderen Browser-Tests; er wird nach zehn Minuten erkannt und beendet, sodass die Prüfungen weiterlaufen.",
+          "pill_en": "Desk answers stay queued",
+          "pill_de": "Desk-Antworten bleiben vorgemerkt",
+          "benefit_en": "Desk answers survive missing listeners, with retries and alerts for stalled pickup.",
+          "benefit_de": "Desk-Antworten bleiben bei fehlenden Empfängern erhalten; Zustellversuche werden wiederholt und stockende Abholungen gemeldet.",
           "group": "fixes"
         },
         {
@@ -7106,16 +7098,8 @@
           "key": "AEON-1444",
           "pill_en": "Leaner database memory",
           "pill_de": "Schlankerer Datenbankspeicher",
-          "benefit_en": "The database needs less memory per connection again, so pages stay fast under load.",
-          "benefit_de": "Die Datenbank braucht pro Verbindung wieder weniger Speicher, damit Seiten auch unter Last schnell bleiben.",
-          "group": "fixes"
-        },
-        {
-          "key": "AEON-1446",
-          "pill_en": "Clean header trail",
-          "pill_de": "Saubere Kopfzeilen-Spur",
-          "benefit_en": "The project trail in the header never shows a half-cut name while the window resizes.",
-          "benefit_de": "Die Projektspur im Kopfbereich zeigt beim Ändern der Fenstergröße nie einen halb abgeschnittenen Namen.",
+          "benefit_en": "Decision Desk queries were split to reduce database memory pressure.",
+          "benefit_de": "Abfragen des Decision Desks wurden aufgeteilt, um den Speicherbedarf der Datenbank zu senken.",
           "group": "fixes"
         },
         {
@@ -7127,35 +7111,19 @@
           "group": "fixes"
         },
         {
-          "key": "AEON-1450",
-          "pill_en": "Builds work again",
-          "pill_de": "Builds laufen wieder",
-          "benefit_en": "New versions can be built and released again after a browser package update upstream broke the build.",
-          "benefit_de": "Neue Versionen lassen sich wieder bauen und ausliefern, nachdem ein Update des Browser-Pakets den Build gebrochen hatte.",
-          "group": "fixes"
-        },
-        {
           "key": "AEON-1453",
           "pill_en": "Views open your way",
           "pill_de": "Ansichten wie gewohnt",
-          "benefit_en": "Every page opens on the view you used last, or on one you choose with a right-click; it follows you to every device.",
-          "benefit_de": "Jede Seite öffnet in der zuletzt genutzten Ansicht oder in der, die du per Rechtsklick festlegst – auf allen Geräten.",
+          "benefit_en": "View switches remember the last choice or a chosen default across devices within a workspace. Direct links and session attention rules can choose another opening view.",
+          "benefit_de": "Ansichtsumschalter merken sich je Person und Arbeitsbereich die letzte Auswahl oder eine festgelegte Standardansicht geräteübergreifend. Direkte Links und Sitzungshinweise können die Startansicht vorgeben.",
           "group": "features"
         },
         {
           "key": "AEON-1456",
-          "pill_en": "Goals with live ETAs",
-          "pill_de": "Ziele mit Live-Termin",
-          "benefit_en": "Every goal shows what is missing, when it lands and who updated that, kept current by the agents.",
-          "benefit_de": "Jedes Ziel zeigt, was fehlt, wann es fertig wird und wer das zuletzt aktualisiert hat, laufend gepflegt von den Agenten.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1466",
-          "pill_en": "Messages tab remembered",
-          "pill_de": "Nachrichten-Tab gemerkt",
-          "benefit_en": "The session panel opens on the tab you used last again, and seeing new posts clears the Messages badge as before.",
-          "benefit_de": "Das Sitzungs-Panel öffnet wieder mit dem zuletzt genutzten Tab, und gesehene neue Beiträge löschen das Nachrichten-Abzeichen wie zuvor.",
+          "pill_en": "Goals API and CLI",
+          "pill_de": "Ziele mit API/CLI",
+          "benefit_en": "Agents can create and update goals and read recorded progress and available ETAs through the API and CLI.",
+          "benefit_de": "Agenten können Ziele per API und CLI anlegen und aktualisieren sowie den erfassten Fortschritt und vorhandene Fertigstellungsschätzungen abrufen.",
           "group": "features"
         }
       ]
