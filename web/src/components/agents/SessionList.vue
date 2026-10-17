@@ -1627,4 +1627,17 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .head-tools .btn, .clear-all { min-height: 44px; }
   .chip-x { width: 44px; }
 }
+/* AEON-1286: short landscape phones give the height to the rows. The columns read on their own
+   (sorting is in Display, as on phones), and a card wide enough keeps its tools on the title's
+   line as 44 px icons whose names stay for screen readers. */
+@media (max-height: 480px) {
+  .thead { display: none; }
+  @container sessions (min-width: 641px) {
+    .tree-head { flex-wrap: nowrap; min-height: 48px; padding-block: 2px; }
+    .tool-btn { width: 44px; padding: 0; }
+    .tool-btn .bl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .head-tools .btn { min-width: 44px; justify-content: center; padding: 0; }
+    .head-tools .tool-label { display: none; }
+  }
+}
 </style>
