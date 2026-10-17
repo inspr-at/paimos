@@ -1272,16 +1272,17 @@ test('AEON-1451 the full web layout and the essential gate stay inside the shard
 
 test('AEON-1453 the merged full web catalogue needs seventeen shards to stay inside the budget',()=>{
   // Merge-queue head 688f05b6a packed the full gate into sixteen shards and
-  // left shard 14 at 900.2s. AEON-1388's group-figures cases, AEON-1477's
-  // painted-glimpse regression and its four tab-row cases leave shard 2 at
-  // 904.5s. Whole files are still larger than the leftover gaps, so sixteen
-  // must stay over budget and the exact worst shard stays pinned.
+  // left shard 14 at 900.2s. Whole files are larger than the leftover gaps, so
+  // the same catalogue needs one more shard. Sixteen must stay over budget.
+  // AEON-1457's Goals cases, AEON-1388's group-figures cases and AEON-1477's
+  // painted-glimpse and Desk tab-row cases leave the first overflow at shard 2
+  // with 906.3s.
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
   assert.equal(sixteen.shards.length,16)
   assert.equal(sixteen.fitsBudget,false)
-  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 2 predicts 904\.5s, over the 900s budget/)
+  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 2 predicts 906\.3s, over the 900s budget/)
   const full=webShardPlan(gate,policy,{mode:'full'})
   assert.equal(fullWebShardCount,17)
   assert.deepEqual(full.shards,fullWebShards)
