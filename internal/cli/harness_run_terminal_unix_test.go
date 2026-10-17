@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -56,12 +55,10 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 			// Deliberately leave raw mode enabled to prove wrapper restoration.
 			os.Exit(0)
 		}
-		before, beforeErr := term.GetState(0)
 		code := Run(args, os.Stdin, os.Stdout, os.Stderr)
 		group, err := unix.IoctlGetInt(0, unix.TIOCGPGRP)
-		after, afterErr := term.GetState(0)
-		if err != nil || group != syscall.Getpgrp() || beforeErr != nil || afterErr != nil || !reflect.DeepEqual(before, after) {
-			fmt.Fprintf(os.Stderr, "AEON1410_RESTORE_FAILED group=%d want=%d groupErr=%v beforeErr=%v afterErr=%v before=%#v after=%#v\n", group, syscall.Getpgrp(), err, beforeErr, afterErr, before, after)
+		if err != nil || group != syscall.Getpgrp() {
+			fmt.Fprintf(os.Stderr, "AEON1410_RESTORE_FAILED group=%d want=%d error=%v\n", group, syscall.Getpgrp(), err)
 			os.Exit(25)
 		}
 		os.Exit(code)
@@ -138,10 +135,19 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 // terminal multiplexer. Readiness establishes input ordering; deadlines only
 // bound hangs. The wrapper retains its signal cleanup on any fixture failure.
 const harnessRunPTYDriver = `
-import errno, os, pty, select, signal, sys, time
+import errno, os, pty, select, signal, sys, termios, time
+start_r, start_w = os.pipe()
 pid, master = pty.fork()
 if pid == 0:
+    os.close(start_w)
+    if os.read(start_r, 1) != b'1':
+        os._exit(26)
+    os.close(start_r)
     os.execv(sys.argv[1], sys.argv[1:])
+os.close(start_r)
+before = termios.tcgetattr(master)
+os.write(start_w, b'1')
+os.close(start_w)
 output, sent, reaped, eof = bytearray(), False, False, False
 try:
     deadline = time.monotonic() + 15
@@ -168,6 +174,13 @@ try:
     sys.stdout.buffer.flush()
     if not reaped:
         raise RuntimeError('PTY child did not complete')
+    after = termios.tcgetattr(master)
+    # Darwin sets PENDIN when switching back to canonical input. This is
+    # kernel reprocessing bookkeeping, not a changed user terminal setting.
+    before[3] &= ~termios.PENDIN
+    after[3] &= ~termios.PENDIN
+    if before != after:
+        raise RuntimeError('terminal settings were not restored')
     sys.exit(os.waitstatus_to_exitcode(status))
 finally:
     if not reaped:
