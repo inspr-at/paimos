@@ -55,6 +55,7 @@ func TestListWithoutStatistics(t *testing.T) {
 			// Count rejected join pairs as well as node scans; runtime alone
 			// can pass on a fast runner while the same plan times out in CI.
 			visits := nodeVisitsInCTE(plan[0], "CTE scope", false)
+			visits += nodeVisitsInCTE(plan[0], "CTE scope_children", false)
 			rejected := scopeRejectedPairs(plan[0], false)
 			t.Logf("%s execution_ms=%v scope_node_visits=%.0f rejected_scope_pairs=%.0f", query.name, plan[0]["Execution Time"], visits, rejected)
 			if visits <= 0 || visits+rejected > 2*6001+1 {

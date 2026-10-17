@@ -228,8 +228,9 @@ func TestGoalListViewFiltersAndOrdering(t *testing.T) {
 }
 
 type listQueryCounter struct {
-	count atomic.Int32
-	t     *testing.T
+	count   atomic.Int32
+	maxRows atomic.Int64
+	t       *testing.T
 }
 
 func (c *listQueryCounter) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
@@ -239,6 +240,13 @@ func (c *listQueryCounter) TraceQueryStart(ctx context.Context, conn *pgx.Conn, 
 	return (goalQueryDiagnostics{c.t}).TraceQueryStart(ctx, conn, data)
 }
 func (c *listQueryCounter) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
+	if start, ok := ctx.Value(goalQueryDiagnosticKey{}).(goalQueryDiagnosticStart); ok && strings.HasPrefix(start.sql, "WITH RECURSIVE\n page AS MATERIALIZED") {
+		for rows, prior := data.CommandTag.RowsAffected(), c.maxRows.Load(); rows > prior; prior = c.maxRows.Load() {
+			if c.maxRows.CompareAndSwap(prior, rows) {
+				break
+			}
+		}
+	}
 	(goalQueryDiagnostics{c.t}).TraceQueryEnd(ctx, conn, data)
 }
 
@@ -374,7 +382,8 @@ func TestGoalListAggregateBudgetPaginatesWithoutLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := f.db.App.Config()
-	config.ConnConfig.Tracer = goalQueryDiagnostics{t}
+	counter := &listQueryCounter{t: t}
+	config.ConnConfig.Tracer = counter
 	pool, err := pgxpool.NewWithConfig(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -396,6 +405,13 @@ func TestGoalListAggregateBudgetPaginatesWithoutLoss(t *testing.T) {
 	}
 	if !first.TotalsPartial || !second.TotalsPartial || first.Totals != second.Totals || !reflect.DeepEqual(first.QuietProjects, second.QuietProjects) {
 		t.Fatal("pagination changed full-filter totals")
+	}
+	// The 260 shared leaves must not produce 260 copies of every root's
+	// fact payload. Include room for memberships, roots and visible metadata;
+	// the old root/leaf wire product returned over 26000 rows per batch.
+	t.Logf("largest successful aggregate batch: %d rows", counter.maxRows.Load())
+	if rows := counter.maxRows.Load(); rows <= 0 || rows > 2000 {
+		t.Fatalf("aggregate batch repeated shared facts: %d rows, want 1..2000", rows)
 	}
 	wrong := goalRequest(t.Context(), m, f.reader, "GET", "/api/goals?sort=progress&cursor="+first.NextCursor, "", "")
 	if wrong.Code != 400 {

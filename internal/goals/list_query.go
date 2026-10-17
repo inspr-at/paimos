@@ -124,7 +124,8 @@ func listPageQuery() string {
  'goal_node_id',o.parent_id,'position',o.position::text,'fields',o.fields,
  'ticket_node_ids',ARRAY(SELECT s.id::text FROM serves s WHERE s.outcome=o.id ORDER BY s.id)) FROM children o
  UNION ALL SELECT 'target',s.goal::text,jsonb_build_object('id',s.id,'key',s.key,'project',coalesce(s.project_id::text,''),'work',NOT s.deleted AND s.slug IN ('work','ticket','task','epic'),'deleted',s.deleted) FROM serves s
- UNION ALL SELECT 'fact',f.root::text,to_jsonb(f)-'root' FROM facts f
+ UNION ALL SELECT 'fact',f.id::text,to_jsonb(f)-'root' FROM (SELECT DISTINCT ON (id) * FROM facts ORDER BY id,root) f
+ UNION ALL SELECT 'fact_roots',f.id::text,to_jsonb(array_agg(f.root ORDER BY f.root)) FROM facts f GROUP BY f.id
  UNION ALL SELECT 'root',s.root::text,to_jsonb(count(*)) FROM page_scope s GROUP BY s.root
  UNION ALL SELECT 'eta',e.id::text,jsonb_build_object('live',e.eta_live_at,'ready',e.eta_ready_at,'live_by',e.live_by,'ready_by',e.ready_by) FROM root_eta e
  UNION ALL SELECT 'badge',b.id::text,to_jsonb(b) FROM badges b
@@ -190,6 +191,8 @@ type listPageData struct {
 	goals     map[string]GoalView
 	children  map[string][]storedNode
 	facts     map[string][]leafFact
+	leaves    map[string]leafFact
+	leafRoots map[string][]string
 	keys      map[string]string
 	projects  map[string]string
 	work      map[string]bool
@@ -203,7 +206,7 @@ type listPageData struct {
 }
 
 func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string, now time.Time, w Watermark) ([]GoalView, error) {
-	d := listPageData{goals: map[string]GoalView{}, children: map[string][]storedNode{}, facts: map[string][]leafFact{}, keys: map[string]string{}, projects: map[string]string{}, work: map[string]bool{}, rootPairs: map[string]int{}, etas: map[string]EffectiveETA{}, badges: map[string]ProjectBadge{}, histories: map[string]*reconstruction{}, kinds: map[string]bool{}, waits: map[string]Waits{}, budgets: map[string]listBudget{}}
+	d := listPageData{goals: map[string]GoalView{}, children: map[string][]storedNode{}, facts: map[string][]leafFact{}, leaves: map[string]leafFact{}, leafRoots: map[string][]string{}, keys: map[string]string{}, projects: map[string]string{}, work: map[string]bool{}, rootPairs: map[string]int{}, etas: map[string]EffectiveETA{}, badges: map[string]ProjectBadge{}, histories: map[string]*reconstruction{}, kinds: map[string]bool{}, waits: map[string]Waits{}, budgets: map[string]listBudget{}}
 	for _, id := range ids {
 		d.budgets[id] = newListBudget()
 		d.histories[id] = &reconstruction{goal: id, metadata: map[string]historicalNode{}}
@@ -250,6 +253,13 @@ func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 			return nil, &listScopeFailure{cause: err, roots: roots, bases: d.goals}
 		}
 		return nil, err
+	}
+	// Decode each leaf once, then share its immutable facts across the bounded
+	// root/leaf memberships. Overlapping roots must not repeat JSON payloads.
+	for leaf, roots := range d.leafRoots {
+		for _, root := range roots {
+			d.facts[root] = append(d.facts[root], d.leaves[leaf])
+		}
 	}
 	out := []GoalView{}
 	for _, id := range ids {
@@ -387,7 +397,13 @@ func (d *listPageData) read(section, id string, raw []byte, w Watermark) error {
 		if len(l.Sessions) > 200 {
 			return fail(413, "outcome session bound exceeded")
 		}
-		d.facts[id] = append(d.facts[id], l)
+		d.leaves[id] = l
+	case "fact_roots":
+		var roots []string
+		if err := json.Unmarshal(raw, &roots); err != nil {
+			return err
+		}
+		d.leafRoots[id] = roots
 	case "root":
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil {
