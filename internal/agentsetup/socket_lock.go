@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -125,10 +126,28 @@ func (p socketPeer) live(kill func(int, syscall.Signal) error, observe func(int)
 	// A permission failure or incomplete observation cannot prove exit. Only
 	// compare the saved image to this PID, never to the starting binary.
 	current, err := observe(p.PID)
-	if err != nil || current.PID != p.PID || p.Started == "" || p.Executable == "" || current.Started == "" || current.Executable == "" {
+	if err != nil || current.PID != p.PID || !comparableSocketStarts(p.Started, current.Started) || !filepath.IsAbs(p.Executable) || filepath.Clean(p.Executable) != p.Executable || current.Executable == "" {
 		return true
 	}
 	return p.Started == current.Started && p.Executable == current.Executable
+}
+
+// Kernel pins use decimal ticks on Linux and seconds:microseconds on Darwin.
+// An unknown encoding is unavailable evidence, not proof of PID reuse.
+func comparableSocketStarts(saved, current string) bool {
+	a, b := strings.Split(saved, ":"), strings.Split(current, ":")
+	if len(a) != len(b) || len(a) > 2 {
+		return false
+	}
+	for _, parts := range [][]string{a, b} {
+		for i, part := range parts {
+			n, err := strconv.ParseUint(part, 10, 64)
+			if err != nil || i == 1 && n >= 1_000_000 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (s *Store) socketHookArtifact(shutdown bool) (*socketArtifact, error) {
