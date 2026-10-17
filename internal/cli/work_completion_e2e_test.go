@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -152,7 +153,7 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 	}
 	request(person, "", "POST", "/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, 200)
 	// Include a passing rule and an inapplicable rule to reject extra checks.
-	request(person, "", "PUT", "/api/settings/definitions", `{"expected_revision":null,"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"blocker_named"},{"id":"design_attached"}],"done":[{"id":"pills_benefits_set"},{"id":"manual:person-signoff","label":"Person sign-off","label_de":"Persönliche Freigabe"}]}}`, 200)
+	request(person, "", "PUT", "/api/settings/definitions", `{"expected_revision":null,"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"blocker_named","condition":"all"},{"id":"design_attached"}],"done":[{"id":"pills_benefits_set"},{"id":"manual:person-signoff","label":"Person sign-off","label_de":"Persönliche Freigabe"}]}}`, 200)
 	t.Setenv("PAIMOS_URL", srv.URL)
 	t.Setenv("PAIMOS_API_KEY", worker.Token)
 	missing := filepath.Join(t.TempDir(), "no-config.yaml")
@@ -178,7 +179,6 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 	var node struct {
 		ProjectID string `json:"project_id"`
 		KindID    string `json:"kind_id"`
-		UpdatedAt string `json:"updated_at"`
 	}
 	if err := json.Unmarshal(raw, &node); err != nil || node.ProjectID == "" {
 		t.Fatal("ticket has no project", err)
@@ -279,6 +279,37 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 			}
 		})
 	}
+	t.Run("structured-error-redaction", func(t *testing.T) {
+		const cookie = "synthetic-entry-session"
+		refusal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": "entry_checks_failed", "code": "entry_checks_failed", "to_status": "done",
+				"checks": []map[string]string{{"id": "manual:person-signoff", "label": "Person sign-off", "label_de": "Persönliche Freigabe", "reason": "Needs " + cookie}},
+				"extra":  "Retain full body; redact " + cookie,
+			})
+		}))
+		defer refusal.Close()
+		for _, jsonOut := range []bool{false, true} {
+			var stderr bytes.Buffer
+			rt := &runtime{program: "aeon", stderr: &stderr, jsonOut: jsonOut, personClient: client.NewSession(refusal.URL, cookie)}
+			err := rt.do(http.MethodPatch, path, map[string]string{"state": "done"}, nil)
+			exit, ok := err.(*exitError)
+			if !ok || exit.code != 1 || exit.apiStatus != 409 {
+				t.Fatal("structured refusal lost its failure status")
+			}
+			rt.printErr(exit)
+			if strings.Contains(stderr.String(), cookie) || !strings.Contains(stderr.String(), "[redacted]") {
+				t.Fatal("structured refusal exposed its credential")
+			}
+			if jsonOut {
+				var body map[string]json.RawMessage
+				if json.Unmarshal(stderr.Bytes(), &body) != nil || !strings.Contains(string(body["extra"]), "Retain full body") || !strings.Contains(string(body["checks"]), "Persönliche Freigabe") {
+					t.Fatal("JSON refusal lost full body fields")
+				}
+			}
+		}
+	})
 	// Ordinary reads, governance reads and ticking keep their existing gates.
 	for _, other := range []string{path, "/api/projects/" + node.ProjectID + "/definitions", path + "/person-steps"} {
 		request(httpClient, writer.Token, "GET", other, "", 403)
