@@ -2,11 +2,14 @@
 package questions
 
 import (
+	"encoding/json"
+	"testing"
+
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	goalapi "github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"testing"
 )
 
 // Risk: a merged Desk question erases another asker's goal association.
@@ -52,6 +55,15 @@ func TestGoalLinksSurviveQuestionMerge(t *testing.T) {
 	if err != nil || count != 2 {
 		t.Fatalf("retained/deduped links %d %v", count, err)
 	}
+	goalsAPI := goalapi.New(f.d.App)
+	goalsAPI.Mount(f.mux)
+	for _, id := range goals[:2] {
+		rec := request(t.Context(), f.mux, f.agent, "GET", "/api/goals/"+id, nil)
+		var g goalapi.GoalView
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &g) != nil || g.Waits.Count != 1 || len(g.Waits.QuestionIDs) != 1 || g.Waits.QuestionIDs[0] != q.ID {
+			t.Fatalf("merged ask did not count once on its associated goal: %d %s", rec.Code, rec.Body)
+		}
+	}
 	hidden := first
 	hidden.RequestID = uid()
 	hidden.GoalID = goals[2]
@@ -65,6 +77,26 @@ func TestGoalLinksSurviveQuestionMerge(t *testing.T) {
 	read := question(t, request(t.Context(), f.mux, f.agent, "GET", "/api/questions/"+q.ID, nil), 200)
 	if read.Input.GoalID != "" || read.Askers[0].Input.GoalID != "" {
 		t.Fatal("question replay exposed a goal that became hidden")
+	}
+	page := request(t.Context(), f.mux, f.agent, "GET", "/api/goals?project="+f.project, nil)
+	var list goalapi.GoalList
+	if page.Code != 200 || json.Unmarshal(page.Body.Bytes(), &list) != nil {
+		t.Fatalf("goal waits page %d %s", page.Code, page.Body)
+	}
+	found := false
+	for _, g := range list.Items {
+		if g.ID == goals[0] {
+			t.Fatal("goal waits page exposed a hidden association")
+		}
+		if g.ID == goals[1] {
+			found = true
+			if g.Waits.Count != 1 || len(g.Waits.QuestionIDs) != 1 || g.Waits.QuestionIDs[0] != q.ID {
+				t.Fatalf("page lost visible waits: %+v", g.Waits)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("page omitted the visible associated goal")
 	}
 
 	restricted := f.otherAgent

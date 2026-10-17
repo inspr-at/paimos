@@ -74,7 +74,7 @@ func TestGoalListViewFiltersAndOrdering(t *testing.T) {
 				if i == 0 && j == 0 {
 					itemFields["note"] = "NeedleNote"
 				}
-				o := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, fmt.Sprintf("VIEWO-%d-%d", i+1, j), g, itemFields)
+				o := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, fmt.Sprintf("VIEWO-%d", i*10+j+1), g, itemFields)
 				if i == 0 && j == 0 {
 					if _, err := tx.Exec(t.Context(), `UPDATE nodes SET title='NeedleLabel' WHERE id=$1`, o); err != nil {
 						return err
@@ -194,13 +194,13 @@ func TestGoalListPageWideProjection(t *testing.T) {
  SELECT $1,'PAGEG-'||i,(SELECT kind_id FROM nodes WHERE id=$2),'Page '||i,$3::uuid FROM generate_series(1,50) i RETURNING id,key
  ), o AS (
  INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,fields)
- SELECT $1,'PAGEO-'||g.key||'-'||j,(SELECT kind_id FROM nodes WHERE id=$4),'Outcome '||j,g.id,jsonb_build_object('outcome_ref','item'||j,'state_set',CASE WHEN j%2=0 THEN 'done' ELSE 'queued' END)
+ SELECT $1,'PAGEO-'||((substring(g.key from '[0-9]+$')::int-1)*30+j),(SELECT kind_id FROM nodes WHERE id=$4),'Outcome '||j,g.id,jsonb_build_object('outcome_ref','item'||j,'state_set',CASE WHEN j%2=0 THEN 'done' ELSE 'queued' END)
  FROM g CROSS JOIN generate_series(1,30) j RETURNING id,parent_id,key
  ), t AS (
  INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,fields)
- SELECT $1,'PAGET-'||o.key,(SELECT kind_id FROM nodes WHERE id=$5),'Work', $3::uuid,'{"estimate_hours":2}'::jsonb FROM o RETURNING id,key
+ SELECT $1,'PAGET-'||substring(o.key from '[0-9]+$'),(SELECT kind_id FROM nodes WHERE id=$5),'Work', $3::uuid,'{"estimate_hours":2}'::jsonb FROM o RETURNING id,key
  ) INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type)
- SELECT $1,o.id,t.id,'serves' FROM o JOIN t ON t.key='PAGET-'||o.key`, f.writer.TenantID, f.goal, f.project, f.outcome, f.ticket)
+ SELECT $1,o.id,t.id,'serves' FROM o JOIN t ON t.key='PAGET-'||substring(o.key from '[0-9]+$')`, f.writer.TenantID, f.goal, f.project, f.outcome, f.ticket)
 		return err
 	})
 	if err != nil {
@@ -300,7 +300,7 @@ func TestGoalListAggregateBudgetPaginatesWithoutLoss(t *testing.T) {
 				selected = roots[i*100 : (i+1)*100]
 			}
 			for j := 0; j < len(selected); j += 20 {
-				o := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, fmt.Sprintf("BO-%d-%d", i+1, j), g, map[string]any{"outcome_ref": fmt.Sprintf("part%d", j)})
+				o := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, fmt.Sprintf("BO-%d", i*10+j/20+1), g, map[string]any{"outcome_ref": fmt.Sprintf("part%d", j)})
 				for _, root := range selected[j : j+20] {
 					if _, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'serves')`, f.writer.TenantID, o, root); err != nil {
 						return err

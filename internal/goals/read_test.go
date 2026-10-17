@@ -225,11 +225,61 @@ func TestGoalListFiltersTotalsAndMoveHistory(t *testing.T) {
 	if apiRequest(t, f, "GET", "/api/goals?sort=unknown", "", "").Code != 400 {
 		t.Fatal("unknown sort accepted")
 	}
+	readWriteResult(t, apiRequest(t, f, "PATCH", "/api/goals/"+f.goal, "history-eta-before", `{"items":{"upsert":[{"ref":"visible","eta":{"text":"before-move"}}]}}`), 200)
 	move := `{"items":{"move":[{"outcome_id":"` + f.outcome + `","to_goal":"` + f.secondGoal + `"}]}}`
 	readWriteResult(t, apiRequest(t, f, "PATCH", "/api/goals/"+f.goal, "history-move", move), 200)
+	readWriteResult(t, apiRequest(t, f, "PATCH", "/api/goals/"+f.secondGoal, "history-eta-after", `{"items":{"upsert":[{"ref":"visible","eta":{"text":"after-move"}}]}}`), 200)
 	r := apiRequest(t, f, "GET", "/api/goals/"+f.secondGoal+"/history?outcome="+f.outcome, "", "")
 	if r.Code != 200 || !strings.Contains(r.Body.String(), "goal.items_changed") || !strings.Contains(r.Body.String(), f.goal) || !strings.Contains(r.Body.String(), f.secondGoal) {
 		t.Fatalf("move history %d %s", r.Code, r.Body)
+	}
+	var history HistoryResult
+	if err := json.Unmarshal(r.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	var beforeID, moveID, afterID int64
+	for _, event := range history.Items {
+		if event.Type == "goal.eta_changed" {
+			var value EffectiveETA
+			if err := json.Unmarshal(event.After, &value); err != nil {
+				t.Fatal(err)
+			}
+			if value.Text == "before-move" {
+				beforeID = event.ID
+			}
+			if value.Text == "after-move" {
+				afterID = event.ID
+			}
+		}
+		if event.Type == "goal.items_changed" {
+			var before, after storedNode
+			if err := json.Unmarshal(event.Before, &before); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(event.After, &after); err != nil {
+				t.Fatal(err)
+			}
+			if before.Parent == f.goal && after.Parent == f.secondGoal {
+				moveID = event.ID
+			}
+		}
+	}
+	if beforeID == 0 || moveID <= beforeID || afterID <= moveID {
+		t.Fatalf("incomplete immutable timeline before=%d move=%d after=%d", beforeID, moveID, afterID)
+	}
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	for _, id := range []string{f.goal, f.secondGoal} {
+		r := goalRequest(t.Context(), m, f.reader, "GET", "/api/goals/"+id+"/history?outcome="+f.outcome, "", "")
+		var visible HistoryResult
+		if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &visible) != nil || !reflect.DeepEqual(visible.Items, history.Items) {
+			t.Fatalf("reader timeline lost the move: %d %s", r.Code, r.Body)
+		}
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'serves')`, f.writer.TenantID, f.outcome, f.hiddenTicket); err != nil {
+		t.Fatal(err)
+	}
+	if hidden := goalRequest(t.Context(), m, f.reader, "GET", "/api/goals/"+f.secondGoal+"/history?outcome="+f.outcome, "", ""); hidden.Code != 404 {
+		t.Fatalf("hidden outcome history exposed: %d %s", hidden.Code, hidden.Body)
 	}
 }
 
