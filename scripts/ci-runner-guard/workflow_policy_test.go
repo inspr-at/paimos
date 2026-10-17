@@ -416,6 +416,12 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			}
 		})
 	}
+	for index := 1; index <= 3; index++ {
+		add(fmt.Sprintf("web-proof-optional/%d", index), "ci.yml", "must revalidate every reused PR proof", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["web"])["steps"].([]any)
+			mapping(steps[index])["continue-on-error"] = true
+		})
+	}
 	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
 	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}

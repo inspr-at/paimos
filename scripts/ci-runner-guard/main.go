@@ -646,7 +646,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			}
 		}
 		for _, step := range proofSteps[:3] {
-			if mapping(step)["if"] != "needs.tree-reuse.outputs.reuse == 'pull_request'" {
+			if mapping(step)["if"] != "needs.tree-reuse.outputs.reuse == 'pull_request'" || mapping(step)["continue-on-error"] != nil {
 				return fmt.Errorf("required check %q must revalidate every reused PR proof", context)
 			}
 		}
