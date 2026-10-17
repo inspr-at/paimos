@@ -303,7 +303,7 @@
   "migration_1361_sha256": "4cbfb808bfda04018a6934eb42ec2edbe381038231ebdb79f7b2824f6cfc1923",
   "preserved_baseline_failure": "Round-two full internal/cli failed after unchanged backend_memory_regression_test.go temporarily changed AEON_TEST_DATABASE_URL before dbtest global template initialization; later tests rejected the restored maintenance URL. That test was not changed, skipped or loosened. The explicitly requested thirteen-case fresh-process rerun passes, including on implementation 280cd4d91. No claim is made that the complete CLI package is green.",
   "pending_ci": [
-    "Full ci-static --merge-main: ci-static-locked.sh returned exit 3 under the host night protocol in fix3. This is incomplete, not green; the coordinator must obtain the hosted static pass before merge.",
+    "Full ci-static --merge-main: the approved static runner returned exit 3 under the host night protocol in fix3 and fix4. This is incomplete, not green; the coordinator must obtain the hosted static pass before merge.",
     "Previous-binary compatibility, backup and release acceptance remain coordinator responsibilities; no worker review/release gate was run."
   ],
   "limitations": [
@@ -434,7 +434,11 @@
         51.675959,
         48.464541,
         42.892
-      ]
+      ],
+      "aggregate_wire_before": {
+        "head": "863958da0",
+        "largest_successful_batch_rows": 26330
+      }
     },
     "regressions": [
       "TestGoalListAggregateBudgetPaginatesWithoutLoss retains page/totals/oversized assertions and additionally bounds actual successful query row counts, rejecting repeated shared leaf payloads.",
@@ -469,15 +473,73 @@
       },
       "migration_guard": "Passed against the published base, including the refreshed exact-byte 1361 exception.",
       "public_name_guard": "Passed; original source on the scratch control reproduces exactly the two reported QA-evidence failures.",
-      "full_affected_go": "Running remotely on f11ea61d9.",
-      "negative_controls": "Scratch branch checks/aeon-1456-fix4-before is a573bd61 plus current main and only the strengthened regression tests; remote run initially refused while full acceptance held the single Go slot. No negative-control commit is on the delivery branch.",
+      "full_affected_go": {
+        "result": "passed",
+        "head": "f11ea61d9",
+        "packages_seconds": {
+          "internal/goals": 46.863,
+          "internal/nodes": 170.776,
+          "internal/db": 131.995,
+          "internal/events": 66.332,
+          "internal/reportercontract": 8.79,
+          "internal/httpapi": 8.506,
+          "internal/eta": 0.394,
+          "internal/authz": 46.918
+        }
+      },
+      "negative_controls": {
+        "result": "expected failures reproduced remotely",
+        "head": "863958da0",
+        "baseline": "a573bd61 plus origin/main; only the two strengthened regression-test files differ from that merged source",
+        "delivery_branch_clean": true,
+        "goals": {
+          "test": "TestGoalListAggregateBudgetPaginatesWithoutLoss",
+          "actual_rows": 26330,
+          "max_rows": 2000,
+          "seconds": 19.11
+        },
+        "nodes": {
+          "test": "TestListWithoutStatistics",
+          "scope_node_visits": 18003,
+          "rejected_join_pairs": 36006000,
+          "list_explain_ms": 915.705,
+          "facets_explain_ms": 799.623,
+          "reason": "The original plan can finish on the remote host; the new work bound deterministically rejects its quadratic join even then."
+        },
+        "http": {
+          "test": "TestHTTPRequestBodyOwnership",
+          "violations": [
+            "internal/goals/module.go:106",
+            "internal/goals/module.go:147"
+          ]
+        },
+        "public_names": {
+          "result": "expected failure",
+          "reported_lines": [
+            291,
+            327
+          ]
+        },
+        "safety": "Control commits exist only on local scratch branch checks/aeon-1456-fix4-before, retained as evidence; its production Goals, node-list and migration files match a573bd61 byte-for-byte. No negative-control commit is in the delivery branch."
+      },
       "ci_static": {
         "result": "blocked",
         "exit_code": 3,
         "reason": "Approved static runner refuses full checks during the host night protocol; no local heavy fallback or guard bypass. Hosted CI evidence remains required."
+      },
+      "goals_integrations": {
+        "result": "passed",
+        "head": "5f9532469",
+        "selection": "TestGoal in fresh processes",
+        "packages_seconds": {
+          "internal/harness": 2.812,
+          "internal/questions": 2.417,
+          "internal/cli": 0.483
+        }
       }
     },
     "shared_changes": "Only existing unreleased migration 1361 and its exact-byte exception are authored shared changes. No schema table/column, DSAR classification, permission, API route/contract or new test registration changes. Current main merged cleanly; its unrelated changes are inherited.",
-    "safety": "No origin push, deployment, model CLI, subagent, cross-family review gate, release acceptance or ticket status change."
+    "safety": "No origin push, deployment, model CLI, subagent, cross-family review gate, release acceptance or ticket status change.",
+    "completion": "All identified blocking CI findings are implemented and locally committed, with full affected Go acceptance, remote browser coverage, integration checks and negative controls passing as expected. Full ci-static --merge-main remains unproven because the approved runner refused under the host night protocol (exit 3); coordinator-hosted CI is required before merge. No assertion or host guard was loosened."
   }
 }
