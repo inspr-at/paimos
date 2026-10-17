@@ -127,6 +127,12 @@ requires browser success for affected runs. The five required check names,
 merge-group full scope, nightly `--all` execution and real-server smoke are
 unchanged.
 
+Only affected PRs receive the browser execution plan; full and queue runs
+receive an empty value. The aggregate validates scope before its unchanged
+read-only proof sequence, including early reuse exits. Checkout, runtime setup
+and proof reconfirmation must all succeed. The full-run workflow pin checks
+the exact plan binding before comparing every existing job field.
+
 The S4 behavior and rejection cases run in
 `scripts/test-tiers/browser-areas.test.mjs`, imported by the existing fixed
 `go-static` selector regression lane. New scripts use the existing S7 ownership
