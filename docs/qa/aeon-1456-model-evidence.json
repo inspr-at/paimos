@@ -3,11 +3,11 @@
   "ticket": "AEON-1456",
   "brief": "aeon-1456-goals-api-fix3",
   "round": 3,
-  "status": "complete-concept-acceptance-passed",
+  "status": "blocked-static-night-protocol",
   "base_commit": "713dd3ec1",
   "implementation_head": "df65241e1",
   "concept": "Goals model r3 D1–D12/E1–E6; AEON-1452 r5 series addendum",
-  "completion_pct": 100,
+  "completion_pct": 95,
   "implementation": {
     "list": "One page-wide MATERIALIZED invoker expansion statement for up to 100 goals; shared work scope, distinct leaf facts and eta.AggregateScopeSQL, plus batched history, badges and waits. Full-filter totals and computed sorting use bounded batches across at most 1000 candidates.",
     "paging": "Union budgets of 4096 roots/50000 root-node pairs shrink the page with truncated=true and a filter-bound keyset cursor. Savepoint retries reuse already visibility-filtered counts and known failed work-root sets. A singleton above its budget remains counts-only too_large while siblings expand; totals_partial exposes omitted derived totals.",
@@ -245,6 +245,50 @@
       "command": "ci-static-remote.sh (full node scripts/ci-static.mjs --merge-main)",
       "result": "not-executed-exit-3",
       "scope": "Night protocol refused full static on the final implementation. This is incomplete, not green; hosted PR CI must run it."
+    },
+    {
+      "command": "remote-test.sh <worktree> ./internal/goals ./internal/nodes ./internal/events ./internal/db ./internal/reportercontract ./internal/httpapi -v -count=1",
+      "head": "df65241e1",
+      "result": "passed",
+      "packages": {
+        "internal/goals": 51.938,
+        "internal/nodes": 172.94,
+        "internal/events": 61.354,
+        "internal/db": 123.95,
+        "internal/reportercontract": 8.432,
+        "internal/httpapi": 7.701
+      },
+      "scope": "Full packages; hidden-outcome leak, bounded/cyclic reference visibility, original no-statistics index assertion and deterministic filtered/scope work bounds all passed."
+    },
+    {
+      "command": "remote-test.sh <worktree> ./internal/harness ./internal/questions ./internal/cli -run TestGoal -v -count=1",
+      "head": "498a45771",
+      "result": "passed",
+      "packages": {
+        "internal/harness": 2.928,
+        "internal/questions": 2.517,
+        "internal/cli": 0.402
+      },
+      "scope": "Goals ETA source transitions, asks-for links through question merging, and CLI patch/receipt handling."
+    },
+    {
+      "command": "node scripts/check-migrations.mjs --base-ref v261016060843.0.0",
+      "head": "498a45771",
+      "result": "passed",
+      "scope": "Published release resolved through GitHub releases/latest; 362 unique migration numbers, including the updated exact-byte 1361 exception."
+    },
+    {
+      "command": "node --test --test-concurrency=2 scripts/check-migrations.test.mjs",
+      "head": "498a45771",
+      "result": "passed",
+      "scope": "43 passed; zero failed, cancelled or skipped."
+    },
+    {
+      "command": "ci-static-locked.sh (runs node scripts/ci-static.mjs --merge-main remotely)",
+      "head": "498a45771",
+      "result": "blocked",
+      "exit_code": 3,
+      "scope": "Remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR hosted CI static job. No local heavy fallback or guard bypass."
     }
   ],
   "resolved_regressions": {
@@ -259,7 +303,7 @@
   "migration_1361_sha256": "a76e0a77ca8143afa1cea6c3c2fc79a66deadacbc0001c7b162aeb1e273ff830",
   "preserved_baseline_failure": "Round-two full internal/cli failed after unchanged backend_memory_regression_test.go temporarily changed AEON_TEST_DATABASE_URL before dbtest global template initialization; later tests rejected the restored maintenance URL. That test was not changed, skipped or loosened. The explicitly requested thirteen-case fresh-process rerun passes, including on implementation 280cd4d91. No claim is made that the complete CLI package is green.",
   "pending_ci": [
-    "Full ci-static --merge-main (night-protocol exit 3).",
+    "Full ci-static --merge-main: ci-static-locked.sh returned exit 3 under the host night protocol in fix3. This is incomplete, not green; the coordinator must obtain the hosted static pass before merge.",
     "Previous-binary compatibility, backup and release acceptance remain coordinator responsibilities; no worker review/release gate was run."
   ],
   "limitations": [
@@ -315,11 +359,32 @@
     "status_icons": {
       "classification": "unrelated to Goals database/query changes",
       "evidence": [
+        "The branch has no changes under web/ versus origin/main.",
         "web/tests/status-icons.spec.ts:318 installs mockWork and performs no locator.click.",
         "web/tests/work-fixtures.ts:390 intercepts **/api/**; its GET /api/nodes branch at line 706 fulfills from fixture rows, without contacting the Go server or database.",
         "review-ci725-0322.out records this exact budget test passing with 26 icons at 0.0377ms/frame, followed by 115 passed and only project-groups.spec.ts failing in that job. Other status-icons cases in the same run also complete."
       ],
       "action": "No browser retries, timeout changes or unrelated UI edits."
+    },
+    "final_acceptance": {
+      "head": "df65241e1",
+      "filtered_request_ms": 87.333958,
+      "stale_kind_filtered_request_ms": 85.3035,
+      "tag_facet_request_ms": 53.14725,
+      "cost_unit_facet_request_ms": 46.61475,
+      "epic_none_request_ms": 79.231458,
+      "scope_node_visits_per_query": 12003,
+      "filtered_node_visits_per_query": 6001,
+      "hidden_outcome_leak_test": "TestGoalStorageVisibility passed",
+      "bounded_reference_test": "TestGoalOutcomeReferenceVisibilityIsBounded passed",
+      "no_statistics_index_test": "TestScopedListWithoutStatisticsUsesChildIndex passed with the source identical to 713dd3ec1",
+      "result": "All six full packages and all three Goals integration packages passed; static merge-main proof remains blocked by the host night protocol."
+    },
+    "shared_changes": "Only the existing unreleased 1361 Goals migration and its pinned exception were updated; no new migration number, schema columns, source files or test names were added.",
+    "static": {
+      "result": "blocked",
+      "exit_code": 3,
+      "reason": "Night protocol pauses remote static checks; no local heavy fallback is authorized for this refusal."
     }
   }
 }
