@@ -406,10 +406,12 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
 
   // Every form of the tabs: the pin stays inside its tab, after the label where one shows and as a
   // badge on an icon-only tab, where stopping and setting it again moves no tab either.
-  const tablist = panelOf(page).getByRole('tablist')
+  const tablist = panelOf(page).getByRole('tablist'), forms: string[] = []
   for (const width of [390, 320, 1440, 1100, 900]) for (const look of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: width < 600 ? 700 : 900 })
     await page.emulateMedia({ colorScheme: look })
+    // The tabs choose their form in a resize observer: two frames, then it is settled.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     await expect(lead.locator('.view-pin')).toBeVisible()
     const placed = await lead.evaluate(tab => {
       const pin = tab.querySelector('.view-pin')!.getBoundingClientRect(), box = tab.getBoundingClientRect(), label = tab.querySelector('.tab-label')!
@@ -419,6 +421,7 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
     expect(placed.pin.x, `${width}: pin inside its tab`).toBeGreaterThanOrEqual(placed.tab.x - .5)
     expect(placed.pin.right, `${width}: pin inside its tab`).toBeLessThanOrEqual(placed.tab.right + .5)
     if (placed.labelRight !== null) expect(Math.abs(placed.pin.x - placed.labelRight - 4), `${width}: four pixels after the label`).toBeLessThanOrEqual(1)
+    forms.push(`${width}-${placed.labelled ? 'labels' : 'icons'}`)
     await tablist.screenshot({ path: info.outputPath(`AEON-1453/session-tabs-${width}-${look}-${placed.labelled ? 'labels' : 'icons'}.png`) })
     if (placed.labelled || look === 'dark') continue
     const badge = await controlStability(page, { lead, details, chat, events })
@@ -432,6 +435,7 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
     })
     badge.done()
   }
+  expect(forms, 'the narrowest phone shows icon-only tabs').toContain('320-icons')
   expect(errors).toEqual([])
 })
 
