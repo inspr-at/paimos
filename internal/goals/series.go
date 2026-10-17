@@ -251,7 +251,7 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
  WHERE e.node_id IS NOT NULL AND p.id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
  AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')),
  walk(root,id) AS (SELECT n.id,n.id FROM nodes n WHERE n.id=ANY($1::uuid[]) UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
- SELECT n.id FROM nodes n WHERE n.parent_id=w.id
+ (SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.parent_id=w.id OFFSET 0)
  UNION SELECT h.id FROM edges h WHERE h.parent_id=w.id
  ) e),
  bounded AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001)

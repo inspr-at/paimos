@@ -432,7 +432,7 @@ func targetIdentities(ctx context.Context, tx pgx.Tx, ids []string) (map[string]
 }
 func projectBadges(ctx context.Context, tx pgx.Tx, home string, targets []string) ([]ProjectBadge, error) {
 	out := []ProjectBadge{}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(nullif(p.fields->>'project_key',''),p.key),p.title,ARRAY(SELECT group_id::text FROM project_group_members WHERE project_id=p.id ORDER BY group_id) FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id WHERE p.kind_id IN (SELECT id FROM node_kinds WHERE slug='project') AND k.slug='project' AND p.deleted_at IS NULL AND (p.id::text=$1 OR p.id IN (SELECT project_id FROM nodes WHERE id=ANY($2::uuid[]))) ORDER BY coalesce(nullif(p.fields->>'project_key',''),p.key),p.id`, home, targets)
+	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(nullif(p.fields->>'project_key',''),p.key),p.title,ARRAY(SELECT group_id::text FROM project_group_members WHERE project_id=p.id ORDER BY group_id) FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id WHERE p.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug='project')) AND k.slug='project' AND p.deleted_at IS NULL AND (p.id::text=$1 OR p.id IN (SELECT project_id FROM nodes WHERE id=ANY($2::uuid[]))) ORDER BY coalesce(nullif(p.fields->>'project_key',''),p.key),p.id`, home, targets)
 	if err != nil {
 		return nil, err
 	}

@@ -26,7 +26,7 @@ func listPageQuery() string {
  ), outcomes AS MATERIALIZED (
  SELECT n.* FROM nodes n JOIN page g ON g.id=n.parent_id
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE k.slug='outcome' AND n.deleted_at IS NULL
+ WHERE n.parent_id=ANY($1::uuid[]) AND n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug='outcome')) AND k.slug='outcome' AND n.deleted_at IS NULL
  ), relations AS MATERIALIZED (
  SELECT r.source_node_id,r.target_node_id FROM node_relations r
  WHERE r.type='serves' AND r.source_node_id IN (SELECT id FROM outcomes)
@@ -38,7 +38,7 @@ func listPageQuery() string {
  ), relation_targets AS MATERIALIZED (
  SELECT n.id,n.key,n.project_id,k.slug,n.deleted_at IS NOT NULL AS deleted FROM nodes n
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.id IN (SELECT target_node_id FROM relations)
+ WHERE n.id=ANY(ARRAY(SELECT target_node_id FROM relations))
  ), serves AS MATERIALIZED (
  SELECT o.parent_id AS goal,o.id AS outcome,n.* FROM children o
  CROSS JOIN LATERAL (SELECT target_node_id FROM relations WHERE source_node_id=o.id ORDER BY target_node_id LIMIT 21) r
@@ -52,7 +52,7 @@ func listPageQuery() string {
  SELECT n.id,coalesce(nullif(n.fields->>'project_key',''),n.key) AS key,n.title AS name,
  ARRAY(SELECT group_id::text FROM project_group_members WHERE project_id=n.id ORDER BY group_id) AS group_ids
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.kind_id IN (SELECT id FROM node_kinds WHERE slug='project') AND k.slug='project' AND n.deleted_at IS NULL AND (n.id IN (SELECT project_id FROM page) OR n.id IN (SELECT project_id FROM serves))
+ WHERE n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug='project')) AND k.slug='project' AND n.deleted_at IS NULL AND (n.id IN (SELECT project_id FROM page) OR n.id IN (SELECT project_id FROM serves))
  ), waits AS MATERIALIZED (
  SELECT DISTINCT g.id AS goal,q.node_id AS question FROM page g
  JOIN desk_askers a ON ($3::boolean OR a.principal_id=$4::uuid)
@@ -83,13 +83,13 @@ func listPageQuery() string {
  SELECT n.id,n.id FROM nodes n WHERE n.id IN (SELECT root FROM history_roots)
  AND (SELECT count(DISTINCT root) FROM history_roots)<=4096
  UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
- SELECT n.id FROM nodes n WHERE n.parent_id=w.id
+ (SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.parent_id=w.id OFFSET 0)
  UNION SELECT h.id FROM historical_edges h WHERE h.parent_id=w.id
  ) e
  ), history_scope AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001),
  history_nodes AS MATERIALIZED (
  SELECT DISTINCT r.goal,n.id,n.key,n.kind_id,k.slug FROM history_roots r
- JOIN history_scope s ON s.root=r.root JOIN nodes n ON n.id=s.id
+ JOIN history_scope s ON s.root=r.root CROSS JOIN LATERAL (SELECT n.* FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=s.id OFFSET 0) n
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  WHERE (SELECT count(*) FROM history_scope)<=50000
  ), source_events AS MATERIALIZED (

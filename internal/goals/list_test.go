@@ -44,7 +44,7 @@ func logListPlan(t *testing.T, f storageFixture) {
 	err := db.InTenant(ctx, f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
 		stage = "candidate IDs"
 		var ids []string
-		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.kind_id IN (SELECT id FROM node_kinds WHERE slug IN ('goal','release')) AND k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug IN ('goal','release'))) AND k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil {
 			return fmt.Errorf("candidate IDs: %w", err)
 		}
 		stage = "page EXPLAIN"
