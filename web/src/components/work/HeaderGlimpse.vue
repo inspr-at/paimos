@@ -20,7 +20,7 @@ const filters = computed(() => props.filters ?? filtersFromQuery(projectSection(
 const wideMedia = `(min-width: ${GLIMPSE_MIN_WIDTH}px)`
 const wideQuery = window.matchMedia(wideMedia)
 const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-const wide = ref(headerGlimpseViewportWide(wideQuery.matches, window.innerWidth)), reduced = ref(reducedQuery.matches), idle = ref(false)
+const wide = ref(headerGlimpseViewportWide(wideQuery.matches, viewportWidth())), reduced = ref(reducedQuery.matches), idle = ref(false)
 const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
 const column = ref<HTMLElement>()
@@ -86,10 +86,16 @@ function scheduleMeasure() {
 }
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
+function viewportWidth() {
+  // ResizeObserver has a fresh layout even when Chromium's window width and
+  // media-query hints still describe the preceding viewport. A narrow root
+  // must clear the canvas in that delivery, including a queued wide change.
+  return Math.min(window.innerWidth, document.documentElement.getBoundingClientRect().width)
+}
 // Re-read a fresh query. The list from setup can miss `change` while the
 // canvas is painting, and its matches flag can stay true after a shrink.
 function readWide() {
-  return headerGlimpseViewportWide(window.matchMedia(wideMedia).matches, window.innerWidth)
+  return headerGlimpseViewportWide(window.matchMedia(wideMedia).matches, viewportWidth())
 }
 function syncWide() {
   const next = readWide()
@@ -107,7 +113,7 @@ function followViewport() {
   viewportFrame = requestAnimationFrame(tick)
 }
 function applyDeliveredWide(mediaMatches: boolean) {
-  const next = nextHeaderGlimpseWide({ mediaMatches, layoutWidth: window.innerWidth })
+  const next = nextHeaderGlimpseWide({ mediaMatches, layoutWidth: viewportWidth() })
   if (wide.value !== next) wide.value = next
   if (next) scheduleMeasure()
 }
@@ -120,7 +126,7 @@ function onWide(event: MediaQueryListEvent) {
   if (viewportFrame) return
   let left = 2
   const tick = () => {
-    const next = nextHeaderGlimpseWide({ mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: window.innerWidth })
+    const next = nextHeaderGlimpseWide({ mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: viewportWidth() })
     if (!next && wide.value) wide.value = false
     viewportFrame = --left > 0 ? requestAnimationFrame(tick) : 0
   }

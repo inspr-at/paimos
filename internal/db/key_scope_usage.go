@@ -38,23 +38,44 @@ func ValidateKeyCreatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) er
 type keyScopeUseBatch struct {
 	tenantID string
 	keyIDs   []string
+	changes  []string
 }
 
 // WithKeyScopeUse declares the complete target-key batch before InTenant.
 // Proposals use it when their target differs from the authenticating key.
 // It grants no authority; callers must still authorize the final write.
 func WithKeyScopeUse(ctx context.Context, tenantID string, keyIDs ...string) context.Context {
-	return context.WithValue(ctx, keyScopeUseContextKey{}, keyScopeUseBatch{tenantID, slices.Clone(keyIDs)})
+	batch, _ := ctx.Value(keyScopeUseContextKey{}).(keyScopeUseBatch)
+	if batch.tenantID != tenantID {
+		batch = keyScopeUseBatch{tenantID: tenantID}
+	}
+	batch.keyIDs = append(slices.Clone(batch.keyIDs), keyIDs...)
+	return context.WithValue(ctx, keyScopeUseContextKey{}, batch)
+}
+
+// WithKeyScopeChange declares keys whose scope or authority will change. Their
+// exclusive fences join the same sorted batch as shared uses at InTenant entry;
+// never upgrade a shared fence after taking tenant or resource locks.
+func WithKeyScopeChange(ctx context.Context, tenantID string, keyIDs ...string) context.Context {
+	ctx = WithKeyScopeUse(ctx, tenantID, keyIDs...)
+	batch := ctx.Value(keyScopeUseContextKey{}).(keyScopeUseBatch)
+	batch.changes = slices.Clone(batch.changes)
+	for _, id := range keyIDs {
+		batch.changes = append(batch.changes, strings.ToLower(id))
+	}
+	return context.WithValue(ctx, keyScopeUseContextKey{}, batch)
 }
 
 // lockAgentScopeUse admits a keyed transaction before any tenant, tree or row
 // locks. RequireTx can run before or after resource locks, but must never be
 // the first acquirer of this fence in a keyed request. Different keys remain
-// independent; transactions sharing a key serialize, as do trims of that key.
+// independent; uses of one key overlap, while authority changes exclude uses.
 func lockAgentScopeUse(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	var keys []string
+	var changes []string
 	if batch, ok := ctx.Value(keyScopeUseContextKey{}).(keyScopeUseBatch); ok && batch.tenantID == tenantID {
 		keys = slices.Clone(batch.keyIDs)
+		changes = batch.changes
 	}
 	if p, ok := tenant.PrincipalFrom(ctx); ok && p.Kind == tenant.Agent && p.KeyID != "" && p.TenantID == tenantID {
 		keys = append(keys, p.KeyID)
@@ -64,17 +85,32 @@ func lockAgentScopeUse(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	}
 	slices.Sort(keys)
 	for _, keyID := range slices.Compact(keys) {
-		if err := LockKeyScopeUseTx(ctx, tx, tenantID, keyID); err != nil {
+		lock := LockKeyScopeUseTx
+		if slices.Contains(changes, keyID) {
+			lock = LockKeyScopeChangeTx
+		}
+		if err := lock(ctx, tx, tenantID, keyID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// LockKeyScopeUseTx is the admission fence shared with person-owned trims.
+// LockKeyScopeUseTx admits concurrent uses, excluding scope/authority changes.
 // Take the entire sorted key batch before tenant/tree/resource locks; the
-// event counter remains last. Re-entering a held transaction lock is safe.
+// event counter remains last. Re-entering a held shared fence is safe even
+// when an exclusive waiter is queued; it cannot strand an already admitted use.
 func LockKeyScopeUseTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtextextended($1,615))`, strings.ToLower(tenantID+":"+keyID))
+	return err
+}
+
+// LockKeyScopeChangeTx drains admitted uses and blocks new uses until commit.
+// It uses exactly the same hash and advisory lock space as LockKeyScopeUseTx.
+// Acquire it in the sorted key batch, before tenant/tree/resource locks.
+func LockKeyScopeChangeTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,615))`, strings.ToLower(tenantID+":"+keyID))

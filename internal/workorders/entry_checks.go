@@ -90,7 +90,7 @@ func (e *EntryFailure) Error() string     { return "entry_checks_failed" }
 func (e *EntryFailure) HTTPStatus() int   { return 409 }
 func (e *EntryFailure) ErrorCode() string { return "entry_checks_failed" }
 func (e *EntryFailure) ErrorDetails() map[string]any {
-	return map[string]any{"to_status": e.ToStatus, "failed": e.Failed, "override_allowed": e.OverrideAllowed}
+	return map[string]any{"to_status": e.ToStatus, "checks": e.Failed, "failed": e.Failed, "override_allowed": e.OverrideAllowed}
 }
 
 type entryCatalogItem struct{ en, de, condition string }

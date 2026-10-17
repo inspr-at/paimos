@@ -190,7 +190,8 @@ func TestErrorMessagesReadBothErrorShapes(t *testing.T) {
 		`plain text`: "plain text",
 		// Risk: reducing a structured entry refusal to its code hides how the
 		// agent can repair it. Only the explicit public check details are shown.
-		`{"error":"entry_checks_failed","failed":[{"id":"release_copy_set","label":"Release text set (EN + DE)","reason":"benefit_de is required","ignored":"not rendered"}]}`: "entry_checks_failed; release_copy_set (Release text set (EN + DE)): benefit_de is required",
+		`{"error":"entry_checks_failed","failed":[{"id":"release_copy_set","label":"Release text set (EN + DE)","reason":"benefit_de is required","ignored":"not rendered"}]}`:                                                                                                                      "entry_checks_failed; release_copy_set (Release text set (EN + DE)): benefit_de is required",
+		`{"error":"entry_checks_failed","checks":[{"id":"estimate_set","label":"Estimate set","reason":"Set an estimate"},{"id":"acceptance_present","label":"Acceptance criteria written","reason":"Write acceptance criteria"}],"failed":[{"id":"stale_alias","reason":"must not be rendered"}]}`: "entry_checks_failed; estimate_set (Estimate set): Set an estimate; acceptance_present (Acceptance criteria written): Write acceptance criteria",
 	} {
 		if got := errorMessage([]byte(payload)); got != want {
 			t.Fatalf("%s: got %q, want %q", payload, got, want)

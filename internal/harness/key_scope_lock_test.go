@@ -65,10 +65,18 @@ func TestKeyScopeUsageRegistrationVersusMoveLockOrder(t *testing.T) {
 			finished := make(chan struct{})
 			go func() { secondDone <- b(); close(finished) }()
 			lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, holder, finished)
-			// The second operation waits on the key admission fence, before
-			// acquiring the ticket. Releasing the first must let both commit.
-			if lock != "advisory" {
-				t.Errorf("%s first: competing operation waited on %q, want key advisory fence", first, lock)
+			// Shared key admission lets the second operation reach the tenant
+			// fence held by the first, before either can invert resource locks.
+			if lock != "transactionid" {
+				t.Errorf("%s first: competing operation waited on %q, want tenant row fence", first, lock)
+			}
+			var tenantWait bool
+			if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+			 WHERE $1::int=ANY(pg_blocking_pids(pid)) AND query LIKE '%FROM tenants%FOR NO KEY UPDATE%')`, holder).Scan(&tenantWait); err != nil {
+				t.Fatal(err)
+			}
+			if !tenantWait {
+				t.Fatal("competing operation did not pass shared admission and wait at the tenant fence")
 			}
 			barrier.Release()
 			expect(t, dbtest.Await(t, ctx, firstDone), statusA)

@@ -520,6 +520,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeFromRootWorkingDirectory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeKeepsDrainingBusyRun","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeRestartsWithUnconfirmedLedgerIntent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedSyncTombstoneProbesAndFailureDiagnostics","tier":"GATED-FULL"}
@@ -1455,6 +1457,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestClaudeTierConfirmsFreshVendorState","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeVerificationSDKEnforcesNoTools","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCleanStopReleasesOwnedRuntime","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexAcknowledgedTerminalAndDrain","tier":"GATED-FULL"}
     ,
@@ -3732,6 +3736,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeCeilingParityCreateEditRotate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestKeyScopeChangeDrainsUsesAndRejectsQueuedStaleScope","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeChangesImmediateAuditedAndBounded","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeConcurrentDeltasPreserveBothChanges","tier":"GATED-FULL"}
@@ -3757,6 +3763,8 @@
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeRoleGrantForeignRoleAndStaleEditor","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeUnknownCleanupAuditedAndKnownScopesPreserved","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestKeyScopeUsesOverlapThroughAuthorization","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopesThroughBearerMiddleware","tier":"GATED-FULL"}
     ,
@@ -4701,6 +4709,8 @@
     {"kind":"go","package":"internal/cli","name":"TestDoctorRulesHookOutputs","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestDoctrineProposeCommand","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestEntryRefusalReasonsAndWriterPreview","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestEstimateCLIFlagsAndPlan","tier":"GATED-FULL"}
     ,
@@ -5723,6 +5733,8 @@
     {"kind":"go","package":"internal/db","name":"TestFullAccessMigrationAcrossTenants","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestHumanCheckMigrationUpgradesExistingStrictSchemasUnderRLS","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestKeyScopeBatchModesAndOrder","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestLockTenantBlocksOnTheCanonicalFenceStatement","tier":"GATED-FULL"}
     ,
