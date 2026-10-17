@@ -63,8 +63,8 @@ paths:
       description: 'Agent-only harness.worker. Proxy-Authorization proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation''s dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.'
       parameters:
         - $ref: '#/components/parameters/projectId'
-        - {$ref: '#/components/parameters/workerLease'}
-        - {$ref: '#/components/parameters/legacyWorkerLease'}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -107,8 +107,8 @@ paths:
       description: Agent-only harness.worker and the current generation lease. Requires expected_revision and generation. The server checks the existing Queue under the tree fence. An idle lead, a lead with a routed worker waiting, or one whose bounded project turn has ended requests the existing cooperative checkpoint/pause. No slot is freed until confirmed exit. Routed assignments retain this generation and can start after worker-priority yield and confirmed exit through all four live gates. Other pauses remain fenced. Restart is explicit and uses ordinary admission; eligible workers precede restart. Automatic production launch remains disabled pending AEON-603.
       parameters:
         - $ref: '#/components/parameters/projectId'
-        - {$ref: '#/components/parameters/workerLease'}
-        - {$ref: '#/components/parameters/legacyWorkerLease'}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -299,8 +299,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       requestBody:
         content:
           application/json:
@@ -325,8 +325,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '409': {description: Managed worker required}
@@ -338,8 +338,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       responses:
         '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
         '403': {description: "Worker proof or current permission rejected"}
@@ -352,8 +352,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       requestBody:
         required: true
         content:
@@ -372,8 +372,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       requestBody:
         required: true
         content:
@@ -438,8 +438,8 @@ paths:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/controlId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Exact claimed control completion}
@@ -449,8 +449,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Closed immutable generation}
@@ -476,8 +476,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
-        - $ref: '#/components/parameters/workerLease'
-        - $ref: '#/components/parameters/legacyWorkerLease'
+        - $ref: '#/components/parameters/WorkerLease'
+        - $ref: '#/components/parameters/LegacyWorkerLease'
       requestBody:
         required: true
         content:
@@ -518,8 +518,8 @@ paths:
         divergent reuse or competing stale writes return 409. All authorization and generation checks
         precede replay, so expired/revoked credentials and stopped/archived generations cannot replay.
       parameters:
-        - {$ref: '#/components/parameters/workerLease'}
-        - {$ref: '#/components/parameters/legacyWorkerLease'}
+        - {$ref: '#/components/parameters/WorkerLease'}
+        - {$ref: '#/components/parameters/LegacyWorkerLease'}
       requestBody:
         required: true
         content:
@@ -536,8 +536,20 @@ components:
     projectId: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     sessionId: {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     controlId: {name: controlId, in: path, required: true, schema: {type: string, format: uuid}}
-    workerLease: {name: Proxy-Authorization, in: header, required: false, schema: {type: string, minLength: 39, maxLength: 4103}, description: 'Bearer <worker-lease> alongside the agent Authorization bearer. This or the legacy header is required; never returned or logged.'}
-    legacyWorkerLease: {name: X-Aeon-Worker-Lease, in: header, required: false, deprecated: true, schema: {type: string, minLength: 32, maxLength: 4096}, description: 'Release 137 transition only; use Proxy-Authorization. Emits a value-free warning.'}
+    WorkerLease:
+      name: Proxy-Authorization
+      in: header
+      required: false
+      schema: {type: string, minLength: 39, maxLength: 4103, pattern: '^[Bb][Ee][Aa][Rr][Ee][Rr] [^ ]+$'}
+      description: 'Bearer <worker-lease>, alongside Authorization: Bearer <agent-key>. Worker routes require this proof or the deprecated X-Aeon-Worker-Lease for one transition release (137). If both are supplied they must match; malformed new proof never falls back. Never returned or logged. Stopped generations reject ordinary worker calls; only stop/exit confirmation and usage settlement retain proof authority.'
+    LegacyWorkerLease:
+      name: X-Aeon-Worker-Lease
+      in: header
+      required: false
+      deprecated: true
+      schema: {type: string, minLength: 32, maxLength: 4096}
+      description: 'Deprecated in release 137; use Proxy-Authorization: Bearer <worker-lease>. Accepted for one release with a value-free deprecation warning. Never returned or logged.'
+    workerLease: {$ref: '#/components/parameters/WorkerLease'}
   schemas:
     AgentRecoveryDiagnosis:
       type: object
