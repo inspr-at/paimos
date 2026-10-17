@@ -373,7 +373,14 @@ func TestGoalListAggregateBudgetPaginatesWithoutLoss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &module{f.db.App, func() time.Time { return apiClock }}
+	config := f.db.App.Config()
+	config.ConnConfig.Tracer = goalQueryDiagnostics{t}
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	m := &module{pool, func() time.Time { return apiClock }}
 	query := "?project=" + f.project + "&q=budget&sort=name&limit=100"
 	first := listResult(t, f, m, query)
 	if len(first.Items) != 1 || first.Items[0].ID != goals[0] || first.Items[0].Expansion != "full" || !first.Truncated || first.NextCursor == "" {

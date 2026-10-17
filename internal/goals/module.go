@@ -3,9 +3,9 @@
 package goals
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -96,14 +96,15 @@ func (m *module) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// ReadRequestBody owns the transport deadline and the 256 KiB bound.
-	if err = httpapi.BufferRequestBodyTimeout(w, r, MaxBodyBytes, 10*time.Second); err != nil {
+	raw, err := httpapi.ReadRequestBody(w, r, MaxBodyBytes, 10*time.Second)
+	if err != nil {
 		respond(w, nil, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	now := m.now()
-	in, err := DecodeRequest(r.Body)
+	in, err := DecodeRequest(bytes.NewReader(raw))
 	if err != nil {
 		respond(w, nil, err)
 		return
@@ -138,17 +139,13 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
-	if err = httpapi.BufferRequestBodyTimeout(w, r, MaxBodyBytes, 10*time.Second); err != nil {
+	raw, err := httpapi.ReadRequestBody(w, r, MaxBodyBytes, 10*time.Second)
+	if err != nil {
 		respond(w, nil, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		respond(w, nil, err)
-		return
-	}
 	var in createInput
 	if err = uniqueObjectKeys(raw); err == nil {
 		err = decodeStrict(raw, &in)

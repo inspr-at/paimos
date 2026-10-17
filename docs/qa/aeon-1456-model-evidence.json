@@ -288,7 +288,7 @@
       "head": "498a45771",
       "result": "blocked",
       "exit_code": 3,
-      "scope": "Remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR hosted CI static job. No local heavy fallback or guard bypass."
+      "scope": "Remote static check paused at night (night protocol: approved remote test host is shared with the CI pool); rely on the PR hosted CI static job. No local heavy fallback or guard bypass."
     }
   ],
   "resolved_regressions": {
@@ -324,7 +324,7 @@
   },
   "fix3": {
     "date": "2026-10-17",
-    "runner": "mbp2606 via remote-test.sh; PostgreSQL 18.6; NOBYPASSRLS request role; unchanged 6000-node fixture",
+    "runner": "approved remote test host via remote-test.sh; PostgreSQL 18.6; NOBYPASSRLS request role; unchanged 6000-node fixture",
     "risk": "A filtered ordinary-node list repeats full child scans under the Goals RLS policy, exceeding the unchanged 600ms CI budget; narrowing visibility must preserve hidden-outcome and reference protection.",
     "changes": [
       "Expose the ordinary-kind predicate with <> ALL (ARRAY(SELECT ...)) instead of a whole-policy CASE. The kind catalog is one InitPlan; the existing outcome visibility function, tenant/project policies, cycle bound and restoration remain intact.",

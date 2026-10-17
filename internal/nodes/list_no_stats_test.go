@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,21 +42,25 @@ func TestListWithoutStatistics(t *testing.T) {
 	} {
 		planCtx := db.WithReadStatementTimeout(ctx, 2*time.Second)
 		err = db.InTenant(planCtx, appPool, p.TenantID, func(tx pgx.Tx) error {
-			rows, err := tx.Query(planCtx, "EXPLAIN (ANALYZE, BUFFERS) "+query.sql, query.args...)
-			if err != nil {
+			var raw []byte
+			if err := tx.QueryRow(planCtx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON, TIMING OFF) "+query.sql, query.args...).Scan(&raw); err != nil {
 				return err
 			}
-			defer rows.Close()
-			for rows.Next() {
-				var line string
-				if err := rows.Scan(&line); err != nil {
-					return err
-				}
-				if strings.HasPrefix(line, "Execution Time:") || strings.HasPrefix(line, "  Buffers:") || strings.Contains(line, "Seq Scan on nodes") {
-					t.Logf("%s %s", query.name, line)
-				}
+			var plan []map[string]any
+			if err := json.Unmarshal(raw, &plan); err != nil {
+				return err
 			}
-			return rows.Err()
+			// Risk: without statistics, a nested loop compares every child
+			// with every parent even if its materialized input scans only once.
+			// Count rejected join pairs as well as node scans; runtime alone
+			// can pass on a fast runner while the same plan times out in CI.
+			visits := nodeVisitsInCTE(plan[0], "CTE scope", false)
+			rejected := scopeRejectedPairs(plan[0], false)
+			t.Logf("%s execution_ms=%v scope_node_visits=%.0f rejected_scope_pairs=%.0f", query.name, plan[0]["Execution Time"], visits, rejected)
+			if visits <= 0 || visits+rejected > 2*6001+1 {
+				t.Errorf("%s scope work = %.0f visits + %.0f rejected pairs; want at most two passes over 6001 nodes and the root lookup", query.name, visits, rejected)
+			}
+			return nil
 		})
 		if err != nil {
 			t.Fatalf("%s without statistics: %v", query.name, err)
@@ -67,6 +70,26 @@ func TestListWithoutStatistics(t *testing.T) {
 	if err != nil || len(page.Items) != 50 || page.Facets["kind"]["work"] != 2058 {
 		t.Fatalf("list without statistics: %v, items=%d, facets=%v", err, len(page.Items), page.Facets)
 	}
+}
+
+func scopeRejectedPairs(value any, inside bool) float64 {
+	var pairs float64
+	switch value := value.(type) {
+	case []any:
+		for _, child := range value {
+			pairs += scopeRejectedPairs(child, inside)
+		}
+	case map[string]any:
+		inside = inside || value["Subplan Name"] == "CTE scope"
+		if inside {
+			rejected, _ := value["Rows Removed by Join Filter"].(float64)
+			loops, _ := value["Actual Loops"].(float64)
+			pairs += rejected * loops
+		}
+		pairs += scopeRejectedPairs(value["Plan"], inside)
+		pairs += scopeRejectedPairs(value["Plans"], inside)
+	}
+	return pairs
 }
 
 // A scoped list with no nodes statistics must keep every nodes access on an
