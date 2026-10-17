@@ -58,7 +58,8 @@ func receivingFixture(t *testing.T) *receiveFixture {
 		}
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+testKey {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer "+testKey && auth != workerAuthorization(testKey, receiveLease) {
 			t.Error("lost authentication")
 		}
 		if r.Method == http.MethodGet {

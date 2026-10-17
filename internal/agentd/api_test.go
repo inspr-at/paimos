@@ -319,7 +319,8 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 	seen := map[string]bool{}
 	var mu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer scoped-key" {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer scoped-key" && auth != workerAuthorization("scoped-key", "private-worker-lease-32-characters-minimum") {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

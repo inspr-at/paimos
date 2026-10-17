@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -573,16 +574,16 @@ func workerKeyTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Princ
 }
 
 func workerKeyPermissionTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, permission string) error {
-	scheme, token, ok := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
-	if !ok || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(r.Header.Get("Authorization")))
+	if malformed || token == "" || len(token) > 8192 {
 		return unavailable()
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return unavailable()
 	}
 	prefix, secret, ok := strings.Cut(rest, "_")
-	if !ok || len(token) > 8192 {
+	if !ok {
 		return unavailable()
 	}
 	sum := sha256.Sum256([]byte(secret))

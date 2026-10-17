@@ -25,6 +25,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Error is a safe HTTP failure shared by the work-order and run modules.
@@ -242,11 +243,11 @@ func CurrentKeyPrincipalAt(r *http.Request, tx pgx.Tx, p tenant.Principal, scope
 	if p.Kind == tenant.Person {
 		return p, nil
 	}
-	scheme, token, ok := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
-	if !ok || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(r.Header.Get("Authorization")))
+	if malformed || token == "" {
 		return p, Fail(403, "scoped agent key required")
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok || len(rest) > 512 {
 		return p, Fail(403, "scoped agent key required")
 	}

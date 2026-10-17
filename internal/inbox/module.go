@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 const scopeInboxSend = "inbox.send"
@@ -230,11 +231,11 @@ func (m *module) authorizeSend(ctx context.Context, r *http.Request, p tenant.Pr
 }
 
 func splitBearer(h string) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(strings.TrimSpace(h), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(h))
+	if malformed || token == "" {
 		return "", "", false
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false
 	}
