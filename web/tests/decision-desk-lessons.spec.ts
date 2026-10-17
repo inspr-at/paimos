@@ -3,7 +3,7 @@
 // recommendation, or loses the native Undo while controls move on a phone.
 // AEON-1385: the last lesson ends the round like every other kind: "All decided"
 // with Undo for 1.2 s, then the toast with Undo for the rest of the grace.
-import { test, expect, type Locator, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
@@ -188,7 +188,10 @@ test('AEON-1331 rule draft, omitted source and keyboard use the native decision'
   await expect(allDecidedUndo(page)).toBeVisible()
   expect(state.calls[0]!.path).toContain('/draft'); expect(state.calls[0]!.body).toEqual({ layer_id: 'rule-layer', set_id: 'rule-set' })
 })
-test('AEON-1331 failed decisions and Undo keep the lesson honest', async ({ page }) => {
+test('AEON-1331 failed decisions and Undo keep the lesson honest', async ({ page }, testInfo) => {
+  // The four widths and themes stay in this case. Another browser row would put
+  // decision-desk-fixtures.ts over the 300-case fan-out and widen every edit of that helper.
+  test.setTimeout(180_000)
   await page.clock.install(); const { state } = await mockLessons(page); await openLesson(page); state.fail = true
   await page.getByTestId('desk-decide').click(); await expect(page.getByTestId('desk-status')).toContainText('changed since')
   await expect(page.getByTestId('desk-undo')).not.toBeVisible(); expect(state.decided).toBe(false)
@@ -199,6 +202,11 @@ test('AEON-1331 failed decisions and Undo keep the lesson honest', async ({ page
   // The failed Undo reported no success: the round still ends by itself and the toast offers Undo again.
   await page.mouse.move(0, 0); await page.clock.runFor(1200); await expect(page.getByTestId('desk-paper')).toBeHidden()
   await expect(page.locator('.toast').filter({ hasText: 'Added to the changelog.' }).getByRole('button', { name: 'Undo' })).toBeVisible()
+  for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+    await test.step(`AEON-1385 a round that ends on a lesson closes like one that ends on an answer at ${width} ${theme}`, async () => {
+      await lessonClosesLikeAnswer(page, testInfo, width, theme)
+    })
+  }
 })
 test('AEON-1331 replaced proposal refuses the frozen lesson', async ({ page }) => {
   const { state } = await mockLessons(page); await openLesson(page); state.revision++
@@ -298,37 +306,37 @@ async function graceEnds(page: Page, toast: Locator) {
   await page.clock.runFor(7999); await expect(toast).toBeVisible()
   await page.clock.runFor(1 + 48); await expect(toast).toHaveCount(0)
 }
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
-  test(`AEON-1385 a round that ends on a lesson closes like one that ends on an answer at ${width} ${theme}`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 }); await page.clock.install()
-    // The answer: decided at the paused time, so its ten-second grace runs on the page clock.
-    const world = await mockDecisionDesk(page, { theme })
-    world.approval.decision = 'approved'; world.rule.state = 'proposed'; world.questions.splice(1)
-    world.questions[0]!.input.source_request_id = world.action.id
-    await page.goto('/decision-desk'); await page.getByTestId('desk-one-by-one').click()
-    await expect(page.getByTestId('desk-decide')).toBeEnabled()
-    world.answerTime = await pause(page); await page.getByTestId('desk-decide').click()
-    await graceEnds(page, await roundEnd(page, /Decided\. It goes to .+ in a few seconds\./))
+async function lessonClosesLikeAnswer(page: Page, testInfo: TestInfo, width: number, theme: 'light' | 'dark') {
+  // The caller already installed the page clock and left it paused, which is the same start as clock.install().
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+  // The answer: decided at the paused time, so its ten-second grace runs on the page clock.
+  const world = await mockDecisionDesk(page, { theme })
+  world.approval.decision = 'approved'; world.rule.state = 'proposed'; world.questions.splice(1)
+  world.questions[0]!.input.source_request_id = world.action.id
+  await page.goto('/decision-desk'); await page.getByTestId('desk-one-by-one').click()
+  await expect(page.getByTestId('desk-decide')).toBeEnabled()
+  world.answerTime = await pause(page); await page.getByTestId('desk-decide').click()
+  await graceEnds(page, await roundEnd(page, /Decided\. It goes to .+ in a few seconds\./))
 
-    // The lesson: the same 1.2 s, the same toast length.
-    await page.clock.resume(); await page.unrouteAll({ behavior: 'ignoreErrors' })
-    const { state } = await mockLessons(page, { theme }); await openLesson(page)
-    await pause(page); await page.getByTestId('desk-decide').click()
-    const lesson = await roundEnd(page, 'Added to the changelog.')
-    await page.screenshot({ path: testInfo.outputPath(`lesson-toast-${width}-${theme}.png`) })
-    await graceEnds(page, lesson)
+  // The lesson: the same 1.2 s, the same toast length.
+  await page.clock.resume(); await page.unrouteAll({ behavior: 'ignoreErrors' })
+  const { state } = await mockLessons(page, { theme }); await openLesson(page)
+  await pause(page); await page.getByTestId('desk-decide').click()
+  const lesson = await roundEnd(page, 'Added to the changelog.')
+  await page.screenshot({ path: testInfo.outputPath(`lesson-toast-${width}-${theme}.png`) })
+  await graceEnds(page, lesson)
 
-    // Undo on "All decided" restores the lesson in place; Undo in the toast puts it back on the list.
-    state.decided = false; await page.clock.resume(); await openLesson(page)
-    await pause(page); await page.getByTestId('desk-decide').click()
-    await expect(page.getByTestId('desk-all-decided')).toContainText('1 lesson decided.')
-    await page.screenshot({ path: testInfo.outputPath(`lesson-all-decided-${width}-${theme}.png`) })
-    await allDecidedUndo(page).click(); await expect(page.getByTestId('choice-0')).toBeEnabled()
-    await expect(page.getByTestId('desk-status')).toHaveText('Undone.'); expect(state.decided).toBe(false)
-    await page.getByTestId('desk-decide').click()
-    const again = await roundEnd(page, 'Added to the changelog.')
-    await again.getByRole('button', { name: 'Undo', exact: true }).click()
-    await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible(); expect(state.decided).toBe(false)
-    expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'accept', 'undo', 'accept', 'undo'])
-  })
+  // Undo on "All decided" restores the lesson in place; Undo in the toast puts it back on the list.
+  state.decided = false; await page.clock.resume(); await openLesson(page)
+  await pause(page); await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-all-decided')).toContainText('1 lesson decided.')
+  await page.screenshot({ path: testInfo.outputPath(`lesson-all-decided-${width}-${theme}.png`) })
+  await allDecidedUndo(page).click(); await expect(page.getByTestId('choice-0')).toBeEnabled()
+  await expect(page.getByTestId('desk-status')).toHaveText('Undone.'); expect(state.decided).toBe(false)
+  await page.getByTestId('desk-decide').click()
+  const again = await roundEnd(page, 'Added to the changelog.')
+  await again.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible(); expect(state.decided).toBe(false)
+  expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'accept', 'undo', 'accept', 'undo'])
 }
