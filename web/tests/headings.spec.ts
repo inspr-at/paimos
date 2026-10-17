@@ -400,7 +400,8 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       } },
       { name: 'hover the condensed session identity', run: () => heading.hover() },
     ] })
-    expect((await panel.locator('.panel-head').boundingBox())!.height).toBeLessThanOrEqual(width <= 720 ? 93 : 45)
+    // AEON-1286's approved aeon-1438-chat-phone-approved.html uses a 56 px head + 60 px tab row + hairline.
+    expect((await panel.locator('.panel-head').boundingBox())!.height).toBeLessThanOrEqual(width <= 720 ? 117 : 45)
     await screenshot(page, 'session', width, theme)
     await noOverflow(page)
     await page.goto('/settings/accounts')

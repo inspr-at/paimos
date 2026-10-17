@@ -538,6 +538,8 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     const { calls, backend } = await setup(page, { example: 'over', dial: { selected: 'claude' } })
     await page.goto('/agents')
     const card = dial(page), fold = card.locator('.fs-tog'), toggle = card.locator('.f-live')
+    // AEON-1286's approved compact chrome starts phones folded; open the detail explicitly.
+    if (width <= 720) { await expect(fold).toHaveAttribute('aria-expanded', 'false'); await fold.click() }
     await expect(row(page, 'claude')).toBeVisible()
     mkdirSync(shots, { recursive: true })
     // The capture grows the viewport to the card; an element screenshot otherwise clips a long phone dial.
@@ -644,6 +646,12 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const errors = watchErrors(page)
     const { backend } = await setup(page, { example: 'limit', dial: { selected: 'claude' } })
     await page.goto('/agents')
+    // AEON-1286's approved compact chrome starts phones folded; open the detail explicitly.
+    if (width <= 720) {
+      const fold = control(page).locator('.fs-tog')
+      await expect(fold).toHaveAttribute('aria-expanded', 'false')
+      await fold.click()
+    }
     // P1 separates the control from the unfolded card. AEON-1166 measures the
     // detail's card, while dial() intentionally searches both regions.
     const card = body(page), claude = detail(page, 'claude'), link = claude.locator('.cd-line').getByRole('link', { name: 'Settings › Models' })
