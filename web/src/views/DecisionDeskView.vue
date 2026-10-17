@@ -602,9 +602,10 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
           <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
         </div>
         <div class="refresh-slot" data-testid="desk-refresh-slot">
-          <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed · retrying · showing ${lastGoodTime}` }}</span><span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></p>
+          <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed · retrying · showing ${lastGoodTime}` }}</span> <span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
         </div>
-        <div v-if="filter === 'decided'" class="seg dec-filter" role="radiogroup" aria-label="Stamp">
+        <!-- On Open the stamp filter keeps its box unseen, so switching tabs moves nothing below the row (AEON-1477). -->
+        <div class="seg dec-filter" :class="{ reserved: filter !== 'decided' }" role="radiogroup" aria-label="Stamp" :aria-hidden="filter !== 'decided' || undefined" :inert="filter !== 'decided' || undefined">
           <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
         </div>
         <Transition name="one-by-one">
@@ -697,20 +698,27 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }
 .dp-head .head-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
 /* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
-   the Decided stamp filter takes a second line of its own; the button keeps the first, so it never wraps or adds height. */
+   the Decided stamp filter takes a line of its own; the button keeps the first, so it never wraps or adds height. */
 .dp-tabrow { container: desk-tabs / inline-size; }
-.dp-bar { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+.dp-bar { display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
 .dp-bar .view-tabs { grid-area: 1 / 1; }
 .dp-bar .view-tabs button { white-space: nowrap; }
-/* Tick's AEON-1477 hint owns its slot before it has anything to say. Its
-   two-line allowance fits inside the tabs' existing height on a wide row. */
-.refresh-slot { grid-area: 1 / 2; min-width: 0; min-height: 32px; display: grid; align-items: center; }
-.refresh-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 0 4px; margin: 0; color: var(--ink-3); font-size: 12px; line-height: 16px; }
-.refresh-hint svg { flex: none; }
+/* AEON-1477 (Tick): on a wide row the hint takes the row's free end, right-aligned before the round action. Its slot
+   is the row's own height and adds none; centred while it fits, a hint that needs more lines grows upward into the
+   header's empty right side, never down onto the list. */
+.refresh-slot { grid-area: 1 / 3; align-self: stretch; position: relative; min-width: 0; }
+.refresh-hint { position: absolute; right: 0; bottom: 0; min-height: 100%; max-width: 100%; display: flex; align-items: center; margin: 0; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: right; }
+.refresh-copy { text-wrap: balance; }
+.refresh-hint svg { display: inline-block; margin-right: 4px; vertical-align: -1px; }
 .refresh-hint.escalated { color: var(--warn-ink); }
-.refresh-retry { display: inline-flex; align-items: center; gap: 4px; opacity: 0; }
+.refresh-retry { white-space: nowrap; opacity: 0; }
 .refresh-retry.shown, .refresh-hint:hover .refresh-retry, .refresh-hint:focus-within .refresh-retry { opacity: 1; }
-.refresh-hint .linkish { color: inherit; font-weight: inherit; white-space: nowrap; }
+.refresh-hint .linkish { color: inherit; font-weight: inherit; }
+/* Touch has no hover to reveal it: Try again shows with the hint, on a 44 × 44 box that adds no line height. */
+@media (pointer: coarse) {
+  .refresh-retry { opacity: 1; }
+  .refresh-hint .linkish { display: inline-block; min-width: 44px; min-height: 44px; margin: -14px 0; }
+}
 /* 12.5 px is the tabs' type (a plain .btn is 13 px), so the label fits beside them on a 390 px phone. */
 .one-by-one { grid-area: 1 / -2; justify-self: end; gap: 6px; padding: 0 12px; font-size: 12.5px; }
 /* Coarse pointers: 44 px tall, and 44 × 44 as the arrow alone. */
@@ -719,16 +727,17 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .one-by-one-enter-from, .one-by-one-leave-to { opacity: 0; }
 .dp-bar .seg button .n { font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .dp-bar .seg button[aria-checked="true"] .n { color: var(--teal-ink); }
-/* The stamp filter gets its own line below the tabs and their reserved hint;
-   on a phone it scrolls sideways instead of wrapping (AEON-1339). */
-.dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; justify-self: start; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+/* The stamp filter stays one line beside the tabs; on a phone it scrolls sideways instead of wrapping (AEON-1339). */
+.dp-bar .dec-filter { grid-area: 1 / 2; justify-self: start; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.dp-bar .dec-filter.reserved { visibility: hidden; }
 .dp-bar .dec-filter::-webkit-scrollbar { display: none; }
 .dp-bar .dec-filter button { flex: none; white-space: nowrap; }
-/* Below 910 px the hint owns a reserved line under the tabs. */
+/* 910 px: a 960 px window with a classic gutter wraps; 1024 keeps one row, where the filter and the hint fit.
+   Below it the hint owns a reserved line under the tabs and the filter the line after it. */
 @container desk-tabs (max-width: 909.98px) {
   .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
-  .refresh-slot { grid-area: 2 / 1 / auto / -1; min-height: 40px; }
-  .refresh-hint { line-height: 20px; }
+  .refresh-slot { grid-area: 2 / 1 / auto / -1; align-self: auto; min-height: 40px; display: grid; align-items: center; }
+  .refresh-hint { position: static; min-height: 0; display: block; line-height: 20px; text-align: left; }
   .dp-bar .dec-filter { grid-area: 3 / 1 / auto / -1; }
 }
 /* Below about 420 px the view tabs and the round action give up a little padding so the label still clears the tabs.

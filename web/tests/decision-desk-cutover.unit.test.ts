@@ -89,23 +89,39 @@ it('AEON-1477 retains the last good projection through 429, 500 and abort, reset
   expect(desk.count).toBe(3); expect(desk.failures).toBe(0); expect(desk.failedSince).toBeNull()
 })
 
-it('AEON-1477 coalesces twenty live wakes in one second into one in-flight read and one trailing read', async () => {
+it('AEON-1477 coalesces a two-second burst of twenty live events into one trailing read, and Try again reads at once', async () => {
   vi.useFakeTimers()
-  const first = deferred<ReturnType<typeof page>>()
-  vi.mocked(loadDeskProjection).mockReturnValueOnce(first.promise).mockResolvedValue(page(2))
+  const trailing = deferred<ReturnType<typeof page>>()
+  vi.mocked(loadDeskProjection).mockResolvedValueOnce(page(1)).mockReturnValueOnce(trailing.promise).mockResolvedValue(page(3))
   const { session, desk } = setup()
+  // Opening the Desk (a new person) reads at once, outside any event window.
   session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }
-  const pending = desk.refresh()
-  const wake = vi.mocked(onProjectionWake).mock.lastCall![0]
-  for (let event = 0; event < 20; event++) { wake('question.asked'); await vi.advanceTimersByTimeAsync(50) }
   expect(loadDeskProjection).toHaveBeenCalledTimes(1)
-  first.resolve(page(1)); await pending
-  await vi.advanceTimersByTimeAsync(0)
+  await vi.advanceTimersByTimeAsync(0); expect(desk.count).toBe(1)
+  const wake = vi.mocked(onProjectionWake).mock.lastCall![0]
+  for (let event = 0; event < 20; event++) { wake('question.asked'); await vi.advanceTimersByTimeAsync(100) }
+  await vi.advanceTimersByTimeAsync(999)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(1)
   expect(loadDeskProjection).toHaveBeenCalledTimes(2)
-  expect(desk.count).toBe(2)
+  // An event while the trailing read runs is not lost: it opens the next window.
+  wake('question.asked')
+  trailing.resolve(page(2)); await vi.advanceTimersByTimeAsync(0); expect(desk.count).toBe(2)
+  await vi.advanceTimersByTimeAsync(2999)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(2)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(10_000)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(3)
+  // Try again does not wait for the window; its read covers the pending event.
+  wake('question.asked'); await vi.advanceTimersByTimeAsync(500)
+  expect(await desk.refresh()).toBe(true)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(4)
+  await vi.advanceTimersByTimeAsync(10_000)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(4)
   // A delayed live wake cannot repopulate person-owned data after reset.
-  wake('question.asked'); desk.invalidate(); await vi.advanceTimersByTimeAsync(1000)
-  expect(loadDeskProjection).toHaveBeenCalledTimes(2); expect(desk.projection).toBeNull()
+  wake('question.asked'); desk.invalidate(); await vi.advanceTimersByTimeAsync(3000)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(4); expect(desk.projection).toBeNull()
 })
 
 it('AEON-1477 keeps a cancelled first load quiet and a genuine first failure unknown', async () => {

@@ -8604,6 +8604,12 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1024, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1440, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 390, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 a genuinely failed first load never claims an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8617,6 +8623,8 @@
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"touch › AEON-1477 on touch Try again shows with the hint on a 44 px target","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
@@ -17728,7 +17736,7 @@
     ,
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"retired Business and compatibility URLs still resolve to their canonical owners, and external account links remain","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 coalesces twenty live wakes in one second into one in-flight read and one trailing read","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 coalesces a two-second burst of twenty live events into one trailing read, and Try again reads at once","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 keeps a cancelled first load quiet and a genuine first failure unknown","tier":"ESSENTIAL"}
     ,

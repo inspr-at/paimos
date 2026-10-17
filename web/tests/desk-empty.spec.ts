@@ -2,7 +2,7 @@
 // AEON-1406 (Tick's approved design): the empty Open tab is a calm picture with one line.
 // Risks: the card jumps between reading (D), all clear (A) and a silent source (B); a silent
 // source still reads as all clear; both theme pictures show; a narrow phone scrolls sideways.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
 import { fixtures, mockWork } from './work-fixtures'
 
@@ -102,6 +102,114 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
 }
 
 async function documentFonts(page: Page) { await page.evaluate(() => document.fonts.ready.then(() => undefined)) }
+
+// AEON-1477 fix round 4 (Tick): the stamp filter is back beside the tabs (main's place). On a wide row the hint takes
+// that row's free right end; on a narrow one it keeps its reserved line under the tabs, the filter the line after it.
+// Risk: switching Open ↔ Decided moves the list because the filter or the hint adds a line on one tab only.
+async function mockFailingDesk(page: Page) {
+  await page.clock.setFixedTime(new Date('2026-10-17T13:58:00Z'))
+  await mockEmptyDesk(page, 'light', true)
+  const world = { failure: 0, reads: 0 }
+  await page.route(url => url.pathname === '/api/decision-desk/projection', route => {
+    world.reads++
+    return world.failure ? route.fulfill({ status: world.failure, json: { error: 'Unavailable' } }) : route.fallback()
+  })
+  await page.goto('/decision-desk')
+  await expect(page.getByTestId('desk-row-u:accounts-1477')).toBeVisible()
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+  await documentFonts(page)
+  // Two failed focus refreshes raise the quiet hint (one alone stays silent).
+  const failTwice = async () => {
+    world.failure = 500
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const before = world.reads
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+      await expect.poll(() => world.reads).toBeGreaterThan(before)
+      await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+    }
+    await expect(page.getByTestId('desk-refresh-hint')).toContainText('Refresh failed · retrying · showing')
+  }
+  return { world, failTwice }
+}
+
+async function box(locator: Locator) { return (await locator.boundingBox())! }
+
+for (const width of [1440, 1024, 390]) {
+  test(`AEON-1477 Open and Decided start the list at the same y at ${width}, with and without the hint`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    const { failTwice } = await mockFailingDesk(page)
+    const list = page.getByTestId('desk-list'), row = page.getByTestId('desk-row-u:accounts-1477'), hint = page.getByTestId('desk-refresh-hint')
+    const tabs = page.getByRole('radiogroup', { name: 'Show' }), stamps = page.getByRole('radiogroup', { name: 'Stamp' }), slot = page.getByTestId('desk-refresh-slot')
+    const wide = width >= 1024
+    const crop = async (name: string) => page.screenshot({ path: testInfo.outputPath(`AEON-1477-fix4-${name}-${width}.png`), clip: { x: 0, y: 0, width, height: Math.min(900, (await box(list)).y + 180) } })
+    const sweep = async (label: string, hinted: boolean) => {
+      const listAt = (await box(list)).y, rowAt = (await box(row)).y
+      if (hinted) await crop('open-hint')
+      await page.getByTestId('desk-tab-decided').click()
+      await expect(stamps).toBeVisible()
+      await expect(page.getByTestId('desk-empty')).toBeVisible()
+      expect((await box(list)).y, `${width} ${label}: Decided starts the list where Open did`).toBe(listAt)
+      const t = await box(tabs), f = await box(stamps), s = await box(slot)
+      if (wide) {
+        expect(Math.abs(f.y + f.height / 2 - (t.y + t.height / 2)), `${width} ${label}: the filter sits on the tabs' line`).toBeLessThanOrEqual(0.5)
+        expect(f.x, `${width} ${label}: the filter follows the tabs`).toBeGreaterThanOrEqual(t.x + t.width + 10)
+        expect(s.x, `${width} ${label}: the hint slot follows the filter`).toBeGreaterThanOrEqual(f.x + f.width)
+        expect(s.y, `${width} ${label}: the hint slot is the row's own height`).toBeGreaterThanOrEqual(t.y - 0.5)
+        expect(s.y + s.height).toBeLessThanOrEqual(t.y + t.height + 0.5)
+      } else {
+        expect(s.y, `${width} ${label}: the hint line sits under the tabs`).toBeGreaterThanOrEqual(t.y + t.height)
+        expect(f.y, `${width} ${label}: the filter takes the line after the hint`).toBeGreaterThanOrEqual(s.y + s.height)
+      }
+      if (hinted) {
+        const h = await box(hint)
+        if (wide) expect(Math.abs(h.x + h.width - (s.x + s.width)), `${width}: the hint is right-aligned at the row's end`).toBeLessThanOrEqual(0.5)
+        expect(h.y, `${width}: the hint fits its slot`).toBeGreaterThanOrEqual(s.y - 0.5)
+        expect(h.y + h.height).toBeLessThanOrEqual(s.y + s.height + 0.5)
+        // A fine pointer keeps the hover/focus reveal: nothing points at the hint here.
+        await expect(hint.locator('.refresh-retry')).toHaveCSS('opacity', '0')
+        await crop('decided-hint')
+      }
+      await page.getByTestId('desk-tab-open').click()
+      await expect(stamps).toBeHidden()
+      expect((await box(list)).y, `${width} ${label}: back on Open the list is where it was`).toBe(listAt)
+      expect((await box(row)).y).toBe(rowAt)
+      return listAt
+    }
+    const quiet = await sweep('without the hint', false)
+    await failTwice()
+    expect((await box(list)).y, `${width}: the hint appears in its reserved place`).toBe(quiet)
+    expect(await sweep('with the hint', true)).toBe(quiet)
+  })
+}
+
+// Touch has no hover: Try again shows whenever the hint does, on a 44 × 44 target that adds no height.
+test.describe('touch', () => {
+  test.use({ hasTouch: true, isMobile: true })
+  test('AEON-1477 on touch Try again shows with the hint on a 44 px target', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const { world, failTwice } = await mockFailingDesk(page)
+    const list = page.getByTestId('desk-list'), hint = page.getByTestId('desk-refresh-hint')
+    const before = await box(list)
+    await failTwice()
+    expect((await box(list)).y, 'the hint and its target add no height').toBe(before.y)
+    const retry = hint.getByRole('button', { name: 'Try again' })
+    await expect(hint.locator('.refresh-retry')).toHaveCSS('opacity', '1')
+    await expect(retry).toBeVisible()
+    const target = await box(retry)
+    expect(target.width, 'Try again is at least 44 px wide').toBeGreaterThanOrEqual(44)
+    expect(target.height, 'Try again is at least 44 px tall').toBeGreaterThanOrEqual(44)
+    // The whole box answers a tap: each corner hits the button, not a neighbour drawn over it.
+    expect(await retry.evaluate(button => {
+      const r = button.getBoundingClientRect()
+      return [[r.left + 1, r.top + 1], [r.right - 1, r.top + 1], [r.left + 1, r.bottom - 1], [r.right - 1, r.bottom - 1]].map(([x, y]) => button.contains(document.elementFromPoint(x, y)))
+    })).toEqual([true, true, true, true])
+    await page.screenshot({ path: testInfo.outputPath('AEON-1477-fix4-touch-retry-390.png'), clip: { x: 0, y: 0, width: 390, height: Math.min(844, (await box(list)).y + 180) } })
+    world.failure = 0
+    await retry.tap()
+    await expect(hint).toHaveCount(0)
+    expect((await box(list)).y).toBe(before.y)
+  })
+})
 
 test('AEON-1477 a genuinely failed first load never claims an empty desk', async ({ page }) => {
   await mockEmptyDesk(page, 'light')
