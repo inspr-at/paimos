@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -140,7 +141,11 @@ func lock(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool              *pgxpool.Pool
+	publication       *releasehistory.Publication
+	publicationTenant string
+}
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 func (m *Module) Mount(mux *http.ServeMux) {
