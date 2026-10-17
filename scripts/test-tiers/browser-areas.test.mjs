@@ -45,6 +45,23 @@ const options = () => ({ event: 'pull_request', paths, impact: 'on', affectedLan
   webImports: graph(), browserMap: map(), baseTree: tree, tree: { complete: true, go: new Map(), webTests: new Map() } })
 const scheduling = value => schedulingDecision(value.event, value.paths, () => true, { ...value, graph: value.webImports, tests: rows })
 
+test('AEON-1336 bounded G7 read-state cases retain all viewport and theme coverage on every PR', () => {
+  // Risk: splitting the timed-out screenshot matrix leaves new cases NIGHTLY,
+  // so a green PR proves only the original viewport instead of all eight.
+  const catalogue = load('web').tests
+  const title = 'AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart'
+  const expected = [1440, 1024, 400, 390].flatMap(width => ['light', 'dark'].map(theme =>
+    width === 1440 && theme === 'light' ? title : `${title} (${width} ${theme})`))
+  const cases = catalogue.filter(row => row.file === 'tests/aeon-1209-agents-head.spec.ts' && row.name.startsWith(title))
+  assert.deepEqual(cases.map(row => row.name).sort(), expected.sort())
+  assert.ok(cases.every(row => row.tier === 'ESSENTIAL'), 'every split case stays on every PR')
+  for (const options of [{ event: 'pull_request', paths: ['docs/features/impact-ci-shadow.md'] },
+    { event: 'pull_request', paths: [], impact: 'off' }, { event: 'merge_group' }]) {
+    const selected = select(catalogue, options).tests
+    for (const name of expected) assert.ok(selected.some(row => row.file === cases[0].file && row.name === name), name)
+  }
+})
+
 test('AEON-1336 historical shadow qualification requires a narrowed proof and rolls back on any confirmed miss', () => {
   const good = browserAreaEvidence(area(), [regression()])
   assert.deepEqual(good, { cases: 1, affected: 1, rejected: 0, misses: [], complete: true })
