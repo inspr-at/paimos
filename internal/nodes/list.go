@@ -1325,10 +1325,8 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	}
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
-            ORDER BY updated_at DESC OFFSET 0
-        ) c
+        UNION ALL SELECT c.id FROM scope s JOIN nodes c ON c.parent_id=s.id
+        WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
