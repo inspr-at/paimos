@@ -520,11 +520,12 @@ test('September lands as Sep, a flat pace says no change, and hidden columns sor
           await pick('Moving')
           await expect(display).toHaveAttribute('aria-label', 'Display, sorted by moving, now descending')
           await expect(display).toHaveAttribute('data-sort-dir', 'desc')
+          // Only the active name is visible: never a sizing copy underneath it.
+          await expect.poll(() => visibleWords(display)).toEqual(['Moving'])
           await expect(display.locator('.sort-name')).toHaveText('Moving')
-          expect(await visibleWords(display)).toEqual(['Moving'])
         })
         for (const name of ['Queued', 'Done']) {
-          await guard.check(async () => { await pick(name); await expect(display.locator('.sort-name')).toHaveText(name); expect(await visibleWords(display)).toEqual([name]) })
+          await guard.check(async () => { await pick(name); await expect.poll(() => visibleWords(display)).toEqual([name]); await expect(display.locator('.sort-name')).toHaveText(name) })
         }
         expect((await box(display)).height).toBeGreaterThanOrEqual(width <= 760 ? 44 : 28)
         guard.done()
