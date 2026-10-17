@@ -287,13 +287,14 @@ BEGIN
    (SELECT c.*,row_number() OVER (ORDER BY c.id)=128 FROM (
     SELECT n.id,n.parent_id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
      AND n.parent_id=w.id AND n.deleted_at IS NULL AND n.id<>w.root
+     AND (n.parent_id,n.id)>=(w.id,'00000000-0000-0000-0000-000000000000'::uuid)
      ORDER BY n.id LIMIT 128
    ) c)
    UNION ALL
    (SELECT c.*,row_number() OVER (ORDER BY c.id)=128 FROM (
     SELECT n.id,n.parent_id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
      AND w.next_page AND n.parent_id=w.parent_id AND n.deleted_at IS NULL AND n.id<>w.root
-     AND n.id>w.id ORDER BY n.id LIMIT 128
+     AND (n.parent_id,n.id)>(w.parent_id,w.id) ORDER BY n.id LIMIT 128
    ) c)
   ) c
  ), bounded AS MATERIALIZED (SELECT w.root,w.id FROM walk w LIMIT 50001)

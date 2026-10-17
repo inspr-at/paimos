@@ -1329,13 +1329,15 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
         UNION ALL SELECT c.* FROM scope s CROSS JOIN LATERAL (
             (SELECT c.*,row_number() OVER (ORDER BY id)=128 FROM (
                 SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
-                    AND parent_id=s.id AND deleted_at IS NULL ORDER BY id LIMIT 128
+                    AND parent_id=s.id AND deleted_at IS NULL
+                    AND (parent_id,id)>=(s.id,'00000000-0000-0000-0000-000000000000'::uuid)
+                    ORDER BY id LIMIT 128
             ) c)
             UNION ALL
             (SELECT c.*,row_number() OVER (ORDER BY id)=128 FROM (
                 SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
                     AND s.next_page AND parent_id=s.parent_id AND deleted_at IS NULL
-                    AND id>s.id ORDER BY id LIMIT 128
+                    AND (parent_id,id)>(s.parent_id,s.id) ORDER BY id LIMIT 128
             ) c)
         ) c
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
