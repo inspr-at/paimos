@@ -56,6 +56,19 @@ test('every lifecycle state has one fitting action', () => {
   assert.equal(leadBand(lead({ state: 'cannot_start', reason: 'owner_revoked' }), 'AEON', 2).action, 'start')
 })
 
+test('AEON-1426: a stopped lead whose admission adapter is absent is not an unreadable check', () => {
+  const stopped = leadBand(lead({ state: 'paused', reason: 'admission_not_configured', session_id: 's1', generation: 1, revision: 4, process_active: false, automatic_launch_enabled: false }), 'OPS', 0)
+  assert.equal(stopped.status, 'Paused · admission is not configured')
+  assert.match(stopped.now, /session has stopped/)
+  assert.match(stopped.now, /not configured/)
+  assert.doesNotMatch(`${stopped.status} ${stopped.now}`, /be read/)
+  assert.equal(stopped.action, 'resume')
+  const waiting = leadBand(lead({ state: 'waiting_for_room', reason: 'admission_not_configured', session_id: 's1', generation: 1, revision: 3, process_active: true, automatic_launch_enabled: false }), 'OPS', 0)
+  assert.equal(waiting.status, 'Waiting · admission is not configured')
+  assert.doesNotMatch(`${waiting.status} ${waiting.now}`, /be read/)
+  assert.match(waitCopy('admission_unavailable').status, /can’t be read/)
+})
+
 test('unreadable gates mean WAIT, never a start', () => {
   assert.match(waitCopy('account_unavailable').status, /account room can’t be read/)
   assert.match(waitCopy('harness_full').status, /a harness limit is full/)

@@ -6848,6 +6848,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProgressSortUsesTheDisplayedCompletionAwarePercent","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectAdmissionAbsence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadActionsTrackCurrentPersonAndGeneration","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdmissionIsFreshAndFailClosed","tier":"ESSENTIAL"}
@@ -6881,6 +6883,8 @@
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadRemovalSerializesClaimAndRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadStoppedAbsentAdmissionShowsNotConfigured","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection","tier":"ESSENTIAL"}
     ,

@@ -88,6 +88,9 @@ test('AEON-1212: admission uses four real gates and a timestamp; no report, unre
     const result = admissionHistory([report()], stale)
     assert.equal(result.tone, 'stale'); assert.equal(result.rows.length, 4); assert.match(result.caption, /may be out of date/)
   }
+  const absent = admissionHistory([report({ outcome: 'wait', reason_codes: ['admission_not_configured'], request: { stage: 'admission', outcome: 'wait', reason_codes: ['admission_not_configured'], attempt: 1 } })], read)
+  assert.notEqual(absent.caption, "Couldn't read the last start")
+  assert.match(absent.rows.map(row => row.detail).join(' '), /not configured/)
   const unreadable = admissionHistory([report({ gate_freshness: [], request: { stage: 'admission', outcome: 'wait', reason_codes: ['admission_unavailable'], attempt: 1 } })], read)
   assert.equal(unreadable.tone, 'unreadable'); assert.equal(unreadable.rows.length, 0)
   const partiallyUnreadable = admissionHistory([report({ reason_codes: ['host_unavailable'] })], read)
