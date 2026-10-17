@@ -104,22 +104,18 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- Ordinary rows must stay index lookups. NOT IN (SELECT …) is planned as an
--- anti-join, and with the volatile serves walk beside it every node read
--- becomes a sequential rescan once statistics are missing. The kind catalog
--- is one scalar InitPlan. CASE does not call the serves walk unless the row's
--- kind is an outcome.
+-- Keep the ordinary-kind predicate visible to the planner. A CASE around the
+-- whole policy estimates that half the nodes are hidden, even for ordinary
+-- kinds, and turns recursive child probes into repeated sequential scans.
+-- ARRAY(SELECT ...) is one InitPlan, without a NOT IN membership subplan.
+-- The serves walk is needed only for outcomes under project-only visibility.
 CREATE POLICY nodes_outcome_ticket_visibility ON nodes AS RESTRICTIVE
-    USING (CASE
-        WHEN (SELECT aeon_visible_all()) THEN true
-        WHEN kind_id <> ALL (COALESCE((SELECT array_agg(id) FROM node_kinds WHERE slug = 'outcome'), '{}'::uuid[])) THEN true
-        ELSE aeon_outcome_tickets_visible(id)
-    END)
-    WITH CHECK (CASE
-        WHEN (SELECT aeon_visible_all()) THEN true
-        WHEN kind_id <> ALL (COALESCE((SELECT array_agg(id) FROM node_kinds WHERE slug = 'outcome'), '{}'::uuid[])) THEN true
-        ELSE aeon_outcome_tickets_visible(id)
-    END);
+    USING ((SELECT aeon_visible_all())
+        OR kind_id <> ALL (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
+        OR aeon_outcome_tickets_visible(id))
+    WITH CHECK ((SELECT aeon_visible_all())
+        OR kind_id <> ALL (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
+        OR aeon_outcome_tickets_visible(id));
 
 -- Keep the invoker visibility walk behind a procedural boundary. Inlining
 -- three copies of nodes RLS into the event policy caused multi-second query
