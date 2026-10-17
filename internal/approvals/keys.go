@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/workerlease"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -48,11 +49,11 @@ func lookupKeyScopes(ctx context.Context, tx pgx.Tx, authorization, principalID 
 }
 
 func parseBearer(header string) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(strings.TrimSpace(header), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(header))
+	if malformed || token == "" {
 		return "", "", false
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false
 	}

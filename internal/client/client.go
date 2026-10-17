@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/stepup"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Me is the GET /api/me response.
@@ -157,8 +158,8 @@ func (c *Client) Do(ctx context.Context, method, path string, body, dest any) er
 	return c.DoWithHeaders(ctx, method, path, body, dest, nil)
 }
 
-// DoWithHeaders sends one JSON request with additional non-credential protocol
-// headers such as a run's daemon fencing identity.
+// DoWithHeaders sends one JSON request with additional protocol headers. Worker
+// proofs and step-up credentials refuse redirects, even to the same origin.
 // MaxResponseBytes caps one response body the client reads.
 const MaxResponseBytes = 64 << 20
 
@@ -201,7 +202,8 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	if req.Header.Get(stepup.Header) != "" {
+	req.Header.Del("Proxy-Authorization")
+	if req.Header.Get(stepup.Header) != "" || workerlease.Carries(req.Header) {
 		proofHTTP := *hc
 		proofHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		hc = &proofHTTP
@@ -278,13 +280,33 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			}
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			// A proxy/server may reflect a request header in an error body.
+			// Worker callers log these errors, so remove both proof forms
+			// before decoding messages or retaining structured refusals.
+			var proofs []string
+			for _, proof := range workerlease.Proofs(req.Header) {
+				if proof == "" {
+					continue
+				}
+				proofs = append(proofs, proof)
+				encoded, _ := json.Marshal(proof)
+				payload = bytes.ReplaceAll(payload, encoded[1:len(encoded)-1], []byte("[redacted]"))
+			}
 			var detail struct {
 				Error         string `json:"error"`
 				AttachRefusal string `json:"attach_refusal"`
 				ReasonCode    string `json:"reason_code"`
 			}
 			_ = json.Unmarshal(payload, &detail)
-			status := &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			// Decode before the final pass too: a JSON escape must not bring
+			// the proof back into a message after byte-level redaction.
+			redact := func(value string) string {
+				for _, proof := range proofs {
+					value = strings.ReplaceAll(value, proof, "[redacted]")
+				}
+				return value
+			}
+			status := &StatusError{Status: res.StatusCode, Message: redact(errorMessage(payload)), AttachRefusal: redact(detail.AttachRefusal), ReasonCode: redact(detail.ReasonCode), RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
 			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= maxEntryChecksFailureBytes && json.Valid(payload) {
 				status.EntryChecksFailure = payload
 			}

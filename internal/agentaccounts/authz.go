@@ -13,14 +13,15 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 func presentedSecret(r *http.Request) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(r.Header.Get("Authorization")))
+	if malformed || token == "" {
 		return "", "", false
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false
 	}

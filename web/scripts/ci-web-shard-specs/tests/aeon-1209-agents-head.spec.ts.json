@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-1209-agents-head.spec.ts",
-    "listedTests": 19,
+    "listedTests": 35,
     "tierTiming": {
       "caseSeconds": {
         "max": 35.365,

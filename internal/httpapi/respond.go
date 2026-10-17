@@ -33,6 +33,17 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 	}{Error: message})
 }
 
+// WriteInternalError distinguishes a client cancellation from a server fault.
+// An internal timeout is still a server failure; only cancellation is 499.
+func WriteInternalError(w http.ResponseWriter, r *http.Request, step string, err error, message string) {
+	status := http.StatusInternalServerError
+	if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
+		status = 499
+	}
+	LogFailure(r, step, err)
+	WriteError(w, status, message)
+}
+
 func handleNotFound(w http.ResponseWriter, _ *http.Request) {
 	WriteError(w, http.StatusNotFound, "not found")
 }
@@ -96,7 +107,11 @@ func LogFailure(r *http.Request, step string, err error) {
 	if err == nil {
 		class = "internal"
 	}
-	slog.ErrorContext(r.Context(), "request failed", "request_id", RequestID(r.Context()),
+	level := slog.LevelError
+	if class == "context_canceled" || errors.Is(r.Context().Err(), context.Canceled) {
+		level = slog.LevelInfo
+	}
+	slog.Log(r.Context(), level, "request failed", "request_id", RequestID(r.Context()),
 		"route", requestLogRoute(r), "step", step, "error_class", class,
 		"request_context", ErrorClass(r.Context().Err()))
 }

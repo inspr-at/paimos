@@ -17,7 +17,7 @@ import { nightlyBrowserMap, gitTree, coverageSummary, dependencyFingerprint } fr
 import { browserBatches, browserCaseSeconds } from './web-batches.mjs'
 import { createGoRunner } from './go-runner.mjs'
 import { inputSnapshot, listingKey, cacheEnabled } from './listing-cache.mjs'
-import { browserPlanSelection } from './browser-plan.mjs'
+import { browserPlanSelection, readBrowserPlan } from './browser-plan.mjs'
 import { hasBrowserSource } from './browser-areas.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
@@ -85,7 +85,7 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
   const pinnedBrowser=kind==='web'&&!unit&&env.CI_IMPACT==='on'&&event==='pull_request'&&hasBrowserSource(paths)
   if(pinnedBrowser&&!full&&!catalogue) {
     const selection=runnerSelection(all,{event,paths,impact:env.CI_IMPACT,affectedLane,base,sha:env.GITHUB_SHA,
-      browserPlan:env.AEON_BROWSER_PLAN??'',forceFull:full,forceAll:catalogue},
+      browserPlan:readBrowserPlan(root,env.AEON_BROWSER_PLAN_FILE,env.AEON_BROWSER_PLAN_SHA256)??'',forceFull:full,forceAll:catalogue},
       {mode:'full',layout:'full',reason:'affected browser plan unavailable'}, {mode:plannerMode,layout:plannerLayout})
     const filtered=selection.tests.filter(row=>row.kind==='browser')
     const tests=shard(filtered,index,count,tierWeights(browserPolicy,filtered))

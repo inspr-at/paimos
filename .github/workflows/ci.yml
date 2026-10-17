@@ -222,7 +222,7 @@ jobs:
       layout: ${{ steps.tiers.outputs.layout }}
       web_shards: ${{ steps.tiers.outputs.web_shards }}
       browser_scope: ${{ steps.tiers.outputs.browser_scope }}
-      browser_plan: ${{ steps.tiers.outputs.browser_plan }}
+      browser_plan_sha256: ${{ steps.tiers.outputs.browser_plan_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: contains(fromJSON('["pull_request","merge_group"]'), github.event_name)
@@ -250,6 +250,17 @@ jobs:
               printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\n' "$lane" >> "$GITHUB_OUTPUT" ;;
           esac
 
+
+      # The complete case list exceeds Linux's per-environment-string limit.
+      # Only its SHA-256 crosses job outputs; runners download the exact bytes.
+      - name: Preserve affected browser execution plan
+        if: github.event_name == 'pull_request' && steps.tiers.outputs.browser_scope == 'affected'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: affected-browser-plan
+          path: tmp/test-tiers/browser-plan.json
+          if-no-files-found: error
+          retention-days: 8
 
       - name: Publish trusted Impact CI shadow plan
         if: github.event_name == 'pull_request'
@@ -877,13 +888,20 @@ jobs:
         timeout-minutes: 13
         working-directory: web
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
+      - name: Download affected browser execution plan
+        if: github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: affected-browser-plan
+          path: tmp/test-tiers
       - name: Run selected UI cases without retries
         env:
           CI_LANE: ${{ needs.tier-plan.outputs.lane }}
           CI_CHANGED_SPECS: ${{ needs.ci-plan.outputs.specs }}
           AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
-          AEON_BROWSER_PLAN: ${{ needs.tier-plan.outputs.browser_plan }}
+          AEON_BROWSER_PLAN_FILE: ${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}
+          AEON_BROWSER_PLAN_SHA256: ${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && needs.tier-plan.outputs.browser_plan_sha256 || '' }}
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
@@ -939,6 +957,34 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: Validate browser execution scope
+        env:
+          BROWSER_SCOPE: ${{ needs.tier-plan.outputs.browser_scope || 'gated-full' }}
+          TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
+          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          WEB_SHARD: ${{ needs.web-shard.result }}
+        run: |
+          set -euo pipefail
+          if [ "${CI_IMPACT:-}" = off ]; then test "$BROWSER_SCOPE" = gated-full; fi
+          case "$BROWSER_SCOPE" in
+            affected)
+              test "$CI_IMPACT" = on
+              test "$CI_AFFECTED_LANE" = on
+              test "$GITHUB_EVENT_NAME" = pull_request
+              test "$TIER_MODE" = essential
+              test "$TIER_LAYOUT" = full
+              test "$CI_LANE" = full
+              test "$WEB_SHARD" = success
+              ;;
+            none)
+              test "$GITHUB_EVENT_NAME" = pull_request
+              test "$CI_LANE" = docs-only || test "$TIER_LAYOUT" = static
+              test "$WEB_SHARD" = skipped
+              ;;
+            gated-full) ;;
+            *) exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
         with:
@@ -1042,35 +1088,6 @@ jobs:
                 *) exit 1 ;;
               esac
               ;;
-            *) exit 1 ;;
-          esac
-
-      - name: Validate browser execution scope
-        env:
-          BROWSER_SCOPE: ${{ needs.tier-plan.outputs.browser_scope || 'gated-full' }}
-          TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
-          WEB_SHARD: ${{ needs.web-shard.result }}
-        run: |
-          set -euo pipefail
-          if [ "${CI_IMPACT:-}" = off ]; then test "$BROWSER_SCOPE" = gated-full; fi
-          case "$BROWSER_SCOPE" in
-            affected)
-              test "$CI_IMPACT" = on
-              test "$CI_AFFECTED_LANE" = on
-              test "$GITHUB_EVENT_NAME" = pull_request
-              test "$TIER_MODE" = essential
-              test "$TIER_LAYOUT" = full
-              test "$CI_LANE" = full
-              test "$WEB_SHARD" = success
-              ;;
-            none)
-              test "$GITHUB_EVENT_NAME" = pull_request
-              test "$CI_LANE" = docs-only || test "$TIER_LAYOUT" = static
-              test "$WEB_SHARD" = skipped
-              ;;
-            gated-full) ;;
             *) exit 1 ;;
           esac
 

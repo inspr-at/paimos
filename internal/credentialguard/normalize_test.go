@@ -11,10 +11,15 @@ import (
 // Only synthetic values, assembled at runtime and never printed on failure.
 func TestContainsUnicodeCredentials(t *testing.T) {
 	for name, text := range map[string]string{
-		"cloud":    "AK" + "IA" + strings.Repeat("AB12", 4),
-		"provider": "sk-proj-" + strings.Repeat("aB7m", 8),
-		"basic":    "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("demo:"+"fake")),
-		"password": "password=" + strings.Repeat("x", 5),
+		"cloud":               "AK" + "IA" + strings.Repeat("AB12", 4),
+		"provider":            "sk-proj-" + strings.Repeat("aB7m", 8),
+		"basic":               "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("demo:"+"fake")),
+		"password":            "password=" + strings.Repeat("x", 5),
+		"legacy-worker-lease": "X-Aeon-Worker-Lease: " + strings.Repeat("a7b3", 16),
+		"worker-lease":        "Proxy-Authorization: Bearer " + strings.Repeat("a7b3", 16),
+		"worker-scheme":       "Authorization: Aeon-Worker " + strings.Repeat("k", 12) + " " + strings.Repeat("a7b3", 16),
+		"legacy-worker-log":   `{"X-Aeon-Worker-Lease":["` + strings.Repeat("a7b3", 16) + `"]}`,
+		"worker-log":          `{"Proxy-Authorization":["Bearer ` + strings.Repeat("a7b3", 16) + `"]}`,
 	} {
 		for form, transform := range map[string]func(string) string{
 			"raw": func(s string) string { return s },
@@ -83,6 +88,8 @@ func TestCredentialNormalizationPreservesASCII(t *testing.T) {
 		"The token: refresh it before retrying.",
 		"Use api_key=${API_KEY} in the example.",
 		"Authorization: Bearer ${TOKEN}",
+		"Proxy-Authorization: Bearer ${WORKER_LEASE}",
+		"X-Aeon-Worker-Lease: ${WORKER_LEASE}",
 		"Run tests before merging. Prüfen vor der Freigabe.",
 		"See docs/credential-rotation.md for password guidance.",
 		"Use an AKIA prefix, a PEM BEGIN header or an eyJ prefix as format names.",

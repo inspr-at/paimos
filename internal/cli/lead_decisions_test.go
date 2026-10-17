@@ -30,7 +30,7 @@ func TestLeadDecisionCLIReadAndRecord(t *testing.T) {
 		}
 		if r.Method == "POST" && r.URL.Path == "/api/projects/"+project+"/harness-sessions/"+session+"/lead-decisions" {
 			posts++
-			if r.Header.Get("X-Aeon-Worker-Lease") != lease {
+			if receivedWorkerLease(r) != lease {
 				t.Error("missing exact generation proof")
 			}
 			var body map[string]any

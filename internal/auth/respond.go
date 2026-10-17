@@ -59,12 +59,11 @@ func writeBadRequest(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusBadRequest, errorJSON{Error: msg})
 }
 
-// internalFailure logs the class of a failure the auth boundary answers with
-// 500, next to the request id, without error text (AEON-1228: these answers
-// were silent, so an already cancelled request context stayed invisible).
+// internalFailure uses the shared cancellation mapping and logs only the class
+// next to the request id. Error text never enters the response or logs.
 func internalFailure(w http.ResponseWriter, r *http.Request, step string, err error) {
-	httpapi.LogFailure(r, step, err)
-	writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "internal"})
+	w.Header().Set("Cache-Control", "no-store")
+	httpapi.WriteInternalError(w, r, step, err, "internal")
 }
 
 // /api/me advertises public sign-in configuration even before a session exists.

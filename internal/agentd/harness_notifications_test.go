@@ -119,7 +119,7 @@ func TestRemoteHarnessNotificationsBoundFramesAndCredentials(t *testing.T) {
 	for _, oversized := range []bool{false, true} {
 		t.Run(fmt.Sprint(oversized), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/api/projects/project/harness-sessions/session/notifications" || r.Header.Get("Authorization") != "Bearer fixture-token" || r.Header.Get("X-Aeon-Worker-Lease") != "fixture-lease" {
+				if r.URL.Path != "/api/projects/project/harness-sessions/session/notifications" || r.Header.Get("Authorization") != workerAuthorization("fixture-token", "fixture-lease") || receivedWorkerLease(r) != "fixture-lease" {
 					t.Error("notification request lost its exact binding")
 				}
 				w.Header().Set("Content-Type", "text/event-stream")

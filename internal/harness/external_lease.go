@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
@@ -71,7 +72,7 @@ func VerifyChatLeaseTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 }
 
 func verifyLeaseTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, sessionID string, lock bool, registration func(context.Context, pgx.Tx, string, bool) (ExternalRegistration, error)) (ExternalRegistration, error) {
-	lease := r.Header.Get("X-Aeon-Worker-Lease")
+	lease := workerlease.Read(r)
 	if p.Kind != tenant.Agent || len(lease) < 32 || len(lease) > 4096 {
 		return ExternalRegistration{}, workorders.Fail(404, "chat binding unavailable")
 	}

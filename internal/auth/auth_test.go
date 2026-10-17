@@ -65,7 +65,7 @@ func TestIncident1228MiddlewareRecordsFailureClass(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/me?private-fixture-value", nil)
 			if fixture.name == "cancelled" {
 				// Exercise the real acquisition path without a database. Any attempted
-				// dial fails the proof that this 500 originates before PostgreSQL.
+				// dial fails the proof that this 499 originates before PostgreSQL.
 				cfg, err := db.ParsePoolConfig("host=127.0.0.1 port=1 dbname=fixture user=fixture sslmode=disable pool_min_conns=0 pool_min_idle_conns=0")
 				if err != nil {
 					t.Fatal(err)
@@ -108,8 +108,14 @@ func TestIncident1228MiddlewareRecordsFailureClass(t *testing.T) {
 				}, mod.Middleware,
 			}}
 			server.Handler().ServeHTTP(rec, req)
-			if rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"error":"internal"}` {
-				t.Fatalf("unexpected response: status %d", rec.Code)
+			// AEON-1477: a request cancelled before authenticate is a client
+			// close (499). Every other failure in this table stays a server fault.
+			want := http.StatusInternalServerError
+			if fixture.name == "cancelled" {
+				want = 499
+			}
+			if rec.Code != want || strings.TrimSpace(rec.Body.String()) != `{"error":"internal"}` {
+				t.Fatalf("unexpected response: status %d body %s", rec.Code, rec.Body.String())
 			}
 			if !strings.Contains(logs.String(), `"error_class":"`+fixture.class+`"`) || !strings.Contains(logs.String(), `"step":"authenticate"`) {
 				t.Fatalf("authentication failure class was not logged: %s", logs.String())
@@ -490,6 +496,17 @@ func TestParseBearer(t *testing.T) {
 	}
 	if _, _, ok := parseBearer("Bearer nope"); ok {
 		t.Fatal("non-aeon accepted")
+	}
+	lease := strings.Repeat("ab", 16)
+	p, s, ok = parseBearer("Aeon-Worker aeon_abc_def " + lease)
+	if !ok || p != "abc" || s != "def" {
+		t.Fatal("worker scheme rejected")
+	}
+	if _, _, ok := parseBearer("Aeon-Worker aeon_abc_def"); ok {
+		t.Fatal("malformed worker scheme accepted")
+	}
+	if _, _, ok := parseBearer("Aeon-Worker nope " + lease); ok {
+		t.Fatal("non-aeon worker scheme accepted")
 	}
 }
 

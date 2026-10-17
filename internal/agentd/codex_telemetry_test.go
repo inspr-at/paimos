@@ -125,7 +125,7 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 			base.mu.Lock()
 			lease := base.harnessRegistration.Lease
 			base.mu.Unlock()
-			if r.Header.Get("X-Aeon-Worker-Lease") != lease || r.Header.Get("Authorization") != "Bearer "+token {
+			if receivedWorkerLease(r) != lease || r.Header.Get("Authorization") != workerAuthorization(token, lease) {
 				t.Error("session binding lost")
 			}
 			var report sessionusage.UsageReport

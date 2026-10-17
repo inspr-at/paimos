@@ -116,7 +116,7 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 			registration = body
 			_, _ = w.Write([]byte(`{"id":"session","project_id":"project"}`))
 		case "/api/projects/project/harness-sessions/session/heartbeat":
-			if r.Header.Get("X-Aeon-Worker-Lease") != "owned-lease" {
+			if receivedWorkerLease(r) != "owned-lease" {
 				t.Error("missing owned worker lease")
 			}
 			beats = append(beats, body)
@@ -319,7 +319,8 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 	seen := map[string]bool{}
 	var mu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer scoped-key" {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer scoped-key" && auth != workerAuthorization("scoped-key", "private-worker-lease-32-characters-minimum") {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -348,7 +349,7 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"id":"session","project_id":"project"}`))
 		default:
-			if r.Header.Get("X-Aeon-Worker-Lease") != "private-worker-lease-32-characters-minimum" {
+			if receivedWorkerLease(r) != "private-worker-lease-32-characters-minimum" {
 				t.Error("worker lease header missing")
 			}
 			switch r.URL.Path {
@@ -533,4 +534,32 @@ func TestRemoteReplyRetainsProjectAndSession(t *testing.T) {
 	if requests[1]["recipient_session_id"] != recipientSession {
 		t.Fatal("recipient generation lost")
 	}
+}
+
+func workerAuthorization(key, lease string) string {
+	return "Aeon-Worker " + key + " " + lease
+}
+
+// Every client fixture also rejects a separate proof header. The lease travels
+// inside Authorization, which a reverse proxy forwards and redacts.
+func receivedWorkerLease(r *http.Request) string {
+	if len(r.Header.Values("X-Aeon-Worker-Lease")) != 0 || len(r.Header.Values("Proxy-Authorization")) != 0 {
+		return "invalid separate worker header"
+	}
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 {
+		if len(values) == 0 {
+			return ""
+		}
+		return "invalid duplicate authorization"
+	}
+	scheme, rest, ok := strings.Cut(values[0], " ")
+	if !ok || !strings.EqualFold(scheme, "Aeon-Worker") {
+		return ""
+	}
+	_, lease, ok := strings.Cut(rest, " ")
+	if !ok || strings.Contains(lease, " ") {
+		return "invalid worker scheme"
+	}
+	return lease
 }

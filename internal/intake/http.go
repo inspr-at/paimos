@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Module serves the intake routes.
@@ -233,11 +234,11 @@ func keyScopes(ctx context.Context, r *http.Request, tx pgx.Tx, p tenant.Princip
 }
 
 func splitBearer(header string) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(strings.TrimSpace(header), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(header))
+	if malformed || token == "" {
 		return "", "", false
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -318,7 +319,7 @@ func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 		WHERE agent_principal_id=$1 AND role='coordinator' AND stopped_at IS NULL AND project_id=$2
 		  AND lease_digest=$3
 		ORDER BY (ticket_node_id IS NOT DISTINCT FROM $4::uuid) DESC, heartbeat_at DESC NULLS LAST
-		LIMIT 1`, p.ID, projectID, digest("lease", r.Header.Get("X-Aeon-Worker-Lease")), nodeID).Scan(&sessionID)
+		LIMIT 1`, p.ID, projectID, digest("lease", workerlease.Read(r)), nodeID).Scan(&sessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, workorders.Fail(403, "live ETA is reported by the coordinator")
 	}

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync, existsSync, writeFileSync, mkdtempSync, realpathSync, statSync, readdirSync, lstatSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, realpathSync, statSync, readdirSync, lstatSync, mkdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
@@ -263,9 +264,9 @@ export function main(env=process.env) {
       const payload=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8'))
       decision=trustedSchedulingDecision(payload.pull_request?.base?.sha,paths,env)
     } else {
-      const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
-      const coverage=hasBrowserSource(paths)&&env.CI_IMPACT!=='on'?nightlyBrowserMap(root,eventBase(env),catalogue):{}
-      const options={...coverage,impact:env.CI_IMPACT,affectedLane:env.CI_AFFECTED_LANE}
+      // A token on this step must not activate the unqualified legacy map.
+      // Only the opted-in, qualified trusted path below may fetch coverage.
+      const options={impact:env.CI_IMPACT,affectedLane:env.CI_AFFECTED_LANE}
       decision=sizeWebDecision(schedulingDecision(env.GITHUB_EVENT_NAME,paths,undefined,options),paths,{event:env.GITHUB_EVENT_NAME,...options})
     }
   } catch { decision={mode:'full',layout:'full',reason:'trusted affected classification unavailable'} }
@@ -277,7 +278,13 @@ export function main(env=process.env) {
   const browserScope=mode==='essential'&&decision.browser_scope==='affected'?'affected':env.GITHUB_EVENT_NAME==='pull_request'&&(layout==='static'||lane==='docs-only')?'none':'gated-full'
   const browserPlan=browserScope==='affected'?JSON.stringify(decision.browserPlan):''
   if(Buffer.byteLength(browserPlan)>=512*1024)throw new Error('Affected browser plan output bound')
-  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\nweb_shards=${JSON.stringify(webShards)}\nbrowser_scope=${browserScope}\nbrowser_plan=${browserPlan}\n`,{flag:'a'})
+  let browserPlanSHA=''
+  if(browserPlan) {
+    mkdirSync(resolve(root,'tmp/test-tiers'),{recursive:true})
+    writeFileSync(resolve(root,'tmp/test-tiers/browser-plan.json'),browserPlan)
+    browserPlanSHA=createHash('sha256').update(browserPlan).digest('hex')
+  }
+  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\nweb_shards=${JSON.stringify(webShards)}\nbrowser_scope=${browserScope}\nbrowser_plan_sha256=${browserPlanSHA}\n`,{flag:'a'})
   const sizing=decision.webShardSizing
   const note=`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); browser_scope=${browserScope}; ${reason}; web shards ${webShards.length}${sizing?`; projected max ${sizing.projectedMaxSeconds.toFixed(1)}s / ${sizing.budgetSeconds}s budget (25% timeout headroom, setup included)`:''}`
   console.log(`${note}; changed paths ${paths?.length??'unavailable'}`)
@@ -296,7 +303,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
       const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
       const browserAreas=process.env.CI_IMPACT==='on'?loadBrowserAreas(root):undefined
       const qualified=browserAreas?browserAreaDecision(paths,browserAreas):undefined
-      const coverage=hasBrowserSource(paths)&&!qualified?.full?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue,{compatible:process.env.CI_IMPACT==='on'}):{}
+      const coverage=process.env.CI_IMPACT==='on'&&hasBrowserSource(paths)&&qualified?.full===false?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue,{compatible:true}):{}
       const options={event:process.env.GITHUB_EVENT_NAME,affectedLane:process.env.CI_AFFECTED_LANE,impact:process.env.CI_IMPACT,checkout,registryChanges,
         browserAreas,base:process.env.AEON_TIER_BASE,sha:process.env.GITHUB_SHA,...coverage}
       console.log(JSON.stringify(sizeWebDecision(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,

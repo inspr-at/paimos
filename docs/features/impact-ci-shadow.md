@@ -117,6 +117,14 @@ promotions and recorded drift obligations. The existing measured shard packer
 sizes that selection. This execution plan comes from the trusted tier planner;
 the `impact-ci-shadow-plan` artifact stays observational.
 
+The complete plan travels as `affected-browser-plan`, containing
+`browser-plan.json`; the tier-plan output contains only its SHA-256. Browser
+runners download the file and verify that digest before parsing the bounded
+contents. Case lists never enter an environment variable, whose per-string
+limit on Linux is smaller than even the essential browser catalogue. A token
+on the planner does not enable legacy browser narrowing: execution-map lookup
+requires the opted-in, qualified S4 trusted path.
+
 Browser runners verify the native catalogue and immutable identities before
 using the plan. Candidate import-edge deletion cannot remove a planned case.
 Missing, stale, malformed, duplicate or drifted plans widen to full execution;
@@ -126,6 +134,12 @@ merge-queue reuse. The `web` aggregate validates planned scope and still
 requires browser success for affected runs. The five required check names,
 merge-group full scope, nightly `--all` execution and real-server smoke are
 unchanged.
+
+Only affected PRs download the browser execution plan; full and queue runs
+receive empty file and digest values. The aggregate validates scope before its
+unchanged read-only proof sequence, including early reuse exits. Checkout, runtime setup
+and proof reconfirmation must all succeed. The full-run workflow pin checks
+the exact plan binding before comparing every existing job field.
 
 The S4 behavior and rejection cases run in
 `scripts/test-tiers/browser-areas.test.mjs`, imported by the existing fixed

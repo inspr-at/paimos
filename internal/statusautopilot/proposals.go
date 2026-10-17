@@ -197,7 +197,7 @@ func (m *Module) resolveProposal(w http.ResponseWriter, r *http.Request) {
 				}
 				s.Enabled = o.Effective
 			}
-			if err = proposalEligible(ctx, tx, c, s, d, now); err != nil {
+			if err = m.proposalEligible(ctx, tx, c, s, d, now); err != nil {
 				return err
 			}
 			actor, err := systemactor.Ensure(ctx, tx, p.TenantID)
@@ -233,7 +233,7 @@ func (m *Module) resolveProposal(w http.ResponseWriter, r *http.Request) {
 	respond(w, struct{}{}, err)
 }
 
-func proposalEligible(ctx context.Context, tx pgx.Tx, c candidate, s Settings, d decision, now time.Time) error {
+func (m *Module) proposalEligible(ctx context.Context, tx pgx.Tx, c candidate, s Settings, d decision, now time.Time) error {
 	if d.Rule != "publish" {
 		current := evaluate(c, s, now)
 		if current == nil || current.Skip || *current != d {
@@ -243,6 +243,9 @@ func proposalEligible(ctx context.Context, tx pgx.Tx, c candidate, s Settings, d
 	}
 	if !s.Enabled || !s.Rules["publish"].Enabled || pending(c.Node) || noReleaseNeeded(c.Node) || normaliseState(c.Node.State) != "done" || c.Node.ProjectID == nil {
 		return events.ErrConflict
+	}
+	if gitAnchor(d.Anchor) {
+		return m.gitProposalEligible(ctx, tx, c, d)
 	}
 	var title, version string
 	var published time.Time
