@@ -132,6 +132,16 @@ func TestGoalStorageVisibility(t *testing.T) {
 	}
 	ctx := tenant.WithPrincipal(t.Context(), f.reader)
 	err = db.InTenant(ctx, f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		var empty, nullArray, nullEntry, duplicates, hidden bool
+		if err := tx.QueryRow(ctx, `SELECT aeon_event_refs_visible('{}'::uuid[]),
+ aeon_event_refs_visible(NULL::uuid[]),aeon_event_refs_visible(ARRAY[NULL::uuid]),
+ aeon_event_refs_visible(ARRAY[$1::uuid,$1::uuid,NULL::uuid]),
+ aeon_event_refs_visible(ARRAY[$1::uuid,$2::uuid])`, f.ticket, f.hiddenTicket).Scan(&empty, &nullArray, &nullEntry, &duplicates, &hidden); err != nil {
+			return err
+		}
+		if !empty || !nullArray || !nullEntry || !duplicates || hidden {
+			t.Fatalf("reference membership semantics changed empty=%v null=%v null-entry=%v duplicates=%v hidden=%v", empty, nullArray, nullEntry, duplicates, hidden)
+		}
 		var ids []string
 		if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(n.id::text ORDER BY n.id::text),'{}') FROM nodes n
 			JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='outcome'`).Scan(&ids); err != nil {
