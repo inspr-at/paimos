@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/systemactor"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -164,7 +166,11 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 }
 
 func deliveryDecision(n node, releaseID, title, version string) decision {
-	d := decision{Rule: "publish", To: "delivered", Anchor: releaseID, Reason: fmt.Sprintf("Shipped in release %s (%s).", title, version)}
+	return publicationDecision(n, releaseID, fmt.Sprintf("Shipped in release %s (%s).", title, version), title+" ("+version+")")
+}
+
+func publicationDecision(n node, anchor, reason, source string) decision {
+	d := decision{Rule: "publish", To: "delivered", Anchor: anchor, Reason: reason}
 	if pr := fieldString(n, "pr_url"); pr != "" {
 		d.Reason += " PR: " + pr + "."
 	}
@@ -175,7 +181,54 @@ func deliveryDecision(n node, releaseID, title, version string) decision {
 		d.Skip = true
 		d.To = ""
 		d.Anchor += "/human-check/" + *n.HumanCheck
-		d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Delivery in " + title + " (" + version + ") was skipped."
+		d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Delivery in " + source + " was skipped."
 	}
 	return d
+}
+
+type DeploymentResult struct {
+	NodeID string `json:"node_id"`
+	Result string `json:"result"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// DeliverDeploymentTx is an explicitly authorized live confirmation, not an
+// unattended policy job. It shares publication decisions, human-check handling,
+// receipts, audit/comments and Undo with release publication. The caller holds
+// the tenant/pairing/tree fence, has verified the immutable merge evidence and
+// has rechecked releases.deploy for this project in this transaction.
+func DeliverDeploymentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, anchor, source string, ids []string, now time.Time) ([]DeploymentResult, error) {
+	// Acquire the complete sorted candidate batch before the first audit event.
+	candidates, err := loadCandidates(ctx, tx, ids, now)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DeploymentResult, 0, len(candidates))
+	for _, c := range candidates {
+		n := c.Node
+		r := DeploymentResult{NodeID: n.ID, Result: "unchanged"}
+		parent, err := db.WorkStatusParentTx(ctx, tx, n.ID)
+		if err != nil {
+			return nil, err
+		}
+		// Also protect projects where parent-status derivation is not enabled.
+		var leaf bool
+		if err := tx.QueryRow(ctx, `SELECT k.slug='work' AND NOT EXISTS(SELECT 1 FROM nodes child JOIN node_kinds ck ON ck.tenant_id=child.tenant_id AND ck.id=child.kind_id WHERE child.parent_id=n.id AND child.deleted_at IS NULL AND ck.slug='work') FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1`, n.ID).Scan(&leaf); err != nil {
+			return nil, err
+		}
+		if n.ProjectID == nil || *n.ProjectID != project || parent || !leaf || normaliseState(n.State) != "done" || noReleaseNeeded(n) {
+			out = append(out, r)
+			continue
+		}
+		d := publicationDecision(n, anchor, "Confirmed live in "+source+".", source)
+		if err := apply(ctx, tx, p, n, d); err != nil {
+			return nil, err
+		}
+		r.Result = "delivered"
+		if d.Skip {
+			r.Result, r.Reason = "skipped", d.Reason
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }

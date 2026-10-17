@@ -788,6 +788,26 @@
     ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
     ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 an ungrouped list keeps the checkbox above the row checkboxes and the sort control, without a chevron"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 collapse and expand all: the first cell, Alt-click on a chevron and Display; folds survive a reload of the view"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 figures land in reserved slots: the group row and the header never move while they arrive"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1024 px, light and dark: figures or the phone line, still on hover"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1440 px, light and dark: figures or the phone line, still on hover"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 390 px, light and dark: figures or the phone line, still on hover"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1388 sorting by key stays reachable: KEY at rest shows its arrow, and the slot control sorts the same way"
+    ,
+    "browser:tests/group-figures.spec.ts:AEON-1390 Display › Groups matches the header and a saved view keeps the group order across a reload"
+    ,
+    "browser:tests/group-figures.spec.ts:coarse pointer › AEON-1388 a coarse pointer shows the first cell’s controls, 44 px each, above the group rows’ own"
+    ,
     "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1024"
     ,
     "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1440"
@@ -9136,6 +9156,34 @@
     ,
     {"kind":"browser","file":"tests/graph-motion.spec.ts","name":"label fades › labels fade with an opacity transition instead of toggling display","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 an ungrouped list keeps the checkbox above the row checkboxes and the sort control, without a chevron","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 collapse and expand all: the first cell, Alt-click on a chevron and Display; folds survive a reload of the view","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 each group row carries its figures in its own columns: sums of its leaves, nothing where there is nothing to say","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 figures land in reserved slots: the group row and the header never move while they arrive","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 grouped list at 1024 px, light and dark: figures or the phone line, still on hover","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 grouped list at 1440 px, light and dark: figures or the phone line, still on hover","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 grouped list at 390 px, light and dark: figures or the phone line, still on hover","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 sorting by key stays reachable: KEY at rest shows its arrow, and the slot control sorts the same way","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 the first header cell swaps KEY for three controls in fixed slots, on hover of that cell only","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1390 Display › Groups matches the header and a saved view keeps the group order across a reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1390 the grouped-by column flips the group order; other columns sort inside the groups; both arrows hold their slots","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"coarse pointer › AEON-1388 a coarse pointer shows the first cell’s controls, 44 px each, above the group rows’ own","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"one quota, its own pool, and move 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"one quota, its own pool, and move 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16025,6 +16073,28 @@
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"smart labels try alternative positions and reject a fully occupied screen","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"the height fit ignores distant satellites without mutating the layout","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"a group is the view narrowed to that group: its value replaces the view’s own, exclusions stay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"a group that has no exact query is not counted rather than counted wrong","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"cells say something or nothing: sums with the header’s marks, never \"—\" or 0","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"people, row facts and the phone line","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"the figures cache: one entry per scope, old entries still land but count as stale, bounded in size","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"the loader counts each scope once, two at a time in order, lands cached scopes at once and drops scopes that left","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-order.test.ts","name":"a saved view keeps the group order with the grouping, and a changed order makes the view differ","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-order.test.ts","name":"reversed groups keep the \"No …\" groups and unknown statuses last, rows keep their order inside","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-order.test.ts","name":"switching the grouping or adding the grouped-by column as a row sort moves it to the group order","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-order.test.ts","name":"the arrows’ tooltips name the group order and the order inside each group","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-order.test.ts","name":"the grouped-by column orders the groups: natural or reversed, never a row sort key","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/head-counts.test.ts","name":"one problem keeps its name, reason and time since in the tip; zeros say none","tier":"GATED-FULL"}
     ,

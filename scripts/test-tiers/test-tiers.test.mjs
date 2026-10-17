@@ -1274,13 +1274,14 @@ test('AEON-1453 the merged full web catalogue needs seventeen shards to stay ins
   // Merge-queue head 688f05b6a packed the full gate into sixteen shards and
   // left shard 14 at 900.2s. Whole files are larger than the leftover gaps, so
   // the same catalogue needs one more shard. Sixteen must stay over budget.
-  // AEON-1473's seven browser cases move that overflow to shard 13 at 901.0s.
+  // AEON-1388's four essential group-figures cases and AEON-1473's seven
+  // browser cases together leave shard 4 at 903.2s.
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
   assert.equal(sixteen.shards.length,16)
   assert.equal(sixteen.fitsBudget,false)
-  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 13 predicts 901\.0s, over the 900s budget/)
+  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 4 predicts 903\.2s, over the 900s budget/)
   const full=webShardPlan(gate,policy,{mode:'full'})
   assert.equal(fullWebShardCount,17)
   assert.deepEqual(full.shards,fullWebShards)
@@ -2321,6 +2322,24 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   assert.ok(go.tests.some(row=>row.tags?.includes('delete-candidate')))
   assert.ok(go.tests.some(row=>row.lane==='timing'))
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='GATED-FULL'||row.tier==='NIGHTLY'))
+})
+
+// The 6000-node visibility list compares wall-clock time with a fixed budget.
+// Parallel shard load made the fastest of three requests 1.46s against the
+// 600ms CI limit. It belongs with the other list budgets, on the timing lane.
+test('AEON-1405 visibility list budget runs on the timing lane and keeps its CI limit',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const name='TestList6000WithProjectVisibility'
+  const row=manifest.tests.find(row=>row.package==='internal/nodes'&&row.name===name)
+  assert.equal(row?.tier,'GATED-FULL')
+  assert.equal(row?.lane,'timing')
+  const parallel=manifest.tests.filter(row=>row.kind==='go'&&row.lane!=='timing')
+  const timing=manifest.tests.filter(row=>row.kind==='go'&&row.lane==='timing')
+  assert.equal(parallel.some(row=>row.package==='internal/nodes'&&row.name===name),false)
+  assert.equal(timing.filter(row=>row.package==='internal/nodes'&&row.name===name).length,1)
+  const source=readFileSync(new URL('../../internal/nodes/visibility_perf_test.go',import.meta.url),'utf8')
+  assert.match(source,/limit = 600 \* time\.Millisecond/)
+  assert.match(source,/if fastest >= limit \{/)
 })
 
 // These exact registrations were missing in the AEON-706 static report.

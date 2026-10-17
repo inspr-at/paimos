@@ -12,6 +12,7 @@ import { toast } from '../../lib/toast'
 import { apiParams, filtersFromView, filtersToQuery, hasFilters, sameListState, suggestName, type ListFilters } from '../../lib/ticketList'
 import { scopeOwner } from '../../lib/identityScope'
 import { useViewFigures } from '../../lib/useViewFigures'
+import { useGroupFigures } from '../../lib/useGroupFigures'
 import { hidesRows, workHeader, workSlots, type WorkSlots } from '../../lib/workFigures'
 import ViewBar from '../../components/work/ViewBar.vue'
 import type { ProjectState } from './types'
@@ -20,8 +21,8 @@ import type { useProjectFilters } from './useProjectFilters'
 import type { useProjectColumns } from './useProjectColumns'
 
 export function useProjectViews(state: ProjectState, data: ReturnType<typeof useProjectData>, columns: ReturnType<typeof useProjectColumns>, controls: ReturnType<typeof useProjectFilters>) {
-  const { route, router, session, ticketKey, project, projectId, section, ticketsHeader, sectionPath, filters, activeTicketView, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbarWrap, scrollRoot, collapsed, me, sectionSwitch, ticketSwitch, ticketOpeningQuery } = state
-  const { list, outline } = data
+  const { route, router, session, ticketKey, project, projectId, section, ticketsHeader, sectionPath, filters, activeTicketView, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbarWrap, scrollRoot, me, sectionSwitch, ticketSwitch, ticketOpeningQuery } = state
+  const { list, outline, groups, listActive } = data
   const { listPrefs, toolbarColumns } = columns
   const { chipLabel, update } = controls
   // ---------- Saved views ----------
@@ -46,7 +47,6 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
   }
   function openView(id: string | null, replace = false) {
     const view = id ? views.value.items.find(item => item.id === id) ?? null : null
-    collapsed.value = new Set()
     const query = view ? viewQuery(view) : { ...(activeTicketView.value.id !== 'list' ? { view: activeTicketView.value.id } : {}) }
     const location = { path: sectionPath('tickets'), query }
     if (replace) void router.replace(location); else void router.push(location)
@@ -113,6 +113,12 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
   watch(wholeFigures, value => { if (value && !workBarSlots.value) workBarSlots.value = workSlots(workHeader(value)) }, { immediate: true })
   const hideOn = computed(() => ticketsHeader.value && !filters.value.showClosed)
   const workHideLabel = computed(() => hideOn.value ? hideLabel(filters.value.hideStates) : null)
+  // Group summaries (AEON-1388): each group's figures from the same function, once the list and the header have painted.
+  const { groupFigures } = useGroupFigures({
+    owner: computed(() => scopeOwner(session.identity)), projectId, filters, groups,
+    ready: computed(() => entryResolved.value && listActive.value && !list.loading.value && !figuresBusy.value && (!!viewFigures.value || !!figuresFailed.value)),
+    freshness: computed(() => project.value ? [project.value.last_activity, project.value.open, project.value.in_progress, project.value.done, project.value.total].join('|') : ''),
+  })
   const columnFigures = computed(() => ({
     figures: figuresBusy.value || figuresFailed.value ? null : viewFigures.value,
     failed: figuresFailed.value,
@@ -221,5 +227,5 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
     } catch (e) { toast(`The view was not deleted: ${problem(e)}`, { tone: 'error' }) }
   }
 
-  return { views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, figuresBusy, figuresFailed, figuresNarrowed, retryFigures, workHead, workBarSlots, workHideLabel, columnFigures, savePanel, saveBusy, saveError, viewBar, startSave, startRename, closeSave, submitSave, saveActive, duplicate, setDefaultView, share, copyViewLink, remove }
+  return { views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, figuresBusy, figuresFailed, figuresNarrowed, retryFigures, workHead, workBarSlots, workHideLabel, columnFigures, groupFigures, savePanel, saveBusy, saveError, viewBar, startSave, startRename, closeSave, submitSave, saveActive, duplicate, setDefaultView, share, copyViewLink, remove }
 }
