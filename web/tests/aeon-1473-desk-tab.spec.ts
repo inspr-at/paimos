@@ -38,8 +38,22 @@ async function recordTab(page: Page) {
 }
 const tabLog = (page: Page) => page.evaluate(() => (window as unknown as { tabLog: { icons: TabEntry[]; titles: TabEntry[] } }).tabLog)
 const noticeShown = (log: { titles: TabEntry[] }) => log.titles.filter(entry => entry.value === NEW_DECISION)
-// The background reader asks once the last answer is a minute old, on 15-second ticks: 80 s covers it.
-const BACKGROUND_READ_MS = 80_000
+// The page's clock starts at T0 and is paused once the page has loaded: from then on
+// timers (pop frames, the notice, the background reader) fire only through runFor.
+const T0 = Date.parse('2026-10-17T10:00:00Z')
+async function pauseClock(page: Page) { await page.clock.pauseAt(T0 + 20_000) }
+// A background tab reads the Desk once its last answer is a minute old, on 15-second
+// ticks. Step the clock one tick at a time until the page sends that read, then stop
+// advancing, so nothing after the read (the two-second notice) runs on its own.
+async function backgroundRead(page: Page, desk: { reads: number }) {
+  const before = desk.reads
+  for (let tick = 0; tick < 8; tick++) {
+    const sent = page.waitForRequest(request => new URL(request.url()).pathname === '/api/decision-desk/projection', { timeout: 3000 }).catch(() => null)
+    await page.clock.runFor(15_000)
+    if (await sent) break
+  }
+  await expect.poll(() => desk.reads).toBeGreaterThan(before)
+}
 async function hideTab(page: Page) {
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
@@ -81,12 +95,13 @@ test('AEON-1473: every page leads with the badge’s count: none at 0, (1), (9),
 })
 
 test('AEON-1473: a rise pops the favicon dot once in six frames; the visible title never swaps', async ({ page }) => {
-  await page.clock.install()
+  await page.clock.install({ time: T0 })
   const desk = await setup(page, { open: 2 })
   await page.goto('/')
   await expect(page).toHaveTitle(/^\(2\) Projects · /)
   await expect(icon(page)).toHaveAttribute('data-desk-count', '2')
   await expect(icon(page)).toHaveAttribute('type', 'image/png')
+  await pauseClock(page)
   await recordTab(page)
   const places = await page.getByRole('navigation', { name: 'Places' }).boundingBox()
   desk.open = 3
@@ -96,8 +111,7 @@ test('AEON-1473: a rise pops the favicon dot once in six frames; the visible tit
   const log = await tabLog(page)
   expect(log.icons, 'six frames, then nothing loops').toHaveLength(6)
   expect(log.icons[2].value, 'the largest frame differs from the resting dot').not.toBe(log.icons[5].value)
-  expect(log.icons[5].at - log.icons[0].at, 'six frames of 100 ms').toBeGreaterThanOrEqual(500)
-  expect(log.icons[5].at - log.icons[0].at).toBeLessThan(800)
+  expect(log.icons.map(entry => entry.at - log.icons[0].at), 'six frames of 100 ms').toEqual([0, 100, 200, 300, 400, 500])
   expect(noticeShown(log)).toHaveLength(0)
   await expect(icon(page)).toHaveAttribute('data-desk-count', '3')
   const after = await page.getByRole('navigation', { name: 'Places' }).boundingBox()
@@ -111,40 +125,41 @@ test('AEON-1473: a rise pops the favicon dot once in six frames; the visible tit
 
 test('AEON-1473: a background tab reads the Desk itself and says New decision for two seconds, without focus or sound', async ({ page }) => {
   await watchFocusAndSound(page)
-  await page.clock.install()
+  await page.clock.install({ time: T0 })
   const desk = await setup(page, { open: 1 })
   await page.goto('/')
   await expect(page).toHaveTitle(/^\(1\) Projects · /)
+  await expect(icon(page)).toHaveAttribute('data-desk-count', '1')
+  await pauseClock(page)
   await recordTab(page)
   await hideTab(page)
-  // The header's poll stops in a background tab; the count it read stays.
+  // The header's poll stops in a background tab and clears the store; the count it read stays.
   await page.clock.runFor(5000)
   await expect(page).toHaveTitle(/^\(1\) Projects · /)
   desk.open = 2
-  const reads = desk.reads
-  const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/decision-desk/projection')
-  await page.clock.runFor(BACKGROUND_READ_MS)
-  await read
-  expect(desk.reads).toBeGreaterThan(reads)
-  await expect.poll(async () => noticeShown(await tabLog(page)).length, { timeout: 1000 }).toBe(1)
-  await page.clock.runFor(3000)
+  await backgroundRead(page, desk)
+  await expect(page).toHaveTitle(NEW_DECISION, { timeout: 1000 })
+  await page.clock.runFor(1999)
+  await expect(page).toHaveTitle(NEW_DECISION)
+  await page.clock.runFor(1)
   await expect(page).toHaveTitle(/^\(2\) Projects · /)
   const log = await tabLog(page)
-  const notice = log.titles.findIndex(entry => entry.value === NEW_DECISION), settled = log.titles[notice + 1]
-  expect(settled?.value, 'the notice settles on the count').toMatch(/^\(2\) Projects · /)
-  expect(settled.at - log.titles[notice].at, 'for two seconds').toBeGreaterThanOrEqual(2000)
-  expect(settled.at - log.titles[notice].at).toBeLessThan(3000)
+  const notice = log.titles.findIndex(entry => entry.value === NEW_DECISION)
+  expect(log.titles[notice + 1].at - log.titles[notice].at, 'two seconds').toBe(2000)
   expect(log.icons, 'the dot changes once: a hidden tab gets no frames').toHaveLength(1)
+  await expect(icon(page)).toHaveAttribute('data-desk-count', '2')
   expect(noticeShown(log)).toHaveLength(1)
   expect(await page.evaluate(() => (window as unknown as { tabCalls: { focus: number; sound: number } }).tabCalls)).toEqual({ focus: 0, sound: 0 })
 })
 
 test('AEON-1473: reduced motion changes only the number, visible or in the background', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.clock.install()
+  await page.clock.install({ time: T0 })
   const desk = await setup(page, { open: 1 })
   await page.goto('/')
   await expect(page).toHaveTitle(/^\(1\) Projects · /)
+  await expect(icon(page)).toHaveAttribute('data-desk-count', '1')
+  await pauseClock(page)
   await recordTab(page)
   desk.open = 2
   await readAgain(page)
@@ -152,9 +167,7 @@ test('AEON-1473: reduced motion changes only the number, visible or in the backg
   await page.clock.runFor(2000)
   await hideTab(page)
   desk.open = 3
-  const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/decision-desk/projection')
-  await page.clock.runFor(BACKGROUND_READ_MS)
-  await read
+  await backgroundRead(page, desk)
   await expect(page).toHaveTitle(/^\(3\) Projects · /, { timeout: 1000 })
   await page.clock.runFor(3000)
   const log = await tabLog(page)
