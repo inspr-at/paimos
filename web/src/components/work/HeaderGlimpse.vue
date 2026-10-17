@@ -87,13 +87,16 @@ function scheduleMeasure() {
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
 // #main's scroll and the observer can disagree. A delivery may carry the
 // pre-scroll sample first, or the scroll may never be delivered. The box on
-// screen is the pause decision; an unmeasured column has nothing to hide.
+// screen is the pause decision. Collapsing the header or opening a full-page
+// ticket hides the ancestor with v-show and leaves this canvas mounted with an
+// empty box; that is occlusion. visibility:hidden still has a box. The height
+// is written for the next flush, and the caller reads the box again after layout.
 function backdropOutOfView() {
   const el = column.value
   const root = document.getElementById('main')
   if (!el || !(root instanceof HTMLElement)) return false
   const box = el.getBoundingClientRect(), view = root.getBoundingClientRect()
-  if (box.width <= 0 || box.height <= 0) return false
+  if (box.width <= 0 || box.height <= 0) return true
   const overlapW = Math.min(box.right, view.right) - Math.max(box.left, view.left)
   const overlapH = Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top)
   return overlapW <= 0 || overlapH <= 0

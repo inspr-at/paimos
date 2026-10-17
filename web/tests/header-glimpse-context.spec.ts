@@ -75,6 +75,35 @@ test('scrolling the entire backdrop out of view pauses it and returning resumes 
   await expect(canvas).toHaveAttribute('data-motion', 'on')
 })
 
+test('collapsing the project header pauses the backdrop and expanding resumes it', async ({ page }) => {
+  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
+  await mockTicketGraph(page)
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page, 50)
+  const canvas = page.locator('.header-glimpse-canvas')
+  const column = page.locator('.glimpse-col')
+  await expect(canvas).toHaveAttribute('data-motion', 'on')
+  const shown = await column.evaluate(el => el.getBoundingClientRect())
+  expect(shown.width).toBeGreaterThan(0)
+  expect(shown.height).toBeGreaterThan(0)
+  await page.getByRole('radio', { name: 'Collapsed project header', exact: true }).click()
+  await expect(page.locator('#project-header-fold')).toBeHidden()
+  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  // v-show keeps the canvas mounted. Its box is empty; motion has to stop.
+  await expect.poll(() => column.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    return box.width <= 0 && box.height <= 0
+  })).toBe(true)
+  await expect(canvas).toHaveAttribute('data-motion', 'still')
+  await page.getByRole('radio', { name: 'Comfortable project header', exact: true }).click()
+  await expect(page.locator('#project-header-fold')).toBeVisible()
+  await expect.poll(() => column.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    return box.width > 0 && box.height > 0
+  })).toBe(true)
+  await expect(canvas).toHaveAttribute('data-motion', 'on')
+})
+
 
 test('other sections keep their own search out of the ticket backdrop', async ({ page }) => {
   await mockTicketGraph(page)

@@ -9200,6 +9200,8 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"a large project with fewer than eight linked matches has no glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"collapsing the project header pauses the backdrop and expanding resumes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"other sections keep their own search out of the ticket backdrop","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"saved views, assignee, type, priority and server search determine the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
