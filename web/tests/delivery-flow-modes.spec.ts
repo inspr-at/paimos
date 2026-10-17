@@ -10,6 +10,7 @@ import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
 import { mockFlow, RUN, ZONE } from './delivery-flow-fixtures'
+import { flowText } from '../src/lib/deliveryFlowText'
 
 test.use({ timezoneId: ZONE })
 
@@ -227,6 +228,16 @@ test('without a recorded run every mode shows the empty state and no sample data
   const empty = page.getByTestId('flow-empty')
   const copy = 'No recorded runs yet. No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.'
   await expect(empty).toHaveText(copy)
+  // Regional preferences keep the app in English (AEON-998); retain complete,
+  // impersonal German wording for the translated surface without changing that policy.
+  for (const [lang, missing, sources] of [
+    ['en', 'No linked', ['GitHub App', 'derived check suites', 'PAIMOS harness deliveries', 'work-queue rounds', 'OPS rollout records']],
+    ['de', 'fehlen', ['GitHub-App', 'Check-Suites', 'PAIMOS-Harness-Lieferungen', 'Arbeitsrunden', 'OPS-Rollout-Einträge']],
+  ] as const) {
+    const wording = flowText(lang).noneB
+    expect(wording).toContain(missing)
+    for (const source of sources) expect(wording).toContain(source)
+  }
   const button = (mode: string) => modes(page).locator(`[data-mode="${mode}"]`)
   const guard = await controlStability(page, { modes: modes(page), live: button('live'), replay: button('replay'), compare: button('compare'), empty })
   for (const mode of ['replay', 'compare', 'live'] as const) {
@@ -252,7 +263,8 @@ for (const [width, theme] of [[390, 'light'], [390, 'dark'], [1024, 'light'], [1
     await setup(page, { theme, lang: 'de', empty: true })
     await page.goto('/p/AEON/delivery?view=flow')
     const empty = page.getByTestId('flow-empty')
-    await expect(empty).toHaveText('Noch keine aufgezeichneten Läufe. Für dieses Projekt fehlen bisher verknüpfte Workflow-Läufe oder abgeleitete Check-Suites der GitHub-App, PAIMOS-Harness-Lieferungen oder Arbeitsrunden sowie OPS-Rollout-Einträge.')
+    // A German regional preference does not change the app's English language.
+    await expect(empty).toHaveText('No recorded runs yet. No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.')
     const button = (mode: string) => modes(page).locator(`[data-mode="${mode}"]`)
     const guard = await controlStability(page, { modes: modes(page), live: button('live'), replay: button('replay'), compare: button('compare') })
     for (const mode of ['replay', 'compare', 'live']) {

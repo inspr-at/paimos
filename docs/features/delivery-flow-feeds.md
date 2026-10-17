@@ -82,5 +82,7 @@ ingress without Actions reads, head-specific workflow precedence, harness and
 backfill replay, preservation of all release 131–136 rows and incident 135,
 scoped rollout validation, and a read-only plan plus two applications for 87
 fixture PRs. The existing Flow browser spec asserts the new English wording,
-keeps mode controls stable, and captures the German empty state at
-390/1024/1440 pixels in both themes.
+checks both translations, keeps mode controls stable, and captures the empty
+state at 390/1024/1440 pixels in both themes under a German regional preference.
+The application display language remains English under the existing AEON-998
+policy; this wording change does not enable a partially translated app.
