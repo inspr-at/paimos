@@ -108,10 +108,10 @@ CREATE POLICY nodes_outcome_ticket_visibility ON nodes AS RESTRICTIVE
     -- The kind subquery is an uncorrelated lookup, avoiding a function call
     -- (and a widened probe) for every ordinary node on existing read paths.
     USING ((SELECT aeon_visible_all())
-        OR kind_id <> ALL (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
+        OR kind_id NOT IN (SELECT id FROM node_kinds WHERE slug = 'outcome')
         OR aeon_outcome_tickets_visible(id))
     WITH CHECK ((SELECT aeon_visible_all())
-        OR kind_id <> ALL (ARRAY(SELECT id FROM node_kinds WHERE slug = 'outcome'))
+        OR kind_id NOT IN (SELECT id FROM node_kinds WHERE slug = 'outcome')
         OR aeon_outcome_tickets_visible(id));
 
 -- Keep the invoker visibility walk behind a procedural boundary. Inlining
