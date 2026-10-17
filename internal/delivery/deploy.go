@@ -34,7 +34,7 @@ type deployInput struct {
 // Its tenant-fenced identity is (project, environment, sha), independent of
 // version labels, deployment order and the repository's later availability.
 type Deploy struct {
-	EventID     int64                              `json:"event_id"`
+	EventID     int64                              `json:"event_id,omitempty"`
 	Project     string                             `json:"project_id"`
 	Environment string                             `json:"environment"`
 	Repository  string                             `json:"repository"`
@@ -126,6 +126,7 @@ func (m *Module) recordDeploy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	project = strings.ToLower(project)
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 	r = r.WithContext(ctx)

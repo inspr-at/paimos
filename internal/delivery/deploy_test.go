@@ -158,7 +158,7 @@ func TestDeployRecordDeliversMergedLeavesAndReplays(t *testing.T) {
 	limited.Scopes = []string{"delivery.read", "delivery.manage"}
 	f.call(t, limited, "POST", path, in, 403, nil)
 	var out Deploy
-	f.call(t, f.agent, "POST", path, in, 200, &out)
+	f.call(t, f.agent, "POST", "/api/projects/"+strings.ToUpper(f.project)+"/deploys", in, 200, &out)
 	if out.EventID < 1 || out.ConfirmedBy != f.agent.ID || out.Project != f.project || out.ConfirmedAt.IsZero() || out.SHA != b || out.Version != in.Version {
 		t.Fatalf("live confirmation missing: %+v", out)
 	}
