@@ -119,8 +119,14 @@ func parseSocketPeer(raw []byte) socketPeer {
 	return peer
 }
 
-func (p socketPeer) live(kill func(int, syscall.Signal) error, observe func(int) (hooknote.Process, error)) bool {
+func (p socketPeer) live(kill func(int, syscall.Signal) error, observe func(int) (hooknote.Process, error), started func(int) (string, error)) bool {
 	if p.PID < 1 || p.PID > 1<<31-1 || errors.Is(kill(p.PID, 0), syscall.ESRCH) {
+		return false
+	}
+	// The kernel start time is readable across users. A different time proves
+	// this pid was reused when image observation fails. A missing or matching
+	// time is not that proof.
+	if start, err := started(p.PID); err == nil && comparableSocketStarts(p.Started, start) && p.Started != start {
 		return false
 	}
 	// A permission failure or incomplete observation cannot prove exit. Only
@@ -185,11 +191,15 @@ func (s *Store) socketHookArtifact(shutdown bool) (*socketArtifact, error) {
 			peer = parseSocketPeer(raw)
 		}
 	}
+	// The pin is published only after this lock is held, so a pin that already
+	// names our pid is a previous incarnation. ObserveDaemon accepts the
+	// login-service cwd "/"; ProcessStarted still proves reuse when that
+	// observation cannot see another user's image.
 	if shutdown {
 		if peer.PID != os.Getpid() {
 			return nil, nil
 		}
-	} else if peer.live(syscall.Kill, hooknote.Observe) {
+	} else if peer.PID != os.Getpid() && peer.live(syscall.Kill, hooknote.ObserveDaemon, hooknote.ProcessStarted) {
 		return nil, fmt.Errorf("agentd is already running for this state root (hook-peer.json names live pid %d): %w", peer.PID, ErrBusy)
 	}
 	return &item, nil

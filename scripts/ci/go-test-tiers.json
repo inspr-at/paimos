@@ -3286,6 +3286,10 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSocketLockCleansPartialStartupAndLegacyArtifacts","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSocketLockRecoversPinNamingThisProcess","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSocketLockRecoversReusedPIDWhenObservationFails","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSocketLockRejectsRegularFileAtSocket","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSocketPathDefaultAndFallbackByteLimits","tier":"GATED-FULL"}

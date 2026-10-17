@@ -3,11 +3,15 @@
 package agentsetup
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -29,6 +33,8 @@ func TestSocketPeerLivenessIsConservative(t *testing.T) {
 		killErr    error
 		process    hooknote.Process
 		observeErr error
+		started    string
+		startedErr error
 		live       bool
 	}{
 		{name: "release 131 133 134", raw: legacy, process: current, live: true},
@@ -42,6 +48,9 @@ func TestSocketPeerLivenessIsConservative(t *testing.T) {
 		{name: "invalid executable", raw: `{"pid":42,"started":"100:1","exe":"relative"}`, process: current, live: true},
 		{name: "partial observation", raw: legacy, process: hooknote.Process{PID: 42, Started: "100:1"}, live: true},
 		{name: "reused pid", raw: legacy, process: hooknote.Process{PID: 42, Started: "200:1", Executable: "/older/agentd"}},
+		{name: "observation failed reused start", raw: legacy, observeErr: hooknote.ErrPeer, started: "200:1"},
+		{name: "observation failed matching start", raw: legacy, observeErr: hooknote.ErrPeer, started: "100:1", live: true},
+		{name: "observation failed uncomparable start", raw: legacy, observeErr: hooknote.ErrPeer, started: "200", live: true},
 		{name: "different loaded executable", raw: legacy, process: hooknote.Process{PID: 42, Started: "100:1", Executable: "/other/program"}},
 		{name: "unknown format", raw: `{"schema":999}`},
 		{name: "malformed", raw: `{`},
@@ -58,6 +67,14 @@ func TestSocketPeerLivenessIsConservative(t *testing.T) {
 					t.Fatal("inspected an invalid or already dead PID")
 				}
 				return tc.process, tc.observeErr
+			}, func(pid int) (string, error) {
+				if pid != 42 || errors.Is(tc.killErr, syscall.ESRCH) {
+					t.Fatal("read the start time of an invalid or already dead PID")
+				}
+				if tc.started == "" && tc.startedErr == nil {
+					return "", hooknote.ErrPeer
+				}
+				return tc.started, tc.startedErr
 			})
 			if got != tc.live {
 				t.Fatalf("live=%v, want %v", got, tc.live)
@@ -321,6 +338,154 @@ func TestSocketCleanupStaysRelativeToPinnedDirectory(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Risk: an unclean stop can leave a pin naming the pid this process was
+// given. The pin is published only after LockSocket, so that pin is residue.
+func TestSocketLockRecoversPinNamingThisProcess(t *testing.T) {
+	self, err := hooknote.ObserveDaemonSelf()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := socketLockStore(t, false)
+	socketPath := filepath.Join(s.Path(), "agentd.sock")
+	staleSocket(t, socketPath)
+	raw, err := json.Marshal(map[string]any{"pid": self.PID, "started": self.Started, "exe": self.Executable})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write("hook-peer.json", raw, true); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := s.LockSocket("agentd.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if _, err := os.Lstat(socketPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("own pid pin left the socket: %v", err)
+	}
+	if _, err := s.Read("hook-peer.json", 4096); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("own pid pin survived startup: %v", err)
+	}
+}
+
+// Risk: image observation fails for cwd "/", another user's process, or a
+// deleted working directory. A different kernel start time still proves the
+// pinned pid was reused; a matching time stays live.
+func TestSocketLockRecoversReusedPIDWhenObservationFails(t *testing.T) {
+	t.Run("deleted cwd", func(t *testing.T) {
+		pid, started := deletedCWDProcess(t)
+		if _, err := hooknote.ObserveDaemon(pid); err == nil {
+			t.Fatal("deleted working directory was fully observable")
+		}
+		assertReusedPIDRecovered(t, pid, started, "/older/agentd")
+	})
+	t.Run("root cwd", func(t *testing.T) {
+		pid := holdProcess(t, "/")
+		if _, err := hooknote.Observe(pid); err == nil {
+			t.Fatal("strict observation accepted cwd /")
+		}
+		observed, err := hooknote.ObserveDaemon(pid)
+		if err != nil || observed.PID != pid || observed.Started == "" || observed.Executable == "" {
+			t.Fatal("daemon observation of cwd /", err)
+		}
+		assertReusedPIDRecovered(t, pid, observed.Started, observed.Executable)
+	})
+}
+
+func assertReusedPIDRecovered(t *testing.T, pid int, started, exe string) {
+	t.Helper()
+	s := socketLockStore(t, false)
+	socketPath := filepath.Join(s.Path(), "agentd.sock")
+	staleSocket(t, socketPath)
+	matching, err := json.Marshal(map[string]any{"pid": pid, "started": started, "exe": exe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write("hook-peer.json", matching, true); err != nil {
+		t.Fatal(err)
+	}
+	if lock, err := s.LockSocket("agentd.sock"); !errors.Is(err, ErrBusy) {
+		if lock != nil {
+			lock.Close()
+		}
+		t.Fatalf("matching start was not live: %v", err)
+	}
+	if _, err := os.Lstat(socketPath); err != nil {
+		t.Fatal("refused start removed the socket", err)
+	}
+	if got, err := s.Read("hook-peer.json", 4096); err != nil || string(got) != string(matching) {
+		t.Fatalf("refusal rewrote the pin: %v", err)
+	}
+	replaced, err := json.Marshal(map[string]any{"pid": pid, "started": reusedSocketStart(t, started), "exe": exe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write("hook-peer.json", replaced, false); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := s.LockSocket("agentd.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if _, err := os.Lstat(socketPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reused pid left the socket: %v", err)
+	}
+	if _, err := s.Read("hook-peer.json", 4096); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reused pid pin survived startup: %v", err)
+	}
+}
+
+func reusedSocketStart(t *testing.T, current string) string {
+	t.Helper()
+	parts := strings.Split(current, ":")
+	n, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil || len(parts) > 2 {
+		t.Fatalf("unusable kernel start %q", current)
+	}
+	parts[0] = strconv.FormatUint(n+1, 10)
+	return strings.Join(parts, ":")
+}
+
+func holdProcess(t *testing.T, dir string) int {
+	t.Helper()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(cat)
+	cmd.Dir = dir
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd.Process.Pid
+}
+
+func deletedCWDProcess(t *testing.T) (int, string) {
+	t.Helper()
+	dir := t.TempDir()
+	pid := holdProcess(t, dir)
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	started, err := hooknote.ProcessStarted(pid)
+	if err != nil || started == "" {
+		t.Fatalf("kernel start time: %v", err)
+	}
+	return pid, started
 }
 
 func TestSocketShutdownRefusesReplacedArtifacts(t *testing.T) {
