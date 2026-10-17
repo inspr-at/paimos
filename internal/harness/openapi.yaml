@@ -60,7 +60,7 @@ paths:
   /api/projects/{projectId}/lead/claim:
     post:
       summary: Bind a proven coordinator generation to the project lead intent
-      description: Agent-only harness.worker. Proxy-Authorization proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation's dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.
+      description: 'Agent-only harness.worker. Proxy-Authorization proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation''s dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.'
       parameters:
         - $ref: '#/components/parameters/projectId'
         - {$ref: '#/components/parameters/workerLease'}
@@ -83,7 +83,7 @@ paths:
   /api/projects/{projectId}/lead/pause:
     post:
       summary: Checkpoint and cooperatively pause the current lead
-      description: Person owner with harness.control, or the current lead with harness.worker and Proxy-Authorization. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned.
+      description: 'Person owner with harness.control, or the current lead with harness.worker and Proxy-Authorization. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       requestBody:

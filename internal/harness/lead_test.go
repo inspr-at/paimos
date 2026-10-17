@@ -287,6 +287,17 @@ func TestProjectLeadLostContactDoesNotPermitSuccession(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='heartbeat_lost',phase='stopped' WHERE id=$1`, session)
 		return err
 	})
+	for _, headers := range []map[string]string{
+		{"X-Aeon-Worker-Lease": lease},
+		{"Proxy-Authorization": "Bearer " + lease},
+	} {
+		stoppedPause := f.call(f.agent, "POST", base+"/lead/pause", map[string]any{"expected_revision": l["revision"], "generation": l["generation"]}, "", headers)
+		expect(t, stoppedPause, 403)
+		if decode(t, stoppedPause)["error"] != "current lead worker proof required" {
+			t.Fatal("stopped lead refused for wrong reason")
+		}
+	}
+
 	next, nextLease, nextBody := leadCandidate(t, f)
 	nextBody["succeeds_session_id"] = session
 	expect(t, f.call(f.person, "POST", base+"/harness-sessions", nextBody, ""), 409)

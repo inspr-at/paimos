@@ -1,7 +1,7 @@
 # One builder per ticket
 
 A worker generation bound to a ticket occupies its build slot until it is
-stopped. Registration, ticket rebinding and lost-contact revival use the same
+stopped. Registration and ticket rebinding use the same
 transactional store guard as queue creation, pickup and attach/watch activation.
 Exact registration replay remains idempotent. A second worker receives HTTP 409 with
 `code: build_in_flight`, the blocking session ID and public label, who started

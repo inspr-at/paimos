@@ -257,7 +257,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. Model and effort reports update the current generation without re-registration; omitted values preserve the accepted identity. The current generation's worker lease is required. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
+      description: 'The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session''s project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. Model and effort reports update the current generation without re-registration; omitted values preserve the accepted identity. The current generation''s worker lease is required. A generation with stopped_at set, including heartbeat_lost (Lost contact), rejects heartbeat with 403. Historical proof remains usable only for stop/exit confirmation and usage settlement; a returning worker registers a fresh generation and lease.'
       requestBody:
         required: true
         content:
@@ -497,7 +497,7 @@ paths:
         '404': {description: Session is not visible}
     post:
       operationId: recordHarnessInstructionProvenance
-      description: The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and Proxy-Authorization. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.
+      description: 'The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and Proxy-Authorization. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.'
       parameters:
         - {$ref: '#/components/parameters/WorkerLease'}
         - {$ref: '#/components/parameters/LegacyWorkerLease'}
@@ -1008,7 +1008,7 @@ components:
         note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
         reason: {type: string, maxLength: 240}
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
-        coordinator_session_id: {type: string, format: uuid, description: Agents must prove a live parent coordinator using Proxy-Authorization.}
+        coordinator_session_id: {type: string, format: uuid, description: 'Agents must prove a live parent coordinator using Proxy-Authorization.'}
     HarnessProvenanceItem:
       type: object
       required: [kind, logical_name, hash_kind]

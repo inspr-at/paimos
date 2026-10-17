@@ -5496,6 +5496,8 @@
     ,
     {"kind":"go","package":"internal/client","name":"TestWorkAggregateReadRetryIsOptInOnceAndCancellable","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/client","name":"TestWorkerProofHeadersRedactReflectedFailures","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/client","name":"TestWorkerProofHeadersRefuseRedirects","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/config","name":"TestChatEnabledFromEnv","tier":"ESSENTIAL"}

@@ -2924,13 +2924,17 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 
 // Every client fixture also rejects accidental legacy-header or scheme emission.
 func receivedWorkerLease(r *http.Request) string {
-	if r.Header.Get("X-Aeon-Worker-Lease") != "" {
+	if len(r.Header.Values("X-Aeon-Worker-Lease")) != 0 {
 		return "invalid legacy worker header"
 	}
-	value := r.Header.Get("Proxy-Authorization")
-	if value == "" {
+	values := r.Header.Values("Proxy-Authorization")
+	if len(values) == 0 {
 		return ""
 	}
+	if len(values) != 1 {
+		return "invalid duplicate worker header"
+	}
+	value := values[0]
 	if !strings.HasPrefix(value, "Bearer ") {
 		return "invalid worker scheme"
 	}

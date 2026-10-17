@@ -279,6 +279,22 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			}
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			// A proxy/server may reflect a request header in an error body.
+			// Worker callers log these errors, so remove both proof forms
+			// before decoding messages or retaining structured refusals.
+			for _, name := range []string{workerlease.Header, workerlease.LegacyHeader} {
+				proof := req.Header.Get(name)
+				if name == workerlease.Header {
+					if scheme, value, ok := strings.Cut(proof, " "); ok && strings.EqualFold(scheme, "Bearer") {
+						proof = value
+					}
+				}
+				if proof == "" {
+					continue
+				}
+				encoded, _ := json.Marshal(proof)
+				payload = bytes.ReplaceAll(payload, encoded[1:len(encoded)-1], []byte("[redacted]"))
+			}
 			var detail struct {
 				Error         string `json:"error"`
 				AttachRefusal string `json:"attach_refusal"`

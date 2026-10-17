@@ -2,6 +2,8 @@
 package client
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,6 +71,32 @@ func TestWorkerProofHeadersRefuseRedirects(t *testing.T) {
 			}
 			if redirected {
 				t.Fatal("worker proof followed redirect")
+			}
+		})
+	}
+}
+
+// Risk: a reverse proxy reflects private proof into an error that agentd logs.
+func TestWorkerProofHeadersRedactReflectedFailures(t *testing.T) {
+	lease := strings.Repeat("synthetic-7b", 4)
+	for _, header := range []string{"Proxy-Authorization", "X-Aeon-Worker-Lease"} {
+		t.Run(header, func(t *testing.T) {
+			value := lease
+			if header == "Proxy-Authorization" {
+				value = "Bearer " + lease
+			}
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "proxy reflected " + r.Header.Get(header), "reason_code": lease, "attach_refusal": lease})
+			}))
+			defer source.Close()
+			err := New(source.URL, "synthetic-agent").DoWithHeaders(t.Context(), http.MethodPost, "/worker", nil, nil, map[string]string{header: value})
+			var status *StatusError
+			if !errors.As(err, &status) || status.Status != http.StatusForbidden {
+				t.Fatal("lost status classification")
+			}
+			if strings.Contains(err.Error(), lease) || strings.Contains(status.ReasonCode, lease) || strings.Contains(status.AttachRefusal, lease) || !strings.Contains(err.Error(), "[redacted]") {
+				t.Fatal("private proof escaped refusal redaction")
 			}
 		})
 	}

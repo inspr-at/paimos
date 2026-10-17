@@ -222,7 +222,7 @@ paths:
       - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       summary: Checkpoint and cooperatively pause the current lead
-      description: Person owner with harness.control, or the current lead with harness.worker and Proxy-Authorization. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned. An unclaimed adoption_pending selection is rejected before any session control and the running session is left untouched.
+      description: 'Person owner with harness.control, or the current lead with harness.worker and Proxy-Authorization. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned. An unclaimed adoption_pending selection is rejected before any session control and the running session is left untouched.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       requestBody:

@@ -446,6 +446,12 @@ func basicCredential(value string) bool {
 // labelledValue reads the value after a credential label ending at i and
 // reports its byte range when it has a credential's shape.
 func labelledValue(text string, i int, label string, sep byte) (int, int, bool) {
+	if (label == "x-aeon-worker-lease" || label == "worker_lease" || label == "worker-lease") && i < len(text) && text[i] == '[' {
+		i++
+		for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
+			i++
+		}
+	}
 	password := strings.HasPrefix(label, "pass") || label == "pwd"
 	minLen := 8
 	if password {
