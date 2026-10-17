@@ -414,6 +414,7 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var out keyRecord
+	r = r.WithContext(db.WithKeyScopeChange(r.Context(), p.TenantID, id))
 	err := m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		// Enter through the same fence as lifecycle and workstation guards.
 		// Recheck ownership only after every access-change lock is held.

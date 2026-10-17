@@ -4,7 +4,7 @@ paths:
   /nodes/{nodeId}/entry-checks:
     get:
       operationId: getNodeEntryChecks
-      description: 'The effective whole workspace or project definition, live checks for Ready, QA and Done, immutable entry records, and the latest agent refusal. No definition means no checks. Reads require nodes.read in the current project. Advice is rechecked inside every final status or queue mutation.'
+      description: 'The effective whole workspace or project definition, live checks for Ready, QA and Done, immutable entry records, and the latest agent refusal. No definition means no checks. Reads require nodes.read or nodes.write in the current ticket project, including for agent keys. This grants no other read or tick authority. Advice is rechecked inside every final status or queue mutation.'
       security: [{session: []}, {agentKey: []}]
       parameters: [{$ref: '#/components/parameters/EntryNodeId'}]
       responses:
@@ -363,10 +363,12 @@ components:
         latest_refusal: {oneOf: [{$ref: '#/components/schemas/EntryRefusal'}, {type: 'null'}]}
     EntryChecksFailed:
       type: object
-      required: [error, code, to_status, failed]
+      description: 'A refused status change. checks contains only applicable checks that failed, in definition order and in the same shape as the entry-checks preview. failed is retained for existing clients.'
+      required: [error, code, to_status, failed, checks]
       properties:
         error: {type: string, const: entry_checks_failed}
         code: {type: string, const: entry_checks_failed}
         to_status: {type: string}
+        checks: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckResult'}, description: 'Every failing applicable check, including its id, label, label_de, reason and current person owner when one is required.'}
         failed: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/EntryCheckResult'}}
         override_allowed: {type: boolean}

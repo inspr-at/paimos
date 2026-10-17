@@ -935,7 +935,7 @@ and the exact previous binary/release pin. Record the daemon identity and copy
 time without recording file contents. Forward migration does not automatically
 retain backups. Avoid copying credentials or the whole pairing root.
 
-For rollback to releases before 136, after confirming the daemon has stopped, manually remove `daemon/agentd.sock` (or its recorded short fallback socket) and `daemon/hook-peer.json`; release 136 and later clean up their own pin on stop and recover stale runtime files on start.
+Releases 131–136 leave `daemon/agentd.sock` (or its recorded short fallback socket) and `daemon/hook-peer.json` after stop. After that daemon has stopped, remove those two files by hand before starting 131–136 again. Release 137 and later remove the socket and a hook pin that names their own pid on SIGTERM, SIGINT and the in-process stop, before the listener closes, so a rollback from those releases needs no manual step. SIGKILL cannot run that cleanup. A later start of 136 or newer treats the leftovers as stale. A rollback to 131–136 after SIGKILL still needs the two files removed by hand.
 
 On a downgrade, version-aware readers refuse a newer checkpoint/WAL with its
 stored and supported versions and a remedy; both state files remain intact.

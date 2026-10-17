@@ -10,7 +10,7 @@ func init() {
 		"PUT /api/nodes/{nodeId}/person-steps/{checkId}":              "nodes.write",
 		"PUT /api/nodes/{nodeId}/person-steps/{checkId}/owner":        "nodes.write",
 		"POST /api/nodes/{nodeId}/entry-evidence":                     "nodes.write",
-		"GET /api/nodes/{nodeId}/entry-checks":                        "nodes.read",
+		"GET /api/nodes/{nodeId}/entry-checks":                        "nodes.read|nodes.write",
 		"PUT /api/nodes/{nodeId}/entry-checks/{checkId}":              "nodes.write",
 		"GET /api/projects/{projectId}/definitions":                   "nodes.read",
 		"PUT /api/projects/{projectId}/definitions":                   "nodes.write",

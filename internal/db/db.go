@@ -149,6 +149,28 @@ func inTenant(ctx, bootstrap context.Context, pool *pgxpool.Pool, tenantID strin
 			return fmt.Errorf("refresh guarded tenant: %w", err)
 		}
 	}
+	if keyed && options.IsoLevel == pgx.RepeatableRead {
+		// Admission can wait after the repeatable-read snapshot was established.
+		// A locking read rejects a key changed since that snapshot (40001), so a
+		// queued read cannot authorize against scopes/ownership predating a change.
+		// SHARE must conflict with non-key updates too: KEY SHARE can follow their
+		// old versions. Roll back this savepoint to release the probe's row lock
+		// before handler locks; the shared advisory fence protects authority until
+		// commit. Run after the tenant guard and before handler rows/events.
+		probe, err := tx.Begin(bootstrap)
+		if err != nil {
+			return err
+		}
+		var id string
+		err = probe.QueryRow(bootstrap, `SELECT id::text FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE`, tenantID, p.KeyID).Scan(&id)
+		rollbackErr := probe.Rollback(bootstrap)
+		if err != nil {
+			return err
+		}
+		if rollbackErr != nil {
+			return rollbackErr
+		}
+	}
 	if err := fn(tx); err != nil {
 		if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok && IsStatementTimeout(err) {
 			limit.timedOut.Store(true)

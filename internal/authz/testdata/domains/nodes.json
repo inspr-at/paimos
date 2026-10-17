@@ -135,7 +135,7 @@
     "GET /api/nodes/lookup": "nodes.read",
     "GET /api/nodes/tree": "nodes.read",
     "GET /api/nodes/{nodeId}": "nodes.read",
-    "GET /api/nodes/{nodeId}/entry-checks": "nodes.read",
+    "GET /api/nodes/{nodeId}/entry-checks": "nodes.read|nodes.write",
     "GET /api/nodes/{nodeId}/person-step-owners": "nodes.read",
     "GET /api/nodes/{nodeId}/person-steps": "nodes.read",
     "GET /api/nodes/{nodeId}/work-lifecycle": "nodes.read",

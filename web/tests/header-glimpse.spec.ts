@@ -25,6 +25,14 @@ async function mockHeaderGraph(page: Page, world = ticketGraphWorld()) {
 
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
 const ready = (page: Page) => expect(surface(page)).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
+// setViewportSize resolves before the page has the new size. With the glimpse
+// running on CI's software GL, window.innerWidth kept the old width for 2.7–3 s
+// in nightly runs and past 5 s on PR shards; the glimpse then cleared within
+// 6 ms. Wait until the page reports the size; the reaction keeps its budget.
+async function resizeSeen(page: Page, size: { width: number; height: number }) {
+  await page.setViewportSize(size)
+  await expect.poll(() => page.evaluate(() => window.innerWidth), { timeout: 20_000 }).toBe(size.width)
+}
 // Fixed 60fps steps, released after layout, so the contrast shot pauses on one
 // orbit angle. 17ms stays above the renderer's frame gate. Do not relax 0.78.
 const GLIMPSE_PIN_FRAMES = 192
@@ -255,7 +263,7 @@ test('eight linked tickets appear once the viewport reaches 1280', async ({ page
   await expect(surface(page)).toHaveCount(0)
   await page.setViewportSize({ width: 1280, height: 900 })
   await ready(page)
-  await page.setViewportSize({ width: 390, height: 844 })
+  await resizeSeen(page, { width: 390, height: 844 })
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
@@ -279,7 +287,7 @@ test('a dropped wide-media change still hides the glimpse below 1280', async ({ 
   await mockHeaderGraph(page, sized(8, true))
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
-  await page.setViewportSize({ width: 390, height: 844 })
+  await resizeSeen(page, { width: 390, height: 844 })
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
@@ -303,10 +311,45 @@ test('a shrink that delivers neither resize nor the wide-media change still hide
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await page.evaluate(() => { (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals = true })
-  await page.setViewportSize({ width: 390, height: 844 })
+  await resizeSeen(page, { width: 390, height: 844 })
   // The layout really moved, and the header still holds the glimpse slot:
   // the off marker proves a decision, not an unmounted header.
   await expect.poll(() => page.evaluate(() => [window.innerWidth, window.matchMedia('(min-width: 1280px)').matches])).toEqual([390, false])
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// Risk: the root observer fires while both window/media hints still describe
+// the earlier wide viewport. Hold those hints and drop their events so only
+// real layout can end painting; no sleep or renderer timing decides the test.
+test('AEON-1471: a narrow root clears the glimpse while window and media hints stay wide', async ({ page }) => {
+  await page.addInitScript(() => {
+    const holding = () => (window as unknown as { __aeonHoldWideHints?: boolean }).__aeonHoldWideHints === true
+    window.addEventListener('resize', event => { if (holding()) event.stopImmediatePropagation() }, { capture: true })
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = original(query)
+      if (query === '(min-width: 1280px)') {
+        Object.defineProperty(list, 'matches', { configurable: true, get: () => holding() || original(query).matches })
+        list.addEventListener('change', event => { if (holding()) event.stopImmediatePropagation() }, { capture: true })
+      }
+      return list
+    }
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => {
+    (window as unknown as { __aeonHoldWideHints?: boolean }).__aeonHoldWideHints = true
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    window: window.innerWidth,
+    media: window.matchMedia('(min-width: 1280px)').matches,
+    layout: document.documentElement.getBoundingClientRect().width,
+  }))).toEqual({ window: 1280, media: true, layout: 390 })
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
