@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { GROUPS, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { GROUPS, groupOrderTip, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import type { ColumnId } from '../../lib/columns'
 import type { SortKey } from '../../lib/work'
 import { useModelDisplay } from '../../lib/prefs'
@@ -30,6 +30,8 @@ const emit = defineEmits<{
   group: [value: GroupBy]; sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']
   columns: [order: ColumnId[], visible: ColumnId[]]; columnsReset: []
   expandAll: []; collapseAll: []; expandGroups: []; collapseGroups: []
+  // The groups' order (AEON-1390): natural or reversed. The grouped-by column's header flips the same setting.
+  groupOrder: [desc: boolean]
   attentionGroup: [value: AttentionGrouping]
 }>()
 </script>
@@ -55,9 +57,18 @@ const emit = defineEmits<{
           :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)"
         >{{ option.label }}</button>
       </div>
+      <div class="group-order" :class="{ off: !grouped }">
+        <span id="display-group-order">Groups</span>
+        <div class="seg" role="radiogroup" aria-labelledby="display-group-order">
+          <button
+            v-for="desc in [false, true]" :key="String(desc)" type="button" role="radio" :aria-checked="grouped && !!filters.groupDesc === desc" :disabled="!grouped"
+            :data-tip="grouped ? groupOrderTip(filters.group, desc) : undefined" @click="emit('groupOrder', desc)"
+          ><AppIcon :name="desc ? 'arrow-down' : 'arrow-up'" :size="12" />{{ desc ? 'Reversed' : 'Natural order' }}</button>
+        </div>
+      </div>
       <div class="pair">
-        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
-        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand all</button>
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
       </div>
     </div>
     <div v-else class="block">
@@ -108,6 +119,10 @@ const emit = defineEmits<{
 .group-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }
 .group-option:focus-visible { box-shadow: var(--focus-ring); }
 .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.group-order { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-2); font-size: 12.5px; }
+.group-order.off { color: var(--ink-3); }
+.group-order .seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; flex: 0 1 auto; }
+.group-order .seg button { gap: 5px; min-width: 0; padding-inline: 8px; white-space: nowrap; }
 .pair .btn { min-width: 0; padding-inline: 4px; gap: 4px; font-size: 12px; }
 .section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
@@ -116,6 +131,7 @@ const emit = defineEmits<{
 .sheet .sort-editor { order: 1; }
 .sheet .group-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sheet .group-option, .sheet .pair .btn, .sheet .seg button { height: 44px; }
+.sheet .group-order { flex-wrap: wrap; }
 .sheet :deep(.head) { min-height: 44px; }
 .sheet :deep(.reset), .sheet :deep(.add), .sheet :deep(.sort-field), .sheet :deep(.icon-btn) { height: 44px; }
 .sheet :deep(.sort-editor .icon-btn) { width: 44px; flex: none; }
