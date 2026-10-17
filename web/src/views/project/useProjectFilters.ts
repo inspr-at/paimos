@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType } from 'vue-router'
 import { can, ensurePermissions } from '../../lib/authz'
 import { selectionHiddenByPolicy, type HideState } from '../../lib/hideStates'
 import { groupStates, reconcileStatusHide, type HeaderStatusGroup } from '../../lib/projectStatusCounts'
 import { toast } from '../../lib/toast'
 import { settledNavigation } from '../../lib/navigation'
-import { clearedFilters, facetOptions, levelOf, toggleMembers, filtersToQuery, toggleIn, toggleOut, valueLabel, type DateFilter, type Dimension, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { clearedFilters, facetOptions, groupSortField, levelOf, toggleMembers, filtersToQuery, toggleIn, toggleOut, valueLabel, withGrouping, withRowSort, type DateFilter, type Dimension, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { cycleSort, type SortField, type SortKey } from '../../lib/work'
 import { PROJECT_SECTIONS, type ProjectSection } from '../../components/work/projectNavigation'
 import { DOCK_MEDIA } from '../../lib/knowledge'
@@ -160,23 +160,50 @@ export function useProjectFilters(state: ProjectState, data: ReturnType<typeof u
   }
   function clearFilters() { update(clearedFilters()) }
   function setDate(date: DateFilter | null) { update({ date }) }
-  function sortBy(field: SortField, additive: boolean) { update({ sort: cycleSort(filters.value.sort, field, additive) }) }
-  function setSort(sort: SortKey[]) { update({ sort }) }
+  // One header sort model (AEON-1390): the grouped-by column flips the group order, never a row sort key.
+  function sortBy(field: SortField, additive: boolean) {
+    if (field === groupSortField(filters.value.group)) { flipGroups(); return }
+    update({ sort: cycleSort(filters.value.sort, field, additive) })
+  }
+  function setSort(sort: SortKey[]) { update(withRowSort(filters.value, sort)) }
+  function setGroupOrder(desc: boolean) { update({ groupDesc: desc || undefined }) }
+  function flipGroups() { setGroupOrder(!filters.value.groupDesc) }
 
   // ---------- Footer summary (AEON-785): what this list shows ----------
   // The same total the toolbar counts; blocked from the state counts, workers from the live read.
   function setGroup(group: GroupBy) {
-    collapsed.value = new Set()
     if (group === 'tag') void list.requestFacet('tag')
-    update({ group })
+    update(withGrouping(filters.value, group))
   }
-  function setAllGroups(open: boolean) { collapsed.value = open ? new Set() : new Set(groups.value.map(group => group.key)) }
   watch(() => filters.value.group === 'tag' && list.loadedOnce.value, on => { if (on) void list.requestFacet('tag') })
+
+  // ---------- Folded groups (AEON-1388): remembered per person, project, saved view and grouping, on this device ----------
+  const FOLDS_MAX = 500
+  const foldKey = computed(() => {
+    const identity = session.identity, id = projectId.value, group = filters.value.group
+    return identity && id && group !== 'none' ? `aeon:list-folds:v1:${identity.tenant.id}:${identity.principal.id}:${id}:${filters.value.view ?? '-'}:${group}` : null
+  })
+  watch(foldKey, key => {
+    let keys: string[] = []
+    try {
+      const parsed: unknown = key ? JSON.parse(localStorage.getItem(key) ?? '[]') : []
+      if (Array.isArray(parsed)) keys = parsed.filter((value): value is string => typeof value === 'string' && value.length <= 200).slice(0, FOLDS_MAX)
+    } catch { /* unreadable device storage: every group starts open */ }
+    collapsed.value = new Set(keys)
+  }, { immediate: true })
+  function setFolds(next: Set<string>) {
+    collapsed.value = next
+    const key = foldKey.value
+    if (!key) return
+    try { if (next.size) localStorage.setItem(key, JSON.stringify([...next].slice(0, FOLDS_MAX))); else localStorage.removeItem(key) }
+    catch { /* the folds still hold for this visit */ }
+  }
+  function setAllGroups(open: boolean) { setFolds(open ? new Set() : new Set(groups.value.map(group => group.key))) }
   function toggleGroup(key: string) {
     const next = new Set(collapsed.value)
     if (next.has(key)) next.delete(key); else next.add(key)
-    collapsed.value = next
+    setFolds(next)
   }
 
-  return { options, chipLabel, facetLoading, needOptions, sheetLoading, sheetOpened, update, setHideStates, manualShowClosed, selectCountGroup, selectCountStatus, setSection, setView, toggleValue, excludeValue, clearFilters, setDate, sortBy, setSort, setGroup, setAllGroups, toggleGroup }
+  return { options, chipLabel, facetLoading, needOptions, sheetLoading, sheetOpened, update, setHideStates, manualShowClosed, selectCountGroup, selectCountStatus, setSection, setView, toggleValue, excludeValue, clearFilters, setDate, sortBy, setSort, setGroupOrder, flipGroups, setGroup, setAllGroups, toggleGroup }
 }

@@ -9,7 +9,7 @@ import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
 const props = defineProps<{ project: Project }>()
 const { project } = toRefs(props)
-const { openAssignee, copyKey, openStatus, openEpic, quickCreate, closeCreate, moveRow, tablePrefs, tableLayout, usageVisible, saveWidths, list, outline, activeLive, liveActive, liveDataStale, rowsById, groups, total, showAssignee, expectedRows, knownStates, filtered, manualShowClosed, clearFilters, sortBy, toggleGroup, showUpdates, panelItem, nativeReleases, openRow, newTab, selectable, selected, phonePicking, selectRow, selectAll, openRelease, routeKey, filters, density, now, outlineActive, table, scrollRoot, cursorId, collapsed, creating, writable, columnFigures, focusFirst } = useProjectPageContext()
+const { openAssignee, copyKey, openStatus, openEpic, quickCreate, closeCreate, moveRow, tablePrefs, tableLayout, usageVisible, saveWidths, list, outline, activeLive, liveActive, liveDataStale, rowsById, groups, total, showAssignee, expectedRows, knownStates, filtered, manualShowClosed, clearFilters, sortBy, toggleGroup, setAllGroups, flipGroups, groupFigures, showUpdates, panelItem, nativeReleases, openRow, newTab, selectable, selected, phonePicking, selectRow, selectAll, openRelease, routeKey, filters, density, now, outlineActive, table, scrollRoot, cursorId, collapsed, creating, writable, columnFigures, focusFirst } = useProjectPageContext()
 const bindTable = bindProjectRef(table)
 </script>
 
@@ -27,6 +27,7 @@ const bindTable = bindProjectRef(table)
     :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
     :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs" :cost-allowed="usageVisible"
     :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll" :column-figures="columnFigures"
+    :group-desc="!!filters.groupDesc" :group-figures="filters.group !== 'none' && !outlineActive ? groupFigures : null" @all-groups="setAllGroups" @flip-groups="flipGroups"
     @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
     @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
     @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"

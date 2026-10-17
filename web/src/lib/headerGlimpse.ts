@@ -46,7 +46,7 @@ export function headerGlimpseAllowed(input: { enabled: boolean; reduced: boolean
 // at mount can keep matches true after the layout shrinks. Stay wide only when
 // the live query and the layout width both clear the same threshold.
 export function headerGlimpseViewportWide(mediaMatches: boolean, innerWidth: number): boolean {
-  return mediaMatches === true && Number.isFinite(innerWidth) && innerWidth >= GLIMPSE_MIN_WIDTH
+  return mediaMatches === true && headerGlimpseWide(innerWidth)
 }
 
 export function headerGlimpseWide(layoutWidth: number): boolean {
