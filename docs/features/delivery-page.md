@@ -1,5 +1,16 @@
 # Delivery page
 
+## Live deployment confirmations
+
+OPS can record its completed live check with `aeon deploy record --project KEY
+--env ENV --sha FULL_SHA [--version VERSION]`. Verified merged Done leaves then
+use the release publication transition to Delivered. The confirmation is
+idempotent per project, environment and SHA, records who confirmed it live,
+and preserves pending human checks and Delivered/Accepted states. See
+[recorded deployments](deploy-records.md) for the API, permissions and bounds.
+
+## Project delivery view
+
 Each project has a **Delivery** section (`/p/KEY/delivery`, between Knowledge and
 Settings) that shows how fast changes move from pull request to live, measured
 against the Project Arion targets. The section is absent, not disabled, for people
