@@ -16,7 +16,7 @@ guard remain unchanged.
 
 ## Ten-worker rehearsal
 
-On 2026-10-17, the approved `remote-test.sh` ran commit `23b254906` on mbp2606,
+On 2026-10-17, the approved `remote-test.sh` ran commit `23b254906` on the remote builder,
 Darwin arm64, Apple M5 Max, PostgreSQL 18.6, with `GOMAXPROCS=8`. Each arm runs
 ten workers sharing one key, thirty transactions per worker, after establishing
 ten pool connections and
