@@ -31,8 +31,9 @@ export function planBackfill({ nodes, merges, membership, live, now, settings })
     if (!sha) reason = 'No merge key on the current main first-parent history'
     else if (!release || !proof) reason = 'Newest merge is outside published + confirmed-live ancestry'
     else if (node.human_check?.trim()) reason = `Human check: ${node.human_check.trim()}; OPS would record a skip comment`
-    else if (node.fields?.no_release_needed) reason = 'no_release_needed: separate existing acceptance policy'
-    else if (!settings.enabled || !settings.rules.publish.enabled) reason = 'Publication policy disabled'
+    else if (node.fields?.no_release_needed === true) reason = 'no_release_needed: separate existing acceptance policy'
+    else if (!settings.enabled || !settings.rules.publish.enabled || settings.server_mode === 'off') reason = 'Publication policy disabled'
+    else if (settings.server_mode === 'suggest' || Date.parse(settings.suggest_until) > Date.parse(now)) reason = 'Publication policy is in Suggest mode'
     else {
       action = 'Delivered'
       if (settings.rules.accept.enabled && Date.parse(now) >= Date.parse(proof.since) + settings.rules.accept.days * day && !node.fields?.delivery_objection) action = 'Delivered → Accepted (objection recheck required)'

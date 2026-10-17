@@ -18,5 +18,7 @@ test('release backfill keeps newest main merge, human checks and live evidence',
   assert.equal(plan[3].action, 'unchanged')
   assert.equal(planBackfill({ ...input, live: [] }).filter(r => r.action.startsWith('Delivered')).length, 0)
   assert.equal(planBackfill({ ...input, now: '2026-10-17T07:59:59Z' })[0].action, 'Delivered')
+  assert.equal(planBackfill({ ...input, settings: { ...input.settings, server_mode: 'off' } }).filter(r => r.action.startsWith('Delivered')).length, 0)
+  assert.equal(planBackfill({ ...input, settings: { ...input.settings, server_mode: 'suggest' } }).filter(r => r.action.startsWith('Delivered')).length, 0)
   assert.throws(() => main(['--apply', 'yes']), /no apply mode/)
 })
