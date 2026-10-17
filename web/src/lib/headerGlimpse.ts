@@ -67,6 +67,15 @@ export function nextHeaderGlimpseWide(signal: { mediaMatches: boolean | null; la
   return true
 }
 
+// While the canvas paints, Chromium can drop resize, the media change and the
+// document-element observer together (CI: 1279 → 1280 → 390 left the glimpse
+// on). A paint frame is the read that still runs. It may only clear, so a
+// one-pixel catch-up cannot undo a delivered widen and a stale matches:true
+// cannot turn the glimpse back on once the layout has left 1280.
+export function headerGlimpsePaintClears(wide: boolean, signal: { mediaMatches: boolean | null; layoutWidth: number }): boolean {
+  return wide && !nextHeaderGlimpseWide(signal)
+}
+
 export function headerGlimpseGraphReady(nodes: number, links: number): boolean {
   return nodes >= GLIMPSE_MIN_TICKETS && links >= GLIMPSE_MIN_LINKS
 }

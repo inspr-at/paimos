@@ -658,9 +658,9 @@ export function tierWeights(manifest, rows) {
 
 // Seventeen is the smallest full-gate bin count whose measured tierTiming pack
 // stays inside the 15-minute budget (25% of the 20-minute hang guard, including
-// setup). Sixteen leaves shard 12 at 901.0s after the desk refresh specs joined
-// the catalogue: the spare on the other bins is smaller than any whole file, so
-// another bin is the fit (AEON-1453, AEON-1477).
+// setup). Sixteen leaves shard 8 at 902.0s after the painted-glimpse regression
+// joined the catalogue: the spare on the other bins is smaller than any whole
+// file, so another bin is the fit (AEON-1453, AEON-1477).
 // Essential PR matrices grow from four up to this cap. Full mode and non-PR
 // events stay fixed here so the merge-queue literal matches the plan.
 export const fullWebShardCount = 17

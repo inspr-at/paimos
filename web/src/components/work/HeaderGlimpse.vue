@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { projectSection } from './projectNavigation'
-import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide, nextHeaderGlimpseWide } from '../../lib/headerGlimpse'
+import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpsePaintClears, headerGlimpseViewportWide, nextHeaderGlimpseWide } from '../../lib/headerGlimpse'
 import { filtersFromQuery, filtersToQuery, type ListFilters } from '../../lib/ticketList'
 import { ticketGraphData } from '../../lib/ticketGraphRenderer'
 import type { GraphData, GraphFPS } from '../../lib/graphRenderer'
@@ -95,7 +95,7 @@ function syncWide() {
   const next = readWide()
   if (wide.value !== next) wide.value = next
 }
-let viewportWatch: ResizeObserver | undefined, viewportFrame = 0
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, paintSample = 0
 function followViewport() {
   syncWide()
   if (viewportFrame) return
@@ -149,6 +149,19 @@ function togglePause() { userPaused.value = !userPaused.value; applyMotion() }
 function onReduced() { reduced.value = reducedQuery.matches }
 function onVisibility() { applyMotion() }
 function onResize() { followViewport(); scheduleMeasure() }
+// The observers above can all stay silent while the canvas is painting.
+// Keep reading until the paint ends, and only clear.
+function samplePaintedViewport() {
+  if (!mounted || !paint.value) { paintSample = 0; return }
+  const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: window.innerWidth }
+  if (headerGlimpsePaintClears(wide.value, signal)) wide.value = false
+  if (!mounted || !paint.value) { paintSample = 0; return }
+  paintSample = requestAnimationFrame(samplePaintedViewport)
+}
+function startPaintSample() {
+  if (!mounted || !paint.value || paintSample) return
+  samplePaintedViewport()
+}
 function attachSizing() {
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
   if (!sizing || !header || !page) return
@@ -195,7 +208,7 @@ async function load() {
     applyMotion()
   } catch { /* A missing graph leaves the header as it was. */ }
 }
-watch(paint, value => emit('active', value))
+watch(paint, value => { emit('active', value); if (value) startPaintSample() })
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
   mounted = true
@@ -220,6 +233,7 @@ onBeforeUnmount(() => {
   changes?.disconnect()
   cancelAnimationFrame(measureFrame)
   cancelAnimationFrame(viewportFrame)
+  cancelAnimationFrame(paintSample)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
