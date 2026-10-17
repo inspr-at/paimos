@@ -460,7 +460,11 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"error":"permission denied"`) {
 		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
 	}
-	if countInstalls(t, database, tenantID) != 0 || countEvents(t, database, tenantID, eventInstallation) != 0 || countLinks(t, database, tenantID) != 0 {
+	var audit int
+	if err := database.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&audit); err != nil {
+		t.Fatal(err)
+	}
+	if countInstalls(t, database, tenantID) != 0 || audit != 0 || countLinks(t, database, tenantID) != 0 {
 		t.Fatal("revoked write left an installation or audit rows")
 	}
 }

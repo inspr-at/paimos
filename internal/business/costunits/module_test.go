@@ -633,7 +633,10 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 	if code, body := putInstall(mux, person, plug.Manifest.DigestSHA256, true, []string{fence.PermNodesContribute, fence.PermViewsProvide, fence.PermStepsApply}); code != http.StatusOK {
 		t.Fatalf("install: %d %s", code, body)
 	}
-	before := countEvents(t, database, tenantID, eventCreated)
+	var before int
+	if err := database.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
 	pool, barrier, ctx := dbtest.BarrierPool(t, database.App, func(sql string) bool { return sql == "commit" })
 	mux, _, _ = mount(t, pool)
 	req := httptest.NewRequest(http.MethodPost, ratesPath(nodeID), strings.NewReader(rateBody("hour", "EUR", "10", "12", "2026-01-01", "")))
@@ -665,7 +668,11 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"error":"permission denied"`) {
 		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
 	}
-	if countRates(t, database, tenantID) != 0 || countEvents(t, database, tenantID, eventCreated) != before || countEvents(t, database, tenantID, eventClosed) != 0 {
+	var audit int
+	if err := database.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&audit); err != nil {
+		t.Fatal(err)
+	}
+	if countRates(t, database, tenantID) != 0 || audit != before {
 		t.Fatal("revoked write left a rate or audit event")
 	}
 }

@@ -422,6 +422,7 @@ func TestPersonMutationsRecheckPermissions(t *testing.T) {
 		`m.requirePermission(r,p,"account.manage"); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { _,err:=tx.Exec(ctx,"INSERT INTO things VALUES(1)"); return err })`,
 		`authz.Require(ctx,"account.manage",authz.Scope{}); authz.RequireTx(ctx,old,p,"account.manage",authz.Scope{}); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { _,err:=tx.Exec(ctx,"UPDATE things SET value=1"); return err })`,
 		`m.admin(w,r); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { return authz.RequireTx(ctx,tx,p,"account.manage",authz.Scope{}) }); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { _,err:=tx.Exec(ctx,"DELETE FROM things"); return err })`,
+		`m.requirePermission(r,p,"account.manage"); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { m.in(ctx,p.TenantID,func(other pgx.Tx) error { return authz.RequireTx(ctx,other,p,"account.manage",authz.Scope{}) }); _,err:=tx.Exec(ctx,"INSERT INTO things VALUES(1)"); return err })`,
 	} {
 		tree, err := parser.ParseFile(token.NewFileSet(), "planted.go", `package planted; func (m *Module) handle() { `+planted+` }`, 0)
 		if err != nil {
@@ -434,6 +435,21 @@ func TestPersonMutationsRecheckPermissions(t *testing.T) {
 		if !permissionPrecheck(fn) || writes != 1 || missing != 1 {
 			t.Errorf("guard missed planted handler (%d writes, %d missing): %s", writes, missing, planted)
 		}
+	}
+	tree, err := parser.ParseFile(token.NewFileSet(), "guarded.go", `package guarded; func (m *Module) handle() {
+        m.requirePermission(r,p,"account.manage")
+        m.in(ctx,p.TenantID,func(tx pgx.Tx) error {
+            if err:=authz.RequireTx(ctx,tx,p,"account.manage",authz.Scope{}); err!=nil { return err }
+            _,err:=tx.Exec(ctx,"INSERT INTO things VALUES(1)"); return err
+        })
+    }`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions := permissionGuardFunctions{}
+	functions.add(tree)
+	if writes, missing := functions.transactions(functions["Module.handle"], map[string]bool{}); writes != 1 || missing != 0 {
+		t.Fatalf("guard rejected an in-transaction recheck (%d writes, %d missing)", writes, missing)
 	}
 }
 
@@ -515,6 +531,9 @@ func permissionTx(params *ast.FieldList) bool {
 // opening its own transaction cannot authorize its caller's final write.
 func (functions permissionGuardFunctions) evidence(fn *ast.FuncDecl, node ast.Node, seen map[string]bool) (write, recheck bool) {
 	ast.Inspect(node, func(node ast.Node) bool {
+		if _, nested := node.(*ast.FuncLit); nested {
+			return false
+		}
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
 			return true
