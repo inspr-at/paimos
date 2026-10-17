@@ -55,7 +55,7 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 			{parent, p.Commits[0], f.now.Add(-2 * time.Hour)}, {laterEpisode, p.Commits[0], f.now.Add(-2 * time.Hour)},
 		} {
 			meta, _ := json.Marshal(map[string]any{"repository": p.Repository, "merge_sha": fact.sha, "merged_at": fact.at.Format(time.RFC3339Nano)})
-			if _, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,metadata,at) VALUES($1,$2,$3,'delivery.merge_done',$4,$5)`, f.p.TenantID, f.p.ID, fact.id, meta, fact.at); err != nil {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,metadata,at,before,after) VALUES($1,$2,$3,'delivery.merge_done',$4,$5,'{"state":"done"}','{"state":"done"}')`, f.p.TenantID, f.p.ID, fact.id, meta, fact.at); err != nil {
 				return err
 			}
 		}
