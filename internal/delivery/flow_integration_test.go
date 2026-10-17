@@ -465,6 +465,9 @@ func TestDeliveryFlowProjectsPaimosRoundsReviewsAndHolds(t *testing.T) {
 			if strings.HasPrefix(key, "hold/") {
 				key = "hold"
 			}
+			if strings.HasPrefix(key, "merge/") {
+				key = "merge"
+			}
 			got[key] = row{r.key, r.kind, r.outcome, r.start, r.end}
 		}
 		return rows.Err()
@@ -475,6 +478,7 @@ func TestDeliveryFlowProjectsPaimosRoundsReviewsAndHolds(t *testing.T) {
 		"review/" + review.ID:           {"review", "work", "changes", 36, 44},
 		"work/" + fix.ID:                {"build", "rework", "-", 45, -1},
 		"hold":                          {"hold", "wait", "-", 50, 70},
+		"merge":                         {"queue", "work", "green", 80, 80},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("steps: %+v", got)

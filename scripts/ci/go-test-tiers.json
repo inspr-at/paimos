@@ -6006,6 +6006,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryConfirmedFlakesAndSuspectsStayApart","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowBackfillPlans87LinkedPRsWithoutWriting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowCheckSuitesFillLinkedChanges","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowCompletionKeepsFlake","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowConcurrentPassesApplyEachEventOnce","tier":"ESSENTIAL"}
@@ -6019,6 +6023,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowEmptyPassDoesNotLockTenant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowGitHubRunsBecomeChecksSteps","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowHarnessProjectsOnceAndPreservesOPSReleases","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowLateQueuedKeepsRunningStart","tier":"ESSENTIAL"}
     ,
@@ -6053,6 +6059,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutIngestIsIdempotentAndRead","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutRecordsCatalogueRehearsalQualificationAndRollbackClass","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutScopeIsNarrowAndValidated","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutValidation","tier":"ESSENTIAL"}
     ,

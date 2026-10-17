@@ -225,7 +225,7 @@ test('without a recorded run every mode shows the empty state and no sample data
   const flow = await setup(page, { empty: true })
   await page.goto('/p/AEON/delivery?view=flow')
   const empty = page.getByTestId('flow-empty')
-  const copy = 'No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.'
+  const copy = 'No recorded runs yet. No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.'
   await expect(empty).toHaveText(copy)
   const button = (mode: string) => modes(page).locator(`[data-mode="${mode}"]`)
   const guard = await controlStability(page, { modes: modes(page), live: button('live'), replay: button('replay'), compare: button('compare'), empty })
@@ -249,16 +249,22 @@ test('without a recorded run every mode shows the empty state and no sample data
 for (const [width, theme] of [[390, 'light'], [390, 'dark'], [1024, 'light'], [1024, 'dark'], [1440, 'light'], [1440, 'dark']] as const) {
   test(`the Flow empty state at ${width} ${theme} sits under the mode controls without sample data`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
-    await setup(page, { theme, empty: true })
+    await setup(page, { theme, lang: 'de', empty: true })
     await page.goto('/p/AEON/delivery?view=flow')
     const empty = page.getByTestId('flow-empty')
-    await expect(empty).toHaveText('No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.')
+    await expect(empty).toHaveText('Noch keine aufgezeichneten Läufe. Für dieses Projekt fehlen bisher verknüpfte Workflow-Läufe oder abgeleitete Check-Suites der GitHub-App, PAIMOS-Harness-Lieferungen oder Arbeitsrunden sowie OPS-Rollout-Einträge.')
+    const button = (mode: string) => modes(page).locator(`[data-mode="${mode}"]`)
+    const guard = await controlStability(page, { modes: modes(page), live: button('live'), replay: button('replay'), compare: button('compare') })
+    for (const mode of ['replay', 'compare', 'live']) {
+      await guard.check(async () => { await button(mode).click(); await expect(button(mode)).toHaveAttribute('aria-checked', 'true') })
+    }
+    guard.done()
     // Below the mode controls, inside the page, with the whole sentence readable.
     const [top, box] = [(await modes(page).boundingBox())!, (await empty.boundingBox())!]
     expect(box.y).toBeGreaterThanOrEqual(top.y + top.height)
     expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5)
     expect(await empty.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
-    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1135/flow-empty-${width}-${theme}.png`) })
+    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1472/flow-empty-${width}-${theme}.png`) })
   })
 }
 

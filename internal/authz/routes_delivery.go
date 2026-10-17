@@ -41,7 +41,7 @@ func init() {
 		"POST /api/projects/{projectId}/delivery-reviews/{reviewId}/claim":   "delivery_reviews.claim",
 		"POST /api/projects/{projectId}/delivery-reviews/{reviewId}/verdict": "delivery_reviews.report",
 		"POST /api/projects/{projectId}/delivery-shipping/claim":             "delivery_ship.claim",
-		"POST /api/projects/{projectId}/delivery/flow/rollout":               "delivery.manage",
+		"POST /api/projects/{projectId}/delivery/flow/rollout":               "delivery.manage|delivery.rollout.write",
 		"POST /api/projects/{projectId}/delivery/metrics/backfill":           "delivery.manage",
 		"POST /api/projects/{projectId}/delivery/metrics/check-again":        "delivery.manage",
 		"POST /api/projects/{projectId}/delivery/merge-backfill":             "delivery.manage",
