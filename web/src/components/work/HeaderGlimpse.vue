@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { projectSection } from './projectNavigation'
-import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide } from '../../lib/headerGlimpse'
+import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide, nextHeaderGlimpseWide } from '../../lib/headerGlimpse'
 import { filtersFromQuery, filtersToQuery, type ListFilters } from '../../lib/ticketList'
 import { ticketGraphData } from '../../lib/ticketGraphRenderer'
 import type { GraphData, GraphFPS } from '../../lib/graphRenderer'
@@ -107,9 +107,11 @@ function followViewport() {
   viewportFrame = requestAnimationFrame(tick)
 }
 function onWide(event: MediaQueryListEvent) {
-  const next = headerGlimpseViewportWide(event.matches, window.innerWidth)
-  if (wide.value !== next) wide.value = next
-  else followViewport()
+  // A delivered media change is authoritative while innerWidth catches up.
+  // Missing changes still use fresh query/layout samples over the next frames.
+  const next = nextHeaderGlimpseWide({ mediaMatches: event.matches, layoutWidth: window.innerWidth })
+  wide.value = next
+  if (next) scheduleMeasure()
 }
 // #main's scroll and the observer can disagree. A delivery may carry the
 // pre-scroll sample first, or the scroll may never be delivered. The box on

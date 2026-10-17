@@ -8806,6 +8806,8 @@
     ,
     {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1315 entry row stays absent without a definition during reads and saves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/entry-checks.spec.ts","name":"AEON-1396 the Move anyway link shows the app ring on keyboard focus and no outline with its form open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"an epic with open children and no hours shows coverage on the empty estimate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"estimate display and edit at 1600 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
