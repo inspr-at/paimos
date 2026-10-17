@@ -7,14 +7,17 @@ import AgentChores from '../src/components/agents/AgentChores.vue'
 import type { AttachQueueRow } from '../src/lib/attachWatch'
 import { useDecisionDesk } from '../src/stores/decisionDesk'
 import { useSession } from '../src/stores/session'
-import { loadDeskProjection, type DeskProjection } from '../src/lib/decisionDesk'
+import { deskRefreshNotice, loadDeskProjection, type DeskProjection } from '../src/lib/decisionDesk'
+import { onProjectionWake } from '../src/lib/agents'
+import { APIError } from '../src/lib/api'
 
 vi.mock('../src/stores/session', () => ({ useSession: vi.fn() }))
 vi.mock('../src/lib/decisionDesk', async original => ({ ...await original<object>(), loadDeskProjection: vi.fn() }))
+vi.mock('../src/lib/agents', async original => ({ ...await original<object>(), onProjectionWake: vi.fn(() => () => {}) }))
 const page = (count: number): DeskProjection & { truncated: boolean } => ({ items: [], counts: { open: count, held: 0, chores: 0 }, has_more: false, as_of: '', truncated: false })
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
+function deferred<T>() { let resolve!: (value: T) => void, reject!: (cause: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail }); return { promise, resolve, reject } }
 const stores: ReturnType<typeof useDecisionDesk>[] = []
-afterEach(() => { for (const store of stores.splice(0)) store.$dispose(); vi.clearAllMocks() })
+afterEach(() => { for (const store of stores.splice(0)) store.$dispose(); vi.clearAllMocks(); vi.useRealTimers() })
 function setup() {
   setActivePinia(createPinia())
   const session = reactive({ identity: null as null | { tenant: { id: string }; principal: { id: string; kind: string } }, authenticationCurrent: () => true })
@@ -42,8 +45,87 @@ it('reports an unknown count on failed refresh and retries without claiming an e
   const { session, desk } = setup()
   session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }
   await desk.refresh(); expect(desk.count).toBe(8)
+  // AEON-1477 retains transient failures; a permission reset still loses the
+  // old authority and must never present its count as a fresh empty desk.
+  desk.invalidate()
   await desk.refresh(); expect(desk.count).toBeNull(); expect(desk.error).toBe('Access changed')
   await desk.refresh(); expect(desk.count).toBe(2); expect(desk.error).toBe('')
+})
+
+it('AEON-1477 retains the last good projection through 429, 500 and abort, resetting failures only on success', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-17T13:58:00Z'))
+  const row: DeskProjection['items'][number] = { id: 'pending-1477', kind: 'question', revision: 1, title: 'Which index?', held: true, created_at: '2026-10-17T13:00:00Z', href: '/decision-desk?item=q:pending-1477', source: '/api/questions/pending-1477' }
+  const good = { ...page(1), items: [row] }, aborted = deferred<typeof good>()
+  vi.mocked(loadDeskProjection).mockResolvedValueOnce(good)
+  const { session, desk } = setup()
+  session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }
+  await desk.refresh()
+  const shown = desk.projection, at = desk.refreshedAt
+  for (const status of [429, 500]) {
+    vi.mocked(loadDeskProjection).mockRejectedValueOnce(new Error(`Decision Desk could not be read (${status}).`))
+    await desk.refresh()
+    expect(desk.projection).toBe(shown); expect(desk.projection?.items).toEqual([row]); expect(desk.count).toBe(1); expect(desk.error).toBe('')
+    expect(desk.failures).toBe(status === 429 ? 1 : 2); expect(desk.refreshedAt).toBe(at)
+  }
+  const since = desk.failedSince
+  vi.mocked(loadDeskProjection).mockRejectedValueOnce(new DOMException('Cancelled', 'AbortError'))
+  await desk.refresh()
+  expect(desk.failures).toBe(2); expect(desk.failedSince).toBe(since); expect(desk.projection).toBe(shown); expect(desk.error).toBe('')
+  vi.mocked(loadDeskProjection).mockRejectedValueOnce(new APIError(499, 'Client cancelled'))
+  await desk.refresh()
+  expect(desk.failures).toBe(2); expect(desk.failedSince).toBe(since); expect(desk.projection).toBe(shown); expect(desk.error).toBe('')
+  vi.mocked(loadDeskProjection).mockReturnValueOnce(aborted.promise)
+  const pending = desk.refresh()
+  const signal = vi.mocked(loadDeskProjection).mock.lastCall![0]!
+  desk.cancelRefresh()
+  expect(signal.aborted).toBe(true)
+  aborted.reject(new Error('Transport reports a generic cancel'))
+  expect(await pending).toBe(false)
+  expect(desk.failures).toBe(2); expect(desk.projection).toBe(shown)
+  vi.mocked(loadDeskProjection).mockResolvedValueOnce(page(3))
+  expect(await desk.refresh()).toBe(true)
+  expect(desk.count).toBe(3); expect(desk.failures).toBe(0); expect(desk.failedSince).toBeNull()
+})
+
+it('AEON-1477 coalesces twenty live wakes in one second into one in-flight read and one trailing read', async () => {
+  vi.useFakeTimers()
+  const first = deferred<ReturnType<typeof page>>()
+  vi.mocked(loadDeskProjection).mockReturnValueOnce(first.promise).mockResolvedValue(page(2))
+  const { session, desk } = setup()
+  session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }
+  const pending = desk.refresh()
+  const wake = vi.mocked(onProjectionWake).mock.lastCall![0]
+  for (let event = 0; event < 20; event++) { wake('question.asked'); await vi.advanceTimersByTimeAsync(50) }
+  expect(loadDeskProjection).toHaveBeenCalledTimes(1)
+  first.resolve(page(1)); await pending
+  await vi.advanceTimersByTimeAsync(0)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(2)
+  expect(desk.count).toBe(2)
+  // A delayed live wake cannot repopulate person-owned data after reset.
+  wake('question.asked'); desk.invalidate(); await vi.advanceTimersByTimeAsync(1000)
+  expect(loadDeskProjection).toHaveBeenCalledTimes(2); expect(desk.projection).toBeNull()
+})
+
+it('AEON-1477 keeps a cancelled first load quiet and a genuine first failure unknown', async () => {
+  vi.mocked(loadDeskProjection).mockRejectedValueOnce(new DOMException('Cancelled', 'AbortError'))
+  const { session, desk } = setup()
+  session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }
+  await desk.refresh()
+  expect(desk.count).toBeNull(); expect(desk.error).toBe(''); expect(desk.failures).toBe(0)
+  vi.mocked(loadDeskProjection).mockRejectedValueOnce(new Error('Decision Desk could not be read (500).'))
+  await desk.refresh()
+  expect(desk.count).toBeNull(); expect(desk.error).toContain('(500)'); expect(desk.failures).toBe(1)
+})
+
+it('AEON-1477 shows the hint after two failures and escalates strictly after sixty seconds or at five failures', () => {
+  const good = Date.parse('2026-10-17T13:58:00Z'), since = good + 1000
+  expect(deskRefreshNotice(1, since, good, since + 90_000)).toBeNull()
+  expect(deskRefreshNotice(2, since, null, since + 90_000)).toBeNull()
+  expect(deskRefreshNotice(2, since, good, since + 60_000)).toBe('quiet')
+  expect(deskRefreshNotice(2, since, good, since + 60_001)).toBe('escalated')
+  expect(deskRefreshNotice(4, since, good, since)).toBe('quiet')
+  expect(deskRefreshNotice(5, since, good, since)).toBe('escalated')
+  expect(deskRefreshNotice(0, null, good, since + 90_000)).toBeNull()
 })
 
 // Risk: the connection adapter must retain consent scope, expiry and receipts.

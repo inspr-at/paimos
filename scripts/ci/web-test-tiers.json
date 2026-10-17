@@ -8584,6 +8584,20 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 a genuinely failed first load never claims an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
@@ -17639,6 +17653,14 @@
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"production runtime exports have a lexical consumer or an explained exception","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"retired Business and compatibility URLs still resolve to their canonical owners, and external account links remain","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 coalesces twenty live wakes in one second into one in-flight read and one trailing read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 keeps a cancelled first load quiet and a genuine first failure unknown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 retains the last good projection through 429, 500 and abort, resetting failures only on success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 shows the hint after two failures and escalates strictly after sixty seconds or at five failures","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
     ,
