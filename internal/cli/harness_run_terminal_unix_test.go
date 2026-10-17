@@ -60,10 +60,11 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 			}
 			os.Exit(0)
 		}
+		beforeGroup, beforeErr := unix.IoctlGetInt(0, unix.TIOCGPGRP)
 		code := Run(args, os.Stdin, os.Stdout, os.Stderr)
 		group, err := unix.IoctlGetInt(0, unix.TIOCGPGRP)
-		if err != nil || group != syscall.Getpgrp() {
-			fmt.Fprintf(os.Stderr, "AEON1410_RESTORE_FAILED group=%d want=%d error=%v\n", group, syscall.Getpgrp(), err)
+		if !errors.Is(err, beforeErr) || group != beforeGroup {
+			fmt.Fprintf(os.Stderr, "AEON1410_RESTORE_FAILED group=%d want=%d error=%v\n", group, beforeGroup, err)
 			os.Exit(25)
 		}
 		os.Exit(code)
@@ -84,6 +85,7 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 		{instance: "pma", role: "worker", mode: "captured", reason: "process_exited"},
 		{instance: "pma", role: "worker", mode: "failed", reason: "process_failed", code: 7},
 		{instance: "pma", role: "worker", mode: "missing", reason: "process_failed", code: 1},
+		{instance: "pma", role: "worker", mode: "foreign", reason: "process_failed", code: 1},
 		{instance: "pma", role: "worker", mode: "interrupted", reason: "stopped", code: 143},
 	} {
 		t.Run(fmt.Sprintf("%s/parent=%t/%s", tc.instance, tc.parent, tc.mode), func(t *testing.T) {
@@ -136,7 +138,8 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 			if code != tc.code {
 				t.Fatalf("PTY wrapper code=%d want=%d\n%s", code, tc.code, output)
 			}
-			if tc.mode != "missing" && tc.mode != "interrupted" && (!strings.Contains(string(output), "AEON1410_STDOUT") || !strings.Contains(string(output), "AEON1410_STDERR")) || strings.Contains(string(output), "RESTORE_FAILED") {
+			launched := tc.mode != "missing" && tc.mode != "foreign" && tc.mode != "interrupted"
+			if launched && (!strings.Contains(string(output), "AEON1410_STDOUT") || !strings.Contains(string(output), "AEON1410_STDERR")) || strings.Contains(string(output), "RESTORE_FAILED") {
 				t.Fatalf("terminal streams/restoration changed: %s", output)
 			}
 			if tc.code != 0 && !strings.Contains(string(output), "harness run:") && !strings.Contains(string(output), "no such file") {
@@ -170,7 +173,19 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 const harnessRunPTYDriver = `
 import errno, os, pty, select, signal, sys, termios, time
 start_r, start_w = os.pipe()
-pid, master = pty.fork()
+if os.environ['AEON_TEST_INTERACTIVE_MODE'] == 'foreign':
+    master, slave = pty.openpty()
+    pid = os.fork()
+    if pid == 0:
+        os.setsid()  # stdin is a terminal, but is not ours to foreground.
+        os.close(master)
+        for fd in (0, 1, 2):
+            os.dup2(slave, fd)
+        os.close(slave)
+    else:
+        os.close(slave)
+else:
+    pid, master = pty.fork()
 if pid == 0:
     os.close(start_w)
     if os.read(start_r, 1) != b'1':
