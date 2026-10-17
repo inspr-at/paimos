@@ -58,6 +58,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/deskdelivery"
+	"github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
@@ -1621,6 +1622,18 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	if err = reportActivity(ctx, tx, s, in.Doing, in.DoingAt, in.ToolActivity); err != nil {
 		return nil, err
+	}
+	var goalETAs *goals.ETACapture
+	if s.TicketNodeID != nil && (in.EtaReadyAt != nil || in.EtaLiveAt != nil) {
+		goalETAs, err = goals.CaptureTicketETAs(ctx, tx, []string{*s.TicketNodeID})
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if err == nil {
+				err = goalETAs.Append(ctx, tx, p)
+			}
+		}()
 	}
 	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=$6,reasoning_effort=$7,account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14,model_raw=$15,model_profile_id=$16,inbox_binding_error=$17 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label, modelRaw, identity.ProfileID, bindingError))
 	if err != nil {

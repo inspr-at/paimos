@@ -125,10 +125,14 @@ and last-used tab. The opening reason stays visible. Workers have Overview
 and Chat. Defaults and last-used tabs are person preferences.
 
 Interrupt, Pause (Resume when paused) and Stop live in the panel's ⋯ menu with
-their labels and reasons (AEON-1286). The default tab is a ⋯ choice for the tab
-on screen, such as "Open on Chat by default"; no pin sits beside the tabs. On
-Events or Terminal it names the current default; clearing it there keeps the
-item in place until ⋯ closes, so it can be ticked again. Lead start, resume and cooperative handover use the caller-specific
+their labels and reasons (AEON-1286). The tabs are the panel's view switch
+(AEON-1453, [View switches](view-switch.md)): a lead panel's default tab is set
+by right-clicking, holding or pressing Shift+F10 on Lead, Details or Chat, and
+carries the small pin in the slot those tabs reserve. On a phone, ⋯ also offers
+it as a labelled choice for the tab on screen, such as "Open on Chat by
+default", which sets the same default. On Events or Terminal it names the
+current default; clearing it there keeps the item in place until ⋯ closes, so it
+can be ticked again. Lead start, resume and cooperative handover use the caller-specific
 lead action projection, including its blocked reason; a missing projection
 leaves those actions unavailable. Session controls retain their own ownership
 and permission checks. A stopped lead's Start a lead is in Right now.

@@ -166,6 +166,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdRecur(),
 		rt.cmdOutcome(),
 		rt.cmdProject(),
+		rt.cmdGoal(),
 		rt.cmdRelation(),
 		rt.cmdRulesImport(),
 		rt.cmdRulesTLDR(),

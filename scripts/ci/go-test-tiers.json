@@ -4732,6 +4732,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestForbiddenHeartbeatSettlesPartialRecordAfterPendingReplay","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestGoalUpdateCommandPreservesPatchAndReceipt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestGrokSnapshotSkipsFallingUncachedInputWithoutBlockingLaterUsage","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestGrokUsageDiscoveryDoesNotPinIncompleteListing","tier":"GATED-FULL"}
@@ -4792,7 +4794,11 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRenameProducerEndToEnd","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessRunInteractiveTTY","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRunLaunchFailureStops","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessRunReportsFailures","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessRunSIGTERM","tier":"GATED-FULL"}
     ,
@@ -6370,6 +6376,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestExactAPINodeChangesCompareNumbersExactly","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestGoalsSubscriptionUsesOutcomeVisibility","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestImportParentChangeHintInHistoryAndStream","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestImportParentChangeSummarizesMembershipWithoutRevisionChange","tier":"GATED-FULL"}
@@ -6439,6 +6447,80 @@
     {"kind":"go","package":"internal/features","name":"TestValidationConcurrencyAndAtomicAudit","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/fromclassic","name":"TestResolveImportedLinksWithProjectVisibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalAPIAtomicReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalAPICreateAndCurrentTarget","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalAPIMoveReplaceAndRetiredRefs","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalAPIReplayReauthorizesUnderFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalAPIWriteTimeETAsAndHiddenPings","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalClockBoundariesAndWatermarks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalEventReferenceUpgradePreservesHistory","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalFilteredReadCoverageETAAndWorkerState","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHandedOverReadAndConflict","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHistoryCancellationReturnsTooLarge","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHistoryIgnoresUnrelatedEvents","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalIdempotencyKeyGrammar","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalKindSchemasAndNextStep","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalLazyKindSeeding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListAggregateBudgetPaginatesWithoutLoss","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListFiltersTotalsAndMoveHistory","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListPageWideProjection","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListViewFiltersAndOrdering","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalOutcomeReferenceVisibilityIsBounded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPassedRevalidationIsFixedAndIdempotent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPatchNodeResolutionUsesIndexes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPauseUsesLatestStoppedSession","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalProjectWriterUpdatesOnlyVisibleOutcomes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalReadGenerationOrdersReversedCompletion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalReceiptReplaySurvivesETAClockWindow","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalReleaseFirstUpdateRestoresKinds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalRollupPartialAndSharedEstimates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesBulkUndoAndProjectSnapshots","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesChangedKeysWithoutPercentageChange","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesPlannerAndMoveTimeline","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesVisibilityAndFourHourStall","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalStateWorkerWins","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalStorageIdentityAndReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalStorageVisibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalTooLargeDetailKeepsOnlyVisibleCounts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestUpdateDigestRetainsPatchIntent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestUpdateValidationBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/greetings","name":"TestCorpusLint","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -6527,6 +6609,8 @@
     {"kind":"go","package":"internal/harness","name":"TestFinishedNeedsAReportedHundredAndARecordedCleanExit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestForceStopOwnershipFreshness","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestGoalETAHeartbeatAndDirectWriteTransitions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestGrokEnrollmentCannotAuthorizeCodexSessionEvidence","tier":"GATED-FULL"}
     ,
@@ -8612,6 +8696,10 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestSchemaAndTagMutationsRequirePersonAdmin","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestScopedListWithoutStatisticsUsesChildIndex","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestScopedReadsIgnoreLargeSiblingTree","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestServicePrincipalsCannotBeAssignees","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestSiblingPlacementOrdersPositionsNumerically","tier":"ESSENTIAL"}
@@ -9121,6 +9209,8 @@
     {"kind":"go","package":"internal/questions","name":"TestFix4CorrectionKeepsSupersededReviewProvenance","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestFix4ReviewIdentityIncludesReference","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/questions","name":"TestGoalLinksSurviveQuestionMerge","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestHeldPersonReplyBridgeAndReplay","tier":"NIGHTLY"}
     ,

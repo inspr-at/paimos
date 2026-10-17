@@ -896,6 +896,8 @@
     ,
     "browser:tests/header-desk-split.spec.ts:the preview's controls stay put through reading, a failure, Retry and a refresh at 390"
     ,
+    "browser:tests/header-glimpse.spec.ts:a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280"
+    ,
     "browser:tests/header-glimpse.spec.ts:the glimpse is off unless the developer setting turns it on, even after an earlier Display choice"
     ,
     "browser:tests/hours.spec.ts:an older week shows existing hours and logs into its existing period"
@@ -6102,7 +6104,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024 sanity: the desktop head and its anchored menu keep their form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024: clearing the default on Events keeps its row and its focus, and it can be ticked again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 320: clearing the default on Events keeps its row and its focus, and it can be ticked again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 390: clearing the default on Events keeps its row and its focus, and it can be ticked again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -9299,6 +9301,8 @@
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a priority filter that keeps eight tickets but no link hides the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a priority filter that leaves seven of those tickets hides the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a wide project with tickets and a link shows a labelless 60fps glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14650,9 +14654,17 @@
     ,
     {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 Projects opens on the view used last or the default; the pin never moves a segment, and a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 phone session panel: the ⋯ choice and a long press on the tab set one default, shown on both","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 session panel: a ?tab= link wins once and changes neither the default nor the tab used last","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 session panel: the old pin becomes the tab switch default once; right-click sets and stops it in place, and ⋯ keeps no default item on wide screens","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 the Releases sheet language leaves this browser for the server once; the view remembers its last choice","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 the ticket list opens on its default (a saved view or a mode) or the mode used last; a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 worker panel: the last tab kept before the switch opens this visit and is never rewritten","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

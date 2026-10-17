@@ -23,12 +23,12 @@ statuses for comparison across a full run; a missing result is `notRun`.
 Existing case accounting and full-execution checks remain authoritative.
 
 `node scripts/test-tiers/prove-web-shards.mjs` checks exact native old/new
-selection identities across all sixteen full browser shards; `--all` checks the
+selection identities across all seventeen full browser shards; `--all` checks the
 whole catalogue. It compares full versus browser-only discovery, resolves both
 the old group lists and the combined lists through Playwright `--list`, and
 writes `tmp/test-tiers/web-shard-set-equality.json`. This is a discovery proof;
 it does not claim browser execution. The runner regression executes a full
-sixteen-shard layout with native-result fixtures and rejects missing/duplicate
+seventeen-shard layout with native-result fixtures and rejects missing/duplicate
 identities. Actual browser execution and before/after non-case timing require
 the approved browser lane or the coordinator's CI run. The AEON lead owns the
 seven-day outcome: compare actual per-shard residuals, runner minutes and

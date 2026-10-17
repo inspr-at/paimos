@@ -336,6 +336,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestListLeadPermissionProjection","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestListLeadRestrictedKeyStaysStable","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestListWithoutStatistics","tier":"ESSENTIAL","active":true},
+    {"kind":"go","package":"internal/nodes","name":"TestScopedListWithoutStatisticsUsesChildIndex","tier":"ESSENTIAL","active":true},
+    {"kind":"go","package":"internal/nodes","name":"TestScopedReadsIgnoreLargeSiblingTree","tier":"ESSENTIAL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestSafeListPerformancePlan","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestList6000Performance","lane":"timing","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestList6000PerformanceWithStaleKindStatistics","lane":"timing","tier":"GATED-FULL","active":true},

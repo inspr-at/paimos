@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1361_goals.sql",
+      "sha256": "47b145f8158d401ae5bdef4fd64d8d9760e9180b1d5d25eeafeb0ba70db189dc",
+      "ticket": "AEON-1456",
+      "reason": "AEON-1456 concept r3 D1-D3/E1: widen the relation CHECK only by serves and asks_for; preserve every existing event family, named type, actor exception, tenant boundary and node-reference guard while adding goal events under visible-goal/outcome RLS. Goal receipts and the response generation sequence support authorized idempotent updates without rewriting existing rows. Invoker visibility helpers retain outcome cycle/depth guards, authorize at most twenty serves ends, and restore project visibility and the path on success or error. The ordinary-kind shortcut remains a statement-level kind lookup. The released aeon_work_scope signature, root/pair budgets, cycle termination, direct-work leaf semantics and result fields remain intact: indexed UUID child pages visit only the subtree, and leaf parents are derived from its bounded facts. The additive goal_event_refs projection stores only immutable event/node/type/time metadata, classified in the DSAR inventory. Tenant RLS and the authoritative event visibility policy apply to every projection read. Its invoker AFTER INSERT trigger supports previous writers; a tenant-fenced append-only backfill copies existing references without rewriting events or nodes. No node or event FK is acquired after the event counter. Bounded invoker reference/current-child/parent helpers and plain UUID/time indexes support selected-range and recorded-prefix history, including bulk and wrapped project snapshots, without widening existing visibility. No sample data or destructive data step. CHECK replacement, ALTER POLICY, CREATE OR REPLACE, CREATE SEQUENCE and the metadata backfill are outside the conservative expand-safe allowlist. Exact bytes require coordinator cross-family review and previous-binary compatibility/backup checks before merge or release. This artifact grants no acceptance, push or deployment authority."
+    }
+  ]
+}

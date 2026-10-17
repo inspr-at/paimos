@@ -1761,6 +1761,7 @@ components:
         blocked_node_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
         doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
         suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        goal_id: {type: string, format: uuid, description: "Visible goal linked to this ask through asks_for; retained across question merging"}
         ticket_id: {type: string, format: uuid}
         session_id: {type: string, format: uuid, description: Verified original public harness generation; never an arbitrary attribution UUID}
         source_request_id: {type: string, format: uuid, description: Optional owned inbox_compat_messages ID in this project and exact session}

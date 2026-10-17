@@ -31,7 +31,7 @@ export const requiredJobs = [
   ...Object.keys(executionSteps),
   ...Array.from({ length: 7 }, (_, i) => `go-test (${i + 1})`),
   ...Array.from({ length: 4 }, (_, i) => `web-unit (${i + 1})`),
-  ...Array.from({ length: 16 }, (_, i) => `web-shard (${i + 1})`),
+  ...Array.from({ length: 17 }, (_, i) => `web-shard (${i + 1})`),
 ];
 
 // Bound the entire operation, every response and redirects before decoding.

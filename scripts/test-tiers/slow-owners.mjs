@@ -71,8 +71,9 @@ export function proveSlowOwners(browserRows, goRows) {
     provePartition(selected, bins)
     const loads = bins.map(bin => [...new Set(bin.map(row => row.file))].reduce((n, file) => n + weights[file], 0))
     const sorted = [...loads].sort((a, b) => a - b)
-    const mid = sorted.length / 2
-    if (event !== 'schedule' && sorted.at(-1) > 1.25 * (sorted[mid - 1] + sorted[mid]) / 2) throw new Error('Browser shard weight imbalance')
+    const mid = Math.floor(sorted.length / 2)
+    const center = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+    if (event !== 'schedule' && sorted.at(-1) > 1.25 * center) throw new Error('Browser shard weight imbalance')
     if (event !== 'schedule') assertWebShardBudget(webShardPlan(selected, policy, { mode: 'full' }))
     browserLoads.push({ event, seconds: loads.map(seconds => +seconds.toFixed(3)) })
   }
