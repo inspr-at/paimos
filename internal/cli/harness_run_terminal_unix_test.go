@@ -114,7 +114,11 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 				srv.Close() // Join handlers before reading their recorded requests.
 				regs, stops := hbWhere(calls, http.MethodPost, "/harness-sessions"), hbWhere(calls, http.MethodPost, "/stop")
 				if len(regs) != 1 || len(stops) != 1 || stops[0].body["reason"] != "process_exited" {
-					t.Fatal("interactive child did not register and stop exactly once")
+					reasons := make([]any, 0, len(stops))
+					for _, stop := range stops {
+						reasons = append(reasons, stop.body["reason"])
+					}
+					t.Fatalf("interactive registration/stop: registrations=%d stops=%d reasons=%v output=%s", len(regs), len(stops), reasons, output)
 				}
 				if regs[0].body["harness"] != "claude" || regs[0].body["display_label"] != "START" || regs[0].body["model"] != "fixture-model" || regs[0].body["ticket_node_id"] != transcriptEntryID {
 					t.Fatal("interactive registration lost its metadata")
@@ -138,33 +142,32 @@ import errno, os, pty, select, signal, sys, time
 pid, master = pty.fork()
 if pid == 0:
     os.execv(sys.argv[1], sys.argv[1:])
-output, sent, reaped = bytearray(), False, False
+output, sent, reaped, eof = bytearray(), False, False, False
 try:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        if select.select([master], [], [], 0.1)[0]:
+        if select.select([] if eof else [master], [], [], 0.1)[0]:
             try:
                 chunk = os.read(master, 4096)
             except OSError as exc:
                 if exc.errno != errno.EIO:
                     raise
-                break
+                chunk = b''
             if not chunk:
-                break
+                eof = True
             output.extend(chunk)
             if not sent and b'AEON1410_READY' in output:
                 os.write(master, b'fixture input\n')
                 sent = True
-        done, status = os.waitpid(pid, os.WNOHANG)
-        if done:
-            reaped = True
+        if not reaped:
+            done, status = os.waitpid(pid, os.WNOHANG)
+            reaped = bool(done)
+        if reaped and eof:
             break
-    if not reaped:
-        done, status = os.waitpid(pid, os.WNOHANG)
-        reaped = bool(done)
+    sys.stdout.buffer.write(output)
+    sys.stdout.buffer.flush()
     if not reaped:
         raise RuntimeError('PTY child did not complete')
-    sys.stdout.buffer.write(output)
     sys.exit(os.waitstatus_to_exitcode(status))
 finally:
     if not reaped:

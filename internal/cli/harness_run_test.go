@@ -23,7 +23,7 @@ func TestHarnessRunReportsFailures(t *testing.T) {
 		name, want string
 		code       int
 	}{
-		{"missing command", "argument", 2},
+		{"missing command", "usage: harness run", 2},
 		{"invalid role", "invalid --role", 2},
 		{"missing project", "--project", 2},
 		{"invalid parent", "invalid parent session", 2},
