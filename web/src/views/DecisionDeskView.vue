@@ -602,7 +602,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
           <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
         </div>
         <div class="refresh-slot" data-testid="desk-refresh-slot">
-          <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed · retrying · showing ${lastGoodTime}` }}</span> <span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
+          <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
         </div>
         <!-- On Open the stamp filter keeps its box unseen, so switching tabs moves nothing below the row (AEON-1477). -->
         <div class="seg dec-filter" :class="{ reserved: filter !== 'decided' }" role="radiogroup" aria-label="Stamp" :aria-hidden="filter !== 'decided' || undefined" :inert="filter !== 'decided' || undefined">
@@ -708,6 +708,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
    header's empty right side, never down onto the list. */
 .refresh-slot { grid-area: 1 / 3; align-self: stretch; position: relative; min-width: 0; }
 .refresh-hint { position: absolute; right: 0; bottom: 0; min-height: 100%; max-width: 100%; display: flex; align-items: center; margin: 0; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: right; }
+/* A separator stays with the word before it, so a wrapped line never starts with "·". */
 .refresh-copy { text-wrap: balance; }
 .refresh-hint svg { display: inline-block; margin-right: 4px; vertical-align: -1px; }
 .refresh-hint.escalated { color: var(--warn-ink); }
