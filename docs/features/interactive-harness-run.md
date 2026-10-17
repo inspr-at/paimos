@@ -40,7 +40,7 @@ It checks foreground input, both output streams, registration, stop and terminal
 restoration. A table covers usage, preflight, registration, launch, child and
 cleanup diagnostics. It makes no vendor model calls or live instance requests.
 
-AEON-1410 validation: the approved mbp2606 runner passed the PTY and failure-table
+AEON-1410 validation: the approved remote runner passed the PTY and failure-table
 tests, including redirected output, worker/coordinator roles, nonzero child exit,
 failed launch and SIGTERM recovery. Existing lifecycle and scoped-stop tests also
 passed with the race detector; the final PTY suite, including foreign-terminal
