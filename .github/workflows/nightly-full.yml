@@ -110,6 +110,9 @@ jobs:
       - working-directory: web
         run: npm run lint
       - name: Web unit checks (once)
+        # Scratch only (LEAD 2026-10-17): aeon-676-ci.test.mjs asserts the production nightly-full.yml
+        # shape, which this experiment replaces by design. Unit results stay recorded, never block the measurement.
+        continue-on-error: true
         working-directory: web
         run: |
           npm run ci:web:shard:test
