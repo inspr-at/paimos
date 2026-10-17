@@ -1,13 +1,13 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "ticket": "AEON-1456",
-  "brief": "aeon-1456-goals-api-fix3",
-  "round": 3,
-  "status": "blocked-static-night-protocol",
+  "brief": "aeon-1456-goals-api-fix6",
+  "round": 6,
+  "status": "fix6-acceptance-passed-pr-static-pending",
   "base_commit": "713dd3ec1",
-  "implementation_head": "df65241e1",
+  "implementation_head": "43e6a02d0",
   "concept": "Goals model r3 D1–D12/E1–E6; AEON-1452 r5 series addendum",
-  "completion_pct": 95,
+  "completion_pct": 100,
   "implementation": {
     "list": "One page-wide MATERIALIZED invoker expansion statement for up to 100 goals; shared work scope, distinct leaf facts and eta.AggregateScopeSQL, plus batched history, badges and waits. Full-filter totals and computed sorting use bounded batches across at most 1000 candidates.",
     "paging": "Union budgets of 4096 roots/50000 root-node pairs shrink the page with truncated=true and a filter-bound keyset cursor. Savepoint retries reuse already visibility-filtered counts and known failed work-root sets. A singleton above its budget remains counts-only too_large while siblings expand; totals_partial exposes omitted derived totals.",
@@ -300,11 +300,11 @@
     "pool_headroom": "Configured startup caught an unmarked Goals scheduler borrowing foreground capacity. It now uses the existing background worker context; both barrier cases and full cmd/aeon pass."
   },
   "shared_changes": "Minimal additive authored goals contract, header/pin and four tier rows; generated OpenAPI rebuilt rather than hand-edited. Unreleased migration 1361 helper/policy updates and its exception hash remain scoped to Goals visibility. Existing migrator replay, scoped-node traversal and scheduler wiring received the necessary safety/performance fixes. No AGENTS.md, go.mod, web package, new schema columns or DSAR classifications changed in round three.",
-  "migration_1361_sha256": "4cbfb808bfda04018a6934eb42ec2edbe381038231ebdb79f7b2824f6cfc1923",
+  "migration_1361_sha256": "47b145f8158d401ae5bdef4fd64d8d9760e9180b1d5d25eeafeb0ba70db189dc",
   "preserved_baseline_failure": "Round-two full internal/cli failed after unchanged backend_memory_regression_test.go temporarily changed AEON_TEST_DATABASE_URL before dbtest global template initialization; later tests rejected the restored maintenance URL. That test was not changed, skipped or loosened. The explicitly requested thirteen-case fresh-process rerun passes, including on implementation 280cd4d91. No claim is made that the complete CLI package is green.",
   "pending_ci": [
-    "Full ci-static --merge-main: the approved static runner returned exit 3 under the host night protocol in fix3 and fix4. This is incomplete, not green; the coordinator must obtain the hosted static pass before merge.",
-    "Previous-binary compatibility, backup and release acceptance remain coordinator responsibilities; no worker review/release gate was run."
+    "Full ci-static --merge-main proof remains for PR CI as explicitly permitted by fix6. Earlier guarded static runs returned exit 3 under the host night protocol; no successful full static proof is claimed.",
+    "The coordinator owns cross-family review, previous-binary compatibility, backup, merge and release acceptance; none was run by this worker."
   ],
   "limitations": [
     "Full-filter candidate discovery is bounded to 1000 goals; larger sets require narrower project/group filters.",
@@ -541,5 +541,258 @@
     "shared_changes": "Only existing unreleased migration 1361 and its exact-byte exception are authored shared changes. No schema table/column, DSAR classification, permission, API route/contract or new test registration changes. Current main merged cleanly; its unrelated changes are inherited.",
     "safety": "No origin push, deployment, model CLI, subagent, cross-family review gate, release acceptance or ticket status change.",
     "completion": "All identified blocking CI findings are implemented and locally committed, with full affected Go acceptance, remote browser coverage, integration checks and negative controls passing as expected. Full ci-static --merge-main remains unproven because the approved runner refused under the host night protocol (exit 3); coordinator-hosted CI is required before merge. No assertion or host guard was loosened."
+  },
+  "fix6": {
+    "date": "2026-10-17",
+    "starting_head": "43e6a02d0",
+    "review_baseline": "10224eac4",
+    "scope": "Finish the final Goals groups, rerun updated pre-fix controls, and map all four blocking findings. Existing non-blocking findings remain outside this round.",
+    "result": "All requested acceptance checks passed; all six pre-fix controls fail for their intended reasons. No additional production fix was necessary.",
+    "page_cause": "The fix5 historical-subject change at 43e6a02d0 resolves node identities only after indexed event-reference discovery, avoiding policy evaluation over unrelated outcomes. The CI-sized fixtures now pass within the original budgets.",
+    "validation": {
+      "goals": {
+        "result": "passed",
+        "head": "43e6a02d0",
+        "runner": "approved remote test host",
+        "run_id": "43e6a02d0e-91945",
+        "package_seconds": 34.031,
+        "page_projection_seconds": 3.34,
+        "aggregate_budget_seconds": 8.78,
+        "aggregate_max_rows": 851,
+        "aggregate_plan_ms": 427.986,
+        "history_statement_event_visits": [
+          2,
+          4,
+          0,
+          1,
+          0,
+          7
+        ],
+        "reference_helper_visits": {
+          "references": 2,
+          "events": 2
+        },
+        "identity_node_visits": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "scoped_nodes": {
+        "result": "passed",
+        "head": "43e6a02d0",
+        "runner": "approved remote test host",
+        "run_id": "43e6a02d0e-7160",
+        "package_seconds": 9.208,
+        "test": "TestScopedReadsIgnoreLargeSiblingTree",
+        "subtree": 5,
+        "tenant_nodes": 6006,
+        "visits": {
+          "node_list": 5,
+          "shared_work_scope": 5,
+          "shared_scope_facts": 5
+        }
+      },
+      "negative_controls": {
+        "result": "all six tests fail for the expected pre-fix reasons",
+        "runner": "approved remote test host via guarded remote-test.sh",
+        "run_id": "bc72688063-13508",
+        "head": "bc7268806",
+        "baseline": "10224eac4",
+        "scratch_branch": "checks/aeon-1456-fix5-final-before",
+        "exit_code": 1,
+        "test_files_identical_to_delivery": true,
+        "only_baseline_differences": [
+          "internal/goals/api_test.go",
+          "internal/goals/series_test.go",
+          "internal/goals/storage_test.go",
+          "internal/nodes/list_no_stats_test.go"
+        ],
+        "goals_package_seconds": 8.025,
+        "nodes_package_seconds": 8.783,
+        "expected_failures": [
+          "TestGoalPatchNodeResolutionUsesIndexes",
+          "TestGoalHistoryIgnoresUnrelatedEvents",
+          "TestGoalSeriesBulkUndoAndProjectSnapshots",
+          "TestGoalHistoryCancellationReturnsTooLarge",
+          "TestGoalEventReferenceUpgradePreservesHistory",
+          "TestScopedReadsIgnoreLargeSiblingTree"
+        ],
+        "safety": "Existing scratch revision only; no new negative-control commits, delivery changes, origin push or other local worktree. Returned to the assigned delivery branch."
+      },
+      "evidence_checks": {
+        "json": "passed",
+        "finding_map_consistency": "passed",
+        "fix_commits_ancestors_of_head": "passed",
+        "public_names": "passed",
+        "diff_whitespace": "passed"
+      }
+    },
+    "blocking_findings": [
+      {
+        "finding": 1,
+        "severity": "Medium",
+        "problem": "Scoped node lists and aeon_work_scope scanned all tenant nodes.",
+        "result": "closed",
+        "commits": [
+          "23c4f03f4",
+          "e78d7c9df",
+          "0703bc07b",
+          "113dde8e4",
+          "016db7c58"
+        ],
+        "tests": [
+          "TestScopedReadsIgnoreLargeSiblingTree"
+        ],
+        "positive": {
+          "head": "43e6a02d0",
+          "run_id": "43e6a02d0e-7160",
+          "subtree_nodes": 5,
+          "tenant_nodes": 6006,
+          "node_list_visits": 5,
+          "shared_scope_visits": 5,
+          "scope_facts_visits": 5
+        },
+        "negative": {
+          "head": "bc7268806",
+          "run_id": "bc72688063-13508",
+          "node_list_visits": 12012,
+          "shared_scope_visits": 12012,
+          "scope_facts_visits": 6011
+        }
+      },
+      {
+        "finding": 2,
+        "severity": "Medium",
+        "problem": "Goal reads scanned unrelated event history and statement cancellation became an internal error.",
+        "result": "closed",
+        "commits": [
+          "23c4f03f4",
+          "cbe408897",
+          "6b6acc6c9",
+          "43e6a02d0"
+        ],
+        "tests": [
+          "TestGoalHistoryIgnoresUnrelatedEvents",
+          "TestGoalHistoryCancellationReturnsTooLarge",
+          "TestGoalListPageWideProjection",
+          "TestGoalListAggregateBudgetPaginatesWithoutLoss",
+          "TestGoalEventReferenceUpgradePreservesHistory"
+        ],
+        "positive": {
+          "head": "43e6a02d0",
+          "run_id": "43e6a02d0e-91945",
+          "unrelated_events": 6000,
+          "statement_event_visits": [
+            2,
+            4,
+            0,
+            1,
+            0,
+            7
+          ],
+          "reference_helper_visits": {
+            "references": 2,
+            "events": 2
+          },
+          "timeout_result": "counts-only too_large with original watermark",
+          "upgrade_result": "backfill preserves authoritative events and tenant isolation; previous writers are indexed"
+        },
+        "negative": {
+          "head": "bc7268806",
+          "run_id": "bc72688063-13508",
+          "history_statement_event_visits": 2005,
+          "cancellation": "57014 propagated instead of too_large",
+          "upgrade": "goal_event_refs is absent on the unchanged baseline"
+        }
+      },
+      {
+        "finding": 3,
+        "severity": "Medium",
+        "problem": "Bulk edits, bulk undo and wrapped project snapshots were absent from the progress series and stall clock.",
+        "result": "closed",
+        "commits": [
+          "23c4f03f4"
+        ],
+        "tests": [
+          "TestGoalSeriesBulkUndoAndProjectSnapshots"
+        ],
+        "positive": {
+          "head": "43e6a02d0",
+          "run_id": "43e6a02d0e-91945",
+          "pct": [
+            50,
+            0,
+            50
+          ],
+          "delta": [
+            50,
+            -50,
+            50
+          ],
+          "changed_keys": [
+            "TKT-1",
+            "RECOUT-1"
+          ],
+          "stall_since": "last recorded percentage change; atomic batches with unchanged percentage retain the old clock",
+          "surfaces": [
+            "series",
+            "detail",
+            "list"
+          ]
+        },
+        "negative": {
+          "head": "bc7268806",
+          "run_id": "bc72688063-13508",
+          "result": "missing snapshots/changed_keys, wrong detail/list stall and atomic batch clock"
+        }
+      },
+      {
+        "finding": 4,
+        "severity": "Medium",
+        "problem": "PATCH identity resolution scanned all tenant nodes for each UUID/key under the write fence.",
+        "result": "closed",
+        "commits": [
+          "23c4f03f4"
+        ],
+        "tests": [
+          "TestGoalPatchNodeResolutionUsesIndexes"
+        ],
+        "positive": {
+          "head": "43e6a02d0",
+          "run_id": "43e6a02d0e-91945",
+          "node_visits": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "identities": "UUID, uppercase UUID and keys under the actual write lock and RLS"
+        },
+        "negative": {
+          "head": "bc7268806",
+          "run_id": "bc72688063-13508",
+          "node_visits": [
+            3014,
+            3014,
+            3014,
+            3014,
+            3014
+          ]
+        }
+      }
+    ],
+    "budgets_preserved": {
+      "read_statement_seconds": 5,
+      "aggregate_wire_rows": 2000,
+      "history_events": 20000,
+      "scope_pairs": 50000
+    },
+    "shared_changes_this_round": "Existing QA JSON only. No production source, migration, contract, test, tier, ownership or version changes.",
+    "safety": "No origin branch push, deployment, model CLI, subagent or review gate. Only the approved remote harness temporary refs were used; no assertion, timeout, host guard or ownership control was weakened.",
+    "completion": "fix6 acceptance is complete. Full static merge-main proof is explicitly deferred to PR CI; the coordinator must obtain it and run the cross-family gate before merge."
   }
 }
