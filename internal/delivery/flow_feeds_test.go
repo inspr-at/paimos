@@ -246,11 +246,19 @@ func TestDeliveryFlowBackfillPlans87LinkedPRsWithoutWriting(t *testing.T) {
 		 SELECT $1,$2,-pull_request,1,$3,'Observed checks','pull_request',branch,head_sha,pull_request,$4,$4,$5,'success','backfill',$5 FROM delivery_items`, f.person.TenantID, f.m.config.Repository, defaultCIWorkflow, start, f.at)
 		return err
 	})
+	// Thousands of sessions outside the 87 linked changes must not consume
+	// the backfill's event bound before its ticket/PR filter is applied.
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after)
+		 SELECT $1,$2,$3,'harness.registered',jsonb_build_object('ticket_node_id',$4::text)
+		 FROM generate_series(1,4001)`, f.person.TenantID, f.agent.ID, f.project, f.ticket)
+		return err
+	})
 	plan, err := f.m.BackfillFlow(t.Context(), f.person, f.project, 87, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.DryRun || plan.Changed != nil || len(plan.LinkedPRs) != 87 || len(plan.Items) != 87 || flowEventCount(t, f) != 0 {
+	if !plan.DryRun || plan.Changed != nil || len(plan.LinkedPRs) != 87 || len(plan.Items) != 87 || len(plan.Events) != 0 || flowEventCount(t, f) != 0 {
 		t.Fatalf("dry-run plan: %+v", plan)
 	}
 	var rows int

@@ -136,11 +136,16 @@ func (m *Module) BackfillFlow(ctx context.Context, p tenant.Principal, project s
 			}
 		}
 		types := append(append([]string{}, flowHarnessEventTypes...), "delivery.state_changed")
-		rows, err = tx.Query(ctx, `SELECT e.id,e.type,e.node_id::text,e.at,e.before,e.after,e.metadata
+		rows, err = tx.Query(ctx, `WITH linked AS MATERIALIZED
+		 (SELECT ticket_node_id::text AS ticket,pull_request::text AS pr FROM delivery_items
+		 WHERE project_id=$1 AND repository=$3 AND pull_request=ANY($5::bigint[]))
+		 SELECT e.id,e.type,e.node_id::text,e.at,e.before,e.after,e.metadata
 		 FROM unnest($2::text[]) AS kinds(kind) CROSS JOIN LATERAL
 		 (SELECT id,type,node_id,at,before,after,metadata FROM events WHERE type=kinds.kind
-		 AND (node_id=$1::uuid OR node_id IN (SELECT ticket_node_id FROM delivery_items WHERE project_id=$1 AND repository=$3)) ORDER BY id LIMIT $4) e
-		 ORDER BY e.id LIMIT $4`, project, types, m.config.Repository, flowBackfillLimit+1)
+		 AND (node_id::text IN (SELECT ticket FROM linked) OR node_id=$1::uuid AND
+		 (after->>'ticket_node_id' IN (SELECT ticket FROM linked) OR type='delivery.ship.decision'
+		 AND after#>>'{decision,facts,pull_request}' IN (SELECT pr FROM linked))) ORDER BY id LIMIT $4) e
+		 ORDER BY e.id LIMIT $4`, project, types, m.config.Repository, flowBackfillLimit+1, out.LinkedPRs)
 		if err != nil {
 			return err
 		}
