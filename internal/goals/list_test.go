@@ -36,20 +36,26 @@ func listResult(t *testing.T, f storageFixture, m *module, query string) GoalLis
 
 // Failed page regressions retain a bounded plan, without request arguments,
 // to distinguish recursive-policy planning from work-scope execution costs.
-func logListPlan(t *testing.T, f storageFixture) {
+func logListPlan(t *testing.T, f storageFixture, candidates ...string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), f.reader), 10*time.Second)
 	defer cancel()
 	stage := "tenant entry"
 	err := db.InTenant(ctx, f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
 		stage = "candidate IDs"
-		var ids []string
-		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug IN ('goal','release'))) AND k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil {
-			return fmt.Errorf("candidate IDs: %w", err)
+		ids := candidates
+		if len(ids) == 0 {
+			if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug IN ('goal','release'))) AND k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil {
+				return fmt.Errorf("candidate IDs: %w", err)
+			}
 		}
 		stage = "page EXPLAIN"
+		explain := "EXPLAIN (FORMAT JSON) "
+		if len(candidates) > 0 {
+			explain = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
+		}
 		var raw []byte
-		if err := tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+listPageQuery(), ids, apiClock, f.reader.Kind == tenant.Person, f.reader.ID).Scan(&raw); err != nil {
+		if err := tx.QueryRow(ctx, explain+listPageQuery(), ids, apiClock, f.reader.Kind == tenant.Person, f.reader.ID).Scan(&raw); err != nil {
 			return fmt.Errorf("page EXPLAIN: %w", err)
 		}
 		t.Logf("captured plan for %d candidates (%d bytes)", len(ids), len(raw))
@@ -69,8 +75,11 @@ func logListPlan(t *testing.T, f storageFixture) {
 					walk(x)
 				}
 			case map[string]any:
+				if v["Execution Time"] != nil {
+					t.Logf("page planning_ms=%v execution_ms=%v", v["Planning Time"], v["Execution Time"])
+				}
 				if cost, ok := v["Total Cost"].(float64); ok && cost > 10000 {
-					t.Logf("plan %v relation=%v rows=%v cost=%v", v["Node Type"], v["Relation Name"], v["Plan Rows"], cost)
+					t.Logf("plan %v cte=%v relation=%v rows=%v cost=%v loops=%v actual_rows=%v actual_ms=%v removed=%v", v["Node Type"], v["Subplan Name"], v["Relation Name"], v["Plan Rows"], cost, v["Actual Loops"], v["Actual Rows"], v["Actual Total Time"], v["Rows Removed by Join Filter"])
 					count++
 				}
 				for _, x := range v {
@@ -417,4 +426,5 @@ func TestGoalListAggregateBudgetPaginatesWithoutLoss(t *testing.T) {
 	if wrong.Code != 400 {
 		t.Fatalf("cursor lost filter binding: %d %s", wrong.Code, wrong.Body)
 	}
+	logListPlan(t, f, goals[0])
 }

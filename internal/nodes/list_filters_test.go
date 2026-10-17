@@ -183,6 +183,7 @@ func TestList6000FiltersWithStaleKindStatistics(t *testing.T) {
 		// leaf. The flat fixture has two recursion levels, so scope may visit
 		// the table once per level plus its single indexed root lookup.
 		scopeVisits := nodeVisitsInCTE(plans[name], "CTE scope", false)
+		scopeVisits += nodeVisitsInCTE(plans[name], "CTE scope_children", false)
 		t.Logf("%s scope node visits: %.0f", name, scopeVisits)
 		if scopeVisits <= 0 || scopeVisits > 2*6001+1 {
 			t.Errorf("%s scope node visits = %.0f, want at most two passes over 6001 nodes and the root lookup", name, scopeVisits)

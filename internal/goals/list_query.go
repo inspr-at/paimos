@@ -261,6 +261,9 @@ func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 			d.facts[root] = append(d.facts[root], d.leaves[leaf])
 		}
 	}
+	for _, facts := range d.facts {
+		sort.Slice(facts, func(i, j int) bool { return facts[i].ID < facts[j].ID })
+	}
 	out := []GoalView{}
 	for _, id := range ids {
 		g, ok := d.goals[id]
