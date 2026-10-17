@@ -203,13 +203,26 @@ needs no edits.
 Both targeted negative controls fail as intended: removing transitive
 ownership fails the mapping test; changing full fallback back to the gated
 subset fails the NIGHTLY-retention test. Original sources are restored and
-the tests pass. Final check results are recorded in the handover below.
+the tests pass.
 
 ### Handover checks
 
-- Targeted mapping and existing area-rollback tests: passed (10 tests before
-  the additional artifact-consistency assertion).
-- Full replay regenerated against the unchanged corpus; final `--check` and
-  repository static validation are recorded after completion.
+- `node --test scripts/test-tiers/browser-candidate.test.mjs
+  scripts/test-tiers/browser-areas.test.mjs`: 11 passed.
+- `node scripts/test-tiers/browser-candidate-replay.mjs --check`: passed on
+  the unchanged pin, checking all 294 proof rows and implementation hashes.
+- `node scripts/test-tiers/cli.mjs manifests --check`: passed.
+- `node --test web/scripts/ci-web-shard.test.mjs`: 33 passed after installing
+  the previously absent web dependencies once, with browser download disabled.
+  The earlier attempt failed on missing dependencies, not a selector assertion.
+- `python3 -m unittest discover -s scripts/audit`: 33 passed after keeping the
+  JSON artifact under the existing S7-owned `scripts/**` prefix. No registry
+  ownership exceptions or added rows were needed.
+- `/Users/markus/.aeon/lead/aeon/ci-static-locked.sh`: **exit 3 on both
+  attempts**: “remote static check paused at night (night protocol: mbp2606 is
+  shared with the CI pool); rely on the PR's hosted CI static job”. Full
+  `node scripts/ci-static.mjs --merge-main`, including the complete selector
+  suite, remains unproven. No heavy local fallback was run. Worker status
+  remains below 100 until that required check runs on an approved host or CI.
 - No browser run, model review, push to origin, deployment, workflow edit or
   area activation is part of this change.
