@@ -1931,15 +1931,19 @@ about in a few words, the headline says what changes for them in one sentence, t
 intro adds context in two or three. No ticket keys, package names or commit
 jargon; those stay in the rows and the commits.
 
-Status autopilot (AEON-521) is the final post-release check: release publication
-through the journey calls the deterministic hook in the publication transaction.
-Only linked tickets already Done at publication become Delivered; tickets awaiting
-a human check get a skip comment. The hook applies at most 50 tickets, queues the
-rest durably, and the worker drains committed batches every minute. A ticket
-failure is isolated from release settlement; disappeared releases are skipped.
-Verify their Activity reasons and `/api/status-autopilot/changes`; a flagged ticket
-gets a comment and is retried after its check is cleared. Historical releases
-are discovered once; queued work and the daily ticket cursor survive restarts.
+Status autopilot (AEON-521 / AEON-1481) is the final post-release check. The
+running tagged build supplies complete Git ancestry between its tag and the
+previous published tag; the worker checks that delta every minute, starting at
+server startup. The configured GitHub App tenant/repository confines it to the
+owning AEON project. Only Done work leaves with their newest merge in the delta
+become Delivered; a later follow-up merge keeps Done. Person checks get a skip
+comment. Events name the release and verified merge; receipts survive retries,
+restarts and Undo. Workspace/server/project policy still applies. Verify Activity
+reasons and `/api/status-autopilot/changes`; inspect logs for an ownership mismatch
+or failed batch. Historic releases require the separately approved OPS backfill;
+see [publication delivery](features/release-publication-delivery.md) and the
+[captured dry-run inventory](ops/aeon-1481-backfill.md). No Journey publish hook is
+used by the Git release flow.
 Workspace admins configure the seven limits in Settings → Workspace → Autopilot,
 with Inherit / On / Off per project. The daily UTC job lists triage and cancellation
 suggestions, reminds blocked work, reopens stalled work and accepts deliveries
