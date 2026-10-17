@@ -876,6 +876,8 @@
     ,
     "browser:tests/header-desk-split.spec.ts:the preview's controls stay put through reading, a failure, Retry and a refresh at 390"
     ,
+    "browser:tests/header-glimpse.spec.ts:a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280"
+    ,
     "browser:tests/header-glimpse.spec.ts:the glimpse is off unless the developer setting turns it on, even after an earlier Display choice"
     ,
     "browser:tests/hours.spec.ts:an older week shows existing hours and logs into its existing period"
@@ -9253,6 +9255,8 @@
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a priority filter that keeps eight tickets but no link hides the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a priority filter that leaves seven of those tickets hides the glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"a wide project with tickets and a link shows a labelless 60fps glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

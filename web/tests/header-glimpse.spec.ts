@@ -283,6 +283,34 @@ test('a dropped wide-media change still hides the glimpse below 1280', async ({ 
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
+// The PR shard has shrunk 1280 → 390 without a usable resize or wide-media
+// change for the header (AEON-1410 CI). Drop both for the shrink only: the
+// layout box is the one signal left, and it must still clear the glimpse.
+test('a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280', async ({ page }) => {
+  await page.addInitScript(() => {
+    const dropping = () => (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals === true
+    // Registered before the app, so stopping here stops every later listener.
+    window.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = original(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => { (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals = true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  // The layout really moved, and the header still holds the glimpse slot:
+  // the off marker proves a decision, not an unmounted header.
+  await expect.poll(() => page.evaluate(() => [window.innerWidth, window.matchMedia('(min-width: 1280px)').matches])).toEqual([390, false])
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
 test.describe('reduced motion', () => {
   test.use({ reducedMotion: 'reduce' })
   test('shows nothing', async ({ page }) => {
