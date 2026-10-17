@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,6 +24,7 @@ func listResult(t *testing.T, f storageFixture, m *module, query string) GoalLis
 	t.Helper()
 	r := goalRequest(t.Context(), m, f.reader, "GET", "/api/goals"+query, "", "")
 	if r.Code != 200 {
+		logListPlan(t, f)
 		t.Fatalf("list %d %s", r.Code, r.Body)
 	}
 	var out GoalList
@@ -30,6 +32,36 @@ func listResult(t *testing.T, f storageFixture, m *module, query string) GoalLis
 		t.Fatal(err)
 	}
 	return out
+}
+
+// Failed page regressions retain a bounded plan, without request arguments,
+// to distinguish recursive-policy planning from work-scope execution costs.
+func logListPlan(t *testing.T, f storageFixture) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), f.reader), 10*time.Second)
+	defer cancel()
+	err := db.InTenant(ctx, f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
+		var ids []string
+		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil { return err }
+		var raw []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+listPageQuery(), ids, apiClock, f.reader.Kind==tenant.Person, f.reader.ID).Scan(&raw); err != nil { return err }
+		var plan any
+		if err := json.Unmarshal(raw,&plan);err!=nil{return err}
+		var walk func(any)
+		count:=0
+		walk=func(value any){
+			if count>=50{return}
+			switch v:=value.(type){
+			case []any:for _,x:=range v{walk(x)}
+			case map[string]any:
+				if cost,ok:=v["Total Cost"].(float64);ok&&cost>10000{t.Logf("plan %v relation=%v rows=%v cost=%v",v["Node Type"],v["Relation Name"],v["Plan Rows"],cost);count++}
+				for _,x:=range v{walk(x)}
+			}
+		}
+		walk(plan)
+		return nil
+	})
+	if err!=nil{t.Logf("list plan unavailable: %v",err)}
 }
 
 // Risk: the page's computed sorts use a different ETA, filters omit workspace

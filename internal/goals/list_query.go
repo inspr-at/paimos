@@ -27,17 +27,22 @@ func listPageQuery() string {
  SELECT n.* FROM nodes n JOIN page g ON g.id=n.parent_id
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  WHERE k.slug='outcome' AND n.deleted_at IS NULL
+ ), relations AS MATERIALIZED (
+ SELECT r.source_node_id,r.target_node_id FROM node_relations r
+ WHERE r.type='serves' AND r.source_node_id IN (SELECT id FROM outcomes)
  ), counts AS MATERIALIZED (
- SELECT g.id,(SELECT count(*)::int FROM outcomes o WHERE o.parent_id=g.id) AS outcomes,
- (SELECT count(DISTINCT r.target_node_id)::int FROM outcomes o JOIN node_relations r ON r.source_node_id=o.id AND r.type='serves' WHERE o.parent_id=g.id) AS tickets
- FROM page g
+ SELECT g.id,count(DISTINCT o.id)::int AS outcomes,count(DISTINCT r.target_node_id)::int AS tickets
+ FROM page g LEFT JOIN outcomes o ON o.parent_id=g.id LEFT JOIN relations r ON r.source_node_id=o.id GROUP BY g.id
  ), children AS MATERIALIZED (
  SELECT o.* FROM outcomes o JOIN counts c ON c.id=o.parent_id WHERE c.outcomes<=200
- ), serves AS MATERIALIZED (
- SELECT o.parent_id AS goal,o.id AS outcome,n.id,n.key,n.project_id,k.slug,n.deleted_at IS NOT NULL AS deleted
- FROM children o CROSS JOIN LATERAL (SELECT target_node_id FROM node_relations WHERE source_node_id=o.id AND type='serves' ORDER BY target_node_id LIMIT 21) r
- JOIN nodes n ON n.id=r.target_node_id
+ ), relation_targets AS MATERIALIZED (
+ SELECT n.id,n.key,n.project_id,k.slug,n.deleted_at IS NOT NULL AS deleted FROM nodes n
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ WHERE n.id IN (SELECT target_node_id FROM relations)
+ ), serves AS MATERIALIZED (
+ SELECT o.parent_id AS goal,o.id AS outcome,n.* FROM children o
+ CROSS JOIN LATERAL (SELECT target_node_id FROM relations WHERE source_node_id=o.id ORDER BY target_node_id LIMIT 21) r
+ JOIN relation_targets n ON n.id=r.target_node_id
  ), work_roots AS MATERIALIZED (SELECT DISTINCT id FROM serves WHERE NOT deleted AND slug IN ('work','ticket','task','epic')),
  page_scope AS MATERIALIZED (SELECT * FROM aeon_work_scope(ARRAY(SELECT id FROM work_roots))),
  facts(root,id,done,hours,sessions,pr,review,paused,queued,blocked) AS MATERIALIZED (
@@ -70,15 +75,17 @@ func listPageQuery() string {
  CROSS JOIN LATERAL jsonb_array_elements_text(e.after->'ticket_node_ids') t(id)
  WHERE (SELECT count(*) FROM subjects)<=4096 AND (SELECT count(*) FROM outcome_events)<=20000
  ), historical_edges(id,parent_id) AS MATERIALIZED (
- SELECT id,parent_id FROM nodes
- UNION SELECT e.node_id,p.id::uuid FROM events e
+ SELECT e.node_id,p.id::uuid FROM events e
  CROSS JOIN LATERAL (VALUES(e.before->>'parent_id'),(e.after->>'parent_id')) p(id)
  WHERE e.node_id IS NOT NULL AND p.id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
  AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')
  ), walk(root,id) AS (
  SELECT n.id,n.id FROM nodes n WHERE n.id IN (SELECT root FROM history_roots)
  AND (SELECT count(DISTINCT root) FROM history_roots)<=4096
- UNION SELECT w.root,e.id FROM walk w JOIN historical_edges e ON e.parent_id=w.id
+ UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
+ SELECT n.id FROM nodes n WHERE n.parent_id=w.id
+ UNION SELECT h.id FROM historical_edges h WHERE h.parent_id=w.id
+ ) e
  ), history_scope AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001),
  history_nodes AS MATERIALIZED (
  SELECT DISTINCT r.goal,n.id,n.key,n.kind_id,k.slug FROM history_roots r

@@ -247,11 +247,13 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 		// bounded candidate graph. Current state, estimates and outcome membership
 		// are never sampled. Event snapshots choose the actual tree at each instant.
 		rows, err = tx.Query(ctx, `WITH RECURSIVE edges(id,parent_id) AS MATERIALIZED (
- SELECT id,parent_id FROM nodes
- UNION SELECT e.node_id,p.id::uuid FROM events e CROSS JOIN LATERAL (VALUES(e.before->>'parent_id'),(e.after->>'parent_id')) p(id)
+ SELECT e.node_id,p.id::uuid FROM events e CROSS JOIN LATERAL (VALUES(e.before->>'parent_id'),(e.after->>'parent_id')) p(id)
  WHERE e.node_id IS NOT NULL AND p.id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
  AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')),
- walk(root,id) AS (SELECT n.id,n.id FROM nodes n WHERE n.id=ANY($1::uuid[]) UNION SELECT w.root,e.id FROM walk w JOIN edges e ON e.parent_id=w.id),
+ walk(root,id) AS (SELECT n.id,n.id FROM nodes n WHERE n.id=ANY($1::uuid[]) UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
+ SELECT n.id FROM nodes n WHERE n.parent_id=w.id
+ UNION SELECT h.id FROM edges h WHERE h.parent_id=w.id
+ ) e),
  bounded AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001)
  SELECT b.root::text,n.id::text,n.key,n.kind_id::text,k.slug FROM bounded b JOIN nodes n ON n.id=b.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`, roots)
 		if err != nil {
