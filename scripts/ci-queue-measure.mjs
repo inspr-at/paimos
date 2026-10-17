@@ -261,13 +261,15 @@ function demand(intervals, from, to) {
     elapsed += span.milliseconds;
     if (elapsed >= duration * .95) { p95 = span.count; break; }
   }
-  return { peak: Math.max(0, ...spans.map(span => span.count)), p95,
+  return { peak: spans.reduce((maximum, span) => Math.max(maximum, span.count), 0), p95,
     mean: spans.reduce((sum, span) => sum + span.count * span.milliseconds, 0) / duration };
 }
 
 export function analyzeSlotDemand(snapshot, { slots = 60, safetySlots = 2 } = {}) {
   if (snapshot.schema !== demandSchema || !Array.isArray(snapshot.runs) || snapshot.runs.length > 2000 ||
-      !Array.isArray(snapshot.repositories) || !snapshot.repositories.includes(snapshot.repository)) throw new Error("invalid slot snapshot");
+      !Array.isArray(snapshot.repositories) || snapshot.repositories.length > 1000 ||
+      new Set(snapshot.repositories).size !== snapshot.repositories.length || !snapshot.repositories.includes(snapshot.repository) ||
+      Object.keys(snapshot.timelines ?? {}).length > 2000 || Object.values(snapshot.timelines ?? {}).some(events => !Array.isArray(events) || events.length > 1000)) throw new Error("invalid slot snapshot");
   windowBounds(snapshot.from, snapshot.to);
   integer(slots, "slots", 1000); integer(safetySlots, "safety slots", slots);
   const from = timestamp(snapshot.from), to = timestamp(snapshot.to);
@@ -291,7 +293,7 @@ export function analyzeSlotDemand(snapshot, { slots = 60, safetySlots = 2 } = {}
         if (created === null || job.status === "completed" && (finish === null || finish < created) || start !== null && start < created || finish !== null && start !== null && finish < start) throw new Error("invalid slot job timestamps");
         const end = finish ?? to;
         if (created >= to || end <= from) continue;
-        if (!Array.isArray(job.labels) || !job.labels.length || job.labels.some(label => typeof label !== "string")) throw new Error("unknown runner class; no capacity recommendation");
+        if (!Array.isArray(job.labels) || !job.labels.length || job.labels.length > 100 || job.labels.some(label => typeof label !== "string")) throw new Error("unknown runner class; no capacity recommendation");
         if (job.labels.some(label => label.toLowerCase() === "self-hosted")) { selfHostedJobs++; continue; }
         if (!job.labels.some(label => /^(?:ubuntu|windows|macos)-/.test(label)) && job.runner_group_name !== "GitHub Actions") throw new Error("unknown runner class; no capacity recommendation");
         const interval = [created, end];
@@ -447,7 +449,7 @@ emit complete PUT bodies locally; they never invoke PUT. Read the patch's _comme
 for operator backup/apply/rollback commands. No --apply mode exists.
 Slot mode also uses fixed read-only GraphQL queue-timeline queries. It emits JSON
 with organization demand and separate admission, runner queueing and execution
-samples. Missing evidence produces no concurrency recommendation. Capacity is an
+samples. Missing capacity evidence produces no concurrency recommendation. Capacity is an
 explicit hosted-slot budget, not discovered from the billing API.
 `;
 

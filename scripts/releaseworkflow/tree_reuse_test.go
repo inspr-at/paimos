@@ -654,6 +654,9 @@ func normalizeConsolidatedPlanning(t *testing.T, id string, j map[string]any) {
 		return
 	}
 	if !containsNeed(j["needs"], "ci-plan") {
+		if j["steps"] == nil {
+			normalizeConsolidatedOutputs(j)
+		}
 		return
 	}
 	if containsNeed(j["needs"], "tier-plan") {
@@ -667,6 +670,10 @@ func normalizeConsolidatedPlanning(t *testing.T, id string, j map[string]any) {
 		}
 		j["if"] = strings.Replace(condition, guard, guard+"needs.tier-plan.result == 'success' && ", 1)
 	}
+	normalizeConsolidatedOutputs(j)
+}
+
+func normalizeConsolidatedOutputs(j map[string]any) {
 	var visit func(map[string]any)
 	visit = func(m map[string]any) {
 		for key, raw := range m {
@@ -694,6 +701,9 @@ func normalizeConsolidatedPlanning(t *testing.T, id string, j map[string]any) {
 // pins. Commands and historical fixtures remain byte-for-byte checked.
 func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 	t.Helper()
+	if id != "ci-plan" && !containsNeed(value["needs"], "tier-plan") {
+		normalizeConsolidatedPlanning(t, id, value)
+	}
 	var visit func(map[string]any)
 	visit = func(m map[string]any) {
 		for key, raw := range m {
@@ -1062,7 +1072,9 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 				delete(stepEnv, "AEON_TEST_POSTGRES_CONTAINER")
 			}
-			normalizeConsolidatedPlanning(t, id, j)
+			if !containsNeed(j["needs"], "tier-plan") {
+				normalizeConsolidatedPlanning(t, id, j)
+			}
 			normalizeEffectiveLane(t, id, j)
 			value = j
 			normalizeNixVendorAdditions(t, id, j)
