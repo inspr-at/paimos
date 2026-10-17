@@ -1274,14 +1274,14 @@ test('AEON-1453 the merged full web catalogue needs seventeen shards to stay ins
   // Merge-queue head 688f05b6a packed the full gate into sixteen shards and
   // left shard 14 at 900.2s. Whole files are larger than the leftover gaps, so
   // the same catalogue needs one more shard. Sixteen must stay over budget.
-  // AEON-1457's Goals cases and AEON-1388's group-figures cases together
-  // leave the first overflow at shard 15 with 904.0s.
+  // AEON-1457's Goals cases, AEON-1388's group-figures cases and AEON-1473's
+  // seven browser cases together leave the first overflow at shard 16 with 904.9s.
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
   assert.equal(sixteen.shards.length,16)
   assert.equal(sixteen.fitsBudget,false)
-  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 15 predicts 904\.0s, over the 900s budget/)
+  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 16 predicts 904\.9s, over the 900s budget/)
   const full=webShardPlan(gate,policy,{mode:'full'})
   assert.equal(fullWebShardCount,17)
   assert.deepEqual(full.shards,fullWebShards)

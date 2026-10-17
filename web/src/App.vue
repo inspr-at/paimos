@@ -31,6 +31,7 @@ import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
 import { useStatusMotion } from './lib/statusMotion'
+import { useDeskTab } from './lib/useDeskTab'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
@@ -39,6 +40,8 @@ const router = useRouter()
 const ticketPeek = provideTicketPeek()
 // Status icons play their one-off on hover or keyboard focus and pause in hidden tabs (AEON-1362).
 useStatusMotion()
+// The Decision Desk count leads the tab's title and marks its icon (AEON-1473).
+useDeskTab()
 const main = ref<HTMLElement>()
 const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const retrying = ref(false)
