@@ -209,23 +209,23 @@ func logListPerformancePlans(t *testing.T, p tenant.Principal, path string) map[
 	return plans
 }
 
-func filteredNodeVisits(value any, filtered bool) float64 {
+func nodeVisitsInCTE(value any, cte string, inside bool) float64 {
 	var visits float64
 	switch value := value.(type) {
 	case []any:
 		for _, item := range value {
-			visits += filteredNodeVisits(item, filtered)
+			visits += nodeVisitsInCTE(item, cte, inside)
 		}
 	case map[string]any:
-		filtered = filtered || value["Subplan Name"] == "CTE filtered"
-		if filtered && value["Relation Name"] == "nodes" {
+		inside = inside || value["Subplan Name"] == cte
+		if inside && value["Relation Name"] == "nodes" {
 			rows, _ := value["Actual Rows"].(float64)
 			removed, _ := value["Rows Removed by Filter"].(float64)
 			loops, _ := value["Actual Loops"].(float64)
 			visits += (rows + removed) * loops
 		}
-		visits += filteredNodeVisits(value["Plan"], filtered)
-		visits += filteredNodeVisits(value["Plans"], filtered)
+		visits += nodeVisitsInCTE(value["Plan"], cte, inside)
+		visits += nodeVisitsInCTE(value["Plans"], cte, inside)
 	}
 	return visits
 }

@@ -172,12 +172,20 @@ func TestList6000FiltersWithStaleKindStatistics(t *testing.T) {
 	p, path := testList6000FiltersPerformance(t)
 	plans := logListPerformancePlans(t, p, path)
 	for _, name := range []string{"list", "facets"} {
-		visits := filteredNodeVisits(plans[name], false)
+		visits := nodeVisitsInCTE(plans[name], "CTE filtered", false)
 		t.Logf("%s filtered node visits: %.0f", name, visits)
 		// Bound actual work, without prescribing an index or join algorithm.
 		// A kind join must not repeat the node lookup/filter for every kind.
 		if visits <= 0 || visits > 6002 {
 			t.Errorf("%s filtered node visits = %.0f, want one pass over 6001 nodes", name, visits)
+		}
+		// Risk: a common-parent estimate repeats a full child scan for every
+		// leaf. The flat fixture has two recursion levels, so scope may visit
+		// the table once per level plus its single indexed root lookup.
+		scopeVisits := nodeVisitsInCTE(plans[name], "CTE scope", false)
+		t.Logf("%s scope node visits: %.0f", name, scopeVisits)
+		if scopeVisits <= 0 || scopeVisits > 2*6001+1 {
+			t.Errorf("%s scope node visits = %.0f, want at most two passes over 6001 nodes and the root lookup", name, scopeVisits)
 		}
 	}
 }
