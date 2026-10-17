@@ -6,7 +6,7 @@
 import { onBeforeUnmount, shallowRef, watch, type Ref } from 'vue'
 import { APIError, figuresPath, getProjectFigures, type ProjectFigures } from './api'
 import { figuresCache, figuresLoader, groupParams, groupScopeKey, UNCOUNTED_GROUP, type FiguresRequest } from './groupFigures'
-import type { ListFilters, RowGroup } from './ticketList'
+import type { GroupBy, ListFilters, RowGroup } from './ticketList'
 import { validFigures } from './workFigures'
 import { workFiguresText } from './workFiguresText'
 
@@ -51,10 +51,29 @@ export function useGroupFigures(options: {
     fail: (key, error) => { for (const [group, scope] of scopes) if (scope === key && !state.value.get(group)?.figures) set(group, { figures: null, failed: failureText(error) }) },
   })
 
+  // The narrowed query a group is counted under now, and its scope key; null when the group is not counted.
+  function scopeOf(id: string, owner: string, group: GroupBy, entry: RowGroup, index: number) {
+    const params = index < MAX_COUNTED_GROUPS ? groupParams(id, options.filters.value, group, entry) : null
+    return params ? { params, key: groupScopeKey(owner, figuresPath(id, params)) } : null
+  }
+  // Without waiting for the list, the header or an idle frame: a group whose scope changed (another person, project,
+  // grouping or filter) loses its figures now. Rows match by group key alone, so they would read as current.
+  function dropChanged(id: string | null, owner: string, group: GroupBy) {
+    if (!id || !owner || group === 'none') { if (state.value.size) state.value = new Map(); scopes = new Map(); return }
+    const kept = new Map(state.value)
+    options.groups.value.forEach((entry, index) => {
+      if (!kept.has(entry.key) || (scopeOf(id, owner, group, entry, index)?.key ?? null) === (scopes.get(entry.key) ?? null)) return
+      kept.delete(entry.key)
+      scopes.delete(entry.key)
+    })
+    if (kept.size !== state.value.size) state.value = kept
+  }
+
   let pass = 0
   async function plan() {
     const run = ++pass
     const id = options.projectId.value, owner = options.owner.value, group = options.filters.value.group
+    dropChanged(id, owner, group)
     if (!id || !owner || group === 'none' || !options.ready.value) { loader.want([]); return }
     await idle()
     if (run !== pass) return
@@ -62,9 +81,9 @@ export function useGroupFigures(options: {
     const next = new Map<string, string>()
     const shown = new Map<string, GroupFigureState>()
     options.groups.value.forEach((entry, index) => {
-      const params = index < MAX_COUNTED_GROUPS ? groupParams(id, options.filters.value, group, entry) : null
-      if (!params) { shown.set(entry.key, { figures: null, failed: index < MAX_COUNTED_GROUPS ? UNCOUNTED_GROUP : TOO_MANY_GROUPS }); return }
-      const key = groupScopeKey(owner, figuresPath(id, params))
+      const scope = scopeOf(id, owner, group, entry, index)
+      if (!scope) { shown.set(entry.key, { figures: null, failed: index < MAX_COUNTED_GROUPS ? UNCOUNTED_GROUP : TOO_MANY_GROUPS }); return }
+      const { key, params } = scope
       next.set(entry.key, key)
       const before = state.value.get(entry.key)
       if (scopes.get(entry.key) === key && before) shown.set(entry.key, before)

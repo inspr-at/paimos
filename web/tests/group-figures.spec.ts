@@ -132,6 +132,34 @@ test('AEON-1388 figures land in reserved slots: the group row and the header nev
   same(before, await boxes(watch))
 })
 
+test('AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again', async ({ page }) => {
+  // PHAROS-18 (medium) carries 3 h here: In progress reads ~10.5h unfiltered and ~7.5h for high priority alone.
+  const d = data()
+  Object.assign(d.nodes.find(n => n.id === 'n-8')!.fields, { estimate_hours: 3 })
+  let release!: () => void, seen!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const held = new Promise<void>(resolve => { seen = resolve })
+  // Every count of the high-priority view waits, the header's as well as the groups'.
+  await open(page, { data: d, routes: async target => target.route('**/api/projects/*/figures**', async route => {
+    if (new URL(route.request().url()).searchParams.get('priority')) { seen(); await gate }
+    await route.fallback()
+  }) })
+  await expect(cell(page, 'In progress', 'estimate')).toHaveText('~10.5h')
+  await page.getByRole('toolbar').getByRole('button', { name: 'Add a filter' }).click()
+  await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Priority', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('High', { exact: true }).click()
+  await page.keyboard.press('Escape')
+  await held
+  // The narrowed list is on screen and its count is held: the group row is there, its old figure is not.
+  await expect(labels(page)).toHaveText(['Backlog', 'In progress'])
+  await expect(rows(page)).toHaveCount(4)
+  await expect(cell(page, 'In progress', 'estimate')).toHaveText('')
+  await expect(cell(page, 'In progress', 'priority')).toHaveText('')
+  release()
+  await expect(cell(page, 'In progress', 'estimate')).toHaveText('~7.5h')
+  await expect(cell(page, 'In progress', 'priority')).toHaveText('3 high')
+})
+
 test('AEON-1388 the first header cell swaps KEY for three controls in fixed slots, on hover of that cell only', async ({ page }) => {
   await open(page)
   const fold = keyHead(page).locator('.key-fold'), check = keyHead(page).locator('.key-check'), sort = keyHead(page).locator('.key-icon'), key = keyHead(page).locator('.key-rest')

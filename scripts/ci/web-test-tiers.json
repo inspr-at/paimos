@@ -9142,6 +9142,8 @@
     ,
     {"kind":"browser","file":"tests/graph-motion.spec.ts","name":"label fades › labels fade with an opacity transition instead of toggling display","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 an ungrouped list keeps the checkbox above the row checkboxes and the sort control, without a chevron","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 collapse and expand all: the first cell, Alt-click on a chevron and Display; folds survive a reload of the view","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

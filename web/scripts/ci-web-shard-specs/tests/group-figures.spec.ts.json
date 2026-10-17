@@ -6,8 +6,8 @@
   },
   "spec": {
     "file": "tests/group-figures.spec.ts",
-    "listedTests": 13,
-    "weightSeconds": 28.853659,
+    "listedTests": 14,
+    "weightSeconds": 31.073171,
     "weightSource": "unmeasured-test-rate"
   }
 }
