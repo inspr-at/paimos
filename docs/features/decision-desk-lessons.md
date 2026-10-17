@@ -8,8 +8,9 @@ Both decisions support the existing event Undo. The last lesson of a round ends 
 like every other Desk kind: "All decided" with Undo for 1.2 seconds, then the
 confirmation toast with Undo for the rest of a ten-second grace counted from the
 decision. Undo on "All decided" restores the lesson open in the memo; Undo in the
-toast puts it back on the Desk. A lesson decided earlier in a round keeps Undo in its
-memo. Rule drafts still require a separate publication approval.
+toast puts it back on the Desk, also after a round opened from the header preview has
+returned there. A lesson decided earlier in a round keeps Undo in its memo. Rule
+drafts still require a separate publication approval.
 
 The Knowledge tab replaces the Method learnings inbox with one quiet link to the
 project’s lessons on the Desk, shown only when lessons wait. Its count uses

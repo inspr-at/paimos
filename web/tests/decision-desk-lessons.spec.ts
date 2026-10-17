@@ -191,7 +191,7 @@ test('AEON-1331 rule draft, omitted source and keyboard use the native decision'
 test('AEON-1331 failed decisions and Undo keep the lesson honest', async ({ page }, testInfo) => {
   // The four widths and themes stay in this case. Another browser row would put
   // decision-desk-fixtures.ts over the 300-case fan-out and widen every edit of that helper.
-  test.setTimeout(180_000)
+  test.setTimeout(210_000)
   await page.clock.install(); const { state } = await mockLessons(page); await openLesson(page); state.fail = true
   await page.getByTestId('desk-decide').click(); await expect(page.getByTestId('desk-status')).toContainText('changed since')
   await expect(page.getByTestId('desk-undo')).not.toBeVisible(); expect(state.decided).toBe(false)
@@ -207,6 +207,7 @@ test('AEON-1331 failed decisions and Undo keep the lesson honest', async ({ page
       await lessonClosesLikeAnswer(page, testInfo, width, theme)
     })
   }
+  await test.step('AEON-1396 the toast still undoes the lesson after the round returned to the preview', () => lessonUndoAfterReturn(page))
 })
 test('AEON-1331 replaced proposal refuses the frozen lesson', async ({ page }) => {
   const { state } = await mockLessons(page); await openLesson(page); state.revision++
@@ -339,4 +340,26 @@ async function lessonClosesLikeAnswer(page: Page, testInfo: TestInfo, width: num
   await again.getByRole('button', { name: 'Undo', exact: true }).click()
   await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible(); expect(state.decided).toBe(false)
   expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'accept', 'undo', 'accept', 'undo'])
+}
+
+// AEON-1396 risk: a lesson opened from the header preview ends its round back on that page, which
+// unmounts the Desk before the person presses the toast's Undo; the Desk then refused it without a
+// request. Decided at a paused page time, so the round's 1.2 s and the toast's grace run only on runFor.
+async function lessonUndoAfterReturn(page: Page) {
+  await page.clock.resume(); await page.unrouteAll({ behavior: 'ignoreErrors' })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { state } = await mockLessons(page)
+  await page.goto('/agents'); await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
+  await page.getByTestId(`desk-preview-item-l:${id}`).click()
+  await expect(page).toHaveURL(`/decision-desk?from=preview&item=l:${id}`)
+  await expect(page.getByTestId('desk-decide')).toBeEnabled()
+  await pause(page); await page.getByTestId('desk-decide').click(); await expect(allDecidedUndo(page)).toBeVisible()
+  await page.clock.runFor(1200); await expect(page).toHaveURL('/agents'); await expect(page.getByTestId('desk-paper')).toHaveCount(0)
+  const place = page.locator('[data-place="desk"] .place-main')
+  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 0 open')
+  await page.locator('.toast').filter({ hasText: 'Added to the changelog.' }).getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Undone. The lesson waits on the Desk again.' })).toBeVisible()
+  expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'undo']); expect(state.decided).toBe(false)
+  // The header's Desk reads the restored lesson again.
+  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 1 open')
 }
