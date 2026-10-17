@@ -45,11 +45,11 @@ test('static CI commands are registered and every origin still exists', () => {
   }
 })
 
-// AEON-1451: the full-mode shard literal lives inside the tier-plan run body.
+// AEON-1451: the full-mode shard literal lives inside the ci-plan run body.
 // Refreshing that literal without a new not-static inventory digest is unclassified.
-test('tier-plan seventeen-shard full list is classified and a twelve-shard body is not', () => {
+test('ci-plan seventeen-shard full list is classified and a twelve-shard body is not', () => {
   const jobs = parseWorkflow(workflow)
-  const body = jobs.get('tier-plan').filter(step => step.run).map(step => step.run).join('\n')
+  const body = jobs.get('ci-plan').filter(step => step.run).map(step => step.run).join('\n')
   const fullShards = '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]'
   const twelve = '[1,2,3,4,5,6,7,8,9,10,11,12]'
   assert.equal(body.split(fullShards).length - 1, 3)
@@ -57,7 +57,7 @@ test('tier-plan seventeen-shard full list is classified and a twelve-shard body 
   assert.equal(validateRegistry(registry, jobs), registry.checks)
   const stale = workflow.replaceAll(fullShards, twelve)
   assert.notEqual(stale, workflow)
-  assert.throws(() => validateRegistry(registry, parseWorkflow(stale)), /Unclassified CI run in not-static job: tier-plan/)
+  assert.throws(() => validateRegistry(registry, parseWorkflow(stale)), /Unclassified CI run in not-static job: ci-plan/)
 })
 
 test('drift guard catches newly added commands in each full static job', () => {

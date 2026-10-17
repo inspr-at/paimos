@@ -46,7 +46,7 @@ export function timelineQuery(repository, pr, cursor = null) {
   } } }`
 }
 
-async function ghTimeline(repository, pr, cursor) {
+export async function ghTimeline(repository, pr, cursor) {
   const { stdout } = await execute('gh', ['api', 'graphql', '-f', `query=${timelineQuery(repository, pr, cursor)}`],
     { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })
   return JSON.parse(stdout)

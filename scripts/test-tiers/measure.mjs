@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { command } from './collect.mjs'
 import { measurementCauses, measurementErrorCause } from './measurement-causes.mjs'
 import { countCaseResults } from './report.mjs'
+import { jobPhases } from '../ci-queue-measure.mjs'
 
 export function newestAttemptReports(reports, { runId, attempt, sha } = {}) {
   const excludedEvidence=[],groups=new Map(),notes=[]
@@ -118,7 +119,7 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
   const missingEvidence=executionRequired
     .filter(job=>job.conclusion==='skipped'||!names.has(evidenceName(job.name))).map(job=>evidenceName(job.name))
   const upstreamFailures=reusedFrom!==undefined?[]:jobs.filter(job=>
-    (job.name==='nightly-web-setup'||lane!=='docs-only'&&/^(?:tier-plan|web-setup)$/.test(job.name))&&
+    (job.name==='nightly-web-setup'||/^(?:ci-plan|tier-plan)$/.test(job.name)||lane!=='docs-only'&&job.name==='web-setup')&&
     (job.status!=='completed'||job.conclusion!=='success'))
     .map(({name,status,conclusion})=>({name,status,conclusion}))
   if(reusedFrom!==undefined&&freshTiming&&!jobs.some(job=>job.name==='go-timing'))missingEvidence.push('go-timing')
@@ -126,13 +127,13 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
   const coverageReason=skippedJobs.length?(upstreamFailures.length?'skipped after upstream failure':'required tier jobs skipped'):
     upstreamFailures.length?'upstream jobs did not succeed':missingEvidence.length?'missing case evidence':
       incompleteEvidence.length?'interrupted or incomplete case evidence':undefined
-  const runners=jobs.map(job=>({name:job.name,status:job.status,conclusion:job.conclusion,runnerMinutes:jobMinutes(job)}))
+  const runners=jobs.map(job=>({name:job.name,status:job.status,conclusion:job.conclusion,runnerMinutes:jobMinutes(job),...jobPhases(job)}))
   const minutes=prefix=>runners.filter(job=>new RegExp(`^(?:nightly-)?${prefix}(?:-| |$)`).test(job.name)).reduce((sum,job)=>sum+(job.runnerMinutes??0),0)
   return {version:1,runId,attempt,sha,classes,reports,notes,flakeLedger,flakeCounts:Object.fromEntries(flakeCounts),jobs:runners,missingEvidence,excludedEvidence,incompleteEvidence,upstreamFailures,skippedJobs,coverageReason,
     reusedFrom,
     coverage:missingEvidence.length||upstreamFailures.length||incompleteEvidence.length||excludedEvidence.length?'incomplete':reusedFrom!==undefined?'reused':lane==='spec-only'?'untiered':'reported',
     baselines:{goRunnerMinutes:22.5,webRunnerMinutes:42.17},
-    measured:{goRunnerMinutes:minutes('go'),webRunnerMinutes:minutes('web'),sharedPlanningRunnerMinutes:minutes('tier-plan')},
+    measured:{goRunnerMinutes:minutes('go'),webRunnerMinutes:minutes('web'),sharedPlanningRunnerMinutes:minutes('ci-plan')+minutes('tier-plan')},
     caseScope:reusedFrom!==undefined&&freshTiming?`Only freshly executed timing guard cases are counted; verified full PR run ${reusedFrom} supplies skipped tier execution. Current runner minutes include guards and proof overhead.`:reusedFrom!==undefined?`No tier tests executed in this run; verified full merge-group run ${reusedFrom} supplies execution evidence. Current runner minutes include reuse/cache overhead.`:lane==='spec-only'?'Spec-only: native unit checks and exact changed specs execute without tier case accounting; runner costs are reported, no tier passes are claimed.':'Top-level Go Test/Fuzz including isolated timing, and web unit/UI registrations selected by tiers; fixed static, release and e2e gates retain separate runner costs.'}
 }
 

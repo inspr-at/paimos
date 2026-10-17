@@ -12,13 +12,8 @@
     },
     "ci-plan": {
       "kind": "not-static",
-      "reason": "Hosted event classification and GitHub output wiring.",
-      "runs_sha256": "7a49b267dd8045ec006938ff9f499bdb668e3a65e9d808b7536b9974d8bc6596"
-    },
-    "tier-plan": {
-      "kind": "not-static",
-      "reason": "Hosted tier scheduling and output wiring.",
-      "runs_sha256": "564447f112b25e763aa1f9d04930595101d771b430ae458186678d03ba0801cc"
+      "reason": "Combined hosted event classification, tier scheduling and evidence; routing and reuse stay independent.",
+      "runs_sha256": "0b9c2b3f9bb2ccebe4ff0c83e2efb6cf28cdd8094a51ae937deeed6c85220a62"
     },
     "runner-route": {
       "kind": "not-static",

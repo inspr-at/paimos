@@ -26,7 +26,7 @@ export const executionSteps = {
   'migration-compat': 'Previous binary on the candidate schema',
 };
 export const requiredJobs = [
-  'tier-plan', 'tier-measurements',
+  'tier-measurements',
   'runner-route / route', 'go', 'web', 'release-check', 'e2e',
   ...Object.keys(executionSteps),
   ...Array.from({ length: 7 }, (_, i) => `go-test (${i + 1})`),
@@ -96,6 +96,10 @@ export function verifyJobs(jobs, attempt) {
     if (stepName) {
       const steps = job.steps?.filter(step => step.name === stepName);
       ensure(steps?.length === 1 && steps[0].status === 'completed' && steps[0].conclusion === 'success', 'missing full execution evidence');
+    }
+    if (name === 'ci-plan') {
+      const tiers = job.steps?.filter(step => step.name === 'Plan test tiers');
+      ensure(tiers?.length === 1 && tiers[0].status === 'completed' && tiers[0].conclusion === 'success', 'missing consolidated tier planning evidence');
     }
     if(/^(go-test|web-unit|web-shard) \(/.test(name)) {
       const full=job.steps?.filter(step=>step.name==='Confirm full tier execution');

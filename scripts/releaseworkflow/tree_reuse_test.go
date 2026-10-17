@@ -577,7 +577,7 @@ func normalizeWebCatalogueOverlap(t *testing.T, jobs, setup map[string]any) {
 	want := cloneStep(t, setup)
 	delete(want, "outputs")
 	want["steps"] = append(append([]any{}, steps[:inputAt]...), wantCheck)
-	if !reflect.DeepEqual(catalogue, want) || catalogue["runs-on"] != "ubuntu-latest" || !reflect.DeepEqual(catalogue["needs"], []any{"ci-plan", "tree-reuse", "tier-plan"}) {
+	if !reflect.DeepEqual(catalogue, want) || catalogue["runs-on"] != "ubuntu-latest" || !reflect.DeepEqual(catalogue["needs"], []any{"ci-plan", "tree-reuse"}) {
 		t.Fatal("catalogue must run beside setup on hosted CI with the same lane/reuse guards and dependency installation")
 	}
 	web := treeMap(jobs["web"])
@@ -621,6 +621,73 @@ func normalizeAEON1018Classification(t *testing.T, id string, j map[string]any) 
 		}
 		j["steps"] = preserved
 	}
+}
+
+// AEON-1337: validate the consolidated publisher, then project its wiring onto
+// the split-job shape used by the immutable full-CI pins. Execution stays pinned.
+func normalizeConsolidatedPlanning(t *testing.T, id string, j map[string]any) {
+	t.Helper()
+	if id == "ci-plan" {
+		outputs := treeMap(j["outputs"])
+		if outputs["lane"] != "${{ steps.tiers.outputs.lane }}" || j["timeout-minutes"] != 7 ||
+			!reflect.DeepEqual(j["permissions"], map[string]any{"contents": "read", "actions": "read"}) {
+			t.Fatal("consolidated planning must publish the effective lane with bounded read authority")
+		}
+		tiers := reuseStep(t, j, "Plan test tiers")
+		if tiers["id"] != "tiers" || treeMap(tiers["env"])["CI_PLAN_LANE"] != "${{ steps.plan.outputs.lane }}" {
+			t.Fatal("tier scheduling must consume the local trusted classifier output")
+		}
+		for _, key := range []string{"mode", "layout", "web_shards", "browser_scope", "browser_plan_sha256"} {
+			if outputs[key] != "${{ steps.tiers.outputs."+key+" }}" {
+				t.Fatalf("unbound consolidated output %s", key)
+			}
+			delete(outputs, key)
+		}
+		outputs["lane"] = "${{ steps.plan.outputs.lane }}"
+		steps := reuseSteps(j)
+		if len(steps) != 8 || treeMap(steps[3])["name"] != "Capture PR checkout identity" || treeMap(steps[4])["name"] != "Plan test tiers" {
+			t.Fatal("one checkout/setup must precede classification, identity capture, tiers and their evidence")
+		}
+		j["steps"] = steps[:4]
+		j["timeout-minutes"] = 5
+		delete(j, "permissions")
+		return
+	}
+	if !containsNeed(j["needs"], "ci-plan") {
+		return
+	}
+	if containsNeed(j["needs"], "tier-plan") {
+		t.Fatal("retired planner must not remain in the live workflow")
+	}
+	j["needs"] = append(anySlice(j["needs"]), "tier-plan")
+	if condition, ok := j["if"].(string); ok {
+		const guard = "needs.ci-plan.result == 'success' && "
+		if strings.Count(condition, guard) != 1 {
+			t.Fatal("execution must gate the single effective publisher once")
+		}
+		j["if"] = strings.Replace(condition, guard, guard+"needs.tier-plan.result == 'success' && ", 1)
+	}
+	var visit func(map[string]any)
+	visit = func(m map[string]any) {
+		for key, raw := range m {
+			switch value := raw.(type) {
+			case string:
+				for _, output := range []string{"lane", "mode", "layout", "web_shards", "browser_scope", "browser_plan_sha256"} {
+					value = strings.ReplaceAll(value, "needs.ci-plan.outputs."+output, "needs.tier-plan.outputs."+output)
+				}
+				m[key] = value
+			case map[string]any:
+				visit(value)
+			case []any:
+				for _, child := range value {
+					if nested, ok := child.(map[string]any); ok {
+						visit(nested)
+					}
+				}
+			}
+		}
+	}
+	visit(j)
 }
 
 // Project the reviewed effective-lane wiring back onto immutable historical
@@ -764,7 +831,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 	normalizeParallelWebSetup(t, jobs)
 	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
 	for _, j := range []map[string]any{unit, browser} {
-		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "tier-plan"}) {
+		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse"}) {
 			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
 		}
 		if treeMap(reuseStep(t, j, "Download shared web runtime")["with"])["name"] != "web-runtime" || reuseStep(t, j, "Restore web runtime")["run"] != `tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"` {
@@ -776,7 +843,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 		t.Fatal("Spec-only units and full-lane shard regressions must each run once")
 	}
 	measure := treeMap(jobs["tier-measurements"])
-	if !containsNeed(measure["needs"], "ci-plan") || treeMap(reuseStep(t, measure, "Report cases and complete job runner minutes")["env"])["CI_LANE"] != "${{ needs.tier-plan.outputs.lane }}" {
+	if !containsNeed(measure["needs"], "ci-plan") || treeMap(reuseStep(t, measure, "Report cases and complete job runner minutes")["env"])["CI_LANE"] != "${{ needs.ci-plan.outputs.lane }}" {
 		t.Fatal("Tier measurements must report spec-only's untiered scope")
 	}
 }
@@ -843,8 +910,8 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				// AEON-1336 supplies plans only to affected PR execution. Prove
 				// that exact binding before pinning every older full-run field.
 				stepEnv := treeMap(reuseStep(t, j, "Run selected UI cases without retries")["env"])
-				if stepEnv["AEON_BROWSER_PLAN_FILE"] != "${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}" ||
-					stepEnv["AEON_BROWSER_PLAN_SHA256"] != "${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && needs.tier-plan.outputs.browser_plan_sha256 || '' }}" {
+				if stepEnv["AEON_BROWSER_PLAN_FILE"] != "${{ github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}" ||
+					stepEnv["AEON_BROWSER_PLAN_SHA256"] != "${{ github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected' && needs.ci-plan.outputs.browser_plan_sha256 || '' }}" {
 					t.Fatal("only an affected PR may supply a pinned browser execution file")
 				}
 				delete(stepEnv, "AEON_BROWSER_PLAN_FILE")
@@ -858,7 +925,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 					}
 					expected := map[string]any{
 						"name": "Download affected browser execution plan",
-						"if":   "github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected'",
+						"if":   "github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected'",
 						"uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
 						"with": map[string]any{"name": "affected-browser-plan", "path": "tmp/test-tiers"},
 					}
@@ -995,6 +1062,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 				delete(stepEnv, "AEON_TEST_POSTGRES_CONTAINER")
 			}
+			normalizeConsolidatedPlanning(t, id, j)
 			normalizeEffectiveLane(t, id, j)
 			value = j
 			normalizeNixVendorAdditions(t, id, j)

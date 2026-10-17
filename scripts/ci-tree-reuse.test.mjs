@@ -21,7 +21,7 @@ function fixture(attempt = 1) {
   const workflow = { id: 20, name: 'CI', path: workflowPath, decideMergeGroup, verifyPRFacts, verifyPRRun, prProofPrefix };
   const jobs = { total_count: requiredJobs.length + 2, jobs: requiredJobs.map(name => {
     const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-unit (') ? 'Run selected web units without retries' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
-    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...(/^(go-test|web-unit|web-shard) \(/.test(name)?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[])] };
+    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...(name==='ci-plan'?[{name:'Plan test tiers',status:'completed',conclusion:'success'}]:[]), ...(/^(go-test|web-unit|web-shard) \(/.test(name)?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[])] };
   }) };
   jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
   jobs.jobs.push({ name: 'tree-reuse', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
@@ -39,6 +39,26 @@ function fixture(attempt = 1) {
 }
 const check = (f, options = {}) => decide({ event: 'push', ref: 'refs/heads/main', sha, repository, api: f.api, clock: fakeClock(), ...options });
 const job = (f, name) => f.jobs.jobs.find(j => j.name === name);
+
+test('AEON-1337 consolidated planner proof requires classification and tier execution and rejects the retired layout', async () => {
+  for (const conclusion of ['skipped', 'failure', 'cancelled', undefined]) {
+    const f = fixture();
+    const tiers = job(f, 'ci-plan').steps.find(step => step.name === 'Plan test tiers');
+    tiers.conclusion = conclusion;
+    await assert.rejects(verifyRun(repository, 123, f.api, sha), /missing consolidated tier planning evidence/);
+    assert.equal((await check(f)).reuse, 'none');
+  }
+  const missing = fixture();
+  job(missing, 'ci-plan').steps = job(missing, 'ci-plan').steps.filter(step => step.name !== 'Plan test tiers');
+  await assert.rejects(verifyRun(repository, 123, missing.api, sha), /missing consolidated tier planning evidence/);
+  const duplicate = fixture();
+  job(duplicate, 'ci-plan').steps.push({name:'Plan test tiers',status:'completed',conclusion:'success'});
+  await assert.rejects(verifyRun(repository, 123, duplicate.api, sha), /missing consolidated tier planning evidence/);
+  const legacy = fixture();
+  legacy.jobs.jobs.push({name:'tier-plan',run_attempt:1,status:'completed',conclusion:'success'});
+  legacy.jobs.total_count++;
+  await assert.rejects(verifyRun(repository, 123, legacy.api, sha), /unknown suite job/);
+});
 
 test('found: an exact-SHA successful merge-group full suite reuses with source note', async () => {
   const f = fixture();
@@ -585,7 +605,7 @@ test('MG entry point emits proof outputs, but aggregate confirmation rejects sta
 
 test('the actual inline PR capture binds HEAD, parents, run and tree without candidate code', () => {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const step = workflow.split('      - name: Capture PR checkout identity\n')[1].split(/\n\n  [a-z][a-z-]*:/)[0];
+  const step = workflow.split('      - name: Capture PR checkout identity\n')[1].split(/\n      - |\n\n  [a-z][a-z-]*:/)[0];
   const script = step.split('        run: |\n')[1].replace(/^          /gm, '');
   const dir = mkdtempSync(join(tmpdir(), 'ops257-capture-'));
   const fixtureEnv = { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',

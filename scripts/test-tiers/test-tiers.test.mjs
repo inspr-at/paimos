@@ -1257,13 +1257,13 @@ test('AEON-1451 the full web layout and the essential gate stay inside the shard
   assertWebShardBudget(essential)
   assert.ok(essential.shards.length>=4&&essential.shards.length<=fullWebShardCount)
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
-  const planner=ci.slice(ci.indexOf('\n  tier-plan:'),ci.indexOf('\n  runner-route:'))
+  const planner=ci.slice(ci.indexOf('\n  ci-plan:'),ci.indexOf('\n  runner-route:'))
   assert.equal(planner.split(fullWebShardJSON).length-1,3,'merge-queue and non-PR planners publish the fitting shard list')
   const shardJob=ci.slice(ci.indexOf('\n  web-shard:'),ci.indexOf('\n  web:'))
   const spaced=`[${fullWebShards.join(', ')}]`
   assert.match(shardJob,/timeout-minutes: 20\n/)
   assert.match(shardJob,/PW_RETRIES: '0'/)
-  assert.equal(shardJob.includes(`github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '${spaced}'`),true)
+  assert.equal(shardJob.includes(`github.event_name == 'pull_request' && needs.ci-plan.outputs.web_shards || '${spaced}'`),true)
   assert.doesNotMatch(shardJob,/continue-on-error|max-attempts/)
   assert.deepEqual(requiredJobs.filter(name=>name.startsWith('web-shard (')),fullWebShards.map(shard=>`web-shard (${shard})`))
 })
@@ -1869,7 +1869,7 @@ test('optional changed browser cases run in changed-area selection; uncertain im
 })
 
 test('lean planner fetches only the exact event base before diffing and widens on fetch failure',()=>{
-  const directory=mkdtempSync(resolve(tmpdir(),'aeon-tier-planner-'))
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-ci-planner-'))
   const eventPath=resolve(directory,'event.json'),base='a'.repeat(40)
   for(const event of ['pull_request','merge_group']) {
     writeFileSync(eventPath,JSON.stringify(event==='pull_request'?{pull_request:{base:{sha:base}}}:{merge_group:{base_sha:base}}))
@@ -1889,28 +1889,28 @@ test('lean planner fetches only the exact event base before diffing and widens o
   assert.deepEqual(invalidCalls,[], 'Invalid base must never be fetched')
 })
 
-test('lean tier-plan skips setup, deep checkout and non-premerge checkout work',()=>{
+test('combined planner shares one checkout and Node setup without installing dependencies or toolchains',()=>{
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
-  const planner=ci.slice(ci.indexOf('\n  tier-plan:'),ci.indexOf('\n  runner-route:'))
-  assert.match(planner,/timeout-minutes: 2/)
-  assert.match(planner,/fetch-depth: 1\n/)
-  assert.doesNotMatch(planner,/setup-node|setup-go|npm ci|fetch-depth: 0/)
-  assert.match(planner,/if: contains\(fromJSON\('\["pull_request","merge_group"\]'\), github.event_name\)/)
+  const planner=ci.slice(ci.indexOf('\n  ci-plan:'),ci.indexOf('\n  runner-route:'))
+  assert.match(planner,/timeout-minutes: 7/)
+  assert.equal((planner.match(/uses: actions\/checkout@/g)??[]).length,1)
+  assert.equal((planner.match(/uses: actions\/setup-node@/g)??[]).length,1)
+  assert.doesNotMatch(planner,/setup-go|npm ci/)
+  assert.match(planner,/fetch-depth: \$\{\{ github.event_name == 'pull_request' && '0' \|\| '1' \}\}/)
   assert.match(planner,/pull_request\) node scripts\/test-tiers\/diff.mjs/)
-  assert.match(planner,new RegExp(`merge_group\\) printf 'mode=full\\\\nlayout=full\\\\nlane=full\\\\nweb_shards=\\[${fullWebShards.join(',')}]\\\\n' >> "\\$GITHUB_OUTPUT" ;;`))
-  assert.match(planner,new RegExp(`printf 'mode=full\\\\nlayout=full\\\\nlane=%s\\\\nweb_shards=\\[${fullWebShards.join(',')}]\\\\n'`))
-  assert.match(planner,/CI_PLAN_LANE: \$\{\{ needs.ci-plan.outputs.lane \}\}/)
+  assert.equal(planner.split(fullWebShardJSON).length-1,3)
+  assert.match(planner,/CI_PLAN_LANE: \$\{\{ steps.plan.outputs.lane \}\}/)
   assert.match(planner,/^      layout: \$\{\{ steps.tiers.outputs.layout \}\}$/m)
 })
 
 test('workflow merge-group planner writes only full outputs without executing candidate code; PR output is unchanged',()=>{
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
-  const planner=ci.slice(ci.indexOf('\n  tier-plan:'),ci.indexOf('\n  runner-route:'))
+  const planner=ci.slice(ci.indexOf('\n  ci-plan:'),ci.indexOf('\n  runner-route:'))
   // The scheduling block ends at the next step. Shadow publication is a separate
   // step and must not be executed as part of this planner script.
-  const run=planner.split('        run: |\n')[1].split('\n      - ')[0].replace(/^          /gm,'')
+  const run=planner.split('      - name: Plan test tiers\n')[1].split('        run: |\n')[1].split('\n      - ')[0].replace(/^          /gm,'')
   assert.doesNotMatch(run,/impact-plan| - name:/)
-  const directory=mkdtempSync(resolve(tmpdir(),'aeon-workflow-tier-plan-'))
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-workflow-ci-plan-'))
   mkdirSync(resolve(directory,'scripts/test-tiers'),{recursive:true})
   writeFileSync(resolve(directory,'scripts/test-tiers/diff.mjs'),`
     import {appendFileSync} from 'node:fs';
@@ -1925,7 +1925,7 @@ test('workflow merge-group planner writes only full outputs without executing ca
       const result=spawnSync('/bin/bash',['-e','-c',run],{cwd:directory,encoding:'utf8',timeout:10_000,
         env:{PATH:process.env.PATH,GITHUB_EVENT_NAME:event,GITHUB_OUTPUT:output,CI_AFFECTED_LANE:flag,CI_PLAN_LANE:lane,CANDIDATE_STATUS:code}})
       assert.equal(result.status,event==='merge_group'?0:Number(code),result.stderr)
-      assert.equal(readFileSync(output,'utf8'),event==='merge_group'?`mode=full\nlayout=full\nlane=full\nweb_shards=${fullWebShardJSON}\n`:'mode=essential\nlayout=static\nlane=full\n')
+      assert.equal(readFileSync(output,'utf8'),event==='merge_group'?`mode=full\nlayout=full\nlane=full\nweb_shards=${fullWebShardJSON}\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n`:'mode=essential\nlayout=static\nlane=full\n')
       assert.equal(result.stdout,event==='merge_group'?'':'candidate planner executed\n')
     }
 })
@@ -1933,7 +1933,7 @@ test('workflow merge-group planner writes only full outputs without executing ca
 test('static layout accounting expects skipped Go shards, timing and browser shards but still requires unit evidence',()=>{
   const finished={status:'completed',conclusion:'success',started_at:'2026-10-06T01:00:00Z',completed_at:'2026-10-06T01:02:00Z'}
   const skipped={status:'completed',conclusion:'skipped',started_at:'2026-10-06T01:00:00Z',completed_at:'0001-01-01T00:00:00Z',steps:[]}
-  const jobs=[{...finished,name:'tier-plan'},{...finished,name:'web-setup'},{...finished,name:'web-unit (1)'},{...skipped,name:'go-test (1)'},{...skipped,name:'go-timing'},{...skipped,name:'web-shard (1)'},{...skipped,name:'e2e-run'}]
+  const jobs=[{...finished,name:'ci-plan'},{...finished,name:'web-setup'},{...finished,name:'web-unit (1)'},{...skipped,name:'go-test (1)'},{...skipped,name:'go-timing'},{...skipped,name:'web-shard (1)'},{...skipped,name:'e2e-run'}]
   const unit={version:1,job:'web-unit-1',classes:{ESSENTIAL:{selected:1,run:1,passed:1,skipped:0,failed:0,notRun:0,platformInactive:0}}}
   const report=aggregate([unit],jobs,{lane:'full',layout:'static'})
   assert.equal(report.coverage,'reported');assert.deepEqual(report.missingEvidence,[]);assert.deepEqual(report.skippedJobs,[])
@@ -2114,7 +2114,7 @@ test('Actions skipped jobs with zero completed_at never invalidate PR, queue, pu
 test('AEON-732 full and nightly skipped tier fixtures remain incomplete after upstream failures',()=>{
   const finished={status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
   const skipped={...finished,conclusion:'skipped',completed_at:'0001-01-01T00:00:00Z',steps:[]}
-  for(const lane of [undefined,'full']) for(const prerequisite of ['tier-plan','web-setup']) {
+  for(const lane of [undefined,'full']) for(const prerequisite of ['ci-plan','web-setup']) {
     const jobs=[{...finished,name:prerequisite,conclusion:'failure'},
       ...['go-test (1)','go-timing','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))]
     const report=aggregate([],jobs,{lane})
@@ -2138,7 +2138,7 @@ test('AEON-732 full and nightly skipped tier fixtures remain incomplete after up
   assert.equal(nightly.coverageReason,'skipped after upstream failure')
   assert.deepEqual(nightly.missingEvidence,['web-unit','web-shard-1'])
   assert.deepEqual(nightly.upstreamFailures,[{name:'nightly-web-setup',status:'completed',conclusion:'failure'}])
-  for(const name of ['tier-plan','web-setup','nightly-web-setup']) for(const conclusion of ['failure','cancelled','skipped']) {
+  for(const name of ['ci-plan','web-setup','nightly-web-setup']) for(const conclusion of ['failure','cancelled','skipped']) {
     const job={...finished,name,conclusion,...(conclusion==='skipped'?{completed_at:'0001-01-01T00:00:00Z'}:{})}
     // Even a retained unit artifact cannot conceal a later setup/build failure.
     const report=aggregate([reportCases([],[],0,'web-unit')],[job])
@@ -2171,7 +2171,7 @@ test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary a
   const root=mkdtempSync(resolve(tmpdir(),'aeon-tier-measurement-'))
   const finished={status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
   const skipped={...finished,conclusion:'skipped',completed_at:'0001-01-01T00:00:00Z',steps:[]}
-  const jobs=[{...finished,name:'tier-plan',conclusion:'failure'},
+  const jobs=[{...finished,name:'ci-plan',conclusion:'failure'},
     ...['go-test (1)','go-timing','web-setup','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))]
   const evidence=resolve(root,'evidence'),summary=resolve(root,'summary.txt')
   mkdirSync(evidence)
@@ -2185,7 +2185,7 @@ test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary a
   ]) {
     const fixtureEvidence=mkdtempSync(resolve(root,'case-evidence-'))
     if(fixture.reuse==='pull_request')writeFileSync(resolve(fixtureEvidence,'go-timing-measurement.json'),JSON.stringify({version:1,job:'go-timing',classes:{},runId:'123',attempt:'2',sha:'a'.repeat(40)}))
-    const fixtureJobs=jobs.map(job=>fixture.reuse==='pull_request'&&job.name==='go-timing'?{...job,...finished,conclusion:'success'}:fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
+    const fixtureJobs=jobs.map(job=>fixture.reuse==='pull_request'&&job.name==='go-timing'?{...job,...finished,conclusion:'success'}:fixture.planned&&(job.name==='ci-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
       ? {...job,...finished,conclusion:'success'}:job)
     writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/jobs?filter=latest&per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
     writeFileSync(summary,'')
@@ -2207,7 +2207,7 @@ test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary a
     assert.ok(readFileSync(summary,'utf8').includes(`Test tiers: ${fixture.coverage}${fixture.reason?` — ${fixture.reason}`:''};`))
     if(fixture.lane==='full'&&!fixture.reuse) {
       assert.deepEqual(report.missingEvidence,['go-test-1','go-timing','web-unit-1','web-shard-1'])
-      assert.ok(readFileSync(summary,'utf8').includes('tier-plan (failure), web-setup (skipped)'))
+      assert.ok(readFileSync(summary,'utf8').includes('ci-plan (failure), web-setup (skipped)'))
       assert.equal(report.measured.sharedPlanningRunnerMinutes,2)
       assert.equal(report.measured.goRunnerMinutes,0)
       assert.equal(report.measured.webRunnerMinutes,0)
@@ -2512,8 +2512,8 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   assert.doesNotMatch(nightly,/pull_request:|merge_group:|runner-route:/)
   for(const command of ['run go --all --shard','run web --all --unit','run web --all --shard'])assert.ok(nightly.includes(command))
   for(const id of ['go-static','go-timing','migration-compat','e2e','release-check'])assert.ok(nightly.includes(`  nightly-${id}:`))
-  assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan\]/)
-  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan\]/)
+  assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime\]/)
+  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime\]/)
   assert.match(ci,/  migration-compat:\n\s+permissions:/)
   assert.doesNotMatch(ci,/ci-flake-guard\.mjs --kind/)
 })

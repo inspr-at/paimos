@@ -1,14 +1,132 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { analyze, collectRuns, formatReport, main, measureRun, percentile, rulesetPlan } from "./ci-queue-measure.mjs";
+import { analyze, collectRuns, formatReport, main, measureRun, percentile, rulesetPlan, analyzeSlotDemand, collectSlotDemand, jobPhases } from "./ci-queue-measure.mjs";
+import { fullWebShards } from "./test-tiers/core.mjs";
 
 const fixtureURL = new URL("./testdata/ci-queue-measure.json", import.meta.url);
 const fixture = () => JSON.parse(readFileSync(fixtureURL, "utf8"));
 const rulesetURL = new URL("./testdata/ci-queue-ruleset.json", import.meta.url);
 const ruleset = () => JSON.parse(readFileSync(rulesetURL, "utf8"));
+
+const slotFrom = '2026-10-17T12:00:00Z', slotTo = '2026-10-17T12:10:00Z';
+const at = seconds => new Date(Date.parse(slotFrom)+seconds*1000).toISOString();
+function slotFixture() {
+  let id=1;
+  const job=(name,created,end)=>({id:id++,name,run_attempt:1,status:'completed',conclusion:'success',
+    created_at:at(created),started_at:at(created+5),completed_at:at(end),labels:['ubuntu-latest'],runner_id:id,full_tier_execution:true});
+  const matrix=[...Array.from({length:7},(_,i)=>`go-test (${i+1})`),...Array.from({length:4},(_,i)=>`web-unit (${i+1})`),...fullWebShards.map(i=>`web-shard (${i})`)];
+  const runs=Array.from({length:5},(_,i)=>({id:100+i,repository:'fixture/aeon',event:'merge_group',path:'.github/workflows/ci.yml',
+    created_at:at(10+i*100),head_sha:'a'.repeat(40),head_branch:`gh-readonly-queue/main/pr-${i+1}-${'b'.repeat(40)}`,run_attempt:1,
+    attempts:[{number:1,jobs:matrix.map(name=>job(name,10+i*100,50+i*100))}]}));
+  for(const [repo,event,path] of [['fixture/other','push','.github/workflows/build.yml'],['fixture/aeon','pull_request','.github/workflows/ci.yml'],['fixture/aeon','schedule','.github/workflows/nightly-full.yml']])
+    runs.push({id:id++,repository:repo,event,path,created_at:at(0),run_attempt:1,attempts:[{number:1,jobs:[job('competing',0,600)]}]});
+  return {schema:'aeon.ci-slot-demand.v1',organization:'fixture',repository:'fixture/aeon',repositories:['fixture/aeon','fixture/other'],from:slotFrom,to:slotTo,lookback:at(-86400),runs,
+    timelines:Object.fromEntries(Array.from({length:5},(_,i)=>[i+1,[{id:`enqueued-${i}`,__typename:'AddedToMergeQueueEvent',createdAt:at(5+i*100)}]]))};
+}
+
+test('AEON-1337 slot budget uses simultaneous organization demand including PR and nightly work and separates the three time phases',()=>{
+  const snapshot=slotFixture(),report=analyzeSlotDemand(snapshot);
+  const width=7+4+fullWebShards.length;
+  assert.equal(report.hosted_running.peak,width+3);
+  assert.equal(report.hosted_waiting.peak,width);
+  assert.equal(report.competing_demand.p95,3);
+  assert.equal(report.full_build_samples,5);
+  assert.equal(report.merge_build_slots_p95,width);
+  assert.equal(report.recommendation.max_entries_to_build,Math.floor((60-3-2)/width));
+  assert.deepEqual(report.phases.admission_seconds,{samples:5,p50:5,p95:5});
+  assert.equal(report.phases.runner_queue_seconds.p95,5);
+  assert.equal(report.phases.execution_seconds.p50,35);
+  assert.equal(report.jobs.length,5*width+3);
+  assert.equal(snapshot.runs[0].attempts[0].jobs[0].created_at,at(10),'analysis leaves the captured evidence intact');
+  const larger=analyzeSlotDemand(snapshot,{slots:100,safetySlots:5});
+  assert.equal(larger.recommendation.max_entries_to_build,Math.floor(92/width));
+});
+
+test('AEON-1337 missing full builds, legacy shard layouts and saturated budgets never invent a concurrency recommendation',()=>{
+  const snapshot=slotFixture();
+  assert.equal(analyzeSlotDemand({...snapshot,runs:snapshot.runs.slice(0,4)}).recommendation.max_entries_to_build,null);
+  assert.equal(analyzeSlotDemand(snapshot,{slots:10}).recommendation.max_entries_to_build,null);
+  for(const run of snapshot.runs.filter(run=>run.event==='merge_group'))run.attempts[0].jobs=run.attempts[0].jobs.filter(job=>job.name!=='web-shard (17)');
+  assert.equal(analyzeSlotDemand(snapshot).full_build_samples,0,'a previous twelve-shard layout is not the current full build');
+  const unknown=slotFixture(); unknown.runs[0].attempts[0].jobs[0].labels=['unknown-large-runner'];
+  assert.throws(()=>analyzeSlotDemand(unknown),/unknown runner class/);
+  const partial=slotFixture();partial.runs[0].attempts=[];
+  assert.throws(()=>analyzeSlotDemand(partial),/incomplete or duplicate slot run/);
+  const duplicate=slotFixture();duplicate.runs[0].attempts[0].jobs.push(duplicate.runs[0].attempts[0].jobs[0]);
+  assert.throws(()=>analyzeSlotDemand(duplicate),/invalid or duplicate slot job/);
+  const clock=slotFixture();clock.runs[0].attempts[0].jobs[0].started_at=at(1);
+  assert.throws(()=>analyzeSlotDemand(clock),/invalid slot job timestamps/);
+});
+
+test('AEON-1337 admission is sampled once per proven queue session and never substituted with runner delay',()=>{
+  const snapshot=slotFixture(),run=snapshot.runs[0],rebuild=structuredClone(run);
+  rebuild.id=900;rebuild.created_at=at(70);
+  rebuild.attempts[0].jobs.forEach(job=>{job.id+=10000;job.created_at=at(70);job.started_at=at(75);job.completed_at=at(90)});
+  snapshot.runs.push(rebuild);
+  const report=analyzeSlotDemand(snapshot);
+  assert.equal(report.phases.admission_seconds.samples,5);
+  assert.equal(report.builds.find(build=>build.run===900).admission.seconds,null);
+  assert.match(report.builds.find(build=>build.run===900).admission.reason,/rebuild/);
+  delete snapshot.timelines[1];
+  assert.equal(analyzeSlotDemand(snapshot).phases.admission_seconds.samples,4);
+  snapshot.timelines[1]=[{id:'old',__typename:'AddedToMergeQueueEvent',createdAt:at(-90000)}];
+  assert.match(analyzeSlotDemand(snapshot).builds[0].admission.reason,/predates/);
+  snapshot.timelines[1]=[{id:'add',__typename:'AddedToMergeQueueEvent',createdAt:at(1)},{id:'remove',__typename:'RemovedFromMergeQueueEvent',createdAt:at(2)}];
+  assert.match(analyzeSlotDemand(snapshot).builds[0].admission.reason,/no proven active/);
+});
+
+test('AEON-1337 phase samples exclude planned skips, queued cancellations and unfinished execution without zero-duration success',()=>{
+  const job=slotFixture().runs[0].attempts[0].jobs[0];
+  assert.deepEqual(jobPhases(job),{runner_queue_seconds:5,execution_seconds:35});
+  for(const skipped of [{...job,conclusion:'skipped'},{...job,conclusion:'cancelled',runner_id:0,steps:[]}])
+    assert.deepEqual(jobPhases(skipped),{runner_queue_seconds:null,execution_seconds:null});
+  assert.deepEqual(jobPhases({...job,status:'in_progress',completed_at:null}),{runner_queue_seconds:5,execution_seconds:null});
+  assert.deepEqual(jobPhases({...job,created_at:null,completed_at:at(1)}),{runner_queue_seconds:null,execution_seconds:null});
+  const snapshot=slotFixture();
+  snapshot.runs.at(-1).attempts[0].jobs[0].labels=['self-hosted','linux'];
+  const report=analyzeSlotDemand(snapshot);
+  assert.equal(report.self_hosted_jobs,1);
+  assert.equal(report.competing_demand.p95,2);
+});
+
+test('AEON-1337 slot collection reads every organization repository, workflow and attempt with bounded pagination and queue timelines',async()=>{
+  const calls=[],run={id:10,repository:'fixture/aeon',event:'merge_group',path:'.github/workflows/ci.yml',created_at:at(10),head_branch:`gh-readonly-queue/main/pr-1-${'a'.repeat(40)}`,run_attempt:2};
+  const get=async endpoint=>{
+    calls.push(endpoint);
+    if(endpoint.startsWith('orgs/'))return [{full_name:'fixture/aeon'},{full_name:'fixture/other'}];
+    if(endpoint.includes('/attempts/')) {
+      const number=Number(endpoint.match(/attempts\/(\d+)/)[1]);
+      return {total_count:1,jobs:[{...slotFixture().runs[0].attempts[0].jobs[0],run_id:10,run_attempt:number,id:number,steps:[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]}]};
+    }
+    return {total_count:1,workflow_runs:endpoint.includes('/fixture/aeon/')&&endpoint.includes('created=2026-10-17')?[run]:[]};
+  };
+  const timeline=async(repository,pr,cursor)=>{assert.equal(repository,'fixture/aeon');assert.equal(pr,1);assert.equal(cursor,null);return {data:{repository:{pullRequest:{number:1,timelineItems:{nodes:slotFixture().timelines[1],pageInfo:{hasNextPage:false}}}}}}};
+  const result=await collectSlotDemand({organization:'fixture',repository:'fixture/aeon',from:slotFrom,to:slotTo,get,timeline});
+  assert.deepEqual(result.repositories,['fixture/aeon','fixture/other']);
+  assert.equal(result.runs[0].attempts.length,2);
+  assert.equal(result.runs[0].attempts[0].jobs[0].full_tier_execution,true);
+  assert.ok(calls.includes('repos/fixture/aeon/actions/runs/10/attempts/2/jobs?per_page=100&page=1'));
+  assert.ok(calls.some(call=>call.startsWith('repos/fixture/other/actions/runs?created=')));
+  await assert.rejects(collectSlotDemand({organization:'fixture',repository:'fixture/aeon',from:slotFrom,to:slotTo,get:async()=>Array.from({length:100},(_,i)=>({full_name:`fixture/r${i}`})),timeline}),/pagination limit/);
+  let tick=0;
+  await assert.rejects(collectSlotDemand({organization:'fixture',repository:'fixture/aeon',from:slotFrom,to:slotTo,get,timeline,now:()=>tick++*20*60_000}),/deadline/);
+  await assert.rejects(collectSlotDemand({organization:'fixture',repository:'fixture/aeon',from:slotFrom,to:slotTo,get,timeline:async()=>({errors:[{message:'incomplete'}]})}),/incomplete queue timeline/);
+});
+
+test('AEON-1337 offline slot evidence is reproducible and cannot be combined with ruleset mutation or unrelated options',async t=>{
+  const directory=mkdtempSync(join(tmpdir(),'aeon-slot-cli-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const input=join(directory,'snapshot.json');writeFileSync(input,JSON.stringify(slotFixture()));
+  const get=()=>assert.fail('offline analysis must not make an API request');
+  const report=JSON.parse(await main(['--slots','--input',input,'--capacity','60'],get));
+  assert.equal(report.full_build_samples,5);
+  for(const args of [['--slots','--ruleset','42'],['--slots','--input',input,'--to',slotTo],['--capacity','60'],['--slots','--input',input,'--safety-slots','0']])
+    await assert.rejects(main(args,get),/cannot be combined|already defines|require --slots|must be/);
+});
 
 test("initial runner wait, execution and retry gaps use attempt-specific jobs, never updated_at", () => {
   const report = analyze(fixture(), "2026-10-03T12:00:00Z");
