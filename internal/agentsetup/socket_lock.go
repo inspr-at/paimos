@@ -52,8 +52,8 @@ func (s *Store) LockSocket(name string, peerStore ...*Store) (*os.File, error) {
 	return lock, nil
 }
 
-// CleanupSocket removes only this listener's recorded socket/token inodes,
-// after closing the listener and while retaining its verified lifetime lock.
+// CleanupSocket removes this listener's recorded socket/token inodes and a
+// hook pin naming our PID, after close under the verified lifetime lock.
 // Lost lock identity leaves residue for a later, verified owner to recover.
 func (s *Store) CleanupSocket(name string, lock *os.File, socketInfo, tokenInfo os.FileInfo, peerStore ...*Store) error {
 	s.mu.Lock()
@@ -205,7 +205,8 @@ func legacySocketAside(name string) bool {
 	return len(name) == 10 && strings.HasPrefix(name, ".s") && strings.Trim(name[2:], "0123456789abcdef") == ""
 }
 
-// cleanSocketArtifacts requires a verified lifetime lock and no live hook peer.
+// cleanSocketArtifacts requires a verified lifetime lock; startup also refuses
+// a live hook peer, including one from a version without the lifetime lock.
 // Connection refusal cannot prove staleness: Darwin also refuses connections
 // when a live listener's accept queue is full. All checks and removals use the
 // pinned directory fd. A same-uid process can disrupt a daemon by deleting or
