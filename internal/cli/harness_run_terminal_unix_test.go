@@ -61,7 +61,7 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 		group, err := unix.IoctlGetInt(0, unix.TIOCGPGRP)
 		after, afterErr := term.GetState(0)
 		if err != nil || group != syscall.Getpgrp() || beforeErr != nil || afterErr != nil || !reflect.DeepEqual(before, after) {
-			fmt.Fprintln(os.Stderr, "AEON1410_RESTORE_FAILED")
+			fmt.Fprintf(os.Stderr, "AEON1410_RESTORE_FAILED group=%d want=%d groupErr=%v beforeErr=%v afterErr=%v before=%#v after=%#v\n", group, syscall.Getpgrp(), err, beforeErr, afterErr, before, after)
 			os.Exit(25)
 		}
 		os.Exit(code)
