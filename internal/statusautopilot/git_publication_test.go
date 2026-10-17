@@ -3,11 +3,12 @@ package statusautopilot
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/jackc/pgx/v5"
 )
@@ -26,7 +27,7 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 	other := f.add("AUT-6", "work", "qa", 2, nil)
 	parent := f.add("AUT-7", "work", "done", 2, nil)
 	child := f.add("AUT-8", "work", "open", 2, nil)
-	laterEpisode := f.add("AUT-9", "work", "done", 0, nil)
+	lateDone := f.add("AUT-9", "work", "done", 0, nil)
 	gitOnly := f.add("AUT-10", "work", "done", 2, nil)
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{project_key}','"AUT"') WHERE id=$1`, f.project); err != nil {
@@ -41,8 +42,8 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, child, parent); err != nil {
 			return err
 		}
-		// Later status episode is authoritative even when its old merge shipped.
-		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET created_at=$2 WHERE id=$1`, laterEpisode, f.now.Add(time.Hour)); err != nil {
+		// Merge completion may arrive after tagging; immutable merge ancestry still wins.
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET created_at=$2 WHERE id=$1`, lateDone, f.now.Add(time.Hour)); err != nil {
 			return err
 		}
 		for _, fact := range []struct {
@@ -50,19 +51,20 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 			at      time.Time
 		}{
 			{shipped, p.Commits[0], f.now.Add(-2 * time.Hour)}, {prior, strings.Repeat("d", 40), f.now.Add(-48 * time.Hour)},
-			{follow, p.Commits[0], f.now.Add(-2 * time.Hour)}, {follow, strings.Repeat("e", 40), f.now.Add(time.Hour)},
+			{follow, p.Commits[0], f.now.Add(-2 * time.Hour)},
 			{held, p.Commits[0], f.now.Add(-2 * time.Hour)}, {other, p.Commits[0], f.now.Add(-2 * time.Hour)},
-			{parent, p.Commits[0], f.now.Add(-2 * time.Hour)}, {laterEpisode, p.Commits[0], f.now.Add(-2 * time.Hour)},
+			{parent, p.Commits[0], f.now.Add(-2 * time.Hour)}, {lateDone, p.Commits[0], f.now.Add(-2 * time.Hour)},
 		} {
 			meta, _ := json.Marshal(map[string]any{"repository": p.Repository, "merge_sha": fact.sha, "merged_at": fact.at.Format(time.RFC3339Nano)})
 			if _, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,metadata,at,before,after) VALUES($1,$2,$3,'delivery.merge_done',$4,$5,'{"state":"done"}','{"state":"done"}')`, f.p.TenantID, f.p.ID, fact.id, meta, fact.at); err != nil {
 				return err
 			}
 		}
-		return nil
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at) VALUES($1,$2,$3,99,$4,$5,'test',true,true,true,'{}',$6)`, f.p.TenantID, p.Repository, strings.Repeat("e", 40), follow, f.project, f.now.Add(time.Hour))
+		return err
 	})
 	f.run(f.now)
-	for id, want := range map[string]string{shipped: "delivered", prior: "done", follow: "done", held: "done", other: "qa", parent: "done", laterEpisode: "done", gitOnly: "delivered"} {
+	for id, want := range map[string]string{shipped: "delivered", prior: "done", follow: "done", held: "done", other: "qa", parent: "done", lateDone: "delivered", gitOnly: "delivered"} {
 		if got := f.state(id).State; got != want {
 			t.Fatalf("%s state %s; want %s", id, got, want)
 		}
@@ -106,7 +108,7 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 	if got := f.changes(shipped); len(got) != 2 || got[0].Rule != "accept" && got[1].Rule != "accept" {
 		t.Fatalf("acceptance audit: %+v", got)
 	}
-	// Receipts survive a person's Undo, even if the current state is Done again.
+	// Receipts also protect work reopened to Done, as after Undo.
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='done' WHERE id=$1`, gitOnly)
 		return err
@@ -124,6 +126,21 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 	off := f.add("AUT-11", "work", "done", 2, nil)
 	f.run(deliveredAt.Add(72 * time.Hour))
 	if f.state(off).State != "done" {
-		t.Fatal(fmt.Sprintf("disabled project delivered %s", off))
+		t.Fatalf("disabled project delivered %s", off)
+	}
+
+	// Removing current write authority cannot be bypassed by the System actor.
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE status_autopilot_projects SET mode='inherit' WHERE project_id=$1`, f.project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE permission='nodes.write' AND role_id IN (SELECT role_id FROM role_bindings WHERE principal_id=$1)`, f.p.ID)
+		return err
+	})
+	if err := f.m.RunTenant(t.Context(), f.p.TenantID, deliveredAt.Add(73*time.Hour)); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("revoked writer error: %v", err)
+	}
+	if f.state(off).State != "done" {
+		t.Fatal("publication ignored revoked write authority")
 	}
 }

@@ -3,8 +3,10 @@ package statusautopilot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -21,40 +23,53 @@ import (
 // the same build is safe: receipts survive restarts and Undo. There is no scan of
 // historic releases here; OPS reviews that inventory separately.
 func (m *Module) WithPublication(p *releasehistory.Publication, current, tenantID, repository string) *Module {
+	m.publication = nil
+	m.publicationTenant = ""
 	if p != nil && p.Version == current && p.Tag == "v"+current && p.Repository != "" && p.Repository == repository && tenantID != "" && p.ProjectKey != "" && p.Commit != "" && len(p.Commits) <= releasehistory.MaxPublicationCommits {
 		m.publication = p
 		m.publicationTenant = tenantID
+	} else if p != nil {
+		slog.Warn("release publication automation disabled: running version or configured GitHub App ownership does not match build evidence", "version", current)
 	}
 	return m
 }
 
-func (m *Module) gitDecision(n node) decision {
+func (m *Module) gitDecision(n node, merge string) decision {
 	p := m.publication
+	sha, _ := json.Marshal(merge)
+	n.Fields = map[string]json.RawMessage{"pr_url": n.Fields["pr_url"], "merge_commit": sha}
 	source := fmt.Sprintf("release %s (%s, %s)", p.Name, p.Version, p.Tag)
 	return publicationDecision(n, "git/"+p.Repository+"/"+p.Tag, "Shipped in "+source+".", source)
 }
 
 // The newest verified observation wins, including a follow-up after this tag.
 // Editable merge_commit fields cannot override immutable audit evidence.
-func (m *Module) gitMemberTx(ctx context.Context, tx pgx.Tx, n node) (bool, error) {
+func (m *Module) gitMemberTx(ctx context.Context, tx pgx.Tx, c candidate) (string, error) {
 	p := m.publication
+	n := c.Node
 	var sha *string
 	var key string
 	var linked bool
-	err := tx.QueryRow(ctx, `SELECT n.key, EXISTS(SELECT 1 FROM nodes project WHERE project.tenant_id=n.tenant_id AND project.id=n.project_id AND project.deleted_at IS NULL AND project.fields->>'project_key'=$3),
+	err := tx.QueryRow(ctx, `SELECT n.key, EXISTS(SELECT 1 FROM nodes project WHERE project.tenant_id=n.tenant_id AND project.id=n.project_id AND project.deleted_at IS NULL AND project.fields->>'project_key'=$3 AND current_setting('aeon.tenant_id')=$4),
  (SELECT f.sha FROM (
  SELECT e.metadata->>'merge_sha' sha,(e.metadata->>'merged_at')::timestamptz at FROM events e
  WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND `+mergeEvidenceSQL+` AND e.metadata->>'repository'=$2
  UNION ALL
  SELECT a.merge_sha,a.at FROM delivery_merge_audit a WHERE a.tenant_id=n.tenant_id AND a.ticket_node_id=n.id AND a.project_id=n.project_id AND a.repository=$2 AND a.pull_request IS NOT NULL
- ) f ORDER BY f.at DESC,f.sha LIMIT 1) FROM nodes n WHERE n.id=$1`, n.ID, p.Repository, p.ProjectKey).Scan(&key, &linked, &sha)
+ ) f ORDER BY f.at DESC,f.sha LIMIT 1) FROM nodes n WHERE n.id=$1`, n.ID, p.Repository, p.ProjectKey, m.publicationTenant).Scan(&key, &linked, &sha)
 	if err != nil || !linked {
-		return false, err
+		return "", err
 	}
 	if sha == nil {
-		return p.Tickets[key] != "" && slices.Contains(p.Commits, p.Tickets[key]), nil
+		if c.Since.After(p.TaggedAt) || !slices.Contains(p.Commits, p.Tickets[key]) {
+			return "", nil
+		}
+		return p.Tickets[key], nil
 	}
-	return slices.Contains(p.Commits, *sha), nil
+	if !slices.Contains(p.Commits, *sha) {
+		return "", nil
+	}
+	return *sha, nil
 }
 
 // Select an existing responsible person, without provisioning any role or key.
@@ -130,7 +145,7 @@ func (m *Module) publishGit(ctx context.Context, actor tenant.Principal, now tim
 			changes := []change{}
 			for _, c := range candidates {
 				n := c.Node
-				if n.ProjectID == nil || classic(n) || noReleaseNeeded(n) || c.Since.After(m.publication.TaggedAt) {
+				if n.ProjectID == nil || classic(n) || noReleaseNeeded(n) {
 					continue
 				}
 				parent, err := db.WorkStatusParentTx(ctx, tx, n.ID)
@@ -151,17 +166,17 @@ func (m *Module) publishGit(ctx context.Context, actor tenant.Principal, now tim
 				if !o.Effective || o.Mode == "off" {
 					continue
 				}
-				member, err := m.gitMemberTx(ctx, tx, n)
+				member, err := m.gitMemberTx(ctx, tx, c)
 				if err != nil {
 					return err
 				}
-				if !member {
+				if member == "" {
 					continue
 				}
 				if err = publicationAuthorityTx(ctx, tx, actor.TenantID, *n.ProjectID); err != nil {
 					return err
 				}
-				changes = append(changes, change{n, m.gitDecision(n)})
+				changes = append(changes, change{n, m.gitDecision(n, member)})
 			}
 			for _, c := range changes {
 				if err = enact(ctx, tx, actor, c.n, c.d, s.ModeAt(now)); err != nil {
@@ -180,14 +195,14 @@ func (m *Module) publishGit(ctx context.Context, actor tenant.Principal, now tim
 }
 
 func (m *Module) gitProposalEligible(ctx context.Context, tx pgx.Tx, c candidate, d decision) error {
-	if m.publication == nil || pending(c.Node) || d != m.gitDecision(c.Node) {
+	if m.publication == nil || pending(c.Node) {
 		return events.ErrConflict
 	}
-	member, err := m.gitMemberTx(ctx, tx, c.Node)
+	member, err := m.gitMemberTx(ctx, tx, c)
 	if err != nil {
 		return err
 	}
-	if !member {
+	if member == "" || d != m.gitDecision(c.Node, member) {
 		return events.ErrConflict
 	}
 	return nil

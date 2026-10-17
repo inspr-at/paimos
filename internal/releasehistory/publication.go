@@ -2,9 +2,11 @@
 package releasehistory
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -34,7 +36,9 @@ func BuildPublication(ctx context.Context, opts Options, h History) (*Publicatio
 	if h.Product != "PAIMOS AEON" {
 		return nil, nil
 	}
-	git := func(args ...string) (string, error) { return runGit(ctx, opts.Repo, args...) }
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	git := func(args ...string) (string, error) { return publicationGit(ctx, opts.Repo, args...) }
 	raw, err := committedFile(git, "version.json", 64<<10)
 	if err != nil {
 		return nil, err
@@ -120,4 +124,28 @@ func EmbeddedPublication() (*Publication, error) {
 		return nil, err
 	}
 	return envelope.Publication, nil
+}
+
+// Bound commit messages before buffering them; max-count alone only bounds
+// hashes, not arbitrarily large commit bodies. Refuse rather than truncate.
+type publicationBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (b *publicationBuffer) Write(p []byte) (int, error) {
+	if len(p) > b.limit-b.buf.Len() {
+		return 0, fmt.Errorf("publication Git evidence exceeds byte limit")
+	}
+	return b.buf.Write(p)
+}
+func publicationGit(ctx context.Context, repo string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
+	out := &publicationBuffer{limit: 8 << 20}
+	stderr := &publicationBuffer{limit: 32 << 10}
+	cmd.Stdout, cmd.Stderr = out, stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("read publication Git evidence: %w", err)
+	}
+	return out.buf.String(), nil
 }
