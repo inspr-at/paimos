@@ -3,12 +3,10 @@
 package rules
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -90,7 +88,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 		}
 		// The whole bounded body is read before any transaction or lock, so a slow
 		// or stalled upload never holds the tenant locks taken below.
-		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+		raw, err := httpapi.ReadRequestBody(w, r, maxBody, httpapi.DefaultBodyReadTimeout)
 		if err != nil {
 			var tooBig *http.MaxBytesError
 			if errors.As(err, &tooBig) {
@@ -100,7 +98,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 			writeFailure(w, fail(400, "invalid_request", "request body could not be read"))
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(raw))
+		httpapi.SetRequestBody(r, raw)
 		// The transaction's context is never cancelled: pgx answers a cancelled
 		// context by dropping the connection rather than rolling back, which
 		// would leave the locks to the server's timing. The deadline bounds the

@@ -889,6 +889,24 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 					t.Fatal("public-source guard must run after the identity guard and before go vet")
 				}
 				j["steps"] = append(steps[:index], steps[index+1:]...)
+				// AEON-1412 adds the mandatory body-read ownership check. Prove
+				// its command and placement before comparing the older CI pin.
+				steps = reuseSteps(j)
+				index = -1
+				for i, value := range steps {
+					step := treeMap(value)
+					if step["name"] != "Bound every HTTP request body read" {
+						continue
+					}
+					if index != -1 || len(step) != 2 || step["run"] != "go test -p 2 ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1" {
+						t.Fatal("body-read guard must retain its exact command and run unconditionally")
+					}
+					index = i
+				}
+				if index < 1 || index+1 >= len(steps) || treeMap(steps[index-1])["run"] != "go vet ./..." || treeMap(steps[index+1])["name"] != "Check prepared rules bootstrap drift" {
+					t.Fatal("body-read guard must run after go vet and before the rules bootstrap check")
+				}
+				j["steps"] = append(steps[:index], steps[index+1:]...)
 			}
 			if id == "go-test" || id == "go-timing" || id == "e2e-run" {
 				// OPS-287: assert the verified mirror pin, then restore only the

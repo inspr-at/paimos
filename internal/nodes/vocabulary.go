@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -102,7 +103,7 @@ func (m *Module) handlePutVocabulary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "person required")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	r.Body = httpapi.RequestBodyReader(w, r, 8192)
 	var input struct {
 		Revision *int64 `json:"revision"`
 		Leaf     *struct {
@@ -118,7 +119,7 @@ func (m *Module) handlePutVocabulary(w http.ResponseWriter, r *http.Request) {
 			Plural   *string `json:"plural"`
 		} `json:"lead"`
 	}
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 1<<20)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&input); err != nil {
 		writeError(w, 400, "invalid vocabulary")

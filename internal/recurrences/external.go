@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -59,7 +60,7 @@ func (m *Module) receiveExternal(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8192))
+	raw, err := httpapi.ReadRequestBody(w, r, 8192, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(raw) == 0 {
 		httpError(w, 400, "external event must be at most 8192 bytes")
 		return

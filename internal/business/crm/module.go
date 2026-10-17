@@ -4,7 +4,6 @@ package crm
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -136,7 +135,7 @@ func (m *module) bind(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		PrincipalID string `json:"principal_id"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+	dec := httpapi.NewRequestDecoder(w, r, 4<<10)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
 		writeErr(w, errInvalid("invalid contact binding"))

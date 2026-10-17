@@ -112,7 +112,7 @@ func (m *Module) putGuardrails(w http.ResponseWriter, r *http.Request) {
 		Rules            []routineguard.Rule `json:"rules"`
 	}
 	// Policy inputs are bounded before decoding or database work.
-	r.Body = http.MaxBytesReader(w, r.Body, routineguard.MaxPolicyBytes)
+	r.Body = httpapi.RequestBodyReader(w, r, routineguard.MaxPolicyBytes)
 	if !decode(w, r, &in) {
 		return
 	}

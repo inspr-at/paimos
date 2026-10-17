@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/business/quotedocument"
 
 	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
@@ -613,7 +614,7 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, denied())
 		return
 	}
-	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
+	raw, e := httpapi.ReadRequestBody(w, r, 10<<20, httpapi.UploadBodyReadTimeout)
 	if e != nil {
 		respond(w, 0, nil, bad("asset exceeds 10 MiB"))
 		return

@@ -87,7 +87,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 func decode(w http.ResponseWriter, r *http.Request, in any) bool {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	d := httpapi.NewRequestDecoder(w, r, 1<<20)
 	d.DisallowUnknownFields()
 	if err := d.Decode(in); err != nil {
 		httpapi.WriteError(w, 400, "invalid recurrence request")

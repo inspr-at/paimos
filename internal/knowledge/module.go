@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -118,8 +117,7 @@ func canWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission str
 }
 
 func readObject(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
-	b, err := io.ReadAll(r.Body)
+	b, err := httpapi.ReadRequestBody(w, r, 2<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(bytes.TrimSpace(b)) == 0 {
 		return nil, fail(http.StatusBadRequest, "invalid_request", "a JSON object is required")
 	}

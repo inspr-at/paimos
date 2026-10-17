@@ -68,7 +68,7 @@ func caller(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	return p, true
 }
 func decode(w http.ResponseWriter, r *http.Request, out any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec := httpapi.NewRequestDecoder(w, r, 4096)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return fail(400, "invalid admission JSON")

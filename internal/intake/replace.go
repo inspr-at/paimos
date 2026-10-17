@@ -7,11 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -32,7 +32,7 @@ func (m *Module) replaceDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	raw, err := httpapi.ReadRequestBody(w, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		status := http.StatusBadRequest
 		var tooLarge *http.MaxBytesError
@@ -42,7 +42,7 @@ func (m *Module) replaceDraft(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, "invalid JSON")
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewReader(raw))
+	httpapi.SetRequestBody(r, raw)
 	var in draftWrite
 	if !decode(w, r, &in) {
 		return

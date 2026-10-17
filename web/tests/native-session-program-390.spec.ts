@@ -25,6 +25,9 @@ for (const width of [390]) for (const theme of ['light', 'dark']) {
     // Keep the one-line rule at 360 px; only smaller phones may wrap a reason.
     for (const phoneWidth of [360, 320]) {
       await page.setViewportSize({ width: phoneWidth, height: 900 })
+      // AEON-1286: the menu row picks its form (labels, smaller labels, icons) from its width in a
+      // ResizeObserver, after this frame's animation callbacks; two frames make it settled.
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
       const more = panel.getByRole('button', { name: 'More session actions' })
       const phoneStable = await controlStability(page, { ...tabs, menu: panel.getByRole('tablist'), more, close: panel.getByRole('button', { name: 'Close session details' }), frame: panel })
       await phoneStable.check(async () => {
@@ -33,7 +36,8 @@ for (const width of [390]) for (const theme of ['light', 'dark']) {
         else {
           const menu = page.getByRole('menu', { name: 'More session actions' })
           const floating = page.getByRole('dialog', { name: 'More session actions' })
-          await expect(floating).toHaveCSS('width', '304px')
+          // AEON-1286: on phones ⋯ opens as a sheet across the whole width.
+          await expect(floating).toHaveCSS('width', '320px')
           const rows = await menu.getByRole('menuitem').all()
           const menuStable = await controlStability(page, { menu, frame: floating, ...Object.fromEntries(rows.map((row, index) => [`row ${index}`, row])) })
           const disabled = menu.locator('.panel-menu-item:disabled')
@@ -62,7 +66,8 @@ for (const width of [390]) for (const theme of ['light', 'dark']) {
     await expectPanelIdentity(panel, worker.ticket!.key, worker.ticket!.title)
     expect(await panel.locator('.title-detail').evaluate(el => el.scrollWidth - el.clientWidth), 'the long title truncates while the key stays complete').toBeGreaterThan(0)
     const headHeight = await panel.locator('.panel-head').evaluate(el => el.getBoundingClientRect().height)
-    expect(headHeight).toBeLessThanOrEqual(width <= 720 ? 93 : 45)
+    // AEON-1286 phone head: a 56 px identity line and the 60 px menu row under it.
+    expect(headHeight).toBeLessThanOrEqual(width <= 720 ? 118 : 45)
     if (width <= 720) {
       for (const name of ['More session actions', 'Close session details']) {
         const box = await panel.getByRole('button', { name }).boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44)

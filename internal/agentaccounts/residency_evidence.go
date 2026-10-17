@@ -185,7 +185,7 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 	write := r.Method == http.MethodPut
 	var in ResidencyEvidence
 	if write {
-		r.Body = http.MaxBytesReader(w, r.Body, 32768)
+		r.Body = httpapi.RequestBodyReader(w, r, 32768)
 		if err := decodeJSON(w, r, &in); err != nil {
 			writeErr(w, err)
 			return

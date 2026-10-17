@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -225,8 +224,7 @@ func WriteError(w http.ResponseWriter, err error) {
 	httpapi.WriteJSON(w, e.Status, body)
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-	d := json.NewDecoder(r.Body)
+	d := httpapi.NewRequestDecoder(w, r, 16<<10)
 	d.DisallowUnknownFields()
 	if d.Decode(v) != nil {
 		return fail(400, "invalid_request", "invalid JSON request")

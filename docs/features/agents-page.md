@@ -24,7 +24,10 @@ or a More item for it.
   harnesses, a tablet), the units wrap onto further lines inside the control
   instead of being cut off. Over pace and today's limit show as a flag after
   the number. The unfolded dial opens as a card under the row (see
-  [agents-daily-plan.md](agents-daily-plan.md)).
+  [agents-daily-plan.md](agents-daily-plan.md)). A page opened on a phone or a
+  short landscape screen starts with the dial folded, so the sessions come
+  first; its toggle unfolds it for the visit, and the saved fold, shared across
+  devices, belongs to wider screens (AEON-1286).
 - On touch, −, the number and + are three separate 44 px targets that never
   overlap: − and + are 44 px wide, and the number's target takes in its mark.
   In a tight row a closed unit is one target, and a tap opens its plate.
@@ -52,7 +55,9 @@ the app header searches everything), Filter (by state, the same filter as the
 head counts) and Display (the sort and Default order), then Clear stale and
 History. Applied filters show as pills under the head. The head, the pills and
 the column heads stick inside the card under the app header; sticking adds a
-hairline shadow only, so no box changes. `?q=` carries the search.
+hairline shadow only, so no box changes. `?q=` carries the search. On short
+landscape screens the tools stay on the title's line as icons and the column
+heads are left out, as on phones, so the rows get the height (AEON-1286).
 
 **Keys.** F or / focuses the search, Shift F opens the filter, Esc clears the
 search and then leaves the field. Plain keys never fire inside a text field.
@@ -119,8 +124,11 @@ worker problem opens the relevant tab, ahead of the person's pinned default
 and last-used tab. The opening reason stays visible. Workers have Overview
 and Chat. Defaults and last-used tabs are person preferences.
 
-Interrupt, Pause (Resume when paused) and Stop remain in the panel head on
-every tab. Lead start, resume and cooperative handover use the caller-specific
+Interrupt, Pause (Resume when paused) and Stop live in the panel's ⋯ menu with
+their labels and reasons (AEON-1286). The default tab is a ⋯ choice for the tab
+on screen, such as "Open on Chat by default"; no pin sits beside the tabs. On
+Events or Terminal it names the current default; clearing it there keeps the
+item in place until ⋯ closes, so it can be ticked again. Lead start, resume and cooperative handover use the caller-specific
 lead action projection, including its blocked reason; a missing projection
 leaves those actions unavailable. Session controls retain their own ownership
 and permission checks. A stopped lead's Start a lead is in Right now.
@@ -166,7 +174,15 @@ Escape and the close button return directly to List only.
 
 A split fits at 1056 px of work area (560 + 16 + 480). Below that threshold,
 details open over the list as a sheet and the preset button hides. Phones have a
-full-height sheet with a 44 px Back control and safe-area padding. In a split,
+full-height sheet: Back, the avatar, the name over its state and model, and ⋯,
+then the menu row (AEON-1286). The state is said once, on that line. ⋯ opens as a
+sheet from the bottom edge in groups: control, the session's process, how the
+panel opens, requested changes, layout. Short landscape screens get the whole
+screen too, with head and menu on one line; a phone turned sideways keeps its
+head and puts the menu on that line, as icons when the title needs the room. In Chat the composer pads the home
+indicator itself, so no band is left under it. Ticket keys and code in chat text
+sit in the line like words, so a line holding one is as tall as any other, and
+a key's link is tapped on its own line only. In a split,
 the work area comes directly under the app header; the list and details have
 viewport-high panes with separate scrolling. A new selection resets the details
 to their top while the picked row stays in view. Opening a sheet, including when
@@ -239,8 +255,9 @@ Only a mouse or a pen points: on a touch screen the changes wait while a
 finger is down and its scroll still runs, momentum included, and apply 1.5 s
 after the scroll settles, without Show now. Whenever changes apply, the first
 rows on screen keep their place, on phones too (Safari does not keep them in
-place by itself). On phones the footer folds away over the page while reading
-down; the page itself never changes size while it scrolls.
+place by itself). On phones and short landscape screens the footer folds away
+over the page while reading down; the page itself never changes size while it
+scrolls.
 A done or ended session keeps its place among its siblings and its end state
 for 10 minutes, then moves to Ended at the next allowed moment. Line 2 says how
 and when it ended and when it moves: "Finished 11:57 · moves to Ended at 12:07"

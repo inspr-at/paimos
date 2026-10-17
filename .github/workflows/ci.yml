@@ -514,6 +514,8 @@ jobs:
       - name: Keep operator names out of public source
         run: node --test scripts/check-public-names.test.mjs && node scripts/check-public-names.mjs
       - run: go vet ./...
+      - name: Bound every HTTP request body read
+        run: go test -p 2 ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1
       - name: Check prepared rules bootstrap drift
         run: go run ./scripts/rules-bootstrap check
       - name: Test tier selector regressions

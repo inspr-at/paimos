@@ -994,6 +994,10 @@
     ,
     "browser:tests/palette.spec.ts:knowledge keys open visible scoped entries and superseded responses stay discarded"
     ,
+    "browser:tests/people-stack-layers.spec.ts:AEON-1403 overlapping faces stack as whole units at 1440"
+    ,
+    "browser:tests/people-stack-layers.spec.ts:AEON-1403 overlapping faces stack as whole units at 390"
+    ,
     "browser:tests/phone-approvals.spec.ts:ended requests offer context without a decision button"
     ,
     "browser:tests/phone-approvals.spec.ts:personal phone settings save quiet hours and revoke a device"
@@ -6076,6 +6080,38 @@
     ,
     {"kind":"browser","file":"tests/aeon-1285-agent-rows.spec.ts","name":"light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024 sanity: the desktop head and its anchored menu keep their form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024: clearing the default on Events keeps its row and its focus, and it can be ticked again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 390: clearing the default on Events keeps its row and its focus, and it can be ticked again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 320x568: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 390x664: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat 390 light: a ticket key or a code chip keeps the line box of plain prose","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 320 dark: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 320 light: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 390 dark: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 390 light: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 rotated phones dark: narrow landscape puts the menu on the head's line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 rotated phones light: narrow landscape puts the menu on the head's line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow bar and the Decided filter","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6085,6 +6121,8 @@
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1286 inline code keeps the line box at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1024: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11321,6 +11359,10 @@
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/people-stack-layers.spec.ts","name":"AEON-1403 overlapping faces stack as whole units at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/people-stack-layers.spec.ts","name":"AEON-1403 overlapping faces stack as whole units at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/performance.spec.ts","name":"cold Projects home has bounded API requests","config":"playwright.perf.config.ts","project":"","tier":"ESSENTIAL"}
     ,

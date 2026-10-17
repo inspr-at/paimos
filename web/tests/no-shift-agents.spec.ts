@@ -127,6 +127,8 @@ for (const width of [1440, 1024, 390]) {
     const row = dial.locator('[data-key="codex"]')
     // Destination labels change with the current value; the stepper controls persist.
     const rowFewer = row.locator('.lim-step .pm').nth(0), rowMore = row.locator('.lim-step .pm').nth(1)
+    // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded.
+    if (width <= 720) await page.locator('.cdial .fs-tog').click()
     await expect(row).toBeVisible()
     await page.evaluate(() => document.fonts.ready)
     // The merged dial uses a separate explanation row and a container breakpoint.
@@ -169,6 +171,8 @@ for (const width of [1440, 1024, 390]) {
     const more = dial.getByRole('button', { name: 'One agent more at once' })
     const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
+    // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded.
+    if (width <= 720) await page.locator('.cdial .fs-tog').click()
     await expect(row).toBeVisible()
     await expectStableControls({
       controls: { more, fewer, selector: row.getByRole('radiogroup'), row },
