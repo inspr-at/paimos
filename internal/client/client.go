@@ -162,6 +162,10 @@ func (c *Client) Do(ctx context.Context, method, path string, body, dest any) er
 // MaxResponseBytes caps one response body the client reads.
 const MaxResponseBytes = 64 << 20
 
+// Refusals include two compatible copies of a definition bounded to 64 KiB,
+// plus evaluated reasons and owners. Keep room for all 32 checks.
+const maxEntryChecksFailureBytes = 1 << 20
+
 func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
 	if c.BaseURL == "" {
 		return fmt.Errorf("instance URL is empty")
@@ -281,7 +285,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			}
 			_ = json.Unmarshal(payload, &detail)
 			status := &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
-			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= 65536 && json.Valid(payload) {
+			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= maxEntryChecksFailureBytes && json.Valid(payload) {
 				status.EntryChecksFailure = payload
 			}
 			enabled, _ := ctx.Value(workReadRetryKey{}).(bool)

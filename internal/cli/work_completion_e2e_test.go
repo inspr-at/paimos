@@ -139,7 +139,7 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	person := &http.Client{Jar: jar}
-	request := func(hc *http.Client, token, method, path, body string, want int) []byte {
+	request := func(t *testing.T, hc *http.Client, token, method, path, body string, want int) []byte {
 		t.Helper()
 		header := http.Header{}
 		if token != "" {
@@ -151,11 +151,11 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 		}
 		return raw
 	}
-	request(person, "", "POST", "/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, 200)
+	request(t, person, "", "POST", "/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, 200)
 	// Include a passing rule and an inapplicable rule to reject extra checks.
-	request(person, "", "PUT", "/api/settings/definitions", `{"expected_revision":null,"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"blocker_named","condition":"all"},{"id":"design_attached"}],"done":[{"id":"pills_benefits_set"},{"id":"manual:person-signoff","label":"Person sign-off","label_de":"Persönliche Freigabe"}]}}`, 200)
-	t.Setenv("PAIMOS_URL", srv.URL)
-	t.Setenv("PAIMOS_API_KEY", worker.Token)
+	definition := `{"expected_revision":null,"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"blocker_named","condition":"all"},{"id":"design_attached"}],"done":[{"id":"pills_benefits_set"},{"id":"manual:person-signoff","label":"Person sign-off","label_de":"Persönliche Freigabe"}]}}`
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", worker.Token)
 	missing := filepath.Join(t.TempDir(), "no-config.yaml")
 	invoke := func(jsonOut bool, args ...string) (int, string, string) {
 		t.Helper()
@@ -175,18 +175,19 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 		t.Fatalf("create: %d %s %s", code, out, stderr)
 	}
 	path := "/api/nodes/" + created.ID
-	raw := request(person, "", "GET", path, "", 200)
+	raw := request(t, person, "", "GET", path, "", 200)
 	var node struct {
-		ProjectID string `json:"project_id"`
-		KindID    string `json:"kind_id"`
+		ParentID string `json:"parent_id"`
+		KindID   string `json:"kind_id"`
 	}
-	if err := json.Unmarshal(raw, &node); err != nil || node.ProjectID == "" {
+	if err := json.Unmarshal(raw, &node); err != nil || node.ParentID == "" {
 		t.Fatal("ticket has no project", err)
 	}
-	request(person, "", "PATCH", path, `{"fields":{"blocker":"Follow-up ticket named"}}`, 200)
+	request(t, person, "", "PUT", "/api/projects/"+node.ParentID+"/definitions", definition, 200)
+	request(t, person, "", "PATCH", path, `{"fields":{"blocker":"Follow-up ticket named"}}`, 200)
 	// A key with write authority only in this project must still read the
 	// preview after being refused. No general nodes.read scope is added.
-	raw = request(person, "", "POST", "/api/agent-keys", `{"name":"entry-writer","scopes":["nodes.write"]}`, 201)
+	raw = request(t, person, "", "POST", "/api/agent-keys", `{"name":"entry-writer","scopes":["nodes.write"]}`, 201)
 	var writer struct {
 		Token       string `json:"token"`
 		PrincipalID string `json:"principal_id"`
@@ -197,10 +198,10 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 	if _, err := opened.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, worker.TenantID, writer.PrincipalID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := opened.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, worker.TenantID, writer.PrincipalID, node.ProjectID); err != nil {
+	if _, err := opened.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, worker.TenantID, writer.PrincipalID, node.ParentID); err != nil {
 		t.Fatal(err)
 	}
-	assertRefusal := func(raw []byte, state string, ids ...string) []workorders.EntryResult {
+	assertRefusal := func(t *testing.T, raw []byte, state string, ids ...string) []workorders.EntryResult {
 		t.Helper()
 		var failure struct {
 			Error           string                   `json:"error"`
@@ -230,9 +231,9 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 	} {
 		t.Run(tc.state, func(t *testing.T) {
 			body := fmt.Sprintf(`{"state":%q}`, tc.state)
-			checks := assertRefusal(request(httpClient, writer.Token, "PATCH", path, body, 409), tc.state, tc.ids...)
+			checks := assertRefusal(t, request(t, httpClient, writer.Token, "PATCH", path, body, 409), tc.state, tc.ids...)
 			var preview workorders.EntryChecks
-			raw := request(httpClient, writer.Token, "GET", path+"/entry-checks", "", 200)
+			raw := request(t, httpClient, writer.Token, "GET", path+"/entry-checks", "", 200)
 			if json.Unmarshal(raw, &preview) != nil || preview.NodeID != created.ID {
 				t.Fatalf("wrong ticket preview: %s", raw)
 			}
@@ -255,7 +256,7 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 					t.Fatalf("refusal exit/output: %d %s %s", code, out, stderr)
 				}
 				if jsonOut {
-					cliChecks := assertRefusal([]byte(stderr), tc.state, tc.ids...)
+					cliChecks := assertRefusal(t, []byte(stderr), tc.state, tc.ids...)
 					if !reflect.DeepEqual(cliChecks, checks) {
 						t.Fatal("JSON lost full check details")
 					}
@@ -286,7 +287,7 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"error": "entry_checks_failed", "code": "entry_checks_failed", "to_status": "done",
 				"checks": []map[string]string{{"id": "manual:person-signoff", "label": "Person sign-off", "label_de": "Persönliche Freigabe", "reason": "Needs " + cookie}},
-				"extra":  "Retain full body; redact " + cookie,
+				"extra":  strings.Repeat("x", 70<<10) + "Retain full body; redact " + cookie,
 			})
 		}))
 		defer refusal.Close()
@@ -311,34 +312,34 @@ func TestEntryRefusalReasonsAndWriterPreview(t *testing.T) {
 		}
 	})
 	// Ordinary reads, governance reads and ticking keep their existing gates.
-	for _, other := range []string{path, "/api/projects/" + node.ProjectID + "/definitions", path + "/person-steps"} {
-		request(httpClient, writer.Token, "GET", other, "", 403)
+	for _, other := range []string{path, "/api/projects/" + node.ParentID + "/definitions", path + "/person-steps"} {
+		request(t, httpClient, writer.Token, "GET", other, "", 403)
 	}
-	request(httpClient, writer.Token, "PUT", path+"/entry-checks/manual:person-signoff", `{"checked":true,"expected_revision":"2026-01-01T00:00:00Z"}`, 403)
+	request(t, httpClient, writer.Token, "PUT", path+"/entry-checks/manual:person-signoff", `{"checked":true,"expected_revision":"2026-01-01T00:00:00Z"}`, 403)
 	var projectKind string
 	if err := opened.Admin.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, worker.TenantID).Scan(&projectKind); err != nil {
 		t.Fatal(err)
 	}
-	raw = request(person, "", "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Other project","fields":{"project_key":"OTHER"}}`, projectKind), 201)
+	raw = request(t, person, "", "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Other project","fields":{"project_key":"OTHER"}}`, projectKind), 201)
 	var otherProject struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(raw, &otherProject); err != nil {
 		t.Fatal(err)
 	}
-	raw = request(person, "", "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Other ticket"}`, node.KindID, otherProject.ID), 201)
+	raw = request(t, person, "", "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Other ticket"}`, node.KindID, otherProject.ID), 201)
 	var other struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(raw, &other); err != nil || other.ID == "" {
 		t.Fatal("other ticket fixture missing", err)
 	}
-	request(httpClient, writer.Token, "PATCH", "/api/nodes/"+other.ID, `{"state":"in_progress"}`, 403)
-	raw = request(httpClient, writer.Token, "GET", "/api/nodes/"+other.ID+"/entry-checks", "", 403)
+	request(t, httpClient, writer.Token, "PATCH", "/api/nodes/"+other.ID, `{"state":"in_progress"}`, 403)
+	raw = request(t, httpClient, writer.Token, "GET", "/api/nodes/"+other.ID+"/entry-checks", "", 403)
 	if strings.Contains(string(raw), "estimate_set") || strings.Contains(string(raw), "Other ticket") {
 		t.Fatal("forbidden preview leaked ticket checks")
 	}
-	raw = request(person, "", "GET", path, "", 200)
+	raw = request(t, person, "", "GET", path, "", 200)
 	var after struct {
 		State string `json:"state"`
 	}
