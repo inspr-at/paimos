@@ -6222,6 +6222,20 @@
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"type-size shots › AEON-1448: 375 and 390, the round action beside the tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"16 px favicon › AEON-1473: the amber dot reads at 16 px on light and dark tab strips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"32 px favicon › AEON-1473: the amber dot reads at 32 px on light and dark tab strips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: a background tab reads the Desk itself and says New decision for two seconds, without focus or sound","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: a rise pops the favicon dot once in six frames; the visible title never swaps","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: an agent principal and a signed-out visitor see no count and the plain icon","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: every page leads with the badge’s count: none at 0, (1), (9), then (9+)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15973,6 +15987,30 @@
     {"kind":"node","file":"tests/delivery-rating.test.ts","name":"rework rate is exceptions divided by deliveries","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/deployTarget.test.ts","name":"targets are display facts, independent of a digest or approval state","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"a digit needs 24 device pixels; below that the dot is plain, and 9+ widens into a capsule","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"a failed read shows no count; a recovery is a rise only above the last count read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"a rise in a background tab says New decision for two seconds, then settles on the count","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"a rise in a visible tab pops the dot once in six frames, then stops","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"a store reading again keeps the count; the same count afterwards moves nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"a tab sent to the background ends its pop at rest; one brought forward drops its notice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"dispose leaves the plain title and icon","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"reduced motion changes only the number: no frames, no notice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"signed out, an agent principal or another person starts from nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"the background notice is the words New decision and carries no icon glyph","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"the first count of a page shows at rest: no pop, no notice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"the tab counts like the badge: none at 0, (1), (9), then (9+)","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/doctrine-inbox.test.ts","name":"a claim answered after a dismissal never toasts the dismissed proposal","tier":"GATED-FULL"}
     ,

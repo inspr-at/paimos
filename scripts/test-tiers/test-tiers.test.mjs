@@ -1290,7 +1290,8 @@ test('AEON-1453 the merged full web catalogue needs seventeen shards to stay ins
   assert.equal(fixedFull.projections.reduce((sum,bin)=>sum+bin.cases,0),fixedGate.length)
 
   // The current catalogue must still overflow at sixteen, report its exact
-  // worst projection, and retain every case within budget at seventeen.
+  // worst projection, and retain every case within budget at seventeen,
+  // including main's Goals, group-figures and seven desk-tab browser cases.
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
