@@ -79,6 +79,8 @@ func tracePlanningWorkScope(t *testing.T, p tenant.Principal, project string) {
 		}
 		query = strings.ReplaceAll(query, "scope_roots", "$1::uuid[]")
 		query = strings.ReplaceAll(query, "scope_nodes", "$2::uuid[]")
+		// This leaf-only fixture already has one unique identity per root.
+		query = strings.ReplaceAll(query, "fact_nodes", "$2::uuid[]")
 		query = strings.TrimSuffix(strings.TrimSpace(query), ";")
 		var ids []string
 		if err := tx.QueryRow(ctx, `SELECT array_agg(id::text) FROM (SELECT n.id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.parent_id=$1 AND k.slug='work' AND n.deleted_at IS NULL ORDER BY n.id LIMIT 1001) bounded`, project).Scan(&ids); err != nil {
