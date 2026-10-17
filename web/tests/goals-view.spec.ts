@@ -574,6 +574,8 @@ test('Display keeps one box through every sort at 1024, 820 and 390, shows only 
     // Below 1200 px Display has the same box in all three views, so the view switch stays under the pointer.
     await guard.check(async () => { await page.getByRole('radio', { name: 'List view' }).click(); await expect(page.getByRole('searchbox', { name: 'Filter projects' })).toBeVisible() })
     expect(await visibleWords(display)).toEqual(['Display'])
+    // The sizing copies add no words to the button's text.
+    await expect(display).toHaveText('Display')
     await guard.check(async () => { await page.getByRole('radio', { name: 'Cards view' }).click(); await expect(page.getByRole('radio', { name: 'Cards view' })).toHaveAttribute('aria-checked', 'true') })
     await guard.check(async () => { await page.getByRole('radio', { name: 'Goals view' }).click(); await expect(page.locator('.goal-list .goal').first()).toBeVisible() })
   }

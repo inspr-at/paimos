@@ -951,8 +951,8 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
             type="button" class="btn sm display-btn" :class="{ on: display.on }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="displayAria"
             :data-tip="display.tip" :data-sort="view === 'goals' ? goals.sort.value : sort" :data-sort-dir="goalSortHidden ? goals.dir.value : undefined" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
           ><AppIcon :name="display.icon" :size="14" class="sort-icon" /><span class="display-words" :class="{ showing: goalSortHidden }"><span class="display-label">Display</span><span
-            v-for="option in GOAL_SORTS" :key="option.value" class="sort-state sizer" :class="{ count: STAT_SORTS.has(option.value) }" aria-hidden="true"
-          ><AppIcon name="arrow-down" :size="11" class="sort-arrow" /><span>{{ option.label }}</span></span><span v-if="view === 'goals'" class="sort-state shown"><AppIcon :name="goals.dir.value === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" class="sort-arrow" /><span class="sort-name">{{ goalSortMeta.label }}</span></span></span><AppIcon name="chevron" :size="12" class="chev" /></button>
+            v-for="option in GOAL_SORTS" :key="option.value" class="sort-state sizer" :class="{ count: STAT_SORTS.has(option.value) }" :data-label="option.label" aria-hidden="true"
+          ><AppIcon name="arrow-down" :size="11" class="sort-arrow" /></span><span v-if="goalSortHidden" class="sort-state shown"><AppIcon :name="goals.dir.value === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" class="sort-arrow" /><span class="sort-name">{{ goalSortMeta.label }}</span></span></span><AppIcon name="chevron" :size="12" class="chev" /></button>
           <GoalsToolbar v-if="view === 'goals'" :page="goals" part="more" />
         </span>
         <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="290" :tallest="640" align="end" label="Display options" @close="closeDisplay">
@@ -1089,15 +1089,17 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .display-btn.on .sort-icon { color: var(--teal-ink); }
 /* "Display" and the sort of a hidden header share one box, sized by invisible copies of the
    widest sort, so picking a sort never resizes the button. Below 1200 px the box is the same in
-   all three views, so a view switch never moves the view switch either. */
+   all three views, so a view switch never moves the view switch either. The copies name their
+   sort in CSS only, so the button's text stays what it shows. */
 .display-words { display: inline-grid; align-items: center; justify-items: center; }
 .display-words > * { grid-area: 1 / 1; }
 .display-words > .sort-state { display: none; }
 .sort-state { align-items: center; gap: 4px; white-space: nowrap; }
 .sort-state.sizer, .display-words.showing > .display-label { visibility: hidden; }
+.sort-state.sizer::after { content: attr(data-label); }
 .sort-arrow { flex: none; }
 .display-btn.on .sort-arrow { color: var(--teal-ink); }
-@media (max-width: 1199px) { .display-words.showing > .sort-state.shown, .display-words > .sort-state.sizer.count { display: inline-flex; } }
+@media (max-width: 1199px) { .display-words > .sort-state.shown, .display-words > .sort-state.sizer.count { display: inline-flex; } }
 .chev { color: var(--ink-3); }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .sort-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
