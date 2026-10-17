@@ -11,10 +11,10 @@ import AppIcon from '../AppIcon.vue'
 import LiveAgents from '../projects/LiveAgents.vue'
 import GoalEta from './GoalEta.vue'
 import GoalProgress from './GoalProgress.vue'
-import GoalStateIcon from './GoalStateIcon.vue'
+import GoalItem from './GoalItem.vue'
 import type { GoalsPage } from './goalsPage'
 import { vClipTip } from '../../lib/clipTip'
-import { itemGroups, itemMatches, QUEUE_SHOWN, STATE_LABEL, ticketHref, type Goal, type GoalOutcome } from '../../lib/goals'
+import { itemGroups, itemMatches, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
 import { averageRate, projectionText } from '../../lib/goalRate'
 import type { LiveAgent } from '../../lib/liveAgents'
 
@@ -40,8 +40,9 @@ const shownItems = computed(() => {
 })
 const groups = computed(() => itemGroups(shownItems.value))
 const folds = computed(() => props.page.folds.get(props.goal.id) ?? {})
-const queuedShown = computed(() => filtering.value || folds.value.queued ? groups.value.queued : groups.value.queued.slice(0, QUEUE_SHOWN))
+const queuedFirst = computed(() => filtering.value ? groups.value.queued : groups.value.queued.slice(0, QUEUE_SHOWN))
 const queuedMore = computed(() => filtering.value ? 0 : Math.max(0, groups.value.queued.length - QUEUE_SHOWN))
+const queuedRest = computed(() => !filtering.value && folds.value.queued ? groups.value.queued.slice(QUEUE_SHOWN) : [])
 const doneShown = computed(() => filtering.value || folds.value.done ? groups.value.done : [])
 const stepsDone = computed(() => props.goal.steps.filter(step => step.state === 'done').length)
 const nextText = computed(() => props.goal.next_step?.text ?? '')
@@ -58,7 +59,7 @@ const projection = computed(() => {
 // A click anywhere on the row (not on its links and buttons) opens it.
 function rowClick(event: MouseEvent) {
   const target = event.target as HTMLElement
-  if (target.closest('a, button, [tabindex], .goal-progress, .live')) return
+  if (target.closest('a, button, input, .goal-progress, .live')) return
   props.page.toggle(props.goal.id)
 }
 const statLabel = (n: number, state: keyof typeof STATE_LABEL) => `${n} ${STATE_LABEL[state].toLowerCase()}`
@@ -104,46 +105,22 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
         </div>
         <p v-if="goal.expansion !== 'full'" class="too-large">This goal has too many items to list here.</p>
         <ul class="items">
-          <template v-for="item in [...groups.moving, ...queuedShown]" :key="item.id">
-            <li class="item" tabindex="-1" data-nav>
-              <span class="i-state" :data-tip="STATE_LABEL[item.state]"><GoalStateIcon :state="item.state" /><span class="sr-only">{{ STATE_LABEL[item.state] }}</span></span>
-              <span class="i-keys mono">
-                <RouterLink v-for="key in item.keys.slice(0, 2)" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink>
-                <span v-if="item.keys.length > 2" class="more" :data-tip="item.keys.slice(2).join(', ')" tabindex="0">+{{ item.keys.length - 2 }} more</span>
-              </span>
-              <div class="i-main"><span class="i-label">{{ item.label }}</span><span v-if="item.note" class="i-live">{{ item.note }}</span></div>
-              <div v-if="agentsOf(item.session_ids).length" class="i-badge"><LiveAgents :agents="agentsOf(item.session_ids)" :project="project" variant="row" /></div>
-              <GoalEta class="i-eta" :goal-id="goal.id" :outcome-id="item.id" :eta="item.eta" :passed="item.passed" :now="now" />
-            </li>
-          </template>
+          <GoalItem v-for="item in [...groups.moving, ...queuedFirst]" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" />
           <li v-if="queuedMore" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.queued" data-nav @click="page.toggleFold(goal.id, 'queued')">
               <AppIcon name="chevron-right" :size="12" /><b>{{ queuedMore }}</b> more queued<span class="act"><span :class="{ off: folds.queued }">· show</span><span :class="{ off: !folds.queued }">· hide</span></span>
             </button>
           </li>
-          <li v-for="item in groups.paused" :key="item.id" class="item" tabindex="-1" data-nav>
-            <span class="i-state" :data-tip="STATE_LABEL[item.state]"><GoalStateIcon :state="item.state" /><span class="sr-only">{{ STATE_LABEL[item.state] }}</span></span>
-            <span class="i-keys mono"><RouterLink v-for="key in item.keys.slice(0, 2)" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink><span v-if="item.keys.length > 2" class="more" :data-tip="item.keys.slice(2).join(', ')" tabindex="0">+{{ item.keys.length - 2 }} more</span></span>
-            <div class="i-main"><span class="i-label">{{ item.label }}</span><span v-if="item.note" class="i-live">{{ item.note }}</span></div>
-            <div v-if="agentsOf(item.session_ids).length" class="i-badge"><LiveAgents :agents="agentsOf(item.session_ids)" :project="project" variant="row" /></div>
-            <GoalEta class="i-eta" :goal-id="goal.id" :outcome-id="item.id" :eta="item.eta" :passed="item.passed" :now="now" />
-          </li>
+          <!-- Opening a fold shows its items below it, so the fold line never moves. -->
+          <GoalItem v-for="item in queuedRest" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" />
+          <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" />
           <li v-if="groups.done.length && !filtering" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.done" data-nav @click="page.toggleFold(goal.id, 'done')">
               <AppIcon name="chevron-right" :size="12" /><b>{{ groups.done.length }}</b> done<span class="act"><span :class="{ off: folds.done }">· show</span><span :class="{ off: !folds.done }">· hide</span></span>
             </button>
           </li>
-          <li v-for="item in doneShown" :key="item.id" class="item is-done" tabindex="-1" data-nav>
-            <span class="i-state" data-tip="Done"><GoalStateIcon state="done" /><span class="sr-only">Done</span></span>
-            <span class="i-keys mono"><RouterLink v-for="key in item.keys.slice(0, 2)" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink><span v-if="item.keys.length > 2" class="more" :data-tip="item.keys.slice(2).join(', ')" tabindex="0">+{{ item.keys.length - 2 }} more</span></span>
-            <div class="i-main"><span class="i-label">{{ item.label }}</span><span v-if="item.note" class="i-live">{{ item.note }}</span></div>
-            <GoalEta class="i-eta" :goal-id="goal.id" :outcome-id="item.id" :eta="item.eta" :done="true" :now="now" />
-          </li>
-          <li v-for="item in groups.handed" :key="item.id" class="item handed is-done" tabindex="-1" data-nav>
-            <span class="i-state" data-tip="Handed over"><AppIcon name="person-check" :size="15" /></span>
-            <span class="i-keys" />
-            <div class="i-main"><span class="i-label">Handed over: {{ item.label }}</span><span v-if="handedDetail(item)" class="i-detail">{{ handedDetail(item) }}</span></div>
-          </li>
+          <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" />
+          <GoalItem v-for="item in groups.handed" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :detail="handedDetail(item)" />
         </ul>
       </template>
     </div>
@@ -151,7 +128,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 </template>
 
 <style scoped>
-.goal, .goal-row, .goal-body, .items, .item, .fold-line { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
+.goal, .goal-row, .goal-body, .items, .fold-line { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
 .items, .steps ol { margin: 0; padding: 0; list-style: none; }
 .goal { position: relative; isolation: isolate; }
 .goal + .goal::before { content: ''; position: absolute; left: -6px; right: -6px; top: -1px; height: 1px; background: var(--line); pointer-events: none; }
@@ -177,7 +154,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .goal-next .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* One agent-badge column, shared with the items; reserved when no one works. */
 .agents { display: flex; align-items: center; justify-self: start; min-width: 0; max-width: 100%; }
-.agents :deep(.row-name), .i-badge :deep(.row-name) { max-width: 14ch; }
+.agents :deep(.row-name) { max-width: 14ch; }
 .stat { justify-self: end; font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink); }
 .stat[data-zero="1"] { color: var(--ink-3); }
 .waits { display: inline-flex; align-items: center; gap: 5px; justify-self: start; height: 28px; padding: 0 8px; margin-left: -8px; border-radius: 8px; color: var(--ink-2); font-size: 12px; font-weight: 600; text-decoration: none; }
@@ -208,27 +185,6 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .phone-next { display: none; }
 .too-large { grid-column: 3 / -3; margin: 0 0 8px; font-size: 12.5px; color: var(--ink-3); }
 
-/* Items: state, keys, outcome and its one live line, the badge in the agent column, ETA */
-.item { position: relative; align-items: start; padding: 6px 0; }
-.item::before { content: ''; position: absolute; inset: 1px -14px; border-radius: 10px; z-index: -1; pointer-events: none; }
-@media (hover: hover) { .item:hover::before { background: var(--row-hover); } }
-.item:focus-visible { outline: none; box-shadow: none; }
-.item:focus-visible::before { box-shadow: var(--focus-ring); background: var(--row-hover); }
-.item > .i-state { grid-column: 1; justify-self: center; display: grid; place-items: center; height: 20px; }
-.item > .i-keys { grid-column: 2; display: grid; gap: 1px; justify-items: start; font-size: 11.5px; font-weight: 500; line-height: 20px; letter-spacing: .01em; }
-.i-keys a { color: var(--ink-2); border-radius: 4px; text-decoration: none; }
-.i-keys a:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
-.i-keys .more { color: var(--ink-3); border-radius: 4px; }
-.item > .i-main { grid-column: 3; min-width: 0; display: grid; gap: 1px; }
-.item.is-done > .i-main, .item.handed > .i-main { grid-column: 3 / -3; }
-.item > .i-badge { grid-column: 4; justify-self: start; align-self: center; min-width: 0; max-width: 100%; }
-.item > .i-eta { grid-column: -3 / -2; justify-self: end; margin: 0 -4px; padding: 0 4px; line-height: 20px; }
-.item > .i-eta.passed { line-height: 1.35; padding-top: 1px; padding-bottom: 1px; }
-.i-label { font-size: 13.5px; font-weight: 500; line-height: 20px; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
-.item.is-done .i-label { color: var(--ink-2); font-weight: 400; }
-.i-live { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 17px; color: var(--ink-3); overflow-wrap: anywhere; }
-.i-detail { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
-.handed .i-state { color: var(--ink-2); }
 .fold-line { padding: 0; }
 .fold-btn { grid-column: 3 / -3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px 0 6px; margin-left: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 12.5px; }
 .fold-btn b { font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
@@ -242,8 +198,8 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 
 /* Tablet and small laptops: the badge keeps only its faces; below 1200 the counts step aside. */
 @media (max-width: 1399px) {
-  .agents :deep(.row-name), .agents :deep(.chip-state), .i-badge :deep(.row-name), .i-badge :deep(.chip-state) { display: none; }
-  .agents :deep(.live-chip), .i-badge :deep(.live-chip) { grid-template-columns: auto; padding-right: 6px; }
+  .agents :deep(.row-name), .agents :deep(.chip-state) { display: none; }
+  .agents :deep(.live-chip) { grid-template-columns: auto; padding-right: 6px; }
 }
 @media (max-width: 1199px) { .goal-row > .stat { display: none; } }
 
@@ -265,21 +221,10 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
   .steps-head, .steps ol { display: none; }
   .phone-next { display: block; margin: 0; padding: 0 0 6px; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
   .phone-next .lbl { color: var(--ink-3); }
-  .item { grid-template-columns: 44px auto minmax(0, 1fr); padding: 8px 0; row-gap: 2px; }
-  .item::before { inset: 1px -6px; }
-  .item > .i-state { grid-column: 1; grid-row: 1; height: 22px; }
-  .item > .i-keys { display: none; }
-  .item > .i-main { display: contents; }
-  .i-label { grid-column: 2 / -1; grid-row: 1; font-size: 14px; line-height: 1.35; }
-  .i-live { grid-column: 3; grid-row: 2; align-self: center; }
-  .i-detail { grid-column: 2 / -1; grid-row: 2; }
-  .item > .i-eta { grid-column: 2; grid-row: 2; justify-self: start; align-self: center; margin: 0 8px 0 -4px; padding: 0 4px; line-height: 1.4; }
-  .item > .i-eta.none { display: none; }
-  .item > .i-badge { grid-column: 2 / -1; grid-row: 3; justify-self: start; margin-top: 4px; }
   .fold-btn { grid-column: 2 / -1; height: 44px; margin-left: -4px; font-size: 13px; }
 }
 /* Touch: the agent chips keep their look and get a 44 px hit area. */
 @media (max-width: 760px), (pointer: coarse) {
-  .agents :deep(.live-chip)::before, .i-badge :deep(.live-chip)::before { inset: -8px auto; left: 50%; width: max(calc(100% + 4px), 44px); transform: translateX(-50%); }
+  .agents :deep(.live-chip)::before { inset: -8px auto; left: 50%; width: max(calc(100% + 4px), 44px); transform: translateX(-50%); }
 }
 </style>

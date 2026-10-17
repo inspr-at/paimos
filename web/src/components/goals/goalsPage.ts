@@ -6,7 +6,7 @@
 // the query it was asked for: an answer for another person, an older query or an
 // older turn never reaches the screen. Progress series and creation times are read
 // per goal as rows need them, a few at a time.
-import { computed, reactive, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { scopeOwner } from '../../lib/identityScope'
 import { usePreference } from '../../lib/preferences'
@@ -166,6 +166,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     if (options.active()) void read()
   }, { flush: 'sync' })
   function stop() { poller.stop(); controller?.abort(); clearTimeout(settle); seriesEpoch++; queue.length = 0 }
+  // Leaving the page stops the reads; its watchers go with the page's scope.
+  onScopeDispose(stop)
 
   return {
     filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, loaded, loadingMore, loadMore, read,

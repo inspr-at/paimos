@@ -50,7 +50,9 @@ const HEAD: { key: GoalSort; label: string; end?: boolean; stat?: boolean }[] = 
   { key: 'progress', label: 'Progress' }, { key: 'eta', label: 'Lands', end: true },
 ]
 const head = (key: GoalSort) => HEAD.find(h => h.key === key)!
-const sortState = (key: GoalSort) => props.page.sort.value === key ? (props.page.dir.value === 'asc' ? 'ascending' : 'descending') : undefined
+const sortState = (key: GoalSort) => props.page.sort.value === key ? props.page.dir.value : undefined
+// The label is the control: its name says the column and, when it sorts the list, which way.
+const sortLabel = (key: GoalSort, label: string) => `Sort by ${label.toLowerCase()}${sortState(key) ? `, now ${sortState(key) === 'asc' ? 'ascending' : 'descending'}` : ''}`
 const allOpen = computed(() => props.page.allOpen.value)
 
 // ---------- Row menu ----------
@@ -156,18 +158,18 @@ const canClear = computed(() => filtering.value)
               <span class="lbl"><span :class="{ off: allOpen }">Expand all</span><span :class="{ off: !allOpen }">Collapse all</span></span>
             </button>
             <span />
-            <button v-for="h in [head('project'), head('name')]" :key="h.key" type="button" class="head-sort" :aria-sort="sortState(h.key)" :aria-label="`Sort by ${h.label.toLowerCase()}`" @click="page.setSort(h.key)">
+            <button v-for="h in [head('project'), head('name')]" :key="h.key" type="button" class="head-sort" :data-sort-dir="sortState(h.key)" :aria-label="sortLabel(h.key, h.label)" @click="page.setSort(h.key)">
               <span>{{ h.label }}</span><AppIcon :name="page.sort.value === h.key && page.dir.value === 'desc' ? 'arrow-down' : 'arrow-up'" :size="11" class="sort-ind" />
             </button>
             <span />
-            <button v-for="h in [head('moving'), head('queued'), head('done')]" :key="h.key" type="button" class="head-sort end h-stat" :aria-sort="sortState(h.key)" :aria-label="`Sort by ${h.label.toLowerCase()}`" @click="page.setSort(h.key)">
+            <button v-for="h in [head('moving'), head('queued'), head('done')]" :key="h.key" type="button" class="head-sort end h-stat" :data-sort-dir="sortState(h.key)" :aria-label="sortLabel(h.key, h.label)" @click="page.setSort(h.key)">
               <AppIcon :name="page.sort.value === h.key && page.dir.value === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" class="sort-ind" /><span>{{ h.label }}</span>
             </button>
-            <button type="button" class="head-sort" :aria-sort="sortState('progress')" aria-label="Sort by progress" @click="page.setSort('progress')">
+            <button type="button" class="head-sort" :data-sort-dir="sortState('progress')" :aria-label="sortLabel('progress', 'Progress')" @click="page.setSort('progress')">
               <span>Progress</span><AppIcon :name="page.sort.value === 'progress' && page.dir.value === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" class="sort-ind" />
             </button>
             <span />
-            <button type="button" class="head-sort end" :aria-sort="sortState('eta')" aria-label="Sort by lands" @click="page.setSort('eta')">
+            <button type="button" class="head-sort end" :data-sort-dir="sortState('eta')" :aria-label="sortLabel('eta', 'Lands')" @click="page.setSort('eta')">
               <AppIcon :name="page.sort.value === 'eta' && page.dir.value === 'desc' ? 'arrow-down' : 'arrow-up'" :size="11" class="sort-ind" /><span>Lands</span>
             </button>
             <span />
@@ -209,8 +211,8 @@ const canClear = computed(() => filtering.value)
 .goal-head::after { content: ''; position: absolute; left: -20px; right: -20px; bottom: 0; height: 1px; background: var(--line); }
 .head-sort { display: inline-flex; align-items: center; gap: 4px; justify-self: start; height: 26px; padding: 0 6px; margin-left: -6px; border: 0; border-radius: 6px; background: transparent; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .head-sort .sort-ind { flex: none; opacity: 0; }
-.head-sort[aria-sort] { color: var(--ink-2); }
-.head-sort[aria-sort] .sort-ind { opacity: 1; }
+.head-sort[data-sort-dir] { color: var(--ink-2); }
+.head-sort[data-sort-dir] .sort-ind { opacity: 1; }
 .head-sort.end { justify-self: end; margin-left: 0; margin-right: -6px; }
 @media (hover: hover) { .head-sort:hover { background: var(--row-hover); color: var(--ink-2); } }
 /* Expand all / Collapse all on phones: both labels share one box, so it never changes width. */

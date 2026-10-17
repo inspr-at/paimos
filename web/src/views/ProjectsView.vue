@@ -1055,7 +1055,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
    view switch never moves the group chips. Below 1420 the Goals controls take the
    existing second row. */
 @media (min-width: 1420px) { .projects-toolbar { grid-template-columns: clamp(160px, calc(100vw - 1256px), 280px) minmax(0, 1fr) auto; } }
-@media (max-width: 1419px) { .view-goals .projects-toolbar { grid-template-columns: minmax(0, 280px) 1fr auto; grid-template-areas: "search . tools" "chips chips chips"; } }
+@media (min-width: 761px) and (max-width: 1419px) { .view-goals .projects-toolbar { grid-template-columns: minmax(0, 280px) 1fr auto; grid-template-areas: "search . tools" "chips chips chips"; } }
 .goals-chips { display: flex; align-items: center; gap: 6px; }
 .goals-chips > .goal-groups { flex: 0 1 auto; min-width: 0; }
 /* "+ Group" shows its icon only while the Goals controls share its line (and on small tablets). */
@@ -1106,6 +1106,8 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
   .project-search .field { height: 44px; font-size: 16px; }
   .chips-skeleton { height: 44px; }
   .tools { justify-content: space-between; }
+  .view-goals .tools { justify-content: flex-start; }
+  .view-goals .display-btn { margin-left: auto; }
   .view-seg :deep(button) { height: 44px; min-width: 48px; }
   .display-btn { height: 44px; min-width: 44px; }
   .cards-area { margin-top: 16px; }

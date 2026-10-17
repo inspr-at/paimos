@@ -221,17 +221,18 @@ test('Waiting on you lists live Desk items; header labels sort with LANDS first;
 
   // Decision 4: labels are the sort controls; LANDS (ETA) leads, ascending; workspace order from the server.
   const head = page.locator('.goal-head')
-  await expect(head.getByRole('button', { name: 'Sort by lands' })).toHaveAttribute('aria-sort', 'ascending')
+  await expect(head.getByRole('button', { name: /^Sort by lands/ })).toHaveAttribute('data-sort-dir', 'asc')
+  await expect(head.getByRole('button', { name: /^Sort by lands/ })).toHaveAccessibleName('Sort by lands, now ascending')
   await expect(page.locator('.goal-list .goal-name')).toHaveText(['Release 136 · steady and complete', 'JoeDesk rebuild', 'Release 137 · better lists', 'hausnetz · home network map'])
   expect(listCalls.at(-1)?.get('sort')).toBe('eta')
-  await head.getByRole('button', { name: 'Sort by progress' }).click()
-  await expect(head.getByRole('button', { name: 'Sort by progress' })).toHaveAttribute('aria-sort', 'descending')
+  await head.getByRole('button', { name: /^Sort by progress/ }).click()
+  await expect(head.getByRole('button', { name: /^Sort by progress/ })).toHaveAttribute('data-sort-dir', 'desc')
   await expect(page.locator('.goal-list .goal-name').first()).toHaveText('hausnetz · home network map')
   expect(listCalls.at(-1)?.get('dir')).toBe('desc')
-  await head.getByRole('button', { name: 'Sort by goal' }).click()
+  await head.getByRole('button', { name: /^Sort by goal/ }).click()
   await expect(page.locator('.goal-list .goal-name').first()).toHaveText('hausnetz · home network map')
-  await head.getByRole('button', { name: 'Sort by goal' }).click()
-  await expect(head.getByRole('button', { name: 'Sort by goal' })).toHaveAttribute('aria-sort', 'descending')
+  await head.getByRole('button', { name: /^Sort by goal/ }).click()
+  await expect(head.getByRole('button', { name: /^Sort by goal/ })).toHaveAttribute('data-sort-dir', 'desc')
   await expect(page.locator('.display-btn')).toHaveAttribute('aria-label', 'Display, sorted by name')
 
   // Decision 5: counts right-aligned, zero muted, the waits marker and the hand-set pen.
@@ -253,7 +254,7 @@ test('an opened goal lists what’s missing, then Moving, Queued (five, then a f
   await page.setViewportSize({ width: 1440, height: 1000 })
   await openGoals(page, world())
   const release = goalRow(page, 'g-r136'), toggle = release.locator('.goal-toggle')
-  const guard = await controlStability(page, { toggle, lands: page.getByRole('button', { name: 'Sort by lands' }), expand: page.locator('.expand-btn'), eta: release.locator('.goal-eta') })
+  const guard = await controlStability(page, { toggle, lands: page.getByRole('button', { name: /^Sort by lands/ }), expand: page.locator('.expand-btn'), eta: release.locator('.goal-eta') })
   await guard.check(async () => { await toggle.click(); await expect(release).toHaveAttribute('data-open', '1') })
   const body = release.locator('.goal-body')
   await expect(body.locator('.steps-head')).toHaveText(/What’s missing\s*2 of 4 steps done/)
