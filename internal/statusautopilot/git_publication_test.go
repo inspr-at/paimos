@@ -134,7 +134,16 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE status_autopilot_projects SET mode='inherit' WHERE project_id=$1`, f.project); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE permission='nodes.write' AND role_id IN (SELECT role_id FROM role_bindings WHERE principal_id=$1)`, f.p.ID)
+		// Retain an active owner binding, as the database requires, but on an
+		// agent. It cannot substitute for the person's revoked write authority.
+		var retained string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Retained fixture owner') RETURNING id::text`, f.p.TenantID).Scan(&retained); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='owner'`, f.p.TenantID, retained); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.p.ID)
 		return err
 	})
 	if err := f.m.RunTenant(t.Context(), f.p.TenantID, deliveredAt.Add(73*time.Hour)); !errors.Is(err, authz.ErrForbidden) {
