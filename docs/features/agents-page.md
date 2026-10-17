@@ -180,7 +180,9 @@ sheet from the bottom edge in groups: control, the session's process, how the
 panel opens, requested changes, layout. Short landscape screens get the whole
 screen too, with head and menu on one line; a phone turned sideways keeps its
 head and puts the menu on that line, as icons when the title needs the room. In Chat the composer pads the home
-indicator itself, so no band is left under it. In a split,
+indicator itself, so no band is left under it. Ticket keys and code in chat text
+sit in the line like words, so a line holding one is as tall as any other; on a
+phone a key's link still takes a 44 px tap. In a split,
 the work area comes directly under the app header; the list and details have
 viewport-high panes with separate scrolling. A new selection resets the details
 to their top while the picked row stays in view. Opening a sheet, including when
