@@ -42,16 +42,13 @@ const noticeShown = (log: { titles: TabEntry[] }) => log.titles.filter(entry => 
 // timers (pop frames, the notice, the background reader) fire only through runFor.
 const T0 = Date.parse('2026-10-17T10:00:00Z')
 async function pauseClock(page: Page) { await page.clock.pauseAt(T0 + 20_000) }
-// A background tab reads the Desk once its last answer is a minute old, on 15-second
-// ticks. Step the clock one tick at a time until the page sends that read, then stop
-// advancing, so nothing after the read (the two-second notice) runs on its own.
+// A background tab reads the Desk once its last answer is a minute old. Jump the paused
+// clock past that minute in one step (timers due in between fire once, as after a closed
+// laptop lid); the header's poll wakes and clears the store too, and the read it drops is
+// asked for again. Nothing after the read (the two-second notice) runs until runFor.
 async function backgroundRead(page: Page, desk: { reads: number }) {
   const before = desk.reads
-  for (let tick = 0; tick < 8; tick++) {
-    const sent = page.waitForRequest(request => new URL(request.url()).pathname === '/api/decision-desk/projection', { timeout: 3000 }).catch(() => null)
-    await page.clock.runFor(15_000)
-    if (await sent) break
-  }
+  await page.clock.fastForward(75_000)
   await expect.poll(() => desk.reads).toBeGreaterThan(before)
 }
 async function hideTab(page: Page) {
