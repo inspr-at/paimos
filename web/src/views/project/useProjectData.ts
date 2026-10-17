@@ -71,7 +71,7 @@ export function useProjectData(state: ProjectState, hooks: ProjectDataHooks) {
   const rowsById = computed(() => new Map(list.rows.value.map(row => [row.id, row])))
   const groups = computed(() => {
     const facet = groupFacet(filters.value.group)
-    return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout, workName: vocabulary.leaf.name })
+    return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout, workName: vocabulary.leaf.name, reversed: !!filters.value.groupDesc })
   })
   // Keyboard order: every visible row once (a ticket under two labels is visited once).
   const sequence = computed(() => {

@@ -12,7 +12,7 @@ import { estimateHours } from './estimates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
-import { DEFAULT_SORT, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
+import { DEFAULT_SORT, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortField, type SortKey } from './work.ts'
 import { workLevel, type WorkVocabulary } from './workVocabulary.ts'
 
 export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
@@ -49,6 +49,8 @@ export interface ListFilters {
   hideRestore?: boolean
   sort: SortKey[]
   group: GroupBy
+  // The grouped-by column orders the groups (AEON-1390): natural order, or reversed. Never a row sort key.
+  groupDesc?: boolean
   // An explicit column set (free columns in order; Key and Title always lead).
   cols: ColumnId[] | null
   // The saved view the state came from.
@@ -81,6 +83,7 @@ export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)
 export const LIST_FACETS = ['state', 'priority', 'assignee', 'kind']
 export const WORK_KINDS = ['work', 'ticket', 'task', 'epic']
 export const PAGE_SIZE = 200
+const GROUP_SORT: Partial<Record<GroupBy, SortField>> = { status: 'state', priority: 'priority', type: 'kind', assignee: 'assignee' }
 export const GROUPS: { value: GroupBy; label: string }[] = [
   { value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'assignee', label: 'Assignee' }, { value: 'priority', label: 'Priority' },
   { value: 'project', label: 'Project' }, { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
@@ -241,11 +244,19 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     showClosed: query.closed === '1',
     ...(typeof query.hide_states === 'string' ? { hideStates: parseHiddenStates(query.hide_states) } : {}),
     ...(query.hide_restore === '1' && query.closed === '1' && list(query.status).length ? { hideRestore: true } : {}),
-    sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
+    ...groupedSort(parseSort(typeof query.sort === 'string' ? query.sort : ''), group, query.group_order),
     group,
     cols: parseCols(query.cols),
     view: typeof query.v === 'string' && VIEW_ID.test(query.v) ? query.v : null,
   }
+}
+// A row sort on the grouped-by column orders the groups instead (older links and views sorted by it): its direction
+// becomes the group order unless the link names one, and it leaves the row sort.
+function groupedSort(sort: SortKey[], group: GroupBy, order: unknown): { sort: SortKey[]; groupDesc?: boolean } {
+  const lead = GROUP_SORT[group]
+  const key = lead ? sort.find(entry => entry.field === lead) : undefined
+  const desc = group === 'none' ? false : order === 'reversed' || (order !== 'natural' && !!key?.desc)
+  return { sort: key ? sort.filter(entry => entry !== key) : sort, ...(desc ? { groupDesc: true } : {}) }
 }
 export function filtersToQuery(filters: ListFilters): Record<string, string> {
   const out: Record<string, string> = {}
@@ -258,6 +269,7 @@ export function filtersToQuery(filters: ListFilters): Record<string, string> {
   if (filters.showClosed && filters.hideRestore && filters.status.length) out.hide_restore = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
   if (filters.group !== 'none') out.group = filters.group
+  if (filters.group !== 'none' && filters.groupDesc) out.group_order = 'reversed'
   if (filters.cols) out.cols = filters.cols.length ? filters.cols.join(',') : PINNED.join(',')
   if (filters.mode !== 'list') out.view = filters.mode
   if (filters.view) out.v = filters.view
@@ -373,17 +385,41 @@ function stateSpellings(states: string[]): string[] {
   }
   return [...out]
 }
-const GROUP_SORT: Partial<Record<GroupBy, SortKey['field']>> = { status: 'state', priority: 'priority', type: 'kind', assignee: 'assignee' }
+// Grouping sorts by its key first, in the group order, so groups stay together across pages. The rows inside a group
+// follow the row sort, or the list's default order when only the group order is set (AEON-1390).
 export function effectiveSort(filters: ListFilters): SortKey[] {
-  const keys = filters.sort.length ? [...filters.sort] : [...DEFAULT_SORT]
-  // Grouping sorts by its key first, so groups stay together across pages.
   const lead = GROUP_SORT[filters.group]
-  if (lead && keys[0]?.field !== lead) {
-    const index = keys.findIndex(key => key.field === lead)
-    keys.unshift(index >= 0 ? keys.splice(index, 1)[0] : { field: lead, desc: false })
-  }
+  const rows = filters.sort.filter(key => key.field !== lead)
+  const keys = rows.length ? [...rows] : [...DEFAULT_SORT]
+  if (lead) keys.unshift({ field: lead, desc: !!filters.groupDesc })
   if (!keys.some(key => key.field === 'updated_at')) keys.push({ field: 'updated_at', desc: true })
   return keys
+}
+// The sort key a grouping orders its groups by, when the list API can follow it.
+export const groupSortField = (group: GroupBy): SortField | null => GROUP_SORT[group] ?? null
+// Switching the grouping: a row sort on the new grouped-by column becomes the group order and leaves the row sort;
+// otherwise the groups start in their natural order.
+export function withGrouping(filters: Pick<ListFilters, 'sort'>, group: GroupBy): Pick<ListFilters, 'group' | 'sort' | 'groupDesc'> {
+  const { sort, groupDesc } = groupedSort(filters.sort, group, undefined)
+  return { group, sort, groupDesc }
+}
+// The groups' natural order per grouping, as the group arrow's tooltip and the Display menu name it (AEON-1390).
+const GROUP_ORDER_NAMES: Record<Exclude<GroupBy, 'none'>, string> = { status: 'workflow order', priority: 'high to low', assignee: 'you first, then A–Z', type: 'work order', tag: 'A–Z', epic: 'list order', project: 'by key' }
+export const groupOrderTip = (group: GroupBy, desc: boolean) => group === 'none' ? '' : `Groups: ${desc ? 'reversed' : GROUP_ORDER_NAMES[group]}`
+// How the row sort orders the tickets inside each group, for the row-sort column's tooltip.
+const ROW_ORDER: Record<SortField, [string, string]> = {
+  key: ['lowest key first', 'highest key first'], title: ['title A–Z', 'title Z–A'], state: ['workflow order', 'reversed workflow order'],
+  priority: ['highest priority first', 'lowest priority first'], updated_at: ['least recently updated first', 'most recently updated first'],
+  created_at: ['oldest first', 'newest first'], kind: ['type A–Z', 'type Z–A'], assignee: ['assignee A–Z', 'assignee Z–A'],
+  eta_ready: ['soonest ready first', 'latest ready first'], progress: ['least done first', 'most done first'], estimate: ['lowest estimate first', 'highest estimate first'],
+  model: ['model A–Z', 'model Z–A'], tokens: ['fewest tokens first', 'most tokens first'], list_cost: ['lowest cost first', 'highest cost first'], paid: ['lowest paid first', 'highest paid first'],
+}
+export const rowOrderTip = (key: SortKey) => `Tickets in each group: ${ROW_ORDER[key.field][key.desc ? 1 : 0]}`
+// A row sort from the Display menu: the grouped-by column's key sets the group order instead.
+export function withRowSort(filters: Pick<ListFilters, 'group' | 'groupDesc'>, sort: SortKey[]): Pick<ListFilters, 'sort' | 'groupDesc'> {
+  const lead = GROUP_SORT[filters.group]
+  const key = lead ? sort.find(entry => entry.field === lead) : undefined
+  return { sort: key ? sort.filter(entry => entry !== key) : sort, groupDesc: key ? key.desc || undefined : filters.groupDesc }
 }
 export function apiParams(within: string, filters: ListFilters, options: { omit?: Dimension; facets?: string[]; limit?: number; cursor?: string; now?: Date } = {}): ListQuery {
   const { omit } = options
@@ -608,8 +644,15 @@ export interface RowGroup {
 // priority, kind or tag), so a group shows its whole size while pages load.
 // layout gives the values a row is grouped by (a live list holds them while an
 // update waits); the group still lists the row itself.
-export function groupRows(rows: TicketRow[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string } = {}): RowGroup[] {
+// reversed flips the groups' natural order (AEON-1390); the "No …" groups and unknown statuses stay last either way.
+export function groupRows(rows: TicketRow[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string; reversed?: boolean } = {}): RowGroup[] {
   if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length, loaded: rows.length, hasMore: false }]
+  const ordered = naturalGroups(rows, group, counts, options)
+  if (!options.reversed) return ordered
+  const last = (entry: RowGroup) => entry.key === 'none' || (group === 'status' && statusMeta(entry.state ?? '').key === 'other')
+  return [...ordered.filter(entry => !last(entry)).reverse(), ...ordered.filter(last)]
+}
+function naturalGroups(rows: TicketRow[], group: Exclude<GroupBy, 'none'>, counts: Record<string, number>, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string }): RowGroup[] {
   const layout = options.layout ?? (row => row)
   if (group === 'status') {
     const groups = new Map<string, RowGroup>()

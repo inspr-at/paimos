@@ -155,11 +155,11 @@ for (const width of [1440, 1024]) {
     const dialog = page.getByRole('dialog', { name: 'Display options', exact: true })
     const groups = dialog.getByRole('radiogroup', { name: 'Group by' })
     await expectStableControls({
-      controls: { groups, ...Object.fromEntries(['None', 'Status', 'Priority'].map(name => [name, groups.getByRole('radio', { name, exact: true })])), expand: dialog.getByRole('button', { name: 'Expand groups' }), collapse: dialog.getByRole('button', { name: 'Collapse groups' }), sort: dialog.locator('.sort-editor'), density: dialog.getByRole('radiogroup', { name: 'Row height' }), columns: dialog.locator('.columns') },
+      controls: { groups, ...Object.fromEntries(['None', 'Status', 'Priority'].map(name => [name, groups.getByRole('radio', { name, exact: true })])), expand: dialog.getByRole('button', { name: 'Expand all', exact: true }), collapse: dialog.getByRole('button', { name: 'Collapse all', exact: true }), sort: dialog.locator('.sort-editor'), density: dialog.getByRole('radiogroup', { name: 'Row height' }), columns: dialog.locator('.columns') },
       scrollAreas: { dialog },
       interactions: ['None', 'Status', 'Priority', 'None'].map(name => ({ name, run: async () => { await groups.getByRole('radio', { name, exact: true }).click(); await expect(groups.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
     })
-    await expect(dialog.getByRole('button', { name: 'Expand groups' })).toBeDisabled()
+    await expect(dialog.getByRole('button', { name: 'Expand all', exact: true })).toBeDisabled()
     for (const button of await dialog.locator('.pair button').all()) {
       expect(await button.evaluate(el => el.scrollWidth - el.clientWidth), 'group action label fits its button').toBeLessThanOrEqual(1)
     }
