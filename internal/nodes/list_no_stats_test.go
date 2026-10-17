@@ -176,9 +176,11 @@ func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
 	project, work := kindBySlug(t, p, "project"), kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Small project"}`)
 	parent := root.ID
+	scopeIDs := []string{root.ID}
 	for i := range 4 {
 		n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":%q,"parent_id":%q}`, work.ID, fmt.Sprintf("Small %d", i), parent))
 		parent = n.ID
+		scopeIDs = append(scopeIDs, n.ID)
 	}
 	member := tenant.Principal{ID: addPrincipalIn(t, p.TenantID, "small-scope-member").ID, TenantID: p.TenantID, Kind: tenant.Person, Name: "small-scope-member", Roles: []string{"member"}}
 	dbtest.BindLegacy(t, testDB, p.TenantID, member.ID)
@@ -212,6 +214,26 @@ func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
 			return fmt.Errorf("installed traversal budget boundary missing")
 		}
 		traversal = "WITH RECURSIVE" + strings.NewReplacer("ANY(roots)", "ANY($1::uuid[])", "unnest(roots)", "unnest($1::uuid[])").Replace(traversal) + "SELECT count(*) FROM bounded"
+		_, facts, ok := strings.Cut(definition, "RETURN QUERY")
+		if !ok {
+			return fmt.Errorf("installed scope facts query missing")
+		}
+		facts, _, ok = strings.Cut(facts, "END;")
+		if !ok {
+			return fmt.Errorf("installed scope facts boundary missing")
+		}
+		facts = strings.NewReplacer("scope_roots", "$1::uuid[]", "scope_nodes", "$2::uuid[]", "fact_nodes", "$2::uuid[]").Replace(strings.TrimSuffix(strings.TrimSpace(facts), ";"))
+		roots := make([]string, len(scopeIDs))
+		for i := range roots {
+			roots[i] = root.ID
+		}
+		var leafIDs []string
+		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT id::text FROM aeon_work_scope(ARRAY[$1::uuid]) WHERE is_leaf ORDER BY id)`, root.ID).Scan(&leafIDs); err != nil {
+			return err
+		}
+		if len(leafIDs) != 1 || leafIDs[0] != parent {
+			return fmt.Errorf("bounded scope changed direct work leaf classification: %v", leafIDs)
+		}
 		for _, query := range []struct {
 			name, sql string
 			args      []any
@@ -219,6 +241,7 @@ func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
 		}{
 			{"node list", filter + " SELECT count(*) FROM filtered", args, 4},
 			{"shared work scope", traversal, []any{[]string{root.ID}}, 5},
+			{"shared scope facts", "SELECT count(*) FROM (" + facts + ") f", []any{roots, scopeIDs}, 5},
 		} {
 			var count int
 			if err := tx.QueryRow(ctx, query.sql, query.args...).Scan(&count); err != nil {
@@ -238,6 +261,8 @@ func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
 			visits := nodeVisitsInCTE(plan, "CTE scope", false) + nodeVisitsInCTE(plan, "CTE scope_children", false)
 			if query.name == "shared work scope" {
 				visits = nodeVisitsInCTE(plan, "CTE walk", false) + nodeVisitsInCTE(plan, "CTE children", false)
+			} else if query.name == "shared scope facts" {
+				visits = nodeVisitsInCTE(plan, "CTE facts", false) + nodeVisitsInCTE(plan, "CTE work_parents", false)
 			}
 			t.Logf("%s: subtree=5 tenant=%d visits=%.0f", query.name, total, visits)
 			if visits <= 0 || visits > 10 {

@@ -217,6 +217,9 @@ func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
 			start := time.Now()
 			status, body := call(t, &p, http.MethodGet, path, "")
 			elapsed := time.Since(start)
+			if status != http.StatusOK {
+				logScopedListFailure(t, p, path)
+			}
 			page := decode[nodePage](t, status, body, http.StatusOK)
 			if (len(page.Items) != 50 && len(page.Items) != 1) || page.NextCursor == nil {
 				t.Fatalf("large list result: %d", len(page.Items))

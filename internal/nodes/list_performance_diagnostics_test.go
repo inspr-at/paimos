@@ -4,6 +4,7 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -26,6 +29,30 @@ var list6000Fixture struct {
 	err       error
 	principal tenant.Principal
 	root      nodeJSON
+}
+
+// A failed synthetic list retains statement timing and the bounded PostgreSQL
+// error class/message, without arguments or connection configuration.
+func logScopedListFailure(t *testing.T, p tenant.Principal, path string) {
+	t.Helper()
+	cfg := appPool.Config()
+	cfg.ConnConfig.Tracer = planningQueryTrace{t}
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	q, err := parseListQuery(httptest.NewRequest("GET", path, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = New(pool, nil).(*Module).listNodes(tenant.WithPrincipal(t.Context(), p), p.TenantID, q)
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) {
+		t.Logf("scoped list failure: SQLSTATE=%s message=%.200s", pg.Code, pg.Message)
+	} else {
+		t.Logf("scoped list failure: %T deadline=%t", err, errors.Is(err, context.DeadlineExceeded))
+	}
 }
 
 // Seed once per test binary, then clone the connection-free database. Every
