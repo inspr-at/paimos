@@ -484,6 +484,60 @@ func TestPairedSocketRollbackRuntimeFiles(t *testing.T) {
 			}
 		})
 	}
+	for _, kind := range []string{"symlink", "hardlink", "public", "directory"} {
+		t.Run("unsafe hook pin "+kind, func(t *testing.T) {
+			dir := socketTestDir(t)
+			store, err := agentsetup.OpenStore(dir, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			socket := filepath.Join(dir, "agentd.sock")
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listener.SetUnlinkOnClose(false)
+			listener.Close()
+			if err := os.Chmod(socket, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"agentd.sock.lock", "agentd.sock.token", "hook-peer.json"} {
+				if err := store.Write(name, []byte("fixture"), true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(dir, "hook-peer.json")
+			switch kind {
+			case "symlink":
+				err = os.Rename(path, path+".original")
+				if err == nil {
+					err = os.Symlink(path+".original", path)
+				}
+			case "hardlink":
+				err = os.Link(path, path+".link")
+			case "public":
+				err = os.Chmod(path, 0644)
+			case "directory":
+				err = os.Rename(path, path+".original")
+				if err == nil {
+					err = os.Mkdir(path, 0700)
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := socketArtifacts(t, dir)
+			local, err := ServePairedLocal(&Supervisor{state: store}, socket)
+			if local != nil {
+				local.Close()
+			}
+			if !errors.Is(err, agentsetup.ErrUnsafePath) {
+				t.Fatalf("unsafe hook pin accepted: %v", err)
+			}
+			assertSocketArtifacts(t, dir, before)
+		})
+	}
 }
 
 func TestPairedSocketConcurrentProcessesExactlyOneWins(t *testing.T) {
