@@ -26,6 +26,14 @@ type auditFake struct {
 	checkReads int
 	checkSHAs  []string
 	onCheck    func()
+	carry      func(context.Context, string, string, string, string) (bool, error)
+}
+
+func (g *auditFake) AuditReviewCarry(ctx context.Context, base, reviewed, target, head string) (bool, error) {
+	if g.carry != nil {
+		return g.carry(ctx, base, reviewed, target, head)
+	}
+	return false, nil
 }
 
 func (g *auditFake) AuditCommits(context.Context) ([]string, error) { return g.commits, g.err }
@@ -130,6 +138,8 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	admin.SHA = strings.Repeat("d", 40)
 	admin.MergedBy = "admin"
 	admin.At = f.at.Add(time.Minute)
+	// Missing queue provenance is notified only after its bounded grace.
+	f.at = admin.At.Add(auditProvenanceGrace)
 	g.checks[admin.Head] = auditGreen()
 	auditSend(t, f, "pull_request", "audit-admin", auditPRBody(f, admin), 204)
 	a = auditRead(t, f, admin.SHA)
@@ -290,6 +300,8 @@ func TestMergeAuditPendingAlertsAndAtomicFailure(t *testing.T) {
 	}
 	g.checksErr = nil
 	g.checks[fact.Head] = auditGreen()
+	f.at = fact.At.Add(auditProvenanceGrace)
+	g.facts[fact.SHA] = &fact
 	auditSend(t, f, "pull_request", "audit-failure", auditPRBody(f, fact), 204)
 	if a := auditRead(t, f, fact.SHA); a.AlertedAt != nil || !reflect.DeepEqual(a.Flags, []string{"no_queue"}) {
 		t.Fatal("missing lead marked notified")
@@ -470,5 +482,121 @@ func TestMergeAuditLateQueueProvenanceRetriesUnreadChecks(t *testing.T) {
 	}
 	if a := auditRead(t, f, fact.SHA); !a.ViaQueue || !a.ChecksPassed || !a.ReviewOK || len(a.Flags) != 0 || a.AlertedAt != nil {
 		t.Fatalf("late queue provenance became a false bypass: %+v", a)
+	}
+}
+
+func TestMergeAuditFalseAlarmRepairAndClassification(t *testing.T) {
+	// Risk: webhook ordering permanently accuses a normal merge, an external
+	// harness verdict is called a bypass, or grace accidentally hides a push.
+	f := newFixture(t)
+	f.build(t)
+	f.review(t)
+	g := &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}
+	f.m.github = g
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.person.TenantID, f.project, f.person.ID)
+		return err
+	})
+	p := f.pull()
+	p.Open, p.Merged = false, true
+	f.gh.pulls[7] = p
+	pr := int64(7)
+	fact := MergeFact{SHA: strings.Repeat("c", 40), Head: p.Head, Base: p.Base, Title: p.Title, Branch: p.Branch, MergedBy: "coordinator", PR: &pr, At: f.at}
+	g.facts[fact.SHA] = &fact
+	g.checks[fact.Head], g.checks[fact.SHA] = auditGreen(), auditGreen()
+	auditSend(t, f, "pull_request", "pending-provenance", auditPRBody(f, fact), 204)
+	if a := auditRead(t, f, fact.SHA); !reflect.DeepEqual(a.Flags, []string{"no_queue"}) || a.AlertedAt != nil {
+		t.Fatalf("initial provenance should wait: %+v", a)
+	}
+	f.at = fact.At.Add(auditProvenanceGrace - time.Second)
+	if err := f.m.ReconcileAudit(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, alerts := auditCounts(t, f); alerts != 0 {
+		t.Fatal("alert escaped provenance grace")
+	}
+	queueFact := func(fact MergeFact, id string) {
+		t.Helper()
+		auditSend(t, f, "merge_group", id, map[string]any{"action": "checks_requested", "merge_group": map[string]string{"head_sha": fact.SHA, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}, 204)
+	}
+	queueFact(fact, "late-provenance-repairs-existing-row")
+	if a := auditRead(t, f, fact.SHA); !a.ViaQueue || !a.ChecksPassed || !a.ReviewOK || len(a.Flags) != 0 || a.AlertedAt != nil {
+		t.Fatalf("late queue fact did not repair existing no_queue: %+v", a)
+	}
+	f.at = fact.At.Add(auditProvenanceGrace + time.Second)
+	if err := f.m.ReconcileAudit(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, alerts := auditCounts(t, f); alerts != 0 {
+		t.Fatal("repaired row produced a stale alert")
+	}
+
+	// The grace is bounded even when the commit has left the latest inventory.
+	timedOut := fact
+	timedOut.SHA, timedOut.At = strings.Repeat("d", 40), f.at
+	g.facts[timedOut.SHA], g.checks[timedOut.SHA] = &timedOut, auditGreen()
+	auditSend(t, f, "pull_request", "unresolved-provenance", auditPRBody(f, timedOut), 204)
+	f.at = timedOut.At.Add(auditProvenanceGrace)
+	if err := f.m.ReconcileAudit(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if a := auditRead(t, f, timedOut.SHA); a.AlertedAt == nil || a.ViaQueue {
+		t.Fatalf("unresolved provenance did not notify at deadline: %+v", a)
+	}
+	assertBody := func(sha, classification string, bypass bool) {
+		t.Helper()
+		f.tx(t, func(tx pgx.Tx) error {
+			var body string
+			if err := tx.QueryRow(t.Context(), `SELECT body FROM inbox_messages WHERE sender_label='Delivery' AND idempotency_key=$1`, digest([]byte(f.person.TenantID+"|"+f.m.config.Repository+"|"+sha))).Scan(&body); err != nil {
+				return err
+			}
+			if !strings.Contains(body, classification) || strings.Contains(body, "bypassed delivery safeguards") != bypass {
+				t.Fatalf("wrong classification: %q", body)
+			}
+			return nil
+		})
+	}
+	assertBody(timedOut.SHA, "provenance pending", false)
+	queueFact(timedOut, "late-provenance-repairs-alerted-row")
+	if a := auditRead(t, f, timedOut.SHA); len(a.Flags) != 0 || !a.ViaQueue || a.AlertedAt == nil {
+		t.Fatalf("previously alerted no_queue could not be repaired: %+v", a)
+	}
+
+	// Keep the harness's actual ok evidence, but remove its reviewgate binding.
+	// The audit must not turn this evidence into a verified review itself.
+	f.tx(t, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM work_order_reviews`); err != nil {
+			return err
+		}
+		var outside bool
+		if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM work_evidence WHERE reference='VERDICT: ok')`).Scan(&outside); err != nil {
+			return err
+		}
+		if !outside {
+			t.Fatal("fixture lost its outside review evidence")
+		}
+		return nil
+	})
+	outside := fact
+	outside.SHA, outside.At, outside.MergedBy = strings.Repeat("e", 40), f.at, "github-merge-queue[bot]"
+	g.facts[outside.SHA], g.checks[outside.SHA] = &outside, auditGreen()
+	auditSend(t, f, "pull_request", "external-harness-review", auditPRBody(f, outside), 204)
+	if a := auditRead(t, f, outside.SHA); a.ReviewOK || !reflect.DeepEqual(a.Flags, []string{"no_review"}) || a.AlertedAt == nil {
+		t.Fatalf("outside review incorrectly verified or hidden: %+v", a)
+	}
+	assertBody(outside.SHA, "review not in reviewgate", false)
+
+	direct := MergeFact{SHA: strings.Repeat("f", 40), Head: strings.Repeat("f", 40), At: f.at}
+	g.facts[direct.SHA], g.checks[direct.SHA] = &direct, auditGreen()
+	auditSend(t, f, "push", "real-direct-push", map[string]any{"ref": "refs/heads/main", "after": direct.SHA, "sender": map[string]string{"login": "actual-pusher"}}, 204)
+	if a := auditRead(t, f, direct.SHA); a.PR != nil || !slices.Contains(a.Flags, "direct_push") || a.AlertedAt == nil || a.MergedBy != "actual-pusher" {
+		t.Fatalf("direct push was hidden by grace/classification: %+v", a)
+	}
+	assertBody(direct.SHA, "bypassed delivery safeguards", true)
+	if err := f.m.ReconcileAudit(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _, alerts := auditCounts(t, f); rows != 4 || alerts != 3 {
+		t.Fatalf("repair/retry duplicated notifications: rows=%d alerts=%d", rows, alerts)
 	}
 }
