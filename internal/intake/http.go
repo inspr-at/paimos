@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -109,8 +108,7 @@ func pathUUID(w http.ResponseWriter, raw string) (string, bool) {
 }
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 1<<20)
 	dec.DisallowUnknownFields()
 	dec.UseNumber()
 	if err := dec.Decode(dst); err != nil {

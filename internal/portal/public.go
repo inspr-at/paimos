@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -471,7 +472,7 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeVote(r *http.Request) error {
-	buf, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+	buf, err := httpapi.ReadRequestBody(nil, r, 1025, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) > 1024 {
 		return errors.New("invalid vote")
 	}

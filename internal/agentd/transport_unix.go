@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/hooknote"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 // LocalServer exposes fenced local control through an owner-only Unix socket.
@@ -122,12 +123,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 64<<10)
 		d.DisallowUnknownFields()
 		var req agentsetup.SetupRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid local enrollment request", 400)
+			rejectBoundedBody(w, r, "invalid local enrollment request")
 			return
 		}
 		s.mu.Lock()
@@ -157,12 +157,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 4096)
 		d.DisallowUnknownFields()
 		var req AccountLinkRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid account link", 400)
+			rejectBoundedBody(w, r, "invalid account link")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -181,12 +180,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 8192)
 		d.DisallowUnknownFields()
 		var req StatuslineRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid statusline", 400)
+			rejectBoundedBody(w, r, "invalid statusline")
 			return
 		}
 		out, err := s.ReportStatusline(r.Context(), req, time.Now().UTC())
@@ -214,12 +212,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 				http.Error(w, "kernel peer required", 403)
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, 4096)
-			d := json.NewDecoder(r.Body)
+			d := httpapi.NewRequestDecoder(w, r, 4096)
 			d.DisallowUnknownFields()
 			var in AttachedHookRequest
 			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
-				http.Error(w, "invalid hook binding", 400)
+				rejectBoundedBody(w, r, "invalid hook binding")
 				return
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -308,12 +305,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 4096)
 		d.DisallowUnknownFields()
 		var req DrainRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid drain", http.StatusBadRequest)
+			rejectBoundedBody(w, r, "invalid drain")
 			return
 		}
 		status, err := s.Drain(req)
@@ -331,12 +327,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 8192)
 		d.DisallowUnknownFields()
 		var config LedgerConfig
 		if d.Decode(&config) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid ledger handover", 400)
+			rejectBoundedBody(w, r, "invalid ledger handover")
 			return
 		}
 		if err := s.EnableLedger(r.Context(), config); err != nil {
@@ -351,10 +346,9 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 2)
-		raw, err := io.ReadAll(r.Body)
+		raw, err := httpapi.ReadRequestBody(w, r, 2, httpapi.DefaultBodyReadTimeout)
 		if err != nil || len(raw) != 0 {
-			http.Error(w, "invalid ledger leave", 400)
+			rejectBoundedBody(w, r, "invalid ledger leave")
 			return
 		}
 		if err := s.LeaveLedger(r.Context()); err != nil {
@@ -377,12 +371,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 70<<10)
-		decoder := json.NewDecoder(r.Body)
+		decoder := httpapi.NewRequestDecoder(w, r, 70<<10)
 		decoder.DisallowUnknownFields()
 		var req ControlRequest
 		if decoder.Decode(&req) != nil || decoder.Decode(&struct{}{}) != io.EOF || req.RunID != r.PathValue("runID") {
-			http.Error(w, "invalid control", http.StatusBadRequest)
+			rejectBoundedBody(w, r, "invalid control")
 			return
 		}
 		receipt, err := s.Control(r.Context(), req)
@@ -393,7 +386,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, ConnContext: localConnContext}
+	server := &http.Server{Handler: httpapi.RequestBodyMiddleware(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, ConnContext: localConnContext}
 	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup, hooks: hooks}
 	local.release = func() {
 		_ = lock.Close()
@@ -423,6 +416,14 @@ func (s *Supervisor) SetSetupHandler(setup func(context.Context, agentsetup.Setu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.setup = setup
+}
+
+// rejectBoundedBody keeps the socket route's 400. An oversized control, ledger
+// or enrollment body is invalid input for that route, not a transport 413.
+// A timed-out read still becomes 408 through the body-status writer.
+func rejectBoundedBody(w http.ResponseWriter, r *http.Request, message string) {
+	httpapi.RetainClassifiedBodyStatus(r)
+	http.Error(w, message, http.StatusBadRequest)
 }
 
 func authorized(r *http.Request, token string) bool {

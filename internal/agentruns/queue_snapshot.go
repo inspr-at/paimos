@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -415,7 +416,7 @@ func snapshotPathCurrent(ctx context.Context, tx pgx.Tx, path []snapshotNode) (b
 
 // Empty and JSON null stay valid for callers that apply a snapshot with no body.
 func decodeOptionalObject(r *http.Request, dst any) error {
-	raw, err := io.ReadAll(r.Body)
+	raw, err := httpapi.ReadRequestBody(nil, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		return workorders.Fail(400, "invalid JSON")
 	}

@@ -7,7 +7,6 @@ package releases
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -157,7 +156,7 @@ func (m *module) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in planInput
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	d := httpapi.NewRequestDecoder(w, r, 1<<20)
 	d.DisallowUnknownFields()
 	if err := d.Decode(&in); err != nil {
 		respond(w, nil, fail(400, "invalid plan"))

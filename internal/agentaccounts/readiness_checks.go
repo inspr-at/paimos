@@ -205,7 +205,7 @@ func (m *Module) check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in checkWrite
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = httpapi.RequestBodyReader(w, r, 4096)
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return
@@ -246,7 +246,7 @@ func (m *Module) sharing(w http.ResponseWriter, r *http.Request) {
 		BindingRevision *int64 `json:"binding_revision"`
 		ShareUsage      *bool  `json:"share_usage"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = httpapi.RequestBodyReader(w, r, 4096)
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return

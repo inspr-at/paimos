@@ -282,3 +282,346 @@ func TestBodyDeadlineSetupAndEarlierContext(t *testing.T) {
 type deadlineFailureWriter struct{ *httptest.ResponseRecorder }
 
 func (*deadlineFailureWriter) SetReadDeadline(time.Time) error { return os.ErrPermission }
+
+// Risk: dribbling input bypasses the budget, transport failures look like 400,
+// or a body guard shortens SSE response lifetimes. Expiry is injected after
+// observed socket reads; wall-clock limits are hang guards only.
+func TestRequestBodyDeadlineResponsesAndStreaming(t *testing.T) {
+	t.Run("dribbling sender", func(t *testing.T) {
+		progress := make(chan int)
+		deadline := make(chan time.Time, 2)
+		var admitted atomic.Bool
+		server := httptest.NewServer(RequestBodyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = &dribblingRequestBody{ReadCloser: r.Body, progress: progress, controller: http.NewResponseController(w)}
+			observed := &observedDeadlineWriter{ResponseWriter: w, deadlines: deadline}
+			var in any
+			if err := DecodeJSON(observed, r, 16, &in); err != nil {
+				WriteError(w, 400, "invalid JSON") // The guard supplies 408.
+				return
+			}
+			admitted.Store(true)
+			w.WriteHeader(204)
+		})))
+		defer server.Close()
+		conn, err := net.Dial("tcp", server.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := io.WriteString(conn, "POST / HTTP/1.1\r\nHost: aeon.test\r\nContent-Length: 10\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case at := <-deadline:
+			if at.IsZero() {
+				t.Fatal("no transport deadline installed")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("body read did not install deadline; hang guard")
+		}
+		for i, b := range []byte(`{"x`) {
+			if _, err := conn.Write([]byte{b}); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case n := <-progress:
+				if n != i+1 {
+					t.Fatalf("dribble progress=%d", n)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("body read made no progress; hang guard")
+			}
+		}
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != 408 || !response.Close || admitted.Load() {
+			t.Fatalf("status=%d close=%v admitted=%v", response.StatusCode, response.Close, admitted.Load())
+		}
+		if len(deadline) != 0 {
+			t.Fatal("failed read cleared or extended its deadline")
+		}
+	})
+	for _, tc := range []struct {
+		name, body string
+		want       int
+	}{
+		{"normal", `{"x":1}`, 204},
+		{"too large", `{"x":1234567890123456789}`, 413},
+		{"unknown field", `{"y":1}`, 400},
+		{"trailing value", `{"x":1} {}`, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(RequestBodyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var in struct {
+					X int `json:"x"`
+				}
+				if err := DecodeJSON(w, r, 16, &in); err != nil {
+					WriteError(w, 400, "invalid JSON")
+					return
+				}
+				w.WriteHeader(204)
+			})))
+			defer server.Close()
+			response, err := server.Client().Post(server.URL, "application/json", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != tc.want {
+				t.Fatalf("status=%d want=%d", response.StatusCode, tc.want)
+			}
+		})
+	}
+	t.Run("classified oversized body keeps its 400", func(t *testing.T) {
+		server := httptest.NewServer(RequestBodyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				X int `json:"x"`
+			}
+			if err := DecodeJSON(w, r, 16, &in); err != nil {
+				RetainClassifiedBodyStatus(r)
+				WriteError(w, 400, "invalid JSON")
+				return
+			}
+			w.WriteHeader(204)
+		})))
+		defer server.Close()
+		response, err := server.Client().Post(server.URL, "application/json", strings.NewReader(`{"x":1234567890123456789}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		raw, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != 400 || strings.TrimSpace(string(raw)) != `{"error":"invalid JSON"}` {
+			t.Fatalf("classified oversized body status=%d body=%s", response.StatusCode, raw)
+		}
+	})
+	for _, tc := range []struct {
+		name, body string
+		want       int
+	}{
+		{"progressing upload", "abcd", 204},
+		{"upload remainder exceeds limit", "abcdefghi", 413},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var admitted atomic.Bool
+			staged := make(chan struct{})
+			server := httptest.NewServer(RequestBodyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				finish, err := BeginRequestBodyStream(w, r, 8, UploadBodyReadTimeout)
+				if err != nil {
+					t.Error(err)
+					WriteError(w, 400, "upload failed")
+					return
+				}
+				defer finish(false)
+				var prefix [2]byte
+				if _, err := io.ReadFull(r.Body, prefix[:]); err != nil {
+					t.Error(err)
+					WriteError(w, 400, "upload failed")
+					return
+				}
+				close(staged)
+				if err := finish(true); err != nil {
+					WriteError(w, 400, "upload failed")
+					return
+				}
+				admitted.Store(true)
+				w.WriteHeader(204)
+			})))
+			defer server.Close()
+			reader, writer := io.Pipe()
+			defer writer.Close()
+			defer reader.Close()
+			type result struct {
+				response *http.Response
+				err      error
+			}
+			done := make(chan result, 1)
+			client := server.Client()
+			client.Timeout = 5 * time.Second // Hang guard, not timing evidence.
+			go func() {
+				response, err := client.Post(server.URL, "application/octet-stream", reader)
+				done <- result{response, err}
+			}()
+			if _, err := io.WriteString(writer, tc.body[:2]); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-staged:
+				// The server consumed a prefix before the client sent the rest.
+			case <-time.After(5 * time.Second):
+				t.Fatal("stream was buffered before staging; hang guard")
+			}
+			if _, err := io.WriteString(writer, tc.body[2:]); err != nil {
+				t.Fatal(err)
+			}
+			_ = writer.Close()
+			got := <-done
+			response, err := got.response, got.err
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != tc.want || admitted.Load() != (tc.want == 204) {
+				t.Fatalf("status=%d admitted=%v", response.StatusCode, admitted.Load())
+			}
+		})
+	}
+	t.Run("SSE", func(t *testing.T) {
+		continueStream := make(chan struct{})
+		defer close(continueStream)
+		s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+			mux.HandleFunc("GET /api/events/stream", func(w http.ResponseWriter, r *http.Request) {
+				if _, hasDeadline := r.Context().Deadline(); hasDeadline {
+					t.Error("SSE retained the ordinary request deadline")
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: first\n\n")
+				_ = http.NewResponseController(w).Flush()
+				select {
+				case <-continueStream:
+					_, _ = io.WriteString(w, "data: second\n\n")
+				case <-r.Context().Done():
+					t.Error("SSE context cancelled during a live response")
+				}
+			})
+		})}}
+		server := httptest.NewUnstartedServer(s.Handler())
+		server.Config.ReadHeaderTimeout = time.Second
+		server.Config.ReadTimeout = time.Minute
+		server.Config.IdleTimeout = time.Minute
+		server.Start()
+		defer server.Close()
+		response, err := server.Client().Get(server.URL + "/api/events/stream")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		reader := bufio.NewReader(response.Body)
+		if line, err := reader.ReadString('\n'); err != nil || line != "data: first\n" {
+			t.Fatalf("first SSE chunk=%q err=%v", line, err)
+		}
+		continueStream <- struct{}{}
+		remaining, err := io.ReadAll(reader)
+		if err != nil || string(remaining) != "\ndata: second\n\n" {
+			t.Fatalf("second SSE chunk=%q err=%v", remaining, err)
+		}
+	})
+	// Risk: Server.ReadTimeout stays armed on a body-less HTTP/1.1 request, the
+	// keep-alive read times out, and net/http cancels the handler while the
+	// response is still live. The barrier is the handler blocked after the
+	// first chunk; the wait is that server deadline, and the longer timeout
+	// only guards a hang. Cancellation must lose to the barrier.
+	t.Run("stream outlives read timeout", func(t *testing.T) {
+		const readTimeout = 200 * time.Millisecond
+		for _, route := range []struct {
+			method, pattern, path string
+		}{
+			{http.MethodGet, "GET /api/events/stream", "/api/events/stream"},
+			{http.MethodPost, "POST /api/projects/{projectId}/delivery/merge-backfill", "/api/projects/project/delivery/merge-backfill"},
+		} {
+			t.Run(route.method+" "+route.path, func(t *testing.T) {
+				release := make(chan struct{})
+				entered := make(chan struct{})
+				cancelled := make(chan struct{}, 1)
+				s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+					mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {
+						if _, hasDeadline := r.Context().Deadline(); hasDeadline {
+							t.Error("live handler retained the ordinary request deadline")
+						}
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = io.WriteString(w, "data: first\n\n")
+						_ = http.NewResponseController(w).Flush()
+						close(entered)
+						select {
+						case <-release:
+							_, _ = io.WriteString(w, "data: second\n\n")
+						case <-r.Context().Done():
+							cancelled <- struct{}{}
+						}
+					})
+				})}}
+				server := httptest.NewUnstartedServer(s.Handler())
+				server.Config.ReadHeaderTimeout = time.Second
+				server.Config.ReadTimeout = readTimeout
+				server.Config.IdleTimeout = time.Minute
+				server.Start()
+				defer server.Close()
+				request, err := http.NewRequest(route.method, server.URL+route.path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := server.Client()
+				client.Timeout = 5 * time.Second // Hang guard, not timing evidence.
+				response, err := client.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				if response.Proto != "HTTP/1.1" {
+					t.Fatalf("protocol=%s, want HTTP/1.1", response.Proto)
+				}
+				reader := bufio.NewReader(response.Body)
+				if line, err := reader.ReadString('\n'); err != nil || line != "data: first\n" {
+					t.Fatalf("first chunk=%q err=%v", line, err)
+				}
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("handler did not reach the stream barrier; hang guard")
+				}
+				select {
+				case <-cancelled:
+					t.Fatal("live response context cancelled by Server.ReadTimeout")
+				case <-time.After(2 * readTimeout):
+				}
+				close(release)
+				remaining, err := io.ReadAll(reader)
+				if err != nil || string(remaining) != "\ndata: second\n\n" {
+					t.Fatalf("second chunk=%q err=%v", remaining, err)
+				}
+				select {
+				case <-cancelled:
+					t.Fatal("live response context cancelled after the read timeout")
+				default:
+				}
+			})
+		}
+	})
+}
+
+type observedDeadlineWriter struct {
+	http.ResponseWriter
+	deadlines chan<- time.Time
+}
+
+func (w *observedDeadlineWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *observedDeadlineWriter) SetReadDeadline(at time.Time) error {
+	w.deadlines <- at
+	return http.NewResponseController(w.ResponseWriter).SetReadDeadline(at)
+}
+
+type dribblingRequestBody struct {
+	io.ReadCloser
+	progress   chan<- int
+	controller *http.ResponseController
+	read       int
+}
+
+func (b *dribblingRequestBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.read += n
+		if b.read == 3 {
+			_ = b.controller.SetReadDeadline(time.Unix(1, 0))
+		}
+		b.progress <- b.read
+	}
+	return n, err
+}

@@ -153,7 +153,7 @@ func (m *Module) handle(fn func(*http.Request, tenant.Principal) (any, error)) h
 			writeFailure(w, fail(503, "unavailable", "the doctrine layer is unavailable"))
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+		r.Body = httpapi.RequestBodyReader(w, r, 16<<10)
 		out, err := fn(r, p)
 		if err != nil {
 			// A transaction timeout can follow a successful external write.

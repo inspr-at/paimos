@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -37,7 +38,7 @@ func (m *module) createRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in releaseInput
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder := httpapi.NewRequestDecoder(w, r, 64<<10)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&in); err != nil || decoder.Decode(new(any)) != io.EOF ||
 		strings.TrimSpace(in.Key) == "" || len(in.Key) > 96 || len(in.IDs) < 1 || len(in.IDs) > 100 {

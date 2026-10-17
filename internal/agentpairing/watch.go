@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -212,7 +213,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	var in attachwatch.DeviceRequest
 	// JSON escapes can expand a bounded text record sixfold.
-	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
+	r.Body = httpapi.RequestBodyReader(w, r, 128<<10)
 	if workorders.Decode(r, &in) != nil || !uuidRE.MatchString(in.ComputerID) || len(in.Text) > attachwatch.MaxText || !inertText(in.Text) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
 		return

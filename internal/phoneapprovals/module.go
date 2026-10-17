@@ -113,7 +113,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 	httpapi.WriteJSON(w, 200, v)
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	d := httpapi.NewRequestDecoder(w, r, 64<<10)
 	d.DisallowUnknownFields()
 	if d.Decode(v) != nil {
 		return fail(400, "invalid request")

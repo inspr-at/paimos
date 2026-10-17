@@ -170,7 +170,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	d := httpapi.NewRequestDecoder(w, r, 16<<10)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		return err

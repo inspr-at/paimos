@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
 	"net/http"
 	"regexp"
 	"slices"
@@ -100,7 +99,7 @@ func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principa
 				httpapi.WriteError(w, 400, "invalid UTF-8 request body")
 				return
 			}
-			r.Body = io.NopCloser(bytes.NewReader(raw))
+			httpapi.SetRequestBody(r, raw)
 			if err := workorders.Decode(r, &in); err != nil {
 				workorders.WriteError(w, err)
 				return

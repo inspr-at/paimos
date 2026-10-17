@@ -4,7 +4,6 @@ package projectgroups
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -154,8 +153,7 @@ func (m *Module) admin(w http.ResponseWriter, r *http.Request) (tenant.Principal
 }
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 64<<10)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return badRequest("invalid JSON request body")

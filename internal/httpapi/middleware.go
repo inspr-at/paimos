@@ -51,6 +51,10 @@ type handlerBudget struct {
 func requestBudgetMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		duration := ordinaryRequestBudget
+		switch r.Pattern {
+		case "POST /api/nodes/{nodeId}/attachments", "POST /api/me/avatar", "POST /api/quote-profiles/assets":
+			duration = UploadBodyReadTimeout
+		}
 		separate := separateHandlerBudget(r.Pattern)
 		if separate {
 			duration = authenticationBudget
@@ -252,7 +256,8 @@ func requestIDMiddlewareWithMetrics(next http.Handler, metrics *TransportMetrics
 		r = r.WithContext(context.WithValue(conn, requestIDKey{}, id))
 		w.Header().Set(requestIDHeader, id)
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK, conn: conn}
-		r = r.WithContext(context.WithValue(r.Context(), bodyReadFailureKey{}, &sw.bodyFailed))
+		sw.body.writer = sw
+		r = r.WithContext(context.WithValue(r.Context(), bodyReadFailureKey{}, &sw.body))
 		var authenticated atomic.Bool
 		r = r.WithContext(context.WithValue(r.Context(), authenticationKey{}, &authenticated))
 		r = r.WithContext(context.WithValue(r.Context(), failureKey{}, &sw.failureLogged))
@@ -294,11 +299,11 @@ func requestIDMiddlewareWithMetrics(next http.Handler, metrics *TransportMetrics
 		next.ServeHTTP(sw, r)
 		// A handler that wrote nothing gets its status line from net/http after
 		// this returns; the connection header must be set before that.
-		if !sw.wrote && (conn.Err() != nil || sw.bodyFailed.Load()) {
+		if !sw.wrote && (conn.Err() != nil || sw.body.failed.Load()) {
 			sw.closed = true
 			w.Header().Set("Connection", "close")
 		}
-		if (conn.Err() != nil || sw.bodyFailed.Load()) && sw.wrote && !sw.closeHeader {
+		if (conn.Err() != nil || sw.body.failed.Load()) && sw.wrote && !sw.closeHeader {
 			// Headers committed before cancellation cannot be changed. Flush
 			// any buffered response, then let net/http abort this connection
 			// (or only this stream on HTTP/2), rather than return it to reuse.
@@ -392,19 +397,24 @@ type statusWriter struct {
 	closed        bool
 	closeHeader   bool
 	failureLogged atomic.Bool
-	bodyFailed    atomic.Bool
+	body          bodyReadState
 }
 
 func (w *statusWriter) WriteHeader(status int) {
 	if w.wrote {
 		return
 	}
+	if status >= 400 {
+		if bodyStatus := w.body.status.Load(); bodyStatus != 0 {
+			status = int(bodyStatus)
+		}
+	}
 	final := status >= 200 || status == http.StatusSwitchingProtocols
 	if final {
 		w.status = status
 		w.wrote = true
 	}
-	if w.bodyFailed.Load() || w.conn != nil && w.conn.Err() != nil {
+	if w.body.failed.Load() || w.conn != nil && w.conn.Err() != nil {
 		w.closed = true
 		w.ResponseWriter.Header().Set("Connection", "close")
 		w.closeHeader = final

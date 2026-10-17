@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -143,7 +143,7 @@ func reviewedField(raw map[string]json.RawMessage) (*string, error) {
 // dismiss. Older clients send no body or {}; both still dismiss without a
 // reason and without a review check.
 func readDismiss(w http.ResponseWriter, r *http.Request) (string, *string, error) {
-	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDismissBody))
+	b, err := httpapi.ReadRequestBody(w, r, maxDismissBody, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		return "", nil, fail(http.StatusRequestEntityTooLarge, "invalid_request", "request body is too large")
 	}
