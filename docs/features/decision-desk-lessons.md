@@ -4,8 +4,13 @@ Prepared lessons appear as **Lesson to adopt** on the Decision Desk. Each memo
 shows the lesson sentence, the linked source when available, the agent’s source
 summary, and the exact line that Accept adds to an entry’s Changelog or a rule
 draft. Dismiss changes no entry and needs no reason; the decision remains audited.
-Both decisions support the existing event Undo, available in the memo and its
-confirmation toast after closing. Rule drafts still require a separate publication approval.
+Both decisions support the existing event Undo. The last lesson of a round ends it
+like every other Desk kind: "All decided" with Undo for 1.2 seconds, then the
+confirmation toast with Undo for the rest of a ten-second grace counted from the
+decision. Undo on "All decided" restores the lesson open in the memo; Undo in the
+toast puts it back on the Desk, also after a round opened from the header preview has
+returned there. A lesson decided earlier in a round keeps Undo in its memo. Rule
+drafts still require a separate publication approval.
 
 The Knowledge tab replaces the Method learnings inbox with one quiet link to the
 project’s lessons on the Desk, shown only when lessons wait. Its count uses

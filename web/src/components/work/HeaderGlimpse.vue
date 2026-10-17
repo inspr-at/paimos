@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { projectSection } from './projectNavigation'
-import { GLIMPSE_CLEAR_SELECTOR, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady } from '../../lib/headerGlimpse'
+import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide, nextHeaderGlimpseWide } from '../../lib/headerGlimpse'
 import { filtersFromQuery, filtersToQuery, type ListFilters } from '../../lib/ticketList'
 import { ticketGraphData } from '../../lib/ticketGraphRenderer'
 import type { GraphData, GraphFPS } from '../../lib/graphRenderer'
@@ -17,9 +17,10 @@ const props = withDefaults(defineProps<{ projectId: string; projectKey: string; 
 const emit = defineEmits<{ active: [value: boolean] }>()
 const router = useRouter(), route = useRoute()
 const filters = computed(() => props.filters ?? filtersFromQuery(projectSection(route) === 'tickets' ? route.query : {}))
-const wideQuery = window.matchMedia('(min-width: 1280px)')
+const wideMedia = `(min-width: ${GLIMPSE_MIN_WIDTH}px)`
+const wideQuery = window.matchMedia(wideMedia)
 const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-const wide = ref(wideQuery.matches), reduced = ref(reducedQuery.matches), idle = ref(false)
+const wide = ref(headerGlimpseViewportWide(wideQuery.matches, window.innerWidth)), reduced = ref(reducedQuery.matches), idle = ref(false)
 const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
 const column = ref<HTMLElement>()
@@ -31,6 +32,7 @@ const shown = ref(0), truncated = ref(false)
 const canvas = ref<{ setPaused: (value: boolean) => void } | null>(null)
 const allowed = computed(() => headerGlimpseAllowed({ enabled: props.enabled, reduced: reduced.value, wide: wide.value, tickets: props.ticketCount }))
 let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, measureFrame = 0, sizingPaused = false
+let scrollRoot: HTMLElement | undefined
 
 function controlBox(compactMode: boolean) {
   const el = controls.value
@@ -70,6 +72,8 @@ function measureRegion() {
   } finally {
     sizingPaused = false
   }
+  // The new height is in the DOM on the next flush. Read it then, not from the observer's queue.
+  void nextTick(() => { if (mounted) syncOcclusion() })
 }
 function scheduleMeasure() {
   // Trial widths change the bar while a measurement is already reading it.
@@ -82,11 +86,56 @@ function scheduleMeasure() {
 }
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
+// Re-read a fresh query. The list from setup can miss `change` while the
+// canvas is painting, and its matches flag can stay true after a shrink.
+function readWide() {
+  return headerGlimpseViewportWide(window.matchMedia(wideMedia).matches, window.innerWidth)
+}
+function syncWide() {
+  const next = readWide()
+  if (wide.value !== next) wide.value = next
+}
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0
+function followViewport() {
+  syncWide()
+  if (viewportFrame) return
+  let left = 2
+  const tick = () => {
+    syncWide()
+    viewportFrame = --left > 0 ? requestAnimationFrame(tick) : 0
+  }
+  viewportFrame = requestAnimationFrame(tick)
+}
+function onWide(event: MediaQueryListEvent) {
+  // A delivered media change is authoritative while innerWidth catches up.
+  // Missing changes still use fresh query/layout samples over the next frames.
+  const next = nextHeaderGlimpseWide({ mediaMatches: event.matches, layoutWidth: window.innerWidth })
+  wide.value = next
+  if (next) scheduleMeasure()
+}
+// #main's scroll and the observer can disagree. A delivery may carry the
+// pre-scroll sample first, or the scroll may never be delivered. The box on
+// screen is the pause decision. Collapsing the header or opening a full-page
+// ticket hides the ancestor with v-show and leaves this canvas mounted with an
+// empty box; that is occlusion. visibility:hidden still has a box. The height
+// is written for the next flush, and the caller reads the box again after layout.
+function backdropOutOfView() {
+  const el = column.value
+  const root = document.getElementById('main')
+  if (!el || !(root instanceof HTMLElement)) return false
+  const box = el.getBoundingClientRect(), view = root.getBoundingClientRect()
+  if (box.width <= 0 || box.height <= 0) return true
+  const overlapW = Math.min(box.right, view.right) - Math.max(box.left, view.left)
+  const overlapH = Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top)
+  return overlapW <= 0 || overlapH <= 0
+}
+function syncOcclusion() { occluded.value = backdropOutOfView(); applyMotion() }
+function detachScroll() { scrollRoot?.removeEventListener('scroll', syncOcclusion); scrollRoot = undefined }
 function openGraph() { void router.push({ path: `/p/${encodeURIComponent(props.projectKey)}/tickets`, query: { ...filtersToQuery(filters.value), view: 'graph' } }) }
 function togglePause() { userPaused.value = !userPaused.value; applyMotion() }
-function onWide() { wide.value = wideQuery.matches }
 function onReduced() { reduced.value = reducedQuery.matches }
 function onVisibility() { applyMotion() }
+function onResize() { followViewport(); scheduleMeasure() }
 function attachSizing() {
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
   if (!sizing || !header || !page) return
@@ -96,12 +145,13 @@ function attachSizing() {
   }
 }
 function watchHeader() {
-  seeing?.disconnect(); sizing?.disconnect(); changes?.disconnect()
+  seeing?.disconnect(); sizing?.disconnect(); changes?.disconnect(); detachScroll()
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
   if (!header || !page) return
   const root = document.getElementById('main')
-  seeing = new IntersectionObserver(([entry]) => { occluded.value = !entry.isIntersecting; applyMotion() }, { root: root instanceof HTMLElement ? root : null, threshold: 0 })
+  seeing = new IntersectionObserver(() => { syncOcclusion() }, { root: root instanceof HTMLElement ? root : null, threshold: 0 })
   seeing.observe(column.value!)
+  if (root instanceof HTMLElement) { scrollRoot = root; root.addEventListener('scroll', syncOcclusion, { passive: true }) }
   sizing = new ResizeObserver(scheduleMeasure)
   attachSizing()
   changes = new MutationObserver(records => {
@@ -112,6 +162,7 @@ function watchHeader() {
   })
   changes.observe(page, { subtree: true, childList: true, characterData: true })
   measureRegion()
+  syncOcclusion()
 }
 
 async function load() {
@@ -138,7 +189,10 @@ onMounted(() => {
   wideQuery.addEventListener('change', onWide)
   reducedQuery.addEventListener('change', onReduced)
   document.addEventListener('visibilitychange', onVisibility)
-  window.addEventListener('resize', scheduleMeasure)
+  window.addEventListener('resize', onResize)
+  viewportWatch = new ResizeObserver(followViewport)
+  viewportWatch.observe(document.documentElement)
+  syncWide()
   const start = () => { if (mounted) idle.value = true }
   if (typeof window.requestIdleCallback === 'function') idleId = window.requestIdleCallback(start, { timeout: 1500 })
   else requestAnimationFrame(() => requestAnimationFrame(start))
@@ -148,10 +202,13 @@ onBeforeUnmount(() => {
   request?.abort()
   if (idleId) window.cancelIdleCallback?.(idleId)
   seeing?.disconnect()
+  detachScroll()
   sizing?.disconnect()
   changes?.disconnect()
   cancelAnimationFrame(measureFrame)
-  window.removeEventListener('resize', scheduleMeasure)
+  cancelAnimationFrame(viewportFrame)
+  viewportWatch?.disconnect()
+  window.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)
