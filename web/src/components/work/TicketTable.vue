@@ -1329,9 +1329,10 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 
 /* ---------- The header's first cell (AEON-1388 §3): expand/collapse all, select all and sort by key in fixed slots ----------
    At rest KEY keeps its place and its sort arrow. On hover of this cell, keyboard focus in it, an active selection or a
-   coarse pointer the three controls show in their slots and KEY hides. Only visibility changes; no slot ever moves. */
+   coarse pointer the three controls show in their slots and KEY hides. Only visibility changes; no slot ever moves. The
+   controls are transparent at rest rather than hidden, so keyboards and screen readers always reach them. */
 .tickets thead th.key-head { padding: 0; }
-.key-slot { position: absolute; top: 50%; left: var(--fold-x); z-index: 1; display: grid; place-items: center; width: var(--slot); height: var(--slot); margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); transform: translateY(-50%); visibility: hidden; }
+.key-slot { position: absolute; top: 50%; left: var(--fold-x); z-index: 1; display: grid; place-items: center; width: var(--slot); height: var(--slot); margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); transform: translateY(-50%); opacity: 0; }
 .key-check { left: var(--check-x); cursor: pointer; }
 .key-fold:hover { color: var(--ink); background: var(--row-hover); }
 .key-fold:focus-visible { box-shadow: var(--focus-ring); }
@@ -1343,16 +1344,16 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .th-sort.key-sort:focus-visible { box-shadow: none; }
 .key-rest { position: absolute; top: 50%; left: calc(var(--rest-x) - var(--sort-x)); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; transform: translateY(-50%); }
 .th-label.key-rest { left: var(--rest-x); margin: 0; padding: 0; }
-.key-icon { position: absolute; top: 50%; left: 0; display: grid; place-items: center; width: var(--slot); height: var(--slot); border-radius: 6px; color: var(--ink-3); transform: translateY(-50%); visibility: hidden; }
+.key-icon { position: absolute; top: 50%; left: 0; display: grid; place-items: center; width: var(--slot); height: var(--slot); border-radius: 6px; color: var(--ink-3); transform: translateY(-50%); opacity: 0; }
 .key-icon.on { color: var(--teal-ink); }
 .key-sort:hover .key-icon { background: var(--row-hover); }
 .key-sort:hover .key-icon:not(.on) { color: var(--ink); }
 .key-sort:focus-visible .key-icon { box-shadow: var(--focus-ring); }
 th.key-head:hover > .key-slot, th.key-head:has(:focus-visible) > .key-slot, .selecting th.key-head > .key-slot,
-th.key-head:hover .key-icon, th.key-head:has(:focus-visible) .key-icon, .selecting th.key-head .key-icon { visibility: visible; }
+th.key-head:hover .key-icon, th.key-head:has(:focus-visible) .key-icon, .selecting th.key-head .key-icon { opacity: 1; }
 th.key-head:hover .key-rest, th.key-head:has(:focus-visible) .key-rest, .selecting th.key-head .key-rest { visibility: hidden; }
 @media (pointer: coarse) {
-  th.key-head > .key-slot, th.key-head .key-icon { visibility: visible; }
+  th.key-head > .key-slot, th.key-head .key-icon { opacity: 1; }
   th.key-head .key-rest { visibility: hidden; }
 }
 

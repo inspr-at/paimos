@@ -70,7 +70,8 @@ function same(before: Awaited<ReturnType<typeof boxes>>, after: Awaited<ReturnTy
     expect(Math.abs(after[name][side] - before[name][side]), `${name}.${side}`).toBeLessThanOrEqual(.5)
   }
 }
-const visibility = (locator: Locator) => locator.evaluate(el => getComputedStyle(el).visibility)
+// Shown or hidden as a person sees it: KEY hides by visibility, the slot controls are transparent at rest (still reachable).
+const visibility = (locator: Locator) => locator.evaluate(el => getComputedStyle(el).visibility === 'visible' && getComputedStyle(el).opacity === '1' ? 'visible' : 'hidden')
 async function settled(page: Page) { await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))) }
 
 test('AEON-1388 each group row carries its figures in its own columns: sums of its leaves, nothing where there is nothing to say', async ({ page }) => {
