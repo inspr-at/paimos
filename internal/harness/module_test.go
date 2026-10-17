@@ -417,7 +417,9 @@ func TestWorkerLeaseHeaderTransitionAndStoppedAuthority(t *testing.T) {
 			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Proxy-Authorization": "Bearer " + lease, "X-Aeon-Worker-Lease": wrong}), 403)
 			stop := map[string]any{"reason": "process_exited"}
 			expect(t, call("/stop", stop), 200)
-			expect(t, call("/stop", stop), 200)
+			// Preserve the existing completed-stop replay policy. Explicit
+			// exit confirmation remains idempotent after stopped_at is set.
+			expect(t, call("/stop", stop), 403)
 			expect(t, call("/confirm-exit", stop), 200)
 			expect(t, call("/heartbeat", beat), 403)
 			expect(t, call("/yield", map[string]any{}), 403)

@@ -1731,9 +1731,6 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if in.Handover != nil {
 		return nil, workorders.Fail(400, "handover requires stop reason paused")
 	}
-	if err != nil && s.ArchivedAt == nil && s.StoppedAt != nil && s.StopReason != nil && *s.StopReason == in.Reason && leaseProof(s, r, p) {
-		return s, nil
-	}
 	if err != nil && lostContact(s) && leaseProof(s, r, p) {
 		// The server already closed this silent generation; the worker's own
 		// reason replaces "lost contact". Its obligations and leases are closed.
