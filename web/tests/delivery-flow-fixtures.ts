@@ -126,19 +126,24 @@ export interface FlowMock {
   setEmpty(empty: boolean): void
 }
 /** Mocks the flow reads and the hint stream. The stream waits until a test sends a hint. */
-export async function mockFlow(page: Page, options: { empty?: boolean; record?: boolean; merge?: boolean } = {}): Promise<FlowMock> {
+export async function mockFlow(page: Page, options: { empty?: boolean; record?: boolean; merge?: boolean; derived?: boolean } = {}): Promise<FlowMock> {
   const reads: string[] = []
   let now = '20:25', empty = !!options.empty
   let release: (frame: string) => void = () => {}
   let waiting = new Promise<string>(resolve => { release = resolve })
+  const observed = <T extends { steps: ReturnType<typeof flowAnswer>['steps'] }>(answer: T): T => {
+    const check = answer.steps.find(s => s.item_id === RUN.c991 && s.step_key === 'ci')
+    if (options.derived && check) check.actor.label = 'Checks (derived from check suite)'
+    return answer
+  }
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, route => {
     reads.push(new URL(route.request().url()).pathname + new URL(route.request().url()).search)
-    return route.fulfill({ json: empty ? emptyFlow() : flowAnswer(now, options.record, options.merge) })
+    return route.fulfill({ json: empty ? emptyFlow() : observed(flowAnswer(now, options.record, options.merge)) })
   })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/runs\/[^/?]+/, route => {
     const itemId = new URL(route.request().url()).pathname.split('/').pop()!
     reads.push(`run:${itemId}`)
-    return route.fulfill({ json: runAnswer(itemId, options.record) })
+    return route.fulfill({ json: observed(runAnswer(itemId, options.record)) })
   })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/stream/, async (route: Route) => {
     const frame = await waiting

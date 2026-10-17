@@ -36,7 +36,7 @@ const EN = {
   clickSeg: 'Click a step for its details.', noInc: 'No incident at this moment.', incOn: 'Incident active', soFarMin: '{m} min so far', ends: 'ends {t}', liveAfter: 'live after +{d}',
   ongoing: 'still going',
   terms: { started: 'Start', took: 'Took', elapsed: 'So far', expectedEnd: 'Expected end', outcome: 'Outcome', round: 'Round', waitsFor: 'Waits for', step: 'Step', actor: 'Actor', startEnd: `Start ${TO} end`, duration: 'Duration', source: 'Source' },
-  sources: { github_app: 'GitHub App', paimos: 'PAIMOS', ops_rollout: 'OPS rollout record', arion: 'Arion target (Project Arion v5, § 4b)' } as Record<string, string>,
+  sources: { github_app: 'GitHub App', check_suite: 'GitHub App · derived from check suite', paimos: 'PAIMOS', ops_rollout: 'OPS rollout record', arion: 'Arion target (Project Arion v5, § 4b)' } as Record<string, string>,
   kindWords: { work: 'work', wait: 'wait', rework: 'rework' } as Record<string, string>, incidentWord: 'incident', sideWord: 'alongside',
   // The release record under the card (AEON-1022): what a rollout reported besides the steps.
   rec: {
@@ -85,7 +85,7 @@ const DE: FlowText = {
   clickSeg: 'Einen Schritt anklicken für Details.', noInc: 'Gerade keine Störung.', incOn: 'Störung aktiv', soFarMin: '{m} min bisher', ends: 'Ende {t}', liveAfter: 'live nach +{d}',
   ongoing: 'läuft noch',
   terms: { started: 'Start', took: 'Dauer', elapsed: 'Bisher', expectedEnd: 'Erwartetes Ende', outcome: 'Ergebnis', round: 'Runde', waitsFor: 'Wartet auf', step: 'Schritt', actor: 'Akteur', startEnd: `Start ${TO} Ende`, duration: 'Dauer', source: 'Quelle' },
-  sources: { github_app: 'GitHub-App', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (Project Arion v5, § 4b)' },
+  sources: { github_app: 'GitHub-App', check_suite: 'GitHub-App · aus Check-Suite abgeleitet', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (Project Arion v5, § 4b)' },
   kindWords: { work: 'Arbeit', wait: 'Warten', rework: 'Nacharbeit' }, incidentWord: 'Störung', sideWord: 'nebenher',
   rec: {
     title: 'Release-Nachweise', none: 'nicht erfasst', partial: 'außerhalb des gelesenen Zeitraums', running: 'läuft seit {t}', soFar: '{m} min bisher', runs: '{n} Läufe', usually: 'üblich {m} min',

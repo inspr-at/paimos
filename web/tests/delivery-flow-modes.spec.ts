@@ -14,7 +14,7 @@ import { flowText } from '../src/lib/deliveryFlowText'
 
 test.use({ timezoneId: ZONE })
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert'; empty?: boolean; record?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert'; empty?: boolean; record?: boolean; derived?: boolean } = {}) {
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   work.preferences['delivery:numbers'] = { level: options.level ?? 'simple', window: 7 }
@@ -23,7 +23,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   await mockWork(page, work, { nativeEvents: true })
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
-  return mockFlow(page, { empty: options.empty, record: options.record })
+  return mockFlow(page, { empty: options.empty, record: options.record, derived: options.derived })
 }
 const lanes = (page: Page) => page.getByTestId('flow-lanes')
 const chip = (page: Page) => page.getByTestId('flow-chip').locator('.shown')
@@ -223,7 +223,7 @@ test('a release no record has reported on says "not recorded" in the same four r
 // the first recorded run replaces it without a reload.
 test('without a recorded run every mode shows the empty state and no sample data, until the first run is recorded', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1300 })
-  const flow = await setup(page, { empty: true })
+  const flow = await setup(page, { empty: true, derived: true })
   await page.goto('/p/AEON/delivery?view=flow')
   const empty = page.getByTestId('flow-empty')
   const copy = 'No recorded runs yet. No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.'
@@ -255,6 +255,13 @@ test('without a recorded run every mode shows the empty state and no sample data
   await expect(empty).toHaveCount(0)
   await expect(lanes(page).locator('.ln-lane')).toHaveCount(6)
   await expect(page.getByTestId('flow-moment-head')).toContainText('Release 126 is live but not working properly')
+  const selection = await controlStability(page, { modes: modes(page), follow: page.getByTestId('flow-follow'), zoom: page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' }) })
+  await selection.check(() => lanes(page).locator(`[data-step="0:${RUN.c991}:3"] .fl-hit`).click())
+  selection.done()
+  await expect(page.getByTestId('flow-moment-detail')).toContainText('derived from check suite')
+  await page.getByRole('radiogroup', { name: 'Level of detail' }).getByRole('radio', { name: 'Expert', exact: true }).click()
+  await expect(page.getByTestId('flow-moment-detail')).toContainText('GitHub App · derived from check suite')
+  await expect(page.getByTestId('flow-moment-detail').getByText('Round', { exact: true })).toHaveCount(0)
 })
 
 for (const [width, theme] of [[390, 'light'], [390, 'dark'], [1024, 'light'], [1024, 'dark'], [1440, 'light'], [1440, 'dark']] as const) {
