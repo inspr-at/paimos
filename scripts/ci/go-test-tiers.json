@@ -10894,6 +10894,8 @@
     ,
     {"kind":"go","package":"internal/workerlease","name":"TestTransitionRejectsAmbiguousProofAndNeverLogsValues","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/workerlease","name":"TestWorkerSchemeSurvivesHopByHopProxy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/workorders","name":"TestBufferBodyBoundsAndDecode","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestBufferEndpointBodyCancellationKeepsInterruptDeadline","tier":"GATED-FULL"}

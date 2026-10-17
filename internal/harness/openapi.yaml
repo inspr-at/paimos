@@ -60,7 +60,7 @@ paths:
   /api/projects/{projectId}/lead/claim:
     post:
       summary: Bind a proven coordinator generation to the project lead intent
-      description: 'Agent-only harness.worker. Proxy-Authorization proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation''s dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.'
+      description: 'Agent-only harness.worker. Authorization scheme Aeon-Worker proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation''s dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.'
       parameters:
         - $ref: '#/components/parameters/projectId'
         - {$ref: '#/components/parameters/WorkerLease'}
@@ -83,7 +83,7 @@ paths:
   /api/projects/{projectId}/lead/pause:
     post:
       summary: Checkpoint and cooperatively pause the current lead
-      description: 'Person owner with harness.control, or the current lead with harness.worker and Proxy-Authorization. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned.'
+      description: 'Person owner with harness.control, or the current lead with harness.worker and Authorization scheme Aeon-Worker. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       requestBody:
@@ -537,18 +537,18 @@ components:
     sessionId: {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     controlId: {name: controlId, in: path, required: true, schema: {type: string, format: uuid}}
     WorkerLease:
-      name: Proxy-Authorization
+      name: Authorization
       in: header
       required: false
-      schema: {type: string, minLength: 39, maxLength: 4103, pattern: '^[Bb][Ee][Aa][Rr][Ee][Rr] [^ ]+$'}
-      description: 'Bearer <worker-lease>, alongside Authorization: Bearer <agent-key>. Worker routes require this proof or the deprecated X-Aeon-Worker-Lease for one transition release (137). If both are supplied they must match; malformed new proof never falls back. Never returned or logged. Stopped generations reject ordinary worker calls; only stop/exit confirmation and usage settlement retain proof authority.'
+      schema: {type: string, maxLength: 4365}
+      description: 'Worker calls send "Aeon-Worker <agent-key> <worker-lease>" in Authorization, which proxies forward and redact. "Bearer <agent-key>" remains valid for calls without a lease and for release 137 clients that also send X-Aeon-Worker-Lease. If both proofs are supplied they must match; a malformed Aeon-Worker value never falls back. Never returned or logged. Stopped generations reject ordinary worker calls; only stop/exit confirmation and usage settlement retain proof authority.'
     LegacyWorkerLease:
       name: X-Aeon-Worker-Lease
       in: header
       required: false
       deprecated: true
       schema: {type: string, minLength: 32, maxLength: 4096}
-      description: 'Deprecated in release 137; use Proxy-Authorization: Bearer <worker-lease>. Accepted for one release with a value-free deprecation warning. Never returned or logged.'
+      description: 'Deprecated in release 137; use Authorization "Aeon-Worker <agent-key> <worker-lease>". Accepted for one release with a value-free deprecation warning. Never returned or logged.'
     workerLease: {$ref: '#/components/parameters/WorkerLease'}
   schemas:
     AgentRecoveryDiagnosis:

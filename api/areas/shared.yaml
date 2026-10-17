@@ -8,7 +8,7 @@ components:
       description: Exact event IDs committed by this mutation, comma separated in reverse append order for Undo. Absent for an unchanged record or when a complete bounded receipt cannot be supplied. Never resolve an absent or lost receipt by finding the newest event.
       schema: {type: string, maxLength: 22528, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}
   securitySchemes:
-    agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
+    agentKey: {type: http, scheme: bearer, description: 'Bearer token aeon_<prefix>_<secret>. A worker call may instead use scheme Aeon-Worker whose value is "<agent-key> <worker-lease>".'}
     aithemaDelegated:
       type: http
       scheme: bearer
@@ -2327,18 +2327,18 @@ components:
         outcome: {type: string, enum: [completed, failed, cancelled, ownership_lost]}
   parameters:
     WorkerLease:
-      name: Proxy-Authorization
+      name: Authorization
       in: header
       required: false
-      schema: {type: string, minLength: 39, maxLength: 4103, pattern: '^[Bb][Ee][Aa][Rr][Ee][Rr] [^ ]+$'}
-      description: 'Bearer <worker-lease>, alongside Authorization: Bearer <agent-key>. Worker routes require this proof or the deprecated X-Aeon-Worker-Lease for one transition release (137). If both are supplied they must match; malformed new proof never falls back. Never returned or logged. Stopped generations reject ordinary worker calls; only stop/exit confirmation and usage settlement retain proof authority.'
+      schema: {type: string, maxLength: 4365}
+      description: 'Worker calls send "Aeon-Worker <agent-key> <worker-lease>" in Authorization, which proxies forward and redact. "Bearer <agent-key>" remains valid for calls without a lease and for release 137 clients that also send X-Aeon-Worker-Lease. If both proofs are supplied they must match; a malformed Aeon-Worker value never falls back. Never returned or logged. Stopped generations reject ordinary worker calls; only stop/exit confirmation and usage settlement retain proof authority.'
     LegacyWorkerLease:
       name: X-Aeon-Worker-Lease
       in: header
       required: false
       deprecated: true
       schema: {type: string, minLength: 32, maxLength: 4096}
-      description: 'Deprecated in release 137; use Proxy-Authorization: Bearer <worker-lease>. Accepted for one release with a value-free deprecation warning. Never returned or logged.'
+      description: 'Deprecated in release 137; use Authorization "Aeon-Worker <agent-key> <worker-lease>". Accepted for one release with a value-free deprecation warning. Never returned or logged.'
     AeonStepUp:
       name: Aeon-Step-Up
       in: header

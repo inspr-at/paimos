@@ -83,8 +83,8 @@ func rulesReceiveDo(api *client.Client, method, path, lease string, maximum int,
 		maximum = rules.MaxBytes
 	}
 	headers := map[string]string{rules.ClientMaximumHeader: strconv.Itoa(maximum)}
-	if lease != "" {
-		headers[workerlease.Header] = workerlease.Value(lease)
+	if lease != "" && api.Token != "" {
+		headers["Authorization"] = workerlease.Value(api.Token, lease)
 	}
 	return api.DoWithHeaders(ctx, method, path, body, dest, headers)
 }

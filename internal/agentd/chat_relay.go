@@ -767,7 +767,11 @@ type chatRelayRequest struct {
 func (r *Remote) chatWorker(ctx context.Context, s HarnessSession, path string, body, dest any) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return r.Client.DoWithHeaders(ctx, "POST", path, body, dest, map[string]string{workerlease.Header: workerlease.Value(s.Lease)})
+	headers := map[string]string{}
+	if s.Lease != "" && r.Client.Token != "" {
+		headers["Authorization"] = workerlease.Value(r.Client.Token, s.Lease)
+	}
+	return r.Client.DoWithHeaders(ctx, "POST", path, body, dest, headers)
 }
 
 func chatProof(s HarnessSession, b ChatRelayBinding) chatRelayRequest {

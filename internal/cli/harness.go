@@ -195,11 +195,10 @@ func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string,
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
+	if c.Token != "" && lease != "" {
+		workerlease.Install(req.Header, c.Token, lease)
+	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-	if lease != "" {
-		req.Header.Set(workerlease.Header, workerlease.Value(lease))
 	}
 	for _, headers := range extra {
 		for name, value := range headers {

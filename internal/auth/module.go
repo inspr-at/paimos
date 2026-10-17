@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
@@ -909,11 +910,10 @@ func (m *Module) authenticate(r *http.Request) (tenant.Principal, credKind, erro
 }
 
 func parseBearer(h string) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(h, " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(h)
+	if malformed || token == "" {
 		return "", "", false
 	}
-	token = strings.TrimSpace(token)
 	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false

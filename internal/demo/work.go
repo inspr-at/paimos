@@ -299,7 +299,7 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 	// a version string. The provenance endpoint persists identities only.
 	instructions := work.instructions
 	digest := sha256.Sum256([]byte(instructions))
-	workerHeaders := map[string]string{workerlease.Header: workerlease.Value(lease)}
+	workerHeaders := map[string]string{"Authorization": workerlease.Value(work.key, lease)}
 	if err := s.api.do(work.agent, work.key, http.MethodPost, path+"/provenance", map[string]any{
 		"items": []map[string]any{{
 			"kind": "skill", "logical_name": work.logicalName, "hash_kind": "content",

@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/views"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/yaml.v3"
@@ -289,7 +290,7 @@ func TestProjectLeadLostContactDoesNotPermitSuccession(t *testing.T) {
 	})
 	for _, headers := range []map[string]string{
 		{"X-Aeon-Worker-Lease": lease},
-		{"Proxy-Authorization": "Bearer " + lease},
+		{"Authorization": workerlease.Value(f.key, lease)},
 	} {
 		stoppedPause := f.call(f.agent, "POST", base+"/lead/pause", map[string]any{"expected_revision": l["revision"], "generation": l["generation"]}, "", headers)
 		expect(t, stoppedPause, 403)

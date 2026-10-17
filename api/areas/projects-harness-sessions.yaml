@@ -497,7 +497,7 @@ paths:
         '404': {description: Session is not visible}
     post:
       operationId: recordHarnessInstructionProvenance
-      description: 'The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and Proxy-Authorization. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.'
+      description: 'The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and Authorization scheme Aeon-Worker. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.'
       parameters:
         - {$ref: '#/components/parameters/WorkerLease'}
         - {$ref: '#/components/parameters/LegacyWorkerLease'}
@@ -1008,7 +1008,7 @@ components:
         note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
         reason: {type: string, maxLength: 240}
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
-        coordinator_session_id: {type: string, format: uuid, description: 'Agents must prove a live parent coordinator using Proxy-Authorization.'}
+        coordinator_session_id: {type: string, format: uuid, description: 'Agents must prove a live parent coordinator using Authorization scheme Aeon-Worker.'}
     HarnessProvenanceItem:
       type: object
       required: [kind, logical_name, hash_kind]

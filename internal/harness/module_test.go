@@ -28,6 +28,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 func TestMain(m *testing.M) {
@@ -388,15 +389,16 @@ func TestHistoricalRegistrationAndHeartbeatWithoutRequestContract(t *testing.T) 
 // Risk: a leaked generation proof remains usable after stop, or migration drops
 // authentication for either supported transport. Only synthetic proofs are used.
 func TestWorkerLeaseHeaderTransitionAndStoppedAuthority(t *testing.T) {
-	for _, header := range []string{"X-Aeon-Worker-Lease", "Proxy-Authorization"} {
-		t.Run(header, func(t *testing.T) {
+	for _, transport := range []string{"legacy", "scheme"} {
+		t.Run(transport, func(t *testing.T) {
 			f := fixture(t)
 			path, _, lease := usageSession(t, f, "unmanaged")
-			value := lease
-			if header == "Proxy-Authorization" {
-				value = "Bearer " + lease
+			headers := map[string]string{}
+			if transport == "legacy" {
+				headers[workerlease.LegacyHeader] = lease
+			} else {
+				headers["Authorization"] = workerlease.Value(f.key, lease)
 			}
-			headers := map[string]string{header: value}
 			beat := map[string]any{"phase": "working", "activity_sequence": 1}
 			call := func(suffix string, body any) *httptest.ResponseRecorder {
 				w := f.call(f.agent, "POST", path+suffix, body, "", headers)
@@ -409,12 +411,16 @@ func TestWorkerLeaseHeaderTransitionAndStoppedAuthority(t *testing.T) {
 			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, ""), 403)
 			expect(t, f.call(f.person, "POST", path+"/heartbeat", beat, "", headers), 403)
 			wrong := "wrong-worker-lease-" + uid()
-			if header == "Proxy-Authorization" {
-				wrong = "Bearer " + wrong
+			wrongHeaders := map[string]string{workerlease.LegacyHeader: wrong}
+			if transport == "scheme" {
+				wrongHeaders = map[string]string{"Authorization": workerlease.Value(f.key, wrong)}
 			}
-			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{header: wrong}), 403)
-			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Proxy-Authorization": "Basic " + lease, "X-Aeon-Worker-Lease": lease}), 403)
-			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Proxy-Authorization": "Bearer " + lease, "X-Aeon-Worker-Lease": wrong}), 403)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", wrongHeaders), 403)
+			// A malformed worker scheme never falls back to a valid legacy proof.
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Authorization": "Aeon-Worker " + f.key, workerlease.LegacyHeader: lease}), 403)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Authorization": workerlease.Value(f.key, lease), workerlease.LegacyHeader: wrong}), 403)
+			// Proxy-Authorization is hop-by-hop. It is not worker proof.
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Proxy-Authorization": "Bearer " + lease}), 403)
 			stop := map[string]any{"reason": "process_exited"}
 			expect(t, call("/stop", stop), 200)
 			// Preserve the existing completed-stop replay policy. Explicit

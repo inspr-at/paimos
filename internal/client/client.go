@@ -202,7 +202,8 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	if req.Header.Get(stepup.Header) != "" || req.Header.Get(workerlease.Header) != "" || req.Header.Get(workerlease.LegacyHeader) != "" {
+	req.Header.Del("Proxy-Authorization")
+	if req.Header.Get(stepup.Header) != "" || workerlease.Carries(req.Header) {
 		proofHTTP := *hc
 		proofHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		hc = &proofHTTP
@@ -283,13 +284,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			// Worker callers log these errors, so remove both proof forms
 			// before decoding messages or retaining structured refusals.
 			var proofs []string
-			for _, name := range []string{workerlease.Header, workerlease.LegacyHeader} {
-				proof := req.Header.Get(name)
-				if name == workerlease.Header {
-					if scheme, value, ok := strings.Cut(proof, " "); ok && strings.EqualFold(scheme, "Bearer") {
-						proof = value
-					}
-				}
+			for _, proof := range workerlease.Proofs(req.Header) {
 				if proof == "" {
 					continue
 				}

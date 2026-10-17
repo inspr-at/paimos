@@ -146,36 +146,36 @@ login is not an installation shortcut.
 
 ## Keep worker credentials out of access logs
 
-Release 137 clients send `Authorization: Bearer <agent-key>` and
-`Proxy-Authorization: Bearer <worker-lease>`. The bearer slot already identifies
-the scoped agent; the second header proves its exact worker generation. The
-server accepts the deprecated `X-Aeon-Worker-Lease` for this transition release
-and emits a warning containing only the header names. Upgrade the server before
-CLI and agentd; keep both credential headers out of access logs during rollout.
+Release 137 clients send one `Authorization` value,
+`Aeon-Worker <agent-key> <worker-lease>`. The same header carries the scoped
+agent key and the exact worker generation. Ordinary reverse proxies forward
+`Authorization` and redact it from access logs. The server accepts the
+deprecated `X-Aeon-Worker-Lease` beside `Authorization: Bearer <agent-key>` for
+this transition release and emits a warning containing only the header names.
+Upgrade the server before CLI and agentd. Do not put the lease in
+`Proxy-Authorization` or any other hop-by-hop header: Traefik and Caddy remove
+those before the request reaches Aeon.
 
-[Caddy redacts Authorization and Proxy-Authorization by default](https://caddyserver.com/docs/caddyfile/directives/log).
+[Caddy redacts Authorization by default](https://caddyserver.com/docs/caddyfile/directives/log).
 Use an explicit log filter for the legacy header too; keep `log_credentials`
-disabled. Caddy removes hop-by-hop headers before proxying, so explicitly restore
-the new proof **only on the Aeon upstream**, from the original request:
+disabled. No extra `header_up` is required for the worker scheme:
 
 ```caddyfile
 work.example.org {
     log {
         format filter {
             request>headers>Authorization delete
-            request>headers>Proxy-Authorization delete
             request>headers>X-Aeon-Worker-Lease delete
         }
     }
-    reverse_proxy 127.0.0.1:8080 {
-        header_up Proxy-Authorization {http.request.header.Proxy-Authorization}
-    }
+    reverse_proxy 127.0.0.1:8080
 }
 ```
 
 For [Traefik access logs](https://doc.traefik.io/traefik/reference/install-configuration/observability/logs-and-accesslogs/),
 merge this into the static configuration. Dropping all headers is the default
-here; explicit entries also protect them if other header logging is enabled:
+here; explicit entries also protect them if other header logging is enabled.
+Traefik forwards `Authorization` on an ordinary HTTP router:
 
 ```yaml
 accessLog:
@@ -185,24 +185,15 @@ accessLog:
       defaultMode: drop
       names:
         Authorization: drop
-        Proxy-Authorization: drop
         X-Aeon-Worker-Lease: drop
         Cookie: drop
         Set-Cookie: drop
 ```
 
-Traefik's ordinary HTTP reverse proxy strips `Proxy-Authorization`; its
-[passthrough request was declined](https://github.com/traefik/traefik/issues/10366).
-The log configuration above does not change forwarding. Route worker traffic
-through a header-preserving edge such as the configured Caddy example or nginx;
-when retaining Traefik at the edge, use TCP TLS passthrough to that TLS-terminating
-proxy. Do not roll out the new clients through an HTTP route that drops the
-proof, and do not copy it into another unredacted request header.
-
 For [nginx access logs](https://nginx.org/en/docs/http/ngx_http_log_module.html),
 use an allowlisted format without request-header variables. Define the format in
-`http`, select it in the Aeon `server`, and add the forwarding line to the
-existing proxy location. No credential header is included in this format:
+`http` and select it in the Aeon `server`. `proxy_pass_request_headers` already
+forwards `Authorization`; do not copy the lease into a separate header:
 
 ```nginx
 # http context
@@ -217,16 +208,15 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header Proxy-Authorization $http_proxy_authorization;
     proxy_buffering off;
     proxy_read_timeout 1h;
 }
 ```
 
 Apply the policy to every proxy hop and log destination. Keep debug/request-body
-logging disabled for authenticated traffic. Verify forwarding and log absence
-with synthetic credentials before upgrading clients; log filters do not remove
-values already written to historical logs.
+logging disabled for authenticated traffic. Verify log absence with synthetic
+credentials before upgrading clients; log filters do not remove values already
+written to historical logs.
 
 A lease has no independent wall-clock expiry, but ordinary worker proof is
 revoked as soon as `stopped_at` is set (including heartbeat-loss closure) or the

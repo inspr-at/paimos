@@ -138,7 +138,7 @@ func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
 					return true
 				case r.Method == http.MethodPost && r.URL.Path == path+"/claim":
 					claims++
-					if r.Header.Get("Authorization") != "Bearer "+testKey || receivedWorkerLease(r) != lease || body["session_id"] != own || body["expected_revision"] != float64(lead.Revision) || len(body) != 2 {
+					if r.Header.Get("Authorization") != workerAuthorization(testKey, lease) || receivedWorkerLease(r) != lease || body["session_id"] != own || body["expected_revision"] != float64(lead.Revision) || len(body) != 2 {
 						t.Error("claim did not retain its own exact authority, selection and current lead revision")
 					}
 					// Establish ordering through the accepted beat and the saved
@@ -2922,21 +2922,30 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 	return sums, next, ring, disc, err
 }
 
-// Every client fixture also rejects accidental legacy-header or scheme emission.
+func workerAuthorization(key, lease string) string {
+	return "Aeon-Worker " + key + " " + lease
+}
+
+// Every client fixture also rejects a separate proof header. The lease travels
+// inside Authorization, which a reverse proxy forwards and redacts.
 func receivedWorkerLease(r *http.Request) string {
-	if len(r.Header.Values("X-Aeon-Worker-Lease")) != 0 {
-		return "invalid legacy worker header"
+	if len(r.Header.Values("X-Aeon-Worker-Lease")) != 0 || len(r.Header.Values("Proxy-Authorization")) != 0 {
+		return "invalid separate worker header"
 	}
-	values := r.Header.Values("Proxy-Authorization")
-	if len(values) == 0 {
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 {
+		if len(values) == 0 {
+			return ""
+		}
+		return "invalid duplicate authorization"
+	}
+	scheme, rest, ok := strings.Cut(values[0], " ")
+	if !ok || !strings.EqualFold(scheme, "Aeon-Worker") {
 		return ""
 	}
-	if len(values) != 1 {
-		return "invalid duplicate worker header"
-	}
-	value := values[0]
-	if !strings.HasPrefix(value, "Bearer ") {
+	_, lease, ok := strings.Cut(rest, " ")
+	if !ok || strings.Contains(lease, " ") {
 		return "invalid worker scheme"
 	}
-	return strings.TrimPrefix(value, "Bearer ")
+	return lease
 }

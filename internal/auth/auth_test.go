@@ -491,6 +491,17 @@ func TestParseBearer(t *testing.T) {
 	if _, _, ok := parseBearer("Bearer nope"); ok {
 		t.Fatal("non-aeon accepted")
 	}
+	lease := strings.Repeat("ab", 16)
+	p, s, ok = parseBearer("Aeon-Worker aeon_abc_def " + lease)
+	if !ok || p != "abc" || s != "def" {
+		t.Fatal("worker scheme rejected")
+	}
+	if _, _, ok := parseBearer("Aeon-Worker aeon_abc_def"); ok {
+		t.Fatal("malformed worker scheme accepted")
+	}
+	if _, _, ok := parseBearer("Aeon-Worker nope " + lease); ok {
+		t.Fatal("non-aeon worker scheme accepted")
+	}
 }
 
 func TestFromEnv(t *testing.T) {

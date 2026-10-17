@@ -17,6 +17,7 @@ func TestContainsUnicodeCredentials(t *testing.T) {
 		"password":            "password=" + strings.Repeat("x", 5),
 		"legacy-worker-lease": "X-Aeon-Worker-Lease: " + strings.Repeat("a7b3", 16),
 		"worker-lease":        "Proxy-Authorization: Bearer " + strings.Repeat("a7b3", 16),
+		"worker-scheme":       "Authorization: Aeon-Worker " + strings.Repeat("k", 12) + " " + strings.Repeat("a7b3", 16),
 		"legacy-worker-log":   `{"X-Aeon-Worker-Lease":["` + strings.Repeat("a7b3", 16) + `"]}`,
 		"worker-log":          `{"Proxy-Authorization":["Bearer ` + strings.Repeat("a7b3", 16) + `"]}`,
 	} {
