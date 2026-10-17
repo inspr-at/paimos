@@ -86,7 +86,7 @@ async function safeAreas(page: Page, safe: { top: number; bottom: number }) {
   expect(read, 'the browser reports the emulated safe areas').toEqual(safe)
 }
 
-async function openLeadChat(page: Page, size: Size, look: 'light' | 'dark') {
+async function openLeadChat(page: Page, size: Size, look: 'light' | 'dark', more: string[] = []) {
   await page.setViewportSize(size)
   await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
   const world = await mockLeadFlow(page, { lead: 'working' })
@@ -108,6 +108,8 @@ async function openLeadChat(page: Page, size: Size, look: 'light' | 'dark') {
     post(2, 'Take the review findings first, then the release check.', true, 44),
     post(3, 'On it. Three findings, all small; a Codex worker has them.', false, 40),
     post(4, 'Merged PHAROS-11. Shall I start the release check now?', false, 12),
+    // Further posts from the lead, a minute apart.
+    ...more.map((body, index) => post(5 + index, body, false, 10 - index)),
   ]
   await page.route(/\/api\/projects\/[^/]+\/(messages|message-targets)(\?|$)/, route => {
     const url = new URL(route.request().url())
@@ -233,6 +235,61 @@ for (const { size, safe } of PHONES) for (const look of ['light', 'dark'] as con
     expect(errors).toEqual([])
   })
 }
+
+// Risk (Tick at fbc5f2a7d): a chip in chat prose (the ticket key's link, inline code) is taller
+// than the line, so its line pushes the next one down (35 px instead of 24 at 390). A line box
+// is never shorter than the line-height, so a paragraph exactly lines × that tall has no tall
+// line; the step from each line to the next is checked as well.
+const PLAIN = 'Without a chip, the nightly gate stayed green through the morning and the queue held only the release notes already written for the train.'
+const WITH_KEY = 'With a key, PHAROS-11 stayed green through the morning and the queue held only the release notes already written for the train.'
+const WITH_CODE = 'With code, `origin/main` stayed green through the morning and the queue held only the release notes already written for the train.'
+test('AEON-1286 chat 390 light: a ticket key or a code chip keeps the line box of plain prose', async ({ page }, info) => {
+  const errors = watchErrors(page)
+  const { size, safe } = PHONES[0]!
+  await openLeadChat(page, size, 'light', [PLAIN, WITH_KEY, WITH_CODE])
+  await safeAreas(page, safe)
+  const paragraph = (start: string) => panelOf(page).locator('#session-panel-messages .chat-markdown p', { hasText: start })
+  // The keys resolved to links (the chip a phone used to stretch to 44 px), the code to its chip.
+  for (const start of ['Morning.', 'Merged PHAROS-11', 'With a key,']) await expect(paragraph(start).getByRole('link', { name: /^PHAROS-11: / })).toBeVisible()
+  await expect(paragraph('With code,').locator('code')).toHaveText('origin/main')
+  await page.evaluate(() => document.fonts.ready.then(() => undefined))
+  // Lines are told apart by the tops of the prose glyphs (chips excluded); steps run from one line's top to the next.
+  const measure = (start: string) => paragraph(start).evaluate(p => {
+    const tops: number[] = []
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement!.closest('.md-ticket, code')) continue
+      const text = node.textContent ?? ''
+      for (let index = 0; index < text.length; index++) {
+        if (/\s/.test(text[index]!)) continue
+        const range = document.createRange()
+        range.setStart(node, index); range.setEnd(node, index + 1)
+        const rect = range.getBoundingClientRect()
+        if (rect.height > 0) tops.push(rect.top)
+      }
+    }
+    const lines: number[] = []
+    for (const top of tops.sort((a, b) => a - b)) if (!lines.length || top - lines.at(-1)! > 4) lines.push(top)
+    return { lines: lines.length, steps: lines.slice(1).map((top, index) => +(top - lines[index]!).toFixed(2)), height: +p.getBoundingClientRect().height.toFixed(2) }
+  })
+  const plain = await measure('Without a chip,')
+  expect(plain.lines, 'the plain paragraph wraps').toBeGreaterThanOrEqual(2)
+  const line = plain.height / plain.lines
+  const chips: [string, Awaited<ReturnType<typeof measure>>][] = []
+  for (const [name, start] of [['ticket key', 'With a key,'], ['code', 'With code,'], ['PHAROS-11 waits', 'Morning.'], ['Merged PHAROS-11', 'Merged PHAROS-11']] as const) chips.push([name, await measure(start)])
+  await report(info.outputPath('AEON-1286/line-boxes-390-light.md'), [
+    `plain: ${plain.lines} lines, ${plain.height} px, line box ${line.toFixed(2)} px, steps [${plain.steps.join(', ')}]`,
+    ...chips.map(([name, chip]) => `${name}: ${chip.lines} lines, ${chip.height} px (lines × line box ${(chip.lines * line).toFixed(2)}), steps [${chip.steps.join(', ')}]`),
+  ])
+  await page.screenshot({ path: info.outputPath('AEON-1286/chat-390-light-lines.png') })
+  for (const step of plain.steps) expect(Math.abs(step - line), `plain lines are even: ${JSON.stringify(plain)}`).toBeLessThanOrEqual(.5)
+  for (const [name, chip] of chips) {
+    expect(chip.lines, `${name} wraps`).toBeGreaterThanOrEqual(2)
+    for (const step of chip.steps) expect(Math.abs(step - line), `${name} line step ${step} px vs ${line.toFixed(2)} px`).toBeLessThanOrEqual(1)
+    expect(Math.abs(chip.height - chip.lines * line), `${name} paragraph ${chip.height} px for ${chip.lines} lines of ${line.toFixed(2)} px`).toBeLessThanOrEqual(1)
+  }
+  expect(errors).toEqual([])
+})
 
 for (const look of ['light', 'dark'] as const) test(`AEON-1286 short landscape ${LANDSCAPE.width}x${LANDSCAPE.height} ${look}: full-screen sheet, one head line, thread at least 60 %`, async ({ page }, info) => {
   await openLeadChat(page, LANDSCAPE, look)

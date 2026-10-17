@@ -6084,6 +6084,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 390x664: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat 390 light: a ticket key or a code chip keeps the line box of plain prose","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 320 dark: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 320 light: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
