@@ -68,6 +68,7 @@ func (g *deployGitHubFixture) DeploymentRead(_ context.Context, _, repository st
 func deployFixture(t *testing.T) (*fixture, *deployGitHubFixture) {
 	t.Helper()
 	f := newFixture(t)
+	f.agent.Scopes = append(f.agent.Scopes, "releases.deploy")
 	g := &deployGitHubFixture{fakeGitHub: f.gh, known: map[string]bool{strings.Repeat("a", 40): true, strings.Repeat("b", 40): true}, ancestors: map[string]bool{strings.Repeat("a", 40): true}}
 	f.m.github = g
 	f.tx(t, func(tx pgx.Tx) error {
@@ -153,6 +154,9 @@ func TestDeployRecordDeliversMergedLeavesAndReplays(t *testing.T) {
 	// Use an OPS agent and retain its identity as the live confirmer.
 	path := "/api/projects/" + f.project + "/deploys"
 	in := deployInput{Environment: "production", SHA: b, Version: "26.10.17"}
+	limited := f.agent
+	limited.Scopes = []string{"delivery.read", "delivery.manage"}
+	f.call(t, limited, "POST", path, in, 403, nil)
 	var out Deploy
 	f.call(t, f.agent, "POST", path, in, 200, &out)
 	if out.EventID < 1 || out.ConfirmedBy != f.agent.ID || out.Project != f.project || out.ConfirmedAt.IsZero() || out.SHA != b || out.Version != in.Version {
