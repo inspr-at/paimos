@@ -5804,6 +5804,20 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1440 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (400 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (400 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"F and / search this list; typing in the search only types; Esc clears, then leaves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"a search that hides the session under the cursor moves the cursor to a match; Enter and p never act on a hidden session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

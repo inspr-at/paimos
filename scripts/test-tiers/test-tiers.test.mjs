@@ -22,6 +22,7 @@ import { nightlyWeights, tierWeights, loadManifest as loadWebPolicy } from '../.
 import { loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
 import './browser-impact.test.mjs'
 import './impact-plan.test.mjs'
+import './browser-areas.test.mjs'
 import './corpus-replay.test.mjs'
 import './manifests.test.mjs'
 import './listing-cache.test.mjs'
@@ -1495,7 +1496,7 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
-  for(const name of ['core.mjs','diff.mjs','collect.mjs','listing-cache.mjs','inputs.mjs','browser-impact.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  for(const name of ['core.mjs','diff.mjs','collect.mjs','listing-cache.mjs','inputs.mjs','browser-impact.mjs','browser-areas.mjs','browser-plan.mjs','browser-ownership.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   for(const name of ['ci-pr-plan.mjs','playwright-safe.mjs','playwright-global-setup.mjs','playwright-lock.mjs','playwright-processes.mjs'])file(`scripts/${name}`,readFileSync(new URL(`../${name}`,import.meta.url),'utf8'))
   file('web/scripts/ci-web-shard.mjs',readFileSync(new URL('../../web/scripts/ci-web-shard.mjs',import.meta.url),'utf8'))
   file('web/scripts/ci-web-shard-source.mjs',readFileSync(new URL('../../web/scripts/ci-web-shard-source.mjs',import.meta.url),'utf8'))
@@ -1604,11 +1605,11 @@ test('merge-group planner writes full without needing payload, checkout history 
   for(const affectedLane of ['','off','on']) {
     const output=resolve(directory,`output-${affectedLane}`)
     assert.equal(tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output}),0)
-    assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=full\nweb_shards=${fullWebShardJSON}\n`)
+    assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=full\nweb_shards=${fullWebShardJSON}\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n`)
     for(const raw of ['full','spec-only','docs-only']) {
       writeFileSync(output,'')
       tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_PLAN_LANE:raw,CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output})
-      assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=${affectedLane==='on'?'full':raw}\nweb_shards=${fullWebShardJSON}\n`)
+      assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=${affectedLane==='on'?'full':raw}\nweb_shards=${fullWebShardJSON}\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n`)
     }
   }
 })

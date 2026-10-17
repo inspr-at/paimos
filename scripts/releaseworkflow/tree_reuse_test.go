@@ -839,6 +839,39 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id == "web-shard" {
+				// AEON-1336 supplies plans only to affected PR execution. Prove
+				// that exact binding before pinning every older full-run field.
+				stepEnv := treeMap(reuseStep(t, j, "Run selected UI cases without retries")["env"])
+				if stepEnv["AEON_BROWSER_PLAN_FILE"] != "${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}" ||
+					stepEnv["AEON_BROWSER_PLAN_SHA256"] != "${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && needs.tier-plan.outputs.browser_plan_sha256 || '' }}" {
+					t.Fatal("only an affected PR may supply a pinned browser execution file")
+				}
+				delete(stepEnv, "AEON_BROWSER_PLAN_FILE")
+				delete(stepEnv, "AEON_BROWSER_PLAN_SHA256")
+				steps := reuseSteps(j)
+				index := -1
+				for i, value := range steps {
+					step := treeMap(value)
+					if step["name"] != "Download affected browser execution plan" {
+						continue
+					}
+					expected := map[string]any{
+						"name": "Download affected browser execution plan",
+						"if":   "github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected'",
+						"uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+						"with": map[string]any{"name": "affected-browser-plan", "path": "tmp/test-tiers"},
+					}
+					if index != -1 || !reflect.DeepEqual(step, expected) {
+						t.Fatal("affected PR execution must download the exact plan artifact")
+					}
+					index = i
+				}
+				if index < 1 || index+1 >= len(steps) || treeMap(steps[index+1])["name"] != "Run selected UI cases without retries" {
+					t.Fatal("affected plan download must immediately precede browser execution")
+				}
+				j["steps"] = append(steps[:index], steps[index+1:]...)
+			}
 			if id == "release-check-run" || id == "e2e-run" {
 				// AEON-582 pins the remaining v7 actions. Assert the exact pins
 				// before restoring their historical tags for the unchanged CI
