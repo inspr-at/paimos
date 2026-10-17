@@ -71,7 +71,8 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func writeErr(w http.ResponseWriter, err error) {
 	var entry *workqueue.EntryFailure
 	if errors.As(err, &entry) {
-		writeJSON(w, 409, map[string]any{"error": "entry_checks_failed", "code": "entry_checks_failed", "to_status": entry.ToStatus, "failed": entry.Failed, "override_allowed": entry.OverrideAllowed})
+		w.Header().Set("Cache-Control", "no-store")
+		workorders.WriteError(w, entry)
 		return
 	}
 	var public interface{ HTTPStatus() int }
