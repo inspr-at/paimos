@@ -58,6 +58,7 @@ DECLARE
     tenant uuid := NULLIF(current_setting('aeon.tenant_id', true), '')::uuid;
     slug text;
     targets uuid[];
+    target_id uuid;
     visible boolean;
 BEGIN
     IF aeon_visible_all() THEN RETURN true; END IF;
@@ -83,11 +84,16 @@ BEGIN
     ELSIF cardinality(targets) > 20 THEN
         visible := false;
     ELSE
-        SELECT NOT EXISTS (
-            SELECT 1 FROM unnest(targets) AS target(id)
-            WHERE NOT EXISTS (SELECT 1 FROM nodes n
-                              WHERE n.tenant_id = tenant AND n.id = target.id)
-        ) INTO visible;
+        visible := true;
+        -- A parameterized point lookup avoids hashing all visible outcomes,
+        -- which would recursively invoke this policy for unrelated rows.
+        FOREACH target_id IN ARRAY targets LOOP
+            IF NOT EXISTS (SELECT 1 FROM nodes n
+                           WHERE n.tenant_id = tenant AND n.id = target_id) THEN
+                visible := false;
+                EXIT;
+            END IF;
+        END LOOP;
     END IF;
     PERFORM set_config('aeon.outcome_visibility_path', coalesce(prior_path, ''), true);
     RETURN visible;
@@ -168,7 +174,7 @@ ALTER POLICY events_project_visibility ON events
                 WHEN node_id IS NULL THEN
                     (SELECT aeon_visibility_system())
                     OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[])
-                ELSE EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id = events.tenant_id AND n.id = events.node_id)
+                ELSE aeon_event_refs_visible(ARRAY[node_id])
                     AND (split_part(type, '.', 1) IN ('node', 'nodes', 'comment', 'comments', 'attachment',
                             'attachments', 'relation', 'relations', 'import', 'journey', 'intake', 'requirement',
                             'requirements', 'release', 'releases', 'knowledge', 'view', 'views', 'tag', 'tags',
