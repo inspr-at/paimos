@@ -83,17 +83,14 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
   const all=validate(manifest,catalogueRows)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const pinnedBrowser=kind==='web'&&!unit&&env.CI_IMPACT==='on'&&event==='pull_request'&&hasBrowserSource(paths)
-  if(pinnedBrowser) {
+  if(pinnedBrowser&&!full&&!catalogue) {
     const selection=runnerSelection(all,{event,paths,impact:env.CI_IMPACT,affectedLane,base,sha:env.GITHUB_SHA,
       browserPlan:env.AEON_BROWSER_PLAN??'',forceFull:full,forceAll:catalogue},
       {mode:'full',layout:'full',reason:'affected browser plan unavailable'}, {mode:plannerMode,layout:plannerLayout})
-    // Explicit --full/--all are stronger than any supplied affected plan.
-    if(!full&&!catalogue) {
-      const filtered=selection.tests.filter(row=>row.kind==='browser')
-      const tests=shard(filtered,index,count,tierWeights(browserPolicy,filtered))
-      return {...selection,all,tests,collectionScope:browserOnly?'browser':'all',
-        timing:{collectSeconds:supplied===undefined?(collected-begin)/1000:0,planSeconds:(performance.now()-collected)/1000}}
-    }
+    const filtered=selection.tests.filter(row=>row.kind==='browser')
+    const tests=shard(filtered,index,count,tierWeights(browserPolicy,filtered))
+    return {...selection,all,tests,collectionScope:browserOnly?'browser':'all',
+      timing:{collectSeconds:supplied===undefined?(collected-begin)/1000:0,planSeconds:(performance.now()-collected)/1000}}
   }
   const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
   // Consumer rules read the candidate tree; semantic registry comparisons use

@@ -61,6 +61,12 @@ test('AEON-1336 historical shadow qualification requires a narrowed proof and ro
   const miss = regression(); miss.id = 'new-miss'; miss.replay.s1.selected = false
   const widened = check(browserAreaEvidence(area(), [regression(), miss]))
   assert.equal(widened.full, true); assert.match(widened.reason, /1 historical shadow misses/)
+  const multiple = { complete: true, areas: [{ ...area(), evidence: good },
+    { id: 'agents', prefixes: ['web/src/components/agents/'], mode: 'affected', evidence: good }] }
+  const mixed = [...paths, 'web/src/components/agents/Screen.vue']
+  assert.deepEqual(browserAreaDecision(mixed, multiple).areas, ['agents', 'work'])
+  multiple.areas[1].mode = 'gated-full'
+  assert.equal(browserAreaDecision(mixed, multiple).full, true, 'one rolled-back area widens the whole diff')
 })
 
 test('AEON-1336 area policy is bounded, pins the corpus, rejects ambiguous ownership and leaves unproven real areas full', () => {
@@ -127,6 +133,8 @@ test('AEON-1336 source rollout fails wide on rollback, mixed or unknown areas, b
   const many = [...rows, ...Array.from({ length: 301 }, (_, i) => row('tests/import.spec.ts', 'GATED-FULL', `case ${i}`))]
   const selected = select(many, options())
   assert.equal(selected.full, true); assert.deepEqual(selected.tests, fullGateTests(many))
+  const opts = options()
+  assert.equal(schedulingDecision(opts.event, paths, () => true, { ...opts, graph: opts.webImports, tests: many }).mode, 'full')
 })
 
 test('AEON-1336 execution rejects stale, partial, duplicate and drifted plans and every stronger full decision', () => {
@@ -144,6 +152,7 @@ test('AEON-1336 execution rejects stale, partial, duplicate and drifted plans an
     assert.equal(read(JSON.stringify(good), rows, overrides).full, true)
   for (const changed of [[...rows, row('tests/new.spec.ts')], rows.map(row => ({ ...row, tier: 'ESSENTIAL' })), rows.slice(1)])
     assert.equal(read(JSON.stringify(good), changed).full, true)
+  assert.equal(read(JSON.stringify(good), Array(20_001).fill(rows[0])).full, true)
   for (const stronger of [{ mode: 'full', layout: 'full' }, { mode: 'essential', layout: 'static' }, {}])
     assert.equal(runnerSelection(rows, { ...options(), browserPlan: JSON.stringify(good), base, sha }, { mode: 'essential', layout: 'full' }, stronger).full, true)
   assert.equal(runnerSelection(rows, { ...options(), forceFull: true, browserPlan: JSON.stringify(good), base, sha },

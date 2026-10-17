@@ -45,4 +45,3 @@ export function ownershipGraph(checkout, imports, read = file => boundedText(che
     return graph
   } catch (error) { return { [graphIncomplete]: error.message } }
 }
-

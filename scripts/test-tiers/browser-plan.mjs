@@ -8,7 +8,8 @@ const catalogueHash = tests => createHash('sha256').update(JSON.stringify(active
   .map(row => [browserIdentity(row), row.tier]).sort(([a], [b]) => a.localeCompare(b)))).digest('hex')
 
 export function makeBrowserPlan(tests, selected, { base, sha, areas }) {
-  if (![base, sha].every(value => oid.test(value ?? '')) || !Array.isArray(areas) || !areas.length) throw new Error('unbound affected browser plan')
+  if (![base, sha].every(value => oid.test(value ?? '')) || !Array.isArray(areas) || !areas.length ||
+      !Array.isArray(tests) || tests.length > 20_000 || !Array.isArray(selected) || selected.length > 20_000) throw new Error('unbound or oversized affected browser plan')
   return { version: 1, scope: 'affected', base, sha, areas, catalogue_sha256: catalogueHash(tests),
     cases: active(selected).map(browserIdentity).sort() }
 }
@@ -20,6 +21,7 @@ export function browserPlanSelection(tests, text, { event, base, sha, impact, af
   const full = reason => ({ full: true, reason, scope: 'gated-full' })
   if (impact !== 'on' || affectedLane !== 'on' || event !== 'pull_request') return full('affected browser execution disabled')
   try {
+    if (!Array.isArray(tests) || tests.length > 20_000) throw new Error('native catalogue count bound')
     if (typeof text !== 'string' || Buffer.byteLength(text) >= 512 * 1024) throw new Error('missing or oversized plan')
     const plan = JSON.parse(text)
     if (plan.version !== 1 || plan.scope !== 'affected' || ![base, sha].every(value => oid.test(value ?? '')) ||

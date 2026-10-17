@@ -264,8 +264,9 @@ export function main(env=process.env) {
       decision=trustedSchedulingDecision(payload.pull_request?.base?.sha,paths,env)
     } else {
       const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
-      const coverage=paths?.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(root,eventBase(env),catalogue):{}
-      decision=sizeWebDecision(schedulingDecision(env.GITHUB_EVENT_NAME,paths,undefined,coverage),paths,{event:env.GITHUB_EVENT_NAME,...coverage})
+      const coverage=hasBrowserSource(paths)&&env.CI_IMPACT!=='on'?nightlyBrowserMap(root,eventBase(env),catalogue):{}
+      const options={...coverage,impact:env.CI_IMPACT,affectedLane:env.CI_AFFECTED_LANE}
+      decision=sizeWebDecision(schedulingDecision(env.GITHUB_EVENT_NAME,paths,undefined,options),paths,{event:env.GITHUB_EVENT_NAME,...options})
     }
   } catch { decision={mode:'full',layout:'full',reason:'trusted affected classification unavailable'} }
   const {mode,reason}=decision
