@@ -44,7 +44,7 @@ defineExpose({ place })
 </template>
 
 <style scoped>
-.goal-tip { position: fixed; z-index: 95; width: max-content; padding: 7px 11px; border-radius: 9px; background: var(--tip-solid); color: var(--tip-ink); font-size: 12px; line-height: 1.4; pointer-events: none; box-shadow: 0 12px 26px -12px rgba(0, 0, 0, .5), 0 0 0 1px var(--tip-line); font-variant-numeric: tabular-nums; }
+.goal-tip { position: fixed; z-index: 95; width: max-content; padding: 7px 11px; border-radius: 9px; background: var(--tip-solid); color: var(--tip-ink); font-size: 12px; line-height: 1.4; pointer-events: none; box-shadow: 0 12px 26px -12px color-mix(in srgb, var(--shadow-black) 50%, transparent), 0 0 0 1px var(--tip-line); font-variant-numeric: tabular-nums; }
 .tip-line + .tip-line { margin-top: 2px; }
 .muted { color: var(--tip-muted); }
 .attn { display: flex; align-items: center; gap: 6px; color: var(--tip-attn); }
