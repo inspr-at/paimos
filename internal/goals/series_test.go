@@ -331,7 +331,7 @@ func (tx *goalHistoryPlanTx) Query(ctx context.Context, sql string, args ...any)
 		tx.plans++
 		tx.t.Logf("history statement %d event visits=%.0f", tx.plans, visits)
 		if visits > 100 {
-			tx.t.Errorf("history statement visits=%.0f; want at most 100 candidate event visits, excluding 6000 unrelated records", visits)
+			tx.t.Fatalf("history statement visits=%.0f; want at most 100 candidate event visits, excluding 6000 unrelated records", visits)
 		}
 	}
 	return tx.Tx.Query(ctx, sql, args...)
@@ -369,6 +369,28 @@ func TestGoalHistoryIgnoresUnrelatedEvents(t *testing.T) {
 		if count < 6003 {
 			return fmt.Errorf("unrelated history fixture missing: %d", count)
 		}
+		traced := &goalHistoryPlanTx{Tx: tx, t: t}
+		h, err := loadReconstruction(ctx, traced, f.secondGoal, apiClock)
+		if err != nil {
+			return err
+		}
+		points, since, err := h.project(ctx, apiClock, "24h")
+		if err != nil {
+			return err
+		}
+		if len(h.events) != 3 || len(points) != 24 || points[23].Pct != 0 || !since.Equal(apiClock.Add(-97*time.Hour)) {
+			t.Fatalf("recorded prefix lost: events=%d points=%d since=%v", len(h.events), len(points), since)
+		}
+		page, err := loadListPage(ctx, traced, f.writer, []string{f.secondGoal}, apiClock, Watermark{})
+		if err != nil {
+			return err
+		}
+		if len(page) != 1 || page[0].Expansion != "full" || page[0].Stall == nil || !page[0].Stall.Since.Equal(since) {
+			t.Fatalf("page prefix differs from series: %+v", page)
+		}
+		if traced.plans < 5 || traced.visits <= 0 {
+			t.Fatalf("missing positive history plan evidence: plans=%d visits=%.0f", traced.plans, traced.visits)
+		}
 		// Explain the installed reference helper's query too. Otherwise an
 		// opaque function scan could hide unrelated work from the counters.
 		var definition string
@@ -396,28 +418,6 @@ func TestGoalHistoryIgnoresUnrelatedEvents(t *testing.T) {
 		t.Logf("installed reference helper visits: references=%.0f events=%.0f", refVisits, eventVisits)
 		if refVisits <= 0 || refVisits > 10 || eventVisits <= 0 || eventVisits > 10 {
 			t.Errorf("reference helper scans unrelated history: references=%.0f events=%.0f", refVisits, eventVisits)
-		}
-		traced := &goalHistoryPlanTx{Tx: tx, t: t}
-		h, err := loadReconstruction(ctx, traced, f.secondGoal, apiClock)
-		if err != nil {
-			return err
-		}
-		points, since, err := h.project(ctx, apiClock, "24h")
-		if err != nil {
-			return err
-		}
-		if len(h.events) != 3 || len(points) != 24 || points[23].Pct != 0 || !since.Equal(apiClock.Add(-97*time.Hour)) {
-			t.Fatalf("recorded prefix lost: events=%d points=%d since=%v", len(h.events), len(points), since)
-		}
-		page, err := loadListPage(ctx, traced, f.writer, []string{f.secondGoal}, apiClock, Watermark{})
-		if err != nil {
-			return err
-		}
-		if len(page) != 1 || page[0].Expansion != "full" || page[0].Stall == nil || !page[0].Stall.Since.Equal(since) {
-			t.Fatalf("page prefix differs from series: %+v", page)
-		}
-		if traced.plans < 5 || traced.visits <= 0 {
-			t.Fatalf("missing positive history plan evidence: plans=%d visits=%.0f", traced.plans, traced.visits)
 		}
 		return nil
 	})

@@ -241,6 +241,22 @@ func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
 			}
 			t.Logf("%s: subtree=5 tenant=%d visits=%.0f", query.name, total, visits)
 			if visits <= 0 || visits > 10 {
+				var walk func(any)
+				walk = func(v any) {
+					switch n := v.(type) {
+					case []any:
+						for _, child := range n {
+							walk(child)
+						}
+					case map[string]any:
+						if n["Relation Name"] == "nodes" {
+							t.Logf("scope scan: type=%v index=%v rows=%v loops=%v removed=%v condition=%v", n["Node Type"], n["Index Name"], n["Actual Rows"], n["Actual Loops"], n["Rows Removed by Filter"], n["Index Cond"])
+						}
+						walk(n["Plan"])
+						walk(n["Plans"])
+					}
+				}
+				walk(plan)
 				t.Errorf("%s visits=%.0f; want work bounded by five scoped nodes, not %d tenant nodes", query.name, visits, total)
 			}
 		}
