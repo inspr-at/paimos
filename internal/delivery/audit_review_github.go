@@ -29,6 +29,7 @@ type auditGitCommit struct {
 
 type auditDiffFile struct {
 	Name      string `json:"filename"`
+	Previous  string `json:"previous_filename,omitempty"`
 	Status    string `json:"status"`
 	Patch     string `json:"patch"`
 	Additions int    `json:"additions"`
@@ -63,9 +64,10 @@ func (g AppReader) AuditReviewCarry(ctx context.Context, base, reviewed, target,
 
 // Accept one merge of the target branch onto the reviewed first parent. The
 // PR deltas must have equal git patch-id --stable values, and the base changes
-// must not overlap their hunks. Trees also bind file modes, which the compare
-// JSON omits. Unsupported/binary/renamed/truncated diffs fail closed: they need
-// a review on the resulting head. No repository checkout or write is needed.
+// must not overlap their hunks. Trees also bind file modes and opaque deltas
+// (binary files, renames, submodules). Identical input/output objects prove an
+// identical per-file patch without needing its textual representation. Missing
+// or truncated evidence fails closed. No checkout or write is needed.
 func readAuditReviewCarry(get func(string, any) error, base, reviewed, target, head string) (bool, error) {
 	var merge auditGitCommit
 	if err := get("/git/commits/"+head, &merge); err != nil {
@@ -98,6 +100,7 @@ func readAuditReviewCarry(get func(string, any) error, base, reviewed, target, h
 		return false, err
 	}
 	modes := map[string]map[string]string{}
+	objects := map[string]map[string]string{}
 	for _, sha := range []string{base, reviewed, updatedBase, head} {
 		if modes[sha] != nil {
 			continue
@@ -117,6 +120,7 @@ func readAuditReviewCarry(get func(string, any) error, base, reviewed, target, h
 			Tree      []struct {
 				Path string `json:"path"`
 				Mode string `json:"mode"`
+				SHA  string `json:"sha"`
 			} `json:"tree"`
 		}
 		if err := get("/git/trees/"+commit.Tree.SHA+"?recursive=1", &tree); err != nil {
@@ -126,22 +130,81 @@ func readAuditReviewCarry(get func(string, any) error, base, reviewed, target, h
 			return false, nil
 		}
 		modes[sha] = map[string]string{}
+		objects[sha] = map[string]string{}
 		for _, entry := range tree.Tree {
 			if _, duplicate := modes[sha][entry.Path]; duplicate {
 				return false, nil
 			}
 			modes[sha][entry.Path] = entry.Mode
+			if !reviewgate.ValidSHA(entry.SHA) {
+				return false, nil
+			}
+			objects[sha][entry.Path] = entry.SHA
 		}
 	}
-	oldID, oldHunks, ok := auditPatchID(before.Files, modes[base], modes[reviewed])
+	// Match every changed path before splitting off exact object deltas. This
+	// also prevents missing patches for unrelated base changes from blocking a
+	// provable carry, while preserving conflict checks for shared text files.
+	remaining := map[string]auditDiffFile{}
+	for _, file := range after.Files {
+		if !validAdmissionPath(file.Name) || remaining[file.Name].Name != "" {
+			return false, nil
+		}
+		remaining[file.Name] = file
+	}
+	oldText, newText := []auditDiffFile{}, []auditDiffFile{}
+	for _, file := range before.Files {
+		next, found := remaining[file.Name]
+		if !found || file.Status != next.Status || file.Previous != next.Previous {
+			return false, nil
+		}
+		delete(remaining, file.Name)
+		switch file.Status {
+		case "added", "removed", "modified", "renamed", "copied", "changed":
+		default:
+			return false, nil
+		}
+		exact := true
+		changed := false
+		paths := []string{file.Name}
+		if file.Previous != "" {
+			if !validAdmissionPath(file.Previous) {
+				return false, nil
+			}
+			paths = append(paths, file.Previous)
+		}
+		for _, path := range paths {
+			changed = changed || modes[base][path] != modes[reviewed][path] || objects[base][path] != objects[reviewed][path]
+			if modes[base][path] != modes[updatedBase][path] || modes[reviewed][path] != modes[head][path] ||
+				objects[base][path] != objects[updatedBase][path] || objects[reviewed][path] != objects[head][path] {
+				exact = false
+			}
+		}
+		if !changed {
+			return false, nil
+		}
+		if !exact {
+			oldText, newText = append(oldText, file), append(newText, next)
+		}
+	}
+	if len(remaining) != 0 {
+		return false, nil
+	}
+	oldID, oldHunks, ok := auditPatchID(oldText, modes[base], modes[reviewed])
 	if !ok {
 		return false, nil
 	}
-	newID, _, ok := auditPatchID(after.Files, modes[updatedBase], modes[head])
+	newID, _, ok := auditPatchID(newText, modes[updatedBase], modes[head])
 	if !ok || oldID != newID {
 		return false, nil
 	}
-	_, baseHunks, ok := auditPatchID(advance.Files, modes[base], modes[updatedBase])
+	shared := []auditDiffFile{}
+	for _, file := range advance.Files {
+		if len(oldHunks[file.Name]) > 0 || len(oldHunks[file.Previous]) > 0 {
+			shared = append(shared, file)
+		}
+	}
+	_, baseHunks, ok := auditPatchID(shared, modes[base], modes[updatedBase])
 	if !ok {
 		return false, nil
 	}

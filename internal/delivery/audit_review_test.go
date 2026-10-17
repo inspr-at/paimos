@@ -55,6 +55,13 @@ func newAuditGitFixture(t *testing.T, variant string) *auditGitFixture {
 	if err := os.WriteFile(filepath.Join(f.dir, "removed.txt"), []byte("obsolete\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if variant == "opaque" {
+		for name, body := range map[string][]byte{"image.bin": {0, 1}, "base.bin": {0, 2}, "old-name.txt": []byte("rename me\n")} {
+			if err := os.WriteFile(filepath.Join(f.dir, name), body, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	f.git("add", ".")
 	f.git("commit", "-m", "base")
 	f.base = f.git("rev-parse", "HEAD")
@@ -67,6 +74,14 @@ func newAuditGitFixture(t *testing.T, variant string) *auditGitFixture {
 	if err := os.WriteFile(filepath.Join(f.dir, "added.sh"), []byte("#!/bin/sh\necho reviewed\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	if variant == "opaque" {
+		if err := os.Rename(filepath.Join(f.dir, "old-name.txt"), filepath.Join(f.dir, "new-name.txt")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(f.dir, "image.bin"), []byte{0, 3}, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.git("add", ".")
 	f.git("commit", "-m", "reviewed delta")
 	f.reviewed = f.git("rev-parse", "HEAD")
@@ -78,6 +93,11 @@ func newAuditGitFixture(t *testing.T, variant string) *auditGitFixture {
 		lines[34] = "base advanced far from the PR hunk"
 	}
 	write()
+	if variant == "opaque" {
+		if err := os.WriteFile(filepath.Join(f.dir, "base.bin"), []byte{0, 4}, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.git("add", ".")
 	f.git("commit", "-m", "advance base")
 	f.updated = f.git("rev-parse", "HEAD")
@@ -122,27 +142,33 @@ func (f *auditGitFixture) get(path string, into any) error {
 		tree := []map[string]string{}
 		for _, line := range strings.Split(f.git("ls-tree", "-r", sha), "\n") {
 			parts := strings.Fields(line)
-			tree = append(tree, map[string]string{"path": parts[3], "mode": parts[0]})
+			tree = append(tree, map[string]string{"path": parts[3], "mode": parts[0], "sha": parts[2]})
 		}
 		body = map[string]any{"sha": sha, "truncated": false, "tree": tree}
 	case strings.HasPrefix(path, "/compare/"):
 		from, to, _ := strings.Cut(strings.TrimPrefix(path, "/compare/"), "...")
 		mb := f.git("merge-base", from, to)
 		files := []auditDiffFile{}
-		for _, line := range strings.Split(f.git("diff", "--name-status", "--no-renames", mb, to), "\n") {
+		for _, line := range strings.Split(f.git("diff", "--name-status", "--find-renames", mb, to), "\n") {
 			if line == "" {
 				continue
 			}
 			kind, name, _ := strings.Cut(line, "\t")
+			previous := ""
+			status := map[string]string{"M": "modified", "A": "added", "D": "removed"}[kind]
+			if strings.HasPrefix(kind, "R") {
+				previous, name, _ = strings.Cut(name, "\t")
+				status = "renamed"
+			}
 			nums := strings.Fields(f.git("diff", "--numstat", "--no-renames", mb, to, "--", name))
 			adds, _ := strconv.Atoi(nums[0])
 			dels, _ := strconv.Atoi(nums[1])
 			diff := f.git("diff", "--no-ext-diff", "--no-renames", mb, to, "--", name)
 			_, patch, ok := strings.Cut(diff, "\n@@ ")
-			if !ok {
-				f.t.Fatalf("fixture needs a text patch: %s", diff)
+			if ok {
+				patch = "@@ " + patch
 			}
-			files = append(files, auditDiffFile{Name: name, Status: map[string]string{"M": "modified", "A": "added", "D": "removed"}[kind], Patch: "@@ " + patch, Additions: adds, Deletions: dels})
+			files = append(files, auditDiffFile{Name: name, Previous: previous, Status: status, Patch: patch, Additions: adds, Deletions: dels})
 		}
 		status := "ahead"
 		if from == to {
@@ -174,7 +200,7 @@ func (f *auditGitFixture) patchID(base, head string) string {
 func TestMergeAuditReviewCarryGitProof(t *testing.T) {
 	// Risk: treating a merge message/ancestry as an independent review, or
 	// missing conflict resolutions which whitespace-insensitive patch-id hides.
-	for _, variant := range []string{"clean", "edited", "conflict"} {
+	for _, variant := range []string{"clean", "edited", "conflict", "opaque"} {
 		t.Run(variant, func(t *testing.T) {
 			f := newAuditGitFixture(t, variant)
 			before, after := f.patchID(f.base, f.reviewed), f.patchID(f.updated, f.head)
@@ -182,6 +208,9 @@ func TestMergeAuditReviewCarryGitProof(t *testing.T) {
 				t.Fatalf("fixture has wrong patch identity: %s %s", before, after)
 			}
 			for _, binding := range [][2]string{{f.base, f.reviewed}, {f.updated, f.head}} {
+				if variant == "opaque" {
+					continue // opaque file identities are proved from Git trees
+				}
 				var c auditCompare
 				if err := f.get("/compare/"+binding[0]+"..."+binding[1], &c); err != nil {
 					t.Fatal(err)
@@ -192,7 +221,7 @@ func TestMergeAuditReviewCarryGitProof(t *testing.T) {
 				}
 			}
 			clean, err := readAuditReviewCarry(f.get, f.base, f.reviewed, f.updated, f.head)
-			if err != nil || clean != (variant == "clean") {
+			if err != nil || clean != (variant == "clean" || variant == "opaque") {
 				t.Fatalf("carry %s: %v %v", variant, clean, err)
 			}
 			for _, shape := range []string{"truncated-tree", "missing-patch", "file-limit", "wrong-parent", "wrong-target", "mode-change"} {
@@ -209,14 +238,22 @@ func TestMergeAuditReviewCarryGitProof(t *testing.T) {
 						switch {
 						case shape == "truncated-tree" && strings.HasPrefix(path, "/git/trees/"):
 							body["truncated"] = true
-						case shape == "mode-change" && strings.HasPrefix(path, "/git/trees/"):
-							body["tree"].([]any)[0].(map[string]any)["mode"] = "120000"
+						case shape == "mode-change" && strings.HasPrefix(path, "/git/trees/"+f.git("rev-parse", f.base+"^{tree}")):
+							for _, entry := range body["tree"].([]any) {
+								if entry.(map[string]any)["path"] == "shared.txt" {
+									entry.(map[string]any)["mode"] = "120000"
+								}
+							}
 						case shape == "wrong-parent" && path == "/git/commits/"+f.head:
 							body["parents"].([]any)[0].(map[string]any)["sha"] = f.base
 						case shape == "wrong-target" && strings.HasPrefix(path, "/compare/"+f.updated+"..."+f.updated):
 							body["merge_base_commit"] = map[string]string{"sha": f.base}
 						case shape == "missing-patch" && strings.HasPrefix(path, "/compare/"+f.base+"..."+f.reviewed):
-							body["files"].([]any)[0].(map[string]any)["patch"] = ""
+							for _, entry := range body["files"].([]any) {
+								if entry.(map[string]any)["filename"] == "shared.txt" {
+									entry.(map[string]any)["patch"] = ""
+								}
+							}
 						case shape == "file-limit" && strings.HasPrefix(path, "/compare/"+f.base+"..."+f.reviewed):
 							body["files"] = make([]auditDiffFile, 300)
 						}
@@ -235,7 +272,7 @@ func TestMergeAuditReviewCarryGitProof(t *testing.T) {
 func TestMergeAuditReviewCarryRechecksVerifiedGate(t *testing.T) {
 	// Risk: equivalent patches bypass model/family/evidence verification, or
 	// a proof prepared before the final fence authorizes an invalidated review.
-	for _, variant := range []string{"clean", "edited", "conflict", "invalidated", "wrong-pr"} {
+	for _, variant := range []string{"clean", "edited", "conflict", "opaque", "invalidated", "wrong-pr"} {
 		t.Run(variant, func(t *testing.T) {
 			f := newFixture(t)
 			f.build(t)
@@ -269,13 +306,13 @@ func TestMergeAuditReviewCarryRechecksVerifiedGate(t *testing.T) {
 			f.m.github = g
 			auditSend(t, f, "pull_request", "carry-review-"+variant, auditPRBody(f, fact), 204)
 			a := auditRead(t, f, fact.SHA)
-			if a.ReviewOK != (variant == "clean") || !a.ViaQueue || !a.ChecksPassed {
+			if a.ReviewOK != (variant == "clean" || variant == "opaque") || !a.ViaQueue || !a.ChecksPassed {
 				t.Fatalf("review carry verification: %+v", a)
 			}
 			if (proofs == 0) != (variant == "wrong-pr") {
 				t.Fatalf("unexpected proof count: %d", proofs)
 			}
-			if variant != "clean" && !reflect.DeepEqual(a.Flags, []string{"no_review"}) {
+			if variant != "clean" && variant != "opaque" && !reflect.DeepEqual(a.Flags, []string{"no_review"}) {
 				t.Fatalf("missing review did not stay closed: %+v", a)
 			}
 		})
