@@ -994,6 +994,10 @@
     ,
     "browser:tests/palette.spec.ts:knowledge keys open visible scoped entries and superseded responses stay discarded"
     ,
+    "browser:tests/people-stack-layers.spec.ts:AEON-1403 overlapping faces stack as whole units at 1440"
+    ,
+    "browser:tests/people-stack-layers.spec.ts:AEON-1403 overlapping faces stack as whole units at 390"
+    ,
     "browser:tests/phone-approvals.spec.ts:ended requests offer context without a decision button"
     ,
     "browser:tests/phone-approvals.spec.ts:personal phone settings save quiet hours and revoke a device"
@@ -11321,6 +11325,10 @@
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/people-stack-layers.spec.ts","name":"AEON-1403 overlapping faces stack as whole units at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/people-stack-layers.spec.ts","name":"AEON-1403 overlapping faces stack as whole units at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/performance.spec.ts","name":"cold Projects home has bounded API requests","config":"playwright.perf.config.ts","project":"","tier":"ESSENTIAL"}
     ,
