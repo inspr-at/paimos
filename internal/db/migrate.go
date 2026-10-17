@@ -268,9 +268,37 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Replaying the released attention migration must retain the later Goals
+	// event policy. Capture the current definition under the DDL fence and
+	// restore it in this transaction, without replaying already-recorded files.
+	// Future policy extensions are preserved as well as the Goals predicates.
+	var eventPolicy string
+	if name == "1241_autopilot_attention_events.sql" {
+		var goalsApplied bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='1361_goals.sql')`).Scan(&goalsApplied); err != nil {
+			return fmt.Errorf("check later event policy: %w", err)
+		}
+		if goalsApplied {
+			if _, err := tx.Exec(ctx, `LOCK TABLE events IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+				return fmt.Errorf("fence later event policy: %w", err)
+			}
+			if err := tx.QueryRow(ctx, `SELECT pg_get_expr(polqual,polrelid) FROM pg_policy WHERE polrelid='events'::regclass AND polname='events_project_visibility'`).Scan(&eventPolicy); err != nil {
+				return fmt.Errorf("capture later event policy: %w", err)
+			}
+			if eventPolicy == "" || len(eventPolicy) > 64<<10 {
+				return fmt.Errorf("later event policy exceeds definition bounds")
+			}
+		}
+	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate %s: %w", name, err)
+		}
+	}
+	if eventPolicy != "" {
+		// pg_get_expr is trusted server-authored SQL, never request input.
+		if _, err := tx.Exec(ctx, `ALTER POLICY events_project_visibility ON events USING (`+eventPolicy+`)`); err != nil {
+			return fmt.Errorf("restore later event policy: %w", err)
 		}
 	}
 	if name == "1292_agent_key_full_access.sql" {

@@ -72,6 +72,9 @@ func TestAttentionEventsMigrationUpgradeAndReapply(t *testing.T) {
 		t.Fatalf("upgrade release 123 schema: %v", err)
 	}
 	after := read()
+	if !strings.Contains(after.policy, "aeon_goal_event_visible") || !strings.Contains(after.policy, "aeon_event_refs_visible") {
+		t.Fatal("full upgrade did not retain the Goals and hidden-reference policy predicates")
+	}
 	if after.policyID != before.policyID || after.functionID != before.functionID {
 		t.Fatal("upgrade replaced policy or function identity")
 	}
