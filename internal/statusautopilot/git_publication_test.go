@@ -60,7 +60,9 @@ func TestGitPublicationDeliveryAndOneDayAcceptance(t *testing.T) {
 				return err
 			}
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at) VALUES($1,$2,$3,99,$4,$5,'test',true,true,true,'{}',$6)`, f.p.TenantID, p.Repository, strings.Repeat("e", 40), follow, f.project, f.now.Add(time.Hour))
+		// Coarse timestamps tie across both sources. The outside-tag follow-up
+		// must keep Done even though its SHA sorts after the shipped merge.
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at) VALUES($1,$2,$3,99,$4,$5,'test',true,true,true,'{}',$6)`, f.p.TenantID, p.Repository, strings.Repeat("e", 40), follow, f.project, f.now.Add(-2*time.Hour))
 		return err
 	})
 	f.run(f.now)

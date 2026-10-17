@@ -44,6 +44,8 @@ func (m *Module) gitDecision(n node, merge string) decision {
 
 // The newest verified observation wins, including a follow-up after this tag.
 // Editable merge_commit fields cannot override immutable audit evidence.
+// On a tied timestamp, an outside-tag fact wins conservatively: SHA ordering
+// cannot prove which merge came last.
 func (m *Module) gitMemberTx(ctx context.Context, tx pgx.Tx, c candidate) (string, error) {
 	p := m.publication
 	n := c.Node
@@ -56,7 +58,7 @@ func (m *Module) gitMemberTx(ctx context.Context, tx pgx.Tx, c candidate) (strin
  WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND `+mergeEvidenceSQL+` AND e.metadata->>'repository'=$2
  UNION ALL
  SELECT a.merge_sha,a.at FROM delivery_merge_audit a WHERE a.tenant_id=n.tenant_id AND a.ticket_node_id=n.id AND a.project_id=n.project_id AND a.repository=$2 AND a.pull_request IS NOT NULL
- ) f ORDER BY f.at DESC,f.sha LIMIT 1) FROM nodes n WHERE n.id=$1`, n.ID, p.Repository, p.ProjectKey, m.publicationTenant).Scan(&key, &linked, &sha)
+ ) f ORDER BY f.at DESC,(f.sha=ANY($5::text[])),f.sha LIMIT 1) FROM nodes n WHERE n.id=$1`, n.ID, p.Repository, p.ProjectKey, m.publicationTenant, p.Commits).Scan(&key, &linked, &sha)
 	if err != nil || !linked {
 		return "", err
 	}
