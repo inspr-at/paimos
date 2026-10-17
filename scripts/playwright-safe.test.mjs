@@ -321,6 +321,68 @@ test('a failing earlier chunk survives a passing final chunk in the shared last-
   assert.equal(existsSync(lockPath), false)
 })
 
+// Risk: a cancelled later acquisition rejects the whole batch before either
+// publication path. A previous passed last-run file would then survive and
+// the shard --last-failed preflight would skip the failure that already ran.
+// The first chunk holds its test at a barrier until a competing waiter has
+// queued, so the second chunk's acquisition must wait and is cancelled there.
+test('a cancelled later chunk acquisition still publishes earlier failures to the shared last-run file', { timeout: 90000 }, async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'aeon-pw-cancel-chunk-'))), lockPath = join(directory, 'suite.lock')
+  const lastRun = join(directory, '.last-run.json'), seen = join(directory, 'seen.txt')
+  const started = join(directory, 'first.started'), go = join(directory, 'first.go')
+  const config = join(directory, 'playwright.config.mjs')
+  writeFileSync(config, `export default ${JSON.stringify({ testDir: directory, testMatch: '*.spec.mjs', outputDir: join(directory, 'results'), workers: 1, reporter: 'line' })}`)
+  const playwright = new URL('../web/node_modules/@playwright/test/index.mjs', import.meta.url).href
+  writeFileSync(join(directory, 'a-fail.spec.mjs'), `import { test, expect } from ${JSON.stringify(playwright)};
+    import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+    test('fails first', async () => {
+      appendFileSync(${JSON.stringify(seen)}, 'fails first\\n');
+      writeFileSync(${JSON.stringify(started)}, '');
+      // Barrier: hold the lane until the test has queued its waiter.
+      const deadline = Date.now() + 20000;
+      while (!existsSync(${JSON.stringify(go)})) {
+        if (Date.now() > deadline) throw new Error('barrier never opened');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(false).toBe(true);
+    });\n`)
+  writeFileSync(join(directory, 'b-pass.spec.mjs'), `import { test, expect } from ${JSON.stringify(playwright)};
+    import { appendFileSync } from 'node:fs';
+    test('passes last', async () => { appendFileSync(${JSON.stringify(seen)}, 'passes last\\n'); expect(true).toBe(true) });\n`)
+  writeFileSync(lastRun, JSON.stringify({ status: 'passed', failedTests: [] }))
+  const args = ['-c', config, '--last-failed-file', lastRun]
+  let cancellations = 0, released = false, waiter
+  const waiterPauses = []
+  const cancelled = () => { cancellations++; return Promise.reject(Object.assign(new Error('queued chunk acquisition cancelled'), { signal: 'SIGINT' })) }
+  const running = runPlaywright(args, { cwd: directory, lockPath, capture: true, graceMs: 50, lockOptions: { log() {}, pause: cancelled } })
+  try {
+    await waitFor(() => existsSync(started))
+    waiter = acquireLock(lockPath, { wait: true, log() {}, pause: () => new Promise(resolve => { if (released) setTimeout(resolve, 25); else waiterPauses.push(resolve) }) })
+    assert.equal(waiterPauses.length, 1, 'the competing waiter queues while the first chunk holds the lane')
+    writeFileSync(go, '')
+    await assert.rejects(running, /queued chunk acquisition cancelled/)
+    assert.equal(cancellations, 1, 'only the second chunk acquisition waited and was cancelled')
+    assert.equal(readFileSync(seen, 'utf8'), 'fails first\n', 'the cancelled chunk never ran')
+    const state = JSON.parse(readFileSync(lastRun, 'utf8'))
+    assert.equal(state.status, 'interrupted')
+    assert.deepEqual(state.failedTests.map(id => typeof id), ['string'], 'the earlier failure replaces the previous passed state')
+    released = true; waiterPauses.shift()()
+    const lock = await waiter; waiter = undefined
+    lock.release()
+    assert.equal(existsSync(lockPath), false)
+    writeFileSync(seen, '')
+    const retry = await runPlaywright([...args, '--last-failed'], { cwd: directory, lockPath, capture: true, graceMs: 50 })
+    assert.equal(retry.code, 1, `${retry.stderr}\n${retry.stdout}`)
+    assert.equal(readFileSync(seen, 'utf8'), 'fails first\n', 'failure-only retry selects the earlier failure')
+  } finally {
+    writeFileSync(go, '')
+    await running.catch(() => {})
+    released = true
+    while (waiterPauses.length) waiterPauses.shift()()
+    if (waiter) (await waiter.catch(() => undefined))?.release()
+  }
+})
+
 test('a synchronous progress burst records every heartbeat without overflowing the reporter queue', { timeout: 30000 }, async t => {
   const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-burst-')), 'suite.lock'), records = []
   const rename = fs.renameSync

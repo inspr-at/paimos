@@ -451,37 +451,54 @@ export async function runPlaywright(args, options = {}) {
     // to the original destination only after the chunk states are collected.
     const override = lastRunOverride(args, env)
     const destination = override ? resolve(options.cwd ?? web, override) : join(plan.outputDir, '.last-run.json')
-    const publish = (states, floor) => { if (states.length) publishLastRun(destination, aggregateLastRuns(states, floor)) }
+    let published = false
+    const publish = (states, floor) => { published = true; if (states.length) publishLastRun(destination, aggregateLastRuns(states, floor)) }
     writeFileSync(mergeConfig, `export default ${JSON.stringify({ testDir: plan.rootDir, reporter: plan.reporters })}\n`)
     const base = withoutOptions(args, ['--reporter', '--add-reporter', '--shard', '--test-list', '--output', '--last-failed', '--last-failed-file'])
-    let code = 0, last, metrics = [], states = []
-    for (const [index, chunk] of plan.chunks.entries()) {
-      const list = join(scratch, 'chunk.txt'), expected = join(scratch, 'expected.json'), blob = join(artifacts, `blob-${index}`, 'report.zip')
-      const statePath = join(lastRunDir, `${String(index).padStart(6, '0')}.json`)
-      const file = relative(plan.rootDir, chunk.file).split('\\').join('/')
-      writeFileSync(list, chunk.titles.map(titles => `[${chunk.project}] › ${file} › ${titles.join(' › ')}`).join('\n') + '\n')
-      writeFileSync(expected, JSON.stringify(chunk.titles.map(titles => JSON.stringify([chunk.project, chunk.file, chunk.repeat, titles]))))
-      console.error(`AEON_PW_CHUNK ${index + 1}/${plan.chunks.length} spec=${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}`)
-      const chunkEnv = { ...env, AEON_PW_CHUNK_EXPECTED: expected, PLAYWRIGHT_BLOB_OUTPUT_FILE: blob }
-      delete chunkEnv.PLAYWRIGHT_LAST_RUN_OUTPUT_FILE
-      last = await run(['test', ...chunkSelector(base, chunk, file, list), `--shard=${chunk.repeat + 1}/${chunk.repeats}`, '--reporter=blob', `--add-reporter=${reporter}`, '--output', join(artifacts, `chunk-${index}`), `--last-failed-file=${statePath}`], {
-        capture: true, env: chunkEnv,
-        lockOptions: { wait: true, ...options.lockOptions, command: `node Playwright test ${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}` },
-      })
-      metrics.push(last.metrics)
-      const state = readChunkLastRun(statePath)
-      if (state) states.push(state)
-      if (existsSync(blob)) { renameSync(blob, join(blobs, `${String(index).padStart(6, '0')}.zip`)); rmdirSync(join(blob, '..')) }
-      if (last.code !== 0) code ||= last.code
-      // Interruptions, timeouts and missing reports are partial results. Stop
-      // rather than quietly executing the remainder or masking the failure.
-      // Publish the states already collected so a previous passed file cannot
-      // hide this run's failures.
-      if ([124, 129, 130, 143].includes(last.code) || !existsSync(join(blobs, `${String(index).padStart(6, '0')}.zip`)) || !state) {
-        publish(states, stoppedLastRunFloor(last.code))
-        if (!options.capture) { process.stdout.write(last.stdout); process.stderr.write(last.stderr) }
-        return { ...last, code: last.code || 1 }
+    let code = 0, last, metrics = [], states = [], inFlight
+    try {
+      for (const [index, chunk] of plan.chunks.entries()) {
+        const list = join(scratch, 'chunk.txt'), expected = join(scratch, 'expected.json'), blob = join(artifacts, `blob-${index}`, 'report.zip')
+        const statePath = join(lastRunDir, `${String(index).padStart(6, '0')}.json`)
+        const file = relative(plan.rootDir, chunk.file).split('\\').join('/')
+        writeFileSync(list, chunk.titles.map(titles => `[${chunk.project}] › ${file} › ${titles.join(' › ')}`).join('\n') + '\n')
+        writeFileSync(expected, JSON.stringify(chunk.titles.map(titles => JSON.stringify([chunk.project, chunk.file, chunk.repeat, titles]))))
+        console.error(`AEON_PW_CHUNK ${index + 1}/${plan.chunks.length} spec=${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}`)
+        const chunkEnv = { ...env, AEON_PW_CHUNK_EXPECTED: expected, PLAYWRIGHT_BLOB_OUTPUT_FILE: blob }
+        delete chunkEnv.PLAYWRIGHT_LAST_RUN_OUTPUT_FILE
+        inFlight = statePath
+        last = await run(['test', ...chunkSelector(base, chunk, file, list), `--shard=${chunk.repeat + 1}/${chunk.repeats}`, '--reporter=blob', `--add-reporter=${reporter}`, '--output', join(artifacts, `chunk-${index}`), `--last-failed-file=${statePath}`], {
+          capture: true, env: chunkEnv,
+          lockOptions: { wait: true, ...options.lockOptions, command: `node Playwright test ${basename(chunk.file)} repeat=${chunk.repeat + 1}/${chunk.repeats}` },
+        })
+        metrics.push(last.metrics)
+        const state = readChunkLastRun(statePath)
+        inFlight = undefined
+        if (state) states.push(state)
+        if (existsSync(blob)) { renameSync(blob, join(blobs, `${String(index).padStart(6, '0')}.zip`)); rmdirSync(join(blob, '..')) }
+        if (last.code !== 0) code ||= last.code
+        // Interruptions, timeouts and missing reports are partial results. Stop
+        // rather than quietly executing the remainder or masking the failure.
+        // Publish the states already collected so a previous passed file cannot
+        // hide this run's failures.
+        if ([124, 129, 130, 143].includes(last.code) || !existsSync(join(blobs, `${String(index).padStart(6, '0')}.zip`)) || !state) {
+          publish(states, stoppedLastRunFloor(last.code))
+          if (!options.capture) { process.stdout.write(last.stdout); process.stderr.write(last.stderr) }
+          return { ...last, code: last.code || 1 }
+        }
       }
+    } catch (error) {
+      // A cancelled later acquisition or a supervisor failure rejects before
+      // either publication path. Publish what already ran before rethrowing,
+      // or a previous passed file hides those failures from the preflight.
+      if (!published) {
+        if (inFlight) {
+          try { const state = readChunkLastRun(inFlight); if (state) states.push(state) }
+          catch { /* the floor below already marks this run as not passed */ }
+        }
+        publish(states, error?.signal ? 'interrupted' : 'failed')
+      }
+      throw error
     }
     const info = aggregateLastRuns(states)
     if (code !== 0 && info.status === 'passed') info.status = 'failed'
