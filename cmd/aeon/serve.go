@@ -446,7 +446,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		return err
 	}
 	goalAPI := goals.New(pool)
-	startWorker(func() { goalAPI.Run(ctx) })
+	startWorker(func() { goalAPI.Run(workerCtx) })
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
