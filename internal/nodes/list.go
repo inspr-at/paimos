@@ -1323,9 +1323,9 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	// The root has no paging parent, so siblings outside the scope stay excluded.
 	return `WITH RECURSIVE scope(id,parent_id,next_page) AS (
         SELECT n.id,NULL::uuid,false FROM unnest(ARRAY[` + scopeRoot + `]) seed(id) CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
-                AND id=seed.id AND deleted_at IS NULL ORDER BY id LIMIT 1
-        ) n
+            SELECT id,deleted_at FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                AND id=seed.id ORDER BY id LIMIT 1
+        ) n WHERE n.deleted_at IS NULL
         UNION ALL SELECT c.* FROM scope s CROSS JOIN LATERAL (
             (SELECT c.*,row_number() OVER (ORDER BY id)=128 FROM (
                 SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid

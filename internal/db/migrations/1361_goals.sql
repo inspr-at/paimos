@@ -279,9 +279,9 @@ BEGIN
  -- UNION still detects cycles; there is no arbitrary depth cutoff.
  WITH RECURSIVE walk(root,id,parent_id,next_page) AS (
   SELECT n.id,n.id,NULL::uuid,false FROM (SELECT DISTINCT r.id FROM unnest(roots) r(id)) seed
-  CROSS JOIN LATERAL (SELECT n.id FROM nodes n
+  CROSS JOIN LATERAL (SELECT n.id,n.deleted_at FROM nodes n
    WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
-    AND n.id=seed.id AND n.deleted_at IS NULL ORDER BY n.id LIMIT 1) n
+    AND n.id=seed.id ORDER BY n.id LIMIT 1) n WHERE n.deleted_at IS NULL
   UNION
   SELECT w.root,c.* FROM walk w CROSS JOIN LATERAL (
    (SELECT c.*,row_number() OVER (ORDER BY c.id)=128 FROM (
