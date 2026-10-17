@@ -131,6 +131,10 @@ class CoverageTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(owners(f'internal/parentbenefits/{name}', config), ['S6'])
 
+    def test_impact_ci_worker_measurements_belong_to_platform_ci(self):
+        config = load(HERE / 'slices.json')
+        self.assertEqual(owners('research/impact-ci-workers/measurements.json', config), ['S7'])
+
 
 class MergeTests(unittest.TestCase):
     def test_tool_theme_sampling_and_individual_override(self):

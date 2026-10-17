@@ -399,6 +399,7 @@
         "api/areas/delivery-admission.yaml",
         "deploy/**",
         "docs/**",
+        "research/impact-ci-workers/**",
         "Dockerfile",
         "justfile",
         "Makefile",
