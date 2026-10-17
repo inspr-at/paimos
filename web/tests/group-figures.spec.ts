@@ -319,22 +319,24 @@ test('AEON-1388 phones: one muted line after the name, at most three facts in or
   await expect(labels(page)).toHaveText(['QA', 'In progress', 'Backlog', 'New'])
 })
 
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
-  test(`AEON-1388 grouped list at ${width} px, ${theme}: figures or the phone line, still on hover`, async ({ page }, testInfo) => {
-    const { errors } = await open(page, { width, theme })
-    if (width > 720) {
-      await expect(cell(page, 'In progress', 'estimate')).toHaveText('~7.5h')
-      const watch = { head: keyHead(page), row: groupRow(page, 'In progress'), estimate: cell(page, 'In progress', 'estimate'), first: rows(page).first() }
+for (const width of [1440, 1024, 390]) {
+  test(`AEON-1388 grouped list at ${width} px, light and dark: figures or the phone line, still on hover`, async ({ page }, testInfo) => {
+    for (const theme of ['light', 'dark'] as const) {
+      const { errors } = await open(page, { width, theme })
+      if (width > 720) {
+        await expect(cell(page, 'In progress', 'estimate')).toHaveText('~7.5h')
+        const watch = { head: keyHead(page), row: groupRow(page, 'In progress'), estimate: cell(page, 'In progress', 'estimate'), first: rows(page).first() }
+        await page.mouse.move(5, 5)
+        const before = await boxes(watch)
+        await keyHead(page).hover()
+        await groupRow(page, 'In progress').hover()
+        same(before, await boxes(watch))
+      } else {
+        await expect(groupRow(page, 'In progress').locator('.group-facts')).toHaveText('· 2 working · 2 stale · ~7.5h')
+      }
       await page.mouse.move(5, 5)
-      const before = await boxes(watch)
-      await keyHead(page).hover()
-      await groupRow(page, 'In progress').hover()
-      same(before, await boxes(watch))
-    } else {
-      await expect(groupRow(page, 'In progress').locator('.group-facts')).toHaveText('· 2 working · 2 stale · ~7.5h')
+      await page.screenshot({ path: testInfo.outputPath(`aeon-1388-${width}-${theme}.png`), fullPage: false })
+      expect(errors).toEqual([])
     }
-    await page.mouse.move(5, 5)
-    await page.screenshot({ path: testInfo.outputPath(`aeon-1388-${width}-${theme}.png`), fullPage: false })
-    expect(errors).toEqual([])
   })
 }
