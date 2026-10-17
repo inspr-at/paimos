@@ -4680,6 +4680,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestCurrentOwnerStampIsPublishable","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestDeployRecordCommandAndFailures","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestDiscoveredUsageSurvivesRestartWithoutChangingCursor","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestDoctorHarnessImportsAreBounded","tier":"GATED-FULL"}
@@ -6203,6 +6205,14 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWorkQueueConcurrentClaimOwnsSlugOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWorkQueueShadowRotationFreezeReplayAndIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeployRecordConcurrentConfirmationIsIdempotent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeployRecordDeliversMergedLeavesAndReplays","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeployRecordFailsAtomicallyAndRechecksAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeploymentAncestryRequiresRepositoryAndExactMergeBase","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderConfirmsMissingPull","tier":"ESSENTIAL"}
     ,
