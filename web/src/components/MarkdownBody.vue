@@ -204,12 +204,9 @@ function click(event: MouseEvent) {
 .markdown-body :deep(:not(pre) > code), .markdown-body :deep(.md-ticket > .inline) { display: inline; min-height: 0; margin-block: 0; padding-block: .5px; -webkit-box-decoration-break: clone; box-decoration-break: clone; line-height: inherit; vertical-align: baseline; }
 /* Inline code is a quiet tint; only code blocks keep a frame. */
 .markdown-body :deep(:not(pre) > code) { padding-inline: 4px; border-radius: 4px; background: var(--code-bg); color: var(--ink); }
-/* A key is one word. On a phone its link keeps a 44 px target that lies outside the layout. */
+/* A key is one word. Its target is its line, like any link in prose: a taller hit box would cover
+   the words on the lines above and below. */
 .markdown-body :deep(.md-ticket > .inline) { white-space: nowrap; }
-@media (max-width: 600px) {
-  .markdown-body :deep(.md-ticket > a.inline) { position: relative; }
-  .markdown-body :deep(.md-ticket > a.inline::after) { content: ''; position: absolute; inset-inline: 0; top: 50%; height: 44px; translate: 0 -50%; }
-}
 .markdown-body :deep(pre code) { font-size: .88em; }
 /* A quote reads as typography: indented on a quiet tint, no coloured rule (rule 11). */
 .markdown-body :deep(blockquote) { margin: 0 0 1em 12px; padding: 8px 14px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); }
