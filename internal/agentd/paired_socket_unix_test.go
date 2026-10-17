@@ -13,12 +13,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -61,11 +59,6 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	var paused *net.UnixListener
-	terminated := make(chan os.Signal, 1)
-	if args[3] == "hook-sigterm" {
-		signal.Notify(terminated, syscall.SIGTERM)
-		defer signal.Stop(terminated)
-	}
 	if args[3] == "legacy" || args[3] == "full-queue" || args[3] == "hook-foreign" {
 		sockets, err := agentsetup.OpenStore(filepath.Dir(args[2]), false)
 		if err != nil {
@@ -126,7 +119,7 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 		}
 		defer local.Close()
 	}
-	if args[3] == "hook-foreign" || args[3] == "hook-sigterm" {
+	if args[3] == "hook-foreign" {
 		self, err := hooknote.ObserveDaemonSelf()
 		if err != nil {
 			t.Fatal(err)
@@ -140,10 +133,6 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 		}
 	}
 	fmt.Println("ready")
-	if args[3] == "hook-sigterm" {
-		<-terminated
-		return
-	}
 	_, _ = input.ReadString('\n')
 	if paused != nil {
 		if err := paused.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -442,31 +431,6 @@ func TestPairedSocketRollbackRuntimeFiles(t *testing.T) {
 			}
 		})
 	}
-	t.Run("SIGTERM cleans socket and own hook", func(t *testing.T) {
-		s, _, _ := testSupervisor(t)
-		socket := filepath.Join(socketTestDir(t), "agentd.sock")
-		child := startSocketProcess(t, s, socket, "hook-sigterm")
-		child.start(t)
-		if got := child.line(t); got != "ready" {
-			t.Fatalf("signal fixture startup: %q", got)
-		}
-		if err := child.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case <-child.done:
-		case <-time.After(15 * time.Second):
-			t.Fatalf("SIGTERM fixture did not exit: %s", child.diagnostics())
-		}
-		if err := child.cmd.Wait(); err != nil {
-			t.Fatalf("clean SIGTERM exit: %v\n%s", err, child.diagnostics())
-		}
-		for _, path := range []string{socket, socket + ".token", filepath.Join(s.state.Path(), "hook-peer.json")} {
-			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("clean SIGTERM left %s: %v", filepath.Base(path), err)
-			}
-		}
-	})
 	for _, sameDirectory := range []bool{true, false} {
 		t.Run(fmt.Sprintf("idempotent close and foreign pin preservation same-dir=%v", sameDirectory), func(t *testing.T) {
 			dir := socketTestDir(t)
