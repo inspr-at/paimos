@@ -286,9 +286,9 @@ test('grouping by assignee, priority and label counts its groups; groups collaps
   await expect(grid(page).locator('.group-row .group-label')).toHaveText(['BUG', 'docs', 'ops', 'No labels'])
   await expect(grid(page).locator('tr[id="row-n-1"]')).toHaveCount(1)
   await expect(rows(page).filter({ hasText: 'PHAROS-11' })).toHaveCount(2)
-  await display.getByRole('button', { name: 'Collapse groups' }).click()
+  await display.getByRole('button', { name: 'Collapse all', exact: true }).click()
   await expect(rows(page)).toHaveCount(0)
-  await display.getByRole('button', { name: 'Expand groups' }).click()
+  await display.getByRole('button', { name: 'Expand all', exact: true }).click()
   await expect(rows(page)).toHaveCount(6)
 })
 

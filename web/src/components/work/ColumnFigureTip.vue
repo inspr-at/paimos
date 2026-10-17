@@ -11,17 +11,20 @@ import { fill, workFiguresText } from '../../lib/workFiguresText'
 import MeasuredMark from './MeasuredMark.vue'
 import PriorityIcon from './PriorityIcon.vue'
 
-const props = defineProps<{ columnId: string; label: string; sortable: boolean; figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean; now: number; modelName?: (id: string) => string }>()
+// hint replaces the plain sort hint (the group order and the order inside groups, AEON-1390); title names a group whose
+// own figures these are (AEON-1388), in place of the hint.
+const props = defineProps<{ columnId: string; label: string; sortable: boolean; figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean; now: number; modelName?: (id: string) => string; hint?: string; title?: string }>()
 const text = workFiguresText()
 const def = computed(() => figureColumn(props.columnId, props.figures))
 const tip = computed(() => props.figures && def.value ? columnTip(props.columnId as ColumnId, props.figures, { hiddenRows: props.hiddenRows, now: props.now, text, modelName: props.modelName }) : null)
-const hint = computed(() => `${fill(text.sortBy, { column: props.label.toLowerCase() })}\n${text.shiftSort}`)
+const hint = computed(() => props.hint ?? `${fill(text.sortBy, { column: props.label.toLowerCase() })}\n${text.shiftSort}`)
 </script>
 
 <template>
-  <p v-if="sortable" class="wf-hint">{{ hint }}</p>
+  <p v-if="title" class="wf-ttl">{{ title }}</p>
+  <p v-else-if="sortable" class="wf-hint">{{ hint }}</p>
   <template v-if="def">
-    <div v-if="sortable" class="wf-rule" aria-hidden="true" />
+    <div v-if="sortable || title" class="wf-rule" aria-hidden="true" />
     <template v-if="tip">
       <template v-for="(line, index) in tip.lines" :key="index">
         <div v-if="line" class="wf-line" :class="{ head: line.head, sub: line.sub }">

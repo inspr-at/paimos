@@ -7,9 +7,11 @@ import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
-import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
+import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
-import { selectLoadedGroup, type GroupBy, type RowGroup, type EpicRef, type TicketRow } from '../../lib/ticketList'
+import { groupOrderTip, rowOrderTip, selectLoadedGroup, type GroupBy, type RowGroup, type EpicRef, type TicketRow } from '../../lib/ticketList'
+import { GROUP_COLUMN, groupCellText, groupTipTitle, peopleText, phoneFacts, rowCount } from '../../lib/groupFigures'
+import type { GroupFigureState } from '../../lib/useGroupFigures'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { isWorkParent, workIcon, workLabel } from '../../lib/workVocabulary'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, ticketPath, type SortField, type SortKey } from '../../lib/work'
@@ -38,6 +40,7 @@ import { figureColumn } from '../../lib/workFigures'
 import type { ProjectFigures } from '../../lib/api'
 import FigureTip from './FigureTip.vue'
 import ColumnFigureTip from './ColumnFigureTip.vue'
+import LiveBot from '../projects/LiveBot.vue'
 
 const NO_WORKERS: LiveAgent[] = []
 
@@ -103,6 +106,10 @@ const props = defineProps<{
   // Column header figures (AEON-1358): the view's figures object (null while it is counted), why it could not be
   // counted, and whether Hide closed hides rows of this view. Without it, headers show the plain sort hint.
   columnFigures?: { figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean } | null
+  // Grouped lists (AEON-1390): the groups run in reverse of their natural order.
+  groupDesc?: boolean
+  // Group summaries (AEON-1388): each group's figures, by group key. With them, a group row is a totals line.
+  groupFigures?: ReadonlyMap<string, GroupFigureState> | null
 }>()
 // Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
 const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
@@ -137,6 +144,10 @@ const emit = defineEmits<{
   moreInGroup: [key: string]
   release: [row: ListItem, anchor: HTMLElement]
   showUpdates: []
+  // Every group open (true) or folded (false): the header's first cell, Alt-click on a group chevron.
+  allGroups: [open: boolean]
+  // The grouped-by column's header flips the group order (AEON-1390).
+  flipGroups: []
 }>()
 
 const instance = getCurrentInstance()
@@ -227,7 +238,103 @@ function headFocus(event: FocusEvent, id: string) {
 }
 function headBlur(event: FocusEvent) { closeFigureTip(event.currentTarget as HTMLElement) }
 const sortHint = (label: string) => 'Sort by ' + label.toLowerCase() + '\nShift-click adds a secondary sort'
-onBeforeUnmount(() => { if (figureTip.owner.startsWith(COLUMN_TIP)) closeFigureTip() })
+onBeforeUnmount(() => { if (figureTip.owner.startsWith(COLUMN_TIP) || figureTip.owner.startsWith(GROUP_TIP)) closeFigureTip() })
+
+// ---------- One header sort model (AEON-1390): the grouped-by column orders the groups, every other column the rows ----------
+const grouped = computed(() => props.group !== 'none' && !props.outline)
+const groupedColumn = computed(() => grouped.value ? GROUP_COLUMN[props.group] ?? null : null)
+const groupsFlip = (id: string) => !props.sortDisabled && id === groupedColumn.value && !!instance?.vnode.props?.onFlipGroups
+function headClick(event: MouseEvent, column: { id: string; field: SortField | null }) {
+  if (groupsFlip(column.id)) { emit('flipGroups'); return }
+  if (column.field) emit('sort', column.field, event.shiftKey)
+}
+// The hint the header gives first: the group order on the grouped-by column, the order inside each group on the
+// row-sort column of a grouped list, the plain sort hint otherwise.
+function headHint(column: { id: string; label: string; field: SortField | null }): string {
+  if (groupsFlip(column.id)) return groupOrderTip(props.group, !!props.groupDesc)
+  const sorted = sortOf(column.field)
+  if (column.id === 'key' && sorted && !grouped.value) return `Sorted by key, ${sorted.desc ? 'descending' : 'ascending'}`
+  if (sorted && grouped.value) return `${rowOrderTip(sorted)}\nShift-click adds a secondary sort`
+  return column.id === 'key' && !sorted ? 'Sort by key\nShift-click adds a secondary sort' : sortHint(column.label)
+}
+
+// The header tip's first line when it is not the plain sort hint.
+const tipHint = computed(() => {
+  const column = tipColumn.value
+  return column && (groupsFlip(column.id) || column.id === 'key' || (grouped.value && sortOf(column.field))) ? headHint(column) : undefined
+})
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+
+// ---------- The header's first cell (AEON-1388 §3): expand/collapse all, select all and sort by key in fixed slots ----------
+// At rest it reads KEY with its sort arrow; on hover of this cell, keyboard focus in it, an active selection or a coarse
+// pointer the three controls show in their slots instead. Only visibility changes; nothing moves.
+const foldSlot = computed(() => grouped.value && !!instance?.vnode.props?.onAllGroups)
+const anyOpen = computed(() => props.groups.some(group => !props.collapsed.has(group.key)))
+const foldLabel = computed(() => german.value ? (anyOpen.value ? 'Alle Gruppen zuklappen' : 'Alle Gruppen aufklappen') : (anyOpen.value ? 'Collapse all groups' : 'Expand all groups'))
+// The slots' left edges in the cell: the chevron and checkbox right above the group rows' own (8 px in, 8 px apart), or
+// without groups the checkbox above the rows' checkboxes; the sort control follows. 24 px each, 44 px on a coarse pointer.
+const keySlots = computed(() => {
+  const size = coarse.value ? 44 : 24
+  const fold = 8
+  const check = foldSlot.value ? fold + size + 8 : Math.max(0, 18 - size / 2)
+  const sort = props.selectable ? check + size + (foldSlot.value ? 8 : 6) : foldSlot.value ? fold + size + 8 : 12
+  return { size, fold, check, sort, min: sort + size + 12 }
+})
+
+// ---------- Group summaries (AEON-1388): one quiet totals line per group, in the columns' own cells ----------
+// Figures come from the group's figures object (the header's function for the view narrowed to the group); who is
+// working, live progress and stale come from the group's rows, as the rows show them.
+const GROUP_TIP = 'grp:'
+const figuresRow = computed(() => !!props.groupFigures && grouped.value && !phone.value)
+const progressLive = (row: ListItem) => { const progress = progressOf(row); return !!progress && !progress.stale && workersOf(row).length > 0 }
+const groupFacts = computed(() => {
+  const out = new Map<string, { cells: Record<string, string>; agents: LiveAgent[]; moreAgents: number; working: string; people: string; live: string; stale: string; phone: [string, string][]; failed: string | null }>()
+  if (!props.groupFigures || !grouped.value) return out
+  const ctx = { now: props.now, grouped: groupedColumn.value, modelName: groupModelName.value }
+  for (const group of props.groups) {
+    const state = props.groupFigures.get(group.key) ?? null
+    const figures = state?.figures ?? null
+    const complete = !group.hasMore && group.rows.length >= group.total
+    const workingRows = group.rows.filter(row => workersOf(row).length > 0)
+    const agents = new Map<string, LiveAgent>()
+    for (const row of workingRows) for (const agent of workersOf(row)) agents.set(agentKey(agent), agent)
+    const staleRows = group.rows.filter(row => queue.stale(row)).length
+    const liveRows = group.rows.filter(progressLive).length
+    const cells: Record<string, string> = {}
+    for (const column of columns.value.slice(2)) cells[column.id] = groupCellText(column.id, figures, ctx)
+    const working = workingRows.length ? rowCount(workingRows.length, complete) : ''
+    const stale = staleRows ? rowCount(staleRows, complete) : ''
+    out.set(group.key, {
+      cells, agents: [...agents.values()].slice(0, 3), moreAgents: Math.max(0, agents.size - 3), working,
+      people: working ? '' : peopleText(figures), live: liveRows ? `${rowCount(liveRows, complete)} live` : '', stale,
+      phone: phoneFacts({ working, stale, estimate: groupCellText('estimate', figures, { ...ctx, grouped: null }) }), failed: state?.failed ?? null,
+    })
+  }
+  return out
+})
+const groupModelName = computed(() => has('model') ? shownModelNames(props.rowsById.values(), modelDisplay.value) : undefined)
+// A group cell's figure tip: its column's header figures for the group's own figures object, titled with the group.
+const tipGroup = computed(() => {
+  if (!props.groupFigures || !figureTip.anchor || !figureTip.owner.startsWith(GROUP_TIP)) return null
+  const [groupKey, columnId] = figureTip.owner.slice(GROUP_TIP.length).split('\u0000')
+  const group = props.groups.find(entry => entry.key === groupKey), column = columns.value.find(entry => entry.id === columnId)
+  if (!group || !column) return null
+  const state = props.groupFigures.get(group.key)
+  return { group, column, figures: state?.figures ?? null, failed: state?.failed ?? null, title: groupTipTitle(groupName(group), group.total) }
+})
+const tipWide = (id: string, figures: ProjectFigures | null) => { const def = figureColumn(id, figures); return def ? def.wide ? 'wide' : 'fig' : 'auto' }
+function groupCellEnter(event: PointerEvent, group: RowGroup, id: string) {
+  if (event.pointerType === 'mouse' && figureColumn(id, props.groupFigures?.get(group.key)?.figures ?? null)) hoverFigureTip(event.currentTarget as HTMLElement, `${GROUP_TIP}${group.key}\u0000${id}`, 'above', GROUP_TIP)
+}
+function groupCellLeave(event: PointerEvent) {
+  if (event.pointerType !== 'mouse') return
+  cancelFigureTip(); closeFigureTip(event.currentTarget as HTMLElement)
+}
+// Option/Alt-click on any group chevron folds or opens every group (as in Finder).
+function groupToggleClick(event: MouseEvent, key: string) {
+  if (event.altKey && instance?.vnode.props?.onAllGroups) { emit('allGroups', props.collapsed.has(key)); return }
+  void toggleGroup(key)
+}
 
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
 const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({
@@ -236,7 +343,7 @@ const columns = computed(() => withHostColumns(layout.value.columns, props.extra
   // gap). Custom titles keep their own room, without clipping host actions.
   // Also reserve the extra touch arrow/action reach (26px + 40px).
   // Saved tablet layouts can scroll inside the card.
-  min: def.min + (def.id === 'title' ? (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0) : 0),
+  min: def.id === 'key' ? Math.max(def.min, keySlots.value.min) : def.min + (def.id === 'title' ? (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0) : 0),
   field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host',
 })))
 const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
@@ -701,31 +808,52 @@ defineExpose({
       </colgroup>
       <thead>
         <tr>
-          <th v-for="column in columns" :key="column.id" scope="col" :data-column-id="column.id" :class="[column.cls, { end: column.end }]" :aria-sort="ariaSort(column.field)">
-            <input
-              v-if="column.id === 'key' && selectable" type="checkbox" class="row-check head-check" :class="{ shown: selecting }" :checked="allChecked"
-              :indeterminate="!!selected?.size && !allChecked" :disabled="selectionDisabled" :aria-label="allChecked ? 'Clear the selection' : 'Select all loaded tickets'" aria-keyshortcuts="Control+A Meta+A"
-              @change="emit('selectAll', ($event.target as HTMLInputElement).checked)"
-            />
+          <th
+            v-for="column in columns" :key="column.id" scope="col" :data-column-id="column.id" :class="[column.cls, { end: column.end, 'key-head': column.id === 'key', 'group-head-col': groupsFlip(column.id) }]" :aria-sort="ariaSort(column.field)"
+            :style="column.id === 'key' ? { '--slot': `${keySlots.size}px`, '--fold-x': `${keySlots.fold}px`, '--check-x': `${keySlots.check}px`, '--sort-x': `${keySlots.sort}px`, '--rest-x': selectable ? '36px' : '18px' } : undefined"
+          >
+            <!-- The first cell's slots (AEON-1388 §3): expand/collapse all above the group chevrons, select all above the group (or row) checkboxes. -->
+            <template v-if="column.id === 'key'">
+              <button v-if="foldSlot" type="button" class="key-slot key-fold" :class="{ folded: !anyOpen }" :aria-label="foldLabel" :aria-expanded="anyOpen" :data-tip="foldLabel" @click="emit('allGroups', !anyOpen)"><AppIcon name="chevron" :size="14" /></button>
+              <label v-if="selectable" class="key-slot key-check">
+                <input
+                  type="checkbox" class="head-check" :checked="allChecked" :indeterminate="!!selected?.size && !allChecked" :disabled="selectionDisabled"
+                  :aria-label="allChecked ? 'Clear the selection' : 'Select all loaded tickets'" aria-keyshortcuts="Control+A Meta+A" @change="emit('selectAll', ($event.target as HTMLInputElement).checked)"
+                />
+              </label>
+            </template>
             <button
-              v-if="column.field && !sortDisabled" type="button" class="th-sort" :class="{ on: sortOf(column.field) }" :data-tip="headFigures(column.id) ? undefined : sortHint(column.label)"
-              :aria-describedby="tipColumn?.id === column.id ? 'figure-tip' : undefined" @click="event => emit('sort', column.field!, event.shiftKey)"
+              v-if="(column.field || groupsFlip(column.id)) && !sortDisabled" type="button" class="th-sort" :class="{ on: sortOf(column.field) || groupsFlip(column.id), 'key-sort': column.id === 'key' }"
+              :aria-label="column.id === 'key' ? column.label : undefined" :data-tip="headFigures(column.id) ? undefined : headHint(column)"
+              :aria-describedby="tipColumn?.id === column.id ? 'figure-tip' : undefined" @click="event => headClick(event, column)"
               @pointerenter="event => headFigures(column.id) && headEnter(event, column.id)" @pointerleave="headLeave" @focus="event => headFigures(column.id) && headFocus(event, column.id)" @blur="headBlur"
             >
-              <span>{{ column.label }}</span>
-              <span class="sort-mark" aria-hidden="true">
-                <template v-if="sortOf(column.field)">
-                  <AppIcon :name="sortOf(column.field)!.desc ? 'arrow-down' : 'arrow-up'" :size="11" />
-                  <span v-if="sort.length > 1" class="sort-index">{{ sortOf(column.field)!.index + 1 }}</span>
-                </template>
-                <AppIcon v-else-if="!sort.length && column.field === 'updated_at'" name="arrow-down" :size="11" class="default-sort" />
-              </span>
+              <!-- Sort by key: KEY with its arrow at rest; the sort control in its slot while the cell's controls show. -->
+              <template v-if="column.id === 'key'">
+                <span class="key-rest">
+                  <span>{{ column.label }}</span>
+                  <span class="sort-mark" aria-hidden="true"><template v-if="sortOf(column.field)"><AppIcon :name="sortOf(column.field)!.desc ? 'arrow-down' : 'arrow-up'" :size="11" /><span v-if="sort.length > 1" class="sort-index">{{ sortOf(column.field)!.index + 1 }}</span></template></span>
+                </span>
+                <span class="key-icon" :class="{ on: sortOf(column.field) }" aria-hidden="true"><AppIcon :name="sortOf(column.field) ? (sortOf(column.field)!.desc ? 'arrow-down' : 'arrow-up') : 'sort'" :size="13" /></span>
+              </template>
+              <template v-else>
+                <span>{{ column.label }}</span>
+                <span class="sort-mark" :class="{ groups: groupsFlip(column.id) }" aria-hidden="true">
+                  <!-- The grouped-by column orders the groups: its arrow carries a small group mark (AEON-1390). -->
+                  <template v-if="groupsFlip(column.id)"><AppIcon :name="groupDesc ? 'arrow-down' : 'arrow-up'" :size="11" /><AppIcon name="layers" :size="9" class="group-mark" /></template>
+                  <template v-else-if="sortOf(column.field)">
+                    <AppIcon :name="sortOf(column.field)!.desc ? 'arrow-down' : 'arrow-up'" :size="11" />
+                    <span v-if="sort.length > 1" class="sort-index">{{ sortOf(column.field)!.index + 1 }}</span>
+                  </template>
+                  <AppIcon v-else-if="!sort.length && column.field === 'updated_at'" name="arrow-down" :size="11" class="default-sort" />
+                </span>
+              </template>
             </button>
             <span
-              v-else-if="headFigures(column.id) && column.id !== 'title'" class="th-label figures" tabindex="0" :aria-describedby="tipColumn?.id === column.id ? 'figure-tip' : undefined"
+              v-else-if="headFigures(column.id) && column.id !== 'title'" class="th-label figures" :class="{ 'key-rest': column.id === 'key' }" tabindex="0" :aria-describedby="tipColumn?.id === column.id ? 'figure-tip' : undefined"
               @pointerenter="event => headEnter(event, column.id)" @pointerleave="headLeave" @focus="event => headFocus(event, column.id)" @blur="headBlur"
             >{{ column.label }}</span>
-            <span v-else class="th-label">{{ column.label }}</span>
+            <span v-else class="th-label" :class="{ 'key-rest': column.id === 'key' }">{{ column.label }}</span>
             <button
               v-if="column.id === 'title' && livePill" type="button" class="live-pill" :aria-label="livePill.text" aria-keyshortcuts="u"
               :data-tip="livePill.overflow ? 'Load the list again' : 'Show the updates · u'" @click.stop="emit('showUpdates')"
@@ -757,10 +885,13 @@ defineExpose({
       <tbody v-for="section in sections" v-else :key="section.key" :class="{ dim: loading }">
         <template v-for="entry in section.entries" :key="entry.key">
           <!-- List grouping header (status or epic) -->
-          <tr v-if="entry.type === 'list-group'" :id="`row-group-${entry.group.key}`" class="group-row" :class="{ collapsed: collapsed.has(entry.group.key) }">
-            <th :colspan="columns.length" scope="rowgroup">
+          <tr v-if="entry.type === 'list-group'" :id="`row-group-${entry.group.key}`" class="group-row" :class="{ collapsed: collapsed.has(entry.group.key), totals: figuresRow }">
+            <th :colspan="figuresRow ? 2 : columns.length" scope="rowgroup">
               <div class="group-head">
-                <button type="button" class="group-toggle" :aria-expanded="!collapsed.has(entry.group.key)" :aria-label="german ? `${groupName(entry.group)} ${collapsed.has(entry.group.key) ? 'aufklappen' : 'zuklappen'}` : `${collapsed.has(entry.group.key) ? 'Expand' : 'Collapse'} ${groupName(entry.group)}`" @click="toggleGroup(entry.group.key)">
+                <button
+                  type="button" class="group-toggle" :aria-expanded="!collapsed.has(entry.group.key)" :aria-label="german ? `${groupName(entry.group)} ${collapsed.has(entry.group.key) ? 'aufklappen' : 'zuklappen'}` : `${collapsed.has(entry.group.key) ? 'Expand' : 'Collapse'} ${groupName(entry.group)}`"
+                  :data-tip="instance?.vnode.props?.onAllGroups ? (mac ? '⌥-click: every group' : 'Alt-click: every group') : undefined" @click="groupToggleClick($event, entry.group.key)"
+                >
                   <AppIcon name="chevron" :size="14" />
                 </button>
                 <label v-if="selectable" class="group-check-target">
@@ -819,10 +950,30 @@ defineExpose({
                   <span class="group-label muted">{{ entry.group.label }}</span>
                   <span class="group-count mono">{{ entry.group.total }}</span>
                 </template>
+                <template v-if="groupFacts.get(entry.group.key)">
+                  <!-- Stale after the name (AEON-1388 §1); a phone has one muted line of at most three facts instead (§2). -->
+                  <span v-if="!phone && groupFacts.get(entry.group.key)!.stale" class="group-stale mono" data-tip="In progress, but nobody is working on it">· {{ groupFacts.get(entry.group.key)!.stale }} <span class="attn">stale</span></span>
+                  <span v-if="phone && groupFacts.get(entry.group.key)!.phone.length" class="group-facts mono"><template v-for="[value, word] in groupFacts.get(entry.group.key)!.phone" :key="word || value"> · {{ value }}<template v-if="word"> <span :class="{ attn: word === 'stale' }">{{ word }}</span></template></template></span>
+                </template>
                 <span class="group-spacer" />
                 <span v-if="$slots['group-end']" class="group-end"><slot name="group-end" :group="entry.group" /></span>
               </div>
             </th>
+            <!-- The group's figures, each in its own column's cell, like a totals line (AEON-1388 §1). -->
+            <template v-if="figuresRow">
+              <td v-for="column in columns.slice(2)" :key="column.id" class="group-fig" :class="[column.cls, { end: column.end }]" :data-group-column="column.id">
+                <div class="gf-cell" @pointerenter="groupCellEnter($event, entry.group, column.id)" @pointerleave="groupCellLeave">
+                  <span v-if="column.id === groupedColumn" class="gf-text" />
+                  <template v-else-if="column.id === 'assignee' && groupFacts.get(entry.group.key)?.working">
+                    <span class="gf-agents" aria-hidden="true"><LiveBot v-for="agent in groupFacts.get(entry.group.key)!.agents" :id="agent.principal_id" :key="agentKey(agent)" :state="agent.state" :harness="agent.harness" :size="16" /><span v-if="groupFacts.get(entry.group.key)!.moreAgents" class="gf-more">+{{ groupFacts.get(entry.group.key)!.moreAgents }}</span></span>
+                    <span class="gf-text">{{ groupFacts.get(entry.group.key)!.working }} working</span>
+                  </template>
+                  <span v-else-if="column.id === 'assignee'" class="gf-text">{{ groupFacts.get(entry.group.key)?.people }}</span>
+                  <span v-else-if="column.id === 'progress'" class="gf-text">{{ groupFacts.get(entry.group.key)?.live }}</span>
+                  <span v-else class="gf-text">{{ groupFacts.get(entry.group.key)?.cells[column.id] }}</span>
+                </div>
+              </td>
+            </template>
           </tr>
           <tr v-else-if="entry.type === 'group-more'" class="more-row group-more">
             <td :colspan="columns.length"><div class="cell">
@@ -1050,8 +1201,14 @@ defineExpose({
     </table>
     <FigureTip v-if="tipColumn && columnFigures" :width="tipWidth">
       <ColumnFigureTip
-        :column-id="tipColumn.id" :label="tipColumn.label" :sortable="!!tipColumn.field && !sortDisabled" :figures="columnFigures.figures" :failed="columnFigures.failed"
+        :column-id="tipColumn.id" :label="tipColumn.label" :sortable="(!!tipColumn.field || groupsFlip(tipColumn.id)) && !sortDisabled" :hint="tipHint" :figures="columnFigures.figures" :failed="columnFigures.failed"
         :hidden-rows="columnFigures.hiddenRows" :now="now" :model-name="tipModelName"
+      />
+    </FigureTip>
+    <FigureTip v-else-if="tipGroup" :width="tipWide(tipGroup.column.id, tipGroup.figures)">
+      <ColumnFigureTip
+        :column-id="tipGroup.column.id" :label="tipGroup.column.label" :sortable="false" :title="tipGroup.title" :figures="tipGroup.figures" :failed="tipGroup.failed"
+        :hidden-rows="columnFigures?.hiddenRows ?? false" :now="now" :model-name="groupModelName"
       />
     </FigureTip>
 
@@ -1094,7 +1251,7 @@ defineExpose({
 <style scoped>
 .person-waiting { display: inline-grid; place-items: center; flex: 0 0 16px; inline-size: 16px; block-size: 16px; color: var(--ink-3); }
 .table-card {
-  --row-h: 36px;
+  --row-h: 36px; --head-h: 35px;
   position: relative; border-radius: var(--radius); border: 1px solid var(--glass-edge); overflow: clip;
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow);
   container: tickets / inline-size;
@@ -1103,7 +1260,7 @@ defineExpose({
 /* Touch tablets need a full 44px content line plus the row's hairline.
    Both densities keep hit targets inside their row; fine pointers stay dense. */
 @media (min-width: 721px) and (pointer: coarse) {
-  .table-card, .table-card.compact { --row-h: 45px; }
+  .table-card, .table-card.compact { --row-h: 45px; --head-h: 46px; }
 }
 .tickets { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13.5px; }
 .tickets:focus-visible { box-shadow: none; }
@@ -1116,7 +1273,7 @@ defineExpose({
 }
 /* Column widths live on the colgroup (saved per person); Title takes the rest. */
 thead th {
-  position: sticky; top: var(--toolbar-h, 0px); z-index: 2; height: 34px; padding: 0 12px; text-align: left; font-weight: 500;
+  position: sticky; top: var(--toolbar-h, 0px); z-index: 2; height: calc(var(--head-h) - 1px); padding: 0 12px; text-align: left; font-weight: 500;
   background: var(--surface-raised-2); border-bottom: 1px solid var(--line-2);
   -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15);
 }
@@ -1130,6 +1287,9 @@ thead th:first-child { padding-left: 18px; }
 .th-label.figures:hover { color: var(--ink); background: var(--row-hover); }
 .sort-mark { display: inline-flex; align-items: center; gap: 1px; min-width: 11px; }
 .sort-index { font-size: 9px; letter-spacing: 0; }
+/* The grouped-by column's arrow orders the groups; a small group mark tells it from the rows' arrow (AEON-1390). */
+.sort-mark.groups { gap: 2px; }
+.group-mark { opacity: .75; }
 .default-sort { opacity: .55; }
 thead th.end { text-align: right; }
 thead th.end .th-sort { flex-direction: row-reverse; }
@@ -1159,14 +1319,42 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .selectable thead th:first-child, .selectable .ticket-row td:first-child { padding-left: 10px; }
 .selectable .c-key .cell { gap: 10px; }
 .row-check { flex-shrink: 0; width: 16px; height: 16px; margin: 0; accent-color: var(--teal); opacity: 0; transition: opacity .1s ease; cursor: pointer; }
-.head-check { margin-right: 10px; vertical-align: middle; }
-.ticket-row:hover .row-check, .ticket-row.selected .row-check, .ticket-row.cursor .row-check, .selecting .row-check, thead th:hover .head-check, .head-check.shown, .row-check:focus-visible { opacity: 1; }
+.ticket-row:hover .row-check, .ticket-row.selected .row-check, .ticket-row.cursor .row-check, .selecting .row-check, .row-check:focus-visible { opacity: 1; }
 .row-check:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 @media (hover: none) { .row-check { opacity: 1; } .table-card:not(.selecting) .row-check { display: none; } .selectable:not(.selecting) .ticket-row td:first-child { padding-left: 18px; } }
 @media (max-width: 720px) { .table-card:not(.selecting) .row-check { display: none; } .row-check { opacity: 1; } }
 .ticket-row.selected td { background: var(--row-selected); }
 .ticket-row.selected .key { color: var(--teal-ink); }
 .ticket-row.selected { outline: 1px solid var(--chip-teal-line); outline-offset: -1px; }
+
+/* ---------- The header's first cell (AEON-1388 §3): expand/collapse all, select all and sort by key in fixed slots ----------
+   At rest KEY keeps its place and its sort arrow. On hover of this cell, keyboard focus in it, an active selection or a
+   coarse pointer the three controls show in their slots and KEY hides. Only visibility changes; no slot ever moves. */
+.tickets thead th.key-head { padding: 0; }
+.key-slot { position: absolute; top: 50%; left: var(--fold-x); z-index: 1; display: grid; place-items: center; width: var(--slot); height: var(--slot); margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); transform: translateY(-50%); visibility: hidden; }
+.key-check { left: var(--check-x); cursor: pointer; }
+.key-fold:hover { color: var(--ink); background: var(--row-hover); }
+.key-fold:focus-visible { box-shadow: var(--focus-ring); }
+.key-fold.folded svg { transform: rotate(-90deg); }
+.head-check { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); cursor: pointer; }
+.head-check:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
+.th-sort.key-sort { position: absolute; top: 50%; left: var(--sort-x); right: 9px; height: max(26px, var(--slot)); margin: 0; padding: 0; transform: translateY(-50%); }
+.th-sort.key-sort:hover, .th-sort.key-sort:active { background: transparent; }
+.th-sort.key-sort:focus-visible { box-shadow: none; }
+.key-rest { position: absolute; top: 50%; left: calc(var(--rest-x) - var(--sort-x)); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; transform: translateY(-50%); }
+.th-label.key-rest { left: var(--rest-x); margin: 0; padding: 0; }
+.key-icon { position: absolute; top: 50%; left: 0; display: grid; place-items: center; width: var(--slot); height: var(--slot); border-radius: 6px; color: var(--ink-3); transform: translateY(-50%); visibility: hidden; }
+.key-icon.on { color: var(--teal-ink); }
+.key-sort:hover .key-icon { background: var(--row-hover); }
+.key-sort:hover .key-icon:not(.on) { color: var(--ink); }
+.key-sort:focus-visible .key-icon { box-shadow: var(--focus-ring); }
+th.key-head:hover > .key-slot, th.key-head:has(:focus-visible) > .key-slot, .selecting th.key-head > .key-slot,
+th.key-head:hover .key-icon, th.key-head:has(:focus-visible) .key-icon, .selecting th.key-head .key-icon { visibility: visible; }
+th.key-head:hover .key-rest, th.key-head:has(:focus-visible) .key-rest, .selecting th.key-head .key-rest { visibility: hidden; }
+@media (pointer: coarse) {
+  th.key-head > .key-slot, th.key-head .key-icon { visibility: visible; }
+  th.key-head .key-rest { visibility: hidden; }
+}
 
 /* ---------- Outline ---------- */
 .tree { position: relative; align-self: stretch; flex-shrink: 0; margin: -1px 0 -1px -4px; }
@@ -1219,12 +1407,12 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .outline-root-drop td { padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised-2); }
 /* Keep the root destination in reach during a drag, without covering ordinary
    row controls while browsing or when a pointer scrolls them into view. */
-.outline-root-drop.drag-active td { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; }
+.outline-root-drop.drag-active td { position: sticky; top: calc(var(--toolbar-h, 0px) + var(--head-h)); z-index: 1; }
 .root-drop-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 36px; padding: 6px 0; font-size: 12px; color: var(--ink-3); }
 .root-drop-hint { margin-left: auto; }
 .outline-root-drop.drop-target td { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
 .drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: linear-gradient(180deg, var(--primary-hi), var(--primary)); color: var(--primary-on); font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--primary-line) 80%, transparent); }
-.outline-group th { top: calc(var(--toolbar-h, 0px) + 35px); }
+.outline-group th { top: calc(var(--toolbar-h, 0px) + var(--head-h)); }
 .more-row td { height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .more-btn { height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
 .more-btn:hover { background: var(--row-hover); }
@@ -1364,7 +1552,19 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .tag-more { flex-shrink: 0; color: var(--ink-3); font-size: 11px; }
 .c-prio.narrow .prio-label { display: none; }
 
-.group-row th { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; height: 36px; padding: 0 12px 0 8px; text-align: left; font-weight: 400; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.group-row th, .group-row td.group-fig { position: sticky; top: calc(var(--toolbar-h, 0px) + var(--head-h)); z-index: 1; height: 36px; text-align: left; font-weight: 400; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.group-row th { padding: 0 12px 0 8px; }
+/* ---------- Group summaries (AEON-1388 §1): a quiet totals line, each figure in its own column's cell ----------
+   12 px, ink-3, tabular; ink-2 while the group row is hovered. Cells only swap text: the row height is fixed. */
+:where(.group-row td.group-fig) { padding: 0 12px; }
+.gf-cell { display: flex; align-items: center; gap: 6px; min-width: 0; height: 35px; white-space: nowrap; color: var(--ink-3); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.group-fig.end .gf-cell { justify-content: flex-end; }
+.gf-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (hover: hover) { .group-row:hover .gf-cell, .group-row:hover .group-stale { color: var(--ink-2); } }
+.gf-agents { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.gf-more { margin-left: 2px; font: 500 11px/1 var(--mono); }
+.group-stale, .group-facts { flex: none; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.attn { color: var(--warn-ink); }
 .group-spacer { flex: 1; min-width: 0; }
 .group-end { display: flex; align-items: center; flex: none; min-width: 0; gap: 8px; }
 .group-check-target { display: grid; place-items: center; flex: none; width: 24px; height: 24px; }
