@@ -86,6 +86,7 @@ func deployMergesTx(ctx context.Context, tx pgx.Tx, project, repository string) 
   ) fact ORDER BY fact.at DESC,fact.sha LIMIT 1
  ) f ON true
  WHERE n.project_id=$1 AND n.deleted_at IS NULL AND k.slug='work'
+ AND regexp_replace(lower(btrim(n.state)), '[[:space:]-]+', '_', 'g')='done'
  ORDER BY n.id LIMIT $3`, project, repository, deploymentLimit+1)
 	if err != nil {
 		return nil, err

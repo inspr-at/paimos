@@ -71,7 +71,7 @@ func deployFixture(t *testing.T) (*fixture, *deployGitHubFixture) {
 	g := &deployGitHubFixture{fakeGitHub: f.gh, known: map[string]bool{strings.Repeat("a", 40): true, strings.Repeat("b", 40): true}, ancestors: map[string]bool{strings.Repeat("a", 40): true}}
 	f.m.github = g
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository) VALUES($1,$2,$3)`, f.person.TenantID, f.project, f.m.config.Repository)
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,$3,$4,$5,$6)`, f.person.TenantID, f.project, f.m.config.Repository, defaultCIWorkflow, defaultNightlyWorkflow, f.at)
 		return err
 	})
 	return f, g
@@ -121,7 +121,16 @@ func TestDeployRecordDeliversMergedLeavesAndReplays(t *testing.T) {
 	noRelease := deployTicket(t, f, "AIT-10", "done", a, repo)
 	active := deployTicket(t, f, "AIT-11", "in_progress", a, repo)
 	undone := deployTicket(t, f, "AIT-12", "done", a, repo)
+	auditOnly := deployTicket(t, f, "AIT-14", "done", "", repo)
+	g.ancestors[strings.Repeat("d", 40)] = true
+	var protectedBefore []byte
 	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(n) ORDER BY n.id) FROM nodes n WHERE n.id=ANY($1::uuid[])`, []string{delivered, accepted}).Scan(&protectedBefore); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at) VALUES($1,$2,$3,14,$4,$5,'merge fixture',true,true,true,'{}',$6)`, f.person.TenantID, repo, strings.Repeat("d", 40), auditOnly, f.project, f.at); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET human_check='Confirm on device' WHERE id=$1`, human); err != nil {
 			return err
 		}
@@ -149,7 +158,7 @@ func TestDeployRecordDeliversMergedLeavesAndReplays(t *testing.T) {
 	if out.EventID < 1 || out.ConfirmedBy != f.agent.ID || out.Project != f.project || out.ConfirmedAt.IsZero() || out.SHA != b || out.Version != in.Version {
 		t.Fatalf("live confirmation missing: %+v", out)
 	}
-	for id, want := range map[string]string{eligible: "delivered", exact: "delivered", delivered: "delivered", accepted: "accepted", unmerged: "done", future: "done", wrongRepo: "done", human: "done", parent: "done", noRelease: "done", active: "in_progress", undone: "done"} {
+	for id, want := range map[string]string{eligible: "delivered", exact: "delivered", delivered: "delivered", accepted: "accepted", unmerged: "done", future: "done", wrongRepo: "done", human: "done", parent: "done", noRelease: "done", active: "in_progress", undone: "done", auditOnly: "delivered"} {
 		if got := mergedState(t, f, id); got != want {
 			t.Errorf("ticket %s: got %s want %s", id, got, want)
 		}
@@ -161,10 +170,17 @@ func TestDeployRecordDeliversMergedLeavesAndReplays(t *testing.T) {
 			t.Fatal("human-check refusal omitted")
 		}
 	}
-	if results[eligible] != "delivered" || results[exact] != "delivered" || results[human] != "skipped" || results[accepted] != "unchanged" || len(results) != 8 {
+	if results[eligible] != "delivered" || results[exact] != "delivered" || results[auditOnly] != "delivered" || results[human] != "skipped" || results[accepted] != "" || len(results) != 6 {
 		t.Fatalf("wrong publication results: %+v", results)
 	}
 	f.tx(t, func(tx pgx.Tx) error {
+		var protectedAfter []byte
+		if err := tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(n) ORDER BY n.id) FROM nodes n WHERE n.id=ANY($1::uuid[])`, []string{delivered, accepted}).Scan(&protectedAfter); err != nil {
+			return err
+		}
+		if string(protectedAfter) != string(protectedBefore) {
+			return errors.New("Delivered or Accepted ticket content or revision changed")
+		}
 		var changed, comments int
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='status_autopilot.changed'),count(*) FILTER(WHERE type='comment.created') FROM events WHERE node_id=$1 AND actor_principal_id=$2 AND metadata->>'rule'='publish'`, eligible, f.agent.ID).Scan(&changed, &comments); err != nil {
 			return err
@@ -208,7 +224,7 @@ func TestDeployRecordDeliversMergedLeavesAndReplays(t *testing.T) {
 func TestDeployRecordFailsAtomicallyAndRechecksAuthority(t *testing.T) {
 	// Risk: malformed/unknown commits, partial reads, failed event writes or
 	// access/source changes during GitHub verification leave false delivery.
-	for _, scenario := range []string{"unknown SHA", "partial read", "permission revoked", "source changed", "audit failed"} {
+	for _, scenario := range []string{"unknown SHA", "partial read", "permission revoked", "source changed", "audit failed", "candidate overflow"} {
 		t.Run(scenario, func(t *testing.T) {
 			f, g := deployFixture(t)
 			a, b := strings.Repeat("a", 40), strings.Repeat("b", 40)
@@ -242,6 +258,18 @@ func TestDeployRecordFailsAtomicallyAndRechecksAuthority(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+			case "candidate overflow":
+				want = 422
+				g.beforeRead = func() { t.Error("overflow reached GitHub verification") }
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `WITH tickets AS (
+ INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title,state)
+ SELECT $1,$2,'AIT-'||(20000+i)::text,k.id,'Overflow ticket','done' FROM node_kinds k CROSS JOIN generate_series(1,1001) i WHERE k.slug='work'
+ RETURNING id)
+ INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,metadata)
+ SELECT $1,$3,id,'delivery.merge_done','{"state":"done"}',jsonb_build_object('repository',$4::text,'merge_sha',$5::text,'merged_at',$6::timestamptz) FROM tickets`, f.person.TenantID, f.project, f.person.ID, f.m.config.Repository, a, f.at)
+					return err
+				})
 			}
 			f.call(t, f.person, "POST", "/api/projects/"+f.project+"/deploys", in, want, nil)
 			if got := mergedState(t, f, id); got != "done" || deployCount(t, f) != 0 {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -48,8 +49,17 @@ func (rt *runtime) cmdDeploy() *Command {
 						Reason string `json:"reason,omitempty"`
 					} `json:"tickets"`
 				}
-				if err := rt.do(http.MethodPost, "/api/projects/"+id+"/deploys", body, &out); err != nil {
+				c, err := rt.api()
+				if err != nil {
 					return err
+				}
+				// Match the server's bounded verification window without changing
+				// other commands or a shared signed-in person's HTTP client.
+				requestClient, transport := *c, *c.HTTP
+				transport.Timeout = 130 * time.Second
+				requestClient.HTTP = &transport
+				if err := requestClient.Do(rt.context(), http.MethodPost, "/api/projects/"+id+"/deploys", body, &out); err != nil {
+					return rt.fail(err, c.SessionToken, c.Token)
 				}
 				if rt.jsonOut {
 					return rt.printJSON(out)
