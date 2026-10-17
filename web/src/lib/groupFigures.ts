@@ -55,6 +55,9 @@ export interface GroupCellContext {
   modelName?: (id: string) => string
 }
 const PRIORITY_WORDS: [string, string][] = [['high', 'high'], ['medium', 'med'], ['low', 'low']]
+// The ticket's own copy: "Sol 6.1 ×5" (a count) and "4 → Next" (the word "to"); text, not icons.
+const TIMES = '×'
+const TO = '→'
 // Tokens and cost: one sum with the header's marks, "~" when estimated rows add to it, "≥" when it is a lower bound.
 function usageSum(c: ColumnFigures | undefined, format: (n: number) => string): string {
   const measured = c?.measured, estimated = c?.estimated
@@ -83,9 +86,9 @@ export function groupCellText(id: string, f: ProjectFigures | null, ctx: GroupCe
     }
     case 'tokens': return usageSum(c('tokens'), fmtTokens)
     case 'list_cost': case 'paid': return usageSum(c('cost'), formatDollars)
-    case 'model': { const v = top('model'); return v && v.count > 0 ? `${ctx.modelName?.(v.value) ?? v.value} ×${fmtInt(v.count)}` : '' }
+    case 'model': { const v = top('model'); return v && v.count > 0 ? `${ctx.modelName?.(v.value) ?? v.value} ${TIMES}${fmtInt(v.count)}` : '' }
     case 'tags': { const v = top('tag'); return v && v.count > 0 ? `${v.value} ${fmtInt(v.count)}` : '' }
-    case 'suggested': { const v = top('suggested_release'); return v && v.count > 0 ? `${fmtInt(v.count)} → ${v.value}` : '' }
+    case 'suggested': { const v = top('suggested_release'); return v && v.count > 0 ? `${fmtInt(v.count)} ${TO} ${v.value}` : '' }
     case 'eta': { const next = c('eta_ready')?.next_finish; return next ? fmtFinish(next.at, ctx.now) : '' }
     default: return ''
   }

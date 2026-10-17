@@ -890,7 +890,7 @@ defineExpose({
               <div class="group-head">
                 <button
                   type="button" class="group-toggle" :aria-expanded="!collapsed.has(entry.group.key)" :aria-label="german ? `${groupName(entry.group)} ${collapsed.has(entry.group.key) ? 'aufklappen' : 'zuklappen'}` : `${collapsed.has(entry.group.key) ? 'Expand' : 'Collapse'} ${groupName(entry.group)}`"
-                  :data-tip="instance?.vnode.props?.onAllGroups ? (mac ? '⌥-click: every group' : 'Alt-click: every group') : undefined" @click="groupToggleClick($event, entry.group.key)"
+                  :data-tip="instance?.vnode.props?.onAllGroups ? (mac ? 'Option-click: every group' : 'Alt-click: every group') : undefined" @click="groupToggleClick($event, entry.group.key)"
                 >
                   <AppIcon name="chevron" :size="14" />
                 </button>
