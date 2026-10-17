@@ -9556,6 +9556,8 @@
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestProductNotesProjectionAndImmutability","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/releasehistory","name":"TestPublicationUsesCompleteTagAncestry","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/releasehistory","name":"TestRepositoryCodenames","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestReservedNotesFailClosed","tier":"GATED-FULL"}
@@ -10567,6 +10569,10 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestEvaluateRules","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestEventRangeReadsPublishedAndSkippedSnapshotsUnderProjectVisibility","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestGitPublicationDeliveryAndOneDayAcceptance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestGitPublicationSkipsDoneOutsideReleaseDelta","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestGraceExpiryRescansWithinSameDay","tier":"GATED-FULL"}
     ,

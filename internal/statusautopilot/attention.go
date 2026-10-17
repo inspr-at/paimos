@@ -538,7 +538,7 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				}
 				s.Enabled = o.Effective
 			}
-			if err = proposalEligible(ctx, tx, c, s, d, time.Now().UTC()); err != nil {
+			if err = m.proposalEligible(ctx, tx, c, s, d, time.Now().UTC()); err != nil {
 				return err
 			}
 		}
