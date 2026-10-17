@@ -126,7 +126,9 @@ and Chat. Defaults and last-used tabs are person preferences.
 
 Interrupt, Pause (Resume when paused) and Stop live in the panel's ⋯ menu with
 their labels and reasons (AEON-1286). The default tab is a ⋯ choice for the tab
-on screen, such as "Open on Chat by default"; no pin sits beside the tabs. Lead start, resume and cooperative handover use the caller-specific
+on screen, such as "Open on Chat by default"; no pin sits beside the tabs. On
+Events or Terminal it names the current default; clearing it there keeps the
+item in place until ⋯ closes, so it can be ticked again. Lead start, resume and cooperative handover use the caller-specific
 lead action projection, including its blocked reason; a missing projection
 leaves those actions unavailable. Session controls retain their own ownership
 and permission checks. A stopped lead's Start a lead is in Right now.
@@ -176,7 +178,8 @@ full-height sheet: Back, the avatar, the name over its state and model, and ⋯,
 then the menu row (AEON-1286). The state is said once, on that line. ⋯ opens as a
 sheet from the bottom edge in groups: control, the session's process, how the
 panel opens, requested changes, layout. Short landscape screens get the whole
-screen too, with head and menu on one line. In Chat the composer pads the home
+screen too, with head and menu on one line; a phone turned sideways keeps its
+head and puts the menu on that line, as icons when the title needs the room. In Chat the composer pads the home
 indicator itself, so no band is left under it. In a split,
 the work area comes directly under the app header; the list and details have
 viewport-high panes with separate scrolling. A new selection resets the details
