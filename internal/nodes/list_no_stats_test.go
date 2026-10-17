@@ -3,8 +3,10 @@ package nodes
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,4 +166,87 @@ func nodesAccessInPlan(t *testing.T, raw string) (seq []string, indexed int) {
 	}
 	walk(explained)
 	return seq, indexed
+}
+
+// Risk: a five-node scope scans a large sibling project on every list and
+// lifecycle/aggregate read. Count actual visits under invoker RLS, including
+// the installed function's traversal, rather than accepting a full index scan.
+func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
+	p, _ := useList6000Fixture(t)
+	project, work := kindBySlug(t, p, "project"), kindBySlug(t, p, "work")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Small project"}`)
+	parent := root.ID
+	for i := range 4 {
+		n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":%q,"parent_id":%q}`, work.ID, fmt.Sprintf("Small %d", i), parent))
+		parent = n.ID
+	}
+	member := tenant.Principal{ID: addPrincipalIn(t, p.TenantID, "small-scope-member").ID, TenantID: p.TenantID, Kind: tenant.Person, Name: "small-scope-member", Roles: []string{"member"}}
+	dbtest.BindLegacy(t, testDB, p.TenantID, member.ID)
+	if _, err := testDB.Admin.Exec(t.Context(), `DELETE FROM pg_statistic WHERE starelid='nodes'::regclass`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.WithPrincipal(t.Context(), member)
+	err := db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
+		var total int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE deleted_at IS NULL`).Scan(&total); err != nil {
+			return err
+		}
+		if total < 6006 {
+			return fmt.Errorf("large sibling fixture missing: %d nodes", total)
+		}
+		q, err := parseListQuery(httptest.NewRequest("GET", "/api/nodes?within="+root.ID, nil))
+		if err != nil {
+			return err
+		}
+		filter, args := listFilterSQL(q, false)
+		var definition string
+		if err := tx.QueryRow(ctx, `SELECT prosrc FROM pg_proc WHERE oid='aeon_work_scope(uuid[])'::regprocedure`).Scan(&definition); err != nil {
+			return err
+		}
+		_, traversal, ok := strings.Cut(definition, "WITH RECURSIVE")
+		if !ok {
+			return fmt.Errorf("installed work traversal missing")
+		}
+		traversal, _, ok = strings.Cut(traversal, "SELECT array_agg(b.root)")
+		if !ok {
+			return fmt.Errorf("installed traversal budget boundary missing")
+		}
+		traversal = "WITH RECURSIVE" + strings.ReplaceAll(traversal, "ANY(roots)", "ANY($1::uuid[])") + "SELECT count(*) FROM bounded"
+		for _, query := range []struct {
+			name, sql string
+			args      []any
+			want      int
+		}{
+			{"node list", filter + " SELECT count(*) FROM filtered", args, 4},
+			{"shared work scope", traversal, []any{[]string{root.ID}}, 5},
+		} {
+			var count int
+			if err := tx.QueryRow(ctx, query.sql, query.args...).Scan(&count); err != nil {
+				return err
+			}
+			if count != query.want {
+				t.Errorf("%s lost subtree rows: %d want %d", query.name, count, query.want)
+			}
+			var raw []byte
+			if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE,FORMAT JSON,TIMING OFF) "+query.sql, query.args...).Scan(&raw); err != nil {
+				return err
+			}
+			var plan any
+			if err := json.Unmarshal(raw, &plan); err != nil {
+				return err
+			}
+			visits := nodeVisitsInCTE(plan, "CTE scope", false) + nodeVisitsInCTE(plan, "CTE scope_children", false)
+			if query.name == "shared work scope" {
+				visits = nodeVisitsInCTE(plan, "CTE walk", false) + nodeVisitsInCTE(plan, "CTE children", false)
+			}
+			t.Logf("%s: subtree=5 tenant=%d visits=%.0f", query.name, total, visits)
+			if visits <= 0 || visits > 10 {
+				t.Errorf("%s visits=%.0f; want work bounded by five scoped nodes, not %d tenant nodes", query.name, visits, total)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }

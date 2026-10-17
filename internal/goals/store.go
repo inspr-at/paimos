@@ -47,7 +47,11 @@ func scanNode(row pgx.Row) (storedNode, error) {
 	return n, err
 }
 func resolveNode(ctx context.Context, tx pgx.Tx, identity string, lock bool) (storedNode, error) {
-	query := `SELECT ` + nodeColumns + ` FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE (n.id::text=lower($1) OR n.key=$1) AND n.deleted_at IS NULL`
+	predicate := `n.key=$1`
+	if uuidPattern.MatchString(identity) {
+		predicate = `n.id=$1::uuid`
+	}
+	query := `SELECT ` + nodeColumns + ` FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE ` + predicate + ` AND n.deleted_at IS NULL`
 	if lock {
 		query += ` FOR NO KEY UPDATE OF n`
 	}

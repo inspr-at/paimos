@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -141,7 +142,7 @@ func (m *module) series(w http.ResponseWriter, r *http.Request) {
 		err = validateSeriesScope(ctx, nested, n.ID)
 		var history reconstruction
 		if err == nil {
-			history, err = loadReconstruction(ctx, nested, n.ID, now)
+			history, err = loadReconstruction(ctx, nested, n.ID, now, span)
 		}
 		if err == nil {
 			out.Points, _, err = history.project(ctx, now, span)
@@ -161,17 +162,74 @@ func (m *module) series(w http.ResponseWriter, r *http.Request) {
 	})
 	respond(w, out, err)
 }
-func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Time) (reconstruction, error) {
+
+// Scan the selected range and its bounded, indexed prefix separately. The
+// prefix supplies recorded baselines and the exact last percentage-change
+// time; current rows cannot substitute for those recorded facts.
+// history_nodes supplies (goal,id), and page supplies the goal identities.
+func nodeHistoryQuery(nowArg, startArg string) string {
+	parts := []string{}
+	for _, period := range []string{"e.at<" + startArg, "e.at>=" + startArg + " AND e.at<=" + nowArg} {
+		parts = append(parts, `(SELECT e.id,e.at,CASE WHEN e.type='node.project_moved' THEN e.after->'node' ELSE e.after END AS after
+ FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id=h.id
+ AND `+period+` AND (e.type LIKE 'node.%' OR e.type LIKE 'import.%' OR e.type LIKE 'status_autopilot.%')
+ ORDER BY e.at,e.id LIMIT 20001)`)
+		parts = append(parts, `(SELECT e.id,e.at,s.item AS after FROM (
+ SELECT e.id,e.at,e.after FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
+ AND e.type='node.bulk_changed' AND e.node_refs @> ARRAY[h.id] AND `+period+`
+ ORDER BY e.at,e.id LIMIT 20001 OFFSET 0) e
+ CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.after->'items')='array' THEN e.after->'items' ELSE '[]'::jsonb END) s(item)
+ WHERE s.item->>'id'=h.id::text)`)
+	}
+	return `(SELECT h.goal,e.id,e.at,h.id AS node_id,e.after,'node'::text AS family,
+ CASE WHEN e.after ? 'state' THEN aeon_work_status_category(e.after->>'state',k.field_schema) END AS bucket
+ FROM history_nodes h JOIN nodes n ON n.id=h.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ CROSS JOIN LATERAL (` + strings.Join(parts, " UNION ALL ") + `) e
+ WHERE e.after ? 'state' OR e.after ? 'fields' OR e.after ? 'parent_id' OR e.after ? 'deleted_at'
+ ORDER BY e.at,e.id,h.id LIMIT 20001)`
+}
+
+func sessionHistoryQuery(nowArg, startArg string) string {
+	parts := []string{}
+	for _, period := range []string{"e.at<" + startArg, "e.at>=" + startArg + " AND e.at<=" + nowArg} {
+		parts = append(parts, `(SELECT g.id AS goal,e.id,e.at,g.id AS node_id,e.after,'goal'::text AS family,NULL::text AS bucket
+ FROM page g CROSS JOIN LATERAL (SELECT e.id,e.at,e.after FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id=g.id AND e.type='goal.updated'
+ AND `+period+` ORDER BY e.at,e.id LIMIT 20001) e)`)
+		for _, snapshot := range []string{"before", "after"} {
+			parts = append(parts, `(SELECT h.goal,e.id,e.at,h.id AS node_id,e.after,'session'::text AS family,NULL::text AS bucket
+ FROM history_nodes h CROSS JOIN LATERAL (SELECT e.id,e.at,e.after FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.type LIKE 'harness.%'
+ AND e.`+snapshot+`->>'ticket_node_id'=h.id::text AND `+period+`
+ AND e.after ? 'id' AND e.after ? 'phase' ORDER BY e.at,e.id LIMIT 20001) e)`)
+		}
+	}
+	// Before and after can name the same ticket. Replay a session event only
+	// once per goal, while retaining both ends of a ticket rebind.
+	return `(SELECT * FROM (` + strings.Join(parts, " UNION ") + `) e ORDER BY e.at,e.id LIMIT 20001)`
+}
+
+func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Time, spans ...string) (reconstruction, error) {
 	out := reconstruction{goal: goal, metadata: map[string]historicalNode{}, kinds: map[string]bool{}}
+	span := "24h"
+	if len(spans) > 0 {
+		span = spans[0]
+	}
+	starts, _, err := planSeries(now, span)
+	if err != nil {
+		return out, err
+	}
+	start := starts[0]
 	if err := tx.QueryRow(ctx, `SELECT created_at FROM nodes WHERE id=$1`, goal).Scan(&out.created); err != nil {
 		return out, err
 	}
 	// Discovery uses immutable outcome subjects, including visible moved-away
 	// outcomes. Values still come only from their RLS-filtered event snapshots.
 	rows, err := tx.Query(ctx, `WITH subjects AS MATERIALIZED (
- SELECT DISTINCT e.node_id FROM events e WHERE e.type='goal.items_changed'
+ SELECT DISTINCT e.node_id FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
+ AND e.node_refs @> ARRAY[$1::uuid] AND e.type='goal.items_changed'
  AND e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
- AND (e.before->>'goal_node_id'=$1 OR e.after->>'goal_node_id'=$1)
+ AND (e.before->>'goal_node_id'=$1::uuid::text OR e.after->>'goal_node_id'=$1::uuid::text)
  ORDER BY e.node_id LIMIT 4097)
  SELECT n.id::text FROM subjects s JOIN nodes n ON n.id=s.node_id
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='outcome'
@@ -197,7 +255,10 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 		return out, fail(413, "series outcome bound exceeded")
 	}
 	rootSet := map[string]bool{}
-	rows, err = tx.Query(ctx, `SELECT id,at,node_id::text,after FROM events WHERE node_id=ANY($1::uuid[]) AND type='goal.items_changed' AND at<=$2 ORDER BY at,id LIMIT 20001`, ids, now)
+	rows, err = tx.Query(ctx, `SELECT e.id,e.at,s.id::text,e.after FROM unnest($1::uuid[]) s(id)
+ CROSS JOIN LATERAL (SELECT e.id,e.at,e.after FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id=s.id AND e.type='goal.items_changed'
+ AND e.at<=$2 ORDER BY e.at,e.id LIMIT 20001) e ORDER BY e.at,e.id LIMIT 20001`, ids, now)
 	if err != nil {
 		return out, err
 	}
@@ -246,16 +307,12 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 		// A union of recorded parent edges and current identity edges discovers the
 		// bounded candidate graph. Current state, estimates and outcome membership
 		// are never sampled. Event snapshots choose the actual tree at each instant.
-		rows, err = tx.Query(ctx, `WITH RECURSIVE edges(id,parent_id) AS MATERIALIZED (
- SELECT e.node_id,p.id::uuid FROM events e CROSS JOIN LATERAL (VALUES(e.before->>'parent_id'),(e.after->>'parent_id')) p(id)
- WHERE e.node_id IS NOT NULL AND p.id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
- AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')),
- walk(root,id) AS (SELECT n.id,n.id FROM nodes n WHERE n.id=ANY($1::uuid[]) UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
+		rows, err = tx.Query(ctx, `WITH RECURSIVE walk(root,id) AS (SELECT n.id,n.id FROM nodes n WHERE n.id=ANY($1::uuid[]) UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
  (SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.parent_id=w.id OFFSET 0)
- UNION SELECT h.id FROM edges h WHERE h.parent_id=w.id
+ UNION SELECT h.id FROM aeon_goal_history_children(w.id,$3,$2) h
  ) e),
  bounded AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001)
- SELECT b.root::text,n.id::text,n.key,n.kind_id::text,k.slug FROM bounded b JOIN nodes n ON n.id=b.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`, roots)
+ SELECT b.root::text,n.id::text,n.key,n.kind_id::text,k.slug FROM bounded b JOIN nodes n ON n.id=b.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`, roots, now, start)
 		if err != nil {
 			return out, err
 		}
@@ -303,11 +360,8 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 		if kindCount > 1000 {
 			return out, fail(413, "series kind bound exceeded")
 		}
-		rows, err = tx.Query(ctx, `SELECT e.id,e.at,e.node_id::text,e.after,
- CASE WHEN e.after ? 'state' THEN aeon_work_status_category(e.after->>'state',k.field_schema) END
- FROM events e JOIN nodes n ON n.id=e.node_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE e.node_id=ANY($1::uuid[]) AND e.at<=$2 AND (e.type LIKE 'node.%' OR e.type LIKE 'import.%' OR e.type LIKE 'status_autopilot.%')
- AND (e.after ? 'state' OR e.after ? 'fields' OR e.after ? 'parent_id' OR e.after ? 'deleted_at') ORDER BY e.at,e.id LIMIT 20001`, nodeIDs, now)
+		rows, err = tx.Query(ctx, `WITH history_nodes AS MATERIALIZED (SELECT id,id AS goal FROM unnest($1::uuid[]) s(id))
+ SELECT e.id,e.at,e.node_id::text,e.after,e.bucket FROM `+nodeHistoryQuery("$2", "$3")+` e`, nodeIDs, now, start)
 		if err != nil {
 			return out, err
 		}
@@ -329,18 +383,17 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 		}
 
 	}
-	rows, err = tx.Query(ctx, `SELECT id,at,node_id::text,after FROM events WHERE at<=$2 AND ((node_id=$1 AND type='goal.updated') OR (type LIKE 'harness.%' AND after ? 'id' AND after ? 'phase' AND (after->>'ticket_node_id'=ANY($3::text[]) OR before->>'ticket_node_id'=ANY($3::text[])))) ORDER BY at,id LIMIT 20001`, goal, now, nodeIDs)
+	rows, err = tx.Query(ctx, `WITH page AS MATERIALIZED (SELECT $1::uuid AS id),
+ history_nodes AS MATERIALIZED (SELECT id,$1::uuid AS goal FROM unnest($3::uuid[]) s(id))
+ SELECT e.id,e.at,e.node_id::text,e.after,e.family FROM `+sessionHistoryQuery("$2", "$4")+` e`, goal, now, nodeIDs, start)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
-		e := sourceEvent{Family: "session"}
-		if err := rows.Scan(&e.ID, &e.At, &e.Node, &e.After); err != nil {
+		e := sourceEvent{}
+		if err := rows.Scan(&e.ID, &e.At, &e.Node, &e.After, &e.Family); err != nil {
 			rows.Close()
 			return out, err
-		}
-		if e.Node == goal {
-			e.Family = "goal"
 		}
 		if err := out.add(e); err != nil {
 			rows.Close()
@@ -357,6 +410,9 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 	}
 	sort.Slice(out.events, func(i, j int) bool {
 		if out.events[i].At.Equal(out.events[j].At) {
+			if out.events[i].ID == out.events[j].ID {
+				return out.events[i].Node < out.events[j].Node
+			}
 			return out.events[i].ID < out.events[j].ID
 		}
 		return out.events[i].At.Before(out.events[j].At)
@@ -571,9 +627,16 @@ func (h reconstruction) project(ctx context.Context, now time.Time, span string)
 	previousStates := map[string]historicalState{}
 	// Replay the prefix to establish the preceding bucket's value. It also
 	// preserves the true stall time when the last change predates this range.
-	advance := func(event sourceEvent, keys map[string]bool) error {
-		if err := p.apply(event, h.metadata); err != nil {
-			return err
+	advance := func(keys map[string]bool) error {
+		event := h.events[index]
+		// A bulk event is one atomic transition. Comparing percentages after
+		// each item would invent intermediate changes and reset stall.since
+		// even when the batch leaves the final percentage unchanged.
+		for index < len(h.events) && h.events[index].ID == event.ID && h.events[index].At.Equal(event.At) {
+			if err := p.apply(h.events[index], h.metadata); err != nil {
+				return err
+			}
+			index++
 		}
 		pct, _, states, err := p.values(ctx)
 		if err != nil {
@@ -598,10 +661,9 @@ func (h reconstruction) project(ctx context.Context, now time.Time, span string)
 		return nil
 	}
 	for index < len(h.events) && !h.events[index].At.After(starts[0]) {
-		if err := advance(h.events[index], nil); err != nil {
+		if err := advance(nil); err != nil {
 			return nil, since, err
 		}
-		index++
 	}
 	points := []SeriesPoint{}
 	for _, start := range starts {
@@ -612,10 +674,9 @@ func (h reconstruction) project(ctx context.Context, now time.Time, span string)
 		baseline := previous
 		keys := map[string]bool{}
 		for index < len(h.events) && !h.events[index].At.After(end) {
-			if err := advance(h.events[index], keys); err != nil {
+			if err := advance(keys); err != nil {
 				return nil, since, err
 			}
-			index++
 		}
 		pct, basis, err := p.progress(ctx)
 		if err != nil {

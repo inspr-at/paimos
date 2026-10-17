@@ -4,15 +4,19 @@ package goals
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -243,5 +247,288 @@ func (q goalQueryDiagnostics) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, da
 			sql = sql[:1800]
 		}
 		q.t.Logf("goal query %s err=%v SQL=%s", elapsed, data.Err, sql)
+	}
+}
+
+func seedRecordedGoal(t *testing.T, f storageFixture, start time.Time) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET created_at=$2 WHERE id=$1`, f.secondGoal, start.Add(-time.Hour)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"estimate_hours":2}',state='open' WHERE id=$1`, f.ticket); err != nil {
+			return err
+		}
+		served := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, "RECOUT-1", f.secondGoal, map[string]any{"outcome_ref": "served"})
+		moving := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, "RECOUT-2", f.secondGoal, map[string]any{"outcome_ref": "moving", "state_set": "moving"})
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'serves')`, f.writer.TenantID, served, f.ticket); err != nil {
+			return err
+		}
+		pending := []events.Change{}
+		for _, id := range []string{served, moving} {
+			n, err := resolveNode(t.Context(), tx, id, false)
+			if err != nil {
+				return err
+			}
+			if id == served {
+				n.Targets = []string{f.ticket}
+			}
+			pending = append(pending, events.Change{NodeID: &n.ID, Type: "goal.items_changed", After: n, At: &start})
+		}
+		pending = append(pending, events.Change{NodeID: &f.ticket, Type: "node.created", At: &start, After: map[string]any{"id": f.ticket, "key": "TKT-1", "parent_id": f.project, "state": "open", "fields": map[string]any{"estimate_hours": 2}, "deleted_at": nil}})
+		for _, change := range pending {
+			if _, err := events.Append(t.Context(), tx, f.writer, change); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Explain the real statements before executing them, never a copied query.
+// Deterministic row visits reject an unrelated-history scan on fast machines.
+type goalHistoryPlanTx struct {
+	pgx.Tx
+	t      *testing.T
+	plans  int
+	visits float64
+}
+
+func relationPlanVisits(v any, relation string) float64 {
+	var total float64
+	switch n := v.(type) {
+	case []any:
+		for _, child := range n {
+			total += relationPlanVisits(child, relation)
+		}
+	case map[string]any:
+		if n["Relation Name"] == relation {
+			rows, _ := n["Actual Rows"].(float64)
+			removed, _ := n["Rows Removed by Filter"].(float64)
+			loops, _ := n["Actual Loops"].(float64)
+			total += (rows + removed) * loops
+		}
+		total += relationPlanVisits(n["Plan"], relation) + relationPlanVisits(n["Plans"], relation)
+	}
+	return total
+}
+
+func (tx *goalHistoryPlanTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "events") || strings.Contains(sql, "aeon_goal_history_children") {
+		var raw []byte
+		if err := tx.Tx.QueryRow(ctx, "EXPLAIN (ANALYZE,FORMAT JSON,TIMING OFF) "+sql, args...).Scan(&raw); err != nil {
+			return nil, err
+		}
+		var plan any
+		if err := json.Unmarshal(raw, &plan); err != nil {
+			return nil, err
+		}
+		visits := relationPlanVisits(plan, "events")
+		tx.visits += visits
+		tx.plans++
+		tx.t.Logf("history statement %d event visits=%.0f", tx.plans, visits)
+		if visits > 100 {
+			tx.t.Errorf("history statement visits=%.0f; want at most 100 candidate event visits, excluding 6000 unrelated records", visits)
+		}
+	}
+	return tx.Tx.Query(ctx, sql, args...)
+}
+
+// Risk: detail/series/list read all old node and harness events even when the
+// candidate goal has only three records. Preserve an older-than-range baseline
+// while proving unrelated history does not grow any real statement's scans.
+func TestGoalHistoryIgnoresUnrelatedEvents(t *testing.T) {
+	f := writerFixture(t)
+	seedRecordedGoal(t, f, apiClock.Add(-96*time.Hour))
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at)
+ SELECT $1,$2,CASE WHEN g%3=0 THEN $3::uuid ELSE NULL END,
+ CASE g%3 WHEN 0 THEN 'node.created' WHEN 1 THEN 'harness.heartbeat' ELSE 'node.bulk_changed' END,
+ CASE g%3 WHEN 0 THEN jsonb_build_object('id',$3::text,'parent_id',$4::text,'state','done','fields','{}'::jsonb)
+ WHEN 1 THEN jsonb_build_object('id',gen_random_uuid(),'ticket_node_id',$3::text,'phase','working','role','worker')
+ ELSE jsonb_build_object('items',jsonb_build_array(jsonb_build_object('id',$3::text,'parent_id',$4::text,'state','done','fields','{}'::jsonb))) END,
+ CASE WHEN g<=5000 THEN $5::timestamptz-interval '180 days' ELSE $5::timestamptz-interval '1 hour' END
+ FROM generate_series(1,6000) g`, f.writer.TenantID, f.writer.ID, f.hiddenTicket, f.otherProject, apiClock)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `ANALYZE events; ANALYZE nodes`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.WithPrincipal(t.Context(), f.writer)
+	err = db.InTenant(ctx, f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events`).Scan(&count); err != nil {
+			return err
+		}
+		if count < 6003 {
+			return fmt.Errorf("unrelated history fixture missing: %d", count)
+		}
+		traced := &goalHistoryPlanTx{Tx: tx, t: t}
+		h, err := loadReconstruction(ctx, traced, f.secondGoal, apiClock)
+		if err != nil {
+			return err
+		}
+		points, since, err := h.project(ctx, apiClock, "24h")
+		if err != nil {
+			return err
+		}
+		if len(h.events) != 3 || len(points) != 24 || points[23].Pct != 0 || !since.Equal(apiClock.Add(-97*time.Hour)) {
+			t.Fatalf("recorded prefix lost: events=%d points=%d since=%v", len(h.events), len(points), since)
+		}
+		page, err := loadListPage(ctx, traced, f.writer, []string{f.secondGoal}, apiClock, Watermark{})
+		if err != nil {
+			return err
+		}
+		if len(page) != 1 || page[0].Expansion != "full" || page[0].Stall == nil || !page[0].Stall.Since.Equal(since) {
+			t.Fatalf("page prefix differs from series: %+v", page)
+		}
+		if traced.plans < 5 || traced.visits <= 0 {
+			t.Fatalf("missing positive history plan evidence: plans=%d visits=%.0f", traced.plans, traced.visits)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Risk: batch snapshots, their undo, and wrapped project moves vanish from the
+// series and falsely mark a moving goal stalled. Only recorded snapshots drive
+// the three transitions; the reader is subject to the real event/node RLS.
+func TestGoalSeriesBulkUndoAndProjectSnapshots(t *testing.T) {
+	t.Run("atomic batch preserves unchanged percentage", func(t *testing.T) {
+		start, batchAt := apiClock.Add(-12*time.Hour), apiClock.Add(-time.Hour)
+		h := reconstruction{goal: "goal", created: start, metadata: map[string]historicalNode{
+			"a": {ID: "a", Key: "TKT-A", Work: true}, "b": {ID: "b", Key: "TKT-B", Work: true},
+		}}
+		for i, id := range []string{"a", "b"} {
+			o := storedNode{ID: "outcome-" + id, Key: "OUT-" + id, Parent: "goal", Fields: map[string]any{}, Targets: []string{id}}
+			h.events = append(h.events, sourceEvent{ID: int64(i + 1), At: start, Node: o.ID, Family: "outcome", After: sourceJSON(t, o)})
+		}
+		done, open := "done", "open"
+		for i, id := range []string{"a", "b"} {
+			bucket := &done
+			if id == "b" {
+				bucket = &open
+			}
+			h.events = append(h.events, sourceEvent{ID: int64(i + 3), At: start, Node: id, Family: "node", After: sourceJSON(t, map[string]any{"state": *bucket}), Bucket: bucket})
+		}
+		h.events = append(h.events,
+			sourceEvent{ID: 5, At: batchAt, Node: "a", Family: "node", After: sourceJSON(t, map[string]any{"state": open}), Bucket: &open},
+			sourceEvent{ID: 5, At: batchAt, Node: "b", Family: "node", After: sourceJSON(t, map[string]any{"state": done}), Bucket: &done})
+		points, since, err := h.project(t.Context(), apiClock, "24h")
+		if err != nil || !since.Equal(start) || len(points) != 24 || points[23].Pct != 50 {
+			t.Fatalf("atomic batch invented percentage change: since=%v points=%v err=%v", since, points, err)
+		}
+	})
+	f := writerFixture(t)
+	seedRecordedGoal(t, f, apiClock.Add(-12*time.Hour))
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET state='done' WHERE id=$1`, f.ticket); err != nil {
+			return err
+		}
+		open := map[string]any{"id": f.ticket, "key": "TKT-1", "parent_id": f.project, "fields": map[string]any{"estimate_hours": 2}, "state": "open"}
+		done := map[string]any{"id": f.ticket, "key": "TKT-1", "parent_id": f.project, "fields": map[string]any{"estimate_hours": 2}, "state": "done"}
+		batch := func(n any) any { return map[string]any{"items": []any{n}} }
+		closedAt, undoAt, movedAt := apiClock.Add(-3*time.Hour), apiClock.Add(-2*time.Hour), apiClock.Add(-time.Hour)
+		closed, err := events.Append(t.Context(), tx, f.reader, events.Change{Type: "node.bulk_changed", Before: batch(open), After: batch(done), At: &closedAt})
+		if err != nil {
+			return err
+		}
+		if _, err := events.Append(t.Context(), tx, f.reader, events.Change{Type: "node.bulk_changed", Before: batch(done), After: batch(open), UndoOf: &closed.ID, At: &undoAt}); err != nil {
+			return err
+		}
+		_, err = events.Append(t.Context(), tx, f.reader, events.Change{NodeID: &f.ticket, Type: "node.project_moved", Before: map[string]any{"node": open}, After: map[string]any{"node": done}, At: &movedAt})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	rec := goalRequest(t.Context(), m, f.reader, "GET", "/api/goals/"+f.secondGoal+"/series?range=24h", "", "")
+	var series SeriesResult
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &series) != nil || len(series.Points) != 24 {
+		t.Fatalf("series failed: %d %s", rec.Code, rec.Body)
+	}
+	for _, expected := range []struct{ hours, pct, delta int }{{3, 50, 50}, {2, 0, -50}, {1, 50, 50}} {
+		asOf := apiClock.Add(-time.Duration(expected.hours) * time.Hour)
+		found := false
+		for _, point := range series.Points {
+			if point.T.Add(time.Hour).Equal(asOf) {
+				found = true
+				if point.Pct != expected.pct || point.Delta != expected.delta || !slices.Contains(point.ChangedKeys, "TKT-1") || !slices.Contains(point.ChangedKeys, "RECOUT-1") {
+					t.Errorf("missing normalized snapshot at %v: %+v", asOf, point)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("missing bucket at %v", asOf)
+		}
+	}
+	check := func(g GoalView) {
+		if g.Progress == nil || g.Progress.Pct != 50 || g.Stall == nil || g.Stall.Stalled || !g.Stall.Since.Equal(apiClock.Add(-time.Hour)) {
+			t.Errorf("progress/stall lost batch or project move: %+v", g)
+		}
+	}
+	check(detail(t, goalRequest(t.Context(), m, f.reader, "GET", "/api/goals/"+f.secondGoal, "", "")))
+	page := listResult(t, f, m, "?project="+f.project)
+	found := false
+	for _, g := range page.Items {
+		if g.ID == f.secondGoal {
+			found = true
+			check(g)
+		}
+	}
+	if !found {
+		t.Fatal("list omitted recorded goal")
+	}
+}
+
+type goalHistoryCancelTx struct {
+	pgx.Tx
+	injected *bool
+}
+
+func (tx *goalHistoryCancelTx) Begin(ctx context.Context) (pgx.Tx, error) {
+	nested, err := tx.Tx.Begin(ctx)
+	return &goalHistoryCancelTx{nested, tx.injected}, err
+}
+func (tx *goalHistoryCancelTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "subjects AS MATERIALIZED") {
+		*tx.injected = true
+		return nil, &pgconn.PgError{Code: "57014", Message: "canceling statement due to statement timeout"}
+	}
+	return tx.Tx.Query(ctx, sql, args...)
+}
+
+// Risk: the explicit PostgreSQL statement budget becomes an internal error
+// instead of the documented too_large expansion, losing a readable goal.
+func TestGoalHistoryCancellationReturnsTooLarge(t *testing.T) {
+	f := writerFixture(t)
+	seedRecordedGoal(t, f, apiClock.Add(-12*time.Hour))
+	ctx := tenant.WithPrincipal(t.Context(), f.reader)
+	err := db.InTenant(ctx, f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
+		n, err := resolveNode(ctx, tx, f.secondGoal, false)
+		if err != nil {
+			return err
+		}
+		injected := false
+		g, err := readGoal(ctx, &goalHistoryCancelTx{tx, &injected}, f.reader, n, apiClock, Watermark{ReadThrough: 7, Generation: 9})
+		if err != nil {
+			return err
+		}
+		if !injected || g.ID != n.ID || g.Expansion != "too_large" || g.Counts.Outcomes != 2 || g.Progress != nil || g.Stall != nil || g.ReadThrough != 7 || g.Generation != 9 {
+			t.Fatalf("cancellation discarded goal or reported partial success: injected=%t goal=%+v", injected, g)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -1323,15 +1323,15 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
 		}
 	}
-	// Resolve visible adjacency once, before joining recursive parents. This
-	// keeps RLS out of the repeated join and permits a hash join even without
-	// statistics; the sibling order also preserves an indexed import path.
-	return `WITH RECURSIVE scope_children AS MATERIALIZED (
-        SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL
-        ORDER BY parent_id,position,id
-    ), scope(id) AS (
+	// Keep each child probe dependent on its parent, including without table
+	// statistics. The sibling index visits only this subtree; materializing
+	// tenant-wide adjacency makes a tiny scope pay for every unrelated tree.
+	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s JOIN scope_children c ON c.parent_id=s.id
+        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                AND parent_id=s.id AND deleted_at IS NULL ORDER BY position,id OFFSET 0
+        ) c
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,

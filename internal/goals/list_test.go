@@ -55,7 +55,11 @@ func logListPlan(t *testing.T, f storageFixture, candidates ...string) {
 			explain = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
 		}
 		var raw []byte
-		if err := tx.QueryRow(ctx, explain+listPageQuery(), ids, apiClock, f.reader.Kind == tenant.Person, f.reader.ID).Scan(&raw); err != nil {
+		starts, _, err := planSeries(apiClock, "24h")
+		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, explain+listPageQuery(), ids, apiClock, f.reader.Kind == tenant.Person, f.reader.ID, starts[0]).Scan(&raw); err != nil {
 			return fmt.Errorf("page EXPLAIN: %w", err)
 		}
 		t.Logf("captured plan for %d candidates (%d bytes)", len(ids), len(raw))

@@ -31,6 +31,54 @@ CREATE POLICY goal_update_receipts_tenant ON goal_update_receipts
 -- with the same visible event watermark; it does not allocate event ids.
 CREATE SEQUENCE goal_response_seq AS bigint;
 
+-- History discovery starts at immutable node references, never a tenant-wide
+-- event scan. Node/time and ticket/time indexes also serve the bounded range
+-- and the indexed prefix needed for an exact baseline and stall.since.
+CREATE INDEX events_goal_history_refs_idx ON events USING gin(node_refs);
+CREATE INDEX events_goal_node_at_idx ON events(tenant_id,node_id,at,id)
+    WHERE node_id IS NOT NULL;
+CREATE INDEX events_goal_harness_after_idx ON events(tenant_id,(after->>'ticket_node_id'),at,id)
+    WHERE type LIKE 'harness.%';
+CREATE INDEX events_goal_harness_before_idx ON events(tenant_id,(before->>'ticket_node_id'),at,id)
+    WHERE type LIKE 'harness.%';
+
+-- Bound matching records before unpacking bulk or wrapped node snapshots.
+-- The prefix is still required: a tree can move away before the selected
+-- range, and the last percentage change can predate that range. Both arms
+-- are indexed reference lookups under the original invoker event RLS.
+CREATE FUNCTION aeon_goal_history_children(p_parent uuid,p_start timestamptz,p_end timestamptz)
+RETURNS TABLE(id uuid) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    event_ids bigint[];
+BEGIN
+    SELECT array_agg(e.id) INTO event_ids FROM (
+        (SELECT e.id FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
+         AND e.node_refs @> ARRAY[p_parent] AND e.at<p_start
+         AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')
+         LIMIT 20001)
+        UNION ALL
+        (SELECT e.id FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
+         AND e.node_refs @> ARRAY[p_parent] AND e.at>=p_start AND e.at<=p_end
+         AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')
+         LIMIT 20001)
+        LIMIT 20001
+    ) e;
+    IF cardinality(event_ids)>20000 THEN
+        RAISE EXCEPTION 'series parent history budget exceeded' USING ERRCODE='54000';
+    END IF;
+    RETURN QUERY SELECT DISTINCT coalesce(aeon_uuid_or_null(s.item->>'id'),e.node_id)
+        FROM unnest(event_ids) ref(id) JOIN events e ON e.id=ref.id
+            AND e.tenant_id=current_setting('aeon.tenant_id')::uuid
+        CROSS JOIN LATERAL (VALUES(e.before),(e.after)) snapshots(data)
+        CROSS JOIN LATERAL jsonb_array_elements(CASE
+            WHEN e.type='node.bulk_changed' AND jsonb_typeof(snapshots.data->'items')='array' THEN snapshots.data->'items'
+            WHEN e.type='node.project_moved' THEN jsonb_build_array(snapshots.data->'node')
+            ELSE jsonb_build_array(snapshots.data) END) s(item)
+        WHERE s.item->>'parent_id'=p_parent::text
+            AND coalesce(aeon_uuid_or_null(s.item->>'id'),e.node_id) IS NOT NULL;
+END;
+$$;
+
 -- Deleted outcomes retain their ref. Moves additionally retire the source
 -- ref in the source goal's fields under the tenant/goal write fence.
 CREATE UNIQUE INDEX nodes_outcome_ref_unique ON nodes
@@ -145,8 +193,8 @@ END;
 $$;
 
 -- Preserve the released work-scope signature and pair/root/cycle bounds.
--- Resolve caller-visible adjacency once before recursion, so RLS cannot force
--- a parent-by-child nested-loop product. Overlapping roots retain every pair,
+-- Probe only each recursive parent's indexed children, so a small subtree
+-- never materializes the tenant's other trees. Overlapping roots retain every pair,
 -- but direct-work-parent discovery probes each distinct node only once.
 CREATE OR REPLACE FUNCTION aeon_work_scope(roots uuid[])
 RETURNS TABLE(root uuid, id uuid, kind_slug text, fields jsonb, bucket text, is_leaf boolean, project_id uuid)
@@ -163,15 +211,15 @@ BEGIN
  -- LIMIT consumes at most budget+1 recursive pairs, before facts/session reads
  -- or the overlapping-root cross product can materialize unbounded work.
  -- UNION still detects cycles; there is no arbitrary depth cutoff.
- WITH RECURSIVE children AS MATERIALIZED (
-  SELECT n.id,n.parent_id FROM nodes n
-  WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
- ), walk(root,id) AS (
+ WITH RECURSIVE walk(root,id) AS (
   SELECT n.id,n.id FROM nodes n
   WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
    AND n.id=ANY(roots) AND n.deleted_at IS NULL
   UNION
-  SELECT w.root,c.id FROM walk w JOIN children c ON c.parent_id=w.id
+  SELECT w.root,c.id FROM walk w CROSS JOIN LATERAL (
+   SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+    AND n.parent_id=w.id AND n.deleted_at IS NULL ORDER BY n.position,n.id OFFSET 0
+  ) c
  ), bounded AS MATERIALIZED (SELECT w.root,w.id FROM walk w LIMIT 50001)
  SELECT array_agg(b.root),array_agg(b.id) INTO scope_roots,scope_nodes FROM bounded b;
  IF cardinality(scope_nodes)>50000 THEN

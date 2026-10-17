@@ -65,29 +65,28 @@ func listPageQuery() string {
  OR EXISTS(SELECT 1 FROM node_relations r WHERE r.type='asks_for' AND r.source_node_id=a.comment_node_id AND r.target_node_id=g.id)
  ), subjects AS MATERIALIZED (
  SELECT DISTINCT g.id AS goal,n.id FROM page g
- JOIN events e ON e.type='goal.items_changed' AND (e.before->>'goal_node_id'=g.id::text OR e.after->>'goal_node_id'=g.id::text)
+ CROSS JOIN LATERAL (SELECT e.* FROM events e WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid
+ AND e.node_refs @> ARRAY[g.id] AND e.type='goal.items_changed'
+ AND (e.before->>'goal_node_id'=g.id::text OR e.after->>'goal_node_id'=g.id::text) OFFSET 0) e
  JOIN nodes n ON n.id=e.node_id AND e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='outcome'
  LIMIT 4097
  ), outcome_events AS MATERIALIZED (
  SELECT s.goal,e.id,e.at,e.node_id,e.after,'outcome'::text AS family,NULL::text AS bucket
- FROM subjects s JOIN events e ON e.node_id=s.id AND e.type='goal.items_changed' AND e.at<=$2
+ FROM subjects s CROSS JOIN LATERAL (SELECT e.id,e.at,e.node_id,e.after FROM events e
+ WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id=s.id AND e.type='goal.items_changed' AND e.at<=$2
+ ORDER BY e.at,e.id LIMIT 20001) e
  ORDER BY e.at,e.id LIMIT 20001
  ), history_roots AS MATERIALIZED (
  SELECT DISTINCT e.goal,t.id::uuid AS root FROM outcome_events e
  CROSS JOIN LATERAL jsonb_array_elements_text(e.after->'ticket_node_ids') t(id)
  WHERE (SELECT count(*) FROM subjects)<=4096 AND (SELECT count(*) FROM outcome_events)<=20000
- ), historical_edges(id,parent_id) AS MATERIALIZED (
- SELECT e.node_id,p.id::uuid FROM events e
- CROSS JOIN LATERAL (VALUES(e.before->>'parent_id'),(e.after->>'parent_id')) p(id)
- WHERE e.node_id IS NOT NULL AND p.id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
- AND e.type IN ('node.created','node.updated','node.moved','node.project_moved','node.bulk_changed','node.kind_changed','import.node_created','import.node_updated','import.parent_changed')
  ), walk(root,id) AS (
  SELECT n.id,n.id FROM nodes n WHERE n.id IN (SELECT root FROM history_roots)
  AND (SELECT count(DISTINCT root) FROM history_roots)<=4096
  UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
  (SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.parent_id=w.id OFFSET 0)
- UNION SELECT h.id FROM historical_edges h WHERE h.parent_id=w.id
+ UNION SELECT h.id FROM aeon_goal_history_children(w.id,$5,$2) h
  ) e
  ), history_scope AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001),
  history_nodes AS MATERIALIZED (
@@ -98,19 +97,9 @@ func listPageQuery() string {
  ), source_events AS MATERIALIZED (
  SELECT * FROM outcome_events
  UNION ALL
- (SELECT h.goal,e.id,e.at,e.node_id,e.after,'node',
- CASE WHEN e.after ? 'state' THEN aeon_work_status_category(e.after->>'state',k.field_schema) END
- FROM history_nodes h JOIN events e ON e.node_id=h.id AND e.at<=$2
- JOIN nodes n ON n.id=h.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE (e.type LIKE 'node.%' OR e.type LIKE 'import.%' OR e.type LIKE 'status_autopilot.%')
- AND (e.after ? 'state' OR e.after ? 'fields' OR e.after ? 'parent_id' OR e.after ? 'deleted_at')
- ORDER BY e.at,e.id LIMIT 20001)
+ ` + nodeHistoryQuery("$2", "$5") + `
  UNION ALL
- (SELECT g.id,e.id,e.at,e.node_id,e.after,CASE WHEN e.node_id=g.id THEN 'goal' ELSE 'session' END,NULL::text
- FROM page g JOIN events e ON e.at<=$2 AND ((e.node_id=g.id AND e.type='goal.updated')
- OR (e.type LIKE 'harness.%' AND e.after ? 'id' AND e.after ? 'phase' AND EXISTS(
- SELECT 1 FROM history_nodes h WHERE h.goal=g.id AND (e.after->>'ticket_node_id'=h.id::text OR e.before->>'ticket_node_id'=h.id::text))))
- ORDER BY e.at,e.id LIMIT 20001)
+ ` + sessionHistoryQuery("$2", "$5") + `
  ), bounded_events AS MATERIALIZED (SELECT * FROM source_events ORDER BY at,id LIMIT 20001),
  kinds AS MATERIALIZED (SELECT id,slug FROM node_kinds ORDER BY id LIMIT 1001)
  SELECT 'bound'::text AS section,''::text AS id,jsonb_build_object('subjects',(SELECT count(*) FROM subjects),
@@ -211,7 +200,11 @@ func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 		d.budgets[id] = newListBudget()
 		d.histories[id] = &reconstruction{goal: id, metadata: map[string]historicalNode{}}
 	}
-	rows, err := tx.Query(ctx, listPageQuery(), ids, now, p.Kind == tenant.Person, p.ID)
+	starts, _, err := planSeries(now, "24h")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, listPageQuery(), ids, now, p.Kind == tenant.Person, p.ID, starts[0])
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +325,9 @@ func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 		// after partitioning by goal and avoids depending on UNION row order.
 		sort.Slice(h.events, func(i, j int) bool {
 			if h.events[i].At.Equal(h.events[j].At) {
+				if h.events[i].ID == h.events[j].ID {
+					return h.events[i].Node < h.events[j].Node
+				}
 				return h.events[i].ID < h.events[j].ID
 			}
 			return h.events[i].At.Before(h.events[j].At)

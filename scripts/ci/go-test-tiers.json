@@ -6460,6 +6460,10 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHandedOverReadAndConflict","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHistoryCancellationReturnsTooLarge","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHistoryIgnoresUnrelatedEvents","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalIdempotencyKeyGrammar","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalKindSchemasAndNextStep","tier":"ESSENTIAL"}
@@ -6478,6 +6482,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPassedRevalidationIsFixedAndIdempotent","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPatchNodeResolutionUsesIndexes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPauseUsesLatestStoppedSession","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalProjectWriterUpdatesOnlyVisibleOutcomes","tier":"ESSENTIAL"}
@@ -6489,6 +6495,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalReleaseFirstUpdateRestoresKinds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalRollupPartialAndSharedEstimates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesBulkUndoAndProjectSnapshots","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesChangedKeysWithoutPercentageChange","tier":"ESSENTIAL"}
     ,
@@ -8683,6 +8691,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestSchemaAndTagMutationsRequirePersonAdmin","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestScopedListWithoutStatisticsUsesChildIndex","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestScopedReadsIgnoreLargeSiblingTree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestServicePrincipalsCannotBeAssignees","tier":"GATED-FULL"}
     ,

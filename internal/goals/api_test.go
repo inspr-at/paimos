@@ -5,6 +5,7 @@ package goals
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -33,6 +34,74 @@ func writerFixture(t *testing.T) storageFixture {
 		t.Fatal(err)
 	}
 	return f
+}
+
+type goalResolvePlanTx struct {
+	pgx.Tx
+	t     *testing.T
+	plans int
+}
+
+func (tx *goalResolvePlanTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.HasPrefix(sql, "SELECT "+nodeColumns+" FROM nodes n") {
+		var raw []byte
+		if err := tx.Tx.QueryRow(ctx, "EXPLAIN (ANALYZE,FORMAT JSON,TIMING OFF) "+sql, args...).Scan(&raw); err != nil {
+			tx.t.Fatal(err)
+		}
+		var plan any
+		if err := json.Unmarshal(raw, &plan); err != nil {
+			tx.t.Fatal(err)
+		}
+		visits := relationPlanVisits(plan, "nodes")
+		tx.plans++
+		tx.t.Logf("resolve statement %d node visits=%.0f", tx.plans, visits)
+		if visits <= 0 || visits > 2 {
+			tx.t.Errorf("node resolution visits=%.0f; want one indexed identity lookup", visits)
+		}
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+// Risk: every upsert identity scans all tenant nodes while PATCH holds the
+// tenant write fence. Exercise UUID case folding and keys under the real lock
+// and RLS, then measure the actual resolver statements against 3000 siblings.
+func TestGoalPatchNodeResolutionUsesIndexes(t *testing.T) {
+	f := writerFixture(t)
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
+ SELECT $1,k.id,'LOOKUP-'||g,'Unrelated lookup '||g,$2 FROM node_kinds k
+ CROSS JOIN generate_series(1,3000) g WHERE k.tenant_id=$1 AND k.slug='work'`, f.writer.TenantID, f.project)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `ANALYZE nodes; ANALYZE node_kinds`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.WithPrincipal(t.Context(), f.writer)
+	err = db.InTenant(ctx, f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if err := lockWrite(ctx, tx, f.writer); err != nil {
+			return err
+		}
+		traced := &goalResolvePlanTx{Tx: tx, t: t}
+		for _, input := range []struct{ identity, id string }{{f.ticket, f.ticket}, {strings.ToUpper(f.ticket), f.ticket}, {"TKT-1", f.ticket}, {f.secondGoal, f.secondGoal}, {"GOAL-2", f.secondGoal}} {
+			n, err := resolveNode(ctx, traced, input.identity, true)
+			if err != nil {
+				return err
+			}
+			if n.ID != input.id {
+				return fmt.Errorf("resolver returned wrong identity")
+			}
+		}
+		if traced.plans != 5 {
+			t.Fatalf("missing resolver plan evidence: %d", traced.plans)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 func goalRequest(ctx context.Context, m *module, p tenant.Principal, method, path, key, body string) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()

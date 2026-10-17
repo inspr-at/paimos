@@ -156,7 +156,7 @@ func tooLarge(err error) bool {
 	var pg *pgconn.PgError
 	var bounded *apiFailure
 	var validation *ValidationError
-	return errors.As(err, &pg) && pg.Code == "54000" || errors.As(err, &bounded) && bounded.status == 413 || errors.As(err, &validation) && validation.Path == "items"
+	return errors.As(err, &pg) && (pg.Code == "54000" || pg.Code == "57014") || errors.As(err, &bounded) && bounded.status == 413 || errors.As(err, &validation) && validation.Path == "items"
 }
 
 func baseGoal(n storedNode, w Watermark) (GoalView, error) {
