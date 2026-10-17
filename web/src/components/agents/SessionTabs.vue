@@ -15,6 +15,8 @@ onMounted(() => {
   // After mount: this setup also runs while the recovery evidence is rendered
   // on the server, where window does not exist.
   const phone = window.matchMedia('(max-width: 720px)')
+  // Narrow landscape phones put the menu on the head's line (SessionPanel, AEON-1286).
+  const sharedLine = window.matchMedia('(min-width: 480px) and (max-width: 720px) and (max-height: 480px)')
   const element = menu.value, head = element?.closest<HTMLElement>('.pane-bar')
   const identity = head?.querySelector<HTMLElement>('.pane-identity')
   if (!element || !head || !identity) return
@@ -23,14 +25,18 @@ onMounted(() => {
     // opening/resizing changes its form; selection and unread counts cannot.
     element.classList.remove('icons', 'compact')
     const css = getComputedStyle(head), identityCSS = getComputedStyle(identity)
+    const glyphs = [...identity.children].filter(child => !child.matches('.pane-title, .pane-heading'))
     if (phone.matches) {
       // AEON-1286: on phones the menu has its own row: the design's labels while all fit,
       // then smaller labels, then icons only. The form follows the width, never the
-      // selection, so choosing a tab never moves one (AEON-541).
+      // selection, so choosing a tab never moves one (AEON-541). On the head's line it takes
+      // what the avatar and the title's minimum leave.
       const own = getComputedStyle(element)
       const room = head.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) - parseFloat(own.marginLeft) - parseFloat(own.marginRight)
+      const titleAt = PANEL_HEAD_TITLE_MIN + glyphs.reduce((width, glyph) => width + glyph.getBoundingClientRect().width + parseFloat(identityCSS.columnGap), 0)
+      const fits = () => sharedLine.matches ? identity.getBoundingClientRect().width >= titleAt - .5 : element.getBoundingClientRect().width <= room + .5
       for (const form of ['compact', 'icons']) {
-        if (element.getBoundingClientRect().width <= room + .5) break
+        if (fits()) break
         element.classList.remove('compact'); element.classList.add(form)
       }
       return
@@ -38,7 +44,6 @@ onMounted(() => {
     // The phone-only back button is not drawn here: it takes neither width nor a gap.
     const shown = [...head.children].filter(child => getComputedStyle(child).display !== 'none')
     const siblings = shown.filter(child => child !== identity)
-    const glyphs = [...identity.children].filter(child => !child.matches('.pane-title, .pane-heading'))
     const labelsAt = Math.ceil(PANEL_HEAD_TITLE_MIN + parseFloat(css.paddingLeft) + parseFloat(css.paddingRight) +
       parseFloat(css.columnGap) * (shown.length - 1) + parseFloat(identityCSS.columnGap) * glyphs.length +
       [...siblings, ...glyphs].reduce((width, child) => width + child.getBoundingClientRect().width, 0))

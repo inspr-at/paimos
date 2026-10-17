@@ -6076,6 +6076,10 @@
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024 sanity: the desktop head and its anchored menu keep their form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 1024: clearing the default on Events keeps its row and its focus, and it can be ticked again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 390: clearing the default on Events keeps its row and its focus, and it can be ticked again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 320x568: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 agent view 390x664: a phone opens on the sessions, the dial folded for the visit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6087,6 +6091,10 @@
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 390 dark: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 chat chrome 390 light: one head line pair, the menu row, the thread first, no band","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 rotated phones dark: narrow landscape puts the menu on the head's line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 rotated phones light: narrow landscape puts the menu on the head's line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

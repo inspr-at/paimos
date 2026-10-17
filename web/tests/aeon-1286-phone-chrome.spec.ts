@@ -3,9 +3,10 @@
 // design aeon-1438-chat-phone-approved.html. Risks: the chat chrome takes the thread's
 // room; the head keeps unexplained or unlabelled controls (pin, pause, stop) and says the
 // state twice; the safe area is padded twice and leaves a blank band under the composer;
-// the ⋯ menu moves its items when a choice is ticked; a phone scrolls sideways; quiet
-// text drops below 4.5:1 in either theme; the ticket list and the agent view spend the
-// screen on chrome instead of rows.
+// the ⋯ menu moves its items, or drops the focused one, when a choice is ticked or cleared;
+// a phone scrolls sideways; a phone turned to narrow landscape keeps two head rows and
+// starves the thread; quiet text drops below 4.5:1 in either theme; the ticket list and the
+// agent view spend the screen on chrome instead of rows.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -247,6 +248,92 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1286 short landscape $
   expect(await noSidewaysScroll(page)).toBe(true)
   await page.screenshot({ path: info.outputPath(`AEON-1286/chat-landscape-${LANDSCAPE.width}-${look}.png`) })
   await report(info.outputPath(`AEON-1286/landscape-${look}.md`), [`thread ${Math.round(thread.height)} px of ${LANDSCAPE.height} = ${(thread.height / LANDSCAPE.height * 100).toFixed(1)} %`])
+})
+
+// Narrow landscape phones (568×320 is the iPhone SE turned, 667×375 its successor): rotating
+// a phone moves the menu onto the head's line, so the thread keeps 60 % there too; turning
+// back gives the menu its own row again.
+const ROTATED: Size[] = [{ width: 568, height: 320 }, { width: 667, height: 375 }]
+const frames = (page: Page) => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+for (const look of ['light', 'dark'] as const) test(`AEON-1286 rotated phones ${look}: narrow landscape puts the menu on the head's line, thread at least 60 %`, async ({ page }, info) => {
+  const errors = watchErrors(page)
+  const portrait = { width: 320, height: 568 }
+  await openLeadChat(page, portrait, look)
+  const panel = panelOf(page), head = panel.locator('.panel-head'), tablist = panel.getByRole('tablist')
+  const back = panel.getByRole('button', { name: 'Close session details', exact: true })
+  const more = panel.getByRole('button', { name: 'More session actions', exact: true })
+  expect((await box(tablist)).y, 'portrait: the menu has its own row').toBeGreaterThanOrEqual((await box(head.locator('.pane-identity'))).bottom)
+  const lines: string[] = []
+  for (const size of ROTATED) {
+    await page.setViewportSize(size)
+    await frames(page)
+    const [headBox, menuBox, backBox, moreBox, nameBox, identityBox] = await Promise.all([box(head), box(tablist), box(back), box(more), box(head.locator('.pane-title .name')), box(head.locator('.pane-identity'))])
+    expect(headBox.height, `${size.width}x${size.height}: head and menu share one line`).toBeLessThanOrEqual(49)
+    expect(menuBox.y, 'the menu is on the head line').toBeLessThan(headBox.bottom)
+    expect(menuBox.x, 'the menu follows the title').toBeGreaterThanOrEqual(identityBox.right)
+    expect(menuBox.right, 'the menu ends before ⋯').toBeLessThanOrEqual(moreBox.x)
+    expect(backBox.x, '← at the left edge').toBeLessThanOrEqual(1)
+    expect(Math.abs(moreBox.right - headBox.right), '⋯ at the right edge').toBeLessThanOrEqual(8)
+    expect(nameBox.right, 'the name is never cut by the menu').toBeLessThanOrEqual(identityBox.right + .5)
+    await expect(head.locator('.pane-state .state-word')).toHaveText('Working')
+    const targets: [string, Locator][] = [['back', back], ['more', more], ...['Lead', 'Details', 'Chat', 'Events'].map(tab => [tab, tabOf(page, tab)] as [string, Locator])]
+    for (const [name, target] of targets) {
+      const b = await box(target)
+      expect(b.height, `${name} height`).toBeGreaterThanOrEqual(44); expect(b.width, `${name} width`).toBeGreaterThanOrEqual(44)
+    }
+    const labelled = await panel.getByRole('tab').evaluateAll(items => items.map(item => (item.querySelector('.tab-label') as HTMLElement | null)?.checkVisibility() ?? false))
+    expect(new Set(labelled).size, `one form for every tab: ${labelled}`).toBe(1)
+    const thread = await box(panel.locator('#session-panel-messages .thread-scroll'))
+    const composer = await box(panel.locator('#session-panel-messages .composer'))
+    expect(thread.height / size.height, `${size.width}x${size.height}: thread share`).toBeGreaterThanOrEqual(.6)
+    expect(Math.abs(composer.bottom - size.height), 'the composer reaches the foot').toBeLessThanOrEqual(.5)
+    expect(await noSidewaysScroll(page), 'no sideways scroll').toBe(true)
+    await page.screenshot({ path: info.outputPath(`AEON-1286/chat-rotated-${size.width}x${size.height}-${look}.png`) })
+    lines.push(`${size.width}x${size.height}: head ${Math.round(headBox.height)} px, thread ${Math.round(thread.height)} px = ${(thread.height / size.height * 100).toFixed(1)} %, tabs ${labelled[0] ? 'labelled' : 'icons'}`)
+  }
+  await page.setViewportSize(portrait)
+  await frames(page)
+  expect((await box(tablist)).y, 'turned back: the menu has its own row again').toBeGreaterThanOrEqual((await box(head.locator('.pane-identity'))).bottom)
+  expect((await box(panel.locator('#session-panel-messages .thread-scroll'))).height / portrait.height, 'portrait thread share').toBeGreaterThanOrEqual(.6)
+  await report(info.outputPath(`AEON-1286/rotated-${look}.md`), lines)
+  expect(errors).toEqual([])
+})
+
+// On Events (no default of its own) the item names the current default. Clearing it there keeps
+// the row, its focus and everything below it until ⋯ closes, so it can be ticked again in place.
+for (const size of [PHONES[0]!.size, { width: 1024, height: 768 }]) test(`AEON-1286 ${size.width}: clearing the default on Events keeps its row and its focus, and it can be ticked again`, async ({ page }) => {
+  const world = await openLeadChat(page, size, 'light')
+  const panel = panelOf(page), menu = menuOf(page)
+  const more = panel.getByRole('button', { name: 'More session actions', exact: true })
+  const pin = menu.getByRole('menuitemcheckbox', { name: /^Open on Chat by default/ })
+  await more.click()
+  await pin.click()
+  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'chat' })
+  await page.keyboard.press('Escape')
+  await tabOf(page, 'Events').click()
+  await expect(tabOf(page, 'Events')).toHaveAttribute('aria-selected', 'true')
+  await more.click()
+  await expect(pin).toHaveAttribute('aria-checked', 'true')
+  const guard = await controlStability(page, { pin, interrupt: menu.getByRole('menuitem', { name: /^Interrupt/ }), stop: menu.getByRole('menuitem', { name: /^Stop…/ }), full: menu.getByRole('menuitem', { name: /^Full screen/ }) })
+  await guard.check(async () => {
+    await pin.click()
+    await expect(pin).toHaveAttribute('aria-checked', 'false')
+    await expect(pin).toContainText('Now it opens on the last tab used')
+    await expect(pin, 'the cleared item keeps the focus').toBeFocused()
+  })
+  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: null })
+  await guard.check(async () => {
+    await pin.click()
+    await expect(pin).toHaveAttribute('aria-checked', 'true')
+    await expect(pin).toContainText('Unless something needs you')
+    await expect(pin, 'the restored item keeps the focus').toBeFocused()
+  })
+  guard.done()
+  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'chat' })
+  await expect(menu, 'a ticked choice keeps ⋯ open').toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(more).toBeFocused()
 })
 
 test('AEON-1286 1024 sanity: the desktop head and its anchored menu keep their form', async ({ page }, info) => {

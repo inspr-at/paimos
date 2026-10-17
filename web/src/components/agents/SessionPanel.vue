@@ -240,7 +240,15 @@ function selectTab(next: PanelTab) {
 // AEON-1286: the default tab is a menu choice for the tab on screen ("Open on Chat by default"),
 // never a pin beside the tabs. Events and Terminal cannot be a default; there the item names the
 // current default, so it can still be cleared. Questions and problems still open where they need you.
-const pinChoice = computed<LeadTab | null>(() => isLead.value ? leadTab(tab.value) ?? pinned.value : null)
+// The item is fixed for one opening of ⋯: clearing the default there keeps its row, its focus and
+// everything below it until the menu closes, so it can be ticked again in place.
+const heldPin = ref<{ owner: string; tab: LeadTab } | null>(null)
+watch(actionsAnchor, anchor => {
+  const choice = isLead.value ? leadTab(tab.value) ?? pinned.value : null
+  heldPin.value = anchor && choice ? { owner: owner.value, tab: choice } : null
+}, { flush: 'sync' })
+const pinChoice = computed<LeadTab | null>(() => !isLead.value ? null
+  : leadTab(tab.value) ?? pinned.value ?? (actionsAnchor.value && heldPin.value?.owner === owner.value ? heldPin.value.tab : null))
 const pinNote = computed(() => !pinChoice.value ? '' : pinned.value === pinChoice.value ? 'Unless something needs you'
   : pinned.value ? `Now ${PANEL_TAB_LABEL[pinned.value]} is your default` : 'Now it opens on the last tab used')
 function pinTab() {
@@ -1062,5 +1070,15 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .session-panel.sheet { z-index: 40; inset: 0; width: auto; border: 0; border-radius: 0; box-shadow: none; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .session-panel.sheet.chatting { padding-bottom: 0; }
   .session-panel.sheet .pane-layout { display: none; }
+}
+/* Narrow landscape phones (480–720 px wide): the phone head keeps its form on one 48 px line,
+   ← · avatar · name over "state · model" · the flat menu · ⋯, inside the side safe areas, so the
+   thread keeps at least 60 % of the height (AEON-1286). Portrait phones with the keyboard up stay
+   narrower than 480 px and keep the menu on its own row. */
+@media (min-width: 480px) and (max-width: 720px) and (max-height: 480px) {
+  .session-panel.sheet, .session-panel.full { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+  .pane-bar, .full .pane-bar { grid-template-columns: 44px minmax(0, 1fr) auto auto; grid-template-rows: 48px; }
+  .pane-bar > :deep(.session-tabs) { grid-column: 3; grid-row: 1; align-self: center; margin: 0; }
+  .pane-buttons { grid-column: 4; }
 }
 </style>
