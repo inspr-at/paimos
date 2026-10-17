@@ -239,16 +239,12 @@ func TestMergeAuditReviewCarryRechecksVerifiedGate(t *testing.T) {
 		t.Run(variant, func(t *testing.T) {
 			f := newFixture(t)
 			f.build(t)
-			f.review(t)
 			repo := newAuditGitFixture(t, variant)
-			f.tx(t, func(tx pgx.Tx) error {
-				pr := int64(7)
-				if variant == "wrong-pr" {
-					pr = 8
-				}
-				_, err := tx.Exec(t.Context(), `UPDATE work_order_reviews SET base_sha=$1,head_sha=$2,pull_request=$3`, repo.base, repo.reviewed, pr)
-				return err
-			})
+			boundPR := int64(7)
+			if variant == "wrong-pr" {
+				boundPR = 8
+			}
+			f.reviewRange(t, repo.base, repo.reviewed, &boundPR)
 			p := f.pull()
 			p.Open, p.Merged, p.Head, p.Base = false, true, repo.head, repo.updated
 			f.gh.pulls[7] = p
@@ -264,7 +260,7 @@ func TestMergeAuditReviewCarryRechecksVerifiedGate(t *testing.T) {
 				clean, err := readAuditReviewCarry(repo.get, base, reviewed, target, head)
 				if variant == "invalidated" {
 					f.tx(t, func(tx pgx.Tx) error {
-						_, err := tx.Exec(t.Context(), `UPDATE work_order_reviews SET evidence_id=NULL`)
+						_, err := tx.Exec(t.Context(), `UPDATE work_order_reviews SET github_status='stale'`)
 						return err
 					})
 				}
