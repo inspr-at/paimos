@@ -637,23 +637,40 @@ func TestKeyTrimOppositeProposalsFenceCompleteKeyBatch(t *testing.T) {
 	m.trimNow = func() time.Time { return now }
 	in := trimInput{RequestID: "10000000-0000-4000-8000-000000000001", Expected: scopes, Candidate: []string{"approvals.request", "nodes.read"}, ExpiresAt: now.Add(time.Hour), Evidence: trimEvidence{Summary: "Retain proposal and read permissions.", ObservedAt: now, Risks: []trimRisk{{Scope: "nodes.write", Evidence: "No recorded use; earlier use unknown.", Risk: "Writes fail."}}}}
 	pool, barrier, ctx := dbtest.BarrierPool(t, m.pool, func(sql string) bool {
-		return strings.Contains(sql, "pg_advisory_xact_lock(hashtextextended($1,615))")
+		return strings.Contains(sql, "pg_advisory_xact_lock_shared(hashtextextended($1,615))")
 	})
 	// Share fixture dependencies without copying the module's mutex or OIDC state.
 	first := &Module{pool: pool, inTenant: m.inTenant, trimNow: m.trimNow}
 	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
 	go func() { _, err := first.proposeKeyTrim(ctx, agents[0], keys[1].ID, in); firstDone <- err }()
 	holder := barrier.Wait(t, ctx)
-	finished := make(chan struct{})
-	go func() { _, err := m.proposeKeyTrim(ctx, agents[1], keys[0].ID, in); secondDone <- err; close(finished) }()
-	if lock := dbtest.BlockedOrDone(t, ctx, m.pool, holder, finished); lock != "advisory" {
-		t.Fatalf("opposite proposal did not wait on the first key in the batch: %q", lock)
+	// The lower target key must be the first shared fence, before self. An
+	// exclusive probe observes exactly that batch prefix while paused.
+	probe, err := m.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer probe.Rollback(context.Background())
+	for i, key := range []agentKeyCreatedJSON{keys[1], keys[0]} {
+		var free bool
+		if err := probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,615))`, owner.TenantID+":"+key.ID).Scan(&free); err != nil {
+			t.Fatal(err)
+		}
+		if free != (i == 1) {
+			t.Fatalf("backend %d acquired an unsorted/incomplete batch prefix at key %d", holder, i)
+		}
+	}
+	if err := probe.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, err := m.proposeKeyTrim(ctx, agents[1], keys[0].ID, in); secondDone <- err }()
+	// Proposals inspect scopes without changing them. The opposite proposal
+	// must complete through its shared batch while the first remains paused.
+	if err := dbtest.Await(t, ctx, secondDone); err != nil {
+		t.Fatal(err)
 	}
 	barrier.Release()
 	if err := dbtest.Await(t, ctx, firstDone); err != nil {
-		t.Fatal(err)
-	}
-	if err := dbtest.Await(t, ctx, secondDone); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range keys {

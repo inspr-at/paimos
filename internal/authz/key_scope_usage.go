@@ -11,12 +11,18 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// LockKeyScopeUseTx serializes grants and trims before resource locking.
+// LockKeyScopeUseTx admits parallel grants and excludes scope changes.
 // InTenant takes the authenticating-key fence before calling handlers, so
 // RequireTx only re-enters it even when it follows a resource row lock.
-// Person-owned trims take the target-key fence before their tenant fence.
+// Scope changes take LockKeyScopeChangeTx before their tenant fence.
 func LockKeyScopeUseTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) error {
 	return db.LockKeyScopeUseTx(ctx, tx, tenantID, keyID)
+}
+
+// LockKeyScopeChangeTx exclusively fences a scope/authority change against uses.
+// Call before tenant/tree/resource locks; do not upgrade a shared use fence.
+func LockKeyScopeChangeTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) error {
+	return db.LockKeyScopeChangeTx(ctx, tx, tenantID, keyID)
 }
 
 func validateKeyCreatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
@@ -67,8 +73,14 @@ func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 }
 
 func upsertKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope string, at time.Time) error {
+	// A fresh committed timestamp needs no tuple lock. ON CONFLICT's WHERE
+	// alone still locks the row and would serialize all otherwise shared uses.
+	// Keep that final predicate too: simultaneous first/expired uses may race.
 	_, err := tx.Exec(ctx, `INSERT INTO agent_key_scope_usage(tenant_id,key_id,scope,last_used_at)
-	 VALUES($1::uuid,$2::uuid,$3,$4)
+	 SELECT $1::uuid,$2::uuid,$3,$4::timestamptz
+	 WHERE NOT EXISTS (SELECT 1 FROM agent_key_scope_usage
+	  WHERE tenant_id=$1::uuid AND key_id=$2::uuid AND scope=$3
+	  AND last_used_at>$4::timestamptz-interval '1 minute')
 	 ON CONFLICT(tenant_id,key_id,scope) DO UPDATE SET last_used_at=EXCLUDED.last_used_at
 	 WHERE agent_key_scope_usage.last_used_at<=EXCLUDED.last_used_at-interval '1 minute'`, p.TenantID, p.KeyID, scope, at)
 	return err

@@ -3732,6 +3732,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeCeilingParityCreateEditRotate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestKeyScopeChangeDrainsUsesAndRejectsQueuedStaleScope","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeChangesImmediateAuditedAndBounded","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeConcurrentDeltasPreserveBothChanges","tier":"GATED-FULL"}
@@ -3757,6 +3759,8 @@
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeRoleGrantForeignRoleAndStaleEditor","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeUnknownCleanupAuditedAndKnownScopesPreserved","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestKeyScopeUsesOverlapThroughAuthorization","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopesThroughBearerMiddleware","tier":"GATED-FULL"}
     ,
