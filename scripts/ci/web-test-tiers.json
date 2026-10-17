@@ -9130,6 +9130,8 @@
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"an opened goal lists what’s missing, then Moving, Queued (five, then a fold), Paused and Done folded; one agent column; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"at 390 a goal item without an agent opens its ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"empty states replace the list in place and never show examples","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the ETA popover says who set it and what it was, where the pace lands it, right-aligned and flipping above; passed ETAs are gold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18111,6 +18113,14 @@
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets filtered to none","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"goals pagination and charts stay current > a refresh during Show more clears the disabled state and a stale page cannot cancel the next one","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"goals pagination and charts stay current > an owner change frees chart slots and drops the previous person’s series","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"partial totals and phone tickets > a goal too large to expand shows unknown counts, and partial totals say so","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"partial totals and phone tickets > a phone item keeps a link for every ticket, including when no agent is on it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"contains a rejected exit and tolerates a missing exit API","tier":"GATED-FULL"}
     ,

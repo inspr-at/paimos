@@ -51,12 +51,17 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const reading = ref(false)
   const loadingMore = ref(false)
   let turn = 0, shownQuery = ''
+  // A list read retires pagination at once. The page still in flight must not
+  // leave "Show more" disabled, and must not append onto the list that replaced it.
+  let pageToken = 0
   let controller: AbortController | undefined
   const query = () => ({ q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, sort: sort.value, dir: dir.value })
+  function retirePagination() { pageToken++; loadingMore.value = false }
   function read(): Promise<void> {
     if (!owner.value || !options.active()) return Promise.resolve()
     controller?.abort()
     const abort = new AbortController(); controller = abort
+    retirePagination()
     const mine = ++turn, who = owner.value, asked = JSON.stringify(query())
     reading.value = true
     // The answer counts only for the person, query and turn it was asked for.
@@ -77,16 +82,16 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // The next page joins the list; a newer read of the first page replaces it instead.
   function loadMore(): Promise<void> {
     const page = list.value
-    if (!page?.next_cursor || loadingMore.value) return Promise.resolve()
-    const mine = turn, who = owner.value
+    if (!page?.next_cursor || loadingMore.value || !owner.value) return Promise.resolve()
+    const mine = turn, who = owner.value, token = pageToken
     loadingMore.value = true
     return listGoals({ ...query(), cursor: page.next_cursor }).then(answer => {
-      if (mine !== turn || who !== owner.value || list.value !== page) return
+      if (token !== pageToken || mine !== turn || who !== owner.value || list.value !== page) return
       const known = new Set(page.items.map(goal => goal.id))
       list.value = { ...answer, items: [...page.items, ...answer.items.filter(goal => !known.has(goal.id))] }
     }, cause => {
-      if (mine === turn && who === owner.value) error.value = cause instanceof Error ? cause.message : 'More goals could not be read.'
-    }).finally(() => { if (mine === turn) loadingMore.value = false })
+      if (token === pageToken && mine === turn && who === owner.value) error.value = cause instanceof Error ? cause.message : 'More goals could not be read.'
+    }).finally(() => { if (token === pageToken) loadingMore.value = false })
   }
   let settle: ReturnType<typeof setTimeout> | undefined
   watch(options.term, () => { clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
@@ -123,55 +128,68 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // ---------- Series ----------
   const series = reactive(new Map<string, SeriesEntry>())
   const queue: { goal: Goal; key: string; sign: string }[] = []
+  const inflight = new Set<string>()
   let running = 0
+  // Flights belong to one epoch. An owner change drops their slots at once;
+  // a late answer never writes, and never keeps the new person's queue from draining.
+  let seriesEpoch = 0
   const signOf = (goal: Goal) => `${goal.progress?.pct ?? ''}:${goal.states ? Object.values(goal.states).join('.') : ''}:${goal.done ? 1 : 0}`
   const seriesKey = (id: string, value: GoalRange) => `${id}:${value}`
   function seriesFor(goal: Goal, value: GoalRange = range.value): SeriesEntry | undefined { return series.get(seriesKey(goal.id, value)) }
+  function retireSeries() { seriesEpoch++; running = 0; queue.length = 0; inflight.clear() }
   // Rows ask for their series; one is read again when the goal moved or it is old.
+  // A "reading" entry with no flight and no queue slot was stranded by an older epoch, so it is asked again.
   function want(goal: Goal, value: GoalRange = range.value) {
     if (goal.expansion !== 'full') return
     const key = seriesKey(goal.id, value), sign = signOf(goal), have = series.get(key)
-    if (have && (have.state === 'reading' || (have.sign === sign && Date.now() - have.at < SERIES_FRESH_MS))) return
-    if (queue.some(entry => entry.key === key)) return
+    if (inflight.has(key) || queue.some(entry => entry.key === key)) return
+    if (have && have.state !== 'reading' && have.sign === sign && Date.now() - have.at < SERIES_FRESH_MS) return
     series.set(key, { state: 'reading', createdAt: have?.createdAt ?? null, series: have?.series, at: Date.now(), sign })
     queue.push({ goal, key, sign })
     pump()
   }
   function pump() {
+    const epoch = seriesEpoch
     while (running < SERIES_PARALLEL && queue.length) {
       const { goal, key, sign } = queue.shift()!
-      const value = key.slice(goal.id.length + 1) as GoalRange, who = owner.value, epoch = seriesEpoch
+      const value = key.slice(goal.id.length + 1) as GoalRange, who = owner.value
       running++
+      inflight.add(key)
       void Promise.all([goalSeries(goal.id, value), goalCreatedAt(goal.id)]).then(([answer, createdAt]) => {
         if (who !== owner.value || epoch !== seriesEpoch) return
         series.set(key, { state: answer.expansion === 'too_large' ? 'too_large' : 'ready', series: answer, createdAt, at: Date.now(), sign })
       }, () => {
         if (who !== owner.value || epoch !== seriesEpoch) return
         series.set(key, { state: 'failed', createdAt: null, at: Date.now(), sign })
-      }).finally(() => { running--; if (epoch === seriesEpoch) pump() })
+      }).finally(() => {
+        if (epoch !== seriesEpoch) return
+        inflight.delete(key)
+        running--
+        pump()
+      })
     }
   }
-  let seriesEpoch = 0
 
   // ---------- Counts ----------
   const totals = computed<GoalCounts>(() => list.value?.totals ?? { moving: 0, queued: 0, paused: 0, done: 0 })
+  const totalsPartial = computed(() => list.value?.totals_partial === true)
   const counts = computed<Record<StateFilter, number>>(() => ({ all: totals.value.moving + totals.value.queued + totals.value.paused + totals.value.done, ...totals.value }))
   const loaded = computed(() => list.value !== null)
 
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
-    turn++; controller?.abort(); seriesEpoch++; queue.length = 0
-    list.value = null; error.value = ''; reading.value = false; loadingMore.value = false
+    turn++; controller?.abort(); retireSeries(); retirePagination()
+    list.value = null; error.value = ''; reading.value = false
     open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'
     if (options.active()) void read()
   }, { flush: 'sync' })
-  function stop() { poller.stop(); controller?.abort(); clearTimeout(settle); seriesEpoch++; queue.length = 0 }
+  function stop() { poller.stop(); controller?.abort(); clearTimeout(settle); retireSeries(); retirePagination() }
   // Leaving the page stops the reads; its watchers go with the page's scope.
   onScopeDispose(stop)
 
   return {
     filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, loaded, loadingMore, loadMore, read,
-    open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, stop,
+    open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
   }
 }
 export type GoalsPage = ReturnType<typeof useGoalsPage>

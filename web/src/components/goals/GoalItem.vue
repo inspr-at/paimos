@@ -32,6 +32,10 @@ const done = computed(() => props.item.state === 'done' || props.item.handed_ove
       </span>
       <div class="i-main"><span class="i-label">{{ item.label }}</span><span v-if="item.note" class="i-live">{{ item.note }}</span></div>
       <div v-if="agents.length && !done" class="i-badge"><LiveAgents :agents="agents" :project="project" variant="row" /></div>
+      <!-- Phones hide the key column. These links stay, so an item with no agent still opens its work. -->
+      <nav v-if="item.keys.length" class="phone-tickets" :aria-label="`Tickets for ${item.label}`">
+        <RouterLink v-for="key in item.keys" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink>
+      </nav>
       <GoalEta class="i-eta" :goal-id="goalId" :outcome-id="item.id" :eta="item.eta" :passed="item.passed" :done="done" :now="now" />
     </template>
   </li>
@@ -54,6 +58,7 @@ const done = computed(() => props.item.state === 'done' || props.item.handed_ove
 .i-badge :deep(.row-name) { max-width: 14ch; }
 .item > .i-eta { grid-column: -3 / -2; justify-self: end; margin: 0 -4px; padding: 0 4px; line-height: 20px; }
 .item > .i-eta.passed { line-height: 1.35; padding-top: 1px; padding-bottom: 1px; }
+.phone-tickets { display: none; }
 .i-label { font-size: 13.5px; font-weight: 500; line-height: 20px; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .is-done .i-label { color: var(--ink-2); font-weight: 400; }
 .i-live { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 17px; color: var(--ink-3); overflow-wrap: anywhere; }
@@ -75,6 +80,10 @@ const done = computed(() => props.item.state === 'done' || props.item.handed_ove
   .item > .i-eta { grid-column: 2; grid-row: 2; justify-self: start; align-self: center; margin: 0 8px 0 -4px; padding: 0 4px; line-height: 1.4; }
   .item > .i-eta.none { display: none; }
   .i-badge { grid-column: 2 / -1; grid-row: 3; justify-self: start; margin-top: 4px; }
+  .phone-tickets { display: flex; flex-wrap: wrap; align-items: center; grid-column: 2 / -1; grid-row: 4; gap: 0 2px; margin-top: 2px; }
+  .phone-tickets a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 8px; border-radius: 8px; color: var(--ink-2); font-size: 13px; font-weight: 500; text-decoration: none; }
+  .phone-tickets a:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
+  .phone-tickets a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 }
 /* Touch: the agent chips keep their look and get a 44 px hit area. */
 @media (max-width: 760px), (pointer: coarse) {

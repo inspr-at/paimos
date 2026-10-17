@@ -126,7 +126,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', searchKey, true); 
 
 const quiet = computed(() => props.page.list.value?.quiet_projects ?? { count: 0, keys: [] })
 const more = computed(() => props.page.list.value?.next_cursor)
-const emptyTitle = computed(() => props.term.trim() ? `No goal matches “${props.term.trim()}”` : props.hiddenGroups ? 'All goals are in hidden groups' : filtering.value ? 'Nothing here' : props.page.hideDone.value && props.page.counts.value.all > 0 ? 'Every goal is done' : 'No goals yet')
+const emptyTitle = computed(() => props.term.trim() ? `No goal matches “${props.term.trim()}”` : props.hiddenGroups ? 'All goals are in hidden groups' : filtering.value ? 'Nothing here' : props.page.hideDone.value && props.page.counts.value.all > 0 && !props.page.totalsPartial.value ? 'Every goal is done' : 'No goals yet')
 const emptyText = computed(() => props.term.trim() ? 'Check the spelling, or search by project or ticket key.'
   : props.hiddenGroups ? 'Show a group from the chips above.'
     : filtering.value ? 'No goal has items in this state. Try another state.'
@@ -144,6 +144,7 @@ const canClear = computed(() => filtering.value)
       <button class="btn" type="button" @click="page.read()"><AppIcon name="refresh" :size="14" />Try again</button>
     </div>
     <template v-else>
+      <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized goals.</p>
       <div class="goal-grid">
         <GoalWaiting v-if="person" :goals="goals" />
         <template v-if="!loaded">
@@ -225,6 +226,7 @@ const canClear = computed(() => filtering.value)
 .quiet-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; padding: 14px 20px 16px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
 .quiet-line .pk { font-size: 11.5px; font-weight: 500; letter-spacing: .02em; color: var(--ink-2); padding: 4px 2px; border-radius: 5px; text-decoration: none; }
 .quiet-line .pk:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
+.partial-line { margin: 0; padding: 10px 20px 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
 .more-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; padding: 12px 20px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
 .more-line.warn { color: var(--warn-ink); }
 .state { display: grid; justify-items: center; gap: 8px; padding: 64px 24px; text-align: center; color: var(--ink-2); }
@@ -251,6 +253,7 @@ const canClear = computed(() => filtering.value)
   .goal-head > :not(.head-expand) { display: none; }
   .head-expand { display: inline-flex; min-height: 44px; padding: 0 14px 0 10px; font-size: 13px; }
   .goal-list { padding: 4px 0; }
+  .partial-line { padding: 8px 14px 0; font-size: 13px; }
   .quiet-line { padding: 10px 14px 12px; font-size: 13px; gap: 0 4px; }
   .quiet-line > span { flex: 1 0 100%; padding: 6px 0 0; }
   .quiet-line .pk { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 8px; }

@@ -399,6 +399,26 @@ test('empty states replace the list in place and never show examples', async ({ 
   await expect(page.getByRole('searchbox', { name: 'Filter goals' })).toBeFocused()
 })
 
+test('at 390 a goal item without an agent opens its ticket', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const w = world()
+  await openGoals(page, w)
+  const release = goalRow(page, 'g-r136')
+  await release.locator('.goal-row').click({ position: { x: 120, y: 20 } })
+  await expect(release).toHaveAttribute('data-open', '1')
+  const item = release.locator('.item', { hasText: 'Browser tests fit the 20-minute CI limit' })
+  await expect(item.locator('.i-keys')).toBeHidden()
+  const link = item.locator('.phone-tickets a')
+  await expect(link).toBeVisible()
+  expect((await box(link)).height).toBeGreaterThanOrEqual(44)
+  const href = await link.getAttribute('href')
+  expect(href).toMatch(/^\/p\/AEON\/AEON-\d+$/)
+  const overflow = await page.evaluate(() => { const main = document.getElementById('main')!; return main.scrollWidth - main.clientWidth })
+  expect(overflow).toBeLessThanOrEqual(0)
+  await link.click()
+  await expect(page).toHaveURL(new RegExp(`${href}$`))
+})
+
 test('a list that cannot be read says so and offers Try again; the counts never pretend', async ({ page }) => {
   const w = world()
   await mockGoals(page, w, { failList: true })

@@ -22,7 +22,8 @@ const props = defineProps<{ goal: Goal; page: GoalsPage; now: number; agents: Re
 const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 
 const open = computed(() => props.page.isOpen(props.goal))
-const states = computed(() => props.goal.states ?? { moving: 0, queued: 0, paused: 0, done: 0 })
+// A goal the server could not expand has no state counts. Zero would say the work is empty.
+const states = computed(() => props.goal.expansion === 'full' && props.goal.states ? props.goal.states : null)
 const done = computed(() => !!props.goal.done)
 const keys = computed(() => props.goal.projects.slice(0, 2))
 const filtering = computed(() => props.page.filter.value !== 'all' || !!props.term.trim())
@@ -62,7 +63,7 @@ function rowClick(event: MouseEvent) {
   if (target.closest('a, button, input, .goal-progress, .live')) return
   props.page.toggle(props.goal.id)
 }
-const statLabel = (n: number, state: keyof typeof STATE_LABEL) => `${n} ${STATE_LABEL[state].toLowerCase()}`
+const statLabel = (n: number | undefined, state: keyof typeof STATE_LABEL) => n === undefined ? `${STATE_LABEL[state]} unknown` : `${n} ${STATE_LABEL[state].toLowerCase()}`
 const waitsLabel = computed(() => `${props.goal.waits.count} open Desk ${props.goal.waits.count === 1 ? 'question waits' : 'questions wait'} on you`)
 const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/decision-desk', query: { item: `q:${props.goal.waits.question_ids[0]}` } } : '/decision-desk')
 </script>
@@ -80,9 +81,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
         <span v-if="!done && nextText" class="goal-next"><span class="lbl">Next</span><span v-clip-tip class="txt">{{ nextText }}</span></span>
       </div>
       <div class="agents"><LiveAgents v-if="goalAgents.length" :agents="goalAgents" :project="project" variant="row" /></div>
-      <span class="stat" :data-zero="states.moving ? 0 : 1" :aria-label="statLabel(states.moving, 'moving')">{{ states.moving }}</span>
-      <span class="stat" :data-zero="states.queued ? 0 : 1" :aria-label="statLabel(states.queued, 'queued')">{{ states.queued }}</span>
-      <span class="stat" :data-zero="states.done ? 0 : 1" :aria-label="statLabel(states.done, 'done')">{{ states.done }}</span>
+      <span v-for="state in (['moving', 'queued', 'done'] as const)" :key="state" class="stat" :data-unknown="states ? 0 : 1" :data-zero="states && states[state] === 0 ? 1 : 0" :aria-label="statLabel(states?.[state], state)">{{ states ? states[state] : '–' }}</span>
       <GoalProgress :goal="goal" :open="page.charts.has(goal.id)" :range="page.range.value" :entry="entry" :now="now" @toggle="page.toggleChart(goal.id)" @range="page.setRange" />
       <RouterLink v-if="goal.waits.count" class="waits mono" :to="deskLink" :data-tip="waitsLabel" :aria-label="waitsLabel"><AppIcon name="person-wait" :size="14" /><span>{{ goal.waits.count }}</span></RouterLink>
       <span v-else />
@@ -156,7 +155,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .agents { display: flex; align-items: center; justify-self: start; min-width: 0; max-width: 100%; }
 .agents :deep(.row-name) { max-width: 14ch; }
 .stat { justify-self: end; font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink); }
-.stat[data-zero="1"] { color: var(--ink-3); }
+.stat[data-zero="1"], .stat[data-unknown="1"] { color: var(--ink-3); }
 .waits { display: inline-flex; align-items: center; gap: 5px; justify-self: start; height: 28px; padding: 0 8px; margin-left: -8px; border-radius: 8px; color: var(--ink-2); font-size: 12px; font-weight: 600; text-decoration: none; }
 .waits svg { color: var(--gold-ink); }
 .waits:hover { background: var(--row-hover); }

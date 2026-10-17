@@ -15,7 +15,9 @@ default, and `?view=goals` once.
   never moves the group chips). After the group chips come the state chips
   All · Moving · Queued · Paused · Done (keys 1–5), Hide done (H) and
   Expand all / Collapse all (E). The chips count items over every visible goal and
-  add up; Hide done and the search change the list, never the counts. Below 1420 px
+  add up; Hide done and the search change the list, never the counts. When the
+  server marks the totals partial, the chips and a line on the list say the counts
+  omit oversized goals. Below 1420 px
   these controls take the toolbar's second row. Display sorts by ETA, name,
   progress or project.
 - **Waiting on you** lists the person's live Decision Desk items from the same
@@ -28,7 +30,8 @@ default, and `?view=goals` once.
 - **A goal row** shows its project keys, kind (goal or release), name and "Next",
   one agent-badge column shared with its items (reserved when no one works), the three
   counts, progress with "N of M done" (a pen marks a hand-set value), the waits-on-you
-  marker and LANDS, the ETA its agent set.
+  marker and LANDS, the ETA its agent set. A goal too large to expand shows those
+  counts as unknown.
 - **An opened goal** lists what's missing as ordered steps, then its items: Moving,
   Queued (five, then "N more queued · show"), Paused; Done folds into one line; the
   "Handed over" line closes the agents' part. A search that finds only items opens
@@ -51,7 +54,9 @@ default, and `?view=goals` once.
   reserves the longest form.
 - **Footer.** "N projects with nothing moving: KEY KEY …" and the keyboard line.
 - **Phones** show name, ETA and progress; the state chips, Hide done and Expand all are
-  behind ⋯, with a 44 px Expand all row above the first goal.
+  behind ⋯, with a 44 px Expand all row above the first goal. An opened item links
+  each of its tickets, with a 44 px target, so an item without an agent still opens
+  its work. The same ⋯ menu says when the counts omit oversized goals.
 
 Without goals the view says so; it never shows examples. The Coming line of the design
 has no data source in Aeon yet and is not shown.
