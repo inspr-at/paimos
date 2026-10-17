@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -60,6 +61,8 @@ func (m *Module) metadata(w http.ResponseWriter, r *http.Request) {
 			if err := requireScope(r.Context(), tx, r, p, "account.manage"); err != nil {
 				return err
 			}
+		} else if authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
 		}
 		var err error
 		out, err = replaceMetadata(r.Context(), tx, p, id, in)
@@ -196,7 +199,7 @@ func (m *Module) rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		var err error
 		out, err = renameAccount(r.Context(), tx, p, r.PathValue("accountId"), in.Label)
 		return err

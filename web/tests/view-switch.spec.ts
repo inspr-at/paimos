@@ -3,13 +3,16 @@
 // server; right-click or Shift+F10 makes one the default, marked by the pin without moving
 // a segment, and a link wins once. A project's ticket list opens on its default (a mode or
 // a saved view, read from the older list:<id>.defaultView until replaced) or the mode used
-// last. The Releases sheet's language moves from this browser to the server once.
+// last. The Releases sheet's language moves from this browser to the server once. The session
+// panel's tabs keep one default, set on the tab or, on a phone, from ⋯ (package B).
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { controlStability } from './control-stability'
 import { fixtures, me, mockView, mockWork, watchErrors, type Fixtures } from './work-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
 import { mockReleases } from './releases-fixtures'
 import { historicHistory } from './releases-historic-fixtures'
+import { mockLeadFlow, LEAD_SESSION } from './lead-flow-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -267,4 +270,309 @@ test('AEON-1453 the Releases sheet language leaves this browser for the server o
   // The default is for the next visit: Details stays on screen until then.
   await expect(radio('Details')).toHaveAttribute('aria-checked', 'true')
   await expect(sheet).toBeVisible()
+})
+
+// AEON-1453 package B: the session panel's tabs are its view switch, with one default. Risks: the
+// old ⋯ pin (agents:lead-panel) is lost, or comes back after the person stopped it; the phone ⋯
+// choice and the tab's own menu keep two defaults that disagree; marking a tab moves the tabs; a
+// hold also switches the tab; a ?tab= link rewrites what is remembered.
+const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details', exact: true })
+const panelTab = (page: Page, name: string) => panelOf(page).getByRole('tab', { name: new RegExp(`^${name}`) })
+const panelMenu = (page: Page) => page.getByRole('menu', { name: 'More session actions' })
+const openedOn = (page: Page) => panelOf(page).locator('p.sr-only').filter({ hasText: /^Opened on / })
+async function leadPanel(page: Page, preferences: Record<string, Record<string, unknown>> = {}) {
+  const world = await mockLeadFlow(page, { lead: 'working' })
+  Object.assign(world.data.preferences, preferences)
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (['/api/models', '/api/approvals', '/api/agent-accounts', '/api/agent-accounts/capacity', '/api/agent-accounts/capacity/schedule'].includes(path)) return route.fulfill({ json: [] })
+    return route.fallback()
+  })
+  return world
+}
+const pinOn = async (page: Page) => (await panelOf(page).getByRole('tab').evaluateAll(tabs => tabs.filter(tab => tab.querySelector('.view-pin')).map(tab => tab.getAttribute('aria-label'))))
+
+test('AEON-1453 session panel: the old pin becomes the tab switch default once; right-click sets and stops it in place, and ⋯ keeps no default item on wide screens', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const errors = watchErrors(page)
+  // The ⋯ pin and the last tab as AEON-1212 kept them, before the switch had its own key.
+  const world = await leadPanel(page, { 'agents:lead-panel': { pinned: 'chat', last: 'session' } })
+  await page.goto(`/agents/${LEAD_SESSION}`)
+  const lead = panelTab(page, 'Lead'), details = panelTab(page, 'Details'), chat = panelTab(page, 'Chat'), events = panelTab(page, 'Events')
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Chat: your default')
+  expect(await pinOn(page)).toEqual(['Chat'])
+  await expect(chat).toHaveAttribute('data-tip', /^Chat · default/)
+  await expect(chat).toHaveAttribute('aria-description', 'Opens here by default')
+  await expect(lead.locator('.tab-label')).toBeVisible()
+
+  // Wide screens set the default on the tab only: ⋯ has no default item.
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await expect(panelMenu(page).getByRole('menuitem', { name: 'Interrupt' })).toBeVisible()
+  await expect(panelMenu(page).getByRole('menuitemcheckbox', { name: /by default/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  // Right-click Lead: the pin moves to Lead in its reserved slot; no tab moves, Chat stays on screen.
+  const guard = await controlStability(page, { lead, details, chat, events })
+  await guard.check(async () => {
+    await lead.click({ button: 'right' })
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Open here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual(['Lead'])
+  })
+  await expect(lead).toBeFocused()
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  expect(world.data.preferences['view:lead-panel']).toEqual({ default: 'lead' })
+  await page.reload()
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Lead: your default')
+
+  // Shift+F10 on the focused tab stops it; the old pin never comes back, the old last tab still counts.
+  await guard.check(async () => {
+    await lead.focus()
+    await page.keyboard.press('Shift+F10')
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Stop opening here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual([])
+  })
+  guard.done()
+  expect(world.data.preferences['view:lead-panel']).toEqual({ default: null })
+  await page.reload()
+  await expect(details).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Details: last used · no default set')
+  expect(await pinOn(page)).toEqual([])
+  // Events cannot be a default: no menu opens on it.
+  await events.click({ button: 'right' })
+  await expect(page.getByRole('menu', { name: 'Events view' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  // The older store is read, never rewritten.
+  expect(world.data.preferences['agents:lead-panel']).toEqual({ pinned: 'chat', last: 'session' })
+  expect(errors).toEqual([])
+})
+
+test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab set one default, shown on both', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const errors = watchErrors(page)
+  const world = await leadPanel(page)
+  // questions.decide is unused until the icon-only overlap check publishes one ask.
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    for (const grant of ['run.create', 'harness.read', 'harness.control', 'work_orders.read', 'questions.read', 'questions.decide']) {
+      permissions.workspace.permissions.push(grant)
+      permissions.project?.permissions.push(grant)
+    }
+    return route.fulfill({ json: permissions })
+  })
+  await page.goto(`/agents/${LEAD_SESSION}`)
+  const lead = panelTab(page, 'Lead'), details = panelTab(page, 'Details'), chat = panelTab(page, 'Chat'), events = panelTab(page, 'Events')
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  const last = saved(page, 'view:lead-panel')
+  await chat.click()
+  await last
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  const more = panelOf(page).getByRole('button', { name: 'More session actions', exact: true })
+  const choice = panelMenu(page).getByRole('menuitemcheckbox', { name: /^Open on Chat by default/ })
+  const tabs = await controlStability(page, { lead, details, chat, events })
+
+  // ⋯ "Open on Chat by default" writes the switch's default: the pin shows on the Chat tab.
+  await tabs.check(async () => {
+    await more.click()
+    await expect(choice).toHaveAttribute('aria-checked', 'false')
+    const put = saved(page, 'view:lead-panel')
+    await choice.click()
+    await put
+    await expect(choice).toHaveAttribute('aria-checked', 'true')
+    await page.keyboard.press('Escape')
+    await expect(panelMenu(page)).toHaveCount(0)
+    expect(await pinOn(page)).toEqual(['Chat'])
+  })
+  expect(world.data.preferences['view:lead-panel']).toEqual({ last: 'chat', default: 'chat' })
+
+  // A long press on Lead opens its menu without switching to it; its default shows in ⋯ too.
+  await tabs.check(async () => {
+    const touch = { pointerType: 'touch', pointerId: 7, isPrimary: true, button: 0, bubbles: true }
+    await lead.dispatchEvent('pointerdown', touch)
+    await expect(menuItem(page, 'Open here by default')).toBeVisible()
+    await lead.dispatchEvent('pointerup', touch)
+    await lead.dispatchEvent('click', { detail: 1, bubbles: true })
+    await expect(chat).toHaveAttribute('aria-selected', 'true')
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Open here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual(['Lead'])
+  })
+  tabs.done()
+  expect(world.data.preferences['view:lead-panel']).toEqual({ last: 'chat', default: 'lead' })
+  await more.click()
+  await expect(choice).toHaveAttribute('aria-checked', 'false')
+  await expect(choice).toContainText('Now Lead is your default')
+  await page.keyboard.press('Escape')
+  await page.reload()
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Lead: your default')
+  expect(await pinOn(page)).toEqual(['Lead'])
+
+  // Every form of the tabs: the pin stays inside its tab, after the label where one shows and as a
+  // glyph on an icon-only tab, where stopping and setting it again moves no tab either.
+  const tablist = panelOf(page).getByRole('tablist'), forms: string[] = []
+  for (const width of [390, 320, 1440, 1100, 900]) for (const look of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width < 600 ? 700 : 900 })
+    await page.emulateMedia({ colorScheme: look })
+    // The tabs choose their form in a resize observer: two frames, then it is settled.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await expect(lead.locator('.view-pin')).toBeVisible()
+    const placed = await lead.evaluate(tab => {
+      const pinEl = tab.querySelector('.view-pin')!
+      const pin = pinEl.getBoundingClientRect(), box = tab.getBoundingClientRect(), label = tab.querySelector('.tab-label')!
+      const labelled = label.checkVisibility()
+      const style = getComputedStyle(pinEl)
+      return {
+        labelled,
+        pin: { x: pin.x, y: pin.y, right: pin.right, bottom: pin.bottom, w: pin.width, h: pin.height },
+        tab: { x: box.x, y: box.y, right: box.right, bottom: box.bottom },
+        labelRight: labelled ? label.getBoundingClientRect().right : null,
+        background: style.backgroundColor, shadow: style.boxShadow,
+      }
+    })
+    expect(placed.pin.x, `${width}: pin inside its tab`).toBeGreaterThanOrEqual(placed.tab.x - .5)
+    expect(placed.pin.y, `${width}: pin inside its tab`).toBeGreaterThanOrEqual(placed.tab.y - .5)
+    expect(placed.pin.right, `${width}: pin inside its tab`).toBeLessThanOrEqual(placed.tab.right + .5)
+    expect(placed.pin.bottom, `${width}: pin inside its tab`).toBeLessThanOrEqual(placed.tab.bottom + .5)
+    if (placed.labelRight !== null) expect(Math.abs(placed.pin.x - placed.labelRight - 4), `${width}: four pixels after the label`).toBeLessThanOrEqual(1)
+    if (!placed.labelled) {
+      const midX = (placed.pin.x + placed.pin.right) / 2, midY = (placed.pin.y + placed.pin.bottom) / 2
+      expect(midX, `${width}: icon-only pin sits in the top-right`).toBeGreaterThan((placed.tab.x + placed.tab.right) / 2)
+      expect(midY, `${width}: icon-only pin sits in the top-right`).toBeLessThan((placed.tab.y + placed.tab.bottom) / 2)
+      expect(placed.pin.w, `${width}: 10–12 px glyph`).toBeGreaterThanOrEqual(10)
+      expect(placed.pin.h, `${width}: 10–12 px glyph`).toBeGreaterThanOrEqual(10)
+      expect(placed.pin.w, `${width}: 10–12 px glyph`).toBeLessThanOrEqual(12.5)
+      expect(placed.pin.h, `${width}: 10–12 px glyph`).toBeLessThanOrEqual(12.5)
+      expect(placed.background, `${width}: no disc`).toBe('rgba(0, 0, 0, 0)')
+      expect(placed.shadow, `${width}: no disc`).toBe('none')
+      const radius = Math.min(placed.tab.right - placed.tab.x, placed.tab.bottom - placed.tab.y) / 2
+      for (const [x, y] of [[placed.pin.x, placed.pin.y], [placed.pin.right, placed.pin.y], [placed.pin.x, placed.pin.bottom], [placed.pin.right, placed.pin.bottom]] as const) {
+        const cx = x < placed.tab.x + radius ? placed.tab.x + radius : placed.tab.right - radius
+        const cy = y < placed.tab.y + radius ? placed.tab.y + radius : placed.tab.bottom - radius
+        expect((x - cx) ** 2 + (y - cy) ** 2, `${width}: pin corner stays on the pill`).toBeLessThanOrEqual((radius + .75) ** 2)
+      }
+    }
+    forms.push(`${width}-${placed.labelled ? 'labels' : 'icons'}`)
+    await tablist.screenshot({ path: info.outputPath(`AEON-1453/session-tabs-${width}-${look}-${placed.labelled ? 'labels' : 'icons'}.png`) })
+    if (placed.labelled || look === 'dark') continue
+    const badge = await controlStability(page, { lead, details, chat, events })
+    for (const action of ['Stop opening here by default', 'Open here by default']) await badge.check(async () => {
+      await lead.focus()
+      await page.keyboard.press('Shift+F10')
+      const put = saved(page, 'view:lead-panel')
+      await menuItem(page, action).click()
+      await put
+      expect(await pinOn(page)).toEqual(action === 'Open here by default' ? ['Lead'] : [])
+    })
+    badge.done()
+  }
+  expect(forms, 'the narrowest phone shows icon-only tabs').toContain('320-icons')
+
+  // Chat can carry the pin and the unread count at once. The count stays where it was;
+  // the pin moves to the bottom-left inside the tab, and the two boxes never meet.
+  await page.setViewportSize({ width: 320, height: 700 })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.route('**/api/decision-desk*', route => {
+    const open = new URL(route.request().url()).searchParams.get('state') === 'open'
+    return route.fulfill({ json: { items: open ? [{
+      id: 'qqqqqqqq-0000-4000-8000-000000000099', project_id: 'p-pharos', revision: 1, state: 'open',
+      suggested_outcome: 'once', suggestion_reason: 'agent_suggestion', pending: [],
+      created_at: '2026-10-06T09:39:00Z', updated_at: '2026-10-06T09:39:00Z',
+      input: { request_id: 'ask-pin', session_id: LEAD_SESSION, question: 'Keep the count?', meanwhile: 'parked', recommend: 'yes',
+        options: [{ id: 'yes', title: 'Yes', description: 'Keep it.', answer: 'Yes' }] },
+      askers: [{ id: 'asker', principal_id: 'lead-agent', session_id: LEAD_SESSION, reply_root_id: '', comment_node_id: '',
+        input: { request_id: 'ask-pin', question: 'Keep the count?', options: [], meanwhile: 'parked' } }],
+    }] : [], has_more: false } })
+  })
+  await page.evaluate(async () => { await (await import('/src/stores/agentProjection.ts')).useAgentProjection().refresh() })
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  const count = chat.locator('.count')
+  await expect(count).toHaveText('1')
+  const countAt = await count.boundingBox()
+  const shared = await controlStability(page, { lead, details, chat, events })
+  await shared.check(async () => {
+    await chat.focus()
+    await page.keyboard.press('Shift+F10')
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Open here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual(['Chat'])
+  })
+  shared.done()
+  const countNow = await count.boundingBox()
+  expect(countAt && countNow, 'the unread count stays where it was').toBeTruthy()
+  expect(Math.abs(countNow!.x - countAt!.x), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  expect(Math.abs(countNow!.y - countAt!.y), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  expect(Math.abs(countNow!.width - countAt!.width), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  expect(Math.abs(countNow!.height - countAt!.height), 'the unread count stays where it was').toBeLessThanOrEqual(.5)
+  const both = await chat.evaluate(tab => {
+    const pin = tab.querySelector('.view-pin')!.getBoundingClientRect()
+    const mark = tab.querySelector('.count')!.getBoundingClientRect()
+    const box = tab.getBoundingClientRect()
+    return {
+      pin: { x: pin.x, y: pin.y, right: pin.right, bottom: pin.bottom },
+      count: { x: mark.x, y: mark.y, right: mark.right, bottom: mark.bottom },
+      tab: { x: box.x, y: box.y, right: box.right, bottom: box.bottom },
+    }
+  })
+  expect(both.pin.x, '320: pin inside its tab').toBeGreaterThanOrEqual(both.tab.x - .5)
+  expect(both.pin.y, '320: pin inside its tab').toBeGreaterThanOrEqual(both.tab.y - .5)
+  expect(both.pin.right, '320: pin inside its tab').toBeLessThanOrEqual(both.tab.right + .5)
+  expect(both.pin.bottom, '320: pin inside its tab').toBeLessThanOrEqual(both.tab.bottom + .5)
+  expect((both.pin.x + both.pin.right) / 2, '320: shared pin sits bottom-left').toBeLessThan((both.tab.x + both.tab.right) / 2)
+  expect((both.pin.y + both.pin.bottom) / 2, '320: shared pin sits bottom-left').toBeGreaterThan((both.tab.y + both.tab.bottom) / 2)
+  const apart = both.pin.right <= both.count.x + .5 || both.count.right <= both.pin.x + .5 || both.pin.bottom <= both.count.y + .5 || both.count.bottom <= both.pin.y + .5
+  expect(apart, '320: pin and unread count never intersect').toBe(true)
+  expect(errors).toEqual([])
+})
+
+const WORKER_SESSION = 'aaaaaaaa-0000-4000-8000-000000000002'
+test('AEON-1453 worker panel: the last tab kept before the switch opens this visit and is never rewritten', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const errors = watchErrors(page)
+  const world = await leadPanel(page, { 'agents:session-panel': { last: 'chat' } })
+  const legacy: string[] = []
+  page.on('request', request => { if (preferencePut('agents:session-panel')(request)) legacy.push(request.postData() ?? '') })
+  await page.goto(`/agents/${WORKER_SESSION}`)
+  const details = panelTab(page, 'Details'), chat = panelTab(page, 'Chat')
+  await expect(panelOf(page)).toContainText('PHAROS-11')
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  expect(await pinOn(page), 'a worker panel has no default pin').toEqual([])
+  const put = saved(page, 'view:session-panel')
+  await details.click()
+  await put
+  expect(world.data.preferences['view:session-panel']).toEqual({ last: 'overview' })
+  expect(world.data.preferences['agents:session-panel']).toEqual({ last: 'chat' })
+  expect(legacy, 'the older last tab is read, never rewritten').toEqual([])
+  await page.reload()
+  await expect(details).toHaveAttribute('aria-selected', 'true')
+  expect(world.data.preferences['agents:session-panel']).toEqual({ last: 'chat' })
+  expect(errors).toEqual([])
+})
+
+test('AEON-1453 session panel: a ?tab= link wins once and changes neither the default nor the tab used last', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const errors = watchErrors(page)
+  const world = await leadPanel(page, { 'view:lead-panel': { last: 'chat', default: 'session' } })
+  const writes: string[] = []
+  page.on('request', request => { if (preferencePut('view:lead-panel')(request)) writes.push(request.postData() ?? '') })
+  await page.goto(`/agents/${LEAD_SESSION}?tab=events`)
+  const details = panelTab(page, 'Details'), events = panelTab(page, 'Events')
+  await expect(events).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Events: from this link')
+  expect(await pinOn(page)).toEqual(['Details'])
+  // Without the link, the panel opens on its default again; nothing was written.
+  await page.goto(`/agents/${LEAD_SESSION}`)
+  await expect(details).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Details: your default')
+  expect(writes).toEqual([])
+  expect(world.data.preferences['view:lead-panel']).toEqual({ last: 'chat', default: 'session' })
+  expect(errors).toEqual([])
 })

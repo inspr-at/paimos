@@ -82,7 +82,7 @@ and changed-area/full coverage. Selected cases never retry. `test-tier-run-measu
 per class and complete job costs against the 22.50 Go / 42.17 web runner-minute
 baselines; reused reports carry provenance without claiming fresh passes.
 Web setup shares the built runtime before four file-preserving unit shards and
-sixteen full-gate browser shards run in parallel. The required `web` aggregate
+seventeen full-gate browser shards run in parallel. The required `web` aggregate
 gates setup and both matrices; spec-only retains one unit job and one exact-spec
 job, while docs-only skips them. Skipped Actions jobs contribute no runner duration;
 executed jobs still reject invalid timestamps. Spec-only measurements explicitly

@@ -27,7 +27,7 @@
     "path": ".github/workflows/ci.yml"
   },
   "jobs": {
-    "total_count": 44,
+    "total_count": 45,
     "jobs": [
       {
         "name": "tier-plan",
@@ -658,6 +658,24 @@
       },
       {
         "name": "web-shard (16)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (17)",
         "run_attempt": 1,
         "status": "completed",
         "conclusion": "success",

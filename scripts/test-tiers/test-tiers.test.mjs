@@ -1270,6 +1270,24 @@ test('AEON-1451 the full web layout and the essential gate stay inside the shard
   assert.deepEqual(requiredJobs.filter(name=>name.startsWith('web-shard (')),fullWebShards.map(shard=>`web-shard (${shard})`))
 })
 
+test('AEON-1453 the merged full web catalogue needs seventeen shards to stay inside the budget',()=>{
+  // Merge-queue head 688f05b6a packed the full gate into sixteen shards and
+  // left shard 14 at 900.2s. Whole files are larger than the leftover gaps, so
+  // the same catalogue needs one more shard. Sixteen must stay over budget.
+  const policy=loadWebPolicy()
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
+  assert.equal(sixteen.shards.length,16)
+  assert.equal(sixteen.fitsBudget,false)
+  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 14 predicts 900\.2s, over the 900s budget/)
+  const full=webShardPlan(gate,policy,{mode:'full'})
+  assert.equal(fullWebShardCount,17)
+  assert.deepEqual(full.shards,fullWebShards)
+  assertWebShardBudget(full)
+  for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
+  assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
+})
+
 test('AEON-1334 a recorded drift title resolves across describe prefixes and a renamed one widens to its file',()=>{
   const [owner,names]=[...driftCases].find(([owner])=>owner.startsWith('browser:'))
   const file=owner.slice('browser:'.length)
@@ -1515,7 +1533,7 @@ test('offline replay CLI prints every real PR with selected counts, effective la
     assert.ok(['full','essential','static'].includes(row.new))
     assert.equal(row.newCases,Object.values(row.newKinds).reduce((sum,n)=>sum+n,0))
     assert.ok(row.new==='full'||row.newCases<=row.oldCases,`PR ${row.number} narrowed selection must not grow`)
-    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:41)
+    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:42)
   }
 })
 
@@ -2128,7 +2146,7 @@ test('serial tier weights rebalance the full browser shards without changing ful
     assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),options.event)
     if(options.paths?.[0]==='.github/workflows/ci.yml'||options.event==='push') {
       const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0)).sort((a,b)=>a-b)
-      const mid=loads.length/2, median=(loads[mid-1]+loads[mid])/2
+      const middle=Math.floor(loads.length/2), median=loads.length%2?loads[middle]:(loads[middle-1]+loads[middle])/2
       assert.ok(loads.at(-1)<=1.3*median,`Serial scheduling estimates: ${loads}`)
       assert.ok(loads.at(-1)<=1.25*median,`Hosted scheduling estimates: ${loads}`)
     }

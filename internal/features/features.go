@@ -204,9 +204,9 @@ type snapshot struct {
 	Revision  int64   `json:"revision"`
 }
 
-// Save checks authorization and revision and appends the audit in the same
-// transaction as the mutation. A per-tenant/key lock also serializes the first
-// insert and tenant/project changes, while unrelated flags remain independent.
+// Save checks authorization under the tenant access fence and appends the audit
+// in the mutation transaction. A per-tenant/key lock also serializes the first
+// insert and tenant/project changes.
 func (s *Service) Save(ctx context.Context, p tenant.Principal, key, projectID string, in Write) (Saved, error) {
 	var out Saved
 	if err := validActor(p); err != nil {
@@ -223,6 +223,9 @@ func (s *Service) Save(ctx context.Context, p tenant.Principal, key, projectID s
 	}
 	ctx = tenant.WithPrincipal(ctx, p)
 	err := db.InTenant(ctx, s.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
 		if err := authorize(ctx, tx, p, projectID, true); err != nil {
 			return err
 		}

@@ -234,17 +234,17 @@ jobs:
           CI_PLAN_LANE: ${{ needs.ci-plan.outputs.lane }}
         run: |
           if [ "${CI_IMPACT:-}" = off ]; then
-            printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]\n' >> "$GITHUB_OUTPUT"
+            printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           case "$GITHUB_EVENT_NAME" in
             pull_request) node scripts/test-tiers/diff.mjs ;;
             # Enforce full merge-group coverage here: the candidate planner can be edited by a PR.
-            merge_group) printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]\n' >> "$GITHUB_OUTPUT" ;;
+            merge_group) printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\n' >> "$GITHUB_OUTPUT" ;;
             *)
               lane=full
               if [ "$CI_AFFECTED_LANE" != on ]; then lane="$CI_PLAN_LANE"; fi
-              printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]\n' "$lane" >> "$GITHUB_OUTPUT" ;;
+              printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\n' "$lane" >> "$GITHUB_OUTPUT" ;;
           esac
 
 
@@ -846,7 +846,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]') }}
+        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]') }}
     env:
       PW_RETRIES: '0'
     steps:
