@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "selector": "impact-ci-s1",
+  "corpus_sha256": "d960c3419d4522a04f90c4b61ffa12eb96fc09d3b44413826c44410e57c51d59",
+  "areas": [
+    {
+      "id": "agents",
+      "mode": "gated-full",
+      "prefixes": [
+        "web/src/components/agents/"
+      ]
+    },
+    {
+      "id": "releases",
+      "mode": "gated-full",
+      "prefixes": [
+        "web/src/components/releases/"
+      ]
+    },
+    {
+      "id": "work",
+      "mode": "gated-full",
+      "prefixes": [
+        "web/src/components/work/"
+      ]
+    }
+  ]
+}

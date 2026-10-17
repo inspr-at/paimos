@@ -5,6 +5,8 @@ import { migrationObjects } from './migration.mjs'
 import { inputBounds, inputMetadata, readInput } from './inputs.mjs'
 import { browserImpact } from './browser-impact.mjs'
 import { validateManifest as validateBrowserPolicy } from '../../web/scripts/ci-web-shard.mjs'
+import { browserAreaDecision, hasBrowserSource, loadBrowserAreas } from './browser-areas.mjs'
+import { fileURLToPath } from 'node:url'
 
 export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${row.kind}:${row.file}:${row.name}${row.occurrence===undefined?'':`#${row.occurrence}`}`
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -467,7 +469,7 @@ export function goImpact(tests, paths, imports = {}, seeds = new Set()) {
 
 // A missing diff, unmapped source, or shared input widens selection. The merge
 // queue always proves the full gate, independently of the affected PR switch.
-export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, fingerprint, impact, affectedLane, forceFull = false, forceAll = false, tree, registryChanges, readFile }) {
+export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, fingerprint, impact, affectedLane, browserAreas, forceFull = false, forceAll = false, tree, registryChanges, readFile }) {
   const full = reason => {
     // Full CI retains the established gate plus the behaviour cases that caught
     // real drift. Only nightly/--all widens to the entire catalogue.
@@ -481,6 +483,12 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
     return full('full event or uncertain impact')
   }
   if (!validImpactPaths(paths)) return full('invalid or oversized impact diff')
+  let area
+  if (impact === 'on' && hasBrowserSource(paths) && tests.some(row => row.kind === 'browser')) {
+    if (affectedLane !== 'on') return full('affected browser area rollout requires CI_AFFECTED_LANE=on')
+    area = browserAreaDecision(paths, browserAreas ?? loadBrowserAreas(fileURLToPath(new URL('../../', import.meta.url))))
+    if (area.full) return full(area.reason)
+  }
   const browserData = paths.find(browserDataInput)
   if (tests.some(row => row.kind === 'browser') && browserData) return full(`browser CSS, asset or data input: ${browserData}`)
   const risk = impactRisk(paths, { event, affectedLane, webImports, tree, registryChanges, readFile, tests })
@@ -517,6 +525,7 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, bro
   const extra = affectedLane === 'on' ? behaviourObligation(tests, paths) : new Set()
   const regression = plannerRegressionKeys(tests, paths)
   return { full: false, reason: risk.reasons.length ? `${reason}; ${risk.reasons.join('; ')}` : reason,
+    ...(area ? { scope: 'affected', browser_scope: 'affected', browser_areas: area.areas } : {}),
     tests: tests.filter(t => t.tier === 'ESSENTIAL' || regression.has(key(t)) || risk.promoted.has(key(t)) || extra.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
 }
 

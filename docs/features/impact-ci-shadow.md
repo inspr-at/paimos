@@ -80,3 +80,54 @@ Selector risks and switch behavior are covered in
 `scripts/test-tiers/impact-plan.test.mjs`, imported by the existing
 `go-static` selector regression lane. New files are covered by the existing S7
 platform/CI ownership slice; no browser/Go case membership changes are needed.
+
+## Area qualification and execution (AEON-1336)
+
+S4 is opt-in through the exact values `CI_IMPACT=on` and
+`CI_AFFECTED_LANE=on`. Source changes then require qualification in
+`scripts/ci/browser-area-rollout.json`. Every changed source must have exactly
+one area owner. Shared backend inputs, unknown areas, missing observations,
+unsupported inputs and uncertainty keep the full gate. The immutable base
+planner uses the S1 import, route and harness ownership graph, and accepts
+successful main-nightly observations with the trusted dependency fingerprint.
+
+Qualification pins the historical replay corpus by SHA-256. It counts only
+source-supported, bisected, ticket-confirmed, fix-diff-confirmed or recorded
+browser regressions whose historical tree and trusted graph identities are
+bound. Unresolved and inherited attribution rows are reported separately and
+cannot qualify an area. Every accepted regression in an area must have been
+selected by S1, and at least one must have used affected scope. Zero misses
+from full fallbacks alone do not prove narrowing. A confirmed miss rejects
+the area even if its configured mode remains `affected`; setting its mode to
+`gated-full` is the per-area rollback. `CI_IMPACT=off` remains the immediate
+global rollback, including execution, aggregates and reuse.
+
+**No real area is activated by this change.** The checked-in corpus has 294
+browser regressions with accepted causal evidence and 291 S1 misses. The first
+candidate areas (`agents`, `releases`, `work`) all have misses, so they remain
+`gated-full`. Expanding the rollout requires new historical shadow evidence,
+an updated corpus pin and a deliberate area-mode change. Synthetic passing
+fixtures test the activation path; they are not production qualification.
+
+For a qualified area the tier planner emits an independent, bounded
+`browser_scope=affected` execution plan containing its base and checkout SHAs,
+area IDs, complete browser catalogue hash and selected native case identities.
+It includes essentials, imports, route/harness owners, observed dependencies,
+promotions and recorded drift obligations. The existing measured shard packer
+sizes that selection. This execution plan comes from the trusted tier planner;
+the `impact-ci-shadow-plan` artifact stays observational.
+
+Browser runners verify the native catalogue and immutable identities before
+using the plan. Candidate import-edge deletion cannot remove a planned case.
+Missing, stale, malformed, duplicate or drifted plans widen to full execution;
+explicit full/all requests and the kill switch take precedence. Measurement
+reports label affected scope, and the existing full-tier proof rejects it for
+merge-queue reuse. The `web` aggregate validates planned scope and still
+requires browser success for affected runs. The five required check names,
+merge-group full scope, nightly `--all` execution and real-server smoke are
+unchanged.
+
+The S4 behavior and rejection cases run in
+`scripts/test-tiers/browser-areas.test.mjs`, imported by the existing fixed
+`go-static` selector regression lane. New scripts use the existing S7 ownership
+glob; no tier rows, application dependencies or web launch records are added.

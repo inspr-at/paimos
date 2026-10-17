@@ -60,7 +60,7 @@
     "web": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "02fb7bc5a4ce123b127835872ebb70884da74b9c35fe02476690a83c64861754"
+      "runs_sha256": "81e641acb9fe15f3d3314aa076891d27291403d2954bf7d5584041163af576f2"
     },
     "release-check": {
       "kind": "not-static",

@@ -17,6 +17,8 @@ import { nightlyBrowserMap, gitTree, coverageSummary, dependencyFingerprint } fr
 import { browserBatches, browserCaseSeconds } from './web-batches.mjs'
 import { createGoRunner } from './go-runner.mjs'
 import { inputSnapshot, listingKey, cacheEnabled } from './listing-cache.mjs'
+import { browserPlanSelection } from './browser-plan.mjs'
+import { hasBrowserSource } from './browser-areas.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -49,6 +51,12 @@ export function runnerDecision(candidate,{mode,layout}={}) {
 }
 
 export function runnerSelection(tests,options,candidate,planner) {
+  if(options.browserPlan !== undefined && options.impact === 'on') {
+    const pinned=browserPlanSelection(tests,options.browserPlan,options)
+    if(!pinned.full&&!options.forceFull&&!options.forceAll&&planner?.mode==='essential'&&planner?.layout==='full')
+      return {...pinned,layout:'full',decision:{mode:'essential',layout:'full',reason:pinned.reason}}
+    candidate={mode:'full',layout:'full',reason:pinned.full?pinned.reason:'trusted planner requires full'}
+  }
   if (options.impact === 'off') candidate = { mode: 'full', layout: 'full', reason: 'CI_IMPACT=off' }
   const decision=runnerDecision(candidate,planner)
   const selection=select(tests,{...options,forceFull:options.forceFull||decision.mode==='full'})
@@ -74,6 +82,19 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
   const catalogueRows=browserOnly?[...inventory.tests,...manifest.tests.filter(row=>row.kind!=='browser')]:inventory.tests
   const all=validate(manifest,catalogueRows)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
+  const pinnedBrowser=kind==='web'&&!unit&&env.CI_IMPACT==='on'&&event==='pull_request'&&hasBrowserSource(paths)
+  if(pinnedBrowser) {
+    const selection=runnerSelection(all,{event,paths,impact:env.CI_IMPACT,affectedLane,base,sha:env.GITHUB_SHA,
+      browserPlan:env.AEON_BROWSER_PLAN??'',forceFull:full,forceAll:catalogue},
+      {mode:'full',layout:'full',reason:'affected browser plan unavailable'}, {mode:plannerMode,layout:plannerLayout})
+    // Explicit --full/--all are stronger than any supplied affected plan.
+    if(!full&&!catalogue) {
+      const filtered=selection.tests.filter(row=>row.kind==='browser')
+      const tests=shard(filtered,index,count,tierWeights(browserPolicy,filtered))
+      return {...selection,all,tests,collectionScope:browserOnly?'browser':'all',
+        timing:{collectSeconds:supplied===undefined?(collected-begin)/1000:0,planSeconds:(performance.now()-collected)/1000}}
+    }
+  }
   const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
   // Consumer rules read the candidate tree; semantic registry comparisons use
   // the fetched event base. Both are unused unless the switch is on.
@@ -218,6 +239,7 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
         ...(!terminal.has(key(row))?{reason:execution.reason??'No terminal native result was reported'}:{})}))
     }
     Object.assign(report,{full:selection.full,reason:selection.reason,scope:selection.scope??'changed-area',
+      ...(selection.browser_scope?{browser_scope:selection.browser_scope,browser_areas:selection.browser_areas}:{}),
       deferredBrowserCases:selection.deferredBrowserCases??0,flakeLedger:ledger,exitCode:code})
     if(goRunner) report.goPhases=goRunner.measurements
     if(execution.status!=='completed'||Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1

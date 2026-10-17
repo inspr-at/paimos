@@ -9,6 +9,9 @@ import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs
 import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, semanticRegistryPattern, registryImpact, select, webShardPlan, fullWebShards } from './core.mjs'
 import { browserImpact, nightlyBrowserMap } from './browser-impact.mjs'
 import { loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
+import { browserAreaDecision, hasBrowserSource, loadBrowserAreas } from './browser-areas.mjs'
+import { ownershipGraph } from './browser-ownership.mjs'
+import { makeBrowserPlan } from './browser-plan.mjs'
 
 // Shared bounded diff reader for Actions event bases and offline merge bases.
 export function pathsBetween(base, { exec=command }={}) {
@@ -140,17 +143,23 @@ export function registryChangesBetween(base, paths, { cwd = root, exec = command
   return changes
 }
 
-export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph,checkout=root,base,tree,registryChanges,readFile,tests:suppliedTests,imports,browserMap,baseTree,fingerprint}={}) {
+export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph,checkout=root,base,tree,registryChanges,readFile,tests:suppliedTests,imports,browserMap,baseTree,fingerprint,browserAreas}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
   if(impact==='off')return full('CI_IMPACT=off')
   if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
   if(!validImpactPaths(paths))return full('invalid or oversized impact diff')
+  const areaRollout=impact==='on'&&hasBrowserSource(paths)
+  if(areaRollout) {
+    if(affectedLane!=='on')return full('affected browser area rollout requires CI_AFFECTED_LANE=on')
+    const area=browserAreaDecision(paths,browserAreas??loadBrowserAreas(root))
+    if(area.full)return full(area.reason)
+  }
   const browserData=paths.find(browserDataInput)
   if(browserData)return full(`browser CSS, asset or data input: ${browserData}`)
   const webChanges=paths.filter(path=>path.startsWith('web/')).map(path=>path.slice(4))
   const on=affectedLane==='on'
-  if(webChanges.length) graph??=webGraph(resolve(root,'web'))
+  if(webChanges.length) graph??=areaRollout?ownershipGraph(resolve(root,'web'),webGraph(resolve(root,'web'))):webGraph(resolve(root,'web'))
   const goChanges=paths.some(path=>/^(?:internal|cmd)\//.test(path)&&!path.endsWith('.md'))
   if(on||goChanges) {
     tree??=sourceTree(checkout)
@@ -209,16 +218,18 @@ export function schedulingMode(event,paths,exists,options) {
 // browsers. In trusted mode policy/graph come from the base, and the candidate
 // catalogue is data only; unknown/new owners fail wide.
 export function sizeWebDecision(decision, paths, { event='pull_request', affectedLane, impact, checkout=root,
-  graph, tree, registryChanges, browserMap, baseTree, fingerprint, tests, policy }={}) {
+  graph, tree, registryChanges, browserMap, baseTree, fingerprint, tests, policy, browserAreas, base, sha }={}) {
   if (decision.mode !== 'essential' || decision.layout === 'static') return decision
   tests ??= JSON.parse(boundedText(checkout,'scripts/ci/web-test-tiers.json',4*1024*1024)).tests
   policy ??= loadPolicy(resolve(root,'web/ci-web-shards.json'))
-  graph ??= webGraph(resolve(root,'web'))
+  graph ??= impact==='on'&&hasBrowserSource(paths)?ownershipGraph(resolve(root,'web'),webGraph(resolve(root,'web'))):webGraph(resolve(root,'web'))
   const selection=select(tests,{event,paths,affectedLane,impact,webImports:graph,tree:tree??sourceTree(checkout),registryChanges,
-    browserMap,baseTree,fingerprint,readFile:path=>boundedText(checkout,path)})
+    browserMap,baseTree,fingerprint,browserAreas,readFile:path=>boundedText(checkout,path)})
   if(selection.full) return {mode:'full',layout:'full',reason:selection.reason}
   const webShardSizing=webShardPlan(selection.tests,policy)
+  const affected=selection.browser_scope==='affected'&&webShardSizing.fitsBudget
   return {...decision,...(!webShardSizing.fitsBudget?{mode:'full',layout:'full',reason:'essential web shard projection exceeds budget; full gate required'}:{}),
+    ...(affected?{browser_scope:'affected',browserPlan:makeBrowserPlan(tests,selection.tests,{base,sha,areas:selection.browser_areas})}:{}),
     webShards:webShardSizing.shards,webShardSizing}
 }
 
@@ -239,6 +250,7 @@ export function trustedSchedulingDecision(base, paths, env=process.env, {cwd=roo
   // Pre-adoption base planners report no layout; that is the full layout.
   decision.layout??='full'
   if(!['full','static'].includes(decision.layout)||(decision.mode==='full'&&decision.layout!=='full'))throw new Error('Invalid trusted planner layout')
+  if(decision.browser_scope==='affected'&&(decision.mode!=='essential'||decision.layout!=='full'||decision.browserPlan?.base!==base||decision.browserPlan?.sha!==env.GITHUB_SHA))throw new Error('Invalid trusted browser plan')
   return decision
 }
 
@@ -261,9 +273,12 @@ export function main(env=process.env) {
   if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
   const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE,impact:env.CI_IMPACT})
   const webShards=lane==='spec-only'&&env.GITHUB_EVENT_NAME==='pull_request'?[1]:decision.webShards??fullWebShards
-  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\nweb_shards=${JSON.stringify(webShards)}\n`,{flag:'a'})
+  const browserScope=mode==='essential'&&decision.browser_scope==='affected'?'affected':env.GITHUB_EVENT_NAME==='pull_request'&&(layout==='static'||lane==='docs-only')?'none':'gated-full'
+  const browserPlan=browserScope==='affected'?JSON.stringify(decision.browserPlan):''
+  if(Buffer.byteLength(browserPlan)>=512*1024)throw new Error('Affected browser plan output bound')
+  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\nweb_shards=${JSON.stringify(webShards)}\nbrowser_scope=${browserScope}\nbrowser_plan=${browserPlan}\n`,{flag:'a'})
   const sizing=decision.webShardSizing
-  const note=`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}; web shards ${webShards.length}${sizing?`; projected max ${sizing.projectedMaxSeconds.toFixed(1)}s / ${sizing.budgetSeconds}s budget (25% timeout headroom, setup included)`:''}`
+  const note=`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); browser_scope=${browserScope}; ${reason}; web shards ${webShards.length}${sizing?`; projected max ${sizing.projectedMaxSeconds.toFixed(1)}s / ${sizing.budgetSeconds}s budget (25% timeout headroom, setup included)`:''}`
   console.log(`${note}; changed paths ${paths?.length??'unavailable'}`)
   if(env.GITHUB_STEP_SUMMARY)writeFileSync(env.GITHUB_STEP_SUMMARY,`${note}\n`,{flag:'a'})
   return 0
@@ -278,8 +293,11 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
       const checkout=process.env.AEON_TIER_CHECKOUT
       const registryChanges=registryChangesBetween(undefined,paths,{cwd:checkout,baseDirectory:root})
       const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
-      const coverage=paths.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue):{}
-      const options={event:process.env.GITHUB_EVENT_NAME,affectedLane:process.env.CI_AFFECTED_LANE,impact:process.env.CI_IMPACT,checkout,registryChanges,...coverage}
+      const browserAreas=process.env.CI_IMPACT==='on'?loadBrowserAreas(root):undefined
+      const qualified=browserAreas?browserAreaDecision(paths,browserAreas):undefined
+      const coverage=hasBrowserSource(paths)&&!qualified?.full?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue,{compatible:process.env.CI_IMPACT==='on'}):{}
+      const options={event:process.env.GITHUB_EVENT_NAME,affectedLane:process.env.CI_AFFECTED_LANE,impact:process.env.CI_IMPACT,checkout,registryChanges,
+        browserAreas,base:process.env.AEON_TIER_BASE,sha:process.env.GITHUB_SHA,...coverage}
       console.log(JSON.stringify(sizeWebDecision(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,
         path=>existsSync(resolve(checkout,path)),options),paths,options)))
     } else process.exitCode=main()
